@@ -24,16 +24,14 @@ signal manual_hit
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	# Create new golf ball
-	ball = GolfBall.new(GolfBall.BallType.STANDARD)
-	ball.position.y = 3.0
+	ball = GolfBall.new()
+	ball.reset()
 	add_child(ball)
 	ball.rest.connect(_on_ball_rest)
 	
 	# Set initial value and connect to setting changes
 	max_tracers = GlobalSettings.range_settings.shot_tracer_count.value
 	GlobalSettings.range_settings.shot_tracer_count.setting_changed.connect(_on_tracer_count_changed)
-	_apply_ball_type(GlobalSettings.range_settings.ball_type.value)
-	GlobalSettings.range_settings.ball_type.setting_changed.connect(_on_ball_type_changed)
 
 func _on_tracer_count_changed(value) -> void:
 	max_tracers = value
@@ -41,14 +39,6 @@ func _on_tracer_count_changed(value) -> void:
 	while tracers.size() > max_tracers:
 		var oldest = tracers.pop_front()
 		oldest.queue_free()
-
-
-func _on_ball_type_changed(value) -> void:
-	_apply_ball_type(value)
-
-
-func _apply_ball_type(_ball_type_value) -> void:
-	reset_ball()
 
 func create_new_tracer() -> MeshInstance3D:
 	# Don't create tracer if max_tracers is 0

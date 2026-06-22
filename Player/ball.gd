@@ -3,7 +3,7 @@ class_name GolfBall
 
 signal rest
 
-enum BallType {STANDARD, PREMIUM}
+#enum BallType {STANDARD, PREMIUM}
 
 const START_HEIGHT := 0.02
 const COLLISION_SAFE_MARGIN := 0.0005
@@ -76,12 +76,6 @@ const OPENFAIRWAY_CLASS_PATHS := {
 const DEFAULT_BALL_MASS := 0.04592623
 const DEFAULT_BALL_RADIUS := 0.021335
 const DEFAULT_BALL_MOI := 0.4 * DEFAULT_BALL_MASS * DEFAULT_BALL_RADIUS * DEFAULT_BALL_RADIUS
-
-
-func _init(ball_type := BallType.STANDARD):
-	if ball_type == BallType.PREMIUM:
-		_drag_mult = 0.9
-		_lift_mult = 1.1
 
 
 func _ready() -> void:
@@ -217,35 +211,8 @@ func _connect_settings() -> void:
 		settings.range_units.setting_changed.connect(_on_environment_changed)
 	if not settings.surface_type.setting_changed.is_connected(_on_surface_type_changed):
 		settings.surface_type.setting_changed.connect(_on_surface_type_changed)
-	if not settings.ball_type.setting_changed.is_connected(_ball_type_changed):
-		settings.ball_type.setting_changed.connect(_ball_type_changed)
-	_ball_type_changed(settings.ball_type.value)
 	_settings_connected = true
 
-
-func _exit_tree() -> void:
-	if _range_settings == null:
-		return
-	if _range_settings.temperature.setting_changed.is_connected(_on_environment_changed):
-		_range_settings.temperature.setting_changed.disconnect(_on_environment_changed)
-	if _range_settings.altitude.setting_changed.is_connected(_on_environment_changed):
-		_range_settings.altitude.setting_changed.disconnect(_on_environment_changed)
-	if _range_settings.range_units.setting_changed.is_connected(_on_environment_changed):
-		_range_settings.range_units.setting_changed.disconnect(_on_environment_changed)
-	if _range_settings.surface_type.setting_changed.is_connected(_on_surface_type_changed):
-		_range_settings.surface_type.setting_changed.disconnect(_on_surface_type_changed)
-	if _range_settings.ball_type.setting_changed.is_connected(_ball_type_changed):
-		_range_settings.ball_type.setting_changed.disconnect(_ball_type_changed)
-
-func _ball_type_changed(value):
-	if value == BallType.PREMIUM:
-		_drag_mult = 0.9
-		_lift_mult = 1.1
-	else:
-		_drag_mult = 1.0
-		_lift_mult = 1.0
-	_drag_scale = _drag_mult
-	_lift_scale = _lift_mult
 
 
 func _on_environment_changed(_value) -> void:
@@ -688,8 +655,6 @@ func _parse_spin_data(data: Dictionary) -> Dictionary:
 
 func _print_launch_debug(data: Dictionary, speed_mps: float, vla: float, hla: float, spin: float, axis: float) -> void:
 	print("=== SHOT DEBUG ===")
-	print("Kirkland Ball")
-	print("Ball: %s" % _get_ball_label())
 	print("Speed: %.2f mph (%.2f m/s)" % [data.get("Speed", 0.0), speed_mps])
 	print("VLA: %.2f deg, HLA: %.2f deg" % [vla, hla])
 	print("Aim yaw offset: %.2f deg" % aim_yaw_offset_deg)
@@ -713,11 +678,3 @@ func _print_launch_debug(data: Dictionary, speed_mps: float, vla: float, hla: fl
 
 func set_env(_value) -> void:
 	_update_environment()
-
-
-func _get_ball_label() -> String:
-	match GlobalSettings.range_settings.ball_type.value:
-		GolfBall.BallType.PREMIUM:
-			return "Premium"
-		_:
-			return "Standard"

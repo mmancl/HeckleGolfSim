@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3 uid="uid://da1vsfwmbk8vw"]
+[gd_scene format=3 uid="uid://da1vsfwmbk8vw"]
 
 [ext_resource type="Script" uid="uid://dginc6hghigy3" path="res://UI/range_ui.gd" id="1_kur1t"]
 [ext_resource type="PackedScene" uid="uid://bxqjwaed60ykh" path="res://UI/data_panel.tscn" id="1_q72xt"]
@@ -9,7 +9,7 @@
 [ext_resource type="Script" uid="uid://3iepiwkqvgs7" path="res://UI/grid_canvas.gd" id="5_rfb4h"]
 [ext_resource type="Script" uid="uid://cgdpaxem0op8k" path="res://UI/shot_injector.gd" id="6_j5yvw"]
 
-[node name="RangeUI" type="MarginContainer"]
+[node name="RangeUI" type="MarginContainer" unique_id=13564358]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -22,35 +22,35 @@ theme_override_constants/margin_right = 15
 theme_override_constants/margin_bottom = 15
 script = ExtResource("1_kur1t")
 
-[node name="HBoxContainer" type="HBoxContainer" parent="."]
+[node name="HBoxContainer" type="HBoxContainer" parent="." unique_id=2082799410]
 layout_mode = 2
 size_flags_vertical = 0
 theme_override_constants/separation = 11
 
-[node name="PlayerName" type="Label" parent="HBoxContainer"]
+[node name="PlayerName" type="Label" parent="HBoxContainer" unique_id=990035211]
 layout_mode = 2
 size_flags_vertical = 0
 theme_override_font_sizes/font_size = 32
 text = "Player1"
 vertical_alignment = 1
 
-[node name="RecButton" type="Button" parent="HBoxContainer"]
+[node name="RecButton" type="Button" parent="HBoxContainer" unique_id=613824307]
 layout_mode = 2
 size_flags_vertical = 0
 tooltip_text = "Start Recording Range Session"
 text = "REC: Off"
 
-[node name="Control" type="Control" parent="HBoxContainer"]
+[node name="Control" type="Control" parent="HBoxContainer" unique_id=1083315582]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="SettingsButton" type="TextureButton" parent="HBoxContainer"]
+[node name="SettingsButton" type="TextureButton" parent="HBoxContainer" unique_id=1578608442]
 layout_mode = 2
 texture_normal = ExtResource("3_omvf4")
 
-[node name="OverlayLayer" type="CanvasLayer" parent="."]
+[node name="OverlayLayer" type="CanvasLayer" parent="." unique_id=1184377481]
 
-[node name="TotalDistanceOverlay" type="Label" parent="OverlayLayer"]
+[node name="TotalDistanceOverlay" type="Label" parent="OverlayLayer" unique_id=378734855]
 visible = false
 anchors_preset = -1
 anchor_top = 0.2
@@ -65,10 +65,10 @@ text = "Total Distance --"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="SettingsLayer" type="CanvasLayer" parent="."]
+[node name="SettingsLayer" type="CanvasLayer" parent="." unique_id=1116119633]
 visible = false
 
-[node name="Background" type="ColorRect" parent="SettingsLayer"]
+[node name="Background" type="ColorRect" parent="SettingsLayer" unique_id=1720430990]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -76,7 +76,7 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0, 0, 0, 0.6)
 
-[node name="Container" type="HBoxContainer" parent="SettingsLayer"]
+[node name="Container" type="HBoxContainer" parent="SettingsLayer" unique_id=2087858578]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -85,20 +85,20 @@ grow_vertical = 2
 mouse_filter = 2
 alignment = 2
 
-[node name="RangeSettings" parent="SettingsLayer/Container" instance=ExtResource("3_bxj45")]
+[node name="RangeSettings" parent="SettingsLayer/Container" unique_id=1548142448 instance=ExtResource("3_bxj45")]
 layout_mode = 2
 size_flags_horizontal = 8
 size_flags_vertical = 0
 
-[node name="SessionPopUp" parent="." instance=ExtResource("4_7kh1v")]
+[node name="SessionPopUp" parent="." unique_id=110874520 instance=ExtResource("4_7kh1v")]
 layout_mode = 2
 
-[node name="GridCanvas" type="Control" parent="."]
+[node name="GridCanvas" type="Control" parent="." unique_id=1836760881]
 layout_mode = 2
 mouse_filter = 2
 script = ExtResource("5_rfb4h")
 
-[node name="Distance" parent="GridCanvas" instance=ExtResource("1_q72xt")]
+[node name="Distance" parent="GridCanvas" unique_id=442483821 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_top = 182.0
 offset_right = 120.0
@@ -106,7 +106,7 @@ offset_bottom = 275.0
 label = "Distance"
 units = "yd"
 
-[node name="Carry" parent="GridCanvas" instance=ExtResource("1_q72xt")]
+[node name="Carry" parent="GridCanvas" unique_id=2040593933 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_top = 230.0
 offset_right = 120.0
@@ -114,7 +114,7 @@ offset_bottom = 323.0
 label = "Carry"
 units = "yd"
 
-[node name="Side" parent="GridCanvas" instance=ExtResource("1_q72xt")]
+[node name="Side" parent="GridCanvas" unique_id=2003394921 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_top = 279.0
 offset_right = 120.0
@@ -122,7 +122,7 @@ offset_bottom = 372.0
 label = "Side"
 units = "yd"
 
-[node name="Apex" parent="GridCanvas" instance=ExtResource("1_q72xt")]
+[node name="Apex" parent="GridCanvas" unique_id=1199759367 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_top = 327.0
 offset_right = 120.0
@@ -130,7 +130,7 @@ offset_bottom = 420.0
 label = "Apex"
 units = "ft"
 
-[node name="VLA" parent="GridCanvas" instance=ExtResource("1_q72xt")]
+[node name="VLA" parent="GridCanvas" unique_id=1786497158 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_top = 376.0
 offset_right = 120.0
@@ -138,7 +138,7 @@ offset_bottom = 469.0
 label = "VLA"
 units = "deg"
 
-[node name="HLA" parent="GridCanvas" instance=ExtResource("1_q72xt")]
+[node name="HLA" parent="GridCanvas" unique_id=486822729 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_top = 424.0
 offset_right = 120.0
@@ -146,7 +146,7 @@ offset_bottom = 517.0
 label = "HLA"
 units = "deg"
 
-[node name="Speed" parent="GridCanvas" instance=ExtResource("1_q72xt")]
+[node name="Speed" parent="GridCanvas" unique_id=156075773 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_top = 472.0
 offset_right = 120.0
@@ -154,7 +154,7 @@ offset_bottom = 565.0
 label = "Speed"
 units = "mph"
 
-[node name="BackSpin" parent="GridCanvas" instance=ExtResource("1_q72xt")]
+[node name="BackSpin" parent="GridCanvas" unique_id=212846167 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_top = 520.0
 offset_right = 120.0
@@ -162,7 +162,7 @@ offset_bottom = 613.0
 label = "BackSpin"
 units = "rpm"
 
-[node name="SideSpin" parent="GridCanvas" instance=ExtResource("1_q72xt")]
+[node name="SideSpin" parent="GridCanvas" unique_id=38660713 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_top = 568.0
 offset_right = 120.0
@@ -170,7 +170,7 @@ offset_bottom = 661.0
 label = "SideSpin"
 units = "rpm"
 
-[node name="TotalSpin" parent="GridCanvas" instance=ExtResource("1_q72xt")]
+[node name="TotalSpin" parent="GridCanvas" unique_id=1703626966 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_top = 616.0
 offset_right = 120.0
@@ -178,7 +178,7 @@ offset_bottom = 709.0
 label = "TotalSpin"
 units = "rpm"
 
-[node name="SpinAxis" parent="GridCanvas" instance=ExtResource("1_q72xt")]
+[node name="SpinAxis" parent="GridCanvas" unique_id=850043213 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_top = 664.0
 offset_right = 120.0
@@ -186,77 +186,77 @@ offset_bottom = 757.0
 label = "SpinAxis"
 units = "deg"
 
-[node name="ClubSelector" parent="GridCanvas" instance=ExtResource("3_crlyb")]
+[node name="ClubSelector" parent="GridCanvas" unique_id=1107551091 instance=ExtResource("3_crlyb")]
 layout_mode = 0
 offset_top = 70.0
 offset_right = 120.0
 offset_bottom = 150.0
 rotation = -0.0004276121
 
-[node name="ShotInjector" type="VBoxContainer" parent="."]
+[node name="ShotInjector" type="VBoxContainer" parent="." unique_id=935650002]
 visible = false
 layout_mode = 2
 size_flags_horizontal = 8
 size_flags_vertical = 4
 script = ExtResource("6_j5yvw")
 
-[node name="PayloadLabel" type="Label" parent="ShotInjector"]
+[node name="PayloadLabel" type="Label" parent="ShotInjector" unique_id=157665089]
 layout_mode = 2
 text = "Test Payload"
 
-[node name="PayloadOption" type="OptionButton" parent="ShotInjector"]
+[node name="PayloadOption" type="OptionButton" parent="ShotInjector" unique_id=294919973]
 layout_mode = 2
 
-[node name="Speed" type="Label" parent="ShotInjector"]
+[node name="Speed" type="Label" parent="ShotInjector" unique_id=11340273]
 layout_mode = 2
 text = "Speed"
 
-[node name="SpeedSpinBox" type="SpinBox" parent="ShotInjector"]
+[node name="SpeedSpinBox" type="SpinBox" parent="ShotInjector" unique_id=11723562]
 layout_mode = 2
 max_value = 250.0
 value = 150.0
 
-[node name="SpinAxis" type="Label" parent="ShotInjector"]
+[node name="SpinAxis" type="Label" parent="ShotInjector" unique_id=102653339]
 layout_mode = 2
 text = "SpinAxis"
 
-[node name="SpinAxisSpinBox" type="SpinBox" parent="ShotInjector"]
+[node name="SpinAxisSpinBox" type="SpinBox" parent="ShotInjector" unique_id=1134005151]
 layout_mode = 2
 min_value = -25.0
 max_value = 25.0
 step = 0.5
 
-[node name="TotalSpin" type="Label" parent="ShotInjector"]
+[node name="TotalSpin" type="Label" parent="ShotInjector" unique_id=779144094]
 layout_mode = 2
 text = "Total Spin"
 
-[node name="TotalSpinSpinBox" type="SpinBox" parent="ShotInjector"]
+[node name="TotalSpinSpinBox" type="SpinBox" parent="ShotInjector" unique_id=1929164296]
 layout_mode = 2
 max_value = 12000.0
 step = 50.0
 value = 6000.0
 
-[node name="HLA" type="Label" parent="ShotInjector"]
+[node name="HLA" type="Label" parent="ShotInjector" unique_id=1916785345]
 layout_mode = 2
 text = "HLA"
 
-[node name="HLASpinBox" type="SpinBox" parent="ShotInjector"]
+[node name="HLASpinBox" type="SpinBox" parent="ShotInjector" unique_id=1486026324]
 layout_mode = 2
 min_value = -45.0
 max_value = 45.0
 step = 0.5
 
-[node name="VLA" type="Label" parent="ShotInjector"]
+[node name="VLA" type="Label" parent="ShotInjector" unique_id=836398024]
 layout_mode = 2
 text = "VLA"
 
-[node name="VLASpinBox" type="SpinBox" parent="ShotInjector"]
+[node name="VLASpinBox" type="SpinBox" parent="ShotInjector" unique_id=597411344]
 layout_mode = 2
 max_value = 90.0
 step = 0.5
 value = 12.0
 
-[node name="Button" type="Button" parent="ShotInjector"]
+[node name="Button" type="Button" parent="ShotInjector" unique_id=2069306512]
 layout_mode = 2
 text = "Hit Shot"
 

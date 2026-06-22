@@ -10,7 +10,6 @@ var temperature := Setting.new(75, -40, 120)
 var altitude := Setting.new(0.0, -1000.0, 10000.0)
 var surface_type := Setting.new(PhysicsEnums.SurfaceType.FAIRWAY)
 var shot_tracer_count := Setting.new(1, 0, 4)
-var ball_type := Setting.new(GolfBall.BallType.STANDARD)
 
 func _init():
 	settings = {
@@ -23,5 +22,4 @@ func _init():
 		"altitude": altitude,
 		"surface_type": surface_type,
 		"shot_tracer_count": shot_tracer_count,
-		"ball_type": ball_type
 	}

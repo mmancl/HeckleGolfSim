@@ -8,7 +8,6 @@ var temperature_spin_box : SpinBox = null
 var altitude_spin_box : SpinBox = null
 var surface_option : OptionButton = null
 var tracer_count_spin_box : SpinBox = null
-var ball_type_option : OptionButton = null
 var square_enabled_button : CheckButton = null
 var square_device_option : OptionButton = null
 var square_scan_button : Button = null
@@ -59,7 +58,6 @@ func _ready() -> void:
 	temperature_spin_box = $MarginContainer/VBoxContainer/Temperature/TemperatureSpinBox
 	altitude_spin_box = $MarginContainer/VBoxContainer/Altitude/AltitudeSpinBox
 	surface_option = $MarginContainer/VBoxContainer/SurfaceType/SurfaceOption
-	ball_type_option = $MarginContainer/VBoxContainer/BallType/BallTypeOption
 	tracer_count_spin_box = $MarginContainer/VBoxContainer/TracerCount/TracerCountSpinBox
 
 	# Reset Timer Settings
@@ -85,16 +83,6 @@ func _ready() -> void:
 	var surface_index := surface_option.get_item_index(surface_id)
 	if surface_index >= 0:
 		surface_option.select(surface_index)
-
-	# Ball type options
-	if ball_type_option:
-		ball_type_option.clear()
-		ball_type_option.add_item("Standard", GolfBall.BallType.STANDARD)
-		ball_type_option.add_item("Premium", GolfBall.BallType.PREMIUM)
-		var ball_type_id: int = GlobalSettings.range_settings.ball_type.value
-		var ball_type_index := ball_type_option.get_item_index(ball_type_id)
-		if ball_type_index >= 0:
-			ball_type_option.select(ball_type_index)
 
 	GlobalSettings.range_settings.range_units.setting_changed.connect(update_units)
 
@@ -177,10 +165,7 @@ func _on_tracer_count_spin_box_value_changed(value: float) -> void:
 
 
 func _on_ball_type_option_item_selected(index: int) -> void:
-	if ball_type_option == null: #If you remove, ball selection stops working in settings. Look at debug shot. 
-		return
-	var id: int = ball_type_option.get_item_id(index)
-	GlobalSettings.range_settings.ball_type.set_value(id)
+	GlobalSettings.range_settings.ball_type.set_value(index)
 
 
 func _setup_square_monitor_section() -> void:
