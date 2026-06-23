@@ -14,7 +14,7 @@ const GROUND_RAYCAST_UP := 2.0
 const GROUND_RAYCAST_DOWN := 8.0
 const GROUND_PROBE_DISTANCE := 0.08
 
-var ball_scene : PackedScene = preload("res://assets/models/balls/golf_ball.glb")
+var ball_model : PackedScene = preload("res://assets/models/balls/golf_ball.glb")
 
 # C# addon instances
 var _physics
@@ -22,12 +22,14 @@ var _aero
 var _surface
 var _shot_setup
 
+# Physics parameters
+var params
+
+# Ball state variables
 var state: int = PhysicsEnums.BallState.REST
 var omega := Vector3.ZERO  # Angular velocity (rad/s)
 var on_ground := false
 var floor_normal := Vector3.UP
-var _settings_connected := false
-var _range_settings: RangeSettings = null
 
 # Surface parameters (base values from C# Surface addon, then multiplied below).
 # TODO - some of these values should not be in ball. Ball type shouldn't matter grass viscosity.
@@ -46,6 +48,7 @@ var _critical_mult := 1.0
 # Environment
 var _air_density: float
 var _air_viscosity: float
+# TODO: takeout these scale and mult variables
 var _drag_scale := 1.0
 var _lift_scale := 1.0
 # Per-ball aerodynamic multipliers. Adjust these to make this ball fly differently (e.g., more lift/less drag).
@@ -79,8 +82,9 @@ const DEFAULT_BALL_MOI := 0.4 * DEFAULT_BALL_MASS * DEFAULT_BALL_RADIUS * DEFAUL
 
 
 func _ready() -> void:
-	if not _try_initialize_ball():
-		return
+	_try_initialize_ball()
+	params = _create_physics_params()
+
 
 
 func _new_openfairway(openfairway_class: StringName):
@@ -147,25 +151,15 @@ func _call_openfairway_method(target: Object, snake_name: StringName, pascal_nam
 
 
 func _init_openfairway_instances() -> bool:
-	if _physics == null:
-		_physics = _new_openfairway(&"BallPhysics")
-	if _aero == null:
-		_aero = _new_openfairway(&"Aerodynamics")
-	if _surface == null:
-		_surface = _new_openfairway(&"Surface")
-	if _shot_setup == null:
-		_shot_setup = _new_openfairway(&"ShotSetup")
+	_physics = _new_openfairway(&"BallPhysics")
+	_aero = _new_openfairway(&"Aerodynamics")
+	_surface = _new_openfairway(&"Surface")
+	_shot_setup = _new_openfairway(&"ShotSetup")
 	if _physics == null or _aero == null or _surface == null:
 		return false
 	_ball_mass = float(_get_openfairway_property(_physics, &"ball_mass", &"BallMass", DEFAULT_BALL_MASS))
 	_ball_radius = float(_get_openfairway_property(_physics, &"ball_radius", &"BallRadius", DEFAULT_BALL_RADIUS))
 	_ball_moi = float(_get_openfairway_property(_physics, &"ball_moment_of_inertia", &"BallMomentOfInertia", DEFAULT_BALL_MOI))
-	if _ball_mass <= 0.0:
-		_ball_mass = DEFAULT_BALL_MASS
-	if _ball_radius <= 0.0:
-		_ball_radius = DEFAULT_BALL_RADIUS
-	if _ball_moi <= 0.0:
-		_ball_moi = DEFAULT_BALL_MOI
 	return true
 
 
@@ -175,7 +169,6 @@ func _try_initialize_ball() -> bool:
 	if not _init_openfairway_instances():
 		return false
 	initialize_ball()
-	_create_collision_and_model()
 	_ball_initialized = true
 	return true
 
@@ -183,7 +176,8 @@ func _try_initialize_ball() -> bool:
 func initialize_ball() -> void:
 	_connect_settings()
 	_update_environment()
-	set_surface(_get_configured_surface_type())
+	set_surface(int(GlobalSettings.range_settings.surface_type.value))
+	_create_collision_and_model()
 
 
 func _create_collision_and_model():
@@ -194,63 +188,61 @@ func _create_collision_and_model():
 	collision.set_shape(shape)
 	add_child(collision)
 	# Create model
-	var mesh = ball_scene.instantiate()
+	var mesh = ball_model.instantiate()
 	var mesh_scale := 0.05
 	mesh.scale = Vector3(mesh_scale, mesh_scale, mesh_scale)
 	add_child(mesh)
 
+
 func _connect_settings() -> void:
-	_range_settings = GlobalSettings.range_settings
-	var settings := _range_settings
-
-	if not settings.temperature.setting_changed.is_connected(_on_environment_changed):
-		settings.temperature.setting_changed.connect(_on_environment_changed)
-	if not settings.altitude.setting_changed.is_connected(_on_environment_changed):
-		settings.altitude.setting_changed.connect(_on_environment_changed)
-	if not settings.range_units.setting_changed.is_connected(_on_environment_changed):
-		settings.range_units.setting_changed.connect(_on_environment_changed)
-	if not settings.surface_type.setting_changed.is_connected(_on_surface_type_changed):
-		settings.surface_type.setting_changed.connect(_on_surface_type_changed)
-	_settings_connected = true
+	GlobalSettings.range_settings.temperature.setting_changed.connect(_on_environment_changed)
+	GlobalSettings.range_settings.altitude.setting_changed.connect(_on_environment_changed)
+	GlobalSettings.range_settings.range_units.setting_changed.connect(_on_environment_changed)
+	GlobalSettings.range_settings.surface_type.setting_changed.connect(_on_surface_type_changed)
 
 
+func _create_physics_params():
+	var _params = _new_openfairway(&"PhysicsParams")
+	if _params == null:
+		return null
+	_set_openfairway_property(_params, &"air_density", &"AirDensity", _air_density)
+	_set_openfairway_property(_params, &"air_viscosity", &"AirViscosity", _air_viscosity)
+	_set_openfairway_property(_params, &"drag_scale", &"DragScale", _drag_scale)
+	_set_openfairway_property(_params, &"lift_scale", &"LiftScale", _lift_scale)
+	_set_openfairway_property(_params, &"kinetic_friction", &"KineticFriction", _kinetic_friction)
+	_set_openfairway_property(_params, &"rolling_friction", &"RollingFriction", _rolling_friction)
+	_set_openfairway_property(_params, &"grass_viscosity", &"GrassViscosity", _grass_viscosity)
+	_set_openfairway_property(_params, &"critical_angle", &"CriticalAngle", _critical_angle)
+	_set_openfairway_property(_params, &"floor_normal", &"FloorNormal", floor_normal)
+	_set_openfairway_property(_params, &"rollout_impact_spin", &"RolloutImpactSpin", rollout_impact_spin_rpm)
+	return _params
 
 func _on_environment_changed(_value) -> void:
 	_update_environment()
 
-
+# TODO: clean up surface type and surface stack
 func _on_surface_type_changed(value) -> void:
 	if _surface_zone_stack.is_empty():
 		set_surface(int(value))
 
 
-func _on_drag_scale_changed(_value) -> void:
-	_drag_scale = _drag_mult
-
-
-func _on_lift_scale_changed(_value) -> void:
-	_lift_scale = _lift_mult
-
-
 func _update_environment() -> void:
-	if _aero == null:
-		return
-	var settings := GlobalSettings.range_settings
-	var units: int = settings.range_units.value
+	var units: int = GlobalSettings.range_settings.range_units.value
 	var density = _call_openfairway_method(
 		_aero,
 		&"get_air_density",
 		&"GetAirDensity",
-		[settings.altitude.value, settings.temperature.value, units]
+		[GlobalSettings.range_settings.altitude.value, GlobalSettings.range_settings.temperature.value, units]
 	)
 	var viscosity = _call_openfairway_method(
 		_aero,
 		&"get_dynamic_viscosity",
 		&"GetDynamicViscosity",
-		[settings.temperature.value, units]
+		[GlobalSettings.range_settings.temperature.value, units]
 	)
-	if density == null or viscosity == null:
+	if density == null:
 		_air_density = 1.225
+	if viscosity == null:
 		_air_viscosity = 0.0000181
 		return
 	_air_density = float(density)
@@ -276,13 +268,7 @@ func exit_surface_zone(surface: int) -> void:
 	if not _surface_zone_stack.is_empty():
 		set_surface(_surface_zone_stack[_surface_zone_stack.size() - 1])
 	else:
-		set_surface(_get_configured_surface_type())
-
-
-func _get_configured_surface_type() -> int:
-	if _range_settings != null:
-		return int(_range_settings.surface_type.value)
-	return PhysicsEnums.SurfaceType.FAIRWAY
+		set_surface(int(GlobalSettings.range_settings.surface_type.value))
 
 
 func _apply_surface_params() -> void:
@@ -311,8 +297,6 @@ func get_downrange_yards() -> float:
 
 
 func _physics_process(delta: float) -> void:
-	if not _try_initialize_ball():
-		return
 	if state == PhysicsEnums.BallState.REST:
 		return
 
@@ -320,9 +304,6 @@ func _physics_process(delta: float) -> void:
 	var prev_velocity := velocity
 
 	# Calculate forces and torques using BallPhysics
-	var params = _create_physics_params()
-	if params == null:
-		return
 	var total_force = _call_openfairway_method(_physics, &"calculate_forces", &"CalculateForces", [velocity, omega, was_on_ground, params])
 	var total_torque = _call_openfairway_method(_physics, &"calculate_torques", &"CalculateTorques", [velocity, omega, was_on_ground, params])
 	if total_force == null or total_torque == null:
@@ -341,8 +322,8 @@ func _physics_process(delta: float) -> void:
 		return
 
 	# Safety bounds check
-	if _check_out_of_bounds():
-		return
+	#if _check_out_of_bounds():
+		#return
 
 	# Move and handle collisions
 	var collision := move_and_collide(velocity * delta, false, COLLISION_SAFE_MARGIN)
@@ -353,23 +334,7 @@ func _physics_process(delta: float) -> void:
 		_enter_rest_state()
 
 
-func _create_physics_params():
-	var params = _new_openfairway(&"PhysicsParams")
-	if params == null:
-		return null
-	_set_openfairway_property(params, &"air_density", &"AirDensity", _air_density)
-	_set_openfairway_property(params, &"air_viscosity", &"AirViscosity", _air_viscosity)
-	_set_openfairway_property(params, &"drag_scale", &"DragScale", _drag_scale)
-	_set_openfairway_property(params, &"lift_scale", &"LiftScale", _lift_scale)
-	_set_openfairway_property(params, &"kinetic_friction", &"KineticFriction", _kinetic_friction)
-	_set_openfairway_property(params, &"rolling_friction", &"RollingFriction", _rolling_friction)
-	_set_openfairway_property(params, &"grass_viscosity", &"GrassViscosity", _grass_viscosity)
-	_set_openfairway_property(params, &"critical_angle", &"CriticalAngle", _critical_angle)
-	_set_openfairway_property(params, &"floor_normal", &"FloorNormal", floor_normal)
-	_set_openfairway_property(params, &"rollout_impact_spin", &"RolloutImpactSpin", rollout_impact_spin_rpm)
-	return params
-
-
+# TODO: this check needs to be updated for larger distances and below zero surfaces
 func _check_out_of_bounds() -> bool:
 	if absf(position.x) > 1000.0 or absf(position.z) > 1000.0:
 		print("WARNING: Ball out of bounds at: ", position)
@@ -402,9 +367,6 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 					_print_impact_debug()
 					rollout_impact_spin_rpm = omega.length() / 0.10472
 
-				var params = _create_physics_params()
-				if params == null:
-					return
 				var bounce_result = _call_openfairway_method(_physics, &"calculate_bounce", &"CalculateBounce", [velocity, omega, normal, state, params])
 				if bounce_result == null:
 					return
@@ -532,7 +494,7 @@ func reset() -> void:
 	launch_spin_rpm = 0.0
 	rollout_impact_spin_rpm = 0.0
 	_surface_zone_stack.clear()
-	set_surface(_get_configured_surface_type())
+	set_surface(int(GlobalSettings.range_settings.surface_type.value))
 	state = PhysicsEnums.BallState.REST
 	on_ground = false
 
@@ -608,7 +570,7 @@ func hit_from_data(data: Dictionary) -> void:
 	on_ground = false
 	rollout_impact_spin_rpm = 0.0
 	_surface_zone_stack.clear()
-	set_surface(_get_configured_surface_type())
+	set_surface(int(GlobalSettings.range_settings.surface_type.value))
 	position = Vector3(0.0, START_HEIGHT, 0.0)
 
 	velocity = launch_velocity
