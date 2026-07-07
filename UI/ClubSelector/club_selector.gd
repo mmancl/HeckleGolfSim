@@ -1,23 +1,36 @@
 extends PanelContainer
 
-var clubs := ["Dr", "3w", "5w", "2H", "3H", "4H", "1i", "2i", "3i", "4i", "5i", "6i", "7i", "8i", "9i", "Pw", "Gw", "Sw", "Lw"]
+var clubs := ["Dr", "3w", "5w", "2H", "3H", "4H", "1i", "2i", "3i", "4i", "5i", "6i", "7i", "8i", "9i", "Pw", "Gw", "Sw", "Lw", "Pt"]
 var current_club: Button = null
 var club_button: Button = null
 var grid_container: GridContainer = null
 
 # Theme colors
-const BUTTON_BG_NORMAL = Color(0.4, 0.4, 0.4, 1.0)
-const BUTTON_BG_HOVER = Color(0.5, 0.5, 0.5, 1.0)
-const BUTTON_BG_PRESSED = Color(1, 0.65, 0, 0.8)
-const BUTTON_BG_SELECTED = Color(0.75, 0.75, 0.75, 0.8)
-const BUTTON_BORDER = Color(1, 0.65, 0, 1)
+const BUTTON_BG_NORMAL = Color(0.18, 0.18, 0.18, 0.85)
+const BUTTON_BG_HOVER = Color(0.28, 0.28, 0.28, 0.85)
+const BUTTON_BG_PRESSED = Color(0.24, 0.46, 0.72, 0.85)
+const BUTTON_BG_SELECTED = Color(0.18, 0.45, 0.25, 0.85)
+const BUTTON_BORDER = Color(1.0, 1.0, 1.0, 0.3)
 const BUTTON_FONT_SELECTED = Color.WHITE
-const DISPLAY_BG_NORMAL = Color(1, 0.65, 0, 0.8)
-const DISPLAY_BG_HOVER = Color(1, 0.75, 0.1, 0.9)
-const DISPLAY_BORDER = Color.WHITE
+const DISPLAY_BG_NORMAL = Color(0.24, 0.46, 0.72, 0.85)
+const DISPLAY_BG_HOVER = Color(0.34, 0.56, 0.82, 0.85)
+const DISPLAY_BORDER = Color(1.0, 1.0, 1.0, 0.3)
 
 func _ready() -> void:
-	grid_container = $MarginContainer/VBoxContainer/GridContainer
+	grid_container = $MarginContainer/VBoxContainer/DropdownWrapper/GridContainer
+	
+	# Hide title label and strip margins
+	var vbox = $MarginContainer/VBoxContainer
+	var title = vbox.get_node_or_null("Title")
+	if title != null:
+		title.visible = false
+	var margin = $MarginContainer
+	if margin != null:
+		margin.add_theme_constant_override("margin_left", 0)
+		margin.add_theme_constant_override("margin_right", 0)
+		margin.add_theme_constant_override("margin_top", 0)
+		margin.add_theme_constant_override("margin_bottom", 0)
+		
 	_create_club_display_button()
 	_create_club_buttons()
 	current_club = grid_container.get_child(0)
@@ -29,7 +42,8 @@ func _input(event: InputEvent) -> void:
 		return
 	var global_mouse_pos = get_global_mouse_position()
 	var selector_rect = get_global_rect()
-	var is_over_selector = selector_rect.has_point(global_mouse_pos)
+	var grid_rect = grid_container.get_global_rect()
+	var is_over_selector = selector_rect.has_point(global_mouse_pos) or grid_rect.has_point(global_mouse_pos)
 
 	if event is InputEventMouseButton:
 		if not is_over_selector:
@@ -39,8 +53,8 @@ func _input(event: InputEvent) -> void:
 
 func _create_club_display_button() -> void:
 	club_button = Button.new()
-	club_button.text = clubs[0]
-	club_button.custom_minimum_size = Vector2(100, 60)
+	club_button.text = "🏌 Club: " + clubs[0]
+	club_button.custom_minimum_size = Vector2(180, 40)
 	club_button.theme = _create_display_button_theme()
 	club_button.pressed.connect(_on_display_button_pressed)
 
@@ -92,19 +106,18 @@ func _create_button_style(bg_color: Color) -> StyleBoxFlat:
 
 func _create_display_button_theme() -> Theme:
 	var display_theme = Theme.new()
-	display_theme.set_font_size("font_size", "Button", 20)
+	display_theme.set_font_size("font_size", "Button", 16)
 
 	var normal_style = StyleBoxFlat.new()
 	normal_style.bg_color = DISPLAY_BG_NORMAL
-	normal_style.corner_radius_top_left = 8
-	normal_style.corner_radius_top_right = 8
-	normal_style.corner_radius_bottom_left = 8
-	normal_style.corner_radius_bottom_right = 8
-	normal_style.border_color = DISPLAY_BORDER
-	normal_style.border_width_left = 2
-	normal_style.border_width_right = 2
-	normal_style.border_width_top = 2
-	normal_style.border_width_bottom = 2
+	normal_style.corner_radius_top_left = 20
+	normal_style.corner_radius_top_right = 20
+	normal_style.corner_radius_bottom_left = 20
+	normal_style.corner_radius_bottom_right = 20
+	normal_style.content_margin_left = 16
+	normal_style.content_margin_right = 16
+	normal_style.content_margin_top = 8
+	normal_style.content_margin_bottom = 8
 	display_theme.set_stylebox("normal", "Button", normal_style)
 
 	var hover_style = normal_style.duplicate()
@@ -116,6 +129,9 @@ func _create_display_button_theme() -> Theme:
 
 func _toggle_grid_visibility() -> void:
 	grid_container.visible = not grid_container.visible
+	var wrapper = get_node_or_null("MarginContainer/VBoxContainer/DropdownWrapper")
+	if wrapper != null:
+		wrapper.custom_minimum_size.y = 250 if grid_container.visible else 0
 
 
 func _on_display_button_pressed() -> void:
@@ -128,7 +144,7 @@ func _on_club_button_pressed(button: Button) -> void:
 		_set_button_deselected(current_club)
 
 	# Update the display button
-	club_button.text = button.text
+	club_button.text = "🏌 Club: " + button.text
 
 	# Select the new button
 	current_club = button
@@ -152,3 +168,22 @@ func _set_button_deselected(button: Button) -> void:
 
 func _create_selected_button_style() -> StyleBoxFlat:
 	return _create_button_style(BUTTON_BG_SELECTED)
+
+
+func select_club_by_name(club_name: String) -> void:
+	if not grid_container:
+		return
+	var target_btn: Button = null
+	for child in grid_container.get_children():
+		if child is Button and child.text == club_name:
+			target_btn = child
+			break
+	
+	if target_btn != null and target_btn != current_club:
+		if current_club:
+			_set_button_deselected(current_club)
+		club_button.text = "🏌 Club: " + target_btn.text
+		current_club = target_btn
+		_set_button_selected(current_club)
+		EventBus.emit_signal("club_selected", current_club.text)
+

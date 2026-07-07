@@ -1,9 +1,9 @@
-<Project Sdk="Godot.NET.Sdk/4.6.0">
+<Project Sdk="Godot.NET.Sdk/4.7.0">
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
-    <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'windows' Or '$(OS)' == 'Windows_NT' ">net9.0-windows10.0.19041.0</TargetFramework>
-    <SupportedOSPlatformVersion Condition=" '$(GodotTargetPlatform)' == 'windows' Or '$(OS)' == 'Windows_NT' ">10.0.19041.0</SupportedOSPlatformVersion>
-    <EnableWindowsTargeting Condition=" '$(GodotTargetPlatform)' == 'windows' Or '$(OS)' == 'Windows_NT' ">true</EnableWindowsTargeting>
+    <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'windows' Or ('$(GodotTargetPlatform)' == '' And '$(OS)' == 'Windows_NT') ">net9.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion Condition=" '$(GodotTargetPlatform)' == 'windows' Or ('$(GodotTargetPlatform)' == '' And '$(OS)' == 'Windows_NT') ">10.0.19041.0</SupportedOSPlatformVersion>
+    <EnableWindowsTargeting Condition=" '$(GodotTargetPlatform)' == 'windows' Or ('$(GodotTargetPlatform)' == '' And '$(OS)' == 'Windows_NT') ">true</EnableWindowsTargeting>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <Nullable>enable</Nullable>
   </PropertyGroup>
@@ -13,6 +13,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="addons/launch_monitors/common/bluetooth/windows/**/*.cs" Condition=" '$(GodotTargetPlatform)' != 'windows' And '$(OS)' != 'Windows_NT' " />
+    <Compile Remove="addons/launch_monitors/common/bluetooth/windows/**/*.cs" Condition=" '$(GodotTargetPlatform)' != 'windows' And ('$(GodotTargetPlatform)' != '' Or '$(OS)' != 'Windows_NT') " />
   </ItemGroup>
 </Project>

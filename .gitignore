@@ -25,3 +25,4 @@ OpenShotGolf.Tests/obj/
 *.claude
 *.codex
 *.agents
+android_old/build/

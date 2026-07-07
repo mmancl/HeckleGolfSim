@@ -22,7 +22,8 @@ uniform float sway_strength = 0.5;
 uniform float sway_phase_len = 0.5;
 
 void vertex() {
-	float strength = COLOR.r * sway_strength;
+	// Sway more at the top of the foliage (VERTEX.y goes from -1.75 to 1.75)
+	float strength = (VERTEX.y + 1.75) * sway_strength;
 	VERTEX.x += sin(VERTEX.x * sway_phase_len * 1.123 + TIME * sway_speed) * strength;
 	VERTEX.y += sin(VERTEX.y * sway_phase_len + TIME * sway_speed * 1.12412) * strength;
 	VERTEX.z += sin(VERTEX.z * sway_phase_len * 0.9123 + TIME * sway_speed * 1.3123) * strength;

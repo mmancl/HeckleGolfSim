@@ -55,6 +55,9 @@ func _ready() -> void:
 		_debug_error("Square monitor unavailable during startup: %s" % _square_init_error)
 	if bool(settings.get("enabled", false)):
 		_connect_saved_device_on_startup(str(settings.get("device_id", "")))
+	
+	if EventBus.has_signal("club_selected"):
+		EventBus.club_selected.connect(_on_club_selected)
 
 
 func start_scan() -> void:
@@ -381,3 +384,29 @@ func _is_transient_square_connect_error(message: String) -> bool:
 
 func _is_square_device_name(name: String) -> bool:
 	return name.strip_edges().to_lower().begins_with(SQUARE_DEVICE_PREFIX)
+
+
+func _on_club_selected(club_name: String) -> void:
+	var code := _map_in_game_club_to_square_code(club_name)
+	_debug_log("In-game club changed to %s (code: %s)" % [club_name, code])
+	set_club_code(code)
+
+
+func _map_in_game_club_to_square_code(club_name: String) -> String:
+	match club_name:
+		"Dr": return "0204"
+		"3w": return "0305"
+		"5w": return "0505"
+		"2H", "3H", "4H", "1i", "2i", "3i": return "0305" # Fallback to 3 Wood/Hybrids
+		"4i": return "0406"
+		"5i": return "0506"
+		"6i": return "0606"
+		"7i": return "0706"
+		"8i": return "0806"
+		"9i": return "0906"
+		"Pw": return "0a06"
+		"Gw": return "0b06"
+		"Sw": return "0c06"
+		"Lw": return "0b06"
+		"Pt": return "0107"
+		_: return "0204" # Default to Driver

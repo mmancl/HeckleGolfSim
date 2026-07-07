@@ -29,7 +29,8 @@ public static class SquareShotDataMapper
             { "SpinAxis", metrics.SpinAxis },
             { "BackSpin", backSpin },
             { "SideSpin", sideSpin },
-            { "ShotType", metrics.ShotType }
+            { "ShotType", metrics.ShotType },
+            { "ClubPath", metrics.ClubPath }
         };
     }
 }

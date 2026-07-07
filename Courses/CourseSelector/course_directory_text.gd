@@ -1,4 +1,4 @@
-extends TextEdit
+extends LineEdit
 
 
 signal course_directory(path: String)

@@ -262,7 +262,7 @@ func set_equatorial_color(value: Color) -> void:
 
 @export_group("Sun")
 @export_node_path("DirectionalLight3D") var sun_light_path: NodePath = NodePath("../SunLight"): set = set_sun_light_path
-@export var sun_light_energy: float = 1.0: set = set_sun_light_energy
+@export var sun_light_energy: float = 0.5: set = set_sun_light_energy
 @export var sun_disk_color: Color = Color(0.996094, 0.541334, 0.140076): set = set_sun_disk_color
 @export_range(0.0, 100.0) var sun_disk_intensity: float = 30.0: set = set_sun_disk_intensity
 @export_range(0.0, 0.5, 0.001) var sun_disk_size: float = 0.02: set = set_sun_disk_size

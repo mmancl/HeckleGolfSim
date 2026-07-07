@@ -1,12 +1,26 @@
-[gd_scene load_steps=2 format=3 uid="uid://cr5js3cuw3b7y"]
+[gd_scene load_steps=3 format=3 uid="uid://cr5js3cuw3b7y"]
 
 [ext_resource type="Script" uid="uid://coaq5bnt4i7s6" path="res://UI/Settings/RangeSettings/range_settings.gd" id="1_btrk3"]
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_settings_bg"]
+bg_color = Color(0.08, 0.08, 0.08, 0.95)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.25, 0.25, 0.25, 0.8)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
 [node name="RangeSettings" type="PanelContainer"]
-offset_right = 379.0
-offset_bottom = 197.0
+custom_minimum_size = Vector2(400, 560)
+offset_right = 400.0
+offset_bottom = 560.0
 size_flags_horizontal = 4
 size_flags_vertical = 4
+theme_override_styles/panel = SubResource("StyleBoxFlat_settings_bg")
 script = ExtResource("1_btrk3")
 
 [node name="MarginContainer" type="MarginContainer" parent="."]
@@ -18,261 +32,349 @@ theme_override_constants/margin_bottom = 20
 
 [node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
 layout_mode = 2
-theme_override_constants/separation = 20
+theme_override_constants/separation = 15
 
-[node name="Units" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+[node name="SettingsTitle" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Settings"
+horizontal_alignment = 1
+
+[node name="TabContainer" type="TabContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Gameplay" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+metadata/_tab_index = 0
+
+[node name="MarginContainer" type="MarginContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="GameplayVBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Units" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/Units"]
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units"]
 layout_mode = 2
 text = "Units: "
 
-[node name="Control" type="Control" parent="MarginContainer/VBoxContainer/Units"]
+[node name="Control" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_stretch_ratio = 2.4
 
-[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/Units"]
+[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units"]
 layout_mode = 2
 text = "Imperial"
 
-[node name="CheckButton" type="CheckButton" parent="MarginContainer/VBoxContainer/Units"]
+[node name="CheckButton" type="CheckButton" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units"]
 layout_mode = 2
 
-[node name="Label3" type="Label" parent="MarginContainer/VBoxContainer/Units"]
+[node name="Label3" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units"]
 layout_mode = 2
 text = "Metric"
 
-[node name="Control2" type="Control" parent="MarginContainer/VBoxContainer/Units"]
+[node name="Control2" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="CameraFollow" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+[node name="AutoBallReset" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/CameraFollow"]
-layout_mode = 2
-text = "Camera
-Follow Mode"
-
-[node name="Control" type="Control" parent="MarginContainer/VBoxContainer/CameraFollow"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_stretch_ratio = 1.5
-
-[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/CameraFollow"]
-layout_mode = 2
-text = "Off"
-
-[node name="CheckButton" type="CheckButton" parent="MarginContainer/VBoxContainer/CameraFollow"]
-layout_mode = 2
-
-[node name="Label3" type="Label" parent="MarginContainer/VBoxContainer/CameraFollow"]
-layout_mode = 2
-text = "On"
-
-[node name="Control2" type="Control" parent="MarginContainer/VBoxContainer/CameraFollow"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="AutoBallReset" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
-layout_mode = 2
-
-[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/AutoBallReset"]
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset"]
 layout_mode = 2
 text = "Auto Ball Reset: "
 
-[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/AutoBallReset"]
+[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/AutoBallReset"]
+[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset"]
 layout_mode = 2
 text = "Off"
 
-[node name="CheckButton" type="CheckButton" parent="MarginContainer/VBoxContainer/AutoBallReset"]
+[node name="CheckButton" type="CheckButton" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset"]
 layout_mode = 2
 
-[node name="Label3" type="Label" parent="MarginContainer/VBoxContainer/AutoBallReset"]
-layout_mode = 2
-text = "On"
-
-[node name="Control2" type="Control" parent="MarginContainer/VBoxContainer/AutoBallReset"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="ShotInjector" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
-layout_mode = 2
-
-[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/ShotInjector"]
-layout_mode = 2
-text = "Shot Injector"
-
-[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/ShotInjector"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/ShotInjector"]
-layout_mode = 2
-text = "Off"
-
-[node name="CheckButton" type="CheckButton" parent="MarginContainer/VBoxContainer/ShotInjector"]
-layout_mode = 2
-
-[node name="Label3" type="Label" parent="MarginContainer/VBoxContainer/ShotInjector"]
+[node name="Label3" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset"]
 layout_mode = 2
 text = "On"
 
-[node name="Control2" type="Control" parent="MarginContainer/VBoxContainer/ShotInjector"]
+[node name="Control2" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="BallResetTimer" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+[node name="BallResetTimer" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/BallResetTimer"]
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer"]
 layout_mode = 2
 text = "Ball Reset Timer: "
 
-[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/BallResetTimer"]
+[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_stretch_ratio = 0.6
 
-[node name="ResetSpinBox" type="SpinBox" parent="MarginContainer/VBoxContainer/BallResetTimer"]
+[node name="ResetSpinBox" type="SpinBox" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer"]
 custom_minimum_size = Vector2(100, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/BallResetTimer"]
+[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer"]
 layout_mode = 2
 text = "sec"
 
-[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/BallResetTimer"]
+[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Temperature" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+[node name="Temperature" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/Temperature"]
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature"]
 layout_mode = 2
 text = "Temperature: "
 
-[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/Temperature"]
+[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="TemperatureSpinBox" type="SpinBox" parent="MarginContainer/VBoxContainer/Temperature"]
+[node name="TemperatureSpinBox" type="SpinBox" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature"]
 custom_minimum_size = Vector2(100, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/Temperature"]
+[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature"]
 layout_mode = 2
 text = "F"
 
-[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/Temperature"]
+[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Altitude" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+[node name="Altitude" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/Altitude"]
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude"]
 layout_mode = 2
 text = "Altitude: "
 
-[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/Altitude"]
+[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_stretch_ratio = 1.7
 
-[node name="AltitudeSpinBox" type="SpinBox" parent="MarginContainer/VBoxContainer/Altitude"]
+[node name="AltitudeSpinBox" type="SpinBox" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude"]
 custom_minimum_size = Vector2(100, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/Altitude"]
+[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude"]
 layout_mode = 2
 text = "ft"
 
-[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/Altitude"]
+[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="SurfaceType" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+[node name="SurfaceType" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/SurfaceType"]
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/SurfaceType"]
 layout_mode = 2
 text = "Surface: "
 
-[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/SurfaceType"]
+[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/SurfaceType"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="SurfaceOption" type="OptionButton" parent="MarginContainer/VBoxContainer/SurfaceType"]
+[node name="SurfaceOption" type="OptionButton" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/SurfaceType"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/SurfaceType"]
+[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/SurfaceType"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="BallType" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+[node name="BallType" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/BallType"]
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallType"]
 layout_mode = 2
 text = "Ball: "
 
-[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/BallType"]
+[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallType"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="BallTypeOption" type="OptionButton" parent="MarginContainer/VBoxContainer/BallType"]
+[node name="BallTypeOption" type="OptionButton" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallType"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/BallType"]
+[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallType"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="TracerCount" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+[node name="TracerCount" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TracerCount"]
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/TracerCount"]
 layout_mode = 2
 text = "Shot Tracers: "
 
-[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TracerCount"]
+[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/TracerCount"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_stretch_ratio = 1.4
 
-[node name="TracerCountSpinBox" type="SpinBox" parent="MarginContainer/VBoxContainer/TracerCount"]
+[node name="TracerCountSpinBox" type="SpinBox" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/TracerCount"]
 custom_minimum_size = Vector2(100, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/TracerCount"]
+[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/TracerCount"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="ExitButton" type="Button" parent="MarginContainer/VBoxContainer"]
+[node name="Camera" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
+visible = false
 layout_mode = 2
-size_flags_horizontal = 4
+theme_override_constants/separation = 12
+metadata/_tab_index = 1
+
+[node name="MarginContainer" type="MarginContainer" parent="MarginContainer/VBoxContainer/TabContainer/Camera"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="CameraVBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="CameraFollow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow"]
+layout_mode = 2
+text = "Camera
+Follow Mode"
+
+[node name="Control" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 1.5
+
+[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow"]
+layout_mode = 2
+text = "Off"
+
+[node name="CheckButton" type="CheckButton" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow"]
+layout_mode = 2
+
+[node name="Label3" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow"]
+layout_mode = 2
+text = "On"
+
+[node name="Control2" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="LaunchMonitor" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+metadata/_tab_index = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="LaunchMonitorVBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ShotInjector" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector"]
+layout_mode = 2
+text = "Shot Injector"
+
+[node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector"]
+layout_mode = 2
+text = "Off"
+
+[node name="CheckButton" type="CheckButton" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector"]
+layout_mode = 2
+
+[node name="Label3" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector"]
+layout_mode = 2
+text = "On"
+
+[node name="Control2" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Announcer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+metadata/_tab_index = 3
+
+[node name="MarginContainer" type="MarginContainer" parent="MarginContainer/VBoxContainer/TabContainer/Announcer"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="AnnouncerVBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Announcer/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ButtonsHBox" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 20
+alignment = 1
+
+[node name="ResetLayoutButton" type="Button" parent="MarginContainer/VBoxContainer/ButtonsHBox"]
+custom_minimum_size = Vector2(140, 40)
+layout_mode = 2
+text = "Reset Layout"
+
+[node name="ExitButton" type="Button" parent="MarginContainer/VBoxContainer/ButtonsHBox"]
+custom_minimum_size = Vector2(140, 40)
+layout_mode = 2
 text = "Exit to Menu"
 
-[connection signal="toggled" from="MarginContainer/VBoxContainer/Units/CheckButton" to="." method="_on_units_check_button_toggled"]
-[connection signal="toggled" from="MarginContainer/VBoxContainer/CameraFollow/CheckButton" to="." method="_on_camer_check_button_toggled"]
-[connection signal="toggled" from="MarginContainer/VBoxContainer/AutoBallReset/CheckButton" to="." method="_on_auto_reset_check_button_toggled"]
-[connection signal="toggled" from="MarginContainer/VBoxContainer/ShotInjector/CheckButton" to="." method="_on_injector_check_button_toggled"]
-[connection signal="value_changed" from="MarginContainer/VBoxContainer/BallResetTimer/ResetSpinBox" to="." method="_on_reset_spin_box_value_changed"]
-[connection signal="value_changed" from="MarginContainer/VBoxContainer/Temperature/TemperatureSpinBox" to="." method="_on_temperature_spin_box_value_changed"]
-[connection signal="value_changed" from="MarginContainer/VBoxContainer/Altitude/AltitudeSpinBox" to="." method="_on_altitude_spin_box_value_changed"]
-[connection signal="item_selected" from="MarginContainer/VBoxContainer/BallType/BallTypeOption" to="." method="_on_ball_type_option_item_selected"]
-[connection signal="item_selected" from="MarginContainer/VBoxContainer/SurfaceType/SurfaceOption" to="." method="_on_surface_option_item_selected"]
-[connection signal="value_changed" from="MarginContainer/VBoxContainer/TracerCount/TracerCountSpinBox" to="." method="_on_tracer_count_spin_box_value_changed"]
-[connection signal="pressed" from="MarginContainer/VBoxContainer/ExitButton" to="." method="_on_exit_button_pressed"]
+[connection signal="toggled" from="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units/CheckButton" to="." method="_on_units_check_button_toggled"]
+[connection signal="toggled" from="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow/CheckButton" to="." method="_on_camer_check_button_toggled"]
+[connection signal="toggled" from="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset/CheckButton" to="." method="_on_auto_reset_check_button_toggled"]
+[connection signal="toggled" from="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector/CheckButton" to="." method="_on_injector_check_button_toggled"]
+[connection signal="value_changed" from="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer/ResetSpinBox" to="." method="_on_reset_spin_box_value_changed"]
+[connection signal="value_changed" from="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature/TemperatureSpinBox" to="." method="_on_temperature_spin_box_value_changed"]
+[connection signal="value_changed" from="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude/AltitudeSpinBox" to="." method="_on_altitude_spin_box_value_changed"]
+[connection signal="item_selected" from="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallType/BallTypeOption" to="." method="_on_ball_type_option_item_selected"]
+[connection signal="item_selected" from="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/SurfaceType/SurfaceOption" to="." method="_on_surface_option_item_selected"]
+[connection signal="value_changed" from="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/TracerCount/TracerCountSpinBox" to="." method="_on_tracer_count_spin_box_value_changed"]
+[connection signal="pressed" from="MarginContainer/VBoxContainer/ButtonsHBox/ResetLayoutButton" to="." method="_on_reset_layout_button_pressed"]
+[connection signal="pressed" from="MarginContainer/VBoxContainer/ButtonsHBox/ExitButton" to="." method="_on_exit_button_pressed"]

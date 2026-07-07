@@ -21,6 +21,7 @@ func _deferred_change_scene(scene_path) -> void:
 		return
 
 	if current_scene != null:
+		get_tree().get_root().remove_child(current_scene)
 		current_scene.queue_free()
 
 	current_scene = next_scene
@@ -40,6 +41,7 @@ func close_scene():
 
 func _deferred_close_scene():
 	if current_scene != null:
+		get_tree().get_root().remove_child(current_scene)
 		current_scene.queue_free()
 		current_scene = null
 
@@ -58,6 +60,7 @@ func reload_scene():
 		push_error("Could not instantiate reloaded scene: " + path)
 		return
 
+	get_tree().get_root().remove_child(current_scene)
 	current_scene.queue_free()
 	current_scene = next_scene
 	get_tree().get_root().add_child(current_scene)

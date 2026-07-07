@@ -72,6 +72,7 @@ func _ready() -> void:
 		var save_file = FileAccess.open(session_save_file, FileAccess.WRITE)
 		var default_save_data := {"SessionID": session_id, "SessionPath": folder_path, "Username": username}
 		save_file.store_string(JSON.stringify(default_save_data))
+		emit_signal("set_session", username, folder_path)
 
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.

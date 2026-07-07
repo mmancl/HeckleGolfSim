@@ -34,7 +34,7 @@ layout_mode = 2
 layout_mode = 2
 text = "Player Name: "
 
-[node name="TextEdit" type="TextEdit" parent="PanelContainer/MarginContainer/VBoxContainer/PlayerName"]
+[node name="PlayerNameInput" type="LineEdit" parent="PanelContainer/MarginContainer/VBoxContainer/PlayerName"]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
@@ -52,7 +52,7 @@ layout_mode = 2
 layout_mode = 2
 text = "Directory: "
 
-[node name="TextEdit" type="TextEdit" parent="PanelContainer/MarginContainer/VBoxContainer/Directory"]
+[node name="DirectoryInput" type="LineEdit" parent="PanelContainer/MarginContainer/VBoxContainer/Directory"]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 size_flags_horizontal = 3
@@ -75,4 +75,4 @@ layout_mode = 2
 horizontal_alignment = 1
 
 [connection signal="pressed" from="PanelContainer/MarginContainer/VBoxContainer/Buttons/OKButton" to="." method="_on_ok_button_pressed"]
-[connection signal="pressed" from="PanelContainer/MarginContainer/VBoxContainer/Buttons/CancelButton" to="." method="close"]
+[connection signal="pressed" from="PanelContainer/MarginContainer/VBoxContainer/Buttons/CancelButton" to="." method="_on_cancel_button_pressed"]

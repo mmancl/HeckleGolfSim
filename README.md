@@ -131,6 +131,23 @@ Download and install the .NET SDK version 9.0 or later.
 - Set your launch monitor to send data to port `49152`, or use the local hit/reset shortcuts below.
   - Python script `~/Resources/SocketTest/SocketTest.py` could be used to test TCP functionality (defaults to `assets/data/drive_test_shot.json`). 
 
+### Android Wireless Debugging
+If you want to deploy and debug directly to an Android device over Wi-Fi, Godot requires you to pair and connect the device via ADB first:
+
+1. Enable **Developer Options** and **Wireless debugging** on your Android device.
+2. Tap "Wireless debugging" and select **Pair device with pairing code** to get your pairing IP, Port, and Code.
+3. Open PowerShell/Command Prompt and run:
+   ```bash
+   adb pair <IP_ADDRESS>:<PORT>
+   ```
+   *Enter the pairing code when prompted. (Note: `adb` is typically located at `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` on Windows).*
+4. Go back to the main Wireless debugging screen to find the connection IP and Port (this port is different from the pairing port).
+5. Connect to the device:
+   ```bash
+   adb connect <IP_ADDRESS>:<PORT>
+   ```
+6. Restart the Godot editor. Your device should now appear in the Remote Debug menu.
+
 ## Controls
 - `h`: Simulate a built-in hit with sample ball data.
 - `r`: Reset the ball and clear the shot trail.

@@ -5,6 +5,7 @@ signal settings_changed
 # Range Settings
 var range_settings := RangeSettings.new()
 const OPENFAIRWAY_LOG_LEVEL_INFO := 2
+var practice_mode_primed : bool = false
 
 
 func _ready() -> void:

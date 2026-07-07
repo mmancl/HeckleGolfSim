@@ -6,6 +6,8 @@
 [ext_resource type="Texture2D" uid="uid://7h84ji1c4crd" path="res://UI/MainMenu/images/exit_door.svg" id="4_trkrl"]
 [ext_resource type="Texture2D" uid="uid://cjj74w7djkfgf" path="res://assets/images/menu/range_small.png" id="5_iyy2y"]
 [ext_resource type="Texture2D" uid="uid://cvbxn5mtc5xeh" path="res://assets/images/menu/airways_small.png" id="6_trkrl"]
+[ext_resource type="Texture2D" uid="uid://dfpyee5nmko34" path="res://assets/images/menu/practice_color.png" id="7_practice_color"]
+[ext_resource type="Texture2D" uid="uid://jbxciy4wpcvj" path="res://assets/images/menu/history_color.jpg" id="8_history_color"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_bddxb"]
 
@@ -138,7 +140,7 @@ size_flags_horizontal = 3
 size_flags_vertical = 1
 size_flags_stretch_ratio = 10.0
 theme_override_font_sizes/font_size = 44
-text = "Open Shot Golf"
+text = "Heckle Golf Simulator"
 horizontal_alignment = 1
 vertical_alignment = 1
 
@@ -231,6 +233,82 @@ horizontal_alignment = 1
 vertical_alignment = 2
 
 [node name="CoursesButton" type="Button" parent="VerticalLayout/TilesRow/CoursesTile/CoursesTextBackdrop" unique_id=1072632761]
+layout_mode = 0
+offset_right = 217.0
+offset_bottom = 217.0
+theme_override_styles/normal = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/hover = SubResource("StyleBoxFlat_iau2q")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_bddxb")
+
+[node name="PracticeTile" type="PanelContainer" parent="VerticalLayout/TilesRow" unique_id=987654321]
+custom_minimum_size = Vector2(221, 221)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_iyy2y")
+
+[node name="PracticeImage" type="TextureRect" parent="VerticalLayout/TilesRow/PracticeTile" unique_id=987654322]
+layout_mode = 2
+texture = ExtResource("7_practice_color")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="PracticeTextBackdrop" type="ColorRect" parent="VerticalLayout/TilesRow/PracticeTile" unique_id=987654323]
+layout_mode = 2
+color = Color(0, 0, 0, 0.34901962)
+
+[node name="PracticeLabel" type="Label" parent="VerticalLayout/TilesRow/PracticeTile/PracticeTextBackdrop" unique_id=987654324]
+layout_mode = 0
+offset_right = 217.0
+offset_bottom = 215.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.7490196)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 38
+text = "PRACTICE
+"
+horizontal_alignment = 1
+vertical_alignment = 2
+
+[node name="PracticeButton" type="Button" parent="VerticalLayout/TilesRow/PracticeTile/PracticeTextBackdrop" unique_id=987654325]
+layout_mode = 0
+offset_right = 217.0
+offset_bottom = 217.0
+theme_override_styles/normal = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/hover = SubResource("StyleBoxFlat_iau2q")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_bddxb")
+
+[node name="HistoryTile" type="PanelContainer" parent="VerticalLayout/TilesRow" unique_id=116802576]
+custom_minimum_size = Vector2(221, 221)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_iyy2y")
+
+[node name="HistoryImage" type="TextureRect" parent="VerticalLayout/TilesRow/HistoryTile" unique_id=694567010]
+layout_mode = 2
+texture = ExtResource("8_history_color")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="HistoryTextBackdrop" type="ColorRect" parent="VerticalLayout/TilesRow/HistoryTile" unique_id=1547519880]
+layout_mode = 2
+color = Color(0, 0, 0, 0.34901962)
+
+[node name="HistoryLabel" type="Label" parent="VerticalLayout/TilesRow/HistoryTile/HistoryTextBackdrop" unique_id=1313115812]
+layout_mode = 0
+offset_right = 217.0
+offset_bottom = 215.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.7490196)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 38
+text = "HISTORY
+"
+horizontal_alignment = 1
+vertical_alignment = 2
+
+[node name="HistoryButton" type="Button" parent="VerticalLayout/TilesRow/HistoryTile/HistoryTextBackdrop" unique_id=1767573261]
 layout_mode = 0
 offset_right = 217.0
 offset_bottom = 217.0

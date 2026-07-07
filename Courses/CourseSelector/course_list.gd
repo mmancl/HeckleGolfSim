@@ -14,25 +14,12 @@ func parse_directory(path: String) -> int:
 	if path.ends_with("/"):
 		path = path.substr(0, path.length() - 1)
 	course_dir = path
-	print("[CourseList] Scanning directory: %s" % course_dir)
-
-	var dir := DirAccess.open(course_dir)
-	if dir == null:
-		printerr("[CourseList] Unable to open course directory: %s" % course_dir)
-		return -1
+	print("[CourseList] Scanning directories: %s and user://courses" % course_dir)
 
 	var validated: Array[Dictionary] = []
 
-	dir.list_dir_begin()
-	var dir_name := dir.get_next()
-	while dir_name != "":
-		if dir.current_is_dir() and not dir_name.begins_with("."):
-			var result: Dictionary = CourseValidator.validate(course_dir, dir_name)
-			if not result.is_empty():
-				result["dir_name"] = dir_name
-				validated.append(result)
-		dir_name = dir.get_next()
-	dir.list_dir_end()
+	_scan_dir(course_dir, validated)
+	_scan_dir("user://courses", validated)
 
 	validated.sort_custom(func(a, b): return a["dir_name"] < b["dir_name"])
 	for course in validated:
@@ -42,6 +29,25 @@ func parse_directory(path: String) -> int:
 
 	print("[CourseList] Found %d valid course(s)." % validated.size())
 	return validated.size()
+
+
+func _scan_dir(dir_path: String, validated: Array[Dictionary]) -> void:
+	if not DirAccess.dir_exists_absolute(dir_path):
+		return
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return
+
+	dir.list_dir_begin()
+	var dir_name := dir.get_next()
+	while dir_name != "":
+		if dir.current_is_dir() and not dir_name.begins_with("."):
+			var result: Dictionary = CourseValidator.validate(dir_path, dir_name)
+			if not result.is_empty():
+				result["dir_name"] = dir_name
+				validated.append(result)
+		dir_name = dir.get_next()
+	dir.list_dir_end()
 
 
 ## Normalize a reload request and return a status string.

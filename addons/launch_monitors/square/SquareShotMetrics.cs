@@ -8,7 +8,8 @@ public readonly record struct SquareShotMetrics(
     float SpinAxis,
     int BackSpinRpm,
     int SideSpinRpm,
-    string ShotType);
+    string ShotType,
+    float ClubPath = 0.0f);
 
 public readonly record struct SquareSensorData(
     bool BallReady,

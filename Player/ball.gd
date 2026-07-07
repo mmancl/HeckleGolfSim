@@ -14,6 +14,7 @@ const GROUND_PROBE_DISTANCE := 0.08
 const MIN_GROUND_NORMAL := 0.7
 
 var ball_model : PackedScene = preload("res://assets/models/balls/golf_ball.glb")
+var spawn_position := Vector3(0.0, START_HEIGHT, 0.0)
 
 # C# addon instances
 var _physics
@@ -29,6 +30,8 @@ var state: int = PhysicsEnums.BallState.REST
 var omega := Vector3.ZERO  # Angular velocity (rad/s)
 var on_ground := false
 var floor_normal := Vector3.UP
+var is_in_water := false
+var water_collider: Node3D = null
 
 # Surface parameters (base values from C# Surface addon, then multiplied below).
 # TODO - some of these values should not be in ball. Ball type shouldn't matter grass viscosity.
@@ -57,6 +60,7 @@ var shot_dir := Vector3(1.0, 0.0, 0.0)  # Normalized horizontal direction
 var aim_yaw_offset_deg := 0.0  # Camera/world rotation offset applied at launch
 var launch_spin_rpm := 0.0  # Stored for bounce calculations
 var rollout_impact_spin_rpm := 0.0  # Spin on first impact; used for rollout friction
+var is_putt := false
 
 # Ball physics constants (cached from C# addon in _init)
 var _ball_mass: float
@@ -300,6 +304,8 @@ func _physics_process(delta: float) -> void:
 	if state == PhysicsEnums.BallState.REST:
 		return
 
+	_update_surface_from_underneath()
+
 	var was_on_ground := on_ground
 	var prev_velocity := velocity
 
@@ -355,6 +361,15 @@ func _check_out_of_bounds() -> bool:
 
 func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, prev_velocity: Vector3) -> void:
 	if collision:
+		var collider = collision.get_collider()
+		if collider != null and collider.has_meta("is_water") and bool(collider.get_meta("is_water")):
+			is_in_water = true
+			water_collider = collider
+			velocity = Vector3.ZERO
+			omega = Vector3.ZERO
+			_enter_rest_state()
+			return
+
 		var normal := collision.get_normal()
 
 		if _is_ground_normal(normal):
@@ -455,7 +470,7 @@ func _try_probe_ground() -> Dictionary:
 		ground_normal = Vector3.UP
 	else:
 		ground_normal = ground_normal.normalized()
-	return {"hit": true, "normal": ground_normal}
+	return {"hit": true, "normal": ground_normal, "position": ray_hit["position"]}
 
 
 func _is_ground_normal(normal: Vector3) -> bool:
@@ -482,16 +497,19 @@ func _enter_rest_state() -> void:
 
 
 func reset() -> void:
-	position = Vector3(0.0, START_HEIGHT, 0.0)
+	position = spawn_position
 	velocity = Vector3.ZERO
 	omega = Vector3.ZERO
 	aim_yaw_offset_deg = 0.0
 	launch_spin_rpm = 0.0
 	rollout_impact_spin_rpm = 0.0
+	is_putt = false
 	_surface_zone_stack.clear()
 	set_surface(int(GlobalSettings.range_settings.surface_type.value))
 	state = PhysicsEnums.BallState.REST
 	on_ground = false
+	is_in_water = false
+	water_collider = null
 
 
 func hit() -> void:
@@ -561,12 +579,28 @@ func hit_from_data(data: Dictionary) -> void:
 		launch_direction = Vector3.RIGHT
 	launch_direction = launch_direction.normalized()
 
-	state = PhysicsEnums.BallState.FLIGHT
-	on_ground = false
+	var shot_type: String = str(data.get("ShotType", ""))
+	is_putt = shot_type.to_lower() == "putt"
+
+	if is_putt:
+		state = PhysicsEnums.BallState.ROLLOUT
+		on_ground = true
+		set_surface(PhysicsEnums.SurfaceType.GREEN)
+	else:
+		state = PhysicsEnums.BallState.FLIGHT
+		on_ground = false
+		_surface_zone_stack.clear()
+		set_surface(int(GlobalSettings.range_settings.surface_type.value))
+
 	rollout_impact_spin_rpm = 0.0
-	_surface_zone_stack.clear()
-	set_surface(int(GlobalSettings.range_settings.surface_type.value))
-	position = Vector3(0.0, START_HEIGHT, 0.0)
+	if position.length_squared() < 0.0001:
+		position = Vector3(0.0, START_HEIGHT, 0.0)
+
+	if is_putt:
+		var probe := _try_probe_ground()
+		if probe.get("hit", false):
+			position.y = probe.get("position", Vector3.ZERO).y + _ball_radius
+			floor_normal = probe.get("normal", Vector3.UP)
 
 	velocity = launch_velocity
 	omega = launch_omega
@@ -631,3 +665,30 @@ func _print_launch_debug(data: Dictionary, speed_mps: float, vla: float, hla: fl
 	print("Initial omega: ", omega, " (%.0f rpm)" % (omega.length() / 0.10472))
 	print("Shot direction: ", shot_dir)
 	print("===================")
+
+
+func _update_surface_from_underneath() -> void:
+	var world := get_world_3d()
+	if world == null:
+		return
+	var query = PhysicsRayQueryParameters3D.create(global_position + Vector3.UP * 0.1, global_position + Vector3.DOWN * 0.3)
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	query.exclude = [get_rid()]
+	var hit = world.direct_space_state.intersect_ray(query)
+	if not hit.is_empty():
+		var collider = hit["collider"]
+		if collider != null:
+			if collider.has_meta("is_water") and bool(collider.get_meta("is_water")):
+				is_in_water = true
+				water_collider = collider
+				_enter_rest_state()
+				return
+			if collider.has_meta("surface_type"):
+				set_surface(int(collider.get_meta("surface_type")))
+			elif collider.name.contains("Green"):
+				set_surface(PhysicsEnums.SurfaceType.GREEN)
+			elif collider.name.contains("Fairway"):
+				set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+			elif collider.name.contains("Bunker") or collider.name.contains("Sand"):
+				set_surface(PhysicsEnums.SurfaceType.ROUGH)

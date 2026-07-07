@@ -14,11 +14,11 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 [application]
 
-config/name="OpenShotGolf"
+config/name="Heckle Golf Simulator"
 config/version="0.1.3"
 run/main_scene="uid://dgyd437dgyv0y"
-config/features=PackedStringArray("4.6", "C#", "Mobile")
-boot_splash/image="uid://db1qv4yqokht7"
+config/features=PackedStringArray("4.7", "C#", "Mobile")
+boot_splash/image="uid://cjp4o151j14xr"
 config/icon="uid://bcv0yjfm7ggro"
 
 [autoload]
@@ -28,6 +28,8 @@ SceneManager="*res://Utils/SceneManager.gd"
 EventBus="*res://Utils/EventBus.gd"
 GlobalSettings="*res://Utils/Settings/global_settings.gd"
 LaunchMonitorManager="*res://addons/launch_monitors/launch_monitor_manager.gd"
+AnnouncerEngine="*res://addons/announcer/AnnouncerEngine.cs"
+MultiplayerManager="*res://Utils/MultiplayerManager.gd"
 
 [display]
 

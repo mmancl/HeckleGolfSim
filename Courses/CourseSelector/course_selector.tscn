@@ -177,7 +177,7 @@ theme_override_colors/font_color = Color(0.98, 0.98, 0.98, 1)
 theme_override_font_sizes/font_size = 24
 text = "Course Directory:"
 
-[node name="CourseDirectoryText" type="TextEdit" parent="ContentPanel/ContentMargin/VBoxContainer/CourseDirectory" unique_id=1738895751]
+[node name="CourseDirectoryText" type="LineEdit" parent="ContentPanel/ContentMargin/VBoxContainer/CourseDirectory" unique_id=1738895751]
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 size_flags_horizontal = 3

@@ -1,0 +1,145 @@
+[gd_scene load_steps=5 format=3 uid="uid://cbp1q8x4jdx5y"]
+
+[ext_resource type="Script" path="res://Courses/OsmDownloadDialog/osm_download_dialog.gd" id="1_dialog"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bg"]
+bg_color = Color(0.08, 0.12, 0.16, 0.95)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.24, 0.38, 0.52, 0.9)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+shadow_color = Color(0, 0, 0, 0.4)
+shadow_size = 10
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_normal"]
+bg_color = Color(0.18, 0.35, 0.56, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 12
+content_margin_top = 6
+content_margin_right = 12
+content_margin_bottom = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_hover"]
+bg_color = Color(0.24, 0.46, 0.72, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 12
+content_margin_top = 6
+content_margin_right = 12
+content_margin_bottom = 6
+
+[node name="OsmDownloadDialog" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_dialog")
+
+[node name="Dimmer" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.6)
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PanelContainer" type="PanelContainer" parent="CenterContainer"]
+custom_minimum_size = Vector2(800, 600)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_bg")
+
+[node name="MarginContainer" type="MarginContainer" parent="CenterContainer/PanelContainer"]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 24
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 28
+text = "Download Golf Course from OpenStreetMap"
+horizontal_alignment = 1
+
+[node name="SearchHBox" type="HBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SearchInput" type="LineEdit" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/SearchHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 20
+placeholder_text = "Search Course Name (e.g. Pebble Beach)"
+clear_button_enabled = true
+
+[node name="SearchButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/SearchHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_btn_hover")
+text = "Search"
+
+[node name="ResultsList" type="ItemList" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 18
+
+[node name="StatusLabel" type="Label" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.82, 0.88, 1)
+theme_override_font_sizes/font_size = 18
+text = "Enter a course name and click Search."
+autowrap_mode = 2
+
+[node name="ButtonHBox" type="HBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 20
+alignment = 2
+
+[node name="CancelButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/ButtonHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 45)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Cancel"
+
+[node name="DownloadButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/ButtonHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 45)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_btn_hover")
+disabled = true
+text = "Download & Generate"

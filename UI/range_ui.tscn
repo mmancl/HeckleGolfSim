@@ -66,6 +66,7 @@ horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="SettingsLayer" type="CanvasLayer" parent="." unique_id=1116119633]
+layer = 100
 visible = false
 
 [node name="Background" type="ColorRect" parent="SettingsLayer" unique_id=1720430990]
@@ -100,98 +101,102 @@ script = ExtResource("5_rfb4h")
 
 [node name="Distance" parent="GridCanvas" unique_id=442483821 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 182.0
+offset_top = 206.0
 offset_right = 120.0
-offset_bottom = 275.0
+offset_bottom = 299.0
 label = "Distance"
 units = "yd"
 
 [node name="Carry" parent="GridCanvas" unique_id=2040593933 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 230.0
+offset_top = 309.0
 offset_right = 120.0
-offset_bottom = 323.0
+offset_bottom = 402.0
 label = "Carry"
 units = "yd"
 
 [node name="Side" parent="GridCanvas" unique_id=2003394921 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 279.0
+offset_top = 412.0
 offset_right = 120.0
-offset_bottom = 372.0
+offset_bottom = 505.0
 label = "Side"
 units = "yd"
 
 [node name="Apex" parent="GridCanvas" unique_id=1199759367 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 327.0
+offset_top = 515.0
 offset_right = 120.0
-offset_bottom = 420.0
+offset_bottom = 608.0
 label = "Apex"
 units = "ft"
 
 [node name="VLA" parent="GridCanvas" unique_id=1786497158 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 376.0
+offset_top = 618.0
 offset_right = 120.0
-offset_bottom = 469.0
+offset_bottom = 711.0
 label = "VLA"
 units = "deg"
 
 [node name="HLA" parent="GridCanvas" unique_id=486822729 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 424.0
+offset_top = 721.0
 offset_right = 120.0
-offset_bottom = 517.0
+offset_bottom = 814.0
 label = "HLA"
 units = "deg"
 
 [node name="Speed" parent="GridCanvas" unique_id=156075773 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 472.0
-offset_right = 120.0
-offset_bottom = 565.0
+offset_left = 130.0
+offset_top = 206.0
+offset_right = 250.0
+offset_bottom = 299.0
 label = "Speed"
 units = "mph"
 
 [node name="BackSpin" parent="GridCanvas" unique_id=212846167 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 520.0
-offset_right = 120.0
-offset_bottom = 613.0
+offset_left = 130.0
+offset_top = 309.0
+offset_right = 250.0
+offset_bottom = 402.0
 label = "BackSpin"
 units = "rpm"
 
 [node name="SideSpin" parent="GridCanvas" unique_id=38660713 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 568.0
-offset_right = 120.0
-offset_bottom = 661.0
+offset_left = 130.0
+offset_top = 412.0
+offset_right = 250.0
+offset_bottom = 505.0
 label = "SideSpin"
 units = "rpm"
 
 [node name="TotalSpin" parent="GridCanvas" unique_id=1703626966 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 616.0
-offset_right = 120.0
-offset_bottom = 709.0
+offset_left = 130.0
+offset_top = 515.0
+offset_right = 250.0
+offset_bottom = 608.0
 label = "TotalSpin"
 units = "rpm"
 
 [node name="SpinAxis" parent="GridCanvas" unique_id=850043213 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 664.0
-offset_right = 120.0
-offset_bottom = 757.0
+offset_left = 130.0
+offset_top = 618.0
+offset_right = 250.0
+offset_bottom = 711.0
 label = "SpinAxis"
 units = "deg"
 
 [node name="ClubSelector" parent="GridCanvas" unique_id=1107551091 instance=ExtResource("3_crlyb")]
 layout_mode = 0
-offset_top = 70.0
+offset_top = 103.0
 offset_right = 120.0
-offset_bottom = 150.0
-rotation = -0.0004276121
+offset_bottom = 183.0
 
 [node name="ShotInjector" type="VBoxContainer" parent="." unique_id=935650002]
 visible = false

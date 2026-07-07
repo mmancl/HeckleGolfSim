@@ -45,12 +45,30 @@ func save_layout():
 
 func load_layout():
 	var config = ConfigFile.new()
-	if config.load("user://layout.cfg") != OK: # User does not have a saved config
-		config.load("res://UI/default_layout.cfg") # Load default config
+	var loaded_ok = (config.load("user://layout.cfg") == OK)
+	
+	if loaded_ok:
+		var overlaps = false
+		if config.has_section("positions"):
+			for panel_name in config.get_section_keys("positions"):
+				var pos = config.get_value("positions", panel_name)
+				if pos is Vector2 and pos.x < 200 and pos.y < 290:
+					overlaps = true
+					break
+		if overlaps:
+			config.load("res://UI/default_layout.cfg")
+	else:
+		config.load("res://UI/default_layout.cfg")
 		
 	for panel in get_children():
 		if config.has_section_key("positions", panel.name):  # <-- not "layout"
 			panel.position = config.get_value("positions", panel.name)
+	
+func reset_layout():
+	var dir = DirAccess.open("user://")
+	if dir and dir.file_exists("layout.cfg"):
+		dir.remove("layout.cfg")
+	load_layout()
 	
 				
 func _on_panel_drag_started():

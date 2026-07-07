@@ -274,7 +274,7 @@ func set_tonemap_exposure(value: float) -> void:
 
 
 ## Light energy coming from the sky shader.
-@export_range(0, 16, 0.005) var skydome_energy: float = 1.0: set = set_skydome_energy
+@export_range(0, 16, 0.005) var skydome_energy: float = 0.7: set = set_skydome_energy
 
 func set_skydome_energy(value: float) -> void:
 	if sky:
@@ -292,7 +292,7 @@ func set_cloud_intensity(value: float) -> void:
 
 
 ## Maximum brightness of the Sun DirectionalLight, visible during the day.
-@export_range(0, 16, 0.005) var sun_energy: float = 1.0: set = set_sun_energy
+@export_range(0, 16, 0.005) var sun_energy: float = 0.5: set = set_sun_energy
 		
 func set_sun_energy(value: float) -> void:
 	sun_energy = value

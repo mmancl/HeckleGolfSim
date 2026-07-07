@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cf9a2k02y62c4"]
+
+[ext_resource type="Script" path="res://Courses/CoursePlay/course_play.gd" id="1_cf9a2"]
+
+[node name="CoursePlay" type="Node3D"]
+script = ExtResource("1_cf9a2")

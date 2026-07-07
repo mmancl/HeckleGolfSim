@@ -61,6 +61,11 @@ func _init() -> void:
 
 func _ready() -> void:
 	set_dome_path(dome_path)
+	
+	# Force always noon and disable progression
+	set_total_hours(12.0)
+	update_in_game = false
+	update_in_editor = false
 
 	_update_timer = Timer.new()
 	_update_timer.name = "Timer"

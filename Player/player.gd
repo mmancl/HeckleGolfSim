@@ -8,6 +8,7 @@ var apex := 0.0
 var carry := 0.0
 var side_distance := 0.0
 var shot_data: Dictionary = {}
+var _last_starting_pos : Vector3 = Vector3.ZERO
 
 var max_tracers : int = 4
 var min_tracers : int = 0
@@ -64,8 +65,10 @@ func create_new_tracer() -> MeshInstance3D:
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(_delta: float) -> void:
 	if Input.is_action_just_pressed("hit"):
+		_last_starting_pos = ball.position
 		track_points = false
 		create_new_tracer()
+		print("[player.gd] Hitting ball manually! ball.aim_yaw_offset_deg = ", ball.aim_yaw_offset_deg)
 		ball.call_deferred("hit")
 		if current_tracer != null:
 			current_tracer.add_point(ball.position)
@@ -112,7 +115,7 @@ func validate_data(data: Dictionary) -> bool:
 
 
 func reset_ball():
-	ball.call_deferred("reset")
+	ball.reset()
 	# Clear all tracers
 	for tracer in tracers:
 		tracer.queue_free()
@@ -130,6 +133,16 @@ func reset_shot_data() -> void:
 
 func _on_ball_rest() -> void:
 	track_points = false
+	
+	# If we are in a dynamic course play scene, save the ball's resting position as its new spawn_position!
+	var parent_scene = get_parent()
+	if parent_scene != null and parent_scene.has_method("get_height"):
+		var current_hole_loc = parent_scene.get("current_hole_location")
+		if current_hole_loc != null and not current_hole_loc.is_zero_approx():
+			if not parent_scene.get("practice_mode_active"):
+				ball.spawn_position = ball.global_position
+				print("[player.gd] Dynamic course detected. Updated ball.spawn_position to: ", ball.spawn_position)
+
 	shot_data["TotalDistance"] = int(ball.get_downrange_yards() / 1.09361)  # Downrange distance in meters
 	shot_data["CarryDistance"] = int(carry)
 	shot_data["Apex"] = int(apex)
@@ -149,13 +162,29 @@ func _on_tcp_client_hit_ball(data: Dictionary) -> void:
 		emit_signal("bad_data")
 		return
 
+	var target_dist := 0.0
+	var parent_scene = get_parent()
+	if parent_scene != null and "aim_target_pos" in parent_scene:
+		target_dist = ball.global_position.distance_to(parent_scene.aim_target_pos)
+
+	_last_starting_pos = ball.position
 	shot_data = data.duplicate()
+	shot_data["TargetDistance"] = target_dist
+
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and not mp_mgr.players.is_empty():
+		var active_player = mp_mgr.get_active_player()
+		active_player["last_shot_penalty"] = 0
+
+	if has_node("/root/AnnouncerEngine"):
+		get_node("/root/AnnouncerEngine").call("AnnounceLaunch", shot_data)
 
 	track_points = false
 	apex = 0.0
 	carry = 0.0
 	side_distance = 0.0
 	create_new_tracer()
+	print("[player.gd] Hitting ball from TCP! ball.aim_yaw_offset_deg = ", ball.aim_yaw_offset_deg)
 	ball.call_deferred("hit_from_data", data)
 	if current_tracer != null:
 		current_tracer.add_point(Vector3(0.0, 0.05, 0.0))
@@ -164,8 +193,23 @@ func _on_tcp_client_hit_ball(data: Dictionary) -> void:
 
 
 func _on_range_ui_hit_shot(data: Variant) -> void:
+	var target_dist := 0.0
+	var parent_scene = get_parent()
+	if parent_scene != null and "aim_target_pos" in parent_scene:
+		target_dist = ball.global_position.distance_to(parent_scene.aim_target_pos)
+
+	_last_starting_pos = ball.position
 	shot_data = data.duplicate()
+	shot_data["TargetDistance"] = target_dist
 	print("Local shot injection payload: ", JSON.stringify(shot_data))
+
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and not mp_mgr.players.is_empty():
+		var active_player = mp_mgr.get_active_player()
+		active_player["last_shot_penalty"] = 0
+
+	if has_node("/root/AnnouncerEngine"):
+		get_node("/root/AnnouncerEngine").call("AnnounceLaunch", shot_data)
 
 	track_points = false
 	apex = 0.0
@@ -181,3 +225,23 @@ func _on_range_ui_hit_shot(data: Variant) -> void:
 
 func _on_range_ui_set_env(data: Variant) -> void:
 	ball.call_deferred("set_env", data)
+
+
+func mulligan() -> void:
+	reset_shot_data()
+	ball.spawn_position = _last_starting_pos
+	ball.call_deferred("reset")
+	
+	if not tracers.is_empty():
+		var last_tracer = tracers.pop_back()
+		if is_instance_valid(last_tracer):
+			last_tracer.queue_free()
+		current_tracer = tracers.back() if not tracers.is_empty() else null
+		
+	apex = 0.0
+	carry = 0.0
+	side_distance = 0.0
+	track_points = false
+	
+	if has_node("/root/AnnouncerEngine"):
+		get_node("/root/AnnouncerEngine").call("SpeakMulliganHeckle")
