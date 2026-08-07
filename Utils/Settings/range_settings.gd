@@ -24,9 +24,15 @@ var gimme_range_1_distance := Setting.new(5.0, 0.5, 20.0)
 var gimme_range_2_enabled := Setting.new(false)
 var gimme_range_2_distance := Setting.new(25.0, 0.5, 30.0)
 var custom_next_player := Setting.new(true)
+var golf_clap_enabled := Setting.new(true)
+var ambient_sound_enabled := Setting.new(true)
+var menu_music_enabled := Setting.new(true)
+var green_speed := Setting.new(10.0, 1.0, 50.0)
+var phone_cam_url := Setting.new("")
+var use_phone_stream := Setting.new(false)
 
 func _init():
-	settings = {
+	init({
 		"range_units": range_units,
 		"camera_follow_mode": camera_follow_mode,
 		"shot_injector_enabled": shot_injector_enabled,
@@ -50,5 +56,12 @@ func _init():
 		"gimme_range_2_enabled": gimme_range_2_enabled,
 		"gimme_range_2_distance": gimme_range_2_distance,
 		"custom_next_player": custom_next_player,
-	}
+		"golf_clap_enabled": golf_clap_enabled,
+		"ambient_sound_enabled": ambient_sound_enabled,
+		"menu_music_enabled": menu_music_enabled,
+		"green_speed": green_speed,
+		"phone_cam_url": phone_cam_url,
+		"use_phone_stream": use_phone_stream,
+	})
+
 

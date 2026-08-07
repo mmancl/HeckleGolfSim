@@ -10,6 +10,8 @@ internal interface IBluetoothGattClient : IAsyncDisposable
 
     event Action<BluetoothCharacteristicValue>? CharacteristicValueChanged;
 
+    event Action? Disconnected;
+
     Task StartScanAsync(BluetoothScanOptions options, CancellationToken cancellationToken);
 
     Task StopScanAsync(CancellationToken cancellationToken);

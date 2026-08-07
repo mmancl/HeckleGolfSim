@@ -10,6 +10,8 @@ internal sealed class UnsupportedBluetoothGattClient(string reason) : IBluetooth
 
     public event Action<BluetoothCharacteristicValue>? CharacteristicValueChanged;
 
+    public event Action? Disconnected;
+
     public Task StartScanAsync(BluetoothScanOptions options, CancellationToken cancellationToken)
     {
         throw new PlatformNotSupportedException(reason);

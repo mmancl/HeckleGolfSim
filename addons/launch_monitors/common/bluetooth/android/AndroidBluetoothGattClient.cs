@@ -12,6 +12,7 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
     
     public event Action<BluetoothDevice>? DeviceDiscovered;
     public event Action<BluetoothCharacteristicValue>? CharacteristicValueChanged;
+    public event Action? Disconnected;
     
     private JavaObject? _bluetoothAdapter;
     private JavaObject? _bluetoothScanner;
@@ -34,53 +35,158 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
     
     private void InitializeAndroidBle()
     {
+        _ = GetBluetoothAdapter();
+    }
+
+    private JavaObject? GetAndroidContext()
+    {
         try
         {
-            var activity = Engine.GetSingleton("GodotAndroid") as JavaObject;
-            if (activity == null)
+            var activityThreadClass = JavaClassWrapper.Wrap("android.app.ActivityThread");
+            if (activityThreadClass != null)
             {
-                GD.PrintErr($"{LogPrefix} GodotAndroid singleton not found.");
-                return;
-            }
-            
-            var context = activity.Call("getApplicationContext").As<JavaObject>();
-            var bluetoothManager = context.Call("getSystemService", "bluetooth").As<JavaObject>();
-            if (bluetoothManager != null)
-            {
-                _bluetoothAdapter = bluetoothManager.Call("getAdapter").As<JavaObject>();
-            }
-            
-            if (_bluetoothAdapter != null)
-            {
-                _bluetoothScanner = _bluetoothAdapter.Call("getBluetoothLeScanner").As<JavaObject>();
-                GD.Print($"{LogPrefix} Android Bluetooth Adapter and LeScanner initialized successfully.");
-            }
-            else
-            {
-                GD.PrintErr($"{LogPrefix} Bluetooth Adapter not available.");
+                var context = activityThreadClass.Call("currentApplication").As<JavaObject>();
+                if (context != null) return context;
             }
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"{LogPrefix} Failed to initialize Android BLE: {ex}");
+            GD.PrintErr($"{LogPrefix} Could not get context via ActivityThread: {ex.Message}");
         }
+
+        try
+        {
+            var activity = Engine.GetSingleton("GodotAndroid") as JavaObject ?? Engine.GetSingleton("Godot") as JavaObject;
+            if (activity != null)
+            {
+                return activity.Call("getApplicationContext").As<JavaObject>();
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Could not get context via Godot singleton: {ex.Message}");
+        }
+
+        return null;
+    }
+
+    private JavaObject? GetBluetoothAdapter()
+    {
+        if (_bluetoothAdapter != null) return _bluetoothAdapter;
+
+        try
+        {
+            var adapterClass = JavaClassWrapper.Wrap("android.bluetooth.BluetoothAdapter");
+            if (adapterClass != null)
+            {
+                _bluetoothAdapter = adapterClass.Call("getDefaultAdapter").As<JavaObject>();
+                if (_bluetoothAdapter != null)
+                {
+                    GD.Print($"{LogPrefix} BluetoothAdapter acquired via JavaClassWrapper.Wrap(\"android.bluetooth.BluetoothAdapter\").getDefaultAdapter().");
+                    return _bluetoothAdapter;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} BluetoothAdapter.getDefaultAdapter failed: {ex.Message}");
+        }
+
+        try
+        {
+            var context = GetAndroidContext();
+            if (context != null)
+            {
+                var bluetoothManager = context.Call("getSystemService", "bluetooth").As<JavaObject>();
+                if (bluetoothManager != null)
+                {
+                    _bluetoothAdapter = bluetoothManager.Call("getAdapter").As<JavaObject>();
+                    if (_bluetoothAdapter != null)
+                    {
+                        GD.Print($"{LogPrefix} BluetoothAdapter acquired via getSystemService.");
+                        return _bluetoothAdapter;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} BluetoothManager.getAdapter failed: {ex.Message}");
+        }
+
+        GD.PrintErr($"{LogPrefix} Bluetooth Adapter not available.");
+        return null;
+    }
+
+    private JavaObject EnsureScannerAvailable()
+    {
+        OS.RequestPermissions();
+
+        var adapter = GetBluetoothAdapter();
+        if (adapter == null)
+        {
+            throw new InvalidOperationException("Bluetooth Adapter not available on this device.");
+        }
+
+        bool isEnabled = false;
+        try
+        {
+            isEnabled = adapter.Call("isEnabled").As<bool>();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Failed to check Bluetooth enabled state: {ex}");
+        }
+
+        if (!isEnabled)
+        {
+            throw new InvalidOperationException("Bluetooth is turned off. Please enable Bluetooth in your phone's settings.");
+        }
+
+        if (_bluetoothScanner == null)
+        {
+            try
+            {
+                _bluetoothScanner = adapter.Call("getBluetoothLeScanner").As<JavaObject>();
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{LogPrefix} Failed to get BluetoothLeScanner: {ex}");
+            }
+        }
+
+        if (_bluetoothScanner == null)
+        {
+            throw new InvalidOperationException("Bluetooth LE Scanner not available. Please ensure Bluetooth/Nearby Devices permissions are granted and Location services (GPS) are enabled.");
+        }
+
+        return _bluetoothScanner;
     }
     
     public Task StartScanAsync(BluetoothScanOptions options, CancellationToken cancellationToken)
     {
-        if (_bluetoothScanner == null)
+        var scanner = EnsureScannerAvailable();
+        
+        _scanListener = new AndroidScanListener(this);
+        var proxy = JavaClassWrapper.CreateProxy(_scanListener, new string[] { "com.godot.game.GodotBleHelper$ScanListener" });
+        if (proxy == null)
         {
-            throw new InvalidOperationException("Bluetooth LE Scanner not available.");
+            throw new InvalidOperationException("Failed to create JNI proxy for ScanListener.");
         }
         
-        var javaClassWrapper = Engine.GetSingleton("JavaClassWrapper");
-        _scanListener = new AndroidScanListener(this);
-        var proxy = javaClassWrapper.Call("create_proxy", _scanListener, new string[] { "com.godot.game.GodotBleHelper$ScanListener" }).As<JavaObject>();
-        
-        var helperClass = javaClassWrapper.Call("wrap", "com.godot.game.GodotBleHelper").As<JavaObject>();
+        var helperClass = JavaClassWrapper.Wrap("com.godot.game.GodotBleHelper");
+        if (helperClass == null)
+        {
+            throw new InvalidOperationException("GodotBleHelper class not found. Please verify Android Custom Build is enabled.");
+        }
+
         _scanCallback = helperClass.Call("createScanCallback", proxy).As<JavaObject>();
+        if (_scanCallback == null)
+        {
+            throw new InvalidOperationException("Failed to create ScanCallback from GodotBleHelper.");
+        }
         
-        _bluetoothScanner.Call("startScan", _scanCallback);
+        scanner.Call("startScan", _scanCallback);
         GD.Print($"{LogPrefix} Started BLE scan.");
         return Task.CompletedTask;
     }
@@ -99,13 +205,15 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
     
     public async Task ConnectAsync(string deviceId, BluetoothConnectionOptions options, CancellationToken cancellationToken)
     {
-        if (_bluetoothAdapter == null)
+        await DisconnectAsync(CancellationToken.None);
+
+        var adapter = GetBluetoothAdapter();
+        if (adapter == null)
         {
             throw new InvalidOperationException("Bluetooth Adapter not available.");
         }
         
-        var javaClassWrapper = Engine.GetSingleton("JavaClassWrapper");
-        var device = _bluetoothAdapter.Call("getRemoteDevice", deviceId).As<JavaObject>();
+        var device = adapter.Call("getRemoteDevice", deviceId).As<JavaObject>();
         if (device == null)
         {
             throw new InvalidOperationException($"Could not find device with ID: {deviceId}");
@@ -115,13 +223,29 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
         _servicesTcs = new TaskCompletionSource<bool>();
         
         _gattListener = new AndroidGattListener(this);
-        var proxy = javaClassWrapper.Call("create_proxy", _gattListener, new string[] { "com.godot.game.GodotBleHelper$GattListener" }).As<JavaObject>();
+        var proxy = JavaClassWrapper.CreateProxy(_gattListener, new string[] { "com.godot.game.GodotBleHelper$GattListener" });
+        if (proxy == null)
+        {
+            throw new InvalidOperationException("Failed to create JNI proxy for GattListener.");
+        }
         
-        var helperClass = javaClassWrapper.Call("wrap", "com.godot.game.GodotBleHelper").As<JavaObject>();
+        var helperClass = JavaClassWrapper.Wrap("com.godot.game.GodotBleHelper");
+        if (helperClass == null)
+        {
+            throw new InvalidOperationException("GodotBleHelper class not found. Please verify Android Custom Build is enabled.");
+        }
+
         _gattCallback = helperClass.Call("createGattCallback", proxy).As<JavaObject>();
+        if (_gattCallback == null)
+        {
+            throw new InvalidOperationException("Failed to create GattCallback from GodotBleHelper.");
+        }
         
-        var activity = Engine.GetSingleton("GodotAndroid") as JavaObject;
-        var context = activity.Call("getApplicationContext").As<JavaObject>();
+        var context = GetAndroidContext();
+        if (context == null)
+        {
+            throw new InvalidOperationException("Could not obtain Android Application Context for connectGatt.");
+        }
         
         _bluetoothGatt = device.Call("connectGatt", context, false, _gattCallback).As<JavaObject>();
         if (_bluetoothGatt == null)
@@ -129,26 +253,88 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
             throw new InvalidOperationException("Failed to initiate connectGatt.");
         }
         
-        using (cancellationToken.Register(() => _connectTcs.TrySetCanceled()))
+        using (var connectTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
-            await _connectTcs.Task;
+            connectTimeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
+            try
+            {
+                using (connectTimeoutCts.Token.Register(() => _connectTcs.TrySetCanceled()))
+                {
+                    var success = await _connectTcs.Task;
+                    if (!success)
+                    {
+                        throw new InvalidOperationException("GATT connection failed or disconnected.");
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                await DisconnectAsync(CancellationToken.None);
+                throw;
+            }
         }
         
         _bluetoothGatt.Call("discoverServices");
-        using (cancellationToken.Register(() => _servicesTcs.TrySetCanceled()))
+        using (var servicesTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
-            await _servicesTcs.Task;
+            servicesTimeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
+            try
+            {
+                using (servicesTimeoutCts.Token.Register(() => _servicesTcs.TrySetCanceled()))
+                {
+                    var success = await _servicesTcs.Task;
+                    if (!success)
+                    {
+                        throw new InvalidOperationException("GATT service discovery failed.");
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                await DisconnectAsync(CancellationToken.None);
+                throw;
+            }
         }
     }
     
     public Task DisconnectAsync(CancellationToken cancellationToken)
     {
+        var wasConnected = _bluetoothGatt != null;
         if (_bluetoothGatt != null)
         {
-            _bluetoothGatt.Call("disconnect");
-            _bluetoothGatt.Call("close");
+            try
+            {
+                _bluetoothGatt.Call("disconnect");
+                _bluetoothGatt.Call("close");
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{LogPrefix} Exception during GATT disconnect/close: {ex.Message}");
+            }
             _bluetoothGatt = null;
             GD.Print($"{LogPrefix} Disconnected and closed GATT client.");
+        }
+
+        _connectTcs?.TrySetCanceled();
+        _servicesTcs?.TrySetCanceled();
+        _connectTcs = null;
+        _servicesTcs = null;
+
+        foreach (var kvp in _readTcsMap)
+        {
+            kvp.Value.TrySetCanceled();
+        }
+        _readTcsMap.Clear();
+
+        foreach (var kvp in _writeTcsMap)
+        {
+            kvp.Value.TrySetCanceled();
+        }
+        _writeTcsMap.Clear();
+
+        if (wasConnected)
+        {
+            Disconnected?.Invoke();
         }
         return Task.CompletedTask;
     }
@@ -183,7 +369,7 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
         }
     }
     
-    public Task SubscribeToCharacteristicAsync(Guid characteristicUuid, CancellationToken cancellationToken)
+    public async Task SubscribeToCharacteristicAsync(Guid characteristicUuid, CancellationToken cancellationToken)
     {
         if (_bluetoothGatt == null)
         {
@@ -199,18 +385,39 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
         _bluetoothGatt.Call("setCharacteristicNotification", characteristic, true);
         
         var clientConfigDescriptorUuid = Guid.Parse("00002902-0000-1000-8000-00805f9b34fb");
-        var javaClassWrapper = Engine.GetSingleton("JavaClassWrapper");
-        var uuidClass = javaClassWrapper.Call("wrap", "java.util.UUID").As<JavaObject>();
+        var uuidClass = JavaClassWrapper.Wrap("java.util.UUID");
         var descriptor = characteristic.Call("getDescriptor", uuidClass.Call("fromString", clientConfigDescriptorUuid.ToString())).As<JavaObject>();
         if (descriptor != null)
         {
             byte[] enableNotificationValue = new byte[] { 0x01, 0x00 };
-            descriptor.Call("setValue", enableNotificationValue);
-            _bluetoothGatt.Call("writeDescriptor", descriptor);
+            bool wrote = false;
+            try
+            {
+                // Try Android 13+ (API 33+) writeDescriptor(descriptor, value) overload first
+                _bluetoothGatt.Call("writeDescriptor", descriptor, enableNotificationValue);
+                wrote = true;
+            }
+            catch (Exception ex)
+            {
+                GD.Print($"{LogPrefix} writeDescriptor(descriptor, value) overload not available, using fallback: {ex.Message}");
+            }
+
+            if (!wrote)
+            {
+                try
+                {
+                    descriptor.Call("setValue", enableNotificationValue);
+                    _bluetoothGatt.Call("writeDescriptor", descriptor);
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"{LogPrefix} Fallback writeDescriptor failed: {ex.Message}");
+                }
+            }
+
             GD.Print($"{LogPrefix} Subscribed and enabled notifications for characteristic: {characteristicUuid}");
+            await Task.Delay(250, cancellationToken);
         }
-        
-        return Task.CompletedTask;
     }
     
     public async Task WriteCharacteristicAsync(Guid characteristicUuid, byte[] value, BluetoothWriteMode writeMode, CancellationToken cancellationToken)
@@ -231,17 +438,22 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
         int writeType = writeMode == BluetoothWriteMode.WithoutResponse ? 1 : 2;
         characteristic.Call("setWriteType", writeType);
         
-        var tcs = new TaskCompletionSource<bool>();
-        _writeTcsMap[characteristicUuid] = tcs;
-        
-        _bluetoothGatt.Call("writeCharacteristic", characteristic);
-        
         if (writeMode == BluetoothWriteMode.WithResponse)
         {
+            var tcs = new TaskCompletionSource<bool>();
+            _writeTcsMap[characteristicUuid] = tcs;
+            
+            _bluetoothGatt.Call("writeCharacteristic", characteristic);
+            
             using (cancellationToken.Register(() => tcs.TrySetCanceled()))
             {
                 await tcs.Task;
             }
+        }
+        else
+        {
+            _bluetoothGatt.Call("writeCharacteristic", characteristic);
+            await Task.Delay(50, cancellationToken);
         }
     }
     
@@ -284,6 +496,7 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
     
     internal void OnConnectionStateChange(int status, int newState)
     {
+        GD.Print($"{LogPrefix} OnConnectionStateChange: status={status}, newState={newState}");
         if (status == 0) // GATT_SUCCESS
         {
             if (newState == 2) // STATE_CONNECTED
@@ -295,12 +508,20 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
             {
                 GD.Print($"{LogPrefix} Disconnected from GATT server.");
                 _connectTcs?.TrySetResult(false);
+                Disconnected?.Invoke();
             }
         }
         else
         {
             GD.PrintErr($"{LogPrefix} GATT error: status={status}, newState={newState}");
-            _connectTcs?.TrySetException(new Exception($"GATT connection failed with status: {status}"));
+            if (_connectTcs != null && !_connectTcs.Task.IsCompleted)
+            {
+                _connectTcs.TrySetException(new Exception($"GATT connection failed with status: {status}"));
+            }
+            if (newState == 0)
+            {
+                Disconnected?.Invoke();
+            }
         }
     }
     

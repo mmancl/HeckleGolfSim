@@ -9,6 +9,7 @@ var drag_offset := Vector2.ZERO
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
+	ThemeManager.apply_data_panel_style(self)
 	set_label(label)
 	set_data(data)
 	set_units(units)

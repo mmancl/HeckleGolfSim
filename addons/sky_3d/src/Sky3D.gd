@@ -540,7 +540,8 @@ func _enter_tree() -> void:
 func _set(property: StringName, value: Variant) -> bool:
 	match property:
 		"environment":
-			sky.environment = value
+			if sky:
+				sky.environment = value
 			environment = value
 			emit_signal("environment_changed", environment)
 			return true

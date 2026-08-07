@@ -23,6 +23,7 @@ public partial class PhysicsParams : Resource
     [Export] public Vector3 FloorNormal { get; set; }
     [Export] public float RolloutImpactSpin { get; set; }  // Spin RPM when ball first landed for rollout
     [Export] public float SpinbackResponseScale { get; set; } = 1.0f;
+    [Export] public float SlopeForceScale { get; set; } = 0.5f;
 
     // Spinback parameters — non-zero values enable check/spin-back behavior on steep high-spin impacts.
     [Export] public float SpinbackThetaBoostMax { get; set; }

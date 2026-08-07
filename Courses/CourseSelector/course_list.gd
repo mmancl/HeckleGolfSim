@@ -3,6 +3,9 @@ extends ItemList
 var course_dir := ""
 
 
+var filter_mode: String = "Real" # "Real", "Custom", or "All"
+
+
 ## Scan the course directory, validate each course, repopulate the list,
 ## and return the count (-1 on open failure).
 func parse_directory(path: String) -> int:
@@ -23,12 +26,24 @@ func parse_directory(path: String) -> int:
 
 	validated.sort_custom(func(a, b): return a["dir_name"] < b["dir_name"])
 	for course in validated:
+		var is_custom: bool = course.get("is_custom", false)
+		if filter_mode == "Real" and is_custom:
+			continue
+		elif filter_mode == "Custom" and not is_custom:
+			continue
+
 		var item_index := get_item_count()
 		add_item(course["title"])
 		set_item_metadata(item_index, course)
 
-	print("[CourseList] Found %d valid course(s)." % validated.size())
-	return validated.size()
+	print("[CourseList] Found %d valid course(s) for filter '%s'." % [get_item_count(), filter_mode])
+	return get_item_count()
+
+
+func set_filter_mode(mode: String) -> void:
+	filter_mode = mode
+	var target_path = course_dir if not course_dir.is_empty() else "res://Courses/UserCourses"
+	parse_directory(target_path)
 
 
 func _scan_dir(dir_path: String, validated: Array[Dictionary]) -> void:

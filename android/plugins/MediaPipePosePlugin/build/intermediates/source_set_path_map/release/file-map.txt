@@ -1,0 +1,7 @@
+org.godotengine.plugin.android.mediapipepose-pngs-0 C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\build\generated\res\pngs\release
+org.godotengine.plugin.android.mediapipepose-resValues-1 C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\build\generated\res\resValues\release
+org.godotengine.plugin.android.mediapipepose-mergeReleaseResources-2 C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\build\intermediates\incremental\release\mergeReleaseResources\merged.dir
+org.godotengine.plugin.android.mediapipepose-mergeReleaseResources-3 C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\build\intermediates\incremental\release\mergeReleaseResources\stripped.dir
+org.godotengine.plugin.android.mediapipepose-merged_res-4 C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\build\intermediates\merged_res\release
+org.godotengine.plugin.android.mediapipepose-main-5 C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\res
+org.godotengine.plugin.android.mediapipepose-release-6 C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\release\res

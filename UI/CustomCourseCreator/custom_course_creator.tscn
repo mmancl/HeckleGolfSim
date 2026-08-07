@@ -1,0 +1,314 @@
+[gd_scene format=3 uid="uid://c87customcreator01"]
+
+[ext_resource type="Script" path="res://UI/CustomCourseCreator/custom_course_creator.gd" id="1_custom_creator"]
+[ext_resource type="Script" path="res://UI/LoadingSpinner.gd" id="2_spinner"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_dimmer"]
+bg_color = Color(0, 0, 0, 0.75)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+bg_color = Color(0.08, 0.12, 0.1, 0.95)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.25, 0.6, 0.35, 0.8)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+content_margin_left = 20.0
+content_margin_top = 20.0
+content_margin_right = 20.0
+content_margin_bottom = 20.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_preview"]
+bg_color = Color(0.04, 0.06, 0.05, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.2, 0.4, 0.25, 0.6)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_gen_card"]
+bg_color = Color(0.06, 0.1, 0.08, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.3, 0.7, 0.4, 0.9)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+content_margin_left = 40.0
+content_margin_top = 30.0
+content_margin_right = 40.0
+content_margin_bottom = 30.0
+shadow_color = Color(0, 0, 0, 0.6)
+shadow_size = 16
+
+[node name="CustomCourseCreator" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_custom_creator")
+
+[node name="Dimmer" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_dimmer")
+
+[node name="MainPanel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 30.0
+offset_right = -40.0
+offset_bottom = -30.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MainPanel"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="HeaderHBox" type="HBoxContainer" parent="MainPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="MainPanel/VBoxContainer/HeaderHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.95, 0.95, 1)
+theme_override_font_sizes/font_size = 32
+text = "Create Custom Course"
+
+[node name="Spacer" type="Control" parent="MainPanel/VBoxContainer/HeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="CourseTitleInput" type="LineEdit" parent="MainPanel/VBoxContainer/HeaderHBox" unique_id=101]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(300, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+placeholder_text = "Custom Course Name"
+
+[node name="ContentHBox" type="HBoxContainer" parent="MainPanel/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 20
+
+[node name="LeftVBox" type="VBoxContainer" parent="MainPanel/VBoxContainer/ContentHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 1.0
+theme_override_constants/separation = 12
+
+[node name="SelectCourseLabel" type="Label" parent="MainPanel/VBoxContainer/ContentHBox/LeftVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "1. Select Real Course:"
+
+[node name="CourseOptionButton" type="OptionButton" parent="MainPanel/VBoxContainer/ContentHBox/LeftVBox" unique_id=102]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+
+[node name="SelectHoleLabel" type="Label" parent="MainPanel/VBoxContainer/ContentHBox/LeftVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "2. Select Hole:"
+
+[node name="HoleOptionButton" type="OptionButton" parent="MainPanel/VBoxContainer/ContentHBox/LeftVBox" unique_id=103]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+
+[node name="AddHoleButton" type="Button" parent="MainPanel/VBoxContainer/ContentHBox/LeftVBox" unique_id=104]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "+ Add Hole to Custom Course"
+
+[node name="AddedHolesLabel" type="Label" parent="MainPanel/VBoxContainer/ContentHBox/LeftVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Custom Course Holes:"
+
+[node name="AddedHolesList" type="ItemList" parent="MainPanel/VBoxContainer/ContentHBox/LeftVBox" unique_id=105]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 18
+
+[node name="ListActionsHBox" type="HBoxContainer" parent="MainPanel/VBoxContainer/ContentHBox/LeftVBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="RemoveHoleButton" type="Button" parent="MainPanel/VBoxContainer/ContentHBox/LeftVBox/ListActionsHBox" unique_id=106]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(140, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Remove Selected"
+
+[node name="ClearHolesButton" type="Button" parent="MainPanel/VBoxContainer/ContentHBox/LeftVBox/ListActionsHBox" unique_id=107]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Clear All"
+
+[node name="RightVBox" type="VBoxContainer" parent="MainPanel/VBoxContainer/ContentHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 1.2
+theme_override_constants/separation = 8
+
+[node name="AerialHeaderHBox" type="HBoxContainer" parent="MainPanel/VBoxContainer/ContentHBox/RightVBox"]
+layout_mode = 2
+
+[node name="AerialHeaderLabel" type="Label" parent="MainPanel/VBoxContainer/ContentHBox/RightVBox/AerialHeaderHBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Aerial Overview of Selected Hole:"
+
+[node name="Spacer" type="Control" parent="MainPanel/VBoxContainer/ContentHBox/RightVBox/AerialHeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ModeToggleButton" type="Button" parent="MainPanel/VBoxContainer/ContentHBox/RightVBox/AerialHeaderHBox" unique_id=113]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(110, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "3D View"
+
+[node name="AerialLabel" type="Label" parent="MainPanel/VBoxContainer/ContentHBox/RightVBox" unique_id=108]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.9, 0.8, 1)
+theme_override_font_sizes/font_size = 16
+text = "Select a hole to preview"
+
+[node name="PreviewPanel" type="PanelContainer" parent="MainPanel/VBoxContainer/ContentHBox/RightVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_preview")
+
+[node name="PreviewTextureRect" type="TextureRect" parent="MainPanel/VBoxContainer/ContentHBox/RightVBox/PreviewPanel" unique_id=109]
+unique_name_in_owner = true
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ViewportContainer" type="SubViewportContainer" parent="MainPanel/VBoxContainer/ContentHBox/RightVBox/PreviewPanel" unique_id=114]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+stretch = true
+
+[node name="SubViewport" type="SubViewport" parent="MainPanel/VBoxContainer/ContentHBox/RightVBox/PreviewPanel/ViewportContainer" unique_id=115]
+unique_name_in_owner = true
+handle_input_locally = false
+size = Vector2i(500, 380)
+render_target_update_mode = 3
+
+[node name="FallbackCanvas" type="Control" parent="MainPanel/VBoxContainer/ContentHBox/RightVBox/PreviewPanel" unique_id=110]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="LoadingOverlay" type="CenterContainer" parent="MainPanel/VBoxContainer/ContentHBox/RightVBox/PreviewPanel" unique_id=116]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+
+[node name="LoadingLabel" type="Label" parent="MainPanel/VBoxContainer/ContentHBox/RightVBox/PreviewPanel/LoadingOverlay"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "Loading 3D View..."
+
+[node name="FooterHBox" type="HBoxContainer" parent="MainPanel/VBoxContainer"]
+layout_mode = 2
+alignment = 2
+theme_override_constants/separation = 16
+
+[node name="CancelButton" type="Button" parent="MainPanel/VBoxContainer/FooterHBox" unique_id=111]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(140, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Cancel"
+
+[node name="DoneButton" type="Button" parent="MainPanel/VBoxContainer/FooterHBox" unique_id=112]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Done (Create Course)"
+
+[node name="GenerationOverlay" type="CenterContainer" parent="." unique_id=117]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="GenDimmer" type="Panel" parent="GenerationOverlay"]
+layout_mode = 2
+custom_minimum_size = Vector2(2000, 2000)
+theme_override_styles/panel = SubResource("StyleBoxFlat_dimmer")
+
+[node name="GenCard" type="PanelContainer" parent="GenerationOverlay"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_gen_card")
+
+[node name="VBox" type="VBoxContainer" parent="GenerationOverlay/GenCard"]
+layout_mode = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="SpinControl" type="Control" parent="GenerationOverlay/GenCard/VBox"]
+custom_minimum_size = Vector2(70, 70)
+layout_mode = 2
+size_flags_horizontal = 4
+script = ExtResource("2_spinner")
+color = Color(0.25, 0.75, 0.45, 1)
+speed = 6.0
+thickness = 7.0
+radius = 30.0
+
+[node name="GenTitle" type="Label" parent="GenerationOverlay/GenCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.98, 0.95, 1)
+theme_override_font_sizes/font_size = 24
+text = "Generating Custom 3D Course..."
+horizontal_alignment = 1
+
+[node name="GenSubtitle" type="Label" parent="GenerationOverlay/GenCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.85, 0.75, 1)
+theme_override_font_sizes/font_size = 16
+text = "Splicing 3D holes & adding 50ft rough corridor..."
+horizontal_alignment = 1

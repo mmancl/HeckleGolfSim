@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34495E"/>
+      <stop offset="100%" stop-color="#1C2833"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+  <circle cx="64" cy="64" r="58" fill="url(#bg)" stroke="#BDC3C7" stroke-width="4" filter="url(#shadow)"/>
+  <circle cx="64" cy="64" r="50" fill="none" stroke="#BDC3C7" stroke-dasharray="3 3" stroke-width="1.5" opacity="0.6"/>
+  <g transform="translate(0, -6)">
+    
+  <circle cx="64" cy="50" r="18" fill="#5D6D7E" stroke="#ECF0F1" stroke-width="2"/>
+  <path d="M64 36 L64 64 M64 38 L76 44 L64 50" fill="#ECF0F1" stroke="#ECF0F1" stroke-width="2" stroke-linejoin="round"/>
+
+  </g>
+  <text x="64" y="86" font-family="sans-serif" font-size="11" font-weight="800" fill="#FFFFFF" text-anchor="middle" letter-spacing="0.5">FIRST PAR</text>
+  <text x="64" y="98" font-family="sans-serif" font-size="9" font-weight="600" fill="#E2E8F0" text-anchor="middle">EQUAL PAR</text>
+</svg>

@@ -2,10 +2,25 @@ extends Control
 
 var show_grid := false
 var _edit_mode := true
-const CELL_SIZE = Vector2(120, 93)
-const GRID_SPACING = Vector2(10, 10)
+var golfer_camera_active: bool = false:
+	set(val):
+		golfer_camera_active = val
+		_update_camera_shift()
+
+const CELL_SIZE = Vector2(100, 64)
+const GRID_SPACING = Vector2(6, 6)
 const GRID_SIZE = CELL_SIZE + GRID_SPACING
-const GRID_ORIGIN := Vector2(15, 15	)
+const GRID_ORIGIN := Vector2(15, 15)
+
+func set_golfer_camera_active(active: bool) -> void:
+	golfer_camera_active = active
+
+func _update_camera_shift() -> void:
+	if golfer_camera_active:
+		position.x = 350.0
+	else:
+		position.x = 0.0
+
 		
 func _draw():
 	if not show_grid:
@@ -48,19 +63,26 @@ func load_layout():
 	var loaded_ok = (config.load("user://layout.cfg") == OK)
 	
 	if loaded_ok:
-		var overlaps = false
-		if config.has_section("positions"):
-			for panel_name in config.get_section_keys("positions"):
-				var pos = config.get_value("positions", panel_name)
-				if pos is Vector2 and pos.x < 200 and pos.y < 290:
-					overlaps = true
-					break
-		if overlaps:
+		if config.get_value("positions", "Carry", Vector2.ZERO) != Vector2(0, 432):
 			config.load("res://UI/default_layout.cfg")
+			config.save("user://layout.cfg")
+		else:
+			var overlaps = false
+			if config.has_section("positions"):
+				for panel_name in config.get_section_keys("positions"):
+					var pos = config.get_value("positions", panel_name)
+					if pos is Vector2 and pos.x < 200 and pos.y < 360:
+						overlaps = true
+						break
+			if overlaps:
+				config.load("res://UI/default_layout.cfg")
 	else:
 		config.load("res://UI/default_layout.cfg")
 		
 	for panel in get_children():
+		if panel is Control:
+			panel.custom_minimum_size = CELL_SIZE
+			panel.size = CELL_SIZE
 		if config.has_section_key("positions", panel.name):  # <-- not "layout"
 			panel.position = config.get_value("positions", panel.name)
 	

@@ -1,0 +1,186 @@
+extends Control
+
+func _ready() -> void:
+	name = "MiniGamesMenu"
+	
+	# Background Cabo Texture
+	var bg_texture = TextureRect.new()
+	bg_texture.name = "Background"
+	bg_texture.texture = load("res://assets/images/menu/cabo_openfairway_bnw.png")
+	bg_texture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	bg_texture.stretch_mode = TextureRect.STRETCH_SCALE
+	bg_texture.anchor_left = 0.0
+	bg_texture.anchor_right = 1.0
+	bg_texture.anchor_top = 0.0
+	bg_texture.anchor_bottom = 1.0
+	bg_texture.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bg_texture.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	add_child(bg_texture)
+	
+	# Semi-transparent dark blue-gray overlay
+	var glass_panel = ColorRect.new()
+	glass_panel.color = Color(0.04, 0.08, 0.12, 0.85)
+	glass_panel.anchor_left = 0.0
+	glass_panel.anchor_right = 1.0
+	glass_panel.anchor_top = 0.0
+	glass_panel.anchor_bottom = 1.0
+	add_child(glass_panel)
+	
+	# Main layout margin
+	var main_margin = MarginContainer.new()
+	main_margin.add_theme_constant_override("margin_left", 60)
+	main_margin.add_theme_constant_override("margin_right", 60)
+	main_margin.add_theme_constant_override("margin_top", 60)
+	main_margin.add_theme_constant_override("margin_bottom", 60)
+	main_margin.anchor_left = 0.0
+	main_margin.anchor_right = 1.0
+	main_margin.anchor_top = 0.0
+	main_margin.anchor_bottom = 1.0
+	add_child(main_margin)
+	
+	var main_vbox = VBoxContainer.new()
+	main_vbox.add_theme_constant_override("separation", 40)
+	main_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	main_margin.add_child(main_vbox)
+	
+	# Header
+	var title_lbl = Label.new()
+	title_lbl.text = "MINI GAMES"
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 48)
+	title_lbl.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0))
+	title_lbl.add_theme_constant_override("outline_size", 4)
+	title_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+	main_vbox.add_child(title_lbl)
+	
+	# Subtitle
+	var subtitle_lbl = Label.new()
+	subtitle_lbl.text = "Select a practice minigame to begin"
+	subtitle_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	subtitle_lbl.add_theme_font_size_override("font_size", 20)
+	subtitle_lbl.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
+	main_vbox.add_child(subtitle_lbl)
+	
+	# Grid/Container for Minigame Selection Tiles
+	var tiles_hbox = HBoxContainer.new()
+	tiles_hbox.add_theme_constant_override("separation", 40)
+	tiles_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	main_vbox.add_child(tiles_hbox)
+	
+	# --- TILE 1: Putting Practice ---
+	var putting_tile = _create_minigame_tile(
+		"Putting Practice",
+		"Practice your short game on a large, undulating 100x100 ft green with multiple target holes and real-time score tracking.",
+		"res://assets/images/menu/practice_color.png", # Fallback to existing practice image
+		func(): SceneManager.change_scene("res://Courses/Minigames/PuttingPractice/putting_practice.tscn")
+	)
+	tiles_hbox.add_child(putting_tile)
+	
+	# --- TILE 2: Chipping Practice ---
+	var chipping_tile = _create_minigame_tile(
+		"Chipping Practice",
+		"Chip onto 4 custom-crafted floating island golf course greens (50, 100, 150, 200 yds) complete with wood retaining walls, sandtraps, pine trees, and boat docks!",
+		"res://assets/images/menu/range_small.png",
+		func(): SceneManager.change_scene("res://Courses/Minigames/Chipping/chipping.tscn")
+	)
+	tiles_hbox.add_child(chipping_tile)
+	
+	# Spacer
+	var spacer = Control.new()
+	spacer.custom_minimum_size = Vector2(0, 20)
+	main_vbox.add_child(spacer)
+	
+	# Back Button
+	var back_btn = Button.new()
+	back_btn.text = "Back to Main Menu"
+	back_btn.custom_minimum_size = Vector2(240, 48)
+	back_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	back_btn.add_theme_font_size_override("font_size", 18)
+	ThemeManager.apply_nav_button_style(back_btn)
+	back_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn") )
+	main_vbox.add_child(back_btn)
+
+
+func _create_minigame_tile(title: String, desc: String, icon_path: String, on_click: Callable) -> PanelContainer:
+	var panel = PanelContainer.new()
+	panel.custom_minimum_size = Vector2(360, 320)
+	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	ThemeManager.apply_card_panel_style(panel, false, 12)
+	
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 24)
+	margin.add_theme_constant_override("margin_right", 24)
+	margin.add_theme_constant_override("margin_top", 24)
+	margin.add_theme_constant_override("margin_bottom", 24)
+	panel.add_child(margin)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	margin.add_child(vbox)
+	
+	# Graphic texture
+	var tex = TextureRect.new()
+	tex.custom_minimum_size = Vector2(0, 100)
+	tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	if ResourceLoader.exists(icon_path):
+		tex.texture = load(icon_path)
+	
+	vbox.add_child(tex)
+	
+	var name_lbl = Label.new()
+	name_lbl.text = title
+	name_lbl.add_theme_font_size_override("font_size", 24)
+	name_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(name_lbl)
+	
+	var desc_lbl = Label.new()
+	desc_lbl.text = desc
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+	desc_lbl.add_theme_font_size_override("font_size", 14)
+	desc_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	desc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc_lbl.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(desc_lbl)
+	
+	var play_btn = Button.new()
+	play_btn.text = "PLAY"
+	play_btn.custom_minimum_size = Vector2(0, 44)
+	ThemeManager.apply_primary_button_style(play_btn)
+	play_btn.pressed.connect(on_click)
+	vbox.add_child(play_btn)
+	
+	return panel
+
+
+func _apply_premium_button_style(btn: Button, normal_color: Color, hover_color: Color):
+	var style_normal = StyleBoxFlat.new()
+	style_normal.bg_color = normal_color
+	style_normal.corner_radius_top_left = 6
+	style_normal.corner_radius_top_right = 6
+	style_normal.corner_radius_bottom_right = 6
+	style_normal.corner_radius_bottom_left = 6
+	style_normal.border_width_left = 1
+	style_normal.border_width_top = 1
+	style_normal.border_width_right = 1
+	style_normal.border_width_bottom = 1
+	style_normal.border_color = Color(1, 1, 1, 0.15)
+	
+	var style_hover = StyleBoxFlat.new()
+	style_hover.bg_color = hover_color
+	style_hover.corner_radius_top_left = 6
+	style_hover.corner_radius_top_right = 6
+	style_hover.corner_radius_bottom_right = 6
+	style_hover.corner_radius_bottom_left = 6
+	style_hover.border_width_left = 1
+	style_hover.border_width_top = 1
+	style_hover.border_width_right = 1
+	style_hover.border_width_bottom = 1
+	style_hover.border_color = Color(1, 1, 1, 0.3)
+	
+	btn.add_theme_stylebox_override("normal", style_normal)
+	btn.add_theme_stylebox_override("hover", style_hover)
+	btn.add_theme_stylebox_override("pressed", style_hover)
+	btn.add_theme_stylebox_override("focus", style_normal)
+	btn.add_theme_color_override("font_color", Color.WHITE)

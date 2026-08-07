@@ -15,7 +15,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="Heckle Golf Simulator"
-config/version="0.1.3"
+config/version="0.6.4"
 run/main_scene="uid://dgyd437dgyv0y"
 config/features=PackedStringArray("4.7", "C#", "Mobile")
 boot_splash/image="uid://cjp4o151j14xr"
@@ -30,6 +30,8 @@ GlobalSettings="*res://Utils/Settings/global_settings.gd"
 LaunchMonitorManager="*res://addons/launch_monitors/launch_monitor_manager.gd"
 AnnouncerEngine="*res://addons/announcer/AnnouncerEngine.cs"
 MultiplayerManager="*res://Utils/MultiplayerManager.gd"
+AchievementManager="*res://Utils/AchievementManager.gd"
+PoseDetectionBridge="*res://UI/GolferCamera/pose_detection_bridge.gd"
 
 [display]
 

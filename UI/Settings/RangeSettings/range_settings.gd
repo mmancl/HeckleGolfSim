@@ -55,11 +55,19 @@ func _setup_spin_box(spin_box: SpinBox, setting: Setting, step: float) -> void:
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
+	ThemeManager.apply_modal_style(self)
+
 	reset_spin_box = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer/ResetSpinBox
 	temperature_spin_box = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature/TemperatureSpinBox
 	altitude_spin_box = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude/AltitudeSpinBox
 	surface_option = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/SurfaceType/SurfaceOption
 	tracer_count_spin_box = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/TracerCount/TracerCountSpinBox
+
+	# Clamp panel size to screen so it always fits on mobile devices
+	var viewport_size = get_viewport().get_visible_rect().size
+	var max_width = clamp(viewport_size.x * 0.92, 320.0, 500.0)
+	var max_height = clamp(viewport_size.y * 0.88, 400.0, 640.0)
+	custom_minimum_size = Vector2(max_width, max_height)
 
 	# Reset Timer Settings
 	_setup_spin_box(reset_spin_box, GlobalSettings.range_settings.ball_reset_timer, 0.5)
@@ -137,6 +145,22 @@ func _ready() -> void:
 	
 	var custom_next_player_toggle = _create_toggle_setting_row("Custom Next Player to Hit", "custom_next_player")
 	gameplay_vbox.add_child(custom_next_player_toggle)
+
+	var golf_clap_toggle = _create_toggle_setting_row("Golf Clap Audio", "golf_clap_enabled")
+	gameplay_vbox.add_child(golf_clap_toggle)
+
+	var ambient_sound_toggle = _create_toggle_setting_row("Ambient Nature Sounds", "ambient_sound_enabled")
+	gameplay_vbox.add_child(ambient_sound_toggle)
+
+	var menu_music_toggle = _create_toggle_setting_row("Menu Soundtrack", "menu_music_enabled")
+	gameplay_vbox.add_child(menu_music_toggle)
+
+	var gs_sep = HSeparator.new()
+	gameplay_vbox.add_child(gs_sep)
+	
+	var green_speed_row = _create_slider_setting_row("Green Speed", "green_speed", 1.0, 50.0, 1.0)
+	gameplay_vbox.add_child(green_speed_row)
+
 
 	# Create and insert camera configuration settings rows in the Camera tab
 	var camera_vbox = $MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox
@@ -372,6 +396,30 @@ func _setup_square_monitor_section() -> void:
 	handedness_row.add_child(square_handedness_option)
 	section.add_child(handedness_row)
 
+	var sound_row := HBoxContainer.new()
+	sound_row.add_child(_make_label("Ready Sound"))
+	sound_row.add_child(_make_spacer())
+	var sound_button := CheckButton.new()
+	sound_button.set_pressed_no_signal(bool(launch_monitor.settings.get("ready_ding_enabled", true)))
+	sound_button.toggled.connect(func(toggled_on: bool):
+		launch_monitor.set_ready_ding_enabled(toggled_on)
+	)
+	sound_row.add_child(sound_button)
+	section.add_child(sound_row)
+
+	var hud_row := HBoxContainer.new()
+	var hud_label := _make_label("Ready Indicator")
+	hud_label.custom_minimum_size = Vector2(130, 0)
+	hud_row.add_child(hud_label)
+	hud_row.add_child(_make_spacer())
+	var hud_button := CheckButton.new()
+	hud_button.set_pressed_no_signal(bool(launch_monitor.settings.get("ready_indicator_enabled", true)))
+	hud_button.toggled.connect(func(toggled_on: bool):
+		launch_monitor.set_ready_indicator_enabled(toggled_on)
+	)
+	hud_row.add_child(hud_button)
+	section.add_child(hud_row)
+
 	square_status_label = Label.new()
 	square_battery_label = Label.new()
 	square_firmware_label = Label.new()
@@ -381,12 +429,20 @@ func _setup_square_monitor_section() -> void:
 
 	root.add_child(section)
 
-	launch_monitor.device_discovered.connect(_on_square_device_discovered)
-	launch_monitor.status_changed.connect(_on_square_status_changed)
-	launch_monitor.error_occurred.connect(_on_square_error_occurred)
-	launch_monitor.battery_changed.connect(_on_square_battery_changed)
-	launch_monitor.firmware_changed.connect(_on_square_firmware_changed)
-	launch_monitor.ready_changed.connect(_on_square_ready_changed)
+	if not launch_monitor.device_discovered.is_connected(_on_square_device_discovered):
+		launch_monitor.device_discovered.connect(_on_square_device_discovered)
+	if not launch_monitor.status_changed.is_connected(_on_square_status_changed):
+		launch_monitor.status_changed.connect(_on_square_status_changed)
+	if not launch_monitor.error_occurred.is_connected(_on_square_error_occurred):
+		launch_monitor.error_occurred.connect(_on_square_error_occurred)
+	if not launch_monitor.battery_changed.is_connected(_on_square_battery_changed):
+		launch_monitor.battery_changed.connect(_on_square_battery_changed)
+	if not launch_monitor.firmware_changed.is_connected(_on_square_firmware_changed):
+		launch_monitor.firmware_changed.connect(_on_square_firmware_changed)
+	if not launch_monitor.ready_changed.is_connected(_on_square_ready_changed):
+		launch_monitor.ready_changed.connect(_on_square_ready_changed)
+	if not launch_monitor.club_code_changed.is_connected(_on_square_club_code_changed):
+		launch_monitor.club_code_changed.connect(_on_square_club_code_changed)
 
 	_refresh_square_devices()
 	_update_square_status_labels()
@@ -417,15 +473,40 @@ func _refresh_square_devices() -> void:
 		return
 	var launch_monitor = get_node("/root/LaunchMonitorManager")
 	var selected_device := str(launch_monitor.settings.get("device_id", ""))
+	var saved_name := str(launch_monitor.settings.get("device_name", ""))
+	if saved_name == "":
+		saved_name = "Square Golf"
+	if selected_device != "" and not launch_monitor.devices.has(selected_device):
+		launch_monitor.devices[selected_device] = {
+			"name": saved_name,
+			"rssi": 0
+		}
 	square_device_option.clear()
 	for device_id in launch_monitor.devices.keys():
 		var device = launch_monitor.devices[device_id]
-		var label := str(device.get("name", "Square"))
+		var label := str(device.get("name", "Square Golf"))
 		var index := square_device_option.item_count
 		square_device_option.add_item(label)
 		square_device_option.set_item_metadata(index, device_id)
 		if device_id == selected_device:
 			square_device_option.select(index)
+
+
+func _exit_tree() -> void:
+	if has_node("/root/LaunchMonitorManager"):
+		var launch_monitor = get_node("/root/LaunchMonitorManager")
+		if launch_monitor.device_discovered.is_connected(_on_square_device_discovered):
+			launch_monitor.device_discovered.disconnect(_on_square_device_discovered)
+		if launch_monitor.status_changed.is_connected(_on_square_status_changed):
+			launch_monitor.status_changed.disconnect(_on_square_status_changed)
+		if launch_monitor.error_occurred.is_connected(_on_square_error_occurred):
+			launch_monitor.error_occurred.disconnect(_on_square_error_occurred)
+		if launch_monitor.battery_changed.is_connected(_on_square_battery_changed):
+			launch_monitor.battery_changed.disconnect(_on_square_battery_changed)
+		if launch_monitor.firmware_changed.is_connected(_on_square_firmware_changed):
+			launch_monitor.firmware_changed.disconnect(_on_square_firmware_changed)
+		if launch_monitor.ready_changed.is_connected(_on_square_ready_changed):
+			launch_monitor.ready_changed.disconnect(_on_square_ready_changed)
 
 
 func _update_square_status_labels() -> void:
@@ -471,7 +552,11 @@ func _on_square_connect_pressed() -> void:
 
 func _on_square_disconnect_pressed() -> void:
 	_square_debug("Disconnect pressed")
-	get_node("/root/LaunchMonitorManager").disconnect_device()
+	if square_enabled_button != null:
+		square_enabled_button.set_pressed_no_signal(false)
+	var launch_monitor = get_node("/root/LaunchMonitorManager")
+	launch_monitor.set_enabled(false)
+	launch_monitor.disconnect_device()
 
 
 func _on_square_ready_pressed() -> void:
@@ -482,6 +567,11 @@ func _on_square_ready_pressed() -> void:
 func _on_square_club_selected(index: int) -> void:
 	var club_code := str(square_club_option.get_item_metadata(index))
 	get_node("/root/LaunchMonitorManager").set_club_code(club_code)
+
+
+func _on_square_club_code_changed(club_code: String) -> void:
+	if square_club_option != null:
+		_select_option_by_metadata(square_club_option, club_code)
 
 
 func _on_square_handedness_selected(index: int) -> void:
@@ -582,7 +672,10 @@ func _setup_hecklelinks_announcer_section() -> void:
 	
 	var ann_btn := CheckButton.new()
 	ann_btn.set_pressed_no_signal(announcer.get("AnnouncerEnabled"))
-	ann_btn.toggled.connect(func(toggled_on): announcer.set("AnnouncerEnabled", toggled_on))
+	ann_btn.toggled.connect(func(toggled_on): 
+		announcer.set("AnnouncerEnabled", toggled_on)
+		GlobalSettings.save_settings()
+	)
 	announcer_row.add_child(ann_btn)
 	section.add_child(announcer_row)
 
@@ -598,7 +691,10 @@ func _setup_hecklelinks_announcer_section() -> void:
 	
 	var praise_btn := CheckButton.new()
 	praise_btn.set_pressed_no_signal(announcer.get("PraiseEnabled"))
-	praise_btn.toggled.connect(func(toggled_on): announcer.set("PraiseEnabled", toggled_on))
+	praise_btn.toggled.connect(func(toggled_on): 
+		announcer.set("PraiseEnabled", toggled_on)
+		GlobalSettings.save_settings()
+	)
 	praise_row.add_child(praise_btn)
 	section.add_child(praise_row)
 
@@ -614,7 +710,10 @@ func _setup_hecklelinks_announcer_section() -> void:
 	
 	var heckle_btn := CheckButton.new()
 	heckle_btn.set_pressed_no_signal(announcer.get("HeckleEnabled"))
-	heckle_btn.toggled.connect(func(toggled_on): announcer.set("HeckleEnabled", toggled_on))
+	heckle_btn.toggled.connect(func(toggled_on): 
+		announcer.set("HeckleEnabled", toggled_on)
+		GlobalSettings.save_settings()
+	)
 	heckle_row.add_child(heckle_btn)
 	section.add_child(heckle_row)
 
@@ -665,6 +764,7 @@ func _setup_hecklelinks_announcer_section() -> void:
 	voice_opt.item_selected.connect(func(idx):
 		var chosen_id = voice_opt.get_item_metadata(idx)
 		announcer.set("ActiveVoice", chosen_id)
+		GlobalSettings.save_settings()
 	)
 	voice_row.add_child(voice_opt)
 	section.add_child(voice_row)
@@ -685,6 +785,7 @@ func _setup_hecklelinks_announcer_section() -> void:
 	pitch_slider.value_changed.connect(func(val):
 		announcer.set("Pitch", val)
 		pitch_label.text = "Voice Pitch: %.1f" % val
+		GlobalSettings.save_settings()
 	)
 	pitch_row.add_child(pitch_slider)
 	section.add_child(pitch_row)
@@ -705,6 +806,7 @@ func _setup_hecklelinks_announcer_section() -> void:
 	rate_slider.value_changed.connect(func(val):
 		announcer.set("Rate", val)
 		rate_label.text = "Voice Speed: %.1f" % val
+		GlobalSettings.save_settings()
 	)
 	rate_row.add_child(rate_slider)
 	section.add_child(rate_row)
@@ -793,6 +895,32 @@ func _create_toggle_setting_row(label_text: String, setting_name: String) -> HBo
 	row.add_child(check)
 	
 	return row
+
+
+func _create_slider_setting_row(label_prefix: String, setting_name: String, min_val: float, max_val: float, step: float) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.name = label_prefix.replace(" ", "")
+	
+	var setting = GlobalSettings.range_settings.settings[setting_name]
+	
+	var label := Label.new()
+	label.text = "%s: %.0f" % [label_prefix, setting.value]
+	label.custom_minimum_size = Vector2(180, 0)
+	row.add_child(label)
+	
+	var slider := HSlider.new()
+	slider.min_value = min_val
+	slider.max_value = max_val
+	slider.step = step
+	slider.value = setting.value
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.value_changed.connect(func(val):
+		setting.set_value(val)
+		label.text = "%s: %.0f" % [label_prefix, val]
+	)
+	row.add_child(slider)
+	return row
+
 
 
 func _apply_material_button_style(btn: Button, bg_color: Color):

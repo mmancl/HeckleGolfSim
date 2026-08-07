@@ -14,7 +14,7 @@ public static class SquareCommandBuilder
 
     public static byte[] DetectBall(byte sequence, int mode, int spinMode)
     {
-        return FromHex($"1181{sequence:X2}0{mode}1{spinMode}00000000");
+        return FromHex($"1181{sequence:X2}0{mode}0{spinMode}00000000");
     }
 
     public static byte[] Club(byte sequence, string clubCode, int handedness)

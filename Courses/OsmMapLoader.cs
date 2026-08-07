@@ -15,11 +15,19 @@ public partial class OsmMapLoader : Node
 {
     private static readonly string LogPrefix = "[OsmMapLoader]";
     private static readonly string OverpassUrl = "https://overpass-api.de/api/interpreter";
+    private static readonly string[] OverpassEndpoints = new[]
+    {
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+    };
     private static readonly System.Net.Http.HttpClient HttpClient = CreateHttpClient();
 
     private static System.Net.Http.HttpClient CreateHttpClient()
     {
         var client = new System.Net.Http.HttpClient();
+        client.Timeout = TimeSpan.FromSeconds(120);
         client.DefaultRequestHeaders.Add("User-Agent", "HeckleLinks/1.0 (contact: github.com/mmancl/HeckleGolfSim)");
         return client;
     }
@@ -31,6 +39,11 @@ public partial class OsmMapLoader : Node
     public delegate void CourseGeneratedEventHandler(bool success);
 
     private string _generationMessage = "";
+    private ElevationMap? _currentElevationMap;
+    private double _refLat;
+    private double _refLon;
+    private double _metersPerLat = 111320.0;
+    private double _metersPerLon = 111320.0;
 
     public string GetGenerationMessage()
     {
@@ -39,6 +52,7 @@ public partial class OsmMapLoader : Node
 
     public async void DownloadAndGenerateCourse(double lat, double lon, string courseName)
     {
+        _generationMessage = "";
         string safeName = string.Concat(courseName.Split(Path.GetInvalidFileNameChars())).Replace(" ", "_");
         string courseDir = $"user://courses/{safeName}";
         string globalCourseDir = ProjectSettings.GlobalizePath(courseDir);
@@ -78,6 +92,7 @@ public partial class OsmMapLoader : Node
         if (bbox != null)
         {
             satImageBytes = await DownloadSatelliteImageAsync(bbox.LonMin, bbox.LatMin, bbox.LonMax, bbox.LatMax, 2048, 2048);
+            await DownloadElevationDataAsync(bbox, globalCourseDir);
         }
         else
         {
@@ -87,50 +102,69 @@ public partial class OsmMapLoader : Node
         CallDeferred(MethodName.GenerateCourseDeferred, osmJson, courseName, lat, lon, satImageBytes ?? Array.Empty<byte>());
     }
 
-    public void GenerateCourseDeferred(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes)
+    public async void GenerateCourseDeferred(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes)
     {
-        bool success = GenerateCourseFromData(jsonString, courseName, lat, lon, satImageBytes);
+        bool success = await GenerateCourseFromDataAsync(jsonString, courseName, lat, lon, satImageBytes);
         EmitSignal(SignalName.CourseGenerated, success);
     }
 
     private async Task<string> DownloadOsmDataAsync(double lat, double lon, string courseName)
     {
         GD.Print($"{LogPrefix} Downloading OSM data for course '{courseName}' around {lat}, {lon}...");
-        // Reduced radius from 3000 to 1500 to prevent Gateway Timeout (504) on Overpass API, and increased query timeout to 90s
+        // Reduced radius to 1000 to prevent Gateway Timeout (504) on Overpass API, increased query timeout to 90s, and removed natural=tree since we scan satellite imagery
         string query = $@"
         [out:json][timeout:90];
         (
-          nwr(around:1500, {lat}, {lon})[""leisure""=""golf_course""];
-          nwr(around:1500, {lat}, {lon})[""golf""];
-          nwr(around:1500, {lat}, {lon})[""natural""=""water""];
-          nwr(around:1500, {lat}, {lon})[""natural""=""tree""];
-          nwr(around:1500, {lat}, {lon})[""natural""=""wood""];
-          nwr(around:1500, {lat}, {lon})[""landuse""=""forest""];
+          nwr(around:1000, {lat}, {lon})[""leisure""=""golf_course""];
+          nwr(around:1000, {lat}, {lon})[""golf""];
+          nwr(around:1000, {lat}, {lon})[""natural""=""water""];
+          nwr(around:1000, {lat}, {lon})[""natural""=""wood""];
+          nwr(around:1000, {lat}, {lon})[""landuse""=""forest""];
         );
         out body;
         >;
         out skel qt;
         ";
 
-        try
+        int maxAttempts = 3;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            var content = new FormUrlEncodedContent(new[] { new KeyValuePair<string, string>("data", query) });
-            var response = await HttpClient.PostAsync(OverpassUrl, content);
-            if (!response.IsSuccessStatusCode)
+            string endpoint = OverpassEndpoints[(attempt - 1) % OverpassEndpoints.Length];
+            GD.Print($"{LogPrefix} Overpass query attempt {attempt}/{maxAttempts} using endpoint: {endpoint}");
+
+            try
             {
-                GD.PrintErr($"{LogPrefix} Overpass API request failed with status: {response.StatusCode}");
-                return "";
+                var content = new FormUrlEncodedContent(new[] { new KeyValuePair<string, string>("data", query) });
+                var response = await HttpClient.PostAsync(endpoint, content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    string result = await response.Content.ReadAsStringAsync();
+                    if (!string.IsNullOrWhiteSpace(result))
+                    {
+                        return result;
+                    }
+                }
+
+                GD.PrintErr($"{LogPrefix} Attempt {attempt} failed with HTTP status {response.StatusCode} from {endpoint}");
             }
-            return await response.Content.ReadAsStringAsync();
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{LogPrefix} Attempt {attempt} exception querying {endpoint}: {ex.Message}");
+            }
+
+            if (attempt < maxAttempts)
+            {
+                _generationMessage = $"Overpass server busy, retrying query (attempt {attempt + 1}/{maxAttempts})...";
+                await Task.Delay(2000);
+            }
         }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"{LogPrefix} Failed to download OSM data: {ex}");
-            return "";
-        }
+
+        _generationMessage = "Error: Overpass API request or connection timed out after multiple retries.";
+        return "";
     }
 
-    private bool GenerateCourseFromData(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes)
+    private async Task<bool> GenerateCourseFromDataAsync(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes)
     {
         _generationMessage = "";
         string safeName = string.Concat(courseName.Split(Path.GetInvalidFileNameChars())).Replace(" ", "_");
@@ -267,6 +301,15 @@ public partial class OsmMapLoader : Node
             double refLon = nodes.Values.Average(n => n.Lon);
             double metersPerLat = 111320.0;
             double metersPerLon = 111320.0 * Math.Cos(refLat * Math.PI / 180.0);
+
+            _refLat = refLat;
+            _refLon = refLon;
+            _metersPerLat = metersPerLat;
+            _metersPerLon = metersPerLon;
+
+            // Load elevation data
+            string elevationPath = Path.Combine(globalCourseDir, "elevation.dat");
+            LoadElevationMap(elevationPath, refLat, refLon, metersPerLat, metersPerLon);
 
             // Copy tags from relations to member ways and nodes
             foreach (var rel in relations)
@@ -495,6 +538,7 @@ public partial class OsmMapLoader : Node
             int parsedFairwaysCount = 0;
             int parsedGreensCount = 0;
             var waterPolygons = new List<Vector2[]>();
+            var forestPolygons = new List<Vector2[]>();
             var holesWithTeePolygons = new HashSet<string>();
 
             foreach (var way in ways)
@@ -598,19 +642,14 @@ public partial class OsmMapLoader : Node
                         if (points.First() != points.Last())
                             points.Add(points.First());
                         var uniquePoints = points.Take(points.Count - 1).ToArray();
-                        exclusionPolygons.Add(new ExclusionPolygon(uniquePoints, "tee"));
-                        var indices = Geometry2D.TriangulatePolygon(uniquePoints);
-                        if (indices.Length > 0)
-                        {
-                            var mesh = Create3DPolygonMesh(uniquePoints, indices, 0.01f, new Color(0.2f, 0.55f, 0.2f), "tee", exclusionPolygons);
-                            var meshInstance = new MeshInstance3D
-                            {
-                                Name = $"tee_{way.Id}",
-                                Mesh = mesh
-                            };
-                            rootNode.AddChild(meshInstance);
-                            meshInstance.Owner = rootNode;
-                        }
+                        exclusionPolygons.Add(new ExclusionPolygon(uniquePoints, "tee", this));
+                        // We no longer create a separate visual mesh for the tee boxes.
+                        // They are rendered solely on the unified terrain, which prevents Z-fighting and UV scaling mismatch.
+                        
+                        // Create collision shape for explicit tee box polygon
+                        var staticBody = new StaticBody3D { Name = $"tee_Static_explicit_{way.Id}" };
+                        staticBody.SetMeta("surface_type", 0); // Fairway physics for tees
+                        CreateCollisionForPolygon(staticBody, uniquePoints, rootNode, exclusionPolygons);
                     }
                     continue;
                 }
@@ -640,60 +679,28 @@ public partial class OsmMapLoader : Node
                     if (golfType == "green") parsedGreensCount++;
 
                     var uniquePoints = points.Take(points.Count - 1).ToArray();
-                    exclusionPolygons.Add(new ExclusionPolygon(uniquePoints, golfType));
-                    var indices = Geometry2D.TriangulatePolygon(uniquePoints);
-                    if (indices.Length > 0)
+                    exclusionPolygons.Add(new ExclusionPolygon(uniquePoints, golfType, this));
+
+                    int surfaceTypeValue = golfType switch
                     {
-                        float heightOffset = golfType switch
-                        {
-                            "green" => 0.02f,
-                            "fairway" => 0.01f,
-                            _ => -0.15f // bunker
-                        };
+                        "green" => 4,
+                        "fairway" => 0,
+                        _ => 2
+                    };
 
-                        Color color = golfType switch
-                        {
-                            "green" => new Color(0.55f, 0.85f, 0.55f), // Bright healthy green
-                            "fairway" => new Color(0.45f, 0.75f, 0.45f), // Medium fairway green
-                            _ => new Color(0.85f, 0.75f, 0.55f) // Sand yellow
-                        };
-
-                        int surfaceTypeValue = golfType switch
-                        {
-                            "green" => 4, // SurfaceType.Green
-                            "fairway" => 0, // SurfaceType.Fairway
-                            _ => 2 // SurfaceType.Rough/Bunker
-                        };
-
-                        var mesh = Create3DPolygonMesh(uniquePoints, indices, heightOffset, color, golfType, exclusionPolygons);
-                        var meshInstance = new MeshInstance3D
-                        {
-                            Name = $"{golfType}_{way.Id}",
-                            Mesh = mesh
-                        };
-                        rootNode.AddChild(meshInstance);
-                        meshInstance.Owner = rootNode;
-
-                        // Add static body for specific surface zone
-                        var staticBody = new StaticBody3D { Name = $"{golfType}_Static_{way.Id}" };
-                        staticBody.SetMeta("surface_type", surfaceTypeValue);
-
-                        var colShape = new CollisionShape3D();
-                        var concaveShape = new ConcavePolygonShape3D();
-                        concaveShape.Data = mesh.GetFaces();
-                        colShape.Shape = concaveShape;
-
-                        staticBody.AddChild(colShape);
-                        rootNode.AddChild(staticBody);
-                        staticBody.Owner = rootNode;
-                        colShape.Owner = rootNode;
+                    var staticBody = new StaticBody3D { Name = $"{golfType}_Static_{way.Id}" };
+                    staticBody.SetMeta("surface_type", surfaceTypeValue);
+                    if (golfType == "bunker")
+                    {
+                        staticBody.SetMeta("is_sand", true);
                     }
+                    CreateCollisionForPolygon(staticBody, uniquePoints, rootNode, exclusionPolygons);
                 }
                 else if (isWaterFeature)
                 {
                     var uniquePoints = points.Take(points.Count - 1).ToArray();
                     waterPolygons.Add(uniquePoints);
-                    exclusionPolygons.Add(new ExclusionPolygon(uniquePoints, "water"));
+                    exclusionPolygons.Add(new ExclusionPolygon(uniquePoints, "water", this));
                     var indices = Geometry2D.TriangulatePolygon(uniquePoints);
                     if (indices.Length > 0)
                     {
@@ -728,9 +735,14 @@ public partial class OsmMapLoader : Node
                 }
                 else if (isForestFeature)
                 {
+                    var uniquePoints = points.Take(points.Count - 1).ToArray();
+                    if (uniquePoints.Length >= 3)
+                    {
+                        forestPolygons.Add(uniquePoints);
+                    }
+
                     if (satImage == null)
                     {
-                        var uniquePoints = points.Take(points.Count - 1).ToArray();
                         if (uniquePoints.Length >= 3)
                         {
                             // Compute bounding box
@@ -802,47 +814,130 @@ public partial class OsmMapLoader : Node
 
             float courseWidth = courseMaxX - courseMinX;
             float courseDepth = courseMaxZ - courseMinZ;
-            int subdivisionsX = Mathf.Clamp((int)Math.Ceiling(courseWidth / 10.0f), 50, 300);
-            int subdivisionsZ = Mathf.Clamp((int)Math.Ceiling(courseDepth / 10.0f), 50, 300);
 
-            CreateRoughGround(courseMinX, courseMaxX, courseMinZ, courseMaxZ, subdivisionsX, subdivisionsZ, rootNode, exclusionPolygons);
+            // 1. Adjust straight-line or dogleg hole paths to follow the fairway doglegs if needed
+            var fairwayPolys = exclusionPolygons.Where(e => e.GolfType == "fairway").ToList();
+            if (fairwayPolys.Count > 0)
+            {
+                foreach (var kp in holeInfo)
+                {
+                    var hole = kp.Value;
+                    if (hole.HolePath == null || hole.HolePath.Count < 2) continue;
 
-            // Spawn individual trees
+                    // Par 3 holes are straight from tee to green and do not need dogleg bending
+                    if (hole.Par == 3) continue;
+
+                    var originalPath = new List<Vector2>();
+                    foreach (var pt in hole.HolePath)
+                    {
+                        originalPath.Add(new Vector2(pt[0], pt[1]));
+                    }
+
+                    // Resample to 5 points for a clean straight-line path
+                    var newPoints = ResamplePath(originalPath, 5);
+
+                    for (int i = 1; i < newPoints.Count - 1; i++)
+                    {
+                        Vector2 pt = newPoints[i];
+                        float t = (float)i / (newPoints.Count - 1);
+
+                        // Don't pull tee-off and green approach too aggressively if they are close to the ends
+                        if (t > 0.10f && t < 0.90f)
+                        {
+                            bool insideFairway = false;
+                            foreach (var fw in fairwayPolys)
+                            {
+                                if (Geometry2D.IsPointInPolygon(pt, fw.Polygon))
+                                {
+                                    insideFairway = true;
+                                    break;
+                                }
+                            }
+
+                            if (!insideFairway)
+                            {
+                                // Calculate local path direction to move strictly perpendicularly
+                                Vector2 dir = (newPoints[i + 1] - newPoints[i - 1]).Normalized();
+                                Vector2 normal = new Vector2(-dir.Y, dir.X);
+
+                                float bestOffset = 0f;
+                                bool found = false;
+                                float minOffsetAbs = float.MaxValue;
+
+                                // Search for the closest offset along the normal that lands inside a fairway (capped at 40m)
+                                for (float offset = -40f; offset <= 40f; offset += 2f)
+                                {
+                                    Vector2 testPt = pt + normal * offset;
+                                    foreach (var fw in fairwayPolys)
+                                    {
+                                        if (Geometry2D.IsPointInPolygon(testPt, fw.Polygon))
+                                        {
+                                            float absOffset = Math.Abs(offset);
+                                            if (absOffset < minOffsetAbs)
+                                            {
+                                                minOffsetAbs = absOffset;
+                                                bestOffset = offset;
+                                                found = true;
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if (found)
+                                {
+                                    float pushSign = bestOffset >= 0 ? 1f : -1f;
+                                    pt = pt + normal * (bestOffset + pushSign * 5.0f); // Push 5 meters inside
+                                }
+                            }
+                        }
+                        newPoints[i] = pt;
+                    }
+
+                    hole.HolePath.Clear();
+                    foreach (var p in newPoints)
+                    {
+                        hole.HolePath.Add(new float[] { p.X, p.Y });
+                    }
+                }
+            }
+
+            // 2. Re-populate lineOfPlayPaths from the updated holeInfo
+            lineOfPlayPaths.Clear();
+            foreach (var kp in holeInfo)
+            {
+                var pList = new List<Vector2>();
+                foreach (var pt in kp.Value.HolePath)
+                {
+                    pList.Add(new Vector2(pt[0], pt[1]));
+                }
+                if (pList.Count >= 2)
+                {
+                    lineOfPlayPaths.Add(pList);
+                }
+            }
+
+            // Gather tree positions from OSM trees
+            var placedTreePositions = new List<Vector2>();
             foreach (var tId in treeNodeIds)
             {
                 if (nodes.TryGetValue(tId, out var coord))
                 {
                     float tx = (float)((coord.Lon - refLon) * metersPerLon);
                     float tz = -(float)((coord.Lat - refLat) * metersPerLat);
-                    AddTreeAt(rootNode, new Vector3(tx, GetHeight(tx, tz), tz));
+                    placedTreePositions.Add(new Vector2(tx, tz));
                 }
             }
 
-            // Spawn trees from satellite imagery
+            // Scan satellite imagery for additional trees
             if (satImage != null)
             {
-                GD.Print($"{LogPrefix} Scanning satellite imagery for trees...");
+                GD.Print($"{LogPrefix} Scanning satellite imagery for tree positions...");
                 int satWidth = satImage.GetWidth();
                 int satHeight = satImage.GetHeight();
-
-                // Keep track of already placed tree positions to avoid overlap
-                var placedTreePositions = new List<Vector2>();
-
-                // Add existing OSM individual trees to placed positions
-                foreach (var tId in treeNodeIds)
-                {
-                    if (nodes.TryGetValue(tId, out var coord))
-                    {
-                        float tx = (float)((coord.Lon - refLon) * metersPerLon);
-                        float tz = -(float)((coord.Lat - refLat) * metersPerLat);
-                        placedTreePositions.Add(new Vector2(tx, tz));
-                    }
-                }
-
-                // Gather all candidate tree positions
                 var candidatePoints = new List<Vector2>();
-                float spacing = 5.0f; // Grid spacing in meters
-                float minDistanceBetweenTrees = 4.0f; // Minimum distance to keep trees apart
+                float spacing = 6.5f; // Grid spacing in meters (increased from 3.5f)
+                float minDistanceBetweenTrees = 8.5f; // Minimum distance to keep trees apart (increased from 3.0f)
 
                 for (float rx = courseMinX; rx <= courseMaxX; rx += spacing)
                 {
@@ -851,7 +946,7 @@ public partial class OsmMapLoader : Node
                         var pt = new Vector2(rx, rz);
                         if (!isPointInMainCourse(pt)) continue;
 
-                        // Check if the point is in any play surface exclusion zone
+                        // Check play surface exclusions
                         bool insideExclusion = false;
                         foreach (var excl in exclusionPolygons)
                         {
@@ -866,31 +961,43 @@ public partial class OsmMapLoader : Node
                         }
                         if (insideExclusion) continue;
 
-                        // Check if the point is too close to the line of play of any hole (keeps direct shots clear)
+                        // Check line of play safety zone (skip if inside a forest polygon)
                         bool tooCloseToLineOfPlay = false;
-                        foreach (var path in lineOfPlayPaths)
+                        bool insideForest = false;
+                        foreach (var forestPoly in forestPolygons)
                         {
-                            for (int i = 0; i < path.Count - 1; i++)
+                            if (Geometry2D.IsPointInPolygon(pt, forestPoly))
                             {
-                                if (DistanceToSegment(pt, path[i], path[i + 1]) < 12.0f)
-                                {
-                                    tooCloseToLineOfPlay = true;
-                                    break;
-                                }
+                                insideForest = true;
+                                break;
                             }
-                            if (tooCloseToLineOfPlay) break;
+                        }
+
+                        if (!insideForest)
+                        {
+                            foreach (var path in lineOfPlayPaths)
+                            {
+                                for (int i = 0; i < path.Count - 1; i++)
+                                {
+                                    if (DistanceToSegment(pt, path[i], path[i + 1]) < 12.0f)
+                                    {
+                                        tooCloseToLineOfPlay = true;
+                                        break;
+                                    }
+                                }
+                                if (tooCloseToLineOfPlay) break;
+                            }
                         }
                         if (tooCloseToLineOfPlay) continue;
 
-                        // Map local coordinate (rx, rz) to image pixel coordinates (px, py)
-                        float normX = (rx - courseMinX) / (courseMaxX - courseMinX);
-                        float normY = (rz - courseMinZ) / (courseMaxZ - courseMinZ);
+                        float normX = (rx - courseMinX) / (courseWidth == 0 ? 1f : courseWidth);
+                        float normY = (rz - courseMinZ) / (courseDepth == 0 ? 1f : courseDepth);
                         int px = Mathf.Clamp((int)(normX * satWidth), 0, satWidth - 1);
                         int py = Mathf.Clamp((int)(normY * satHeight), 0, satHeight - 1);
 
                         Color pixelColor = GetAveragedPixel(satImage, px, py);
                         float variance = GetLocalVariance(satImage, px, py);
-                        if (IsTreeColor(pixelColor) && variance > 0.005f)
+                        if (IsTreeColor(pixelColor) && variance > 0.001f)
                         {
                             candidatePoints.Add(pt);
                         }
@@ -899,12 +1006,11 @@ public partial class OsmMapLoader : Node
 
                 GD.Print($"{LogPrefix} Found {candidatePoints.Count} tree candidate locations from satellite imagery.");
 
-                // Limit maximum satellite trees to avoid performance issues
-                int maxSatelliteTrees = 10000;
+                int maxSatelliteTrees = 1500; // Capped at 1500 down from 10000
                 var selectedPoints = new List<Vector2>();
                 if (candidatePoints.Count > maxSatelliteTrees)
                 {
-                    var rnd = new Random(42); // Seeded for deterministic generation
+                    var rnd = new Random(42);
                     var indices = Enumerable.Range(0, candidatePoints.Count).OrderBy(x => rnd.Next()).Take(maxSatelliteTrees).ToList();
                     foreach (int idx in indices)
                     {
@@ -917,8 +1023,6 @@ public partial class OsmMapLoader : Node
                     selectedPoints = candidatePoints;
                 }
 
-                // Spawn selected trees, checking distances to avoid overlapping
-                int satelliteTreesCount = 0;
                 foreach (var pt in selectedPoints)
                 {
                     bool tooClose = false;
@@ -933,66 +1037,84 @@ public partial class OsmMapLoader : Node
 
                     if (!tooClose)
                     {
-                        float height = GetHeight(pt.X, pt.Y);
-                        AddTreeAt(rootNode, new Vector3(pt.X, height, pt.Y));
                         placedTreePositions.Add(pt);
-                        satelliteTreesCount++;
                     }
                 }
-                GD.Print($"{LogPrefix} Placed {satelliteTreesCount} trees based on satellite imagery analysis.");
+            }
 
-                // Spawn random bushes clustered around a subset of trees rather than randomly everywhere
-                if (placedTreePositions.Count > 0)
+            int subdivisionsX = Mathf.Clamp((int)Math.Ceiling(courseWidth / 2.0f), 100, 1000);
+            int subdivisionsZ = Mathf.Clamp((int)Math.Ceiling(courseDepth / 2.0f), 100, 1000);
+
+            // Generate unified terrain with mulch mapped around all tree positions!
+            CreateUnifiedTerrain(courseMinX, courseMaxX, courseMinZ, courseMaxZ, subdivisionsX, subdivisionsZ, rootNode, exclusionPolygons, placedTreePositions);
+
+            // Spawn all trees (OSM + satellite selected)
+            foreach (var pt in placedTreePositions)
+            {
+                float height = GetHeight(pt.X, pt.Y);
+                AddTreeAt(rootNode, new Vector3(pt.X, height, pt.Y));
+            }
+            GD.Print($"{LogPrefix} Placed {placedTreePositions.Count} trees total.");
+
+            // Spawn random bushes clustered around a subset of trees
+            if (placedTreePositions.Count > 0)
+            {
+                GD.Print($"{LogPrefix} Placing bushes clustered around trees...");
+                var bushRnd = new Random(99);
+                int bushCount = 0;
+                int maxBushes = 1200;
+                var placedBushPositions = new List<Vector2>();
+
+                var treeIndices = Enumerable.Range(0, placedTreePositions.Count).OrderBy(x => bushRnd.Next()).ToList();
+                int treesWithBushesCount = (int)(placedTreePositions.Count * 0.35);
+
+                for (int tIdx = 0; tIdx < treesWithBushesCount && bushCount < maxBushes; tIdx++)
                 {
-                    GD.Print($"{LogPrefix} Placing bushes clustered around trees...");
-                    var bushRnd = new Random(99); // Seeded for deterministic generation
-                    int bushCount = 0;
-                    int maxBushes = 1200;
-                    var placedBushPositions = new List<Vector2>();
+                    var treePos = placedTreePositions[treeIndices[tIdx]];
+                    int numBushesAroundTree = bushRnd.Next(1, 4);
 
-                    // Select a random subset of trees (e.g., 35% of placed trees) to have bushes around them
-                    var treeIndices = Enumerable.Range(0, placedTreePositions.Count).OrderBy(x => bushRnd.Next()).ToList();
-                    int treesWithBushesCount = (int)(placedTreePositions.Count * 0.35);
-
-                    for (int tIdx = 0; tIdx < treesWithBushesCount && bushCount < maxBushes; tIdx++)
+                    for (int b = 0; b < numBushesAroundTree && bushCount < maxBushes; b++)
                     {
-                        var treePos = placedTreePositions[treeIndices[tIdx]];
-                        // Spawn 1 to 3 bushes around this tree
-                        int numBushesAroundTree = bushRnd.Next(1, 4);
+                        double angle = bushRnd.NextDouble() * Math.PI * 2.0;
+                        float distance = 1.5f + (float)bushRnd.NextDouble() * 2.0f;
+                        float bx = treePos.X + (float)Math.Cos(angle) * distance;
+                        float bz = treePos.Y + (float)Math.Sin(angle) * distance;
+                        var pt = new Vector2(bx, bz);
 
-                        for (int b = 0; b < numBushesAroundTree && bushCount < maxBushes; b++)
+                        if (!isPointInMainCourse(pt)) continue;
+
+                        bool insideExclusion = false;
+                        foreach (var excl in exclusionPolygons)
                         {
-                            // Generate a random angle and distance from the tree base
-                            double angle = bushRnd.NextDouble() * Math.PI * 2.0;
-                            float distance = 1.5f + (float)bushRnd.NextDouble() * 2.0f; // 1.5m to 3.5m from tree
-                            float bx = treePos.X + (float)Math.Cos(angle) * distance;
-                            float bz = treePos.Y + (float)Math.Sin(angle) * distance;
-                            var pt = new Vector2(bx, bz);
-
-                            if (!isPointInMainCourse(pt)) continue;
-
-                            // Must NOT be inside any exclusion polygon (not green, fairway, bunker, water, tee)
-                            bool insideExclusion = false;
-                            foreach (var excl in exclusionPolygons)
+                            if (bx >= excl.MinX && bx <= excl.MaxX && bz >= excl.MinY && bz <= excl.MaxY)
                             {
-                                if (bx >= excl.MinX && bx <= excl.MaxX && bz >= excl.MinY && bz <= excl.MaxY)
+                                if (Geometry2D.IsPointInPolygon(pt, excl.Polygon))
                                 {
-                                    if (Geometry2D.IsPointInPolygon(pt, excl.Polygon))
-                                    {
-                                        insideExclusion = true;
-                                        break;
-                                    }
+                                    insideExclusion = true;
+                                    break;
                                 }
                             }
-                            if (insideExclusion) continue;
+                        }
+                        if (insideExclusion) continue;
 
-                            // Must NOT be too close to line of play
-                            bool tooCloseToLineOfPlay = false;
+                        bool tooCloseToLineOfPlay = false;
+                        bool insideForest = false;
+                        foreach (var forestPoly in forestPolygons)
+                        {
+                            if (Geometry2D.IsPointInPolygon(pt, forestPoly))
+                            {
+                                insideForest = true;
+                                break;
+                            }
+                        }
+
+                        if (!insideForest)
+                        {
                             foreach (var path in lineOfPlayPaths)
                             {
                                 for (int i = 0; i < path.Count - 1; i++)
                                 {
-                                    if (DistanceToSegment(pt, path[i], path[i + 1]) < 8.0f) // slightly closer is fine near trees
+                                    if (DistanceToSegment(pt, path[i], path[i + 1]) < 8.0f)
                                     {
                                         tooCloseToLineOfPlay = true;
                                         break;
@@ -1000,29 +1122,27 @@ public partial class OsmMapLoader : Node
                                 }
                                 if (tooCloseToLineOfPlay) break;
                             }
-                            if (tooCloseToLineOfPlay) continue;
-
-                            // Must NOT be too close to other placed bushes
-                            bool tooCloseToBush = false;
-                            foreach (var bushPos in placedBushPositions)
-                            {
-                                if (pt.DistanceTo(bushPos) < 1.2f)
-                                {
-                                    tooCloseToBush = true;
-                                    break;
-                                }
-                            }
-                            if (tooCloseToBush) continue;
-
-                            // Place the bush!
-                            float bh = GetHeight(bx, bz);
-                            AddBushAt(rootNode, new Vector3(bx, bh, bz));
-                            placedBushPositions.Add(pt);
-                            bushCount++;
                         }
+                        if (tooCloseToLineOfPlay) continue;
+
+                        bool tooCloseToBush = false;
+                        foreach (var bushPos in placedBushPositions)
+                        {
+                            if (pt.DistanceTo(bushPos) < 1.2f)
+                            {
+                                tooCloseToBush = true;
+                                break;
+                            }
+                        }
+                        if (tooCloseToBush) continue;
+
+                        float bh = GetHeight(bx, bz);
+                        AddBushAt(rootNode, new Vector3(bx, bh, bz));
+                        placedBushPositions.Add(pt);
+                        bushCount++;
                     }
-                    GD.Print($"{LogPrefix} Placed {bushCount} bushes clustered around trees.");
                 }
+                GD.Print($"{LogPrefix} Placed {bushCount} bushes clustered around trees.");
             }
 
             // Gather node-based tees from nodeTags list
@@ -1263,11 +1383,16 @@ public partial class OsmMapLoader : Node
                     var lastPt = hole.HolePath[hole.HolePath.Count - 1];
                     Vector2 greenCenter = new Vector2(lastPt[0], lastPt[1]);
 
-                    var greenPoints = new Vector2[8];
-                    for (int i = 0; i < 8; i++)
+                    // Generate a smooth organic oval instead of an octagon
+                    int greenPointCount = 24;
+                    var greenPoints = new Vector2[greenPointCount];
+                    float baseRadius = 12.0f;
+                    for (int i = 0; i < greenPointCount; i++)
                     {
-                        float angle = i * Mathf.Pi / 4f;
-                        greenPoints[i] = greenCenter + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * 12.0f;
+                        float angle = i * Mathf.Pi * 2f / greenPointCount;
+                        // Create organic oval with gentle variation so it looks natural
+                        float radius = baseRadius + 2.0f * Mathf.Sin(angle * 2f) + 1.0f * Mathf.Cos(angle * 3f);
+                        greenPoints[i] = greenCenter + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius;
                     }
 
                     CreateGolfSurfaceMesh(rootNode, greenPoints, "green", $"madeup_{kp.Key.Replace(" ", "_")}", exclusionPolygons);
@@ -1368,6 +1493,57 @@ public partial class OsmMapLoader : Node
                             };
                             
                             CreateTeeBoxMesh(rootNode, teeBoxPoints, $"{kp.Key.Replace(" ", "_")}_default", exclusionPolygons);
+                        }
+                    }
+                }
+            }
+
+            // Procedurally spawn rock decorations around water hazards
+            InitializeRockAssets();
+            if (_rockMeshes != null)
+            {
+                var rand = new Random(42);
+                foreach (var waterPoly in waterPolygons)
+                {
+                    int numPoints = waterPoly.Length;
+                    for (int i = 0; i < numPoints; i++)
+                    {
+                        Vector2 p1 = waterPoly[i];
+                        Vector2 p2 = waterPoly[(i + 1) % numPoints];
+                        float segmentLength = p1.DistanceTo(p2);
+                        
+                        // Spawn a rock every 1.0 to 1.4 meters to cover the full perimeter with no gaps
+                        float step = 1.0f + (float)rand.NextDouble() * 0.4f;
+                        for (float d = 0f; d < segmentLength; d += step)
+                        {
+                            float t = d / segmentLength;
+                            Vector2 pos2d = p1.Lerp(p2, t);
+                            
+                            Vector2 dir = (p2 - p1).Normalized();
+                            Vector2 perp = new Vector2(-dir.Y, dir.X);
+                            
+                            // Jitter offset: -0.2m to +0.2m (keep aligned to water perimeter)
+                            float jitter = -0.2f + (float)rand.NextDouble() * 0.4f;
+                            Vector2 rockPos2d = pos2d + perp * jitter;
+                            
+                            float rockX = rockPos2d.X;
+                            float rockZ = rockPos2d.Y;
+                            float terrainY = GetHeightWithFeatures(rockX, rockZ, exclusionPolygons);
+                            
+                            // Scale variety (various sizes to look natural)
+                            float rScaleX = 0.8f + (float)rand.NextDouble() * 1.2f;
+                            float rScaleY = 0.5f + (float)rand.NextDouble() * 0.8f;
+                            float rScaleZ = 0.8f + (float)rand.NextDouble() * 1.2f;
+                            Vector3 rockScale = new Vector3(rScaleX, rScaleY, rScaleZ);
+                            
+                            float rotY = (float)(rand.NextDouble() * Math.PI * 2.0);
+                            var rockMesh = _rockMeshes[rand.Next(_rockMeshes.Length)];
+                            
+                            // Sit rock on terrain, keeping it above the depressed water level
+                            float baseHeight = GetHeight(rockX, rockZ);
+                            float spawnY = Math.Max(terrainY, baseHeight - 0.2f);
+                            Vector3 rockPos = new Vector3(rockX, spawnY + 0.1f, rockZ);
+                            SpawnRockAt(rootNode, rockPos, rockScale, rotY, rockMesh);
                         }
                     }
                 }
@@ -1671,6 +1847,8 @@ public partial class OsmMapLoader : Node
             string configJson = JsonSerializer.Serialize(courseConfig, options);
             File.WriteAllText(globalJsonPath, configJson);
 
+            await GenerateAerialPreviewsAsync(rootNode, courseDir, globalCourseDir, holeInfo);
+
             GD.Print($"{LogPrefix} Course '{courseName}' generated successfully.");
             return true;
         }
@@ -1678,6 +1856,138 @@ public partial class OsmMapLoader : Node
         {
             GD.PrintErr($"{LogPrefix} Failed to query or build OSM course: {ex}");
             return false;
+        }
+    }
+
+    private async Task GenerateAerialPreviewsAsync(Node3D rootNode, string courseDir, string globalCourseDir, Dictionary<string, HoleConfig> holeInfo)
+    {
+        try
+        {
+            GD.Print($"{LogPrefix} Generating top-down aerial snapshots for course and holes...");
+            var subViewport = new SubViewport();
+            subViewport.Size = new Vector2I(1024, 1024);
+            subViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
+            subViewport.OwnWorld3D = true;
+            subViewport.World3D = new World3D();
+
+            var tempCam = new Camera3D();
+            tempCam.Projection = Camera3D.ProjectionType.Orthogonal;
+            subViewport.AddChild(tempCam);
+
+            var courseInstance = rootNode.Duplicate() as Node3D;
+            if (courseInstance == null) return;
+            subViewport.AddChild(courseInstance);
+
+            AddChild(subViewport);
+
+            // 1. Full Course Aerial View
+            double minX = 99999, maxX = -99999, minZ = 99999, maxZ = -99999;
+            foreach (var h in holeInfo.Values)
+            {
+                if (h.HoleLocation != null && h.HoleLocation.Length >= 2)
+                {
+                    minX = Math.Min(minX, h.HoleLocation[0]);
+                    maxX = Math.Max(maxX, h.HoleLocation[0]);
+                    minZ = Math.Min(minZ, h.HoleLocation[1]);
+                    maxZ = Math.Max(maxZ, h.HoleLocation[1]);
+                }
+                if (h.TeeBoxes != null)
+                {
+                    foreach (var t in h.TeeBoxes.Values)
+                    {
+                        if (t.Length >= 2)
+                        {
+                            minX = Math.Min(minX, t[0]);
+                            maxX = Math.Max(maxX, t[0]);
+                            minZ = Math.Min(minZ, t[1]);
+                            maxZ = Math.Max(maxZ, t[1]);
+                        }
+                    }
+                }
+            }
+            if (minX > maxX) { minX = -150; maxX = 150; minZ = -150; maxZ = 150; }
+
+            Vector3 center = new Vector3((float)(minX + maxX) / 2f, 150f, (float)(minZ + maxZ) / 2f);
+            float width = (float)(maxX - minX);
+            float depth = (float)(maxZ - minZ);
+            float fullZoom = Math.Max(Math.Max(width, depth) * 1.25f, 300f);
+
+            tempCam.Size = fullZoom;
+            tempCam.Transform = new Transform3D(
+                new Basis(new Vector3(1f, 0f, 0f), new Vector3(0f, 0f, -1f), new Vector3(0f, 1f, 0f)),
+                center
+            );
+
+            await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+            var courseImg = subViewport.GetTexture().GetImage();
+            if (courseImg != null)
+            {
+                string fullCourseImgPath = Path.Combine(globalCourseDir, "aerial_course.png");
+                courseImg.SavePng(fullCourseImgPath);
+                GD.Print($"{LogPrefix} Saved full course aerial snapshot: {fullCourseImgPath}");
+            }
+
+            // 2. Per-hole Aerial Views
+            var holeKeys = holeInfo.Keys.ToList();
+            holeKeys.Sort((a, b) =>
+            {
+                int numA = 0, numB = 0;
+                int.TryParse(a.Replace("Hole", "").Trim(), out numA);
+                int.TryParse(b.Replace("Hole", "").Trim(), out numB);
+                if (numA > 0 && numB > 0) return numA.CompareTo(numB);
+                return string.Compare(a, b, StringComparison.Ordinal);
+            });
+
+            for (int i = 0; i < holeKeys.Count; i++)
+            {
+                var hKey = holeKeys[i];
+                var h = holeInfo[hKey];
+                if (h.HoleLocation == null || h.HoleLocation.Length < 2) continue;
+
+                Vector3 pinPos = new Vector3(h.HoleLocation[0], 0f, h.HoleLocation[1]);
+                Vector3 teePos = pinPos + new Vector3(0f, 0f, 150f);
+                if (h.TeeBoxes != null && h.TeeBoxes.Count > 0)
+                {
+                    string firstTeeKey = h.TeeBoxes.ContainsKey("Blue") ? "Blue" : h.TeeBoxes.Keys.First();
+                    var tArr = h.TeeBoxes[firstTeeKey];
+                    if (tArr.Length >= 2) teePos = new Vector3(tArr[0], 0f, tArr[1]);
+                }
+
+                Vector3 dir3D = (pinPos - teePos);
+                dir3D.Y = 0;
+                if (dir3D.IsZeroApprox()) dir3D = new Vector3(0f, 0f, -1f);
+                else dir3D = dir3D.Normalized();
+
+                float dist = teePos.DistanceTo(pinPos);
+                float holeZoom = Math.Max(dist * 1.35f, 60f);
+
+                Vector3 rightVec = dir3D.Cross(Vector3.Up).Normalized();
+                Vector3 upVec = dir3D;
+                Vector3 backVec = Vector3.Up;
+
+                tempCam.Size = holeZoom;
+                Vector3 basePos = teePos + dir3D * (0.35f * holeZoom);
+                tempCam.Transform = new Transform3D(
+                    new Basis(rightVec, upVec, backVec),
+                    new Vector3(basePos.X, 150f, basePos.Z)
+                );
+
+                await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+                var holeImg = subViewport.GetTexture().GetImage();
+                if (holeImg != null)
+                {
+                    string holeImgPath = Path.Combine(globalCourseDir, $"aerial_hole_{i + 1}.png");
+                    holeImg.SavePng(holeImgPath);
+                    GD.Print($"{LogPrefix} Saved aerial snapshot for Hole {i + 1}: {holeImgPath}");
+                }
+            }
+
+            RemoveChild(subViewport);
+            subViewport.QueueFree();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Exception during aerial preview generation: {ex}");
         }
     }
 
@@ -1840,44 +2150,12 @@ public partial class OsmMapLoader : Node
             }
         }
 
-        // Helper function to calculate exclusions depression for overlapping surfaces
-        float GetExclDepression(Vector2 pt)
-        {
-            if (exclusions == null) return 0f;
-            if (golfType == "fairway" || golfType == "tee" || golfType == "bunker")
-            {
-                foreach (var excl in exclusions)
-                {
-                    if (golfType == "fairway")
-                    {
-                        if ((excl.GolfType == "green" || excl.GolfType == "bunker") && Geometry2D.IsPointInPolygon(pt, excl.Polygon))
-                        {
-                            return 0.3f;
-                        }
-                    }
-                    else if (golfType == "tee")
-                    {
-                        if (excl.GolfType == "green" && Geometry2D.IsPointInPolygon(pt, excl.Polygon))
-                        {
-                            return 0.3f;
-                        }
-                    }
-                    else if (golfType == "bunker")
-                    {
-                        if (excl.GolfType == "green" && Geometry2D.IsPointInPolygon(pt, excl.Polygon))
-                        {
-                            return 0.3f;
-                        }
-                    }
-                }
-            }
-            return 0f;
-        }
+
 
         var arrayMesh = new ArrayMesh();
         int numTopVertices = subdividedTriangles.Count * 3;
         int M = points.Length;
-        int numSkirtVertices = M * 6;
+        int numSkirtVertices = M * 12;
         int totalVertices = numTopVertices + numSkirtVertices;
 
         var vertices = new Vector3[totalVertices];
@@ -1885,6 +2163,18 @@ public partial class OsmMapLoader : Node
         var colors = new Color[totalVertices];
         var uvs = new Vector2[totalVertices];
         var newIndices = new int[totalVertices];
+
+        // Inward taper width: vertices within this distance of the polygon edge
+        // have their height offset smoothly reduced to 0 (matching rough ground)
+        float taperWidth = golfType switch
+        {
+            "green" => 5.0f,
+            "fairway" => 4.0f,
+            "tee" => 3.0f,
+            "bunker" => 2.5f,
+            "water" => 0.0f,
+            _ => 2.0f
+        };
 
         for (int i = 0; i < subdividedTriangles.Count; i++)
         {
@@ -1896,8 +2186,19 @@ public partial class OsmMapLoader : Node
                 int idx = i * 3 + j;
                 float vx = triPts[j].X;
                 float vz = triPts[j].Y;
-                float dep = GetExclDepression(triPts[j]);
-                float vy = GetHeight(vx, vz) + height - dep;
+
+                // Calculate how far this vertex is from the polygon boundary
+                float distToEdge = DistanceToPolygon(new Vector2(vx, vz), points);
+
+                // Smoothstep taper: 0 at edge, 1 at taperWidth inside
+                float taperFactor = 1.0f;
+                if (taperWidth > 0.0f && distToEdge < taperWidth)
+                {
+                    float t = distToEdge / taperWidth;
+                    taperFactor = t * t * (3.0f - 2.0f * t);
+                }
+
+                float vy = GetHeight(vx, vz) + height * taperFactor;
                 vertices[idx] = new Vector3(vx, vy, vz);
                 normals[idx] = GetTerrainNormal(vx, vz);
                 colors[idx] = color;
@@ -1953,21 +2254,19 @@ public partial class OsmMapLoader : Node
             normalsOut[i] = normal.Normalized();
         }
 
+        // Tiny outward skirt just to tuck the edge under the rough mesh
+        // The real transition happens via the inward taper above
         float rampWidth = golfType switch
         {
-            "green" => 4.5f,
-            "fairway" => 3.6f,
-            "tee" => 3.0f,
-            "bunker" => 0.05f,
             "water" => 0.05f,
-            _ => 0.5f
+            _ => 0.3f
         };
 
-        float bottomHeightOffset = golfType switch
+        float bottomDrop = golfType switch
         {
-            "water" => -2.5f,
-            "bunker" => -0.3f,
-            _ => -0.8f
+            "water" => 2.5f,
+            "bunker" => 0.10f,
+            _ => 0.08f
         };
 
         for (int i = 0; i < M; i++)
@@ -1979,32 +2278,41 @@ public partial class OsmMapLoader : Node
 
             var p_top_i = points[i];
             var p_top_next = points[next];
+            var p_mid_i = points[i] + n_i * (rampWidth * 0.5f);
+            var p_mid_next = points[next] + n_next * (rampWidth * 0.5f);
             var p_bot_i = points[i] + n_i * rampWidth;
             var p_bot_next = points[next] + n_next * rampWidth;
 
-            float dep_top_i = GetExclDepression(p_top_i);
-            float dep_top_next = GetExclDepression(p_top_next);
-            float dep_bot_i = GetExclDepression(p_bot_i);
-            float dep_bot_next = GetExclDepression(p_bot_next);
+            // Top: at rough ground level (tapered edge height is ~0 offset)
+            var v_top_i = new Vector3(p_top_i.X, GetHeight(p_top_i.X, p_top_i.Y), p_top_i.Y);
+            var v_top_next = new Vector3(p_top_next.X, GetHeight(p_top_next.X, p_top_next.Y), p_top_next.Y);
 
-            var v_top_i = new Vector3(p_top_i.X, GetHeight(p_top_i.X, p_top_i.Y) + height - dep_top_i, p_top_i.Y);
-            var v_top_next = new Vector3(p_top_next.X, GetHeight(p_top_next.X, p_top_next.Y) + height - dep_top_next, p_top_next.Y);
-            var v_bot_i = new Vector3(p_bot_i.X, GetHeight(p_bot_i.X, p_bot_i.Y) + bottomHeightOffset - dep_bot_i, p_bot_i.Y);
-            var v_bot_next = new Vector3(p_bot_next.X, GetHeight(p_bot_next.X, p_bot_next.Y) + bottomHeightOffset - dep_bot_next, p_bot_next.Y);
+            // Mid: slightly below rough ground
+            var v_mid_i = new Vector3(p_mid_i.X, GetHeight(p_mid_i.X, p_mid_i.Y) - bottomDrop * 0.5f, p_mid_i.Y);
+            var v_mid_next = new Vector3(p_mid_next.X, GetHeight(p_mid_next.X, p_mid_next.Y) - bottomDrop * 0.5f, p_mid_next.Y);
+
+            // Bottom: just below rough ground to hide the seam
+            var v_bot_i = new Vector3(p_bot_i.X, GetHeight(p_bot_i.X, p_bot_i.Y) - bottomDrop, p_bot_i.Y);
+            var v_bot_next = new Vector3(p_bot_next.X, GetHeight(p_bot_next.X, p_bot_next.Y) - bottomDrop, p_bot_next.Y);
 
             var norm_top_i = GetTerrainNormal(p_top_i.X, p_top_i.Y);
             var norm_top_next = GetTerrainNormal(p_top_next.X, p_top_next.Y);
+            var norm_mid_i = GetTerrainNormal(p_mid_i.X, p_mid_i.Y);
+            var norm_mid_next = GetTerrainNormal(p_mid_next.X, p_mid_next.Y);
             var norm_bot_i = GetTerrainNormal(p_bot_i.X, p_bot_i.Y);
             var norm_bot_next = GetTerrainNormal(p_bot_next.X, p_bot_next.Y);
 
             var uv_top_i = p_top_i * 0.1f;
             var uv_top_next = p_top_next * 0.1f;
+            var uv_mid_i = p_mid_i * 0.1f;
+            var uv_mid_next = p_mid_next * 0.1f;
             var uv_bot_i = p_bot_i * 0.1f;
             var uv_bot_next = p_bot_next * 0.1f;
 
-            int baseIdx = numTopVertices + i * 6;
+            int baseIdx = numTopVertices + i * 12;
 
-            // Triangle 1: V_top_i, V_top_next, V_bot_i
+            // UPPER SKIRT (zone surface → mid slope)
+            // Triangle 1: V_top_i, V_top_next, V_mid_i
             vertices[baseIdx] = v_top_i;
             normals[baseIdx] = norm_top_i;
             colors[baseIdx] = color;
@@ -2017,30 +2325,69 @@ public partial class OsmMapLoader : Node
             uvs[baseIdx + 1] = uv_top_next;
             newIndices[baseIdx + 1] = baseIdx + 1;
 
-            vertices[baseIdx + 2] = v_bot_i;
-            normals[baseIdx + 2] = norm_bot_i;
+            vertices[baseIdx + 2] = v_mid_i;
+            normals[baseIdx + 2] = norm_mid_i;
             colors[baseIdx + 2] = color;
-            uvs[baseIdx + 2] = uv_bot_i;
+            uvs[baseIdx + 2] = uv_mid_i;
             newIndices[baseIdx + 2] = baseIdx + 2;
 
-            // Triangle 2: V_bot_i, V_top_next, V_bot_next
-            vertices[baseIdx + 3] = v_bot_i;
-            normals[baseIdx + 3] = norm_bot_i;
+            // Triangle 2: V_top_next, V_mid_next, V_mid_i
+            vertices[baseIdx + 3] = v_top_next;
+            normals[baseIdx + 3] = norm_top_next;
             colors[baseIdx + 3] = color;
-            uvs[baseIdx + 3] = uv_bot_i;
+            uvs[baseIdx + 3] = uv_top_next;
             newIndices[baseIdx + 3] = baseIdx + 3;
 
-            vertices[baseIdx + 4] = v_top_next;
-            normals[baseIdx + 4] = norm_top_next;
+            vertices[baseIdx + 4] = v_mid_next;
+            normals[baseIdx + 4] = norm_mid_next;
             colors[baseIdx + 4] = color;
-            uvs[baseIdx + 4] = uv_top_next;
+            uvs[baseIdx + 4] = uv_mid_next;
             newIndices[baseIdx + 4] = baseIdx + 4;
 
-            vertices[baseIdx + 5] = v_bot_next;
-            normals[baseIdx + 5] = norm_bot_next;
+            vertices[baseIdx + 5] = v_mid_i;
+            normals[baseIdx + 5] = norm_mid_i;
             colors[baseIdx + 5] = color;
-            uvs[baseIdx + 5] = uv_bot_next;
+            uvs[baseIdx + 5] = uv_mid_i;
             newIndices[baseIdx + 5] = baseIdx + 5;
+
+            // LOWER SKIRT (mid slope → below rough ground)
+            // Triangle 3: V_mid_i, V_mid_next, V_bot_i
+            vertices[baseIdx + 6] = v_mid_i;
+            normals[baseIdx + 6] = norm_mid_i;
+            colors[baseIdx + 6] = color;
+            uvs[baseIdx + 6] = uv_mid_i;
+            newIndices[baseIdx + 6] = baseIdx + 6;
+
+            vertices[baseIdx + 7] = v_mid_next;
+            normals[baseIdx + 7] = norm_mid_next;
+            colors[baseIdx + 7] = color;
+            uvs[baseIdx + 7] = uv_mid_next;
+            newIndices[baseIdx + 7] = baseIdx + 7;
+
+            vertices[baseIdx + 8] = v_bot_i;
+            normals[baseIdx + 8] = norm_bot_i;
+            colors[baseIdx + 8] = color;
+            uvs[baseIdx + 8] = uv_bot_i;
+            newIndices[baseIdx + 8] = baseIdx + 8;
+
+            // Triangle 4: V_mid_next, V_bot_next, V_bot_i
+            vertices[baseIdx + 9] = v_mid_next;
+            normals[baseIdx + 9] = norm_mid_next;
+            colors[baseIdx + 9] = color;
+            uvs[baseIdx + 9] = uv_mid_next;
+            newIndices[baseIdx + 9] = baseIdx + 9;
+
+            vertices[baseIdx + 10] = v_bot_next;
+            normals[baseIdx + 10] = norm_bot_next;
+            colors[baseIdx + 10] = color;
+            uvs[baseIdx + 10] = uv_bot_next;
+            newIndices[baseIdx + 10] = baseIdx + 10;
+
+            vertices[baseIdx + 11] = v_bot_i;
+            normals[baseIdx + 11] = norm_bot_i;
+            colors[baseIdx + 11] = color;
+            uvs[baseIdx + 11] = uv_bot_i;
+            newIndices[baseIdx + 11] = baseIdx + 11;
         }
 
         var arr = new Godot.Collections.Array();
@@ -2109,11 +2456,11 @@ public partial class OsmMapLoader : Node
         }
 
         Material mat;
-        if (golfType == "green")
+        if (golfType == "green" || golfType == "tee")
         {
             mat = CreateGrassShaderMaterial("res://Courses/Environments/grass-green/albedo.png", 1, 0.0f, 0.0f, new Color(1f, 1f, 1f), 0.85f);
         }
-        else if (golfType == "fairway" || golfType == "tee")
+        else if (golfType == "fairway")
         {
             mat = CreateGrassShaderMaterial("res://Courses/Environments/grass-fairway/albedo.png", 10, 0.06f, 0.4f, new Color(1f, 1f, 1f), 0.9f);
         }
@@ -2172,11 +2519,413 @@ public partial class OsmMapLoader : Node
         return mat;
     }
 
+    private class ElevationMap
+    {
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public double LeftLon { get; set; }
+        public double RightLon { get; set; }
+        public double TopLat { get; set; }
+        public double BottomLat { get; set; }
+        public float[] Data { get; set; } = Array.Empty<float>();
+        public float Offset { get; set; }
+    }
+
+    private int LonToTileX(double lon, int zoom)
+    {
+        return (int)Math.Floor((lon + 180.0) / 360.0 * (1 << zoom));
+    }
+
+    private int LatToTileY(double lat, int zoom)
+    {
+        double latRad = lat * Math.PI / 180.0;
+        return (int)Math.Floor((1.0 - Math.Log(Math.Tan(latRad) + 1.0 / Math.Cos(latRad)) / Math.PI) / 2.0 * (1 << zoom));
+    }
+
+    private double TileXToLon(int x, int zoom)
+    {
+        return x / (double)(1 << zoom) * 360.0 - 180.0;
+    }
+
+    private double TileYToLat(int y, int zoom)
+    {
+        double n = Math.PI - 2.0 * Math.PI * y / (double)(1 << zoom);
+        return 180.0 / Math.PI * Math.Atan(0.5 * (Math.Exp(n) - Math.Exp(-n)));
+    }
+
+    private async Task<float[]?> DownloadUsgsElevationAsync(BBox bbox, double leftLon, double rightLon, double topLat, double bottomLat, int width, int height)
+    {
+        string bboxStr = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F7},{1:F7},{2:F7},{3:F7}", leftLon, bottomLat, rightLon, topLat);
+        string url = $"https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage?bbox={bboxStr}&bboxSR=4326&size={width},{height}&imageSR=3857&format=bip&pixelType=F32&f=image";
+
+        GD.Print($"{LogPrefix} Attempting to fetch USGS 3DEP elevation data: size {width}x{height}, bbox {bboxStr}");
+        try
+        {
+            var response = await HttpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                GD.Print($"{LogPrefix} USGS 3DEP request returned status: {response.StatusCode}.");
+                return null;
+            }
+
+            byte[] bytes = await response.Content.ReadAsByteArrayAsync();
+            int expectedFloatBytes = width * height * 4;
+            if (bytes.Length < expectedFloatBytes)
+            {
+                GD.Print($"{LogPrefix} USGS response byte array too small ({bytes.Length} < {expectedFloatBytes}).");
+                return null;
+            }
+
+            float[] elevationData = new float[width * height];
+            Buffer.BlockCopy(bytes, 0, elevationData, 0, expectedFloatBytes);
+
+            // Check for NoData values
+            int checkCount = 0;
+            int noDataCount = 0;
+            int step = Math.Max(1, elevationData.Length / 100);
+            for (int i = 0; i < elevationData.Length; i += step)
+            {
+                checkCount++;
+                if (elevationData[i] < -9000f || float.IsNaN(elevationData[i]) || elevationData[i] > 10000f)
+                {
+                    noDataCount++;
+                }
+            }
+
+            if (noDataCount > checkCount * 0.5)
+            {
+                GD.Print($"{LogPrefix} USGS returned mostly NoData values (presumably outside the US).");
+                return null;
+            }
+
+            GD.Print($"{LogPrefix} Successfully downloaded USGS 3DEP elevation data!");
+            return elevationData;
+        }
+        catch (Exception ex)
+        {
+            GD.Print($"{LogPrefix} Exception querying USGS 3DEP: {ex.Message}");
+            return null;
+        }
+    }
+
+    private async Task DownloadElevationDataAsync(BBox bbox, string globalCourseDir)
+    {
+        string elevationPath = Path.Combine(globalCourseDir, "elevation.dat");
+        GD.Print($"{LogPrefix} Downloading elevation data for bbox: Lon[{bbox.LonMin}, {bbox.LonMax}], Lat[{bbox.LatMin}, {bbox.LatMax}]");
+
+        int z = 15;
+        int minTileX = LonToTileX(bbox.LonMin, z);
+        int maxTileX = LonToTileX(bbox.LonMax, z);
+        int minTileY = LatToTileY(bbox.LatMax, z);
+        int maxTileY = LatToTileY(bbox.LatMin, z);
+
+        int numTilesX = maxTileX - minTileX + 1;
+        int numTilesY = maxTileY - minTileY + 1;
+
+        if (numTilesX > 10 || numTilesY > 10)
+        {
+            GD.PrintErr($"{LogPrefix} Elevation bbox spans too many tiles ({numTilesX}x{numTilesY}). Aborting.");
+            return;
+        }
+
+        int widthPixels = numTilesX * 256;
+        int heightPixels = numTilesY * 256;
+
+        double leftLon = TileXToLon(minTileX, z);
+        double rightLon = TileXToLon(maxTileX + 1, z);
+        double topLat = TileYToLat(minTileY, z);
+        double bottomLat = TileYToLat(maxTileY + 1, z);
+
+        float[]? elevationData = await DownloadUsgsElevationAsync(bbox, leftLon, rightLon, topLat, bottomLat, widthPixels, heightPixels);
+
+        if (elevationData == null)
+        {
+            GD.Print($"{LogPrefix} USGS 3DEP not available or failed. Falling back to S3 Terrain Tiles.");
+            elevationData = new float[widthPixels * heightPixels];
+
+            for (int ty = minTileY; ty <= maxTileY; ty++)
+            {
+                for (int tx = minTileX; tx <= maxTileX; tx++)
+                {
+                    string url = $"https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{tx}/{ty}.png";
+                    try
+                    {
+                        var response = await HttpClient.GetAsync(url);
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            GD.PrintErr($"{LogPrefix} Failed to download elevation tile {tx},{ty}: {response.StatusCode}");
+                            continue;
+                        }
+
+                        byte[] pngBytes = await response.Content.ReadAsByteArrayAsync();
+                        var img = new Image();
+                        var err = img.LoadPngFromBuffer(pngBytes);
+                        if (err != Error.Ok)
+                        {
+                            GD.PrintErr($"{LogPrefix} Failed to parse elevation tile PNG {tx},{ty}: {err}");
+                            continue;
+                        }
+
+                        int startX = (tx - minTileX) * 256;
+                        int startY = (ty - minTileY) * 256;
+
+                        for (int py = 0; py < 256; py++)
+                        {
+                            for (int px = 0; px < 256; px++)
+                            {
+                                Color c = img.GetPixel(px, py);
+                                float r = c.R * 255.0f;
+                                float g = c.G * 255.0f;
+                                float b = c.B * 255.0f;
+                                float h = (r * 256.0f) + g + (b / 256.0f) - 32768.0f;
+
+                                int destX = startX + px;
+                                int destY = startY + py;
+                                elevationData[destY * widthPixels + destX] = h;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        GD.PrintErr($"{LogPrefix} Exception downloading elevation tile {tx},{ty}: {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        try
+        {
+            using (var stream = File.OpenWrite(elevationPath))
+            using (var writer = new BinaryWriter(stream))
+            {
+                writer.Write(2); // Version 2
+                writer.Write(widthPixels);
+                writer.Write(heightPixels);
+                writer.Write(leftLon);
+                writer.Write(rightLon);
+                writer.Write(topLat);
+                writer.Write(bottomLat);
+                writer.Write(bbox.RefLat);
+                writer.Write(bbox.RefLon);
+                writer.Write(bbox.MetersPerLat);
+                writer.Write(bbox.MetersPerLon);
+                
+                float rawCenterHeight = SampleRawHeightFromGrid(bbox.RefLat, bbox.RefLon, leftLon, rightLon, topLat, bottomLat, elevationData, widthPixels, heightPixels);
+                writer.Write(rawCenterHeight); // Offset
+
+                for (int i = 0; i < elevationData.Length; i++)
+                {
+                    writer.Write(elevationData[i]);
+                }
+            }
+            GD.Print($"{LogPrefix} Successfully saved elevation data to: {elevationPath}");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Failed to write elevation file: {ex.Message}");
+        }
+    }
+
+    private void LoadElevationMap(string elevationPath, double refLat, double refLon, double metersPerLat, double metersPerLon)
+    {
+        _currentElevationMap = null;
+        if (!File.Exists(elevationPath))
+        {
+            GD.Print($"{LogPrefix} Elevation file not found: {elevationPath}. Falling back to procedural elevation.");
+            return;
+        }
+
+        try
+        {
+            using (var stream = File.OpenRead(elevationPath))
+            using (var reader = new BinaryReader(stream))
+            {
+                int version = reader.ReadInt32();
+                if (version != 2)
+                {
+                    GD.PrintErr($"{LogPrefix} Unsupported elevation file version: {version}");
+                    return;
+                }
+
+                int w = reader.ReadInt32();
+                int h = reader.ReadInt32();
+                double leftLon = reader.ReadDouble();
+                double rightLon = reader.ReadDouble();
+                double topLat = reader.ReadDouble();
+                double bottomLat = reader.ReadDouble();
+                double rLat = reader.ReadDouble();
+                double rLon = reader.ReadDouble();
+                double mPerLat = reader.ReadDouble();
+                double mPerLon = reader.ReadDouble();
+                float offset = reader.ReadSingle();
+
+                float[] data = new float[w * h];
+                for (int i = 0; i < data.Length; i++)
+                {
+                    data[i] = reader.ReadSingle();
+                }
+
+                _currentElevationMap = new ElevationMap
+                {
+                    Width = w,
+                    Height = h,
+                    LeftLon = leftLon,
+                    RightLon = rightLon,
+                    TopLat = topLat,
+                    BottomLat = bottomLat,
+                    Data = data,
+                    Offset = offset
+                };
+
+                GD.Print($"{LogPrefix} Loaded elevation map: {w}x{h}, center offset subtracted: {offset} meters.");
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Failed to load elevation map: {ex.Message}");
+            _currentElevationMap = null;
+        }
+    }
+
+    private float SampleRawHeight(double lat, double lon)
+    {
+        if (_currentElevationMap == null) return 0f;
+
+        double leftLon = _currentElevationMap.LeftLon;
+        double rightLon = _currentElevationMap.RightLon;
+        double topLat = _currentElevationMap.TopLat;
+        double bottomLat = _currentElevationMap.BottomLat;
+
+        double u = (lon - leftLon) / (rightLon - leftLon);
+        
+        double MercatorY(double l)
+        {
+            return Math.Log(Math.Tan(l * Math.PI / 360.0 + Math.PI / 4.0));
+        }
+
+        double yVal = MercatorY(lat);
+        double yTop = MercatorY(topLat);
+        double yBottom = MercatorY(bottomLat);
+        double v = (yVal - yTop) / (yBottom - yTop);
+
+        u = Math.Clamp(u, 0.0, 1.0);
+        v = Math.Clamp(v, 0.0, 1.0);
+
+        int w = _currentElevationMap.Width;
+        int h = _currentElevationMap.Height;
+
+        float sampleX = (float)(u * (w - 1));
+        float sampleY = (float)(v * (h - 1));
+
+        int x0 = Math.Clamp((int)Math.Floor(sampleX), 0, w - 1);
+        int x1 = Math.Clamp(x0 + 1, 0, w - 1);
+        int y0 = Math.Clamp((int)Math.Floor(sampleY), 0, h - 1);
+        int y1 = Math.Clamp(y0 + 1, 0, h - 1);
+
+        float tx = sampleX - x0;
+        float ty = sampleY - y0;
+
+        float[] data = _currentElevationMap.Data;
+        float h00 = data[y0 * w + x0];
+        float h10 = data[y0 * w + x1];
+        float h01 = data[y1 * w + x0];
+        float h11 = data[y1 * w + x1];
+
+        float h0 = h00 * (1f - tx) + h10 * tx;
+        float h1 = h01 * (1f - tx) + h11 * tx;
+        return h0 * (1f - ty) + h1 * ty;
+    }
+
+    private static float SampleRawHeightFromGrid(double lat, double lon, double leftLon, double rightLon, double topLat, double bottomLat, float[] data, int w, int h)
+    {
+        double u = (lon - leftLon) / (rightLon - leftLon);
+        
+        double MercatorY(double l)
+        {
+            return Math.Log(Math.Tan(l * Math.PI / 360.0 + Math.PI / 4.0));
+        }
+
+        double yVal = MercatorY(lat);
+        double yTop = MercatorY(topLat);
+        double yBottom = MercatorY(bottomLat);
+        double v = (yVal - yTop) / (yBottom - yTop);
+
+        u = Math.Clamp(u, 0.0, 1.0);
+        v = Math.Clamp(v, 0.0, 1.0);
+
+        float sampleX = (float)(u * (w - 1));
+        float sampleY = (float)(v * (h - 1));
+
+        int x0 = Math.Clamp((int)Math.Floor(sampleX), 0, w - 1);
+        int x1 = Math.Clamp(x0 + 1, 0, w - 1);
+        int y0 = Math.Clamp((int)Math.Floor(sampleY), 0, h - 1);
+        int y1 = Math.Clamp(y0 + 1, 0, h - 1);
+
+        float tx = sampleX - x0;
+        float ty = sampleY - y0;
+
+        float h00 = data[y0 * w + x0];
+        float h10 = data[y0 * w + x1];
+        float h01 = data[y1 * w + x0];
+        float h11 = data[y1 * w + x1];
+
+        float h0 = h00 * (1f - tx) + h10 * tx;
+        float h1 = h01 * (1f - tx) + h11 * tx;
+        return h0 * (1f - ty) + h1 * ty;
+    }
+
+    private List<Vector2> ResamplePath(List<Vector2> path, int numPoints)
+    {
+        if (path.Count < 2) return path;
+        
+        float totalLength = 0f;
+        var segLengths = new float[path.Count - 1];
+        for (int i = 0; i < path.Count - 1; i++)
+        {
+            segLengths[i] = path[i].DistanceTo(path[i+1]);
+            totalLength += segLengths[i];
+        }
+
+        if (totalLength < 0.1f) return path;
+
+        var resampled = new List<Vector2>();
+        resampled.Add(path[0]);
+
+        float step = totalLength / (numPoints - 1);
+        int segIdx = 0;
+        float segStartDist = 0f;
+
+        for (int i = 1; i < numPoints - 1; i++)
+        {
+            float targetDist = i * step;
+            while (segIdx < segLengths.Length && segStartDist + segLengths[segIdx] < targetDist)
+            {
+                segStartDist += segLengths[segIdx];
+                segIdx++;
+            }
+            if (segIdx >= segLengths.Length) break;
+
+            float t = (targetDist - segStartDist) / segLengths[segIdx];
+            Vector2 p = path[segIdx] * (1f - t) + path[segIdx + 1] * t;
+            resampled.Add(p);
+        }
+
+        resampled.Add(path[path.Count - 1]);
+        return resampled;
+    }
+
     private float GetHeight(float x, float z)
     {
-        double h = Math.Sin(x * 0.01) * Math.Cos(z * 0.01) * 1.5
-                 + Math.Sin(x * 0.03 + z * 0.02) * 0.5
-                 + Math.Cos(x * 0.07 - z * 0.05) * 0.125;
+        if (_currentElevationMap != null)
+        {
+            double lon = _refLon + x / _metersPerLon;
+            double lat = _refLat - z / _metersPerLat;
+            return SampleRawHeight(lat, lon) - _currentElevationMap.Offset;
+        }
+
+        double h = Math.Sin(x * 0.01) * Math.Cos(z * 0.01) * 3.5
+                 + Math.Sin(x * 0.03 + z * 0.02) * 1.2
+                 + Math.Cos(x * 0.07 - z * 0.05) * 0.3;
         return (float)h;
     }
 
@@ -2217,8 +2966,6 @@ public partial class OsmMapLoader : Node
                 float distToWaterBoundary = 0f;
                 bool isInsideBunker = false;
                 float minDistBunker = float.MaxValue;
-                bool isInsidePlay = false;
-                float minDistPlay = float.MaxValue;
                 var vertexPoint = new Vector2(vx, vz);
                 
                 foreach (var excl in exclusions)
@@ -2248,19 +2995,6 @@ public partial class OsmMapLoader : Node
                                 if (dist < minDistBunker) minDistBunker = dist;
                             }
                         }
-                        else
-                        {
-                            if (isInside)
-                            {
-                                isInsidePlay = true;
-                                minDistPlay = 0f;
-                            }
-                            else
-                            {
-                                float dist = DistanceToPolygon(vertexPoint, excl.Polygon);
-                                if (dist < minDistPlay) minDistPlay = dist;
-                            }
-                        }
                     }
                 }
                 
@@ -2282,27 +3016,16 @@ public partial class OsmMapLoader : Node
                 float depBunker = 0f;
                 if (isInsideBunker)
                 {
-                    depBunker = 0.8f;
+                    depBunker = 0.45f;
                 }
                 else if (minDistBunker < 3.0f)
                 {
                     float t = 1.0f - (minDistBunker / 3.0f);
                     float smoothT = t * t * (3.0f - 2.0f * t);
-                    depBunker = smoothT * 0.15f;
+                    depBunker = smoothT * 0.45f;
                 }
                 
-                float bufferPlay = margin * 0.5f;
                 float depPlay = 0f;
-                if (isInsidePlay || minDistPlay < bufferPlay)
-                {
-                    depPlay = 0.8f;
-                }
-                else if (minDistPlay < margin)
-                {
-                    float t = 1.0f - ((minDistPlay - bufferPlay) / (margin - bufferPlay));
-                    float smoothT = t * t * (3.0f - 2.0f * t);
-                    depPlay = smoothT * 0.8f;
-                }
                 
                 float totalDep = Math.Max(depWater, Math.Max(depBunker, depPlay));
                 vy -= totalDep;
@@ -2426,6 +3149,40 @@ public partial class OsmMapLoader : Node
                 
                 root.AddChild(treeInstance);
                 treeInstance.Owner = root;
+
+                // Shrink and reposition the trunk collision shape so it doesn't extend into foliage
+                foreach (Node child in treeInstance.GetChildren())
+                {
+                    if (child is CollisionShape3D colShapeNode)
+                    {
+                        if (colShapeNode.Shape is CapsuleShape3D capsule)
+                        {
+                            var newCapsule = (CapsuleShape3D)capsule.Duplicate();
+                            newCapsule.Radius = 0.15f;
+                            newCapsule.Height = 1.0f;
+                            colShapeNode.Shape = newCapsule;
+                            
+                            colShapeNode.Transform = new Transform3D(Basis.Identity, new Vector3(0f, 0.5f, 0f));
+                        }
+                    }
+                }
+
+                // Create leaves/canopy Area3D to detect ball passing through
+                var canopyArea = new Area3D();
+                canopyArea.Name = "CanopyArea";
+                canopyArea.SetMeta("is_canopy", true);
+
+                var canopyShape = new CollisionShape3D();
+                var sphereShape = new SphereShape3D();
+                sphereShape.Radius = 1.8f;
+                canopyShape.Shape = sphereShape;
+                canopyShape.Position = new Vector3(0f, 3.8f, 0f);
+
+                canopyArea.AddChild(canopyShape);
+                treeInstance.AddChild(canopyArea);
+
+                canopyArea.Owner = root;
+                canopyShape.Owner = root;
             }
             else
             {
@@ -2557,8 +3314,9 @@ public partial class OsmMapLoader : Node
         public float MinY;
         public float MaxY;
         public string? GolfType;
+        public float? AverageHeight;
 
-        public ExclusionPolygon(Vector2[] polygon, string? golfType = "")
+        public ExclusionPolygon(Vector2[] polygon, string? golfType = "", OsmMapLoader? loader = null)
         {
             Polygon = polygon;
             GolfType = golfType;
@@ -2566,12 +3324,21 @@ public partial class OsmMapLoader : Node
             MaxX = float.MinValue;
             MinY = float.MaxValue;
             MaxY = float.MinValue;
+            float sum = 0f;
             foreach (var p in polygon)
             {
                 if (p.X < MinX) MinX = p.X;
                 if (p.X > MaxX) MaxX = p.X;
                 if (p.Y < MinY) MinY = p.Y;
                 if (p.Y > MaxY) MaxY = p.Y;
+                if (loader != null)
+                {
+                    sum += loader.GetHeight(p.X, p.Y);
+                }
+            }
+            if (loader != null && polygon.Length > 0 && (golfType == "tee" || golfType == "green"))
+            {
+                AverageHeight = sum / polygon.Length;
             }
         }
     }
@@ -2644,17 +3411,16 @@ public partial class OsmMapLoader : Node
         ColorToHsv(color, out float h, out float s, out float v);
 
         // Vegetation check (Hue: yellow-green to cyan-green, saturation filter)
-        // Relaxed saturation threshold from 0.18f to 0.13f to capture olive/desaturated trees
-        bool isGreenish = (h >= 0.12f && h <= 0.48f) && (s > 0.13f);
+        // Tightened saturation threshold to avoid selecting desaturated ground/grass
+        bool isGreenish = (h >= 0.12f && h <= 0.48f) && (s > 0.18f);
 
         // Brightness check (trees are darker canopy)
-        // Lowered minimum value from 0.08f back to 0.05f to capture darker tree canopy interiors
-        bool isDarkEnough = (v > 0.05f && v < 0.28f);
+        // Tightened brightness range to target actual tree crowns and shadows rather than bright fairways
+        bool isDarkEnough = (v > 0.04f && v < 0.32f);
 
         // Excess green index check to confirm it's actually vegetation
-        // Adjusted from 0.02f down to -0.005f to allow less intense green foliage
         float exG = 2.0f * g - r - b;
-        bool hasExG = exG > -0.005f;
+        bool hasExG = exG > 0.01f;
 
         return isGreenish && isDarkEnough && hasExG;
     }
@@ -2742,6 +3508,10 @@ public partial class OsmMapLoader : Node
         public double LatMin { get; set; }
         public double LonMax { get; set; }
         public double LatMax { get; set; }
+        public double RefLat { get; set; }
+        public double RefLon { get; set; }
+        public double MetersPerLat { get; set; }
+        public double MetersPerLon { get; set; }
     }
 
     private BBox? CalculateBBoxFromOsmJson(string jsonString, double lat, double lon)
@@ -3102,10 +3872,10 @@ public partial class OsmMapLoader : Node
 
             if (!hasValidPoints)
             {
-                courseMinX = -1500f;
-                courseMaxX = 1500f;
-                courseMinZ = -1500f;
-                courseMaxZ = 1500f;
+                courseMinX = -1000f;
+                courseMaxX = 1000f;
+                courseMinZ = -1000f;
+                courseMaxZ = 1000f;
             }
             else
             {
@@ -3120,7 +3890,16 @@ public partial class OsmMapLoader : Node
             double latMin = refLat - courseMaxZ / metersPerLat;
             double latMax = refLat - courseMinZ / metersPerLat;
 
-            return new BBox { LonMin = lonMin, LatMin = latMin, LonMax = lonMax, LatMax = latMax };
+            return new BBox { 
+                LonMin = lonMin, 
+                LatMin = latMin, 
+                LonMax = lonMax, 
+                LatMax = latMax,
+                RefLat = refLat,
+                RefLon = refLon,
+                MetersPerLat = metersPerLat,
+                MetersPerLon = metersPerLon
+            };
         }
         catch (Exception ex)
         {
@@ -3171,53 +3950,466 @@ public partial class OsmMapLoader : Node
 
     private void CreateGolfSurfaceMesh(Node3D rootNode, Vector2[] uniquePoints, string golfType, string idSuffix, List<ExclusionPolygon> exclusionPolygons)
     {
-        exclusionPolygons.Add(new ExclusionPolygon(uniquePoints, golfType));
-        var indices = Geometry2D.TriangulatePolygon(uniquePoints);
-        if (indices.Length > 0)
+        exclusionPolygons.Add(new ExclusionPolygon(uniquePoints, golfType, this));
+        int surfaceTypeValue = golfType == "green" ? 4 : (golfType == "bunker" ? 2 : 0);
+
+        var staticBody = new StaticBody3D { Name = $"{golfType}_Static_{idSuffix}" };
+        staticBody.SetMeta("surface_type", surfaceTypeValue);
+        if (golfType == "bunker")
         {
-            float heightOffset = golfType == "green" ? 0.02f : (golfType == "bunker" ? -0.15f : 0.01f);
-            Color color = golfType == "green" ? new Color(0.55f, 0.85f, 0.55f) : new Color(0.45f, 0.75f, 0.45f);
-            int surfaceTypeValue = golfType == "green" ? 4 : 0;
-
-            var mesh = Create3DPolygonMesh(uniquePoints, indices, heightOffset, color, golfType, exclusionPolygons);
-            var meshInstance = new MeshInstance3D
-            {
-                Name = $"{golfType}_{idSuffix}",
-                Mesh = mesh
-            };
-            rootNode.AddChild(meshInstance);
-            meshInstance.Owner = rootNode;
-
-            var staticBody = new StaticBody3D { Name = $"{golfType}_Static_{idSuffix}" };
-            staticBody.SetMeta("surface_type", surfaceTypeValue);
-
-            var colShape = new CollisionShape3D();
-            var concaveShape = new ConcavePolygonShape3D();
-            concaveShape.Data = mesh.GetFaces();
-            colShape.Shape = concaveShape;
-
-            staticBody.AddChild(colShape);
-            rootNode.AddChild(staticBody);
-            staticBody.Owner = rootNode;
-            colShape.Owner = rootNode;
+            staticBody.SetMeta("is_sand", true);
         }
+        CreateCollisionForPolygon(staticBody, uniquePoints, rootNode, exclusionPolygons);
     }
 
     private void CreateTeeBoxMesh(Node3D rootNode, Vector2[] uniquePoints, string idSuffix, List<ExclusionPolygon> exclusionPolygons)
     {
-        exclusionPolygons.Add(new ExclusionPolygon(uniquePoints, "tee"));
-        var indices = Geometry2D.TriangulatePolygon(uniquePoints);
-        if (indices.Length > 0)
+        exclusionPolygons.Add(new ExclusionPolygon(uniquePoints, "tee", this));
+        var staticBody = new StaticBody3D { Name = $"tee_Static_{idSuffix}" };
+        staticBody.SetMeta("surface_type", 0); // Fairway physics for tees
+        CreateCollisionForPolygon(staticBody, uniquePoints, rootNode, exclusionPolygons);
+    }
+
+    /// <summary>
+    /// Creates a collision-only body for a polygon zone (no visual mesh).
+    /// The collision shape follows the terrain height.
+    /// </summary>
+    private void CreateCollisionForPolygon(StaticBody3D staticBody, Vector2[] points, Node3D rootNode, List<ExclusionPolygon>? exclusions = null)
+    {
+        if (points == null || points.Length < 3) return;
+        
+        var indices = Geometry2D.TriangulatePolygon(points);
+        if (indices.Length == 0) return;
+
+        // Subdivide large triangles for height fidelity
+        var queue = new Queue<SubdivisionTriangle>();
+        for (int i = 0; i < indices.Length; i += 3)
         {
-            var mesh = Create3DPolygonMesh(uniquePoints, indices, 0.01f, new Color(0.45f, 0.75f, 0.45f), "tee", exclusionPolygons);
-            var meshInstance = new MeshInstance3D
-            {
-                Name = $"tee_{idSuffix}",
-                Mesh = mesh
-            };
-            rootNode.AddChild(meshInstance);
-            meshInstance.Owner = rootNode;
+            queue.Enqueue(new SubdivisionTriangle(points[indices[i]], points[indices[i+1]], points[indices[i+2]]));
         }
+
+        var tris = new List<SubdivisionTriangle>();
+        float maxEdgeSq = 12.0f * 12.0f;
+        while (queue.Count > 0)
+        {
+            var tri = queue.Dequeue();
+            float dAB = tri.A.DistanceSquaredTo(tri.B);
+            float dBC = tri.B.DistanceSquaredTo(tri.C);
+            float dCA = tri.C.DistanceSquaredTo(tri.A);
+            float maxD = Math.Max(dAB, Math.Max(dBC, dCA));
+            if (maxD > maxEdgeSq)
+            {
+                if (maxD == dAB)
+                {
+                    var m = (tri.A + tri.B) * 0.5f;
+                    queue.Enqueue(new SubdivisionTriangle(tri.A, m, tri.C));
+                    queue.Enqueue(new SubdivisionTriangle(m, tri.B, tri.C));
+                }
+                else if (maxD == dBC)
+                {
+                    var m = (tri.B + tri.C) * 0.5f;
+                    queue.Enqueue(new SubdivisionTriangle(tri.B, m, tri.A));
+                    queue.Enqueue(new SubdivisionTriangle(m, tri.C, tri.A));
+                }
+                else
+                {
+                    var m = (tri.C + tri.A) * 0.5f;
+                    queue.Enqueue(new SubdivisionTriangle(tri.C, m, tri.B));
+                    queue.Enqueue(new SubdivisionTriangle(m, tri.A, tri.B));
+                }
+            }
+            else
+            {
+                tris.Add(tri);
+            }
+        }
+
+        var collisionVerts = new Vector3[tris.Count * 3];
+        for (int i = 0; i < tris.Count; i++)
+        {
+            var t = tris[i];
+            float hA = exclusions != null ? GetHeightWithFeatures(t.A.X, t.A.Y, exclusions) : GetHeight(t.A.X, t.A.Y);
+            float hB = exclusions != null ? GetHeightWithFeatures(t.B.X, t.B.Y, exclusions) : GetHeight(t.B.X, t.B.Y);
+            float hC = exclusions != null ? GetHeightWithFeatures(t.C.X, t.C.Y, exclusions) : GetHeight(t.C.X, t.C.Y);
+            collisionVerts[i * 3] = new Vector3(t.A.X, hA, t.A.Y);
+            collisionVerts[i * 3 + 1] = new Vector3(t.B.X, hB, t.B.Y);
+            collisionVerts[i * 3 + 2] = new Vector3(t.C.X, hC, t.C.Y);
+        }
+
+        var concaveShape = new ConcavePolygonShape3D();
+        concaveShape.Data = collisionVerts;
+        var colShape = new CollisionShape3D();
+        colShape.Shape = concaveShape;
+
+        staticBody.AddChild(colShape);
+        rootNode.AddChild(staticBody);
+        staticBody.Owner = rootNode;
+        colShape.Owner = rootNode;
+    }
+
+    /// <summary>
+    /// Returns terrain height with smooth bunker bowl depressions applied.
+    /// </summary>
+    private float GetHeightWithFeatures(float x, float z, List<ExclusionPolygon> exclusions)
+    {
+        float baseHeight = GetHeight(x, z);
+        var point = new Vector2(x, z);
+
+        float bunkerDepression = 0f;
+        float waterDepression = 0f;
+
+        float? overrideHeight = null;
+        float overrideWeight = 0f;
+
+        foreach (var excl in exclusions)
+        {
+            if (x < excl.MinX - 5f || x > excl.MaxX + 5f || z < excl.MinY - 5f || z > excl.MaxY + 5f)
+                continue;
+
+            bool inside = Geometry2D.IsPointInPolygon(point, excl.Polygon);
+
+            if (excl.GolfType == "bunker")
+            {
+                if (inside)
+                {
+                    float dist = DistanceToPolygon(point, excl.Polygon);
+                    float bowlRadius = 2.0f;
+                    float maxDepth = 0.6f;
+                    if (dist < bowlRadius)
+                    {
+                        float t = dist / bowlRadius;
+                        float smoothT = t * t * (3.0f - 2.0f * t);
+                        bunkerDepression = Math.Max(bunkerDepression, smoothT * maxDepth);
+                    }
+                    else
+                    {
+                        bunkerDepression = Math.Max(bunkerDepression, maxDepth);
+                    }
+                }
+                else
+                {
+                    // Smooth lip outside bunker boundary
+                    float dist = DistanceToPolygon(point, excl.Polygon);
+                    if (dist < 1.5f)
+                    {
+                        float t = 1.0f - (dist / 1.5f);
+                        float smoothT = t * t * (3.0f - 2.0f * t);
+                        bunkerDepression = Math.Max(bunkerDepression, smoothT * 0.05f);
+                    }
+                }
+            }
+            else if (excl.GolfType == "water")
+            {
+                if (inside)
+                {
+                    float dist = DistanceToPolygon(point, excl.Polygon);
+                    float maxDepth = 2.0f;
+                    if (dist < 15.0f)
+                    {
+                        float t = dist / 15.0f;
+                        float smoothT = t * t * (3.0f - 2.0f * t);
+                        waterDepression = Math.Max(waterDepression, smoothT * maxDepth);
+                    }
+                    else
+                    {
+                        waterDepression = Math.Max(waterDepression, maxDepth);
+                    }
+                }
+            }
+            else if (excl.GolfType == "tee" && excl.AverageHeight.HasValue)
+            {
+                float targetH = excl.AverageHeight.Value;
+                if (inside)
+                {
+                    float dist = DistanceToPolygon(point, excl.Polygon);
+                    float blendRadius = 2.0f;
+                    if (dist < blendRadius)
+                    {
+                        float t = dist / blendRadius;
+                        float smoothT = t * t * (3.0f - 2.0f * t);
+                        overrideHeight = (overrideHeight ?? baseHeight) * (1f - smoothT) + targetH * smoothT;
+                        overrideWeight = Math.Max(overrideWeight, smoothT);
+                    }
+                    else
+                    {
+                        overrideHeight = targetH;
+                        overrideWeight = 1.0f;
+                    }
+                }
+            }
+            else if (excl.GolfType == "green" && excl.AverageHeight.HasValue)
+            {
+                float targetH = excl.AverageHeight.Value;
+                if (inside)
+                {
+                    float dist = DistanceToPolygon(point, excl.Polygon);
+                    float blendRadius = 2.0f;
+                    // Green smoothing: scale down vertical variation relative to average height
+                    float greenSlopeScale = (_currentElevationMap != null) ? 1.0f : 0.35f;
+                    float smoothedH = targetH + (baseHeight - targetH) * greenSlopeScale;
+                    if (dist < blendRadius)
+                    {
+                        float t = dist / blendRadius;
+                        float smoothT = t * t * (3.0f - 2.0f * t);
+                        overrideHeight = (overrideHeight ?? baseHeight) * (1f - smoothT) + smoothedH * smoothT;
+                        overrideWeight = Math.Max(overrideWeight, smoothT);
+                    }
+                    else
+                    {
+                        overrideHeight = smoothedH;
+                        overrideWeight = 1.0f;
+                    }
+                }
+            }
+        }
+
+        float finalBase = overrideHeight.HasValue ? overrideHeight.Value : baseHeight;
+        return finalBase - Math.Max(bunkerDepression, waterDepression);
+    }
+
+    /// <summary>
+    /// Generates a splat map texture encoding surface types for the terrain.
+    /// R = green, G = fairway/tee, B = bunker. Rough = where all channels are 0.
+    /// </summary>
+    private ImageTexture GenerateSplatMap(float minX, float maxX, float minZ, float maxZ, List<ExclusionPolygon> exclusions, List<Vector2> treePositions)
+    {
+        int texSize = 2048;
+        var image = Image.CreateEmpty(texSize, texSize, false, Image.Format.Rgba8);
+
+        float worldWidth = maxX - minX;
+        float worldDepth = maxZ - minZ;
+        float blendRadius = 1.5f; // meters of smooth blending at zone boundaries
+
+        for (int py = 0; py < texSize; py++)
+        {
+            for (int px = 0; px < texSize; px++)
+            {
+                float worldX = minX + (px / (float)(texSize - 1)) * worldWidth;
+                float worldZ = minZ + (py / (float)(texSize - 1)) * worldDepth;
+                var point = new Vector2(worldX, worldZ);
+
+                float greenWeight = 0f;
+                float fairwayWeight = 0f;
+                float bunkerWeight = 0f;
+
+                foreach (var excl in exclusions)
+                {
+                    if (worldX < excl.MinX - blendRadius || worldX > excl.MaxX + blendRadius ||
+                        worldZ < excl.MinY - blendRadius || worldZ > excl.MaxY + blendRadius)
+                        continue;
+
+                    bool inside = Geometry2D.IsPointInPolygon(point, excl.Polygon);
+                    float dist = DistanceToPolygon(point, excl.Polygon);
+
+                    float weight = 0f;
+                    if (inside)
+                    {
+                        weight = 1.0f;
+                    }
+                    else if (dist < blendRadius)
+                    {
+                        float t = 1.0f - (dist / blendRadius);
+                        weight = t * t * (3.0f - 2.0f * t); // smoothstep
+                    }
+
+                    if (weight > 0f)
+                    {
+                        if (excl.GolfType == "green" || excl.GolfType == "tee")
+                        {
+                            greenWeight = Math.Max(greenWeight, weight);
+                        }
+                        else if (excl.GolfType == "fairway")
+                        {
+                            fairwayWeight = Math.Max(fairwayWeight, weight);
+                        }
+                        else if (excl.GolfType == "bunker")
+                        {
+                            bunkerWeight = Math.Max(bunkerWeight, weight);
+                        }
+                    }
+                }
+
+                // Compute mulch weight around tree positions (radius = 2.2m)
+                float mulchWeight = 0f;
+                foreach (var treePos in treePositions)
+                {
+                    float dx = worldX - treePos.X;
+                    float dz = worldZ - treePos.Y;
+                    float distSq = dx * dx + dz * dz;
+                    float mulchRadius = 2.2f;
+                    if (distSq < mulchRadius * mulchRadius)
+                    {
+                        float dist = (float)Math.Sqrt(distSq);
+                        float w = 1.0f - (dist / mulchRadius);
+                        mulchWeight = Math.Max(mulchWeight, w * w * (3.0f - 2.0f * w)); // smoothstep
+                    }
+                }
+
+                // Priority override: bunker > green/tee > mulch > fairway
+                if (bunkerWeight >= 1.0f)
+                {
+                    greenWeight = 0f;
+                    fairwayWeight = 0f;
+                    mulchWeight = 0f;
+                }
+                else if (greenWeight >= 1.0f)
+                {
+                    fairwayWeight = 0f;
+                    mulchWeight = 0f;
+                    bunkerWeight = Math.Min(bunkerWeight, 1.0f - greenWeight);
+                }
+                else if (mulchWeight >= 1.0f)
+                {
+                    fairwayWeight = 0f;
+                    greenWeight = Math.Min(greenWeight, 1.0f - mulchWeight);
+                    bunkerWeight = Math.Min(bunkerWeight, 1.0f - mulchWeight);
+                }
+                else
+                {
+                    float baseSum = greenWeight + bunkerWeight + mulchWeight;
+                    if (baseSum > 0f)
+                    {
+                        fairwayWeight = Math.Min(fairwayWeight, 1.0f - baseSum);
+                    }
+                }
+
+                image.SetPixel(px, py, new Color(greenWeight, fairwayWeight, bunkerWeight, mulchWeight));
+            }
+        }
+
+        var texture = ImageTexture.CreateFromImage(image);
+        return texture;
+    }
+
+    /// <summary>
+    /// Creates a single unified terrain mesh covering the entire course, with a splat map
+    /// shader to blend between surface textures (green, fairway, rough, bunker).
+    /// Replaces the old separate-mesh approach.
+    /// </summary>
+    private void CreateUnifiedTerrain(float minX, float maxX, float minZ, float maxZ, int subdivisionsX, int subdivisionsZ, Node3D root, List<ExclusionPolygon> exclusions, List<Vector2> treePositions)
+    {
+        GD.Print($"{LogPrefix} Generating unified terrain mesh ({subdivisionsX}x{subdivisionsZ})...");
+
+        // Generate the splat map texture
+        GD.Print($"{LogPrefix} Generating splat map...");
+        var splatMap = GenerateSplatMap(minX, maxX, minZ, maxZ, exclusions, treePositions);
+
+        var arrayMesh = new ArrayMesh();
+        int numVertices = (subdivisionsX + 1) * (subdivisionsZ + 1);
+        var vertices = new Vector3[numVertices];
+        var normals = new Vector3[numVertices];
+        var colors = new Color[numVertices];
+        var uvs = new Vector2[numVertices]; // UV1: world-space tiling for textures
+        var uv2s = new Vector2[numVertices]; // UV2: normalized [0,1] for splat map
+
+        float width = maxX - minX;
+        float depth = maxZ - minZ;
+        float cellWidth = width / subdivisionsX;
+        float cellDepth = depth / subdivisionsZ;
+
+        int idx = 0;
+        for (int z = 0; z <= subdivisionsZ; z++)
+        {
+            for (int x = 0; x <= subdivisionsX; x++)
+            {
+                float vx = minX + x * cellWidth;
+                float vz = minZ + z * cellDepth;
+                float vy = GetHeightWithFeatures(vx, vz, exclusions);
+
+                vertices[idx] = new Vector3(vx, vy, vz);
+
+                // Compute normal from height differences
+                float hL = GetHeightWithFeatures(vx - 1.0f, vz, exclusions);
+                float hR = GetHeightWithFeatures(vx + 1.0f, vz, exclusions);
+                float hD = GetHeightWithFeatures(vx, vz - 1.0f, exclusions);
+                float hU = GetHeightWithFeatures(vx, vz + 1.0f, exclusions);
+                normals[idx] = new Vector3(hL - hR, 2.0f, hD - hU).Normalized();
+
+                colors[idx] = new Color(1f, 1f, 1f); // White — shader handles color
+                uvs[idx] = new Vector2(vx, vz) * 0.1f; // World-space UV for texture tiling
+                uv2s[idx] = new Vector2(
+                    (vx - minX) / width,
+                    (vz - minZ) / depth
+                ); // Normalized UV for splat map
+
+                idx++;
+            }
+        }
+
+        // Build index buffer (two triangles per grid cell)
+        var indicesList = new List<int>();
+        for (int z = 0; z < subdivisionsZ; z++)
+        {
+            for (int x = 0; x < subdivisionsX; x++)
+            {
+                int row1 = z * (subdivisionsX + 1);
+                int row2 = (z + 1) * (subdivisionsX + 1);
+
+                indicesList.Add(row1 + x);
+                indicesList.Add(row1 + x + 1);
+                indicesList.Add(row2 + x);
+
+                indicesList.Add(row1 + x + 1);
+                indicesList.Add(row2 + x + 1);
+                indicesList.Add(row2 + x);
+            }
+        }
+        var indices = indicesList.ToArray();
+
+        // Build the mesh
+        var arr = new Godot.Collections.Array();
+        arr.Resize((int)Mesh.ArrayType.Max);
+        arr[(int)Mesh.ArrayType.Vertex] = vertices;
+        arr[(int)Mesh.ArrayType.Normal] = normals;
+        arr[(int)Mesh.ArrayType.Color] = colors;
+        arr[(int)Mesh.ArrayType.TexUV] = uvs;
+        arr[(int)Mesh.ArrayType.TexUV2] = uv2s;
+        arr[(int)Mesh.ArrayType.Index] = indices;
+
+        arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arr);
+
+        // Create and assign the splat map material
+        var shader = GD.Load<Shader>("res://Courses/Environments/shaders/terrain_splat.gdshader");
+        var mat = new ShaderMaterial();
+        mat.Shader = shader;
+        mat.SetShaderParameter("splat_map", splatMap);
+        mat.SetShaderParameter("tex_rough", GD.Load<Texture2D>("res://Courses/Environments/grass-rough/albedo.png"));
+        mat.SetShaderParameter("tex_green", GD.Load<Texture2D>("res://Courses/Environments/grass-green/albedo.png"));
+        mat.SetShaderParameter("tex_fairway", GD.Load<Texture2D>("res://Courses/Environments/grass-fairway/albedo.png"));
+        mat.SetShaderParameter("tex_bunker", GD.Load<Texture2D>("res://Courses/Environments/sand-bunker/albedo.png"));
+        mat.SetShaderParameter("normal_bunker", GD.Load<Texture2D>("res://Courses/Environments/sand-bunker/normal.png"));
+        mat.SetShaderParameter("tex_mulch", GD.Load<Texture2D>("res://Courses/Environments/tree-bark/albedo.png"));
+
+        arrayMesh.SurfaceSetMaterial(0, mat);
+
+        var groundMesh = new MeshInstance3D
+        {
+            Name = "UnifiedTerrain",
+            Mesh = arrayMesh
+        };
+        root.AddChild(groundMesh);
+        groundMesh.Owner = root;
+
+        // Create fallback collision body (rough surface type) for the terrain
+        var groundStatic = new StaticBody3D { Name = "TerrainStatic" };
+        groundStatic.SetMeta("surface_type", 2); // Rough
+
+        var colShape = new CollisionShape3D();
+        var concaveShape = new ConcavePolygonShape3D();
+        var collisionVertices = new Vector3[indices.Length];
+        for (int i = 0; i < indices.Length; i++)
+        {
+            collisionVertices[i] = vertices[indices[i]];
+        }
+        concaveShape.Data = collisionVertices;
+        colShape.Shape = concaveShape;
+
+        groundStatic.AddChild(colShape);
+        root.AddChild(groundStatic);
+        groundStatic.Owner = root;
+        colShape.Owner = root;
+
+        GD.Print($"{LogPrefix} Unified terrain created successfully.");
     }
 
     private float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
@@ -3242,5 +4434,183 @@ public partial class OsmMapLoader : Node
             if (d < minD) minD = d;
         }
         return minD;
+    }
+
+    private StandardMaterial3D? _rockMaterial;
+    private ArrayMesh[]? _rockMeshes;
+
+    private void InitializeRockAssets()
+    {
+        if (_rockMaterial != null) return;
+        
+        _rockMaterial = new StandardMaterial3D
+        {
+            VertexColorUseAsAlbedo = false,
+            AlbedoTexture = GD.Load<Texture2D>("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_albedo.png"),
+            NormalEnabled = true,
+            NormalTexture = GD.Load<Texture2D>("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_normal-ogl.png"),
+            RoughnessTexture = GD.Load<Texture2D>("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_roughness.png"),
+            AOEnabled = true,
+            AOTexture = GD.Load<Texture2D>("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_ao.png"),
+            Roughness = 0.9f,
+            NormalScale = 1.0f,
+            Uv1Scale = new Vector3(2f, 2f, 2f)
+        };
+        
+        var random = new Random(1337);
+        _rockMeshes = new ArrayMesh[3];
+        for (int i = 0; i < 3; i++)
+        {
+            _rockMeshes[i] = CreateSingleRockMesh(_rockMaterial, random);
+        }
+    }
+
+    private ArrayMesh CreateSingleRockMesh(StandardMaterial3D material, Random random)
+    {
+        var arrayMesh = new ArrayMesh();
+        int rings = 6;
+        int slices = 10;
+        
+        int numVertices = (rings + 1) * (slices + 1);
+        var vertices = new Vector3[numVertices];
+        var normals = new Vector3[numVertices];
+        var uvs = new Vector2[numVertices];
+        
+        int idx = 0;
+        for (int r = 0; r <= rings; r++)
+        {
+            float phi = Mathf.Pi * r / rings;
+            float sinPhi = Mathf.Sin(phi);
+            float cosPhi = Mathf.Cos(phi);
+            
+            for (int s = 0; s <= slices; s++)
+            {
+                float theta = Mathf.Tau * s / slices;
+                float sinTheta = Mathf.Sin(theta);
+                float cosTheta = Mathf.Cos(theta);
+                
+                float x = sinPhi * cosTheta;
+                float y = cosPhi;
+                float z = sinPhi * sinTheta;
+                
+                var normal = new Vector3(x, y, z).Normalized();
+                
+                float radialNoise = 0.7f + (float)random.NextDouble() * 0.5f;
+                float heightDeform = 0.5f + (float)random.NextDouble() * 0.4f;
+                float bottomFlatten = y < -0.2f ? 0.8f : 1.0f;
+                
+                var vertex = new Vector3(
+                    x * radialNoise,
+                    y * heightDeform * bottomFlatten,
+                    z * radialNoise
+                );
+                
+                vertices[idx] = vertex;
+                normals[idx] = normal;
+                uvs[idx] = new Vector2((float)s / slices * 2f, (float)r / rings * 2f);
+                
+                idx++;
+            }
+        }
+        
+        var indices = new List<int>();
+        for (int r = 0; r < rings; r++)
+        {
+            for (int s = 0; s < slices; s++)
+            {
+                int current = r * (slices + 1) + s;
+                int next = current + 1;
+                int bottom = (r + 1) * (slices + 1) + s;
+                int bottomNext = bottom + 1;
+                
+                indices.Add(current);
+                indices.Add(bottom);
+                indices.Add(next);
+                
+                indices.Add(next);
+                indices.Add(bottom);
+                indices.Add(bottomNext);
+            }
+        }
+        
+        var arr = new Godot.Collections.Array();
+        arr.Resize((int)Mesh.ArrayType.Max);
+        arr[(int)Mesh.ArrayType.Vertex] = vertices;
+        arr[(int)Mesh.ArrayType.Normal] = normals;
+        arr[(int)Mesh.ArrayType.TexUV] = uvs;
+        arr[(int)Mesh.ArrayType.Index] = indices.ToArray();
+        
+        arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arr);
+        arrayMesh.SurfaceSetMaterial(0, material);
+        return arrayMesh;
+    }
+
+    private void SpawnRockAt(Node3D root, Vector3 position, Vector3 scale, float rotationY, ArrayMesh mesh)
+    {
+        var staticBody = new StaticBody3D
+        {
+            Name = $"Rock_{position.X:F1}_{position.Z:F1}",
+            Position = position,
+            Scale = scale,
+            Rotation = new Vector3(0f, rotationY, 0f)
+        };
+        staticBody.SetMeta("surface_type", 2); // Treated as rough collision for the ball
+        
+        var meshInstance = new MeshInstance3D
+        {
+            Name = "Mesh",
+            Mesh = mesh
+        };
+        staticBody.AddChild(meshInstance);
+
+        var collisionShape = new CollisionShape3D
+        {
+            Name = "Collision"
+        };
+        
+        // Generate a convex collision shape from the rock's mesh for realistic non-uniform scale collisions
+        var convexShape = mesh.CreateConvexShape();
+        collisionShape.Shape = convexShape;
+        staticBody.AddChild(collisionShape);
+
+        root.AddChild(staticBody);
+        
+        staticBody.Owner = root;
+        meshInstance.Owner = root;
+        collisionShape.Owner = root;
+    }
+
+    private Vector2 GetClosestPointOnPolygon(Vector2 p, Vector2[] poly)
+    {
+        Vector2 closest = p;
+        float minD = float.MaxValue;
+        int n = poly.Length;
+        for (int i = 0; i < n; i++)
+        {
+            Vector2 a = poly[i];
+            Vector2 b = poly[(i + 1) % n];
+            Vector2 proj = GetClosestPointOnSegment(p, a, b);
+            float d = p.DistanceTo(proj);
+            if (d < minD)
+            {
+                minD = d;
+                closest = proj;
+            }
+        }
+        return closest;
+    }
+
+    private Vector2 GetClosestPointOnSegment(Vector2 p, Vector2 a, Vector2 b)
+    {
+        Vector2 ab = b - a;
+        float l2 = ab.LengthSquared();
+        if (l2 == 0f) return a;
+        float t = Math.Max(0f, Math.Min(1f, Vector2Dot(p - a, ab) / l2));
+        return a + t * ab;
+    }
+
+    private float Vector2Dot(Vector2 v1, Vector2 v2)
+    {
+        return v1.X * v2.X + v1.Y * v2.Y;
     }
 }

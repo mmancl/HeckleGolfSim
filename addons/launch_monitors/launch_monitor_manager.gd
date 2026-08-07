@@ -9,6 +9,7 @@ signal error_occurred(message: String)
 signal battery_changed(level: int)
 signal firmware_changed(firmware: String)
 signal ready_changed(is_ready: bool)
+signal club_code_changed(club_code: String)
 
 const SETTINGS_PATH := "user://square_launch_monitor.cfg"
 const DEFAULT_CLUB_CODE := "0204"
@@ -32,8 +33,11 @@ var _square_init_error := ""
 var settings := {
 	"enabled": false,
 	"device_id": "",
+	"device_name": "",
 	"club_code": DEFAULT_CLUB_CODE,
-	"handedness": 0
+	"handedness": 0,
+	"ready_ding_enabled": true,
+	"ready_indicator_enabled": true
 }
 
 var _square: Node = null
@@ -41,6 +45,9 @@ var _config := ConfigFile.new()
 var _linux_auto_connect_active := false
 var _linux_auto_connect_target_address := ""
 var _linux_auto_connect_timer: Timer = null
+var _auto_reconnect_timer: Timer = null
+var _ready_audio_player: AudioStreamPlayer = null
+var _ready_hud: CanvasLayer = null
 
 
 func _ready() -> void:
@@ -50,6 +57,8 @@ func _ready() -> void:
 		str(ProjectSettings.get_setting("dotnet/project/assembly_name", ""))
 	])
 	_load_settings()
+	_setup_audio_player()
+	_setup_ready_hud()
 	_create_square_monitor()
 	if _square == null:
 		_debug_error("Square monitor unavailable during startup: %s" % _square_init_error)
@@ -58,6 +67,84 @@ func _ready() -> void:
 	
 	if EventBus.has_signal("club_selected"):
 		EventBus.club_selected.connect(_on_club_selected)
+
+
+func _setup_audio_player() -> void:
+	_ready_audio_player = AudioStreamPlayer.new()
+	_ready_audio_player.name = "ReadyDingPlayer"
+	_ready_audio_player.bus = "Master"
+	add_child(_ready_audio_player)
+	
+	var ding_path := "res://assets/audio/sfx/ready_ding.wav"
+	if ResourceLoader.exists(ding_path):
+		var stream = load(ding_path) as AudioStream
+		if stream != null:
+			_ready_audio_player.stream = stream
+			return
+	_ready_audio_player.stream = _generate_fallback_ding_stream()
+
+
+func _generate_fallback_ding_stream() -> AudioStreamWAV:
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = 44100
+	wav.stereo = false
+	var sample_rate := 44100.0
+	var duration := 0.22
+	var num_samples := int(sample_rate * duration)
+	var byte_array := PackedByteArray()
+	byte_array.resize(num_samples * 2)
+
+	var attack_samples := float(sample_rate * 0.006)
+	var fadeout_samples := float(sample_rate * 0.010)
+
+	var p0_f := 1046.50; var p0_w := 0.65; var p0_d := 18.0
+	var p1_f := 1567.98; var p1_w := 0.25; var p1_d := 28.0
+	var p2_f := 2637.02; var p2_w := 0.08; var p2_d := 55.0
+	var p3_f := 523.25;  var p3_w := 0.15; var p3_d := 22.0
+
+	for i in range(num_samples):
+		var t := float(i) / sample_rate
+		var env_attack: float = (float(i) / attack_samples) ** 2 if i < attack_samples else 1.0
+		var env_fade: float = float(num_samples - 1 - i) / fadeout_samples if i >= (num_samples - int(fadeout_samples)) else 1.0
+
+		var val := (sin(2.0 * PI * p0_f * t) * p0_w * exp(-p0_d * t) + \
+				sin(2.0 * PI * p1_f * t) * p1_w * exp(-p1_d * t) + \
+				sin(2.0 * PI * p2_f * t) * p2_w * exp(-p2_d * t) + \
+				sin(2.0 * PI * p3_f * t) * p3_w * exp(-p3_d * t)) * env_attack * env_fade * 0.42
+		val = clampf(val, -1.0, 1.0)
+		var sample := int(val * 32767.0)
+		byte_array.encode_s16(i * 2, sample)
+	wav.data = byte_array
+	return wav
+
+
+func _setup_ready_hud() -> void:
+	var hud_script_path := "res://UI/ReadyIndicator/ready_indicator_hud.gd"
+	var script := load(hud_script_path) as Script
+	if script != null and script.can_instantiate():
+		_ready_hud = script.new() as CanvasLayer
+		if _ready_hud != null:
+			add_child(_ready_hud)
+			_update_hud_display()
+
+
+func play_ready_ding() -> void:
+	if not bool(settings.get("ready_ding_enabled", true)):
+		return
+	if _ready_audio_player != null and _ready_audio_player.stream != null:
+		_ready_audio_player.play()
+
+
+func set_ready_ding_enabled(enabled: bool) -> void:
+	settings["ready_ding_enabled"] = enabled
+	_save_settings()
+
+
+func set_ready_indicator_enabled(enabled: bool) -> void:
+	settings["ready_indicator_enabled"] = enabled
+	_save_settings()
+	_update_hud_display()
 
 
 func start_scan() -> void:
@@ -80,7 +167,22 @@ func connect_to_device(device_id: String) -> void:
 		return
 	_debug_log("connect_to_device requested for %s" % device_id)
 	settings["device_id"] = device_id
+	var device_name := ""
+	if devices.has(device_id):
+		device_name = str(devices[device_id].get("name", ""))
+	if device_name != "":
+		settings["device_name"] = device_name
+	elif str(settings.get("device_name", "")) != "":
+		device_name = str(settings.get("device_name", ""))
+	else:
+		device_name = "Square Golf"
+		settings["device_name"] = device_name
 	_save_settings()
+	if not devices.has(device_id):
+		devices[device_id] = {
+			"name": device_name,
+			"rssi": 0
+		}
 	_square.call("SetHandedness", int(settings.get("handedness", 0)))
 	_square.call("SetClub", str(settings.get("club_code", DEFAULT_CLUB_CODE)))
 	_square.call("ConnectToDevice", device_id)
@@ -88,6 +190,9 @@ func connect_to_device(device_id: String) -> void:
 
 func disconnect_device() -> void:
 	_cancel_linux_auto_connect_scan()
+	_cancel_auto_reconnect()
+	settings["enabled"] = false
+	_save_settings()
 	if _square != null:
 		_debug_log("disconnect_device requested")
 		_square.call("DisconnectFromDevice")
@@ -123,6 +228,7 @@ func set_club_code(club_code: String) -> void:
 	_save_settings()
 	if _square != null:
 		_square.call("SetClub", club_code)
+	emit_signal("club_code_changed", club_code)
 
 
 func set_handedness(handedness: int) -> void:
@@ -133,6 +239,9 @@ func set_handedness(handedness: int) -> void:
 
 
 func set_ready() -> void:
+	play_ready_ding()
+	is_ready = true
+	_update_hud_display()
 	if _square != null:
 		_debug_log("set_ready requested")
 		_square.call("SetReady")
@@ -182,15 +291,21 @@ func _load_settings() -> void:
 		return
 	settings["enabled"] = bool(_config.get_value("square", "enabled", false))
 	settings["device_id"] = str(_config.get_value("square", "device_id", ""))
+	settings["device_name"] = str(_config.get_value("square", "device_name", ""))
 	settings["club_code"] = str(_config.get_value("square", "club_code", DEFAULT_CLUB_CODE))
 	settings["handedness"] = int(_config.get_value("square", "handedness", 0))
+	settings["ready_ding_enabled"] = bool(_config.get_value("square", "ready_ding_enabled", true))
+	settings["ready_indicator_enabled"] = bool(_config.get_value("square", "ready_indicator_enabled", true))
 
 
 func _save_settings() -> void:
 	_config.set_value("square", "enabled", bool(settings.get("enabled", false)))
 	_config.set_value("square", "device_id", str(settings.get("device_id", "")))
+	_config.set_value("square", "device_name", str(settings.get("device_name", "")))
 	_config.set_value("square", "club_code", str(settings.get("club_code", DEFAULT_CLUB_CODE)))
 	_config.set_value("square", "handedness", int(settings.get("handedness", 0)))
+	_config.set_value("square", "ready_ding_enabled", bool(settings.get("ready_ding_enabled", true)))
+	_config.set_value("square", "ready_indicator_enabled", bool(settings.get("ready_indicator_enabled", true)))
 	var err := _config.save(SETTINGS_PATH)
 	if err != OK:
 		_debug_error("Failed to save Square settings file at %s" % SETTINGS_PATH)
@@ -206,6 +321,9 @@ func _on_square_device_discovered(device_id: String, name: String, rssi: int) ->
 		"name": name,
 		"rssi": rssi
 	}
+	if device_id == str(settings.get("device_id", "")):
+		settings["device_name"] = name
+		_save_settings()
 	emit_signal("device_discovered", device_id, name, rssi)
 	if _is_linux_auto_connect_match(device_id):
 		_debug_log("saved Linux Square discovered; connecting automatically")
@@ -214,6 +332,38 @@ func _on_square_device_discovered(device_id: String, name: String, rssi: int) ->
 
 func _on_square_status_changed(value: String) -> void:
 	_set_status(value)
+	if value == "Disconnected" and bool(settings.get("enabled", false)) and str(settings.get("device_id", "")) != "":
+		_schedule_auto_reconnect()
+	elif value == "Connected" or value == "Connecting" or value == "Ready":
+		_cancel_auto_reconnect()
+
+
+func _schedule_auto_reconnect() -> void:
+	_cancel_auto_reconnect()
+	_auto_reconnect_timer = Timer.new()
+	_auto_reconnect_timer.one_shot = true
+	_auto_reconnect_timer.wait_time = 3.0
+	_auto_reconnect_timer.timeout.connect(_on_auto_reconnect_timeout)
+	add_child(_auto_reconnect_timer)
+	_auto_reconnect_timer.start()
+	_debug_log("Auto-reconnect scheduled in 3 seconds.")
+
+
+func _on_auto_reconnect_timeout() -> void:
+	_cancel_auto_reconnect()
+	var dev_id := str(settings.get("device_id", ""))
+	if bool(settings.get("enabled", false)) and dev_id != "" and status == "Disconnected":
+		_debug_log("Attempting automatic reconnection to saved device %s" % dev_id)
+		connect_to_device(dev_id)
+
+
+func _cancel_auto_reconnect() -> void:
+	if _auto_reconnect_timer != null:
+		if _auto_reconnect_timer.timeout.is_connected(_on_auto_reconnect_timeout):
+			_auto_reconnect_timer.timeout.disconnect(_on_auto_reconnect_timeout)
+		_auto_reconnect_timer.stop()
+		_auto_reconnect_timer.queue_free()
+		_auto_reconnect_timer = null
 
 
 func _on_square_error_occurred(message: String) -> void:
@@ -238,12 +388,18 @@ func _on_square_firmware_changed(value: String) -> void:
 
 func _on_square_ready_changed(value: bool) -> void:
 	_debug_log("ready changed: %s" % str(value))
+	var became_ready := value and not is_ready
 	is_ready = value
+	if became_ready:
+		play_ready_ding()
 	emit_signal("ready_changed", value)
+	_update_hud_display()
 
 
 func _on_square_shot_received(data: Dictionary) -> void:
 	_debug_log("shot received with %d fields" % data.size())
+	is_ready = false
+	_update_hud_display()
 	emit_signal("hit_ball", data)
 
 
@@ -256,6 +412,14 @@ func _missing_support_message() -> String:
 func _connect_saved_device_on_startup(device_id: String) -> void:
 	if device_id == "":
 		return
+	var saved_name := str(settings.get("device_name", ""))
+	if saved_name == "":
+		saved_name = "Square Golf"
+	if not devices.has(device_id):
+		devices[device_id] = {
+			"name": saved_name,
+			"rssi": 0
+		}
 	if _square == null:
 		connect_to_device(device_id)
 		return
@@ -364,6 +528,13 @@ func _set_status(value: String) -> void:
 	status = value
 	emit_signal("status_changed", value)
 	_debug_log("status -> %s" % value)
+	_update_hud_display()
+
+
+func _update_hud_display() -> void:
+	if _ready_hud != null and _ready_hud.has_method("set_ready_status"):
+		var hud_enabled := bool(settings.get("ready_indicator_enabled", true))
+		_ready_hud.call("set_ready_status", is_ready, status, hud_enabled)
 
 
 func _debug_log(message: String) -> void:

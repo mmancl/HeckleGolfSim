@@ -21,11 +21,42 @@ var raw_ball_data: Dictionary = {}
 var last_display: Dictionary = {}
 var is_aerial_view: bool = false
 var is_driving_range: bool = false
+var _elevation_width: int = 0
+var _elevation_height: int = 0
+var _elevation_left_lon: float = 0.0
+var _elevation_right_lon: float = 0.0
+var _elevation_top_lat: float = 0.0
+var _elevation_bottom_lat: float = 0.0
+var _elevation_ref_lat: float = 0.0
+var _elevation_ref_lon: float = 0.0
+var _elevation_meters_per_lat: float = 111320.0
+var _elevation_meters_per_lon: float = 111320.0
+var _elevation_offset: float = 0.0
+var _elevation_data: PackedFloat32Array = PackedFloat32Array()
+var _has_elevation_map: bool = false
+var _height_raycast: RayCast3D = null
+var aerial_zoom: float = 300.0
+var _last_was_on_green: bool = false
+var _default_non_green_aerial_zoom: float = 300.0
 var aim_target_pos: Vector3 = Vector3(150.0, 0.0, 0.0) # Default target down the range
 var aim_line: MeshInstance3D = null
+var current_aim_distance_yards: int = 0
 
 # Dynamic Course Play active hole variables
-var current_hole_location: Vector3 = Vector3.ZERO
+var show_green_grid: bool = false:
+	set(val):
+		if show_green_grid != val:
+			show_green_grid = val
+			_update_green_grid_visibility()
+			if has_node("MapCanvas/AerialZoomVBox/GridToggleButton"):
+				var btn = $MapCanvas/AerialZoomVBox/GridToggleButton
+				var btn_color = Color(0.2, 0.6, 0.3, 0.85) if show_green_grid else Color(0.15, 0.15, 0.15, 0.85)
+				apply_circular_button_style(btn, btn_color)
+var current_hole_location: Vector3 = Vector3.ZERO:
+	set(val):
+		if current_hole_location != val:
+			current_hole_location = val
+			call_deferred("_generate_green_grid_and_heatmap")
 var current_hole_name: String = "Hole 1"
 var current_hole_par: int = 4
 var current_hole_tee_dist_yards: int = 0
@@ -43,6 +74,23 @@ var is_sky_view_active: bool = false
 var _last_travel_yaw: float = 0.0
 var _user_custom_club: String = ""
 var _is_updating_auto_club: bool = false
+var _skip_requested := false
+
+# Chipping minigame state variables
+var chipping_island_positions: Array[Vector3] = []
+var chipping_stats := {}
+var selected_chipping_target_idx := 1 # Default 100 feet
+var chipping_hud: CanvasLayer = null
+var chipping_target_lbl: Label = null
+var chipping_attempts_lbl: Label = null
+var chipping_hits_lbl: Label = null
+var chipping_accuracy_lbl: Label = null
+var chipping_banner_lbl: Label = null
+var chipping_buttons: Array[Button] = []
+var chipping_islands: Array[StaticBody3D] = []
+var chipping_distances = [50, 100, 150, 200, 250, 300] # in feet
+var chipping_lateral_offsets = [-15, 20, -25, 30, -35, 25] # in feet, staggered left/right
+
 
 
 # Visual effects references
@@ -54,8 +102,99 @@ var camera_attributes: CameraAttributesPractical = null
 func get_height(x: float, z: float) -> float:
 	if is_driving_range:
 		return 0.0
-	var h = sin(x * 0.01) * cos(z * 0.01) * 1.5 + sin(x * 0.03 + z * 0.02) * 0.5 + cos(x * 0.07 - z * 0.05) * 0.125
+		
+	if _height_raycast != null:
+		_height_raycast.global_position = Vector3(x, 1000.0, z)
+		_height_raycast.target_position = Vector3(0.0, -2000.0, 0.0)
+		_height_raycast.force_raycast_update()
+		if _height_raycast.is_colliding():
+			var collider = _height_raycast.get_collider()
+			if collider and (collider.has_meta("surface_type") or collider.name.contains("Terrain") or collider.name.contains("Rough") or collider.name.contains("green") or collider.name.contains("fairway") or collider.name.contains("tee") or collider.name.contains("bunker")):
+				return _height_raycast.get_collision_point().y
+				
+	if _has_elevation_map:
+		return sample_elevation(x, z)
+		
+	var h = sin(x * 0.01) * cos(z * 0.01) * 3.5 + sin(x * 0.03 + z * 0.02) * 1.2 + cos(x * 0.07 - z * 0.05) * 0.3
 	return h
+
+
+func _load_elevation_map() -> void:
+	var scene_dir = scene_file_path.get_base_dir()
+	var path = scene_dir.path_join("elevation.dat")
+	if not FileAccess.file_exists(path):
+		print("[range.gd] Elevation map not found at: ", path)
+		return
+		
+	var file = FileAccess.open(path, FileAccess.READ)
+	if not file:
+		print("[range.gd] Failed to open elevation map: ", path)
+		return
+		
+	var version = file.get_32()
+	if version != 2:
+		print("[range.gd] Unsupported elevation map version: ", version)
+		return
+		
+	_elevation_width = file.get_32()
+	_elevation_height = file.get_32()
+	_elevation_left_lon = file.get_double()
+	_elevation_right_lon = file.get_double()
+	_elevation_top_lat = file.get_double()
+	_elevation_bottom_lat = file.get_double()
+	_elevation_ref_lat = file.get_double()
+	_elevation_ref_lon = file.get_double()
+	_elevation_meters_per_lat = file.get_double()
+	_elevation_meters_per_lon = file.get_double()
+	_elevation_offset = file.get_float()
+	
+	var num_elements = _elevation_width * _elevation_height
+	_elevation_data.resize(num_elements)
+	for i in range(num_elements):
+		_elevation_data[i] = file.get_float()
+		
+	_has_elevation_map = true
+	print("[range.gd] Loaded elevation map: ", _elevation_width, "x", _elevation_height)
+
+
+func sample_elevation(x: float, z: float) -> float:
+	var lon = _elevation_ref_lon + x / _elevation_meters_per_lon
+	var lat = _elevation_ref_lat - z / _elevation_meters_per_lat
+	
+	var u = (lon - _elevation_left_lon) / (_elevation_right_lon - _elevation_left_lon)
+	
+	var y_val = log(tan(lat * PI / 360.0 + PI / 4.0))
+	var y_top = log(tan(_elevation_top_lat * PI / 360.0 + PI / 4.0))
+	var y_bottom = log(tan(_elevation_bottom_lat * PI / 360.0 + PI / 4.0))
+	var v = (y_val - y_top) / (y_bottom - y_top)
+	
+	u = clamp(u, 0.0, 1.0)
+	v = clamp(v, 0.0, 1.0)
+	
+	var w = _elevation_width
+	var h = _elevation_height
+	
+	var sample_x = u * (w - 1)
+	var sample_y = v * (h - 1)
+	
+	var x0 = clamp(floor(sample_x), 0, w - 1)
+	var x1 = clamp(x0 + 1, 0, w - 1)
+	var y0 = clamp(floor(sample_y), 0, h - 1)
+	var y1 = clamp(y0 + 1, 0, h - 1)
+	
+	var tx = sample_x - x0
+	var ty = sample_y - y0
+	
+	var h00 = _elevation_data[y0 * w + x0]
+	var h10 = _elevation_data[y0 * w + x1]
+	var h01 = _elevation_data[y1 * w + x0]
+	var h11 = _elevation_data[y1 * w + x1]
+	
+	var h0 = h00 * (1.0 - tx) + h10 * tx
+	var h1 = h01 * (1.0 - tx) + h11 * tx
+	var raw_h = h0 * (1.0 - ty) + h1 * ty
+	
+	return raw_h - _elevation_offset
 
 
 func _generate_ground_terrain() -> void:
@@ -155,6 +294,14 @@ func _ready() -> void:
 		if mp_mgr != null:
 			mp_mgr.players.clear()
 		_generate_ground_terrain()
+	else:
+		_load_elevation_map()
+		_height_raycast = RayCast3D.new()
+		_height_raycast.collision_mask = 1 # Terrain collision layer
+		_height_raycast.collide_with_areas = false
+		_height_raycast.collide_with_bodies = true
+		_height_raycast.enabled = false
+		add_child(_height_raycast)
 	# Initialize Camera3DResource on PhantomCamera3D for dynamic fov/far changes
 	if has_node("PhantomCamera3D"):
 		var pcam = $PhantomCamera3D
@@ -177,6 +324,9 @@ func _ready() -> void:
 	if has_node("RangeUI") and has_node("Player"):
 		if $RangeUI.is_connected("hit_shot", Callable($Player, "_on_range_ui_hit_shot")):
 			$RangeUI.disconnect("hit_shot", Callable($Player, "_on_range_ui_hit_shot"))
+			
+	if has_node("RangeUI"):
+		$RangeUI.skip_flight_requested.connect(_on_skip_flight_requested)
 			
 	# Visual effects setup
 	setup_depth_of_field()
@@ -216,7 +366,7 @@ func _ready() -> void:
 		var aerial_cam = Camera3D.new()
 		aerial_cam.name = "AerialCamera"
 		aerial_cam.projection = Camera3D.PROJECTION_ORTHOGONAL
-		aerial_cam.size = 300.0
+		aerial_cam.size = aerial_zoom
 		aerial_cam.position = Vector3(0, 150, 0)
 		aerial_cam.rotation = Vector3(-PI/2, 0, 0) # Look straight down
 		add_child(aerial_cam)
@@ -292,7 +442,61 @@ func _ready() -> void:
 	# Create Map Canvas Layer to prevent container stretching
 	var canvas = CanvasLayer.new()
 	canvas.name = "MapCanvas"
+	canvas.visible = true
 	add_child(canvas)
+
+	# HBoxContainer for zoom buttons in Aerial View (placed top middle below the distance label)
+	var zoom_vbox = HBoxContainer.new()
+	zoom_vbox.name = "AerialZoomVBox"
+	zoom_vbox.visible = is_aerial_view
+	zoom_vbox.anchor_left = 0.5
+	zoom_vbox.anchor_right = 0.5
+	zoom_vbox.anchor_top = 0.0
+	zoom_vbox.anchor_bottom = 0.0
+	zoom_vbox.offset_left = -100
+	zoom_vbox.offset_top = 115
+	zoom_vbox.offset_right = 100
+	zoom_vbox.offset_bottom = 159
+	zoom_vbox.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	zoom_vbox.grow_vertical = Control.GROW_DIRECTION_END
+	zoom_vbox.add_theme_constant_override("separation", 12)
+	canvas.add_child(zoom_vbox)
+
+	var zoom_in_btn = Button.new()
+	zoom_in_btn.name = "ZoomInButton"
+	zoom_in_btn.text = "+"
+	zoom_in_btn.custom_minimum_size = Vector2(44, 44)
+	apply_circular_button_style(zoom_in_btn, Color(0.15, 0.15, 0.15, 0.85))
+	zoom_in_btn.pressed.connect(func():
+		aerial_zoom = clamp(aerial_zoom - 25.0, 50.0, 500.0)
+		if not _last_was_on_green:
+			_default_non_green_aerial_zoom = aerial_zoom
+	)
+	zoom_vbox.add_child(zoom_in_btn)
+
+	var zoom_out_btn = Button.new()
+	zoom_out_btn.name = "ZoomOutButton"
+	zoom_out_btn.text = "-"
+	zoom_out_btn.custom_minimum_size = Vector2(44, 44)
+	apply_circular_button_style(zoom_out_btn, Color(0.15, 0.15, 0.15, 0.85))
+	zoom_out_btn.pressed.connect(func():
+		aerial_zoom = clamp(aerial_zoom + 25.0, 50.0, 500.0)
+		if not _last_was_on_green:
+			_default_non_green_aerial_zoom = aerial_zoom
+	)
+	zoom_vbox.add_child(zoom_out_btn)
+
+	var grid_toggle_btn = Button.new()
+	grid_toggle_btn.name = "GridToggleButton"
+	grid_toggle_btn.text = "📊"
+	grid_toggle_btn.tooltip_text = "Toggle Slope Grid & Heatmap"
+	grid_toggle_btn.custom_minimum_size = Vector2(44, 44)
+	var btn_color = Color(0.2, 0.6, 0.3, 0.85) if show_green_grid else Color(0.15, 0.15, 0.15, 0.85)
+	apply_circular_button_style(grid_toggle_btn, btn_color)
+	grid_toggle_btn.pressed.connect(func():
+		show_green_grid = not show_green_grid
+	)
+	zoom_vbox.add_child(grid_toggle_btn)
 
 	# Create Aim Distance Badge background Panel
 	var badge = Panel.new()
@@ -312,9 +516,9 @@ func _ready() -> void:
 	
 	badge.anchor_left = 0.5
 	badge.anchor_right = 0.5
-	badge.offset_left = -120
+	badge.offset_left = -200
 	badge.offset_top = 20
-	badge.offset_right = 120
+	badge.offset_right = 200
 	badge.offset_bottom = 60
 	canvas.add_child(badge)
 
@@ -326,9 +530,9 @@ func _ready() -> void:
 	aim_lbl.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
 	aim_lbl.anchor_left = 0.5
 	aim_lbl.anchor_right = 0.5
-	aim_lbl.offset_left = -120
+	aim_lbl.offset_left = -200
 	aim_lbl.offset_top = 20
-	aim_lbl.offset_right = 120
+	aim_lbl.offset_right = 200
 	aim_lbl.offset_bottom = 60
 	aim_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	aim_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -338,6 +542,7 @@ func _ready() -> void:
 	# Create labels inside MapCanvas
 	var hole_lbl = Label.new()
 	hole_lbl.name = "HoleInfoLabel"
+	hole_lbl.visible = is_aerial_view
 	hole_lbl.text = "Hole 1 | Par 4 | --- Yards"
 	hole_lbl.add_theme_font_size_override("font_size", 20)
 	hole_lbl.add_theme_color_override("font_color", Color.WHITE)
@@ -390,14 +595,31 @@ func _ready() -> void:
 			if json.parse(json_text) == OK:
 				course_data_dict = json.data
 				if practice_mode_active:
-					load_practice_hole(0)
-					set_practice_mode(true)
+					if GlobalSettings.is_chipping_minigame:
+						var hole_info_data = course_data_dict.get("Hole Info", {})
+						var hole_keys = hole_info_data.keys()
+						hole_keys.sort()
+						var target_idx = hole_keys.find("Hole 17")
+						if target_idx != -1:
+							load_practice_hole(target_idx)
+						else:
+							load_practice_hole(0)
+						set_practice_mode(true)
+						_setup_chipping_minigame()
+					else:
+						load_practice_hole(0)
+						set_practice_mode(true)
 				else:
 					var hole_info_data = course_data_dict.get("Hole Info", {})
 					var hole_keys = hole_info_data.keys()
 					hole_keys.sort()
 					if not hole_keys.is_empty():
-						var first_hole = hole_info_data[hole_keys[0]]
+						var start_hole_id = hole_keys[0]
+						var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+						if mp_mgr != null and not mp_mgr.players.is_empty() and mp_mgr.current_hole_index < mp_mgr.hole_ids.size():
+							start_hole_id = mp_mgr.hole_ids[mp_mgr.current_hole_index]
+						
+						var first_hole = hole_info_data.get(start_hole_id, hole_info_data[hole_keys[0]])
 						var tee_boxes = first_hole.get("Tee Boxes", {})
 						var tee_pos = tee_boxes.get("Blue")
 						if tee_pos == null:
@@ -407,51 +629,58 @@ func _ready() -> void:
 						if tee_pos != null:
 							var spawn_pos = Vector3(tee_pos[0], get_height(tee_pos[0], tee_pos[1]) + 0.02, tee_pos[1])
 							practice_start_pos = spawn_pos
-							if has_node("Player") and $Player.ball != null:
-								$Player.ball.spawn_position = spawn_pos
-								$Player.ball.reset()
-								
-							# Default aim towards green/pin of Hole 1
 							var hole_loc = first_hole.get("Hole Location")
 							var par = first_hole.get("Par", 4)
 							var hole_name = first_hole.get("Name", "Hole 1")
 							
-							current_hole_name = hole_name
-							current_hole_par = par
-							
-							if hole_loc != null:
-								current_hole_location = Vector3(hole_loc[0], get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
-								aim_target_pos = current_hole_location
-								update_dof_focus()
-								if has_node("AimMarker"):
-									$AimMarker.global_position = aim_target_pos
-								
-								var diff = aim_target_pos - spawn_pos
-								var angle_rad = atan2(diff.z, diff.x)
+							var is_mp = mp_mgr != null and not mp_mgr.players.is_empty()
+							if is_mp:
+								# Multiplayer controller (course_play.gd) handles positioning, cameras, and HUD.
+								# We only need to ensure the flag pin is spawned.
+								if hole_loc != null:
+									_spawn_flag_pin()
+							else:
 								if has_node("Player") and $Player.ball != null:
-									$Player.ball.aim_yaw_offset_deg = rad_to_deg(-angle_rad)
+									$Player.ball.spawn_position = spawn_pos
+									$Player.ball.reset()
 									
-								var dist_m = spawn_pos.distance_to(aim_target_pos)
-								var dist_yards = int(dist_m * 1.09361)
-								current_hole_tee_dist_yards = dist_yards
-								hole_lbl.text = "%s | Par %d | %d Yards | Ball: %d Yards to Pin" % [hole_name, par, dist_yards, dist_yards]
-								aim_lbl.text = "Aim: %d Yards" % dist_yards
+								current_hole_name = hole_name
+								current_hole_par = par
 								
-								# Immediately rotate/position player cameras to face the hole on startup
-								var yaw_rad = -angle_rad
-								var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
-								var cam_pos = clamp_camera_position(spawn_pos + local_offset)
-								if has_node("PhantomCamera3D"):
-									$PhantomCamera3D.global_position = cam_pos
-									$PhantomCamera3D.look_at(aim_target_pos + Vector3.UP * 0.5)
-								if has_node("Camera3D"):
-									$Camera3D.global_position = cam_pos
-									$Camera3D.look_at(aim_target_pos + Vector3.UP * 0.5)
+								if hole_loc != null:
+									current_hole_location = Vector3(hole_loc[0], get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
+									aim_target_pos = current_hole_location
+									update_dof_focus()
+									if has_node("AimMarker"):
+										$AimMarker.global_position = aim_target_pos
 									
-								# Spawn 3D FlagPin at hole center dynamically
-								_spawn_flag_pin()
+									var diff = aim_target_pos - spawn_pos
+									var angle_rad = atan2(diff.z, diff.x)
+									if has_node("Player") and $Player.ball != null:
+										$Player.ball.aim_yaw_offset_deg = rad_to_deg(-angle_rad)
+										
+									var dist_m = spawn_pos.distance_to(aim_target_pos)
+									var dist_yards = int(dist_m * 1.09361)
+									current_hole_tee_dist_yards = dist_yards
+									hole_lbl.text = "%s | Par %d | %d Yards | Ball: %d Yards to Pin" % [hole_name, par, dist_yards, dist_yards]
+									set_aim_distance(dist_yards)
+									
+									# Immediately rotate/position player cameras to face the hole on startup
+									var yaw_rad = -angle_rad
+									var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
+									var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
+									var cam_pos = clamp_camera_position(spawn_pos + local_offset)
+									var target_look = (aim_target_pos + spawn_pos) * 0.5 if is_on_green else aim_target_pos + Vector3.UP * 0.5
+									if has_node("PhantomCamera3D"):
+										$PhantomCamera3D.global_position = cam_pos
+										$PhantomCamera3D.look_at(target_look)
+									if has_node("Camera3D"):
+										$Camera3D.global_position = cam_pos
+										$Camera3D.look_at(target_look)
+										
+									_spawn_flag_pin()
 								
-							print("[CoursePlay] Player positioned at Hole 1 Tee: ", spawn_pos, " | Aiming at green: ", aim_target_pos)
+							print("[CoursePlay] Player positioned at %s Tee: " % start_hole_id, spawn_pos, " | Aiming at green: ", aim_target_pos)
 
 	# Programmatically connect dynamic course play signals
 	var player_node = get_node_or_null("Player")
@@ -553,6 +782,7 @@ func _ready() -> void:
 			range_ui.connect("set_session", Callable(self, "_on_player_changed"))
 			
 	_update_averages()
+	update_current_lie_and_reduction()
 
 
 var practice_mode_active: bool = false
@@ -574,9 +804,30 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_ESCAPE and is_aerial_view:
 			_on_map_button_pressed()
 			get_viewport().set_input_as_handled()
-
 	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT):
 		if event.pressed:
+			if GlobalSettings.is_chipping_minigame and event.button_index == MOUSE_BUTTON_LEFT:
+				var camera = get_viewport().get_camera_3d()
+				if camera != null:
+					var ray_start = camera.project_ray_origin(event.position)
+					var ray_dir = camera.project_ray_normal(event.position)
+					var ray_end = ray_start + ray_dir * 1000.0
+					var query = PhysicsRayQueryParameters3D.create(ray_start, ray_end)
+					var hit = get_world_3d().direct_space_state.intersect_ray(query)
+					if not hit.is_empty():
+						var clicked_point = hit["position"]
+						var closest_idx = -1
+						var min_dist = 9999.0
+						for i in range(chipping_island_positions.size()):
+							var d = clicked_point.distance_to(chipping_island_positions[i])
+							if d < min_dist:
+								min_dist = d
+								closest_idx = i
+						if min_dist <= 8.0:
+							_select_chipping_target(closest_idx)
+							get_viewport().set_input_as_handled()
+							return
+
 			is_mouse_down_on_map = true
 			is_dragging_map = false
 			map_drag_start_pos = event.position
@@ -660,18 +911,20 @@ func _perform_map_click_aim(mouse_pos: Vector2) -> void:
 			
 			if has_node("MapCanvas/AimDistanceLabel"):
 				var dist_yards = int(ball_pos.distance_to(aim_target_pos) * 1.09361)
-				$MapCanvas/AimDistanceLabel.text = "Aim: %d Yards" % dist_yards
+				set_aim_distance(dist_yards)
 			update_auto_club(true)
 
 			# Immediately position/rotate the PhantomCamera3D and Camera3D to face the target!
+			var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
 			var local_offset = get_camera_local_offset().rotated(Vector3.UP, -angle_rad)
 			var cam_pos = clamp_camera_position(ball_pos + local_offset)
+			var target_look = (aim_target_pos + ball_pos) * 0.5 if is_on_green else aim_target_pos + Vector3.UP * 0.5
 			if has_node("PhantomCamera3D"):
 				$PhantomCamera3D.global_position = cam_pos
-				$PhantomCamera3D.look_at(aim_target_pos + Vector3.UP * 0.5)
+				$PhantomCamera3D.look_at(target_look)
 			if has_node("Camera3D"):
 				$Camera3D.global_position = cam_pos
-				$Camera3D.look_at(aim_target_pos + Vector3.UP * 0.5)
+				$Camera3D.look_at(target_look)
 
 
 func _perform_practice_teleport(mouse_pos: Vector2) -> void:
@@ -706,20 +959,22 @@ func _perform_practice_teleport(mouse_pos: Vector2) -> void:
 				$Player.ball.aim_yaw_offset_deg = rad_to_deg(-angle_rad)
 				
 				if has_node("MapCanvas/AimDistanceLabel"):
-					$MapCanvas/AimDistanceLabel.text = "Aim: %d Yards" % int(clicked_point.distance_to(current_hole_location) * 1.09361)
+					set_aim_distance(int(clicked_point.distance_to(current_hole_location) * 1.09361))
 					
 				_update_hole_info_label(true)
 				
 				if not is_aerial_view:
 					var yaw_rad = -angle_rad
+					var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
 					var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 					var cam_pos = clamp_camera_position(clicked_point + local_offset)
+					var target_look = (current_hole_location + clicked_point) * 0.5 if is_on_green else current_hole_location + Vector3.UP * 0.5
 					if has_node("PhantomCamera3D"):
 						$PhantomCamera3D.global_position = cam_pos
-						$PhantomCamera3D.look_at(current_hole_location + Vector3.UP * 0.5)
+						$PhantomCamera3D.look_at(target_look)
 					if has_node("Camera3D"):
 						$Camera3D.global_position = cam_pos
-						$Camera3D.look_at(current_hole_location + Vector3.UP * 0.5)
+						$Camera3D.look_at(target_look)
 
 
 func _on_tcp_client_hit_ball(data: Dictionary) -> void:
@@ -740,6 +995,20 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 
 
 func _process(_delta: float) -> void:
+	_update_green_grid_visibility()
+	
+	# Check for on-green state transition
+	var is_on_green = false
+	if $Player and $Player.ball:
+		is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN)
+	
+	if is_on_green != _last_was_on_green:
+		if is_on_green:
+			aerial_zoom = get_green_zoom_size()
+		else:
+			aerial_zoom = _default_non_green_aerial_zoom
+		_last_was_on_green = is_on_green
+
 	# Refresh UI during flight/rollout so carry/apex update live; distance updates only at rest.
 	var player = $Player
 	if player.get_ball_state() != PhysicsEnums.BallState.REST:
@@ -761,9 +1030,7 @@ func _process(_delta: float) -> void:
 		else:
 			dir_3d = dir_3d.normalized()
 		
-		var dist = ball_pos.distance_to(hole_pos)
-		var target_size = clamp(dist * 1.43, 100.0, 400.0)
-		$AerialCamera.size = target_size
+		$AerialCamera.size = aerial_zoom
 		
 		# Orientation: local up (Y column of basis) points from ball to hole, local -Z points straight down
 		var right_vec = dir_3d.cross(Vector3.UP).normalized()
@@ -771,8 +1038,8 @@ func _process(_delta: float) -> void:
 		var back_vec = Vector3.UP
 		$AerialCamera.global_transform.basis = Basis(right_vec, up_vec, back_vec)
 		
-		# Position: offset towards the hole by 0.35 * target_size so ball is on the south side
-		var base_pos = ball_pos + dir_3d * (0.35 * target_size)
+		# Position: offset towards the hole by 0.35 * aerial_zoom so ball is on the south side
+		var base_pos = ball_pos + dir_3d * (0.35 * aerial_zoom)
 		$AerialCamera.global_position = Vector3(base_pos.x, 150.0, base_pos.z) + aerial_cam_user_offset
 
 	# Draw/update the aim line connecting the player's ball to the aim marker
@@ -806,10 +1073,10 @@ func _process(_delta: float) -> void:
 		if has_node("PinMarker"):
 			$PinMarker.visible = is_aerial_view or has_minimap
 		
-		if is_aerial_view:
-			var dist_to_target = $Player.ball.global_position.distance_to(aim_target_pos) * 1.09361
-			if has_node("MapCanvas/AimDistanceLabel"):
-				$MapCanvas/AimDistanceLabel.text = "Aim: %d Yards" % round(dist_to_target)
+		# Update distance to target in both regular and aerial views
+		var dist_to_target = $Player.ball.global_position.distance_to(aim_target_pos) * 1.09361
+		if has_node("MapCanvas/AimDistanceLabel"):
+			set_aim_distance(round(dist_to_target))
 
 
 var shot_history: Array[Dictionary] = []
@@ -822,12 +1089,36 @@ func _on_golf_ball_rest(_ball_data) -> void:
 	
 	# Add valid shots to history to compute average stats
 	if raw_ball_data.get("Speed", 0.0) > 0.0:
+		if GlobalSettings.is_chipping_minigame:
+			var final_pos = $Player.ball.global_position
+			var target_pos = chipping_island_positions[selected_chipping_target_idx]
+			var dist_to_target = Vector2(final_pos.x, final_pos.z).distance_to(Vector2(target_pos.x, target_pos.z))
+			
+			var is_hit = false
+			if not $Player.ball.is_in_water and dist_to_target <= 3.81:
+				is_hit = true
+				chipping_stats[selected_chipping_target_idx]["Hits"] += 1
+				GlobalSettings.play_golf_clap()
+				_show_chipping_banner("GREEN HIT! Fantastic shot!")
+			else:
+				if $Player.ball.is_in_water:
+					_show_chipping_banner("SPLASH! Landed in the water hazard.")
+				else:
+					_show_chipping_banner("Missed target. Distance: %.1f ft" % (dist_to_target * 3.28084))
+					
+			chipping_stats[selected_chipping_target_idx]["Attempts"] += 1
+			_update_chipping_hud()
+		
 		var p_name = _get_current_player_name()
 		var club_name = _get_current_club()
 		raw_ball_data["player"] = p_name
 		raw_ball_data["club"] = club_name
 		shot_history.append(raw_ball_data.duplicate())
-		_record_global_shot(p_name, club_name, raw_ball_data)
+		
+		# Only record globally if not in multiplayer match
+		var mp_active = has_node("/root/MultiplayerManager") and not get_node("/root/MultiplayerManager").players.is_empty()
+		if not mp_active:
+			_record_global_shot(p_name, club_name, raw_ball_data)
 		_update_averages()
 
 	# Announce shot
@@ -835,6 +1126,9 @@ func _on_golf_ball_rest(_ball_data) -> void:
 	var ball_pos: Vector3 = $Player.ball.global_position
 
 	var ball = $Player.ball
+	var landed_in_water = ball.is_in_water
+	var landed_in_sand = ball.is_in_sand
+
 	if ball.is_in_water:
 		print("[range.gd] Ball landed in water hazard!")
 		# 1. Find closest point on water polygon boundary
@@ -859,7 +1153,6 @@ func _on_golf_ball_rest(_ball_data) -> void:
 		# 2. Update ball position and spawn position
 		ball.global_position = recovery_pos
 		ball.spawn_position = recovery_pos
-		ball.position = recovery_pos
 		ball_pos = recovery_pos
 		
 		# 3. Add penalty stroke to active player
@@ -874,12 +1167,14 @@ func _on_golf_ball_rest(_ball_data) -> void:
 	if is_dynamic_course and not practice_mode_active:
 		$Player.ball.spawn_position = ball_pos
 
+	update_current_lie_and_reduction()
+
 	if has_node("/root/AnnouncerEngine") and not raw_ball_data.is_empty():
 		var announcer = get_node("/root/AnnouncerEngine")
 		var pin_dist := 999.0
 		var target_pin = current_hole_location if is_dynamic_course else Vector3(150.0, ball_pos.y, 0.0)
 		pin_dist = ball_pos.distance_to(target_pin) * 1.09361 # yards
-		announcer.call("EvaluateShot", raw_ball_data, $Player.ball.surface_type, pin_dist)
+		announcer.call("EvaluateShot", raw_ball_data, $Player.ball.surface_type, pin_dist, landed_in_sand, landed_in_water)
 
 	# Record multiplayer shot
 	if has_node("/root/MultiplayerManager") and not get_node("/root/MultiplayerManager").players.is_empty():
@@ -887,8 +1182,9 @@ func _on_golf_ball_rest(_ball_data) -> void:
 
 	if is_dynamic_course:
 		if practice_mode_active:
-			var reset_delay = GlobalSettings.range_settings.ball_reset_timer.value
-			await get_tree().create_timer(reset_delay).timeout
+			if not _skip_requested:
+				var reset_delay = GlobalSettings.range_settings.ball_reset_timer.value
+				await get_tree().create_timer(reset_delay).timeout
 			
 			if GlobalSettings.range_settings.auto_ball_reset.value:
 				_reset_display_data()
@@ -910,11 +1206,15 @@ func _on_golf_ball_rest(_ball_data) -> void:
 				$Player.ball.aim_yaw_offset_deg = saved_yaw
 				
 			_update_hole_info_label(true)
+			if has_node("RangeUI"):
+				$RangeUI.hide_skip_button()
+			_skip_requested = false
 			return
 		else:
 			# Wait for the ball reset delay so the player can watch the ball finish rolling
-			var reset_delay = GlobalSettings.range_settings.ball_reset_timer.value
-			await get_tree().create_timer(reset_delay).timeout
+			if not _skip_requested:
+				var reset_delay = GlobalSettings.range_settings.ball_reset_timer.value
+				await get_tree().create_timer(reset_delay).timeout
 			
 			# Reset ball physics state and clear tracers
 			$Player.reset_ball()
@@ -935,20 +1235,22 @@ func _on_golf_ball_rest(_ball_data) -> void:
 			
 			# Update aim distance display
 			if has_node("MapCanvas/AimDistanceLabel"):
-				$MapCanvas/AimDistanceLabel.text = "Aim: %d Yards" % int(ball_pos.distance_to(current_hole_location) * 1.09361)
+				set_aim_distance(int(ball_pos.distance_to(current_hole_location) * 1.09361))
 	
 			# Position camera behind the ball facing the pin
 			var yaw_rad = -angle_rad
+			var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
 			var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 			var start_pos = clamp_camera_position(ball_pos + local_offset)
 			
 			# Position cameras
+			var target_look = (current_hole_location + ball_pos) * 0.5 if is_on_green else current_hole_location + Vector3.UP * 0.5
 			if has_node("PhantomCamera3D"):
 				$PhantomCamera3D.global_position = start_pos
-				$PhantomCamera3D.look_at(current_hole_location + Vector3.UP * 0.5)
+				$PhantomCamera3D.look_at(target_look)
 			if has_node("Camera3D"):
 				$Camera3D.global_position = start_pos
-				$Camera3D.look_at(current_hole_location + Vector3.UP * 0.5)
+				$Camera3D.look_at(target_look)
 	
 			# Make sure follow mode is disabled so camera stays behind the ball
 			set_camera_follow_mode(false)
@@ -956,6 +1258,10 @@ func _on_golf_ball_rest(_ball_data) -> void:
 			_user_custom_club = ""
 			update_auto_club()
 			print("[CoursePlay] Ball at rest. Spawn position updated. Ready for next shot.")
+			
+			if has_node("RangeUI"):
+				$RangeUI.hide_skip_button()
+			_skip_requested = false
 			
 			var mp_mgr = get_node_or_null("/root/MultiplayerManager")
 			if mp_mgr != null and not mp_mgr.players.is_empty():
@@ -965,8 +1271,9 @@ func _on_golf_ball_rest(_ball_data) -> void:
 
 
 	# Return camera/ball to starting position for driving range
-	var reset_delay = GlobalSettings.range_settings.ball_reset_timer.value
-	await get_tree().create_timer(reset_delay).timeout
+	if not _skip_requested:
+		var reset_delay = GlobalSettings.range_settings.ball_reset_timer.value
+		await get_tree().create_timer(reset_delay).timeout
 	
 	if GlobalSettings.range_settings.auto_ball_reset.value:
 		_reset_display_data()
@@ -982,6 +1289,9 @@ func _on_golf_ball_rest(_ball_data) -> void:
 		
 	_user_custom_club = ""
 	update_auto_club()
+	if has_node("RangeUI"):
+		$RangeUI.hide_skip_button()
+	_skip_requested = false
 	return
 
 
@@ -1033,7 +1343,7 @@ func _update_averages(target_club: String = "") -> void:
 	# No auto reset: leave final numbers visible
 
 func set_camera_follow_mode(value) -> void:
-	var camera = $PhantomCamera3D
+	var camera = get_node_or_null("PhantomCamera3D")
 	if camera == null:
 		return
 
@@ -1051,8 +1361,8 @@ func set_camera_follow_mode(value) -> void:
 			# For putts, keep the camera as the player camera view just following the ball,
 			# instead of switching to the sky view logic.
 			update_camera_fov(GlobalSettings.range_settings.camera_fov.value)
-			var cam_dist = GlobalSettings.range_settings.camera_distance.value
-			var cam_height = GlobalSettings.range_settings.camera_height.value
+			var cam_dist = 14.0
+			var cam_height = 4.5
 			var local_offset = Vector3(-cam_dist, cam_height, 0).rotated(Vector3.UP, yaw_rad)
 			camera.follow_offset = local_offset
 		else:
@@ -1086,22 +1396,33 @@ func reset_camera_to_start() -> void:
 	var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 	var start_pos = clamp_camera_position($Player.ball.spawn_position + local_offset)
 
-	# Tween camera back to starting position
-	var tween := create_tween()
-	tween.set_trans(Tween.TRANS_CUBIC)
-	tween.set_ease(Tween.EASE_IN_OUT)
-	tween.tween_property(camera, "global_position", start_pos, 1.5)
+	if _skip_requested:
+		camera.global_position = start_pos
+		camera.look_at_from_position(start_pos, aim_target_pos + Vector3.UP * 0.5)
+	else:
+		# Tween camera back to starting position
+		var tween := create_tween()
+		tween.set_trans(Tween.TRANS_CUBIC)
+		tween.set_ease(Tween.EASE_IN_OUT)
+		tween.tween_property(camera, "global_position", start_pos, 1.5)
 
-	# Rotate camera to face the aim target
-	camera.look_at_from_position(start_pos, aim_target_pos + Vector3.UP * 0.5)
+		# Rotate camera to face the aim target
+		camera.look_at_from_position(start_pos, aim_target_pos + Vector3.UP * 0.5)
 
-	await tween.finished
+		await tween.finished
 
 	# Reset ball to starting position
 	var player = $Player
 	if player != null:
 		player.reset_ball()
 		player.ball.aim_yaw_offset_deg = saved_yaw
+
+
+func _on_skip_flight_requested() -> void:
+	_skip_requested = true
+	if has_node("Player"):
+		$Player.skip_to_rest()
+
 
 
 func _on_range_ui_hit_shot(data: Dictionary) -> void:
@@ -1234,18 +1555,20 @@ func load_practice_hole(idx: int) -> void:
 			
 			_update_hole_info_label(true)
 			if has_node("MapCanvas/AimDistanceLabel"):
-				$MapCanvas/AimDistanceLabel.text = "Aim: %d Yards" % dist_yards
+				set_aim_distance(dist_yards)
 				
 			# Rotate/position cameras to face the hole
 			var yaw_rad = -angle_rad
+			var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
 			var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 			var cam_pos = clamp_camera_position(spawn_pos + local_offset)
+			var target_look = (aim_target_pos + spawn_pos) * 0.5 if is_on_green else aim_target_pos + Vector3.UP * 0.5
 			if has_node("PhantomCamera3D"):
 				$PhantomCamera3D.global_position = cam_pos
-				$PhantomCamera3D.look_at(aim_target_pos + Vector3.UP * 0.5)
+				$PhantomCamera3D.look_at(target_look)
 			if has_node("Camera3D"):
 				$Camera3D.global_position = cam_pos
-				$Camera3D.look_at(aim_target_pos + Vector3.UP * 0.5)
+				$Camera3D.look_at(target_look)
 				
 			# Spawn 3D FlagPin at hole center dynamically
 			_spawn_flag_pin()
@@ -1257,15 +1580,31 @@ func load_practice_hole(idx: int) -> void:
 
 
 func next_practice_hole() -> void:
+	if GlobalSettings.is_chipping_minigame:
+		return
 	load_practice_hole(current_practice_hole_index + 1)
 
 
 func prev_practice_hole() -> void:
+	if GlobalSettings.is_chipping_minigame:
+		return
 	load_practice_hole(current_practice_hole_index - 1)
 
 
 func _on_map_button_pressed() -> void:
 	is_aerial_view = !is_aerial_view
+	
+	if has_node("MapCanvas"):
+		$MapCanvas.visible = true
+		if $MapCanvas.has_node("AerialZoomVBox"):
+			$MapCanvas/AerialZoomVBox.visible = is_aerial_view
+		if $MapCanvas.has_node("HoleInfoLabel"):
+			var is_course_play = false
+			if has_node("/root/MultiplayerManager"):
+				var mp = get_node("/root/MultiplayerManager")
+				if not mp.players.is_empty():
+					is_course_play = true
+			$MapCanvas/HoleInfoLabel.visible = is_aerial_view and not is_course_play
 	
 	# Update map button text and practice UI visibility in children and current scene
 	for child in get_children():
@@ -1313,9 +1652,7 @@ func _on_map_button_pressed() -> void:
 			else:
 				dir_3d = dir_3d.normalized()
 			
-			var dist = ball_pos.distance_to(hole_pos)
-			var target_size = clamp(dist * 1.43, 100.0, 400.0)
-			$AerialCamera.size = target_size
+			$AerialCamera.size = aerial_zoom
 			
 			# Orientation
 			var right_vec = dir_3d.cross(Vector3.UP).normalized()
@@ -1324,7 +1661,7 @@ func _on_map_button_pressed() -> void:
 			$AerialCamera.global_transform.basis = Basis(right_vec, up_vec, back_vec)
 			
 			# Position
-			var base_pos = ball_pos + dir_3d * (0.35 * target_size)
+			var base_pos = ball_pos + dir_3d * (0.35 * aerial_zoom)
 			$AerialCamera.global_position = Vector3(base_pos.x, 150.0, base_pos.z)
 			$AerialCamera.make_current()
 			
@@ -1401,16 +1738,16 @@ func _spawn_flag_pin() -> void:
 	flag.rotation = Vector3(0, 0, -PI/2)
 	pin.add_child(flag)
 	
-	# Cup / hole circle on ground: small flat white cylinder
+	# Cup / hole circle on ground: small flat dark cylinder to look like a hole
 	var cup = MeshInstance3D.new()
 	cup.name = "Cup"
 	var cup_mesh = CylinderMesh.new()
-	cup_mesh.top_radius = 0.0762 # 6in diameter / 2 = 3in = 0.0762m
-	cup_mesh.bottom_radius = 0.0762
+	cup_mesh.top_radius = 0.12 # Larger radius for a bigger cup
+	cup_mesh.bottom_radius = 0.12
 	cup_mesh.height = 0.002
 	cup.mesh = cup_mesh
 	var cup_mat = StandardMaterial3D.new()
-	cup_mat.albedo_color = Color.WHITE
+	cup_mat.albedo_color = Color(0.15, 0.15, 0.15) # Dark grey/black to look like a hole depth
 	cup_mat.roughness = 1.0
 	cup.material_override = cup_mat
 	cup.position = Vector3(0, 0.001, 0)
@@ -1421,7 +1758,10 @@ func _spawn_flag_pin() -> void:
 
 
 func _on_shot_initiated() -> void:
+	_skip_requested = false
 	_shot_active = true
+	if has_node("RangeUI"):
+		$RangeUI.show_skip_button()
 	if current_hole_location.is_zero_approx():
 		return
 	shot_count += 1
@@ -1505,8 +1845,8 @@ func update_hole_outline() -> void:
 		path_pts.append(hole_pos)
 		
 	# Generate geometry for outline (regular thickness for map view)
-	var outer_vertices = get_path_buffer_polygon(path_pts, 35.0)
-	var inner_vertices = get_path_buffer_polygon(path_pts, 33.5)
+	var outer_vertices = get_path_buffer_polygon(path_pts, 25.0)
+	var inner_vertices = get_path_buffer_polygon(path_pts, 23.5)
 	
 	if outer_vertices.size() > 1 and inner_vertices.size() == outer_vertices.size():
 		imm.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -1528,8 +1868,8 @@ func update_hole_outline() -> void:
 		imm.surface_end()
 		
 	# Generate geometry for minimap outline (thicker)
-	var m_outer_vertices = get_path_buffer_polygon(path_pts, 37.5)
-	var m_inner_vertices = get_path_buffer_polygon(path_pts, 32.5)
+	var m_outer_vertices = get_path_buffer_polygon(path_pts, 27.5)
+	var m_inner_vertices = get_path_buffer_polygon(path_pts, 22.5)
 	
 	if m_outer_vertices.size() > 1 and m_inner_vertices.size() == m_outer_vertices.size():
 		m_imm.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -1630,6 +1970,14 @@ func toggle_sky_view() -> void:
 
 
 func get_camera_local_offset() -> Vector3:
+	var is_on_green = false
+	if has_node("Player") and $Player.ball != null:
+		var ball = $Player.ball
+		is_on_green = (ball.get("lie_type") == "green" or ball.get("surface_type") == PhysicsEnums.SurfaceType.GREEN)
+		
+	if is_on_green:
+		return Vector3(-14.0, 4.5, 0)
+		
 	var cam_dist = 50.0 if is_sky_view_active else GlobalSettings.range_settings.camera_distance.value
 	var cam_height = 15.0 if is_sky_view_active else GlobalSettings.range_settings.camera_height.value
 	return Vector3(-cam_dist, cam_height, 0)
@@ -1647,10 +1995,12 @@ func update_camera_offset(_val = null) -> void:
 			var local_offset = offset.rotated(Vector3.UP, yaw_rad)
 			var cam_pos = clamp_camera_position($Player.ball.global_position + local_offset)
 			$PhantomCamera3D.global_position = cam_pos
-			$PhantomCamera3D.look_at(aim_target_pos + Vector3.UP * 0.5)
+			var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN)
+			var target_look = (aim_target_pos + $Player.ball.global_position) * 0.5 if is_on_green else aim_target_pos + Vector3.UP * 0.5
+			$PhantomCamera3D.look_at(target_look)
 			if has_node("Camera3D"):
 				$Camera3D.global_position = cam_pos
-				$Camera3D.look_at(aim_target_pos + Vector3.UP * 0.5)
+				$Camera3D.look_at(target_look)
 
 
 func update_camera_fov(value: float) -> void:
@@ -2281,56 +2631,19 @@ func _on_player_changed(_dir: String, _player_name: String) -> void:
 
 
 func _load_global_stats() -> Dictionary:
-	var path = "user://player_club_stats.json"
-	if not FileAccess.file_exists(path):
-		return {}
-	var file = FileAccess.open(path, FileAccess.READ)
-	if file == null:
-		return {}
-	var json = JSON.new()
-	var err = json.parse(file.get_as_text())
-	if err == OK:
-		if typeof(json.data) == TYPE_DICTIONARY:
-			return json.data
-	return {}
+	return get_node("/root/MultiplayerManager").load_global_club_stats()
 
 
 func _save_global_stats(stats: Dictionary) -> void:
-	var path = "user://player_club_stats.json"
-	var file = FileAccess.open(path, FileAccess.WRITE)
-	if file != null:
-		file.store_string(JSON.stringify(stats, "\t"))
+	get_node("/root/MultiplayerManager").save_global_club_stats(stats)
 
 
 func _record_global_shot(player_name: String, club_name: String, raw_shot: Dictionary) -> void:
-	if player_name.is_empty() or club_name.is_empty():
-		return
-	var stats = _load_global_stats()
-	if not stats.has(player_name):
-		stats[player_name] = {}
-	if not stats[player_name].has(club_name):
-		stats[player_name][club_name] = []
-		
-	var entry = {
-		"CarryDistance": raw_shot.get("CarryDistance", 0.0),
-		"Speed": raw_shot.get("Speed", 0.0),
-		"TotalSpin": raw_shot.get("TotalSpin", 0.0),
-		"SideDistance": raw_shot.get("SideDistance", 0.0),
-		"TargetDistance": raw_shot.get("TargetDistance", 0.0),
-		"TotalDistance": raw_shot.get("TotalDistance", 0.0)
-	}
-	stats[player_name][club_name].append(entry)
-	_save_global_stats(stats)
+	get_node("/root/MultiplayerManager").record_global_shot(player_name, club_name, raw_shot)
 
 
 func _remove_last_global_shot(player_name: String, club_name: String) -> void:
-	if player_name.is_empty() or club_name.is_empty():
-		return
-	var stats = _load_global_stats()
-	if stats.has(player_name) and stats[player_name].has(club_name):
-		if not stats[player_name][club_name].is_empty():
-			stats[player_name][club_name].pop_back()
-			_save_global_stats(stats)
+	get_node("/root/MultiplayerManager").remove_last_global_shot(player_name, club_name)
 
 
 func remove_last_shot() -> void:
@@ -2343,6 +2656,1224 @@ func remove_last_shot() -> void:
 		_update_averages()
 
 
+func _distance_to_segment_2d(p: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab := b - a
+	var ap := p - a
+	var ab_len_sq := ab.length_squared()
+	if ab_len_sq == 0.0:
+		return ap.length()
+	var t := clampf(ap.dot(ab) / ab_len_sq, 0.0, 1.0)
+	var projection := a + t * ab
+	return p.distance_to(projection)
 
 
+func _is_point_in_triangle_2d(p: Vector2, a: Vector2, b: Vector2, c: Vector2) -> bool:
+	var sign_ab = (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y)
+	var sign_bc = (p.x - c.x) * (b.y - c.y) - (b.x - c.x) * (p.y - c.y)
+	var sign_ca = (p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y)
 	
+	var has_neg = (sign_ab < 0) or (sign_bc < 0) or (sign_ca < 0)
+	var has_pos = (sign_ab > 0) or (sign_bc > 0) or (sign_ca > 0)
+	
+	return not (has_neg and has_pos)
+
+
+func _distance_to_triangle_2d(p: Vector2, a: Vector2, b: Vector2, c: Vector2) -> float:
+	if _is_point_in_triangle_2d(p, a, b, c):
+		return 0.0
+	var d1 = _distance_to_segment_2d(p, a, b)
+	var d2 = _distance_to_segment_2d(p, b, c)
+	var d3 = _distance_to_segment_2d(p, c, a)
+	return minf(d1, minf(d2, d3))
+
+
+func _find_nodes_by_prefix(node: Node, prefix: String) -> Array:
+	var result := []
+	if node.name.begins_with(prefix):
+		result.append(node)
+	for child in node.get_children():
+		result.append_array(_find_nodes_by_prefix(child, prefix))
+	return result
+
+
+func get_distance_to_nearest_fairway(pos: Vector3) -> float:
+	var min_dist := 9999.0
+	var pos_2d := Vector2(pos.x, pos.z)
+	
+	var fairway_nodes = _find_nodes_by_prefix(self, "fairway_Static")
+	for body in fairway_nodes:
+		if body is StaticBody3D:
+			for child in body.get_children():
+				if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
+					var shape: ConcavePolygonShape3D = child.shape
+					var faces = shape.data
+					for i in range(0, faces.size(), 3):
+						if i + 2 < faces.size():
+							var a = Vector2(faces[i].x, faces[i].z)
+							var b = Vector2(faces[i+1].x, faces[i+1].z)
+							var c = Vector2(faces[i+2].x, faces[i+2].z)
+							var dist = _distance_to_triangle_2d(pos_2d, a, b, c)
+							if dist < min_dist:
+								min_dist = dist
+	return min_dist
+
+
+func get_distance_to_nearest_green(pos: Vector3) -> float:
+	var min_dist := 9999.0
+	var pos_2d := Vector2(pos.x, pos.z)
+	
+	var green_nodes = _find_nodes_by_prefix(self, "green_Static")
+	for body in green_nodes:
+		if body is StaticBody3D:
+			for child in body.get_children():
+				if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
+					var shape: ConcavePolygonShape3D = child.shape
+					var faces = shape.data
+					for i in range(0, faces.size(), 3):
+						if i + 2 < faces.size():
+							var a = Vector2(faces[i].x, faces[i].z)
+							var b = Vector2(faces[i+1].x, faces[i+1].z)
+							var c = Vector2(faces[i+2].x, faces[i+2].z)
+							var dist = _distance_to_triangle_2d(pos_2d, a, b, c)
+							if dist < min_dist:
+								min_dist = dist
+	return min_dist
+
+
+func get_distance_to_nearest_teebox(pos: Vector3) -> float:
+	var min_dist := 9999.0
+	var pos_2d := Vector2(pos.x, pos.z)
+	
+	var tee_nodes = _find_nodes_by_prefix(self, "tee_Static")
+	for body in tee_nodes:
+		if body is StaticBody3D:
+			for child in body.get_children():
+				if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
+					var shape: ConcavePolygonShape3D = child.shape
+					var faces = shape.data
+					for i in range(0, faces.size(), 3):
+						if i + 2 < faces.size():
+							var a = Vector2(faces[i].x, faces[i].z)
+							var b = Vector2(faces[i+1].x, faces[i+1].z)
+							var c = Vector2(faces[i+2].x, faces[i+2].z)
+							var dist = _distance_to_triangle_2d(pos_2d, a, b, c)
+							if dist < min_dist:
+								min_dist = dist
+	return min_dist
+
+
+func update_current_lie_and_reduction() -> void:
+	var ball_node = $Player.ball if has_node("Player") else null
+	if ball_node == null:
+		return
+		
+	# Force update of ball's surface detection at its current position
+	ball_node._update_surface_from_underneath()
+	
+	var lie_type = ball_node.get("lie_type")
+	if lie_type == null:
+		lie_type = "fairway"
+	var reduction = 0.0
+	
+	# Determine if we are on the first hit on a hole
+	var is_first_hit = false
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and not mp_mgr.players.is_empty():
+		var active_p = mp_mgr.get_active_player()
+		if not active_p.is_empty():
+			is_first_hit = (active_p.get("strokes", 0) == 0)
+	else:
+		is_first_hit = (shot_count == 0)
+		
+	# If it's the first stroke, but the ball is already far from its tee spawn position,
+	# then the shot has already been hit and we are evaluating where it landed!
+	if is_first_hit and ball_node != null:
+		var dist_to_spawn = ball_node.global_position.distance_to(ball_node.spawn_position)
+		if dist_to_spawn > 1.5: # More than 1.5 meters away from tee spawn
+			is_first_hit = false
+	
+	if is_driving_range:
+		lie_type = "fairway"
+		reduction = 0.0
+	elif is_first_hit:
+		lie_type = "teebox"
+		reduction = 0.0
+		ball_node.lie_type = "teebox"
+		ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+	else:
+		# Geometric check fallbacks to ensure absolute accuracy for teeboxes, fairways and greens
+		if lie_type != "green" and lie_type != "sand":
+			# Check if we are actually on a green (within 0.8m of green triangles)
+			if get_distance_to_nearest_green(ball_node.global_position) < 0.8:
+				lie_type = "green"
+				ball_node.lie_type = "green"
+				ball_node.set_surface(PhysicsEnums.SurfaceType.GREEN)
+			# Check if we are actually on a tee box (within 1.5m of tee box triangles)
+			elif get_distance_to_nearest_teebox(ball_node.global_position) < 1.5:
+				lie_type = "teebox"
+				ball_node.lie_type = "teebox"
+				ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+			# Check if we are actually on a fairway (within 1.5m of fairway triangles)
+			elif get_distance_to_nearest_fairway(ball_node.global_position) < 1.5:
+				lie_type = "fairway"
+				ball_node.lie_type = "fairway"
+				ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+
+		if lie_type == "green" or lie_type == "fairway":
+			reduction = 0.0
+		elif lie_type == "teebox":
+			reduction = 0.0
+		elif lie_type == "rough":
+			var d = get_distance_to_nearest_fairway(ball_node.global_position)
+			# rough penalty is 10-30% based on how far away from fairway (up to 50 meters)
+			reduction = 0.10 + 0.20 * clampf(d / 50.0, 0.0, 1.0)
+		elif lie_type == "sand":
+			# sand penalty is 20-40% based on relative apex height (up to 30 meters)
+			var shot_height = max(0.0, $Player.apex - $Player._last_starting_pos.y)
+			reduction = 0.20 + 0.20 * clampf(shot_height / 30.0, 0.0, 1.0)
+			
+	# Save it
+	if mp_mgr != null and not mp_mgr.players.is_empty():
+		var active_player = mp_mgr.get_active_player()
+		active_player["lie_type"] = lie_type
+		active_player["shot_reduction"] = reduction
+		print("[range.gd] Multiplayer Active. Storing lie penalty for player %s: %s (%.1f%%)" % [active_player["name"], lie_type, reduction * 100.0])
+	else:
+		$Player.current_shot_reduction = reduction
+		$Player.current_lie_type = lie_type
+		print("[range.gd] Single Player Active. Storing lie penalty: %s (%.1f%%)" % [lie_type, reduction * 100.0])
+		
+	# Update UI
+	_update_aim_distance_label_text()
+		
+	# If in course play, update HUD
+	var parent = get_parent()
+	if parent != null and parent.has_method("_on_active_player_changed"):
+		var active_p = mp_mgr.get_active_player() if (mp_mgr != null and not mp_mgr.players.is_empty()) else {}
+		if not active_p.is_empty():
+			parent.call("_on_active_player_changed", active_p)
+
+
+func set_aim_distance(dist_yards: int) -> void:
+	current_aim_distance_yards = dist_yards
+	_update_aim_distance_label_text()
+
+
+func _update_aim_distance_label_text() -> void:
+	if not has_node("MapCanvas/AimDistanceLabel"):
+		return
+		
+	var label = $MapCanvas/AimDistanceLabel
+	var base_text = "Aim: %d Yards" % current_aim_distance_yards
+	
+	# Get the active player's reduction/lie or single player's
+	var reduction = 0.0
+	var lie_type = "fairway"
+	
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and not mp_mgr.players.is_empty():
+		var active_player = mp_mgr.get_active_player()
+		reduction = active_player.get("shot_reduction", 0.0)
+		lie_type = active_player.get("lie_type", "fairway")
+	else:
+		if has_node("Player"):
+			reduction = $Player.current_shot_reduction
+			lie_type = $Player.current_lie_type
+			
+	var emoji := "🟢"
+	var name_str := "Fairway"
+	match lie_type:
+		"green":
+			emoji = "⛳"
+			name_str = "Green"
+		"fairway":
+			emoji = "🟢"
+			name_str = "Fairway"
+		"teebox":
+			emoji = "🏌️"
+			name_str = "Tee Box"
+		"rough":
+			emoji = "🌿"
+			name_str = "Rough"
+		"sand":
+			emoji = "🏖️"
+			name_str = "Sand"
+			
+	if reduction > 0.0:
+		label.text = "%s | %s %s (-%d%%)" % [base_text, emoji, name_str, int(reduction * 100.0)]
+	else:
+		label.text = "%s | %s %s (0%%)" % [base_text, emoji, name_str]
+
+
+func apply_circular_button_style(btn: Button, bg_color: Color):
+	var style_normal = StyleBoxFlat.new()
+	style_normal.bg_color = bg_color
+	style_normal.corner_radius_top_left = 22 # Half of 44 height
+	style_normal.corner_radius_top_right = 22
+	style_normal.corner_radius_bottom_left = 22
+	style_normal.corner_radius_bottom_right = 22
+	style_normal.content_margin_left = 8
+	style_normal.content_margin_right = 8
+	style_normal.content_margin_top = 8
+	style_normal.content_margin_bottom = 8
+
+	var style_hover = style_normal.duplicate()
+	style_hover.bg_color = bg_color.lightened(0.15)
+
+	var style_pressed = style_normal.duplicate()
+	style_pressed.bg_color = bg_color.darkened(0.15)
+
+	btn.add_theme_stylebox_override("normal", style_normal)
+	btn.add_theme_stylebox_override("hover", style_hover)
+	btn.add_theme_stylebox_override("pressed", style_pressed)
+	btn.add_theme_color_override("font_color", Color.WHITE)
+	btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	btn.add_theme_color_override("font_pressed_color", Color.WHITE)
+	btn.add_theme_font_size_override("font_size", 22)
+
+
+func get_current_green_vertices() -> PackedVector3Array:
+	var pin_pos = current_hole_location
+	if pin_pos.is_zero_approx():
+		pin_pos = aim_target_pos
+	if pin_pos.is_zero_approx():
+		return PackedVector3Array()
+		
+	var closest_green: StaticBody3D = null
+	var min_dist_to_pin = 999999.0
+	
+	var stack = [self]
+	while not stack.is_empty():
+		var node = stack.pop_back()
+		if node is StaticBody3D and node.name.begins_with("green_Static_"):
+			var centroid = Vector3.ZERO
+			var vertex_count = 0
+			for child in node.get_children():
+				if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
+					var verts = child.shape.data
+					if verts.size() > 0:
+						for v in verts:
+							centroid += node.global_transform * v
+						vertex_count += verts.size()
+			if vertex_count > 0:
+				centroid /= vertex_count
+				var dist = centroid.distance_to(pin_pos)
+				if dist < min_dist_to_pin:
+					min_dist_to_pin = dist
+					closest_green = node
+			else:
+				var dist = node.global_position.distance_to(pin_pos)
+				if dist < min_dist_to_pin:
+					min_dist_to_pin = dist
+					closest_green = node
+		
+		for child in node.get_children():
+			stack.append(child)
+			
+	if closest_green == null:
+		return PackedVector3Array()
+		
+	var global_verts = PackedVector3Array()
+	for child in closest_green.get_children():
+		if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
+			var verts = child.shape.data
+			for v in verts:
+				global_verts.append(closest_green.global_transform * v)
+				
+	return global_verts
+
+
+func get_green_zoom_size() -> float:
+	var verts = get_current_green_vertices()
+	if verts.is_empty():
+		return 60.0
+	
+	var min_x = 999999.0
+	var max_x = -999999.0
+	var min_z = 999999.0
+	var max_z = -999999.0
+	for v in verts:
+		if v.x < min_x: min_x = v.x
+		if v.x > max_x: max_x = v.x
+		if v.z < min_z: min_z = v.z
+		if v.z > max_z: max_z = v.z
+		
+	var width = max_x - min_x
+	var depth = max_z - min_z
+	var green_size = max(width, depth)
+	
+	return clamp(green_size * 1.4 + 5.0, 25.0, 200.0)
+
+
+# ==========================================
+# GREEN SLOPE GRID & ELEVATION HEATMAP LOGIC
+# ==========================================
+
+func _get_green_triangles(pin_pos: Vector3) -> Array:
+	var closest_green: StaticBody3D = null
+	var min_dist_to_pin = 999999.0
+	
+	var stack = [self]
+	while not stack.is_empty():
+		var node = stack.pop_back()
+		if node is StaticBody3D and node.name.begins_with("green_Static_"):
+			var centroid = Vector3.ZERO
+			var vertex_count = 0
+			for child in node.get_children():
+				if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
+					var verts = child.shape.data
+					if verts.size() > 0:
+						for v in verts:
+							centroid += node.global_transform * v
+						vertex_count += verts.size()
+			if vertex_count > 0:
+				centroid /= vertex_count
+				var dist = centroid.distance_to(pin_pos)
+				if dist < min_dist_to_pin:
+					min_dist_to_pin = dist
+					closest_green = node
+			else:
+				var dist = node.global_position.distance_to(pin_pos)
+				if dist < min_dist_to_pin:
+					min_dist_to_pin = dist
+					closest_green = node
+		
+		for child in node.get_children():
+			stack.append(child)
+			
+	if closest_green == null:
+		return []
+		
+	var triangles = []
+	for child in closest_green.get_children():
+		if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
+			var verts = child.shape.data
+			for i in range(0, verts.size(), 3):
+				if i + 2 < verts.size():
+					var v0 = closest_green.global_transform * verts[i]
+					var v1 = closest_green.global_transform * verts[i+1]
+					var v2 = closest_green.global_transform * verts[i+2]
+					triangles.append([
+						Vector2(v0.x, v0.z),
+						Vector2(v1.x, v1.z),
+						Vector2(v2.x, v2.z)
+					])
+	return triangles
+
+
+func _is_point_in_triangle(p: Vector2, a: Vector2, b: Vector2, c: Vector2) -> bool:
+	var d1 = (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y)
+	var d2 = (p.x - c.x) * (b.y - c.y) - (b.x - c.x) * (p.y - c.y)
+	var d3 = (p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y)
+	
+	var has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
+	var has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
+	
+	return not (has_neg and has_pos)
+
+
+func _get_heatmap_color(t: float) -> Color:
+	var color: Color
+	if t < 0.25:
+		color = Color.BLUE.lerp(Color.CYAN, t / 0.25)
+	elif t < 0.5:
+		color = Color.CYAN.lerp(Color.GREEN, (t - 0.25) / 0.25)
+	elif t < 0.75:
+		color = Color.GREEN.lerp(Color.YELLOW, (t - 0.5) / 0.25)
+	else:
+		color = Color.YELLOW.lerp(Color.RED, (t - 0.75) / 0.25)
+	color.a = 0.55
+	return color
+
+
+func _get_arrow_color(slope_len: float) -> Color:
+	var val = clamp(slope_len * 15.0, 0.0, 1.0)
+	if val < 0.5:
+		return Color.CYAN.lerp(Color.WHITE, val / 0.5)
+	else:
+		return Color.WHITE.lerp(Color.RED, (val - 0.5) / 0.5)
+
+
+func _is_player_near_green() -> bool:
+	if not $Player or not $Player.ball:
+		return false
+	var ball_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN)
+	if ball_on_green:
+		return true
+	if not current_hole_location.is_zero_approx():
+		var dist = $Player.ball.global_position.distance_to(current_hole_location)
+		if dist < 45.0: # ~50 yards
+			return true
+	return false
+
+
+func _update_green_grid_visibility() -> void:
+	var heatmap_node = get_node_or_null("GreenHeatmapMesh")
+	var grid_node = get_node_or_null("GreenGridMesh")
+	var dots_node = get_node_or_null("GreenDotsMesh")
+	
+	if heatmap_node == null or grid_node == null or dots_node == null:
+		return
+		
+	if not show_green_grid:
+		heatmap_node.visible = false
+		grid_node.visible = false
+		dots_node.visible = false
+		return
+		
+	if is_aerial_view:
+		heatmap_node.visible = true
+		grid_node.visible = true
+		dots_node.visible = true
+	else:
+		var is_near = _is_player_near_green()
+		heatmap_node.visible = false
+		grid_node.visible = is_near
+		dots_node.visible = is_near
+
+
+func _generate_green_grid_and_heatmap() -> void:
+	for name in ["GreenHeatmapMesh", "GreenGridMesh", "GreenDotsMesh"]:
+		var node = get_node_or_null(name)
+		if node:
+			remove_child(node)
+			node.queue_free()
+			
+	var pin_pos = current_hole_location
+	if pin_pos.is_zero_approx():
+		pin_pos = aim_target_pos
+	if pin_pos.is_zero_approx():
+		return
+		
+	var triangles = _get_green_triangles(pin_pos)
+	if triangles.is_empty():
+		return
+		
+	var verts = get_current_green_vertices()
+	var min_y = 999999.0
+	var max_y = -999999.0
+	for v in verts:
+		if v.y < min_y: min_y = v.y
+		if v.y > max_y: max_y = v.y
+		
+	if max_y - min_y < 0.001:
+		max_y = min_y + 1.0
+		
+	var spacing = 1.0
+	var active_cells = {}
+	
+	for tri in triangles:
+		var tx_min = min(tri[0].x, min(tri[1].x, tri[2].x))
+		var tx_max = max(tri[0].x, max(tri[1].x, tri[2].x))
+		var tz_min = min(tri[0].y, min(tri[1].y, tri[2].y))
+		var tz_max = max(tri[0].y, max(tri[1].y, tri[2].y))
+		
+		var ix_start = int(floor(tx_min / spacing))
+		var ix_end = int(ceil(tx_max / spacing))
+		var iz_start = int(floor(tz_min / spacing))
+		var iz_end = int(ceil(tz_max / spacing))
+		
+		for ix in range(ix_start, ix_end + 1):
+			for iz in range(iz_start, iz_end + 1):
+				var cell_center = Vector2((ix + 0.5) * spacing, (iz + 0.5) * spacing)
+				if _is_point_in_triangle(cell_center, tri[0], tri[1], tri[2]):
+					active_cells[Vector2i(ix, iz)] = true
+					
+	if active_cells.is_empty():
+		return
+		
+	var st_heatmap = SurfaceTool.new()
+	st_heatmap.begin(Mesh.PRIMITIVE_TRIANGLES)
+	
+	var st_grid = SurfaceTool.new()
+	st_grid.begin(Mesh.PRIMITIVE_LINES)
+	
+	var heatmap_y_offset = 0.02
+	var grid_y_offset = 0.03
+	
+	# Height cache for optimization
+	var height_cache = {}
+	var get_cached_height = func(gx: float, gz: float) -> float:
+		var key = Vector2(gx, gz)
+		if not height_cache.has(key):
+			height_cache[key] = get_height(gx, gz)
+		return height_cache[key]
+		
+	for cell in active_cells.keys():
+		var ix = cell.x
+		var iz = cell.y
+		
+		var x0 = ix * spacing
+		var x1 = (ix + 1) * spacing
+		var z0 = iz * spacing
+		var z1 = (iz + 1) * spacing
+		
+		var y00 = get_cached_height.call(x0, z0)
+		var y10 = get_cached_height.call(x1, z0)
+		var y11 = get_cached_height.call(x1, z1)
+		var y01 = get_cached_height.call(x0, z1)
+		
+		var h00 = Vector3(x0, y00 + heatmap_y_offset, z0)
+		var h10 = Vector3(x1, y10 + heatmap_y_offset, z0)
+		var h11 = Vector3(x1, y11 + heatmap_y_offset, z1)
+		var h01 = Vector3(x0, y01 + heatmap_y_offset, z1)
+		
+		var col00 = _get_heatmap_color(clamp((y00 - min_y) / (max_y - min_y), 0.0, 1.0))
+		var col10 = _get_heatmap_color(clamp((y10 - min_y) / (max_y - min_y), 0.0, 1.0))
+		var col11 = _get_heatmap_color(clamp((y11 - min_y) / (max_y - min_y), 0.0, 1.0))
+		var col01 = _get_heatmap_color(clamp((y01 - min_y) / (max_y - min_y), 0.0, 1.0))
+		
+		st_heatmap.set_color(col00)
+		st_heatmap.add_vertex(h00)
+		st_heatmap.set_color(col10)
+		st_heatmap.add_vertex(h10)
+		st_heatmap.set_color(col11)
+		st_heatmap.add_vertex(h11)
+		
+		st_heatmap.set_color(col00)
+		st_heatmap.add_vertex(h00)
+		st_heatmap.set_color(col11)
+		st_heatmap.add_vertex(h11)
+		st_heatmap.set_color(col01)
+		st_heatmap.add_vertex(h01)
+		
+		var g00 = Vector3(x0, y00 + grid_y_offset, z0)
+		var g10 = Vector3(x1, y10 + grid_y_offset, z0)
+		var g11 = Vector3(x1, y11 + grid_y_offset, z1)
+		var g01 = Vector3(x0, y01 + grid_y_offset, z1)
+		
+		st_grid.add_vertex(g00)
+		st_grid.add_vertex(g10)
+		st_grid.add_vertex(g10)
+		st_grid.add_vertex(g11)
+		st_grid.add_vertex(g11)
+		st_grid.add_vertex(g01)
+		st_grid.add_vertex(g01)
+		st_grid.add_vertex(g00)
+		
+	# Collect unique horizontal and vertical edges to generate slope flow dots
+	var h_edges = {}
+	var v_edges = {}
+	for cell in active_cells.keys():
+		var ix = cell.x
+		var iz = cell.y
+		h_edges[Vector2i(ix, iz)] = true
+		h_edges[Vector2i(ix, iz + 1)] = true
+		v_edges[Vector2i(ix, iz)] = true
+		v_edges[Vector2i(ix + 1, iz)] = true
+		
+	var dot_y_offset = 0.035
+	var dots_data = [] # Array of dictionaries: {start: Vector3, displacement: Vector3, slope: float}
+	
+	# Horizontal edges
+	for edge in h_edges.keys():
+		var x0 = edge.x * spacing
+		var z0 = edge.y * spacing
+		var x1 = (edge.x + 1) * spacing
+		var z1 = edge.y * spacing
+		
+		var y0 = get_cached_height.call(x0, z0)
+		var y1 = get_cached_height.call(x1, z1)
+		
+		var slope = abs(y0 - y1)
+		if slope > 0.005:
+			var start_pos: Vector3
+			var end_pos: Vector3
+			if y0 > y1:
+				start_pos = Vector3(x0, y0 + dot_y_offset, z0)
+				end_pos = Vector3(x1, y1 + dot_y_offset, z1)
+			else:
+				start_pos = Vector3(x1, y1 + dot_y_offset, z1)
+				end_pos = Vector3(x0, y0 + dot_y_offset, z0)
+				
+			var dots_per_segment = 3
+			for j in range(dots_per_segment):
+				dots_data.append({
+					"start": start_pos,
+					"displacement": end_pos - start_pos,
+					"slope": slope,
+					"phase_offset": float(j) / float(dots_per_segment)
+				})
+			
+	# Vertical edges
+	for edge in v_edges.keys():
+		var x0 = edge.x * spacing
+		var z0 = edge.y * spacing
+		var x1 = edge.x * spacing
+		var z1 = (edge.y + 1) * spacing
+		
+		var y0 = get_cached_height.call(x0, z0)
+		var y1 = get_cached_height.call(x1, z1)
+		
+		var slope = abs(y0 - y1)
+		if slope > 0.005:
+			var start_pos: Vector3
+			var end_pos: Vector3
+			if y0 > y1:
+				start_pos = Vector3(x0, y0 + dot_y_offset, z0)
+				end_pos = Vector3(x1, y1 + dot_y_offset, z1)
+			else:
+				start_pos = Vector3(x1, y1 + dot_y_offset, z1)
+				end_pos = Vector3(x0, y0 + dot_y_offset, z0)
+				
+			var dots_per_segment = 3
+			for j in range(dots_per_segment):
+				dots_data.append({
+					"start": start_pos,
+					"displacement": end_pos - start_pos,
+					"slope": slope,
+					"phase_offset": float(j) / float(dots_per_segment)
+				})
+			
+	var heatmap_mesh = st_heatmap.commit()
+	var grid_mesh = st_grid.commit()
+	
+	var heatmap_mi = MeshInstance3D.new()
+	heatmap_mi.name = "GreenHeatmapMesh"
+	heatmap_mi.mesh = heatmap_mesh
+	var mat_hm = StandardMaterial3D.new()
+	mat_hm.vertex_color_use_as_albedo = true
+	mat_hm.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat_hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat_hm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	heatmap_mi.material_override = mat_hm
+	heatmap_mi.visible = false
+	add_child(heatmap_mi)
+	
+	var grid_mi = MeshInstance3D.new()
+	grid_mi.name = "GreenGridMesh"
+	grid_mi.mesh = grid_mesh
+	var mat_g = StandardMaterial3D.new()
+	mat_g.albedo_color = Color(1.0, 1.0, 1.0, 0.35)
+	mat_g.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat_g.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	grid_mi.material_override = mat_g
+	grid_mi.visible = false
+	add_child(grid_mi)
+	
+	# Instantiate MultiMesh for moving dots
+	var dots_mi = MultiMeshInstance3D.new()
+	dots_mi.name = "GreenDotsMesh"
+	
+	var multimesh = MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.use_colors = true
+	multimesh.use_custom_data = true
+	multimesh.instance_count = dots_data.size()
+	
+	# Setup low-poly sphere mesh for dots (slightly larger)
+	var dot_sphere = SphereMesh.new()
+	dot_sphere.radius = 0.018
+	dot_sphere.height = 0.036
+	dot_sphere.radial_segments = 6
+	dot_sphere.rings = 3
+	multimesh.mesh = dot_sphere
+	
+	for i in range(dots_data.size()):
+		var data = dots_data[i]
+		var tx = Transform3D(Basis(), data.start)
+		multimesh.set_instance_transform(i, tx)
+		
+		var disp = data.displacement
+		var custom = Color(disp.x, disp.y, disp.z, data.slope)
+		multimesh.set_instance_custom_data(i, custom)
+		multimesh.set_instance_color(i, Color(data.phase_offset, 0.0, 0.0, 1.0))
+		
+	dots_mi.multimesh = multimesh
+	
+	# Create custom spatial shader for dots
+	var shader = Shader.new()
+	shader.code = """
+shader_type spatial;
+render_mode unshaded, cull_back;
+
+uniform float time_scale = 1.0;
+uniform vec4 dot_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+uniform float min_y = 0.0;
+uniform float max_y = 1.0;
+
+varying vec4 v_color;
+
+void vertex() {
+	vec3 displacement = INSTANCE_CUSTOM.xyz;
+	float speed = INSTANCE_CUSTOM.w;
+	
+	// Phase offset is passed via COLOR.r
+	float phase_offset = COLOR.r;
+	
+	// Stagger across different segments using INSTANCE_ID
+	float segment_phase = float(INSTANCE_ID / 3) * 0.15;
+	
+	float progress = fract(TIME * speed * time_scale * 3.5 + phase_offset + segment_phase);
+	
+	// Translate vertex in world space along the displacement vector
+	vec4 world_offset = vec4(displacement * progress, 0.0);
+	vec4 local_offset = inverse(MODEL_MATRIX) * world_offset;
+	VERTEX += local_offset.xyz;
+	
+	// Smooth fade-in / fade-out along the segment
+	float fade = sin(progress * 3.14159265);
+	
+	// Height indicator of the dot's current position
+	float current_y = MODEL_MATRIX[3].y + displacement.y * progress;
+	float t = clamp((current_y - min_y) / (max_y - min_y), 0.0, 1.0);
+	
+	// Map height to a gradient matching the heatmap (blue -> cyan -> green -> yellow -> red)
+	vec3 col;
+	if (t < 0.25) {
+		col = mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), t / 0.25);
+	} else if (t < 0.5) {
+		col = mix(vec3(0.0, 1.0, 1.0), vec3(0.0, 1.0, 0.0), (t - 0.25) / 0.25);
+	} else if (t < 0.75) {
+		col = mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), (t - 0.5) / 0.25);
+	} else {
+		col = mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), (t - 0.75) / 0.25);
+	}
+	
+	v_color = vec4(col, dot_color.a * fade);
+}
+
+void fragment() {
+	ALBEDO = v_color.rgb;
+	ALPHA = v_color.a;
+}
+"""
+	
+	var mat_dots = ShaderMaterial.new()
+	mat_dots.shader = shader
+	mat_dots.set_shader_parameter("min_y", min_y)
+	mat_dots.set_shader_parameter("max_y", max_y)
+	dots_mi.material_override = mat_dots
+	dots_mi.visible = false
+	add_child(dots_mi)
+	
+	_update_green_grid_visibility()
+
+
+func _exit_tree() -> void:
+	if GlobalSettings.is_chipping_minigame:
+		GlobalSettings.is_chipping_minigame = false
+
+
+func _setup_chipping_minigame() -> void:
+	chipping_stats = {}
+	chipping_island_positions = []
+	chipping_islands = []
+	for i in range(chipping_distances.size()):
+		chipping_stats[i] = {"Attempts": 0, "Hits": 0}
+		
+	var hole_info_data = course_data_dict.get("Hole Info", {})
+	var hole_data = hole_info_data.get("Hole 17", {})
+	if hole_data.is_empty():
+		push_error("[Chipping] Hole 17 info not found in course data!")
+		return
+		
+	var tee_coord = hole_data.get("Tee Boxes", {}).get("Blue", [52.162712, 31.829489])
+	var pin_coord = hole_data.get("Hole Location", [73.96878, 131.19373])
+	
+	var tee_pos = Vector3(tee_coord[0], get_height(tee_coord[0], tee_coord[1]), tee_coord[1])
+	var pin_pos = Vector3(pin_coord[0], get_height(pin_coord[0], pin_coord[1]), pin_coord[1])
+	
+	var dir = (pin_pos - tee_pos)
+	var dir_norm = dir.normalized()
+	var perp = Vector3(-dir_norm.z, 0, dir_norm.x).normalized()
+	var green_radius = 3.81
+	
+	for i in range(chipping_distances.size()):
+		var dist_meters = chipping_distances[i] * 0.3048
+		var lat_offset_meters = chipping_lateral_offsets[i] * 0.3048
+		
+		var base_pos = tee_pos + dir_norm * dist_meters
+		var island_pos = base_pos + perp * lat_offset_meters
+		
+		var terrain_h = get_height(island_pos.x, island_pos.z)
+		island_pos.y = terrain_h + 0.25
+		chipping_island_positions.append(island_pos)
+		
+		var island = StaticBody3D.new()
+		island.name = "ChippingGreenIsland_%d" % i
+		island.set_meta("surface_type", 4)
+		add_child(island)
+		island.global_position = island_pos
+		chipping_islands.append(island)
+		
+		var col_shape = CollisionShape3D.new()
+		var cyl_shape = CylinderShape3D.new()
+		cyl_shape.radius = green_radius
+		cyl_shape.height = 1.0
+		col_shape.shape = cyl_shape
+		island.add_child(col_shape)
+		
+		var base_mesh_inst = MeshInstance3D.new()
+		var base_mesh = CylinderMesh.new()
+		base_mesh.top_radius = green_radius + 0.1
+		base_mesh.bottom_radius = green_radius + 0.1
+		base_mesh.height = 1.0
+		base_mesh_inst.mesh = base_mesh
+		
+		var base_mat = StandardMaterial3D.new()
+		base_mat.albedo_color = Color(0.35, 0.25, 0.15)
+		base_mat.roughness = 0.9
+		base_mesh_inst.material_override = base_mat
+		base_mesh_inst.position = Vector3(0.0, -0.4, 0.0)
+		island.add_child(base_mesh_inst)
+		
+		var turf_mesh_inst = MeshInstance3D.new()
+		var turf_mesh = CylinderMesh.new()
+		turf_mesh.top_radius = green_radius
+		turf_mesh.bottom_radius = green_radius
+		turf_mesh.height = 0.08
+		turf_mesh_inst.mesh = turf_mesh
+		
+		var turf_mat = StandardMaterial3D.new()
+		turf_mat.albedo_texture = load("res://Courses/Environments/grass-green/albedo.png")
+		turf_mat.roughness = 0.95
+		turf_mesh_inst.material_override = turf_mat
+		turf_mesh_inst.position = Vector3(0.0, 0.1, 0.0)
+		island.add_child(turf_mesh_inst)
+		
+		var flag_node = Node3D.new()
+		flag_node.name = "Flag_%d" % i
+		island.add_child(flag_node)
+		flag_node.position = Vector3(0.0, 0.1, 0.0)
+		
+		var pole = MeshInstance3D.new()
+		var pole_mesh = CylinderMesh.new()
+		pole_mesh.top_radius = 0.015
+		pole_mesh.bottom_radius = 0.015
+		pole_mesh.height = 1.8
+		pole.mesh = pole_mesh
+		var pole_mat = StandardMaterial3D.new()
+		pole_mat.albedo_color = Color.WHITE
+		pole.material_override = pole_mat
+		pole.position = Vector3(0.0, 0.9, 0.0)
+		flag_node.add_child(pole)
+		
+		var flag = MeshInstance3D.new()
+		var flag_mesh = PrismMesh.new()
+		flag_mesh.size = Vector3(0.35, 0.25, 0.01)
+		flag.mesh = flag_mesh
+		var flag_mat = StandardMaterial3D.new()
+		flag_mat.albedo_color = Color(0.85, 0.65, 0.0)
+		flag_mat.emission_enabled = true
+		flag_mat.emission = Color(0.85, 0.65, 0.0)
+		flag.material_override = flag_mat
+		flag.position = Vector3(0.175, 1.775, 0.0)
+		flag.rotation = Vector3(0.0, 0.0, -PI/2)
+		flag_node.add_child(flag)
+		
+		var label_node = Label3D.new()
+		label_node.text = "%d FT" % chipping_distances[i]
+		label_node.font_size = 36
+		label_node.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label_node.outline_size = 8
+		label_node.modulate = Color.WHITE
+		label_node.position = Vector3(0.0, 2.2, 0.0)
+		flag_node.add_child(label_node)
+		
+	_select_chipping_target(selected_chipping_target_idx)
+	_setup_chipping_hud_ui()
+
+
+func _select_chipping_target(index: int) -> void:
+	selected_chipping_target_idx = index
+	for i in range(chipping_islands.size()):
+		var island_node = chipping_islands[i]
+		if island_node:
+			var old_ring = island_node.get_node_or_null("TargetRing")
+			if old_ring:
+				old_ring.queue_free()
+				
+			if i == index:
+				var ring = MeshInstance3D.new()
+				ring.name = "TargetRing"
+				var ring_mesh = CylinderMesh.new()
+				ring_mesh.top_radius = 3.81
+				ring_mesh.bottom_radius = 3.81
+				ring_mesh.height = 0.01
+				ring.mesh = ring_mesh
+				
+				var ring_mat = StandardMaterial3D.new()
+				ring_mat.albedo_color = Color(0.0, 0.8, 1.0, 0.6)
+				ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				ring.material_override = ring_mat
+				ring.position = Vector3(0.0, 0.15, 0.0)
+				island_node.add_child(ring)
+				
+	var target_pos = chipping_island_positions[index]
+	aim_target_pos = target_pos
+	if has_node("AimMarker"):
+		$AimMarker.global_position = aim_target_pos
+		
+	if has_node("Player") and $Player.ball != null:
+		var diff = aim_target_pos - $Player.ball.spawn_position
+		var angle_rad = atan2(diff.z, diff.x)
+		$Player.ball.aim_yaw_offset_deg = rad_to_deg(-angle_rad)
+		
+		var yaw_rad = -angle_rad
+		var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
+		var cam_pos = clamp_camera_position($Player.ball.spawn_position + local_offset)
+		var target_look = aim_target_pos + Vector3.UP * 0.5
+		if has_node("PhantomCamera3D"):
+			$PhantomCamera3D.global_position = cam_pos
+			$PhantomCamera3D.look_at(target_look)
+		if has_node("Camera3D"):
+			$Camera3D.global_position = cam_pos
+			$Camera3D.look_at(target_look)
+			
+	_update_chipping_hud()
+	_show_chipping_banner("Target Island: %d Feet Selected" % chipping_distances[index])
+
+
+func _setup_chipping_hud_ui() -> void:
+	if chipping_hud != null:
+		chipping_hud.queue_free()
+		chipping_hud = null
+		
+	chipping_hud = CanvasLayer.new()
+	chipping_hud.name = "ChippingHUDLayer"
+	chipping_hud.layer = 20
+	add_child(chipping_hud)
+	
+	var control = Control.new()
+	control.anchors_preset = Control.PRESET_FULL_RECT
+	control.set_anchors_preset(Control.PRESET_FULL_RECT)
+	chipping_hud.add_child(control)
+	
+	var glass_style = StyleBoxFlat.new()
+	glass_style.bg_color = Color(0.04, 0.08, 0.12, 0.85)
+	glass_style.border_width_left = 2
+	glass_style.border_width_top = 2
+	glass_style.border_width_right = 2
+	glass_style.border_width_bottom = 2
+	glass_style.border_color = Color(0.24, 0.46, 0.72, 0.5)
+	glass_style.corner_radius_top_left = 10
+	glass_style.corner_radius_top_right = 10
+	glass_style.corner_radius_bottom_right = 10
+	glass_style.corner_radius_bottom_left = 10
+	
+	var score_panel = PanelContainer.new()
+	score_panel.custom_minimum_size = Vector2(700, 90)
+	score_panel.anchor_left = 0.5
+	score_panel.anchor_right = 0.5
+	score_panel.anchor_top = 0.0
+	score_panel.anchor_bottom = 0.0
+	score_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	score_panel.offset_left = -350
+	score_panel.offset_right = 350
+	score_panel.offset_top = 20
+	score_panel.offset_bottom = 110
+	control.add_child(score_panel)
+	score_panel.add_theme_stylebox_override("panel", glass_style)
+	
+	var score_margin = MarginContainer.new()
+	score_margin.add_theme_constant_override("margin_left", 20)
+	score_margin.add_theme_constant_override("margin_right", 20)
+	score_panel.add_child(score_margin)
+	
+	var score_hbox = HBoxContainer.new()
+	score_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	score_margin.add_child(score_hbox)
+	
+	var target_col = VBoxContainer.new()
+	target_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	target_col.alignment = BoxContainer.ALIGNMENT_CENTER
+	score_hbox.add_child(target_col)
+	var t_lbl = Label.new()
+	t_lbl.text = "ACTIVE TARGET"
+	t_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t_lbl.add_theme_font_size_override("font_size", 12)
+	t_lbl.add_theme_color_override("font_color", Color(0.0, 0.8, 1.0))
+	target_col.add_child(t_lbl)
+	chipping_target_lbl = Label.new()
+	chipping_target_lbl.text = "100 FT"
+	chipping_target_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	chipping_target_lbl.add_theme_font_size_override("font_size", 28)
+	chipping_target_lbl.add_theme_color_override("font_color", Color.WHITE)
+	target_col.add_child(chipping_target_lbl)
+	
+	var attempts_col = VBoxContainer.new()
+	attempts_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	attempts_col.alignment = BoxContainer.ALIGNMENT_CENTER
+	score_hbox.add_child(attempts_col)
+	var att_lbl = Label.new()
+	att_lbl.text = "ATTEMPTS"
+	att_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	att_lbl.add_theme_font_size_override("font_size", 12)
+	att_lbl.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
+	attempts_col.add_child(att_lbl)
+	chipping_attempts_lbl = Label.new()
+	chipping_attempts_lbl.text = "0"
+	chipping_attempts_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	chipping_attempts_lbl.add_theme_font_size_override("font_size", 28)
+	chipping_attempts_lbl.add_theme_color_override("font_color", Color.WHITE)
+	attempts_col.add_child(chipping_attempts_lbl)
+	
+	var hits_col = VBoxContainer.new()
+	hits_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hits_col.alignment = BoxContainer.ALIGNMENT_CENTER
+	score_hbox.add_child(hits_col)
+	var h_lbl = Label.new()
+	h_lbl.text = "HITS"
+	h_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	h_lbl.add_theme_font_size_override("font_size", 12)
+	h_lbl.add_theme_color_override("font_color", Color(0.2, 0.8, 0.3))
+	hits_col.add_child(h_lbl)
+	chipping_hits_lbl = Label.new()
+	chipping_hits_lbl.text = "0"
+	chipping_hits_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	chipping_hits_lbl.add_theme_font_size_override("font_size", 28)
+	chipping_hits_lbl.add_theme_color_override("font_color", Color.WHITE)
+	hits_col.add_child(chipping_hits_lbl)
+	
+	var acc_col = VBoxContainer.new()
+	acc_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	acc_col.alignment = BoxContainer.ALIGNMENT_CENTER
+	score_hbox.add_child(acc_col)
+	var ac_lbl = Label.new()
+	ac_lbl.text = "ACCURACY"
+	ac_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ac_lbl.add_theme_font_size_override("font_size", 12)
+	ac_lbl.add_theme_color_override("font_color", Color(0.85, 0.7, 0.1))
+	acc_col.add_child(ac_lbl)
+	chipping_accuracy_lbl = Label.new()
+	chipping_accuracy_lbl.text = "0%"
+	chipping_accuracy_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	chipping_accuracy_lbl.add_theme_font_size_override("font_size", 28)
+	chipping_accuracy_lbl.add_theme_color_override("font_color", Color.WHITE)
+	acc_col.add_child(chipping_accuracy_lbl)
+	
+	var target_panel = PanelContainer.new()
+	target_panel.custom_minimum_size = Vector2(180, 300)
+	target_panel.anchor_left = 0.0
+	target_panel.anchor_top = 0.5
+	target_panel.anchor_bottom = 0.5
+	target_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	target_panel.offset_left = 20
+	target_panel.offset_top = -150
+	target_panel.offset_bottom = 150
+	control.add_child(target_panel)
+	target_panel.add_theme_stylebox_override("panel", glass_style)
+	
+	var target_margin = MarginContainer.new()
+	target_margin.add_theme_constant_override("margin_left", 12)
+	target_margin.add_theme_constant_override("margin_right", 12)
+	target_margin.add_theme_constant_override("margin_top", 12)
+	target_margin.add_theme_constant_override("margin_bottom", 12)
+	target_panel.add_child(target_margin)
+	
+	var target_vbox = VBoxContainer.new()
+	target_vbox.add_theme_constant_override("separation", 10)
+	target_margin.add_child(target_vbox)
+	
+	var t_title = Label.new()
+	t_title.text = "CHOOSE TARGET"
+	t_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t_title.add_theme_font_size_override("font_size", 13)
+	t_title.add_theme_color_override("font_color", Color(0.0, 0.8, 1.0))
+	target_vbox.add_child(t_title)
+	
+	chipping_buttons.clear()
+	for i in range(chipping_distances.size()):
+		var btn = Button.new()
+		btn.text = "Target: %d FT" % chipping_distances[i]
+		btn.custom_minimum_size = Vector2(0, 32)
+		btn.add_theme_font_size_override("font_size", 12)
+		_apply_chipping_btn_style(btn, Color(0.12, 0.20, 0.28), Color(0.18, 0.30, 0.42))
+		btn.pressed.connect(func(idx=i): _select_chipping_target(idx))
+		target_vbox.add_child(btn)
+		chipping_buttons.append(btn)
+		
+	var exit_btn = Button.new()
+	exit_btn.text = "Exit Minigame"
+	exit_btn.custom_minimum_size = Vector2(0, 35)
+	exit_btn.add_theme_font_size_override("font_size", 12)
+	_apply_chipping_btn_style(exit_btn, Color(0.36, 0.16, 0.16), Color(0.5, 0.2, 0.2))
+	exit_btn.pressed.connect(func():
+		GlobalSettings.is_chipping_minigame = false
+		var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+		if mp_mgr != null:
+			mp_mgr.players.clear()
+			mp_mgr.practice_mode_active = false
+		SceneManager.change_scene("res://UI/MiniGamesMenu/minigames_menu.tscn")
+	)
+	target_vbox.add_child(exit_btn)
+	
+	chipping_banner_lbl = Label.new()
+	chipping_banner_lbl.text = "Aim and hit towards the target island green!"
+	chipping_banner_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	chipping_banner_lbl.anchor_left = 0.5
+	chipping_banner_lbl.anchor_right = 0.5
+	chipping_banner_lbl.anchor_top = 0.25
+	chipping_banner_lbl.anchor_bottom = 0.25
+	chipping_banner_lbl.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	chipping_banner_lbl.add_theme_font_size_override("font_size", 20)
+	chipping_banner_lbl.add_theme_color_override("font_color", Color(1, 1, 0.5, 1.0))
+	chipping_banner_lbl.add_theme_constant_override("outline_size", 3)
+	chipping_banner_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	control.add_child(chipping_banner_lbl)
+	
+	_update_chipping_hud()
+
+
+func _apply_chipping_btn_style(btn: Button, norm_color: Color, hov_color: Color) -> void:
+	var style_normal = StyleBoxFlat.new()
+	style_normal.bg_color = norm_color
+	style_normal.corner_radius_top_left = 6
+	style_normal.corner_radius_top_right = 6
+	style_normal.corner_radius_bottom_right = 6
+	style_normal.corner_radius_bottom_left = 6
+	style_normal.border_width_left = 1
+	style_normal.border_width_top = 1
+	style_normal.border_width_right = 1
+	style_normal.border_width_bottom = 1
+	style_normal.border_color = Color(1, 1, 1, 0.15)
+	
+	var style_hover = StyleBoxFlat.new()
+	style_hover.bg_color = hov_color
+	style_hover.corner_radius_top_left = 6
+	style_hover.corner_radius_top_right = 6
+	style_hover.corner_radius_bottom_right = 6
+	style_hover.corner_radius_bottom_left = 6
+	style_hover.border_width_left = 1
+	style_hover.border_width_top = 1
+	style_hover.border_width_right = 1
+	style_hover.border_width_bottom = 1
+	style_hover.border_color = Color(1, 1, 1, 0.3)
+	
+	btn.add_theme_stylebox_override("normal", style_normal)
+	btn.add_theme_stylebox_override("hover", style_hover)
+	btn.add_theme_stylebox_override("pressed", style_hover)
+	btn.add_theme_stylebox_override("focus", style_normal)
+	btn.add_theme_color_override("font_color", Color.WHITE)
+
+
+func _update_chipping_hud() -> void:
+	if not chipping_stats.has(selected_chipping_target_idx):
+		return
+	var stats = chipping_stats[selected_chipping_target_idx]
+	var att = stats["Attempts"]
+	var hits = stats["Hits"]
+	var acc = 0
+	if att > 0:
+		acc = int((float(hits) / float(att)) * 100.0)
+		
+	if chipping_target_lbl:
+		chipping_target_lbl.text = "%d FT" % chipping_distances[selected_chipping_target_idx]
+	if chipping_attempts_lbl:
+		chipping_attempts_lbl.text = str(att)
+	if chipping_hits_lbl:
+		chipping_hits_lbl.text = str(hits)
+	if chipping_accuracy_lbl:
+		chipping_accuracy_lbl.text = "%d%%" % acc
+		
+	for i in range(chipping_buttons.size()):
+		if i == selected_chipping_target_idx:
+			chipping_buttons[i].add_theme_color_override("font_color", Color(0.0, 0.8, 1.0))
+		else:
+			chipping_buttons[i].remove_theme_color_override("font_color")
+
+
+func _show_chipping_banner(text: String) -> void:
+	if chipping_banner_lbl:
+		chipping_banner_lbl.text = text

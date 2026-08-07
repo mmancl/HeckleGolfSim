@@ -23,12 +23,18 @@ public static class SquareProtocol
             return false;
         }
 
+        var ballReady = data[2] != 0x00 || data[3] != 0x00;
+        var posX = BinaryPrimitives.ReadInt32LittleEndian(data[5..9]);
+        var posY = BinaryPrimitives.ReadInt32LittleEndian(data[9..13]);
+        var posZ = BinaryPrimitives.ReadInt32LittleEndian(data[13..17]);
+        var ballDetected = data[4] != 0x00 || posX != 0 || posY != 0 || posZ != 0;
+
         sensor = new SquareSensorData(
-            data[3] is 0x01 or 0x02,
-            data[4] == 0x01,
-            BinaryPrimitives.ReadInt32LittleEndian(data[5..9]),
-            BinaryPrimitives.ReadInt32LittleEndian(data[9..13]),
-            BinaryPrimitives.ReadInt32LittleEndian(data[13..17]));
+            ballReady,
+            ballDetected,
+            posX,
+            posY,
+            posZ);
 
         return true;
     }
@@ -56,7 +62,8 @@ public static class SquareProtocol
         var rawBackSpin = BinaryPrimitives.ReadInt16LittleEndian(data[13..15]);
         var rawSideSpin = BinaryPrimitives.ReadInt16LittleEndian(data[15..17]);
 
-        var speed = rawSpeed == -32768 ? 0.0f : rawSpeed / 100.0f;
+        var speedDivisor = 100.0f;
+        var speed = rawSpeed == -32768 ? 0.0f : rawSpeed / speedDivisor;
         var vla = rawVla == -32768 ? 0.0f : rawVla / 100.0f;
         var hla = rawHla == -32768 ? 0.0f : rawHla / 100.0f;
         var totalSpin = rawTotalSpin == -32768 ? 0 : (int)rawTotalSpin;

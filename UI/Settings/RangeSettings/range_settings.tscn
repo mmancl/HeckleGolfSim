@@ -15,7 +15,6 @@ corner_radius_bottom_right = 12
 corner_radius_bottom_left = 12
 
 [node name="RangeSettings" type="PanelContainer"]
-custom_minimum_size = Vector2(400, 560)
 offset_right = 400.0
 offset_bottom = 560.0
 size_flags_horizontal = 4
@@ -42,7 +41,9 @@ horizontal_alignment = 1
 
 [node name="TabContainer" type="TabContainer" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
+size_flags_horizontal = 3
 size_flags_vertical = 3
+clip_contents = true
 
 [node name="Gameplay" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
 layout_mode = 2
@@ -357,12 +358,12 @@ theme_override_constants/separation = 20
 alignment = 1
 
 [node name="ResetLayoutButton" type="Button" parent="MarginContainer/VBoxContainer/ButtonsHBox"]
-custom_minimum_size = Vector2(140, 40)
+custom_minimum_size = Vector2(140, 56)
 layout_mode = 2
 text = "Reset Layout"
 
 [node name="ExitButton" type="Button" parent="MarginContainer/VBoxContainer/ButtonsHBox"]
-custom_minimum_size = Vector2(140, 40)
+custom_minimum_size = Vector2(140, 56)
 layout_mode = 2
 text = "Exit to Menu"
 

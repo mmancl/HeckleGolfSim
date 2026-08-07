@@ -1,0 +1,9 @@
+[config]
+name="MediaPipePosePlugin"
+binary_type="local"
+binary="MediaPipePosePlugin.aar"
+
+[dependencies]
+local=[]
+remote=["com.google.mediapipe:tasks-vision:0.10.14"]
+custom_rules=[]

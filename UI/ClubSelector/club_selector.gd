@@ -6,14 +6,14 @@ var club_button: Button = null
 var grid_container: GridContainer = null
 
 # Theme colors
-const BUTTON_BG_NORMAL = Color(0.18, 0.18, 0.18, 0.85)
-const BUTTON_BG_HOVER = Color(0.28, 0.28, 0.28, 0.85)
-const BUTTON_BG_PRESSED = Color(0.24, 0.46, 0.72, 0.85)
-const BUTTON_BG_SELECTED = Color(0.18, 0.45, 0.25, 0.85)
+const BUTTON_BG_NORMAL = Color(0.10, 0.14, 0.18, 0.85)
+const BUTTON_BG_HOVER = Color(0.18, 0.34, 0.50, 0.85)
+const BUTTON_BG_PRESSED = Color(0.24, 0.44, 0.65, 0.85)
+const BUTTON_BG_SELECTED = Color(0.14, 0.52, 0.28, 0.90)
 const BUTTON_BORDER = Color(1.0, 1.0, 1.0, 0.3)
 const BUTTON_FONT_SELECTED = Color.WHITE
-const DISPLAY_BG_NORMAL = Color(0.24, 0.46, 0.72, 0.85)
-const DISPLAY_BG_HOVER = Color(0.34, 0.56, 0.82, 0.85)
+const DISPLAY_BG_NORMAL = Color(0.14, 0.52, 0.28, 0.90)
+const DISPLAY_BG_HOVER = Color(0.18, 0.65, 0.35, 0.95)
 const DISPLAY_BORDER = Color(1.0, 1.0, 1.0, 0.3)
 
 func _ready() -> void:
@@ -67,7 +67,7 @@ func _create_club_buttons() -> void:
 	for i in range(clubs.size()):
 		var button = Button.new()
 		button.text = clubs[i]
-		button.custom_minimum_size = Vector2(60, 60)
+		button.custom_minimum_size = Vector2(40, 40)
 		button.theme = button_theme
 		button.pressed.connect(_on_club_button_pressed.bindv([button]))
 		grid_container.add_child(button)
@@ -92,15 +92,15 @@ func _create_club_button_theme() -> Theme:
 func _create_button_style(bg_color: Color) -> StyleBoxFlat:
 	var style = StyleBoxFlat.new()
 	style.bg_color = bg_color
-	style.corner_radius_top_left = 8
-	style.corner_radius_top_right = 8
-	style.corner_radius_bottom_left = 8
-	style.corner_radius_bottom_right = 8
+	style.corner_radius_top_left = 6
+	style.corner_radius_top_right = 6
+	style.corner_radius_bottom_left = 6
+	style.corner_radius_bottom_right = 6
 	style.border_color = BUTTON_BORDER
-	style.border_width_left = 3
-	style.border_width_right = 3
-	style.border_width_top = 3
-	style.border_width_bottom = 3
+	style.border_width_left = 1
+	style.border_width_right = 1
+	style.border_width_top = 1
+	style.border_width_bottom = 1
 	return style
 
 
@@ -131,7 +131,7 @@ func _toggle_grid_visibility() -> void:
 	grid_container.visible = not grid_container.visible
 	var wrapper = get_node_or_null("MarginContainer/VBoxContainer/DropdownWrapper")
 	if wrapper != null:
-		wrapper.custom_minimum_size.y = 250 if grid_container.visible else 0
+		wrapper.custom_minimum_size.y = 230 if grid_container.visible else 0
 
 
 func _on_display_button_pressed() -> void:

@@ -8,12 +8,22 @@ signal course_downloaded(course_name: String)
 @onready var status_label: Label = %StatusLabel
 @onready var cancel_button: Button = %CancelButton
 @onready var download_button: Button = %DownloadButton
+@onready var spinner: Control = %Spinner
 
 var _loader: Node = null
 var _results: Array = []
 
 
 func _ready() -> void:
+	var panel = get_node_or_null("CenterContainer/PanelContainer")
+	if panel != null:
+		ThemeManager.apply_modal_style(panel, 12)
+
+	ThemeManager.apply_secondary_button_style(search_button, 6)
+	ThemeManager.apply_primary_button_style(download_button, 6)
+	ThemeManager.apply_nav_button_style(cancel_button, 6)
+	ThemeManager.apply_input_style(search_input)
+
 	search_button.pressed.connect(_on_search_pressed)
 	cancel_button.pressed.connect(_on_cancel_pressed)
 	download_button.pressed.connect(_on_download_pressed)
@@ -44,11 +54,13 @@ func _on_search_pressed() -> void:
 	results_list.clear()
 	_results.clear()
 	download_button.disabled = true
+	spinner.visible = true
 	
 	# Call C# search and await signal
 	_loader.SearchGolfCourses(query)
 	var results_array = await _loader.SearchCompleted
 	
+	spinner.visible = false
 	_set_ui_disabled(false)
 	
 	if results_array == null or results_array.is_empty():
@@ -89,11 +101,13 @@ func _on_download_pressed() -> void:
 	_set_ui_disabled(true)
 	download_button.disabled = true
 	cancel_button.disabled = true
+	spinner.visible = true
 	
 	# Call C# download and generate and await signal
 	_loader.DownloadAndGenerateCourse(lat, lon, course_name)
 	var success = await _loader.CourseGenerated
 	
+	spinner.visible = false
 	if success:
 		var msg = ""
 		if _loader.has_method("GetGenerationMessage"):
@@ -107,7 +121,13 @@ func _on_download_pressed() -> void:
 		await get_tree().create_timer(1.5).timeout
 		queue_free()
 	else:
-		status_label.text = "Error: Failed to download or generate course data."
+		var msg = ""
+		if _loader.has_method("GetGenerationMessage"):
+			msg = _loader.GetGenerationMessage()
+		if msg != "":
+			status_label.text = msg
+		else:
+			status_label.text = "Error: Failed to download or generate course data."
 		_set_ui_disabled(false)
 		download_button.disabled = false
 		cancel_button.disabled = false

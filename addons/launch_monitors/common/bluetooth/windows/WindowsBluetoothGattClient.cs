@@ -23,10 +23,14 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
     private GattSession? _session;
     private BluetoothScanOptions _scanOptions = new(string.Empty);
     private BluetoothConnectionOptions _connectionOptions = new([], [], 4, TimeSpan.FromMilliseconds(700));
+    private bool _isDisconnecting;
+    private bool _isConnected;
 
     public event Action<BluetoothDevice>? DeviceDiscovered;
 
     public event Action<BluetoothCharacteristicValue>? CharacteristicValueChanged;
+
+    public event Action? Disconnected;
 
     public async Task StartScanAsync(BluetoothScanOptions options, CancellationToken cancellationToken)
     {
@@ -77,6 +81,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         _connectionOptions = options;
         await DisconnectAsync(cancellationToken);
 
+        _isDisconnecting = false;
         _device = await OpenDeviceWithRetryAsync(deviceId, cancellationToken);
         if (_device is null)
         {
@@ -86,11 +91,22 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         await PairIfNeededAsync(_device);
         _session = await GattSession.FromDeviceIdAsync(_device.BluetoothDeviceId);
         _session.MaintainConnection = true;
+        _session.SessionStatusChanged += OnGattSessionStatusChanged;
         await LoadCharacteristicsAsync(options);
+
+        _isConnected = true;
     }
 
     public async Task DisconnectAsync(CancellationToken cancellationToken)
     {
+        _isDisconnecting = true;
+        _isConnected = false;
+
+        if (_session is not null)
+        {
+            _session.SessionStatusChanged -= OnGattSessionStatusChanged;
+        }
+
         foreach (var characteristicUuid in _subscribedCharacteristicUuids)
         {
             if (!_characteristics.TryGetValue(characteristicUuid, out var characteristic))
@@ -99,8 +115,15 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
             }
 
             characteristic.ValueChanged -= OnCharacteristicValueChanged;
-            await characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
-                GattClientCharacteristicConfigurationDescriptorValue.None);
+            try
+            {
+                await characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
+                    GattClientCharacteristicConfigurationDescriptorValue.None);
+            }
+            catch
+            {
+                // Ignore cleanup errors on disconnected/disposed characteristics
+            }
         }
 
         _subscribedCharacteristicUuids.Clear();
@@ -109,6 +132,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         _session = null;
         _device?.Dispose();
         _device = null;
+        _isDisconnecting = false;
     }
 
     public async Task<byte[]> ReadCharacteristicAsync(Guid characteristicUuid, CancellationToken cancellationToken)
@@ -348,5 +372,14 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
     {
         return !string.IsNullOrWhiteSpace(name)
             && name.Trim().StartsWith(_scanOptions.DeviceNamePrefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void OnGattSessionStatusChanged(GattSession sender, GattSessionStatusChangedEventArgs args)
+    {
+        if (!_isDisconnecting && _isConnected && args.Status == GattSessionStatus.Closed)
+        {
+            _isConnected = false;
+            Disconnected?.Invoke();
+        }
     }
 }

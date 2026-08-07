@@ -55,7 +55,7 @@ func _ready() -> void:
 	var title_lbl = Label.new()
 	title_lbl.text = "Match History"
 	title_lbl.add_theme_font_size_override("font_size", 42)
-	title_lbl.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
+	title_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
 	header_hbox.add_child(title_lbl)
 	
 	var spacer = Control.new()
@@ -63,9 +63,12 @@ func _ready() -> void:
 	header_hbox.add_child(spacer)
 	
 	var back_btn = Button.new()
-	back_btn.text = "⬅ Main Menu"
+	back_btn.text = "Main Menu"
+	back_btn.icon = load("res://UI/MainMenu/images/menu.svg")
+	back_btn.expand_icon = true
 	back_btn.custom_minimum_size = Vector2(160, 48)
-	apply_button_style(back_btn, Color(0.2, 0.25, 0.3, 0.9))
+	back_btn.add_theme_font_size_override("font_size", 18)
+	ThemeManager.apply_nav_button_style(back_btn)
 	back_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn"))
 	header_hbox.add_child(back_btn)
 	
@@ -110,22 +113,7 @@ func _setup_scorecard_overlay() -> void:
 	
 	var card_panel = PanelContainer.new()
 	card_panel.custom_minimum_size = Vector2(1400, 600)
-	var card_style = StyleBoxFlat.new()
-	card_style.bg_color = Color(0.08, 0.12, 0.16, 0.98)
-	card_style.corner_radius_top_left = 12
-	card_style.corner_radius_top_right = 12
-	card_style.corner_radius_bottom_left = 12
-	card_style.corner_radius_bottom_right = 12
-	card_style.border_width_left = 2
-	card_style.border_width_right = 2
-	card_style.border_width_top = 2
-	card_style.border_width_bottom = 2
-	card_style.border_color = Color(0.3, 0.35, 0.4, 0.4)
-	card_style.content_margin_left = 30
-	card_style.content_margin_right = 30
-	card_style.content_margin_top = 24
-	card_style.content_margin_bottom = 24
-	card_panel.add_theme_stylebox_override("panel", card_style)
+	ThemeManager.apply_modal_style(card_panel, 12)
 	center.add_child(card_panel)
 
 func _load_history() -> Array:
@@ -208,6 +196,13 @@ func _render_history_list() -> void:
 		course_lbl.add_theme_font_size_override("font_size", 22)
 		course_lbl.add_theme_color_override("font_color", Color.WHITE)
 		title_hbox.add_child(course_lbl)
+
+		var mode_lbl = Label.new()
+		var g_mode = match_data.get("game_mode", "Standard")
+		mode_lbl.text = "[%s]" % g_mode
+		mode_lbl.add_theme_font_size_override("font_size", 16)
+		mode_lbl.add_theme_color_override("font_color", Color(0.35, 0.75, 0.9))
+		title_hbox.add_child(mode_lbl)
 		
 		var status_lbl = Label.new()
 		var is_finished = match_data.get("is_finished", false)
@@ -224,7 +219,10 @@ func _render_history_list() -> void:
 		var players_array = match_data.get("players", [])
 		var names = []
 		for p in players_array:
-			names.append(p.get("name", "Player"))
+			var p_str = p.get("name", "Player")
+			if not p.get("team", "").is_empty() and g_mode == "2v2 Scramble":
+				p_str += " (%s)" % p.get("team")
+			names.append(p_str)
 		players_lbl.text = "Players: " + ", ".join(names)
 		players_lbl.add_theme_font_size_override("font_size", 16)
 		players_lbl.add_theme_color_override("font_color", Color(0.75, 0.8, 0.75))
@@ -298,8 +296,9 @@ func _show_scorecard(match_data: Dictionary) -> void:
 	var head_hbox = HBoxContainer.new()
 	card_vbox.add_child(head_hbox)
 	
+	var g_mode = match_data.get("game_mode", "Standard")
 	var title_lbl = Label.new()
-	title_lbl.text = "Scorecard - %s" % match_data.get("course_title", "Course")
+	title_lbl.text = "Scorecard - %s [%s Mode]" % [match_data.get("course_title", "Course"), g_mode]
 	title_lbl.add_theme_font_size_override("font_size", 26)
 	title_lbl.add_theme_color_override("font_color", Color.WHITE)
 	head_hbox.add_child(title_lbl)
@@ -510,8 +509,8 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		# Email stats button next to player name
 		var email_btn = Button.new()
 		email_btn.text = "✉ Email"
-		email_btn.custom_minimum_size = Vector2(65, 24)
-		email_btn.add_theme_font_size_override("font_size", 11)
+		email_btn.custom_minimum_size = Vector2(90, 48)
+		email_btn.add_theme_font_size_override("font_size", 14)
 		apply_button_style(email_btn, Color(0.18, 0.45, 0.30, 0.9)) # Emerald Green
 		email_btn.pressed.connect(func():
 			_email_player_stats(p, match_data)
@@ -771,6 +770,8 @@ func _email_player_stats(player: Dictionary, match_data: Dictionary) -> void:
 						body += "%-6s | %-10s | %-10s | %-9s | %-12s | %-14s\n" % [club, carry_str, speed_str, spin_str, offline_str, target_diff_str]
 					body += "\n"
 		
+	body += MultiplayerManager.format_player_swing_issues_summary(player_name)
+	
 	var mailto_url = "mailto:?subject=%s&body=%s" % [subject.uri_encode(), body.uri_encode()]
 	OS.shell_open(mailto_url)
 	print("[HistoryMenu] Opened email client for %s" % player_name)

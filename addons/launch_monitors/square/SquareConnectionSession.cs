@@ -24,6 +24,8 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
     private string _clubCode = SquareCommandBuilder.DriverClubCode;
     private int _handedness;
     private bool _isConnected;
+    private bool _isDetectBallActive;
+    private DateTime _lastSensorPacketTime = DateTime.MinValue;
 
     public SquareConnectionSession(
         IBluetoothGattClient bluetoothClient,
@@ -40,6 +42,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
 
         _bluetoothClient.DeviceDiscovered += OnDeviceDiscovered;
         _bluetoothClient.CharacteristicValueChanged += OnCharacteristicValueChanged;
+        _bluetoothClient.Disconnected += OnBluetoothDisconnected;
     }
 
     public event Action<BluetoothDevice>? DeviceDiscovered;
@@ -99,6 +102,13 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
             StartHeartbeat();
             _logInfo("Connection sequence complete.");
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            EmitError("Square connection timed out. Please verify device is powered on and in pairing mode.");
+            EmitStatus("Disconnected");
+            _logError("ConnectToDeviceAsync timed out.");
+            await DisconnectCoreAsync(CancellationToken.None);
+        }
         catch (Exception ex) when (IsTransientConnectFailure(ex))
         {
             EmitError(DeviceNotReadyMessage);
@@ -122,16 +132,20 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
         _logInfo("DisconnectAsync requested.");
-        await _connectionLock.WaitAsync(cancellationToken);
+        var lockAcquired = false;
         try
         {
+            lockAcquired = await _connectionLock.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
             await DisconnectCoreAsync(cancellationToken);
             EmitStatus("Disconnected");
             EmitReady(false);
         }
         finally
         {
-            _connectionLock.Release();
+            if (lockAcquired)
+            {
+                _connectionLock.Release();
+            }
         }
     }
 
@@ -142,12 +156,18 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
             clubCode = SquareCommandBuilder.DriverClubCode;
         }
 
+        var forceUpdate = !_clubCode.Equals(clubCode, StringComparison.OrdinalIgnoreCase);
         _clubCode = clubCode;
-        _logInfo($"SetClub requested. clubCode={_clubCode}");
+        _logInfo($"SetClub requested. clubCode={_clubCode}, forceUpdate={forceUpdate}");
 
         if (_isConnected)
         {
-            await WriteCommandAsync(SquareCommandBuilder.Club(NextSequence(), _clubCode, _handedness), cancellationToken);
+            if (forceUpdate)
+            {
+                await WriteCommandAsync(SquareCommandBuilder.Club(NextSequence(), _clubCode, _handedness), cancellationToken);
+                await _delayAsync(_options.ConnectionReadyDelay, cancellationToken);
+            }
+            await SetReadyAsync(cancellationToken);
         }
     }
 
@@ -161,7 +181,8 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
     {
         _logInfo("Sending DetectBall ready command.");
         await WriteCommandAsync(SquareCommandBuilder.DetectBall(NextSequence(), mode: 1, spinMode: 1), cancellationToken);
-        EmitReady(true);
+        _isDetectBallActive = true;
+        _lastSensorPacketTime = DateTime.UtcNow;
         EmitStatus("Ready");
     }
 
@@ -169,6 +190,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
     {
         _bluetoothClient.DeviceDiscovered -= OnDeviceDiscovered;
         _bluetoothClient.CharacteristicValueChanged -= OnCharacteristicValueChanged;
+        _bluetoothClient.Disconnected -= OnBluetoothDisconnected;
         await DisconnectAsync();
         await _bluetoothClient.DisposeAsync();
         _connectionLock.Dispose();
@@ -220,7 +242,10 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         }
     }
 
-    private async Task WriteCommandAsync(byte[] command, CancellationToken cancellationToken)
+    private async Task WriteCommandAsync(
+        byte[] command,
+        CancellationToken cancellationToken,
+        BluetoothWriteMode writeMode = BluetoothWriteMode.WithResponse)
     {
         if (!_isConnected)
         {
@@ -233,9 +258,9 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
             await _bluetoothClient.WriteCharacteristicAsync(
                 _options.CommandCharacteristicUuid,
                 command,
-                BluetoothWriteMode.WithResponse,
+                writeMode,
                 cancellationToken);
-            _logInfo($"Wrote command ({command.Length} bytes).");
+            _logInfo($"Wrote command ({command.Length} bytes, mode={writeMode}).");
         }
         finally
         {
@@ -249,6 +274,8 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         _heartbeatTimer = null;
         _lastPayload = null;
         _isConnected = false;
+        _isDetectBallActive = false;
+        _lastSensorPacketTime = DateTime.MinValue;
         await _bluetoothClient.DisconnectAsync(cancellationToken);
     }
 
@@ -266,10 +293,36 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
     {
         _ = RunAsync(async () =>
         {
-            if (_isConnected)
+            if (!_isConnected)
             {
-                await WriteCommandAsync(SquareCommandBuilder.Heartbeat(NextSequence()), CancellationToken.None);
+                return;
             }
+
+            try
+            {
+                await WriteCommandAsync(
+                    SquareCommandBuilder.Heartbeat(NextSequence()),
+                    CancellationToken.None,
+                    BluetoothWriteMode.WithoutResponse);
+            }
+            catch (Exception ex)
+            {
+                _logError($"Heartbeat write failed: {ex.Message}");
+            }
+        });
+    }
+
+    private void OnBluetoothDisconnected()
+    {
+        if (!_isConnected)
+        {
+            return;
+        }
+
+        _logInfo("Bluetooth client reported disconnection.");
+        _ = RunAsync(async () =>
+        {
+            await DisconnectAsync();
         });
     }
 
@@ -296,6 +349,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
     {
         if (SquareProtocol.TryParseSensor(data, out var sensor))
         {
+            _lastSensorPacketTime = DateTime.UtcNow;
             var ready = sensor.BallReady && sensor.BallDetected;
             EmitReady(ready);
             _logInfo($"Sensor packet parsed. ready={ready}");
@@ -314,6 +368,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         }
 
         _lastPayload = payload;
+        _isDetectBallActive = false;
         EmitReady(false);
         ShotReceived?.Invoke(metrics);
         _logInfo($"Shot packet parsed. speed={metrics.BallSpeedMps} m/s, spin={metrics.TotalSpinRpm} rpm");

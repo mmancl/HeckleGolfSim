@@ -32,7 +32,8 @@ static func validate(course_dir: String, dir_name: String) -> Dictionary:
 		printerr("[CourseValidator] Missing %s for course '%s'." % [COURSE_SCENE_FILE, dir_name])
 		return {}
 
-	return { "title": title, "scene_path": scene_path, "config_path": config_path }
+	var is_custom: bool = parsed.get("is_custom", false) or parsed.get("IsCustom", false) or dir_name.begins_with("custom_")
+	return { "title": title, "scene_path": scene_path, "config_path": config_path, "is_custom": is_custom }
 
 
 static func _extract_title(parsed: Dictionary, dir_name: String) -> String:

@@ -24,7 +24,31 @@ var _current_config_path: String = ""
 
 func initialize(scene_path: String, config_path: String) -> void:
 	_load_course_config(config_path)
-	var packed := load(scene_path) as PackedScene
+	
+	var err = ResourceLoader.load_threaded_request(scene_path)
+	if err != OK:
+		push_error("[CourseManager] Failed to start threaded load for: %s. Falling back to synchronous load." % scene_path)
+		var packed := load(scene_path) as PackedScene
+		if packed == null:
+			push_error("[CourseManager] Could not load course scene: %s" % scene_path)
+			return
+		var course_scene := packed.instantiate()
+		if course_scene == null:
+			push_error("[CourseManager] Could not instantiate course scene: %s" % scene_path)
+			return
+		add_child(course_scene)
+		return
+		
+	while true:
+		var status = ResourceLoader.load_threaded_get_status(scene_path)
+		if status == ResourceLoader.THREAD_LOAD_LOADED:
+			break
+		elif status == ResourceLoader.THREAD_LOAD_FAILED or status == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+			push_error("[CourseManager] Failed to load course scene asynchronously: %s" % scene_path)
+			return
+		await get_tree().process_frame
+		
+	var packed = ResourceLoader.load_threaded_get(scene_path) as PackedScene
 	if packed == null:
 		push_error("[CourseManager] Could not load course scene: %s" % scene_path)
 		return

@@ -59,7 +59,7 @@ public partial class BallPhysics : RefCounted
                 ? parameters.FloorNormal.Normalized()
                 : Vector3.Up;
 
-            Vector3 gravityAlongSlope = gravity - floorNormal * gravity.Dot(floorNormal);
+            Vector3 gravityAlongSlope = (gravity - floorNormal * gravity.Dot(floorNormal)) * parameters.SlopeForceScale;
 
             // Ground integration is handled in world-space with collision response.
             // Keep the along-slope gravity contribution in horizontal axes only.

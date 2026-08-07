@@ -19,6 +19,7 @@ internal sealed class LinuxBluetoothGattClient : IBluetoothGattClient
     private IBlueZObjectManager? _objectManager;
     private IBlueZAdapter? _adapter;
     private IBlueZDevice? _device;
+    private IDisposable? _devicePropertySubscription;
     private IDisposable? _scanSubscription;
     private BluetoothScanOptions _scanOptions = new(string.Empty);
     private BluetoothConnectionOptions _connectionOptions = new([], [], 4, TimeSpan.FromMilliseconds(700));
@@ -26,6 +27,8 @@ internal sealed class LinuxBluetoothGattClient : IBluetoothGattClient
     public event Action<BluetoothDevice>? DeviceDiscovered;
 
     public event Action<BluetoothCharacteristicValue>? CharacteristicValueChanged;
+
+    public event Action? Disconnected;
 
     public async Task StartScanAsync(BluetoothScanOptions options, CancellationToken cancellationToken)
     {
@@ -76,6 +79,7 @@ internal sealed class LinuxBluetoothGattClient : IBluetoothGattClient
         }
 
         _device = Connection.System.CreateProxy<IBlueZDevice>(BlueZService, devicePath);
+        _devicePropertySubscription = await _device.WatchPropertiesAsync(OnDevicePropertiesChanged, OnWatcherError);
         await ConnectDeviceWithRetryAsync(_device, cancellationToken);
 
         await WaitForServicesResolvedAsync(_device, cancellationToken);
@@ -85,6 +89,9 @@ internal sealed class LinuxBluetoothGattClient : IBluetoothGattClient
 
     public async Task DisconnectAsync(CancellationToken cancellationToken)
     {
+        _devicePropertySubscription?.Dispose();
+        _devicePropertySubscription = null;
+
         foreach (var subscription in _subscriptions.Values)
         {
             subscription.Dispose();
@@ -370,6 +377,19 @@ internal sealed class LinuxBluetoothGattClient : IBluetoothGattClient
     {
         return managedObjects.ToDictionary(item => item.Key.ToString(), item => item.Value);
     }
+
+    private void OnDevicePropertiesChanged(PropertyChanges changes)
+    {
+        for (var i = 0; i < changes.Changed.Length; i++)
+        {
+            var change = changes.Changed[i];
+            if (string.Equals(change.Key, "Connected", StringComparison.Ordinal) && change.Value is false)
+            {
+                Disconnected?.Invoke();
+                break;
+            }
+        }
+    }
 }
 
 [DBusInterface("org.freedesktop.DBus.ObjectManager")]
@@ -400,6 +420,8 @@ public interface IBlueZDevice : IDBusObject
     Task DisconnectAsync();
 
     Task<T> GetAsync<T>(string property);
+
+    Task<IDisposable> WatchPropertiesAsync(Action<PropertyChanges> handler, Action<Exception> onError);
 }
 
 [DBusInterface(BlueZMapper.GattCharacteristicInterface)]

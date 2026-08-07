@@ -2,6 +2,9 @@ extends MeshInstance3D
 
 var points : Array = []
 var color : Color = Color(0.6, 0.0, 0.0, 1.0)  # Darker red
+var dark_red : Color = Color(0.6, 0.0, 0.0, 1.0)
+var orange : Color = Color(1.0, 0.4, 0.0, 1.0)
+var yellow : Color = Color(1.0, 0.9, 0.0, 1.0)
 var line_width : float = 0.08
 var material : StandardMaterial3D = StandardMaterial3D.new()
 
@@ -9,12 +12,10 @@ var material : StandardMaterial3D = StandardMaterial3D.new()
 func _ready():
 	mesh = ArrayMesh.new()
 
-	# Setup material with subtle glow
+	# Setup material with subtle glow using vertex colors
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.albedo_color = color
-	material.emission_enabled = true
-	material.emission = color
-	material.emission_energy_multiplier = 0.5
+	material.vertex_color_use_as_albedo = true
+	material.albedo_color = Color(1.0, 1.0, 1.0, 1.0)
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
 	material.disable_receive_shadows = true
@@ -25,8 +26,7 @@ func _process(_delta):
 
 func setColor(a):
 	color = a
-	material.albedo_color = color
-	material.emission = color
+	dark_red = a
 
 func draw():
 	mesh.clear_surfaces()
@@ -42,6 +42,14 @@ func create_ribbon_mesh():
 	var camera := get_viewport().get_camera_3d()
 	if camera == null:
 		return
+
+	# Find peak (highest Y value)
+	var peak_index := 0
+	var max_y := -999999.0
+	for i in range(points.size()):
+		if points[i].y > max_y:
+			max_y = points[i].y
+			peak_index = i
 
 	# Create ribbon vertices
 	for i in range(points.size()):
@@ -79,7 +87,34 @@ func create_ribbon_mesh():
 		uvs.append(Vector2(0, t))
 		uvs.append(Vector2(1, t))
 
-		var vertex_color := Color(color.r, color.g, color.b, alpha)
+		# Interpolate color based on peak:
+		# - Red for the first 1/2 of the way up.
+		# - Red to orange transition for the second 1/2 of the way up.
+		# - Orange to yellow transition for the first 1/2 of the way down.
+		# - Yellow for the remaining way down.
+		var point_color : Color
+		if i <= peak_index:
+			var factor := 0.0
+			if peak_index > 0:
+				factor = float(i) / float(peak_index)
+			if factor <= 0.5:
+				point_color = dark_red
+			else:
+				var sub_factor := (factor - 0.5) / 0.5
+				point_color = dark_red.lerp(orange, sub_factor)
+		else:
+			var factor := 0.0
+			var denom := float(points.size() - 1 - peak_index)
+			if denom > 0.0:
+				factor = float(i - peak_index) / denom
+			if factor <= 0.5:
+				var sub_factor := factor / 0.5
+				point_color = orange.lerp(yellow, sub_factor)
+			else:
+				point_color = yellow
+
+		# Apply brightness scale (mimicking the original 1.5x total multiplier from emission)
+		var vertex_color := Color(point_color.r * 1.5, point_color.g * 1.5, point_color.b * 1.5, alpha)
 		colors.append(vertex_color)
 		colors.append(vertex_color)
 

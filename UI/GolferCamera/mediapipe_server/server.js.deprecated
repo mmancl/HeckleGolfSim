@@ -1,0 +1,78 @@
+global.window = global;
+global.location = { pathname: '/' };
+global.navigator = { userAgent: 'node' };
+
+const express = require('express');
+const { Pose } = require('@mediapipe/pose');
+const { createCanvas, Image } = require('canvas');
+
+const app = express();
+const PORT = 49154;
+
+app.use(express.raw({ type: 'image/*', limit: '10mb' }));
+app.use(express.json({ limit: '10mb' }));
+
+const pose = new Pose({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+});
+
+pose.setOptions({
+    modelComplexity: 1,
+    smoothLandmarks: true,
+    enableSegmentation: false,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+});
+
+let latestResults = null;
+pose.onResults((results) => {
+    latestResults = results;
+});
+
+app.post('/pose', async (req, res) => {
+    try {
+        let imageBuffer = req.body;
+        if (!imageBuffer || imageBuffer.length === 0) {
+            return res.json({ detected: false, landmarks: {} });
+        }
+
+        const img = new Image();
+        img.src = imageBuffer;
+
+        const canvas = createCanvas(img.width, img.height);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+
+        await pose.send({ image: canvas });
+
+        if (!latestResults || !latestResults.poseLandmarks) {
+            return res.json({ detected: false, landmarks: {} });
+        }
+
+        const lm = latestResults.poseLandmarks;
+        const landmarks = {
+            "nose": { x: lm[0].x, y: lm[0].y, visibility: lm[0].visibility || 0.9 },
+            "left_shoulder": { x: lm[11].x, y: lm[11].y, visibility: lm[11].visibility || 0.9 },
+            "right_shoulder": { x: lm[12].x, y: lm[12].y, visibility: lm[12].visibility || 0.9 },
+            "left_elbow": { x: lm[13].x, y: lm[13].y, visibility: lm[13].visibility || 0.9 },
+            "right_elbow": { x: lm[14].x, y: lm[14].y, visibility: lm[14].visibility || 0.9 },
+            "left_wrist": { x: lm[15].x, y: lm[15].y, visibility: lm[15].visibility || 0.9 },
+            "right_wrist": { x: lm[16].x, y: lm[16].y, visibility: lm[16].visibility || 0.9 },
+            "left_hip": { x: lm[23].x, y: lm[23].y, visibility: lm[23].visibility || 0.9 },
+            "right_hip": { x: lm[24].x, y: lm[24].y, visibility: lm[24].visibility || 0.9 },
+            "left_knee": { x: lm[25].x, y: lm[25].y, visibility: lm[25].visibility || 0.9 },
+            "right_knee": { x: lm[26].x, y: lm[26].y, visibility: lm[26].visibility || 0.9 },
+            "left_ankle": { x: lm[27].x, y: lm[27].y, visibility: lm[27].visibility || 0.9 },
+            "right_ankle": { x: lm[28].x, y: lm[28].y, visibility: lm[28].visibility || 0.9 },
+        };
+
+        return res.json({ detected: true, landmarks });
+    } catch (err) {
+        console.error('MediaPipe Pose processing error:', err.message);
+        return res.json({ detected: false, landmarks: {}, error: err.message });
+    }
+});
+
+app.listen(PORT, () => {
+    console.log(`MediaPipe Pose Server listening on http://127.0.0.1:${PORT}`);
+});

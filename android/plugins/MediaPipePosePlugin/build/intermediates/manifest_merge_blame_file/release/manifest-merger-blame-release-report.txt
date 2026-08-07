@@ -1,0 +1,17 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="org.godotengine.plugin.android.mediapipepose" >
+4
+5    <uses-sdk android:minSdkVersion="24" />
+6
+7    <application>
+7-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:5:5-9:19
+8        <meta-data
+8-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:6:9-8:96
+9            android:name="org.godotengine.plugin.v2.MediaPipePosePlugin"
+9-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:7:13-73
+10            android:value="org.godotengine.plugin.android.mediapipepose.MediaPipePosePlugin" />
+10-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:8:13-93
+11    </application>
+12
+13</manifest>

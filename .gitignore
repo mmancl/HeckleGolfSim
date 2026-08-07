@@ -1,7 +1,7 @@
 # Godot 4+ specific ignores
 .godot/
-/android/
-
+/android/build/
+!/android/plugins/
 # Godot-specific ignores
 .import/
 export.cfg
@@ -26,3 +26,11 @@ OpenShotGolf.Tests/obj/
 *.codex
 *.agents
 android_old/build/
+
+# MediaPipe model files (downloaded on-demand, ~30MB each)
+*.task
+__pycache__/
+*.pyc
+
+# Ignore large binary files
+*.scn

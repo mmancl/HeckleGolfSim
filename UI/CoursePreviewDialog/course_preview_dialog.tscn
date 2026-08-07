@@ -1,0 +1,234 @@
+[gd_scene load_steps=6 format=3 uid="uid://cx4k289m4q1v8"]
+
+[ext_resource type="Script" path="res://UI/CoursePreviewDialog/course_preview_dialog.gd" id="1_preview_dialog"]
+[ext_resource type="Script" path="res://UI/LoadingSpinner.gd" id="2_spinner"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bg"]
+bg_color = Color(0.06, 0.09, 0.12, 0.95)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.24, 0.44, 0.65, 0.9)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+shadow_color = Color(0, 0, 0, 0.5)
+shadow_size = 12
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_normal"]
+bg_color = Color(0.18, 0.35, 0.56, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 14
+content_margin_top = 6
+content_margin_right = 14
+content_margin_bottom = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_hover"]
+bg_color = Color(0.24, 0.48, 0.76, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 14
+content_margin_top = 6
+content_margin_right = 14
+content_margin_bottom = 6
+
+[node name="CoursePreviewDialog" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_preview_dialog")
+
+[node name="Dimmer" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.75)
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PanelContainer" type="PanelContainer" parent="CenterContainer"]
+custom_minimum_size = Vector2(1000, 720)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_bg")
+
+[node name="MarginContainer" type="MarginContainer" parent="CenterContainer/PanelContainer"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="MainVBox" type="VBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="HeaderHBox" type="HBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox"]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/HeaderHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.92, 0.96, 1, 1)
+theme_override_font_sizes/font_size = 26
+text = "Course Aerial Layout Preview"
+
+[node name="CloseButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/HeaderHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "X"
+
+[node name="NavHBox" type="HBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="FullCourseButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(130, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_btn_hover")
+text = "Full Course"
+
+[node name="PrevHoleButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(45, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "<"
+
+[node name="HoleOptionButton" type="OptionButton" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(250, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 18
+
+[node name="NextHoleButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(45, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = ">"
+
+[node name="ModeToggleButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(110, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "3D View"
+
+[node name="ZoomHBox" type="HBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="ZoomInButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox/ZoomHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "+"
+
+[node name="ZoomOutButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox/ZoomHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "-"
+
+[node name="ZoomResetButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox/ZoomHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(70, 40)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Reset"
+
+[node name="DisplayPanel" type="PanelContainer" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="PreviewTextureRect" type="TextureRect" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/DisplayPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ViewportContainer" type="SubViewportContainer" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/DisplayPanel"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+stretch = true
+
+[node name="SubViewport" type="SubViewport" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/DisplayPanel/ViewportContainer"]
+unique_name_in_owner = true
+handle_input_locally = false
+size = Vector2i(960, 520)
+render_target_update_mode = 3
+
+[node name="Layout2DCanvas" type="Control" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/DisplayPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+
+[node name="LoadingOverlay" type="CenterContainer" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/DisplayPanel"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/DisplayPanel/LoadingOverlay"]
+layout_mode = 2
+theme_override_constants/separation = 12
+alignment = 1
+
+[node name="Spinner" type="Control" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/DisplayPanel/LoadingOverlay/VBox"]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+size_flags_horizontal = 4
+script = ExtResource("2_spinner")
+color = Color(0.24, 0.46, 0.72, 1)
+
+[node name="LoadingLabel" type="Label" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/DisplayPanel/LoadingOverlay/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "Loading 3D View..."
+horizontal_alignment = 1
+
+[node name="FooterVBox" type="VBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox"]
+layout_mode = 2
+
+[node name="HoleInfoLabel" type="Label" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/FooterVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.95, 0.95, 1)
+theme_override_font_sizes/font_size = 20
+text = "Hole 1 - Par 4 (385 yds)"
+
+[node name="TeeInfoLabel" type="Label" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/FooterVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.8, 0.9, 1)
+theme_override_font_sizes/font_size = 16
+text = "Tee Distances: Blue: 385 yds, White: 370 yds, Red: 335 yds"

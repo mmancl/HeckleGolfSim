@@ -29,15 +29,12 @@ layout_mode = 2
 
 [node name="GridContainer" type="GridContainer" parent="MarginContainer/VBoxContainer/DropdownWrapper"]
 layout_mode = 1
-anchors_preset = 1
-anchor_left = 1.0
+anchors_preset = 10
 anchor_right = 1.0
-offset_left = -324.0
 offset_top = 4.0
-offset_right = 0.0
-offset_bottom = 244.0
-grow_horizontal = 0
+offset_bottom = 230.0
+grow_horizontal = 2
 mouse_filter = 2
 theme_override_constants/h_separation = 6
 theme_override_constants/v_separation = 6
-columns = 5
+columns = 4

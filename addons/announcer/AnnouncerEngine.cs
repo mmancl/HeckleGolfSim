@@ -16,7 +16,173 @@ public partial class AnnouncerEngine : Node
     [Export] public float Pitch { get; set; } = 1.0f;
     [Export] public float Rate { get; set; } = 1.0f;
 
-    // Launch-time commentary templates
+    // Audio stream player child
+    private AudioStreamPlayer _audioPlayer = null!;
+
+    // Idle announcement timer
+    private float _idleTimer = 0.0f;
+    private const float IdleAnnouncementInterval = 45.0f; // 45 seconds
+
+    // 1. Crushed / Overshot Aim
+    private readonly string[] _overshotCrushedTemplates = new[]
+    {
+        "They got all of that one. They got so much, I think it went further than planned.",
+        "Well, that ball was struck with pure, unadulterated anger. It's completely overshot the target.",
+        "Good heavens, he absolutely vaporized that. I hope it has a passport, because it's in a different territory now.",
+        "I think he forgot his own strength there. That ball is way past the landing zone.",
+        "Well, he caught that one flush. And by flush, I mean it's currently orbiting the moon.",
+        "They got all of that. Way more than they bargained for, I suspect.",
+        "Struck with authority! A bit too much authority, actually. It's sailed right past the target.",
+        "That went so far past the aim point, I think it has its own zip code now.",
+        "A majestic strike, really. Too bad it's twenty yards past where he actually wanted it.",
+        "Well, the good news is he hit it perfectly. The bad news is he's now in the next fairway."
+    };
+
+    // 2. Offline / Slice / Curve
+    private readonly string[] _offlineSarcasticTemplates = new[]
+    {
+        "That curve was so sharp, I think the ball is trying to look back at the tee box.",
+        "A spectacular slice. If we were playing boomerang, he'd be a champion.",
+        "That ball didn't just fade, it migrated for the winter.",
+        "I've seen less dramatic curves on a mountain road. That is way offline.",
+        "Oh, a beautiful shot... if the hole was located in the parking lot.",
+        "He's managed to find an angle of departure that defies modern physics.",
+        "That slice had so much bend, I think it just registered as a hurricane.",
+        "Offline right and fading. He's playing lawn darts, not golf.",
+        "A magnificent hook. Or slice. Either way, it's not on our map anymore.",
+        "Well, that ball is heading in a direction usually reserved for fleeing animals."
+    };
+
+    // 3. Sand / Bunker
+    private readonly string[] _sandTemplates = new[]
+    {
+        "Well, grab your sunscreen and a bucket, because you're going to the beach.",
+        "In the sand. I hope he brought a bucket and shovel to build a sandcastle.",
+        "Right in the bunker. Don't forget your beach towel and a cold drink.",
+        "A lovely trip to the beach. Too bad he forgot his swim trunks.",
+        "He's found the kitty litter. Let's see if he can dig his way out.",
+        "Ah, the sand. Perfect place for a picnic, terrible place for a golf ball.",
+        "He's landed in the bunker. Better apply some SPF 50 before the next shot.",
+        "A classic beach holiday, minus the ocean view.",
+        "Buried in the sand. I think I see a crab near his ball.",
+        "Well, he's in the bunker. Time to get dirty and play in the sandbox."
+    };
+
+    // 4. Water
+    private readonly string[] _waterTemplates = new[]
+    {
+        "You're going to need scuba gear to find that one.",
+        "Splash! I think he just awakened the local fish population.",
+        "Well, that one is sleeping with the fishes now.",
+        "I hope that ball knows how to swim, because it just took a deep dive.",
+        "A beautiful splash. He should get extra points for diving style.",
+        "That's in the drink. Call the Coast Guard, we have a ball overboard.",
+        "He's found the water hazard. I hope he brought a fishing pole.",
+        "Submarine shot! It's currently search-and-rescue down there.",
+        "Waterlogged! That ball is officially retired from active duty.",
+        "A wet and wild adventure. Next time, try aiming for dry land."
+    };
+
+    // 5. Long Putt Made
+    private readonly string[] _longPuttTemplates = new[]
+    {
+        "Unbelievable! He drained it from way downtown!",
+        "What a magnificent putt! That rolled like it was on a pool table.",
+        "Are you kidding me? From that distance? What a sensational putt!",
+        "Absolute magic on the green! He read that break perfectly.",
+        "In the bottom of the cup! That was a masterclass in putting.",
+        "Oh, the crowd goes wild! What a phenomenal stroke from out there.",
+        "He dropped it! A truly majestic putt that never looked like missing.",
+        "Talk about nerves of steel. That was an absolute beauty of a putt.",
+        "Boom! Right in the center. He's got the flatstick working today.",
+        "An absolute monster of a putt! Well played, sir."
+    };
+
+    // 6. Above Par
+    private readonly string[] _aboveParTemplates = new[]
+    {
+        "Well, that scorecard is starting to look like a phone number.",
+        "Oof, above par. I was worried we'd run out of daylight before he finished.",
+        "That took a while. I think my hair grew an inch while you were playing that hole.",
+        "A bit of a struggle there. Have you considered taking up gardening?",
+        "Above par. That wasn't golf, that was a scenic hike with lots of swings.",
+        "They say golf builds character. You must have built a mansion on that hole.",
+        "I lost count of the strokes. Did we start this hole yesterday?",
+        "Well, the score is high, but look on the bright side... actually, there is no bright side.",
+        "Double bogey or worse. A performance best forgotten, or at least deleted from memory.",
+        "Oof. That was a marathon, not a sprint. A very, very slow marathon."
+    };
+
+    // 7. Par
+    private readonly string[] _parTemplates = new[]
+    {
+        "A steady par. Nothing to write home about, but it keeps the scorecard clean.",
+        "Par. Safe, sensible, and completely unexciting.",
+        "He walks away with a par. A decent result, all things considered.",
+        "Right on par. It gets the job done, I suppose.",
+        "A solid par. Not a highlight reel shot, but no damage done.",
+        "Par is your friend, even if it's a rather boring friend.",
+        "A respectable par. No drama, just good old-fashioned golf.",
+        "Well, it's a par. Neither heroic nor disastrous.",
+        "A par. Keeps you right in the middle of the pack.",
+        "Par. The breakfast of champions, or at least the oatmeal."
+    };
+
+    // 8. Under Par
+    private readonly string[] _underParTemplates = new[]
+    {
+        "Birdie or better! Now that is how you play this game!",
+        "Sensational! A brilliant under-par score on this hole!",
+        "Outstanding golf! He absolutely tore this hole apart.",
+        "Under par! That is world-class play right there.",
+        "Beautifully played! An under-par score that belongs on the pro tour.",
+        "Absolutely stellar! He made that hole look incredibly easy.",
+        "Under par! That scorecard is looking very red and very beautiful.",
+        "Superb! A display of pure golf genius on that hole.",
+        "Masterful performance! That's a birdie or better and well deserved.",
+        "Simply brilliant. He conquered the hole and left with a smile."
+    };
+
+    // 9. Idle / Overthinking
+    private readonly string[] _idleTemplates = new[]
+    {
+        "Are we going to hit today, or are you waiting for the grass to grow?",
+        "I've seen glaciers move faster than this pre-shot routine.",
+        "Take your time. It's not like the sun is going down or anything.",
+        "He's overthinking this so much, I think he's writing a thesis on it.",
+        "Is he playing golf, or meditating on the meaning of life?",
+        "Any second now. Any... second... now.",
+        "I think the ball is starting to gather moss. Hit it already!",
+        "Did he fall asleep standing up? Somebody check his pulse.",
+        "Overthinking is the enemy of golf. And so is this delay.",
+        "We are waiting. The course is waiting. The grass is waiting."
+    };
+
+    // 10. Chunked
+    private readonly string[] _chunkedTemplates = new[]
+    {
+        "Oof, did you hit that with your purse? That went absolutely nowhere.",
+        "That's a classic chunk. Next time, try hitting the ball instead of the entire planet.",
+        "He hit more dirt than ball there. A very dusty shot.",
+        "A bit of a stubbed toe on that swing. That ball barely moved.",
+        "Well, that was a nice practice swing. Oh wait, that was the actual shot?",
+        "He caught that so fat, it needs its own weight-loss program.",
+        "That went about ten feet. Did you forget to swing, or did the ball just fall off the tee?",
+        "A ground-cutter that didn't even reach the ladies' tee.",
+        "A massive chunk. He's practically excavating the fairway out here.",
+        "Well, it moved. Not forward, but it definitely moved."
+    };
+
+    // Mulligan
+    private readonly string[] _mulliganTemplates = new[]
+    {
+        "Oh, a mulligan? Sure, let's pretend that last shot never happened.",
+        "Another mulligan? Are we playing golf, or editing a movie?",
+        "Mulligan! Did your mom approve that redo?",
+        "A mulligan? Fine, but the announcer saw it. We all saw it."
+    };
+
+    // Launch-time commentary templates for fallback
     private readonly string[] _launchSkyballTemplates = new[]
     {
         "Skyball! That one is going to have snow on it.",
@@ -78,14 +244,24 @@ public partial class AnnouncerEngine : Node
         "Struck well, tracking down the range."
     };
 
-    // Rest-time commentary templates
+    private readonly string[] _duffTemplates = new[]
+    {
+        "Oof, did you even hit the ball? That went nowhere.",
+        "That's a classic duff. Next time, try hitting the ball instead of the turf."
+    };
+
     private readonly string[] _praiseTemplates = new[]
     {
         "That is an absolute beauty! Right down the middle!",
         "Oh, what a strike! That one is going to roll forever.",
         "Superb shot! You made that look easy.",
         "Nicely done. Right in the short grass.",
-        "Great shot! Beautiful tempo on that swing."
+        "Great shot! Beautiful tempo on that swing.",
+        "A marvellous result there, right in the heart of the fairway.",
+        "Perfect execution. He's exactly where he wanted to be.",
+        "Struck that beautifully. A textbook shot.",
+        "Excellent distance control. That's a highly respectable shot.",
+        "That's in prime position. Absolutely splendid."
     };
 
     private readonly string[] _heckleTemplates = new[]
@@ -95,21 +271,11 @@ public partial class AnnouncerEngine : Node
         "I've seen better swings on a playground!",
         "Is that your golf swing, or are you swatting a mosquito?",
         "Heckle links! You might want to consider tennis.",
-        "You swing like a rusty gate."
-    };
-
-    private readonly string[] _duffTemplates = new[]
-    {
-        "Oof, did you even hit the ball? That went nowhere.",
-        "That's a classic duff. Next time, try hitting the ball instead of the turf."
-    };
-
-    private readonly string[] _mulliganTemplates = new[]
-    {
-        "Oh, a mulligan? Sure, let's pretend that last shot never happened.",
-        "Another mulligan? Are we playing golf, or editing a movie?",
-        "Mulligan! Did your mom approve that redo?",
-        "A mulligan? Fine, but the announcer saw it. We all saw it."
+        "You swing like a rusty gate.",
+        "Well, that was a swing only a mother could love.",
+        "Struck with the precision of a blindfolded caveman.",
+        "I've seen happier accidents, but that's in the deep stuff.",
+        "Oof. That's going to require a search party."
     };
 
     private readonly Random _random = new();
@@ -121,26 +287,107 @@ public partial class AnnouncerEngine : Node
 
     public override void _Ready()
     {
-        // Try to select the first English voice as default if not set
-        if (string.IsNullOrEmpty(ActiveVoice))
+        _audioPlayer = new AudioStreamPlayer();
+        AddChild(_audioPlayer);
+        GD.Print($"{LogPrefix} Ready. Audio player initialized.");
+    }
+
+    private void PlayAudioFile(string filename)
+    {
+        if (!AnnouncerEnabled) return;
+        try
         {
-            var voices = AndroidTTS.GetVoices();
-            foreach (var voice in voices)
+            var path = $"res://assets/audio/announcer/{filename}.mp3";
+            var stream = GD.Load<AudioStream>(path);
+            if (stream != null)
             {
-                string lang = voice.ContainsKey("language") ? voice["language"].AsString().ToLower() : "";
-                if (lang.StartsWith("en") || lang.Contains("en"))
+                _audioPlayer.Stream = stream;
+                _audioPlayer.Play();
+                GD.Print($"{LogPrefix} Playing audio file: {path}");
+            }
+            else
+            {
+                GD.PrintErr($"{LogPrefix} Failed to load audio stream from path: {path}");
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Error playing audio file: {ex.Message}");
+        }
+    }
+
+    private void PlayComment(string categoryName, string[] templates)
+    {
+        string selected = GetRandomComment(templates);
+        int index = System.Array.IndexOf(templates, selected);
+        if (index >= 0)
+        {
+            PlayAudioFile($"{categoryName}_{index}");
+        }
+    }
+
+    public override void _Process(double delta)
+    {
+        if (!AnnouncerEnabled || !HeckleEnabled) return;
+
+        // Don't play idle comments if audio is already playing
+        if (_audioPlayer != null && _audioPlayer.Playing)
+        {
+            _idleTimer = 0.0f;
+            return;
+        }
+
+        var currentScene = GetTree().CurrentScene;
+        if (currentScene == null) return;
+
+        // Simple check to ensure we are in a golf game and not the main menu / screens
+        if (currentScene.Name == "MainMenu" || currentScene.Name == "CourseSelector" || currentScene.Name == "CoursePlaySetup" || currentScene.Name == "OsmDownloadDialog")
+        {
+            _idleTimer = 0.0f;
+            return;
+        }
+
+        // Check if there is a player/ball or MultiplayerManager in the scene
+        bool gameActive = currentScene.HasNode("Player") || currentScene.HasNode("MultiplayerManager");
+        if (!gameActive)
+        {
+            _idleTimer = 0.0f;
+            return;
+        }
+
+        // Only run idle timer when the ball is at rest
+        var playerNode = currentScene.GetNodeOrNull("Player");
+        if (playerNode != null)
+        {
+            var ball = playerNode.GetNodeOrNull("ball");
+            if (ball != null)
+            {
+                int ballState = (int)ball.Get("state");
+                if (ballState != 0) // REST is 0
                 {
-                    ActiveVoice = voice.ContainsKey("id") ? voice["id"].AsString() : "";
-                    break;
+                    _idleTimer = 0.0f;
+                    return;
                 }
             }
         }
-        GD.Print($"{LogPrefix} Ready. Active voice is: '{ActiveVoice}'");
+
+        _idleTimer += (float)delta;
+        if (_idleTimer >= IdleAnnouncementInterval)
+        {
+            _idleTimer = 0.0f;
+            SpeakIdleComment();
+        }
+    }
+
+    private void SpeakIdleComment()
+    {
+        PlayComment("idle", _idleTemplates);
     }
 
     public void AnnounceLaunch(Dictionary shotData)
     {
         if (!AnnouncerEnabled) return;
+        _idleTimer = 0.0f; // Reset idle timer!
 
         float speedMph = shotData.TryGetValue("Speed", out var speedVal) ? (float)speedVal : 0.0f;
         float vla = shotData.TryGetValue("VLA", out var vlaVal) ? (float)vlaVal : 0.0f;
@@ -149,11 +396,9 @@ public partial class AnnouncerEngine : Node
 
         bool isPutt = shotType.Equals("putt", StringComparison.OrdinalIgnoreCase);
 
-        string voiceComment = "";
-
         if (isPutt)
         {
-            voiceComment = GetRandomComment(_launchPuttTemplates);
+            PlayComment("launch_putt", _launchPuttTemplates);
         }
         else
         {
@@ -195,136 +440,173 @@ public partial class AnnouncerEngine : Node
             if (vla < 4.0f && speedMph > 30.0f) // Wormburner
             {
                 if (HeckleEnabled)
-                    voiceComment = GetRandomComment(_launchWormburnerTemplates);
+                    PlayComment("launch_wormburner", _launchWormburnerTemplates);
             }
             else if (vla > 30.0f && speedMph > 90.0f) // Skyball / Pop-up
             {
                 if (HeckleEnabled)
-                    voiceComment = GetRandomComment(_launchSkyballTemplates);
+                    PlayComment("launch_skyball", _launchSkyballTemplates);
             }
             else if (hla > 4.5f && speedMph > 40.0f) // Offline right
             {
                 if (HeckleEnabled)
-                    voiceComment = GetRandomComment(_launchSliceTemplates);
+                    PlayComment("launch_slice", _launchSliceTemplates);
             }
             else if (hla < -4.5f && speedMph > 40.0f) // Offline left
             {
                 if (HeckleEnabled)
-                    voiceComment = GetRandomComment(_launchHookTemplates);
+                    PlayComment("launch_hook", _launchHookTemplates);
             }
             else if (speedMph > 40.0f && smashFactor > 1.45f) // Crushed it
             {
                 if (PraiseEnabled)
-                    voiceComment = GetRandomComment(_launchCrushedTemplates);
+                    PlayComment("launch_crushed", _launchCrushedTemplates);
             }
             else if (speedMph > 40.0f && smashFactor < 1.25f) // Mishit
             {
                 if (HeckleEnabled)
-                    voiceComment = GetRandomComment(_launchMishitTemplates);
+                    PlayComment("launch_mishit", _launchMishitTemplates);
             }
             else if (speedMph > 30.0f) // Normal hit
             {
                 if (PraiseEnabled)
-                    voiceComment = GetRandomComment(_launchGenericTemplates);
+                    PlayComment("launch_generic", _launchGenericTemplates);
             }
-        }
-
-        if (!string.IsNullOrEmpty(voiceComment))
-        {
-            AndroidTTS.Speak(voiceComment, ActiveVoice, Pitch, Rate);
         }
     }
 
-    public void EvaluateShot(Dictionary shotData, int surfaceType, float distanceToPinYards)
+    public void EvaluateShot(Dictionary shotData, int surfaceType, float distanceToPinYards, bool isInSand = false, bool isInWater = false)
     {
         if (!AnnouncerEnabled) return;
+        _idleTimer = 0.0f; // Reset idle timer!
 
         float speedMph = shotData.TryGetValue("Speed", out var speedVal) ? (float)speedVal : 0.0f;
         float totalDistYards = shotData.TryGetValue("TotalDistance", out var distVal) ? (float)distVal * 1.09361f : 0.0f;
         float offlineYards = shotData.TryGetValue("SideDistance", out var sideVal) ? (float)sideVal * 1.09361f : 0.0f;
+        float targetDistYards = shotData.TryGetValue("TargetDistance", out var targetVal) ? (float)targetVal * 1.09361f : 0.0f;
         string shotType = shotData.TryGetValue("ShotType", out var typeVal) ? (string)typeVal : "";
 
         bool isPutt = shotType.Equals("putt", StringComparison.OrdinalIgnoreCase);
-
-        string voiceComment = "";
 
         if (isPutt)
         {
             if (distanceToPinYards < 0.25f) // Holed out / extremely close
             {
-                voiceComment = "In the cup! What a beautiful putt.";
+                if (totalDistYards >= 5.0f) // Long putt (>= 15 feet / 5 yards)
+                {
+                    PlayComment("long_putt", _longPuttTemplates);
+                }
+                else
+                {
+                    // For short putts, play one of the praise lines
+                    PlayComment("praise", _praiseTemplates);
+                }
             }
             else if (totalDistYards < 2.0f && distanceToPinYards > 5.0f)
             {
-                voiceComment = "Left it way short. You need to hit it with some conviction.";
+                // Missed short: play a heckle comment
+                PlayComment("heckle", _heckleTemplates);
             }
             else
             {
-                voiceComment = $"Nice putt. It rolled {totalDistYards:F0} yards, leaving {distanceToPinYards:F0} yards to the hole.";
+                // Normal rollout: play praise if close, heckle if far
+                if (distanceToPinYards < 2.0f)
+                    PlayComment("praise", _praiseTemplates);
+                else if (distanceToPinYards > 5.0f)
+                    PlayComment("heckle", _heckleTemplates);
             }
+        }
+        else if (isInWater)
+        {
+            if (HeckleEnabled)
+                PlayComment("water", _waterTemplates);
+        }
+        else if (isInSand)
+        {
+            if (HeckleEnabled)
+                PlayComment("sand", _sandTemplates);
+        }
+        else if (targetDistYards > 50.0f && totalDistYards < 30.0f && totalDistYards < targetDistYards * 0.4f) // Chunked!
+        {
+            if (HeckleEnabled)
+                PlayComment("chunked", _chunkedTemplates);
+        }
+        else if (targetDistYards > 50.0f && totalDistYards > targetDistYards + 15.0f) // Crushed and went further than aimed
+        {
+            if (PraiseEnabled)
+                PlayComment("overshot_crushed", _overshotCrushedTemplates);
+        }
+        else if (totalDistYards > 50.0f && Math.Abs(offlineYards) > 20.0f) // Offline / Slice / Hook / Curve
+        {
+            if (HeckleEnabled)
+                PlayComment("offline_sarcastic", _offlineSarcasticTemplates);
         }
         else if (totalDistYards < 20.0f) // Duff
         {
             if (HeckleEnabled)
-                voiceComment = GetRandomComment(_duffTemplates);
+                PlayComment("duff", _duffTemplates);
         }
         else if (distanceToPinYards < 1.0f) // Extremely close to pin
         {
             if (PraiseEnabled)
-                voiceComment = $"Oh, what a shot! Unbelievable! It stopped just {distanceToPinYards:F1} yards from the pin!";
+                PlayComment("praise", _praiseTemplates);
         }
         else if (totalDistYards > 280.0f && Math.Abs(offlineYards) < 15.0f) // Massive bomb
         {
             if (PraiseEnabled)
-                voiceComment = $"What an absolute bomb! {totalDistYards:F0} yards, right down the fairway.";
+                PlayComment("praise", _praiseTemplates);
         }
         else
         {
-            // Play-by-play landing zone announcer
-            string lieText = surfaceType switch
-            {
-                0 => "fairway",
-                1 => "soft fairway",
-                2 => "rough",
-                3 => "hard ground",
-                4 => "green",
-                _ => "grass"
-            };
-
             // Praise if it landed on the fairway or green
             if (PraiseEnabled && (surfaceType == 0 || surfaceType == 4))
             {
-                if (surfaceType == 4)
-                {
-                    voiceComment = $"It found the green! That's on the green, leaving {distanceToPinYards:F0} yards for the putt.";
-                }
-                else
-                {
-                    voiceComment = $"Nicely placed in the fairway. The shot traveled {totalDistYards:F0} yards, with {distanceToPinYards:F0} yards left to the pin.";
-                }
+                PlayComment("praise", _praiseTemplates);
             }
             // Heckle if it landed in the rough
             else if (HeckleEnabled && surfaceType == 2)
             {
-                voiceComment = $"It's landed in the deep rough. That's {totalDistYards:F0} yards from the tee, leaving a tough lie and {distanceToPinYards:F0} yards to the pin.";
+                PlayComment("heckle", _heckleTemplates);
             }
-            else
-            {
-                voiceComment = $"That hit went {totalDistYards:F0} yards. The ball is resting in the {lieText}, with {distanceToPinYards:F0} yards remaining to the pin.";
-            }
-        }
-
-        if (!string.IsNullOrEmpty(voiceComment))
-        {
-            AndroidTTS.Speak(voiceComment, ActiveVoice, Pitch, Rate);
         }
     }
 
     public void SpeakMulliganHeckle()
     {
         if (!HeckleEnabled) return;
-        string comment = GetRandomComment(_mulliganTemplates);
-        AndroidTTS.Speak(comment, ActiveVoice, Pitch, Rate);
+        _idleTimer = 0.0f; // Reset idle timer!
+        PlayComment("mulligan", _mulliganTemplates);
+    }
+
+    public void SpeakTreeHeckle()
+    {
+        if (!HeckleEnabled) return;
+        _idleTimer = 0.0f; // Reset idle timer!
+        PlayComment("heckle", _heckleTemplates);
+    }
+
+    public void AnnounceHoleScore(string playerName, int strokes, int par)
+    {
+        if (!AnnouncerEnabled) return;
+        _idleTimer = 0.0f; // Reset idle timer!
+
+        int scoreType = strokes - par;
+
+        if (scoreType > 0)
+        {
+            if (HeckleEnabled)
+                PlayComment("above_par", _aboveParTemplates);
+        }
+        else if (scoreType == 0)
+        {
+            if (PraiseEnabled)
+                PlayComment("par", _parTemplates);
+        }
+        else // Under par (scoreType < 0)
+        {
+            if (PraiseEnabled)
+                PlayComment("under_par", _underParTemplates);
+        }
     }
 
     private string GetRandomComment(string[] templates)

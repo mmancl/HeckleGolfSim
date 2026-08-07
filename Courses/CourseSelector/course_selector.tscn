@@ -79,77 +79,15 @@ texture = ExtResource("4_37cdx")
 expand_mode = 1
 stretch_mode = 6
 
-[node name="BackgroundTint" type="ColorRect" parent="." unique_id=423827965]
-layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-offset_bottom = 64.0
-grow_horizontal = 2
-mouse_filter = 2
-color = Color(0.0431373, 0.180392, 0.309804, 0.921569)
-
-[node name="TopBanner" type="ColorRect" parent="." unique_id=1839826400]
-layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-offset_bottom = 64.0
-grow_horizontal = 2
-mouse_filter = 2
-color = Color(0.0431373, 0.180392, 0.309804, 0.921569)
-
-[node name="LeftButtons" type="BoxContainer" parent="TopBanner" unique_id=422245545]
-layout_mode = 0
-offset_left = 16.0
-offset_top = 12.0
-offset_right = 258.0
-offset_bottom = 52.0
-
-[node name="MainMenuButton" type="Button" parent="TopBanner/LeftButtons" unique_id=1244649058]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.875, 0.875, 0.875, 1)
-theme_override_colors/font_pressed_color = Color(1, 1, 1, 1)
-theme_override_colors/font_hover_color = Color(0.95, 0.95, 0.95, 1)
-theme_override_colors/icon_normal_color = Color(1, 1, 1, 1)
-theme_override_colors/icon_pressed_color = Color(1, 1, 1, 1)
-theme_override_colors/icon_hover_color = Color(1, 1, 1, 1)
-theme_override_styles/normal = SubResource("StyleBoxEmpty_6c7yh")
-theme_override_styles/pressed = SubResource("StyleBoxEmpty_pef24")
-theme_override_styles/hover = SubResource("StyleBoxEmpty_ka8tw")
-theme_override_styles/disabled = SubResource("StyleBoxEmpty_jx5fx")
-theme_override_styles/focus = SubResource("StyleBoxEmpty_xjqb6")
-text = "MAIN MENU"
-
-[node name="TitleLabel" type="Label" parent="TopBanner" unique_id=990890750]
-layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-offset_left = 24.0
-offset_right = -24.0
-offset_bottom = 64.0
-grow_horizontal = 2
-theme_override_font_sizes/font_size = 44
-text = "Course Finder"
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="TopBannerBottomStrip" type="ColorRect" parent="." unique_id=1463765346]
-layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-offset_top = 64.0
-offset_bottom = 82.0
-grow_horizontal = 2
-color = Color(0.0627451, 0.0862745, 0.12549, 0.858824)
-
 [node name="ContentPanel" type="PanelContainer" parent="." unique_id=1423278671]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 64.0
-offset_top = 112.0
-offset_right = -64.0
-offset_bottom = -64.0
+offset_left = 60.0
+offset_top = 40.0
+offset_right = -60.0
+offset_bottom = -40.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_9ya2x")
@@ -166,6 +104,25 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 16
+
+[node name="HeaderHBox" type="HBoxContainer" parent="ContentPanel/ContentMargin/VBoxContainer" unique_id=1000000]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="ContentPanel/ContentMargin/VBoxContainer/HeaderHBox" unique_id=1000001]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
+theme_override_font_sizes/font_size = 42
+text = "Practice Mode"
+vertical_alignment = 1
+
+[node name="Spacer" type="Control" parent="ContentPanel/ContentMargin/VBoxContainer/HeaderHBox" unique_id=1000002]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="MainMenuButton" type="Button" parent="ContentPanel/ContentMargin/VBoxContainer/HeaderHBox" unique_id=1000003]
+custom_minimum_size = Vector2(160, 48)
+layout_mode = 2
+text = "Main Menu"
 
 [node name="CourseDirectory" type="HBoxContainer" parent="ContentPanel/ContentMargin/VBoxContainer" unique_id=2052990276]
 layout_mode = 2
@@ -221,10 +178,11 @@ size_flags_vertical = 3
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-theme_override_font_sizes/font_size = 28
+theme_override_constants/v_separation = 20
+theme_override_font_sizes/font_size = 24
 script = ExtResource("3_eghlt")
 
-[connection signal="pressed" from="TopBanner/LeftButtons/MainMenuButton" to="." method="_on_main_menu_button_pressed"]
+[connection signal="pressed" from="ContentPanel/ContentMargin/VBoxContainer/HeaderHBox/MainMenuButton" to="." method="_on_main_menu_button_pressed"]
 [connection signal="course_directory" from="ContentPanel/ContentMargin/VBoxContainer/CourseDirectory/CourseDirectoryText" to="ContentPanel/ContentMargin/VBoxContainer/ScrollContainer/CourseList" method="parse_directory"]
 [connection signal="pressed" from="ContentPanel/ContentMargin/VBoxContainer/CourseDirectory/RefreshButton" to="." method="_on_refresh_button_pressed"]
 [connection signal="item_activated" from="ContentPanel/ContentMargin/VBoxContainer/ScrollContainer/CourseList" to="." method="_on_course_list_item_activated"]
