@@ -34,8 +34,11 @@ public class MediaPipePosePlugin extends GodotPlugin {
     private static final String PLUGIN_NAME = "MediaPipePosePlugin";
     private PoseLandmarker poseLandmarker;
 
+    private long frameCount = 0;
+
     public MediaPipePosePlugin(Godot godot) {
         super(godot);
+        Log.i(TAG, "MediaPipePosePlugin plugin constructor called.");
         initMediaPipe();
     }
 
@@ -55,26 +58,41 @@ public class MediaPipePosePlugin extends GodotPlugin {
 
     private synchronized void initMediaPipe() {
         if (poseLandmarker != null) return;
-        try {
-            BaseOptions baseOptions = BaseOptions.builder()
-                .setModelAssetPath("pose_landmarker_lite.task")
-                .build();
+        if (getActivity() == null) {
+            Log.w(TAG, "initMediaPipe deferred: getActivity() is null");
+            return;
+        }
 
-            PoseLandmarkerOptions options = PoseLandmarkerOptions.builder()
-                .setBaseOptions(baseOptions)
-                .setRunningMode(RunningMode.IMAGE)
-                .setNumPoses(1)
-                .setMinPoseDetectionConfidence(0.3f)
-                .setMinPosePresenceConfidence(0.3f)
-                .setMinTrackingConfidence(0.3f)
-                .build();
+        String[] modelPaths = {"pose_landmarker_lite.task", "assets/pose_landmarker_lite.task"};
+        Exception lastException = null;
 
-            if (getActivity() != null) {
+        for (String modelPath : modelPaths) {
+            try {
+                Log.d(TAG, "Attempting to load MediaPipe model from asset path: " + modelPath);
+                BaseOptions baseOptions = BaseOptions.builder()
+                    .setModelAssetPath(modelPath)
+                    .build();
+
+                PoseLandmarkerOptions options = PoseLandmarkerOptions.builder()
+                    .setBaseOptions(baseOptions)
+                    .setRunningMode(RunningMode.IMAGE)
+                    .setNumPoses(1)
+                    .setMinPoseDetectionConfidence(0.3f)
+                    .setMinPosePresenceConfidence(0.3f)
+                    .setMinTrackingConfidence(0.3f)
+                    .build();
+
                 poseLandmarker = PoseLandmarker.createFromOptions(getActivity(), options);
-                Log.d(TAG, "MediaPipe PoseLandmarker initialized successfully.");
+                Log.i(TAG, "MediaPipe PoseLandmarker initialized successfully using path: " + modelPath);
+                return;
+            } catch (Exception e) {
+                lastException = e;
+                Log.w(TAG, "Could not load MediaPipe model from path '" + modelPath + "': " + e.getMessage());
             }
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to initialize MediaPipe PoseLandmarker: " + e.getMessage(), e);
+        }
+
+        if (lastException != null) {
+            Log.e(TAG, "Failed to initialize MediaPipe PoseLandmarker after trying all model paths.", lastException);
         }
     }
 
@@ -85,17 +103,27 @@ public class MediaPipePosePlugin extends GodotPlugin {
             return;
         }
 
+        frameCount++;
+
         if (poseLandmarker == null) {
             initMediaPipe();
             if (poseLandmarker == null) {
+                if (frameCount % 60 == 1) {
+                    Log.e(TAG, "processFrame skipped: PoseLandmarker is not initialized.");
+                }
                 emitSignal("pose_result", "{\"detected\":false}");
                 return;
             }
         }
 
         try {
+            if (frameCount % 60 == 1) {
+                Log.d(TAG, "Processing camera frame #" + frameCount + " (bytes: " + jpegBytes.length + ")");
+            }
+
             Bitmap bitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.length);
             if (bitmap == null) {
+                Log.e(TAG, "Failed to decode JPEG bytes into Bitmap");
                 emitSignal("pose_result", "{\"detected\":false}");
                 return;
             }
@@ -137,6 +165,10 @@ public class MediaPipePosePlugin extends GodotPlugin {
                     landmarksObj.put(lmNames[i], lmObj);
                 }
                 json.put("landmarks", landmarksObj);
+
+                if (frameCount % 60 == 1) {
+                    Log.d(TAG, "Pose detected successfully with " + landmarksList.size() + " landmarks!");
+                }
             }
 
             emitSignal("pose_result", json.toString());

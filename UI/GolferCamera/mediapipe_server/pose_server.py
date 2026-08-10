@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """
-MediaPipe Pose Detection Server — Embedded Desktop Backend
-Auto-started by Godot's PoseDetectionBridge for desktop/laptop testing.
-Uses Google MediaPipe Tasks Vision Python SDK for accurate pose landmark detection.
+MediaPipe Pose Detection & System Camera Server — Embedded Backend
+Auto-started by Godot's PoseDetectionBridge for desktop/laptop environments.
+Uses Google MediaPipe Tasks Vision & OpenCV for local camera capture & pose tracking.
 
-Accepts JPEG frames via HTTP POST /pose, returns 33-landmark JSON response.
-Model auto-downloads on first run (~30MB).
+Endpoints:
+  GET  /health           -> Server health & active camera state
+  GET  /cameras          -> List available local system webcams
+  POST /camera/select    -> Select/open camera index (e.g. {"index": 0})
+  GET  /camera/capture   -> Capture frame from camera, run pose detection, return JPEG base64 + landmarks
+  POST /pose             -> Accept external JPEG bytes, return pose landmarks JSON
 """
 
+import base64
 import http.server
 import json
 import os
 import signal
 import sys
 import threading
+import urllib.parse
 
 # ─── Model download ─────────────────────────────────────────────────────────────
 
@@ -41,8 +47,6 @@ def ensure_model():
     size_mb = os.path.getsize(MODEL_PATH) / (1024 * 1024)
     print(f"[PoseServer] Download complete ({size_mb:.1f} MB)")
 
-
-# ─── MediaPipe initialisation ───────────────────────────────────────────────────
 
 ensure_model()
 
@@ -85,68 +89,191 @@ GOLF_LANDMARK_MAP = {
     "right_ankle": 28,
 }
 
-# ─── HTTP handler ────────────────────────────────────────────────────────────────
+
+def parse_landmarks(result) -> dict:
+    if not result.pose_landmarks or len(result.pose_landmarks) == 0:
+        return {}
+    lms = result.pose_landmarks[0]
+    landmarks = {}
+    for name, idx in GOLF_LANDMARK_MAP.items():
+        lm = lms[idx]
+        landmarks[name] = {
+            "x": round(lm.x, 6),
+            "y": round(lm.y, 6),
+            "z": round(lm.z, 6),
+            "visibility": round(lm.visibility, 4),
+        }
+    return landmarks
+
+
+# ─── Camera Manager ─────────────────────────────────────────────────────────────
+
+class CameraManager:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.cap = None
+        self.active_index = -1
+
+    def scan_cameras(self) -> list:
+        cams = []
+        # Test indices 0..4
+        for i in range(5):
+            cap = None
+            if os.name == 'nt':
+                cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+            if cap is None or not cap.isOpened():
+                cap = cv2.VideoCapture(i)
+            if cap.isOpened():
+                ret, _ = cap.read()
+                if ret:
+                    cams.append({"index": i, "name": f"System Camera {i}"})
+                cap.release()
+        return cams
+
+    def select_camera(self, index: int) -> bool:
+        with self.lock:
+            if self.active_index == index and self.cap is not None and self.cap.isOpened():
+                return True
+            if self.cap is not None:
+                self.cap.release()
+                self.cap = None
+                self.active_index = -1
+
+            if index < 0:
+                return True
+
+            cap = None
+            if os.name == 'nt':
+                cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+            if cap is None or not cap.isOpened():
+                cap = cv2.VideoCapture(index)
+
+            if cap is not None and cap.isOpened():
+                self.cap = cap
+                self.active_index = index
+                print(f"[PoseServer] Activated system camera {index}")
+                return True
+            else:
+                print(f"[PoseServer] Failed to open system camera {index}")
+                return False
+
+    def capture_and_process(self) -> dict:
+        with self.lock:
+            if self.cap is None or not self.cap.isOpened():
+                return {"detected": False, "landmarks": {}, "image_base64": "", "error": "No active camera"}
+
+            ret, frame = self.cap.read()
+            if not ret or frame is None:
+                return {"detected": False, "landmarks": {}, "image_base64": "", "error": "Frame read failed"}
+
+            # Resize if large to ensure smooth 30 FPS transmission
+            h, w = frame.shape[:2]
+            if w > 960:
+                new_w = 640
+                new_h = int(h * (640.0 / w))
+                frame = cv2.resize(frame, (new_w, new_h))
+
+            # Run MediaPipe PoseLandmarker
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            result = detector.detect(mp_image)
+            landmarks = parse_landmarks(result)
+            detected = len(landmarks) > 0
+
+            # Encode frame to JPEG and base64
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 75]
+            _, jpg_buffer = cv2.imencode('.jpg', frame, encode_param)
+            b64_str = base64.b64encode(jpg_buffer).decode('ascii')
+
+            return {
+                "detected": detected,
+                "landmarks": landmarks,
+                "image_base64": b64_str,
+                "camera_index": self.active_index,
+            }
+
+    def close(self):
+        with self.lock:
+            if self.cap is not None:
+                self.cap.release()
+                self.cap = None
+                self.active_index = -1
+
+
+camera_mgr = CameraManager()
+
+
+# ─── HTTP Handler ───────────────────────────────────────────────────────────────
 
 class PoseHandler(http.server.BaseHTTPRequestHandler):
-    """Handles /pose (POST) and /health (GET) endpoints."""
-
     def do_POST(self):
-        if self.path != "/pose":
-            self._send(404, {"error": "not found"})
-            return
-
-        content_length = int(self.headers.get("Content-Length", 0))
-        if content_length == 0:
-            self._send(200, {"detected": False, "landmarks": {}})
-            return
-
-        image_bytes = self.rfile.read(content_length)
-        if not image_bytes:
-            self._send(200, {"detected": False, "landmarks": {}})
-            return
-
-        try:
-            result = self._detect(image_bytes)
-            self._send(200, result)
-        except Exception as exc:
-            print(f"[PoseServer] Error: {exc}", file=sys.stderr)
-            self._send(200, {"detected": False, "landmarks": {}, "error": str(exc)})
-
-    def do_GET(self):
-        if self.path == "/health":
-            self._send(200, {"status": "ok", "model": MODEL_FILENAME})
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/pose":
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length == 0:
+                self._send(200, {"detected": False, "landmarks": {}})
+                return
+            image_bytes = self.rfile.read(content_length)
+            if not image_bytes:
+                self._send(200, {"detected": False, "landmarks": {}})
+                return
+            try:
+                result = self._detect_raw(image_bytes)
+                self._send(200, result)
+            except Exception as exc:
+                print(f"[PoseServer] Error processing frame: {exc}", file=sys.stderr)
+                self._send(200, {"detected": False, "landmarks": {}, "error": str(exc)})
+        elif parsed.path == "/camera/select":
+            content_length = int(self.headers.get("Content-Length", 0))
+            idx = 0
+            if content_length > 0:
+                body = self.rfile.read(content_length)
+                try:
+                    data = json.loads(body)
+                    idx = data.get("index", 0)
+                except Exception:
+                    pass
+            ok = camera_mgr.select_camera(idx)
+            self._send(200, {"status": "ok" if ok else "error", "index": camera_mgr.active_index})
         else:
             self._send(404, {"error": "not found"})
 
-    # ── Internal helpers ─────────────────────────────────────────────────────
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        query = urllib.parse.parse_qs(parsed.query)
+
+        if path == "/health":
+            self._send(200, {
+                "status": "ok",
+                "model": MODEL_FILENAME,
+                "camera_active": camera_mgr.active_index >= 0,
+                "camera_index": camera_mgr.active_index
+            })
+        elif path == "/cameras":
+            cams = camera_mgr.scan_cameras()
+            self._send(200, {"cameras": cams})
+        elif path == "/camera/select":
+            idx = int(query.get("index", [0])[0])
+            ok = camera_mgr.select_camera(idx)
+            self._send(200, {"status": "ok" if ok else "error", "index": camera_mgr.active_index})
+        elif path == "/camera/capture" or path == "/camera/frame":
+            res = camera_mgr.capture_and_process()
+            self._send(200, res)
+        else:
+            self._send(404, {"error": "not found"})
 
     @staticmethod
-    def _detect(jpeg_bytes: bytes) -> dict:
+    def _detect_raw(jpeg_bytes: bytes) -> dict:
         np_arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
         bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         if bgr is None:
             return {"detected": False, "landmarks": {}}
-
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-
         result = detector.detect(mp_image)
-
-        if not result.pose_landmarks or len(result.pose_landmarks) == 0:
-            return {"detected": False, "landmarks": {}}
-
-        lms = result.pose_landmarks[0]
-        landmarks = {}
-        for name, idx in GOLF_LANDMARK_MAP.items():
-            lm = lms[idx]
-            landmarks[name] = {
-                "x": round(lm.x, 6),
-                "y": round(lm.y, 6),
-                "z": round(lm.z, 6),
-                "visibility": round(lm.visibility, 4),
-            }
-
-        return {"detected": True, "landmarks": landmarks}
+        landmarks = parse_landmarks(result)
+        return {"detected": len(landmarks) > 0, "landmarks": landmarks}
 
     def _send(self, code: int, data: dict):
         body = json.dumps(data).encode("utf-8")
@@ -158,28 +285,27 @@ class PoseHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, fmt, *args):
-        # Suppress per-request logging to keep console clean
         pass
 
 
-# ─── Entry point ─────────────────────────────────────────────────────────────────
-
 def main():
     server = http.server.HTTPServer(("127.0.0.1", PORT), PoseHandler)
-    server.timeout = 1.0  # Allow periodic shutdown checks
+    server.timeout = 1.0
 
     def _shutdown(sig, frame):
         print("\n[PoseServer] Shutting down...")
+        camera_mgr.close()
         threading.Thread(target=server.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
 
     print(f"[PoseServer] Listening on http://127.0.0.1:{PORT}")
-    print("[PoseServer] Endpoints:  POST /pose  |  GET /health")
+    print("[PoseServer] Endpoints: GET /cameras | POST /camera/select | GET /camera/capture | POST /pose | GET /health")
     try:
         server.serve_forever()
     finally:
+        camera_mgr.close()
         server.server_close()
         print("[PoseServer] Stopped.")
 

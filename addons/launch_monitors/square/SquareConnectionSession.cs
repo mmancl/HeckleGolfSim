@@ -57,6 +57,8 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
 
     public event Action<bool>? ReadyChanged;
 
+    public event Action<SquareSensorData>? SensorDataReceived;
+
     public event Action<SquareShotMetrics>? ShotReceived;
 
     public async Task StartScanAsync(CancellationToken cancellationToken = default)
@@ -352,7 +354,8 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
             _lastSensorPacketTime = DateTime.UtcNow;
             var ready = sensor.BallReady && sensor.BallDetected;
             EmitReady(ready);
-            _logInfo($"Sensor packet parsed. ready={ready}");
+            SensorDataReceived?.Invoke(sensor);
+            _logInfo($"Sensor packet parsed. ready={ready}, pos=({sensor.PositionX}, {sensor.PositionY}, {sensor.PositionZ})");
             return;
         }
 

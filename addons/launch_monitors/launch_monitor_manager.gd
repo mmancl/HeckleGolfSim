@@ -10,6 +10,7 @@ signal battery_changed(level: int)
 signal firmware_changed(firmware: String)
 signal ready_changed(is_ready: bool)
 signal club_code_changed(club_code: String)
+signal sensor_data_updated(pos_x: int, pos_y: int, pos_z: int, is_ready: bool, is_detected: bool)
 
 const SETTINGS_PATH := "user://square_launch_monitor.cfg"
 const DEFAULT_CLUB_CODE := "0204"
@@ -29,6 +30,7 @@ var status := "Disconnected"
 var battery_level := -1
 var firmware := ""
 var is_ready := false
+var last_sensor_data := {"pos_x": 0, "pos_y": 0, "pos_z": 0, "ready": false, "detected": false}
 var _square_init_error := ""
 var settings := {
 	"enabled": false,
@@ -37,7 +39,8 @@ var settings := {
 	"club_code": DEFAULT_CLUB_CODE,
 	"handedness": 0,
 	"ready_ding_enabled": true,
-	"ready_indicator_enabled": true
+	"ready_indicator_enabled": true,
+	"ball_placement_guide_enabled": true
 }
 
 var _square: Node = null
@@ -282,7 +285,15 @@ func _create_square_monitor() -> void:
 	_square.connect("BatteryChanged", _on_square_battery_changed)
 	_square.connect("FirmwareChanged", _on_square_firmware_changed)
 	_square.connect("ReadyChanged", _on_square_ready_changed)
+	if _square.has_signal("SensorDataReceived"):
+		_square.connect("SensorDataReceived", _on_square_sensor_data_received)
 	_square.connect("ShotReceived", _on_square_shot_received)
+
+
+func set_ball_placement_guide_enabled(enabled: bool) -> void:
+	settings["ball_placement_guide_enabled"] = enabled
+	_save_settings()
+	_update_hud_display()
 
 
 func _load_settings() -> void:
@@ -296,6 +307,7 @@ func _load_settings() -> void:
 	settings["handedness"] = int(_config.get_value("square", "handedness", 0))
 	settings["ready_ding_enabled"] = bool(_config.get_value("square", "ready_ding_enabled", true))
 	settings["ready_indicator_enabled"] = bool(_config.get_value("square", "ready_indicator_enabled", true))
+	settings["ball_placement_guide_enabled"] = bool(_config.get_value("square", "ball_placement_guide_enabled", true))
 
 
 func _save_settings() -> void:
@@ -306,6 +318,7 @@ func _save_settings() -> void:
 	_config.set_value("square", "handedness", int(settings.get("handedness", 0)))
 	_config.set_value("square", "ready_ding_enabled", bool(settings.get("ready_ding_enabled", true)))
 	_config.set_value("square", "ready_indicator_enabled", bool(settings.get("ready_indicator_enabled", true)))
+	_config.set_value("square", "ball_placement_guide_enabled", bool(settings.get("ball_placement_guide_enabled", true)))
 	var err := _config.save(SETTINGS_PATH)
 	if err != OK:
 		_debug_error("Failed to save Square settings file at %s" % SETTINGS_PATH)
@@ -394,6 +407,19 @@ func _on_square_ready_changed(value: bool) -> void:
 		play_ready_ding()
 	emit_signal("ready_changed", value)
 	_update_hud_display()
+
+
+func _on_square_sensor_data_received(pos_x: int, pos_y: int, pos_z: int, ready: bool, detected: bool) -> void:
+	last_sensor_data = {
+		"pos_x": pos_x,
+		"pos_y": pos_y,
+		"pos_z": pos_z,
+		"ready": ready,
+		"detected": detected
+	}
+	emit_signal("sensor_data_updated", pos_x, pos_y, pos_z, ready, detected)
+	if _ready_hud != null and _ready_hud.has_method("set_sensor_position"):
+		_ready_hud.call("set_sensor_position", pos_x, pos_y, pos_z, ready, detected)
 
 
 func _on_square_shot_received(data: Dictionary) -> void:
@@ -534,6 +560,9 @@ func _set_status(value: String) -> void:
 func _update_hud_display() -> void:
 	if _ready_hud != null and _ready_hud.has_method("set_ready_status"):
 		var hud_enabled := bool(settings.get("ready_indicator_enabled", true))
+		var guide_enabled := bool(settings.get("ball_placement_guide_enabled", true))
+		if _ready_hud.has_method("set_placement_guide_enabled"):
+			_ready_hud.call("set_placement_guide_enabled", guide_enabled)
 		_ready_hud.call("set_ready_status", is_ready, status, hud_enabled)
 
 

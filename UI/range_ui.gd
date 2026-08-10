@@ -55,6 +55,11 @@ func _ready() -> void:
 				_update_camera_feed(true)
 		)
 
+	var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
+	if bridge != null:
+		if bridge.has_signal("desktop_frame_received") and not bridge.desktop_frame_received.is_connected(_on_desktop_frame_received):
+			bridge.desktop_frame_received.connect(_on_desktop_frame_received)
+
 	$SessionPopUp.cancelled.connect(_on_session_pop_up_cancelled)
 
 	var range_settings = get_node_or_null("SettingsLayer/Container/RangeSettings")
@@ -829,7 +834,18 @@ func _notification(what: int) -> void:
 			_update_camera_feed(true)
 
 
+func _on_desktop_frame_received(_img: Image, tex: Texture2D, _landmarks: Dictionary) -> void:
+	if is_golfer_camera_visible() and not _use_phone_stream:
+		if _camera_feed_rect != null:
+			_camera_feed_rect.texture = tex
+		_update_status_overlay("", false)
+
+
 func _update_camera_feed(active: bool) -> void:
+	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
+	if pose_bridge != null and pose_bridge.has_method("stop_desktop_camera"):
+		pose_bridge.stop_desktop_camera()
+
 	if not active:
 		CameraServer.set_monitoring_feeds(false)
 		var feeds = CameraServer.feeds()
@@ -863,22 +879,30 @@ func _update_camera_feed(active: bool) -> void:
 			return
 
 	CameraServer.set_monitoring_feeds(true)
-	var feeds = CameraServer.feeds()
-	var count = feeds.size()
 
 	if _use_phone_stream and not _phone_cam_url.is_empty():
 		_start_phone_camera_stream(_phone_cam_url)
-	elif count > 0:
+		return
+
+	var feeds = CameraServer.feeds()
+	var count = feeds.size()
+
+	if count > 0:
 		var selected_index = _find_default_camera_index(feeds)
 		_current_camera_feed_index = selected_index
 		_activate_camera_feed_index(selected_index)
-	elif not _phone_cam_url.is_empty() and _use_phone_stream:
-		_start_phone_camera_stream(_phone_cam_url)
+	elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
+		var sel_idx = clamp(_current_camera_feed_index, 0, pose_bridge.desktop_cameras.size() - 1)
+		_current_camera_feed_index = sel_idx
+		pose_bridge.select_desktop_camera(sel_idx)
+		_update_status_overlay("", false)
 	else:
 		if _camera_feed_rect != null:
 			_camera_feed_rect.texture = null
 		_update_status_overlay("SEARCHING FOR WEBCAMS...\n[ Click ⚙️ Connect Camera for setup ]", true)
-		# Schedule asynchronous re-scan for Android hardware camera enumeration
+		if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
+			pose_bridge.fetch_desktop_cameras()
+		# Schedule asynchronous re-scan
 		get_tree().create_timer(0.6).timeout.connect(func():
 			if is_golfer_camera_visible() and not _use_phone_stream:
 				var rescan_feeds = CameraServer.feeds()
@@ -886,6 +910,11 @@ func _update_camera_feed(active: bool) -> void:
 					var sel_idx = _find_default_camera_index(rescan_feeds)
 					_current_camera_feed_index = sel_idx
 					_activate_camera_feed_index(sel_idx)
+				elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
+					var sel_idx = clamp(_current_camera_feed_index, 0, pose_bridge.desktop_cameras.size() - 1)
+					_current_camera_feed_index = sel_idx
+					pose_bridge.select_desktop_camera(sel_idx)
+					_update_status_overlay("", false)
 				elif _phone_cam_url.is_empty():
 					_update_status_overlay("NO LOCAL WEBCAM DETECTED\n[ Click ⚙️ Connect Camera for Phone WiFi Stream ]", true)
 		)
@@ -915,6 +944,12 @@ func _find_default_camera_index(feeds: Array = []) -> int:
 func _activate_camera_feed_index(index: int) -> void:
 	var feeds = CameraServer.feeds()
 	if index < 0 or index >= feeds.size():
+		var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
+		if pose_bridge != null and "desktop_cameras" in pose_bridge and index >= 0 and index < pose_bridge.desktop_cameras.size():
+			pose_bridge.select_desktop_camera(index)
+			_update_status_overlay("", false)
+			return
+		
 		if _camera_feed_rect != null:
 			_camera_feed_rect.texture = null
 		_update_status_overlay("NO LOCAL WEBCAM DETECTED\n[ Click ⚙️ Connect Camera for Phone WiFi Stream ]", true)
@@ -938,22 +973,35 @@ func _on_flip_camera_pressed() -> void:
 	
 	var feeds = CameraServer.feeds()
 	var count = feeds.size()
+	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
+	var desk_cams: Array = pose_bridge.desktop_cameras if (pose_bridge != null and "desktop_cameras" in pose_bridge) else []
+
 	if count > 1:
 		if _current_camera_feed_index < count:
 			var current_feed = feeds[_current_camera_feed_index]
 			if current_feed != null:
 				current_feed.feed_is_active = false
-		
 		_current_camera_feed_index = (_current_camera_feed_index + 1) % count
 		_activate_camera_feed_index(_current_camera_feed_index)
+	elif desk_cams.size() > 1:
+		_current_camera_feed_index = (_current_camera_feed_index + 1) % desk_cams.size()
+		pose_bridge.select_desktop_camera(_current_camera_feed_index)
+		_update_status_overlay("", false)
 	elif count == 1:
 		_activate_camera_feed_index(0)
+	elif desk_cams.size() == 1:
+		pose_bridge.select_desktop_camera(0)
+		_update_status_overlay("", false)
 	else:
 		_open_camera_setup_dialog()
 
 
 func _open_camera_setup_dialog() -> void:
 	CameraServer.set_monitoring_feeds(true)
+	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
+	if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
+		pose_bridge.fetch_desktop_cameras()
+
 	var existing = $OverlayLayer.get_node_or_null("CameraSetupDialog")
 	if existing != null:
 		existing.queue_free()
@@ -1015,12 +1063,15 @@ func _open_camera_setup_dialog() -> void:
 
 	var populate_feeds = func():
 		var feeds = CameraServer.feeds()
-		var cam_count = feeds.size()
-		webcams_label.text = "1. Local / Built-in Webcams (%d detected):" % cam_count
+		var desk_cams: Array = pose_bridge.desktop_cameras if (pose_bridge != null and "desktop_cameras" in pose_bridge) else []
+		var total_count = max(feeds.size(), desk_cams.size())
+		
+		webcams_label.text = "1. Local / Built-in Webcams (%d detected):" % total_count
 		cam_option.clear()
-		if cam_count > 0:
+		
+		if feeds.size() > 0:
 			cam_option.disabled = false
-			for i in range(cam_count):
+			for i in range(feeds.size()):
 				var feed = feeds[i]
 				var feed_name = "Camera %d" % i
 				if feed != null:
@@ -1035,16 +1086,25 @@ func _open_camera_setup_dialog() -> void:
 						feed_name = "Camera %d%s" % [i, pos_name]
 				cam_option.add_item(feed_name, i)
 			
-			if _current_camera_feed_index >= 0 and _current_camera_feed_index < cam_count:
-				cam_option.select(_current_camera_feed_index)
-			else:
-				cam_option.select(0)
+			cam_option.select(clamp(_current_camera_feed_index, 0, feeds.size() - 1))
+		elif desk_cams.size() > 0:
+			cam_option.disabled = false
+			for i in range(desk_cams.size()):
+				var cam_info = desk_cams[i]
+				var c_name: String = cam_info.get("name", "System Camera %d" % i)
+				cam_option.add_item(c_name, i)
+			cam_option.select(clamp(_current_camera_feed_index, 0, desk_cams.size() - 1))
 		else:
 			cam_option.add_item("No local webcams detected", 0)
 			cam_option.disabled = true
 
-	# Populate immediately and schedule polling scans as OS device driver enumerates feeds
+	# Populate immediately and schedule polling scans
 	populate_feeds.call()
+
+	if pose_bridge != null and pose_bridge.has_signal("desktop_cameras_updated"):
+		pose_bridge.desktop_cameras_updated.connect(func(_cams):
+			populate_feeds.call()
+		)
 
 	var scan_timer = Timer.new()
 	scan_timer.name = "WebcamScanTimer"
@@ -1065,7 +1125,13 @@ func _open_camera_setup_dialog() -> void:
 		_use_phone_stream = false
 		var sel_idx = cam_option.get_selected_id()
 		_current_camera_feed_index = sel_idx
-		_activate_camera_feed_index(sel_idx)
+		var feeds = CameraServer.feeds()
+		if feeds.size() > 0:
+			_activate_camera_feed_index(sel_idx)
+		else:
+			if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
+				pose_bridge.select_desktop_camera(sel_idx)
+				_update_status_overlay("", false)
 		popup.queue_free()
 	)
 	cam_btn_hbox.add_child(connect_local_btn)
@@ -1076,6 +1142,8 @@ func _open_camera_setup_dialog() -> void:
 	apply_material_button_style(rescan_btn, Color(0.3, 0.35, 0.45, 0.9))
 	rescan_btn.pressed.connect(func():
 		CameraServer.set_monitoring_feeds(true)
+		if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
+			pose_bridge.fetch_desktop_cameras()
 		populate_feeds.call()
 	)
 	cam_btn_hbox.add_child(rescan_btn)
@@ -1109,6 +1177,8 @@ func _open_camera_setup_dialog() -> void:
 		for feed in local_feeds:
 			if feed != null:
 				feed.feed_is_active = false
+		if pose_bridge != null and pose_bridge.has_method("stop_desktop_camera"):
+			pose_bridge.stop_desktop_camera()
 		_use_phone_stream = true
 		_start_phone_camera_stream(ip_input.text)
 		popup.queue_free()

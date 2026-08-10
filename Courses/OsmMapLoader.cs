@@ -1584,7 +1584,7 @@ public partial class OsmMapLoader : Node
             phantomCam.SetScript(GD.Load<Script>("res://addons/phantom_camera/scripts/phantom_camera/phantom_camera_3d.gd"));
             
             var cameraResource = (Resource)GD.Load<GDScript>("res://addons/phantom_camera/scripts/resources/camera_3d_resource.gd").New();
-            cameraResource.Set("fov", 25.0f);
+            cameraResource.Set("fov", 55.0f);
             cameraResource.Set("far", 400.0f);
             phantomCam.Set("camera_3d_resource", cameraResource);
 
@@ -1592,7 +1592,7 @@ public partial class OsmMapLoader : Node
                 new Basis(new Vector3(-4.37114e-08f, 0f, -1f), new Vector3(0f, 1f, 0f), new Vector3(1f, 0f, -4.37114e-08f)),
                 new Vector3(-6.04467f, 3.02244f, 0f)
             );
-            phantomCam.Set("follow_offset", new Vector3(-2f, 1.6f, 0f));
+            phantomCam.Set("follow_offset", new Vector3(-15.0f, 2.4f, 0f));
             phantomCam.Set("follow_damping", true);
             phantomCam.Set("follow_damping_value", new Vector3(0.4f, 0.1f, 0.1f));
             phantomCam.Set("dead_zone_height", 0.204f);
@@ -1600,7 +1600,7 @@ public partial class OsmMapLoader : Node
             phantomCam.Owner = rootNode;
 
             var camera3d = new Camera3D { Name = "Camera3D" };
-            camera3d.Fov = 25.0f;
+            camera3d.Fov = 55.0f;
             camera3d.Far = 400.0f;
             var cameraAttrs = new CameraAttributesPractical();
             cameraAttrs.DofBlurFarEnabled = false;

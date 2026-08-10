@@ -1290,7 +1290,9 @@ func _on_active_player_changed(player: Dictionary) -> void:
 					if camera != null:
 						camera.follow_mode = PhantomCamera3D.FollowMode.NONE
 						camera.look_at_mode = PhantomCamera3D.LookAtMode.NONE
-						var local_offset = Vector3(-2, 1.6, 0)
+						var cam_dist = GlobalSettings.range_settings.camera_distance.value
+						var cam_height = GlobalSettings.range_settings.camera_height.value
+						var local_offset = Vector3(-cam_dist, cam_height, 0)
 						if course_instance.has_method("get_camera_local_offset"):
 							local_offset = course_instance.call("get_camera_local_offset")
 						var rotated_offset = local_offset.rotated(Vector3.UP, -angle_rad)
@@ -1299,13 +1301,19 @@ func _on_active_player_changed(player: Dictionary) -> void:
 							cam_pos = course_instance.call("clamp_camera_position", cam_pos)
 						camera.global_position = cam_pos
 						var is_on_green = (active_ball.get("lie_type") == "green" or active_ball.get("surface_type") == PhysicsEnums.SurfaceType.GREEN)
-						var target_look = (pin_pos + ball_pos) * 0.5 if is_on_green else pin_pos + Vector3.UP * 0.5
+						var aim_dir = (pin_pos - ball_pos).normalized()
+						if aim_dir.is_zero_approx():
+							aim_dir = Vector3.FORWARD
+						var target_look = (pin_pos + ball_pos) * 0.5 if is_on_green else ball_pos + aim_dir * 50.0 + Vector3.UP * 1.0
 						camera.look_at(target_look)
+						if camera.camera_3d_resource != null:
+							camera.camera_3d_resource.fov = GlobalSettings.range_settings.camera_fov.value
 						
 						var cam3d = course_instance.get_node_or_null("Camera3D")
 						if cam3d != null:
 							cam3d.global_position = cam_pos
 							cam3d.look_at(target_look)
+							cam3d.fov = GlobalSettings.range_settings.camera_fov.value
 			
 		# Redraw active player's tracer trails if any
 		var player_node = course_instance.get_node_or_null("Player")

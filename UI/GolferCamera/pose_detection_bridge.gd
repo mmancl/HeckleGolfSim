@@ -1,15 +1,19 @@
 extends Node
 
 # PoseDetectionBridge
-# Autoload singleton that manages the pose detection backend.
+# Autoload singleton that manages the pose detection & desktop camera backend.
 # Automatically selects the right backend for the current platform:
 #   - Android: Native Java plugin (MediaPipe Android SDK via GodotPlugin)
-#   - Desktop: Auto-started Python HTTP server (mediapipe Python package)
-# Provides a unified API for the GolferSkeletonOverlay to consume.
+#   - Desktop: Auto-started Python HTTP server (mediapipe + OpenCV camera server)
+# Provides a unified API for GolferSkeletonOverlay and UI components.
 
 signal pose_detected(landmarks: Dictionary)
 signal pose_lost()
 signal server_ready()
+
+# Desktop camera signals
+signal desktop_cameras_updated(cameras: Array)
+signal desktop_frame_received(image: Image, texture: Texture2D, landmarks: Dictionary)
 
 # Platform state
 var _is_android: bool = false
@@ -18,9 +22,18 @@ var _plugin = null  # Android GodotPlugin singleton
 # Desktop HTTP state
 var _http_req: HTTPRequest = null
 var _health_req: HTTPRequest = null
+var _cam_scan_req: HTTPRequest = null
+var _cam_select_req: HTTPRequest = null
+var _cam_capture_req: HTTPRequest = null
 var _python_pid: int = -1
 var _server_is_ready: bool = false
 var _health_check_attempts: int = 0
+
+# Desktop system camera state
+var desktop_cameras: Array = []
+var active_desktop_camera_index: int = -1
+var _desktop_polling_active: bool = false
+var _desktop_polling_in_flight: bool = false
 
 # Rate limiting
 var _last_req_time: float = 0.0
@@ -29,8 +42,12 @@ var _request_in_flight: bool = false
 const SERVER_PORT: int = 49154
 const SERVER_URL: String = "http://127.0.0.1:49154/pose"
 const HEALTH_URL: String = "http://127.0.0.1:49154/health"
+const CAMERAS_URL: String = "http://127.0.0.1:49154/cameras"
+const CAM_SELECT_URL: String = "http://127.0.0.1:49154/camera/select"
+const CAM_CAPTURE_URL: String = "http://127.0.0.1:49154/camera/capture"
+
 const MAX_HEALTH_RETRIES: int = 15
-const FRAME_INTERVAL: float = 0.066  # ~15 FPS cap
+const FRAME_INTERVAL: float = 0.04  # ~25 FPS cap for desktop camera streaming
 
 
 func _ready() -> void:
@@ -96,7 +113,7 @@ func _start_python_server() -> void:
 		pose_lost.emit()
 		return
 	
-	print("[PoseDetectionBridge] Starting Python pose server...")
+	print("[PoseDetectionBridge] Starting Python pose & camera server...")
 	print("[PoseDetectionBridge]   Python: %s" % python_cmd)
 	print("[PoseDetectionBridge]   Script: %s" % script_path)
 	
@@ -170,27 +187,131 @@ func _on_health_response(_result: int, response_code: int, _headers: PackedStrin
 	
 	if response_code == 200:
 		_server_is_ready = true
-		print("[PoseDetectionBridge] MediaPipe pose server is READY (%s)." % SERVER_URL)
+		print("[PoseDetectionBridge] MediaPipe pose & camera server is READY (%s)." % SERVER_URL)
 		server_ready.emit()
+		fetch_desktop_cameras()
 	else:
 		print("[PoseDetectionBridge] Health check attempt %d/%d — server not ready yet..." % [_health_check_attempts, MAX_HEALTH_RETRIES])
 		get_tree().create_timer(1.5).timeout.connect(_poll_server_health)
 
 
-func _on_pose_http_response(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
-	_request_in_flight = false
+# ─── Desktop System Camera Controls ──────────────────────────────────────────
+
+func fetch_desktop_cameras() -> void:
+	if _is_android or not _server_is_ready:
+		desktop_cameras_updated.emit([])
+		return
+	
+	if _cam_scan_req != null:
+		_cam_scan_req.queue_free()
+	
+	_cam_scan_req = HTTPRequest.new()
+	_cam_scan_req.name = "CamScanRequest"
+	_cam_scan_req.timeout = 3.0
+	_cam_scan_req.request_completed.connect(_on_scan_cameras_response)
+	add_child(_cam_scan_req)
+	_cam_scan_req.request(CAMERAS_URL)
+
+
+func _on_scan_cameras_response(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	if _cam_scan_req != null:
+		_cam_scan_req.queue_free()
+		_cam_scan_req = null
+	
 	if response_code == 200 and body.size() > 0:
-		_parse_and_emit(body.get_string_from_utf8())
+		var json = JSON.new()
+		if json.parse(body.get_string_from_utf8()) == OK:
+			var data: Dictionary = json.data
+			desktop_cameras = data.get("cameras", [])
+			print("[PoseDetectionBridge] Detected %d desktop system cameras." % desktop_cameras.size())
+			desktop_cameras_updated.emit(desktop_cameras)
+			return
+	
+	desktop_cameras = []
+	desktop_cameras_updated.emit([])
+
+
+func select_desktop_camera(index: int) -> void:
+	if _is_android or not _server_is_ready:
+		return
+	
+	if _cam_select_req != null:
+		_cam_select_req.queue_free()
+	
+	_cam_select_req = HTTPRequest.new()
+	_cam_select_req.name = "CamSelectRequest"
+	_cam_select_req.timeout = 3.0
+	add_child(_cam_select_req)
+	
+	var headers: PackedStringArray = ["Content-Type: application/json"]
+	var body_json := JSON.stringify({"index": index})
+	_cam_select_req.request(CAM_SELECT_URL, headers, HTTPClient.METHOD_POST, body_json)
+	
+	active_desktop_camera_index = index
+	if index >= 0:
+		_desktop_polling_active = true
+		_poll_desktop_camera_frame()
 	else:
-		pose_lost.emit()
+		_desktop_polling_active = false
+
+
+func stop_desktop_camera() -> void:
+	select_desktop_camera(-1)
+
+
+func _poll_desktop_camera_frame() -> void:
+	if not _desktop_polling_active or _desktop_polling_in_flight or not _server_is_ready:
+		return
+	
+	_desktop_polling_in_flight = true
+	
+	if _cam_capture_req == null:
+		_cam_capture_req = HTTPRequest.new()
+		_cam_capture_req.name = "CamCaptureRequest"
+		_cam_capture_req.timeout = 2.0
+		_cam_capture_req.request_completed.connect(_on_cam_capture_response)
+		add_child(_cam_capture_req)
+	
+	_cam_capture_req.request(CAM_CAPTURE_URL)
+
+
+func _on_cam_capture_response(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	_desktop_polling_in_flight = false
+	
+	if response_code == 200 and body.size() > 0:
+		var json = JSON.new()
+		if json.parse(body.get_string_from_utf8()) == OK:
+			var data: Dictionary = json.data
+			var b64_img: String = data.get("image_base64", "")
+			var landmarks: Dictionary = data.get("landmarks", {})
+			var detected: bool = data.get("detected", false)
+			
+			if not b64_img.is_empty():
+				var bytes := Marshalls.base64_to_raw(b64_img)
+				var img := Image.new()
+				var err := img.load_jpg_from_buffer(bytes)
+				if err == OK and not img.is_empty():
+					var tex := ImageTexture.create_from_image(img)
+					if detected:
+						pose_detected.emit(landmarks)
+					else:
+						pose_lost.emit()
+					desktop_frame_received.emit(img, tex, landmarks)
+	
+	if _desktop_polling_active:
+		get_tree().create_timer(FRAME_INTERVAL).timeout.connect(_poll_desktop_camera_frame)
 
 
 # ─── Public API ──────────────────────────────────────────────────────────────
 
-## Send a camera frame for pose detection. Rate-limited to ~15 FPS internally.
+## Send a camera frame for pose detection (Android / Viewport fallback).
 func process_frame(img: Image) -> void:
 	if img == null or img.is_empty() or not _server_is_ready:
 		pose_lost.emit()
+		return
+	
+	if _desktop_polling_active:
+		# When desktop system camera is actively capturing, bypass manual frame processing
 		return
 	
 	# Rate limit
@@ -224,6 +345,14 @@ func process_frame(img: Image) -> void:
 		if err != OK:
 			_request_in_flight = false
 			pose_lost.emit()
+
+
+func _on_pose_http_response(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	_request_in_flight = false
+	if response_code == 200 and body.size() > 0:
+		_parse_and_emit(body.get_string_from_utf8())
+	else:
+		pose_lost.emit()
 
 
 # ─── Internal ────────────────────────────────────────────────────────────────

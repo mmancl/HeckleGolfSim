@@ -146,7 +146,15 @@ If you want to deploy and debug directly to an Android device over Wi-Fi, Godot 
    ```bash
    adb connect <IP_ADDRESS>:<PORT>
    ```
-6. Restart the Godot editor. Your device should now appear in the Remote Debug menu.
+### Android MediaPipe Pose Plugin Rebuild
+To rebuild the native Android GPU MediaPipe pose detection plugin (`MediaPipePosePlugin.aar`):
+1. Ensure the task model `pose_landmarker_lite.task` is located in `android/plugins/MediaPipePosePlugin/src/main/assets/`.
+2. Run Gradle assemble:
+   - **Windows:** `cd android\build && gradlew.bat -p ..\plugins\MediaPipePosePlugin assembleRelease`
+   - **Linux/macOS:** `cd android/build && ./gradlew -p ../plugins/MediaPipePosePlugin assembleRelease`
+3. Copy the output AAR to the plugin folder:
+   - Copy `android/plugins/MediaPipePosePlugin/build/outputs/aar/MediaPipePosePlugin-release.aar` to `android/plugins/MediaPipePosePlugin/MediaPipePosePlugin.aar`.
+   - Verify the copied `.aar` is **~5 MB** in size (containing the bundled MediaPipe ML model).
 
 ## Controls
 - `h`: Simulate a built-in hit with sample ball data.

@@ -168,10 +168,10 @@ func _ready() -> void:
 	var height_row = _create_spinbox_setting_row("Camera Height", "camera_height", 0.5, 10.0, 0.1, "m")
 	camera_vbox.add_child(height_row)
 	
-	var dist_row = _create_spinbox_setting_row("Camera Distance", "camera_distance", 2.0, 30.0, 0.1, "m")
+	var dist_row = _create_spinbox_setting_row("Camera Distance", "camera_distance", 1.0, 30.0, 0.1, "m")
 	camera_vbox.add_child(dist_row)
 	
-	var fov_row = _create_spinbox_setting_row("Camera FOV", "camera_fov", 1.0, 60.0, 0.1, "deg")
+	var fov_row = _create_spinbox_setting_row("Camera FOV", "camera_fov", 1.0, 90.0, 0.1, "deg")
 	camera_vbox.add_child(fov_row)
 
 	var far_row = _create_spinbox_setting_row("Camera Far", "camera_far", 100.0, 1000.0, 1.0, "m")
@@ -419,6 +419,20 @@ func _setup_square_monitor_section() -> void:
 	)
 	hud_row.add_child(hud_button)
 	section.add_child(hud_row)
+
+	var guide_row := HBoxContainer.new()
+	var guide_label := _make_label("Placement Guide")
+	guide_label.custom_minimum_size = Vector2(130, 0)
+	guide_row.add_child(guide_label)
+	guide_row.add_child(_make_spacer())
+	var guide_button := CheckButton.new()
+	guide_button.set_pressed_no_signal(bool(launch_monitor.settings.get("ball_placement_guide_enabled", true)))
+	guide_button.toggled.connect(func(toggled_on: bool):
+		if launch_monitor.has_method("set_ball_placement_guide_enabled"):
+			launch_monitor.set_ball_placement_guide_enabled(toggled_on)
+	)
+	guide_row.add_child(guide_button)
+	section.add_child(guide_row)
 
 	square_status_label = Label.new()
 	square_battery_label = Label.new()

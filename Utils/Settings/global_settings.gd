@@ -63,6 +63,20 @@ func load_settings() -> void:
 		if config.has_section_key("range_settings", key):
 			var val = config.get_value("range_settings", key)
 			range_settings.settings[key].set_value(val)
+			
+	# Migration for camera settings if updating from older config files with small camera distance
+	var migrated := false
+	if range_settings.camera_distance.value < 14.0:
+		range_settings.camera_distance.set_value(15.0)
+		migrated = true
+	if range_settings.camera_fov.value < 50.0:
+		range_settings.camera_fov.set_value(55.0)
+		migrated = true
+	if range_settings.camera_height.value < 2.0:
+		range_settings.camera_height.set_value(2.4)
+		migrated = true
+	if migrated:
+		save_settings()
 	
 	# Load AnnouncerSettings
 	_loaded_announcer_settings.clear()

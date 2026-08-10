@@ -182,7 +182,7 @@ static func _build_and_save_course_scene(scene_path: String, new_hole_info: Dict
 
 	var cam3d = Camera3D.new()
 	cam3d.name = "Camera3D"
-	cam3d.fov = 25.0
+	cam3d.fov = 55.0
 	cam3d.far = 400.0
 	root.add_child(cam3d)
 	cam3d.owner = root

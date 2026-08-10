@@ -34,6 +34,9 @@ public partial class SquareLaunchMonitor : Node
     public delegate void ReadyChangedEventHandler(bool isReady);
 
     [Signal]
+    public delegate void SensorDataReceivedEventHandler(int posX, int posY, int posZ, bool isReady, bool isDetected);
+
+    [Signal]
     public delegate void ShotReceivedEventHandler(GodotDictionary shotData);
 
     public override void _Ready()
@@ -44,6 +47,7 @@ public partial class SquareLaunchMonitor : Node
         _session.BatteryChanged += EmitBattery;
         _session.FirmwareChanged += EmitFirmware;
         _session.ReadyChanged += EmitReady;
+        _session.SensorDataReceived += OnSensorDataReceived;
         _session.ShotReceived += OnShotReceived;
         LogInfo("Node ready.");
     }
@@ -57,6 +61,7 @@ public partial class SquareLaunchMonitor : Node
         _session.BatteryChanged -= EmitBattery;
         _session.FirmwareChanged -= EmitFirmware;
         _session.ReadyChanged -= EmitReady;
+        _session.SensorDataReceived -= OnSensorDataReceived;
         _session.ShotReceived -= OnShotReceived;
         _ = _session.DisposeAsync();
     }
@@ -148,6 +153,11 @@ public partial class SquareLaunchMonitor : Node
     private void EmitReady(bool ready)
     {
         CallDeferred("emit_signal", SignalName.ReadyChanged, ready);
+    }
+
+    private void OnSensorDataReceived(SquareSensorData sensor)
+    {
+        CallDeferred("emit_signal", SignalName.SensorDataReceived, sensor.PositionX, sensor.PositionY, sensor.PositionZ, sensor.BallReady, sensor.BallDetected);
     }
 
     private void EmitShot(GodotDictionary shotData)

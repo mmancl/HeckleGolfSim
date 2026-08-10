@@ -143,8 +143,13 @@ func _send_frame_to_bridge(tex: Texture2D) -> void:
 	var img: Image = null
 	if tex.has_method("get_image"):
 		img = tex.get_image()
+		if img != null and not img.is_empty():
+			if img.is_compressed():
+				img.decompress()
+			if img.get_format() != Image.FORMAT_RGBA8 and img.get_format() != Image.FORMAT_RGB8:
+				img.convert(Image.FORMAT_RGBA8)
 	
-	# Fallback: capture from viewport if texture extraction fails
+	# Fallback: capture from viewport if texture extraction fails (e.g. Android OES camera textures)
 	if (img == null or img.is_empty()) and is_inside_tree():
 		var vp = get_viewport()
 		if vp != null:
@@ -152,6 +157,10 @@ func _send_frame_to_bridge(tex: Texture2D) -> void:
 			if vp_tex != null:
 				var full_img = vp_tex.get_image()
 				if full_img != null and not full_img.is_empty():
+					if full_img.is_compressed():
+						full_img.decompress()
+					if full_img.get_format() != Image.FORMAT_RGBA8 and full_img.get_format() != Image.FORMAT_RGB8:
+						full_img.convert(Image.FORMAT_RGBA8)
 					full_img.flip_y()
 					var glob_rect = get_global_rect()
 					var vp_sz = vp.get_visible_rect().size

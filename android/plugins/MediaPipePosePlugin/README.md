@@ -9,39 +9,78 @@ This plugin enables **on-device, GPU-accelerated Google MediaPipe Pose AI Landma
 ```
 android/plugins/MediaPipePosePlugin/
 ├── MediaPipePosePlugin.gdap        # Godot plugin configuration
-├── MediaPipePosePlugin.aar         # Compiled plugin binary
+├── MediaPipePosePlugin.aar         # Compiled plugin binary (~5 MB with task model)
 ├── build.gradle                    # Android Gradle build file
-└── src/main/java/org/godotengine/plugin/android/mediapipepose/
-    └── MediaPipePosePlugin.java    # Java plugin bridge
+├── assets/                         # Packaged assets (pose_landmarker_lite.task)
+└── src/
+    └── main/
+        ├── assets/                 # Task model source folder (pose_landmarker_lite.task)
+        ├── AndroidManifest.xml
+        └── java/org/godotengine/plugin/android/mediapipepose/
+            └── MediaPipePosePlugin.java # Native Android Java plugin
 ```
 
 ---
 
-## 🚀 How to Build & Enable on Android
+## 🚀 How to Rebuild the `.aar` Library
 
-### Step 1: Build the `.aar` Library
-Run Gradle from the plugin directory or root Android project:
+### Step 1: Ensure Model Task File is Present
+Ensure `pose_landmarker_lite.task` is located in `android/plugins/MediaPipePosePlugin/src/main/assets/pose_landmarker_lite.task` (and `android/plugins/MediaPipePosePlugin/assets/pose_landmarker_lite.task`).
+
+If missing, download it from Google:
 ```bash
-./gradlew assembleRelease
+# Model file: pose_landmarker_lite.task (~5.7 MB)
+# URL: https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task
 ```
-Copy the compiled `MediaPipePosePlugin-release.aar` to:
-`android/plugins/MediaPipePosePlugin/MediaPipePosePlugin.aar`
 
-### Step 2: Download MediaPipe Task Model
-Download the official Google MediaPipe Pose Landmarker model:
-- **Model file**: `pose_landmarker_lite.task` (or `pose_landmarker_full.task`)
-- **Download URL**: https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task
-- **Location**: Place inside `android/build/assets/pose_landmarker_lite.task` (or project root `assets/`).
+### Step 2: Build with Gradle
+Run the Gradle build command using the wrapper from `android/build`:
 
-### Step 3: Enable in Godot Export Settings
-1. In Godot IDE: **Project -> Export -> Android**.
-2. Check **Use Custom Build**.
+**On Windows (PowerShell / CMD):**
+```cmd
+cd android\build
+gradlew.bat -p ..\plugins\MediaPipePosePlugin assembleRelease
+```
+
+**On Linux / macOS:**
+```bash
+cd android/build
+./gradlew -p ../plugins/MediaPipePosePlugin assembleRelease
+```
+
+### Step 3: Copy Output AAR to Plugin Directory
+Copy the built library from the Gradle output path to the root plugin directory:
+
+**Windows (PowerShell):**
+```powershell
+Copy-Item 'android/plugins/MediaPipePosePlugin/build/outputs/aar/MediaPipePosePlugin-release.aar' 'android/plugins/MediaPipePosePlugin/MediaPipePosePlugin.aar' -Force
+```
+
+**Linux / macOS:**
+```bash
+cp android/plugins/MediaPipePosePlugin/build/outputs/aar/MediaPipePosePlugin-release.aar android/plugins/MediaPipePosePlugin/MediaPipePosePlugin.aar
+```
+
+> ⚠️ **Verification:** Verify that `MediaPipePosePlugin.aar` is approximately **~5 MB** in size. If it is only ~4.5 KB, the model file was not bundled into the AAR.
+
+---
+
+## ⚙️ Enabling in Godot Android Export
+
+1. Open **Godot IDE** -> **Project -> Export -> Android**.
+2. Ensure **Use Custom Build** is enabled.
 3. Under **Plugins**, check **MediaPipe Pose Plugin**.
 4. Export the APK!
 
 ---
 
-## 🎯 Verification
-Upon launch on an Android device:
+## 🎯 Verification & On-Device Logs
+
+Upon launching on an Android device with camera connected:
 - `Engine.has_singleton("MediaPipePosePlugin")` will evaluate to `true`.
-- The app uses local GPU acceleration to detect 33 MediaPipe body landmarks at 30+ FPS!
+- Open a terminal and view real-time logs via `adb`:
+  ```bash
+  adb logcat | grep -i "MediaPipePose"
+  ```
+- Look for `MediaPipe PoseLandmarker initialized successfully` and `Pose detected successfully`.
+

@@ -1,7 +1,9 @@
 extends CanvasLayer
 
 # ReadyIndicatorHUD
-# Positioned overlay showing Launch Monitor ball readiness status ONLY during active gameplay.
+# Positioned overlay showing Launch Monitor ball readiness status ONLY during active gameplay,
+# featuring a visual Ball Placement Zone Box underneath that guides ball positioning
+# and automatically fades away once the ball is placed in the correct target spot.
 
 enum ScreenLayout {
 	HIDDEN,                 # Main menu, course selection, setup, history, analytics
@@ -10,6 +12,7 @@ enum ScreenLayout {
 }
 
 var _container: MarginContainer
+var _main_vbox: VBoxContainer
 var _panel: PanelContainer
 var _hbox: HBoxContainer
 var _dot_panel: Panel
@@ -19,13 +22,31 @@ var _glow_style: StyleBoxFlat
 var _tween: Tween = null
 var _pulse_tween: Tween = null
 
+# Visual Placement Guide Box nodes
+var _placement_panel: PanelContainer
+var _placement_canvas: Control
+var _placement_glow_style: StyleBoxFlat
+var _guide_label: Label
+var _box_tween: Tween = null
+var _box_visible_target := false
+var _ready_hold_timer := 0.0
+
+# Sensor & Position state
 var _is_ready := false
 var _status_text := "Disconnected"
 var _visible_mode := true
+var _placement_guide_enabled := true
 var _current_layout := ScreenLayout.HIDDEN
 var _check_timer := 0.0
 var _cached_ball: GolfBall = null
 var _ball_moving_prev := false
+
+var _sensor_pos_x := 0
+var _sensor_pos_y := 0
+var _sensor_pos_z := 0
+var _sensor_ready := false
+var _sensor_detected := false
+var _has_sensor_data := false
 
 
 func _ready() -> void:
@@ -52,6 +73,9 @@ func _process(delta: float) -> void:
 		_ball_moving_prev = ball_moving
 		_update_display(true)
 
+	# Update placement box auto-hide / show logic
+	_update_placement_box_state(delta)
+
 	_check_timer += delta
 	if _check_timer >= 0.1:
 		_check_timer = 0.0
@@ -64,7 +88,26 @@ func _process(delta: float) -> void:
 func _on_scene_changed() -> void:
 	_cached_ball = null
 	_ball_moving_prev = false
+	_has_sensor_data = false
+	_ready_hold_timer = 0.0
 	call_deferred("_refresh_layout_and_display", true)
+
+
+func set_sensor_position(pos_x: int, pos_y: int, pos_z: int, ready: bool, detected: bool) -> void:
+	_sensor_pos_x = pos_x
+	_sensor_pos_y = pos_y
+	_sensor_pos_z = pos_z
+	_sensor_ready = ready
+	_sensor_detected = detected
+	_has_sensor_data = true
+	if _placement_canvas != null and is_instance_valid(_placement_canvas):
+		_placement_canvas.queue_redraw()
+	_update_guidance_text()
+
+
+func set_placement_guide_enabled(enabled: bool) -> void:
+	_placement_guide_enabled = enabled
+	_update_display(false)
 
 
 func _setup_ui() -> void:
@@ -77,10 +120,16 @@ func _setup_ui() -> void:
 	_container.add_theme_constant_override("margin_top", 78)
 	add_child(_container)
 
+	_main_vbox = VBoxContainer.new()
+	_main_vbox.name = "ReadyHUDVBox"
+	_main_vbox.add_theme_constant_override("separation", 6)
+	_container.add_child(_main_vbox)
+
+	# Top Status Badge Pill
 	_panel = PanelContainer.new()
 	_panel.name = "StatusBadge"
 	_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_container.add_child(_panel)
+	_main_vbox.add_child(_panel)
 
 	_glow_style = StyleBoxFlat.new()
 	_glow_style.corner_radius_top_left = 18
@@ -136,6 +185,256 @@ func _setup_ui() -> void:
 	_sub_label.add_theme_font_size_override("font_size", 10)
 	_sub_label.add_theme_color_override("font_color", Color(0.7, 0.9, 0.75))
 	text_vbox.add_child(_sub_label)
+
+	# Setup Visual Ball Placement Box UI directly under the ready badge
+	_setup_placement_box_ui()
+
+
+func _setup_placement_box_ui() -> void:
+	_placement_panel = PanelContainer.new()
+	_placement_panel.name = "BallPlacementGuideBox"
+	_placement_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_placement_panel.custom_minimum_size = Vector2(190, 130)
+
+	_placement_glow_style = StyleBoxFlat.new()
+	_placement_glow_style.corner_radius_top_left = 14
+	_placement_glow_style.corner_radius_top_right = 14
+	_placement_glow_style.corner_radius_bottom_left = 14
+	_placement_glow_style.corner_radius_bottom_right = 14
+	_placement_glow_style.bg_color = Color(0.05, 0.08, 0.12, 0.92)
+	_placement_glow_style.border_width_left = 2
+	_placement_glow_style.border_width_top = 2
+	_placement_glow_style.border_width_right = 2
+	_placement_glow_style.border_width_bottom = 2
+	_placement_glow_style.border_color = Color(0.2, 0.6, 0.9, 0.7)
+	_placement_glow_style.content_margin_left = 8
+	_placement_glow_style.content_margin_right = 8
+	_placement_glow_style.content_margin_top = 8
+	_placement_glow_style.content_margin_bottom = 8
+	_placement_glow_style.shadow_color = Color(0, 0, 0, 0.4)
+	_placement_glow_style.shadow_size = 10
+	_placement_panel.add_theme_stylebox_override("panel", _placement_glow_style)
+
+	var inner_vbox = VBoxContainer.new()
+	inner_vbox.add_theme_constant_override("separation", 4)
+	_placement_panel.add_child(inner_vbox)
+
+	# Header text
+	var header = Label.new()
+	header.text = "BALL PLACEMENT ZONE"
+	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	header.add_theme_font_size_override("font_size", 9)
+	header.add_theme_color_override("font_color", Color(0.65, 0.8, 0.95))
+	inner_vbox.add_child(header)
+
+	# Custom Canvas for zone rectangle & ball dot
+	_placement_canvas = Control.new()
+	_placement_canvas.custom_minimum_size = Vector2(174, 84)
+	_placement_canvas.draw.connect(_on_placement_canvas_draw)
+	inner_vbox.add_child(_placement_canvas)
+
+	# Guidance label
+	_guide_label = Label.new()
+	_guide_label.text = "PLACE BALL IN TARGET ZONE"
+	_guide_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_guide_label.add_theme_font_size_override("font_size", 10)
+	_guide_label.add_theme_color_override("font_color", Color(0.9, 0.8, 0.4))
+	inner_vbox.add_child(_guide_label)
+
+	_main_vbox.add_child(_placement_panel)
+	_placement_panel.visible = false
+	_placement_panel.modulate.a = 0.0
+
+
+func _on_placement_canvas_draw() -> void:
+	if _placement_canvas == null or not is_instance_valid(_placement_canvas):
+		return
+
+	var size := _placement_canvas.size
+	var center := size / 2.0
+
+	# 1. Background Grid & Outer Sensing Boundaries
+	var outer_rect := Rect2(Vector2(12, 6), Vector2(size.x - 24, size.y - 12))
+	_placement_canvas.draw_rect(outer_rect, Color(0.1, 0.15, 0.22, 0.5), true)
+	_placement_canvas.draw_rect(outer_rect, Color(0.25, 0.35, 0.5, 0.4), false, 1.0)
+
+	# 2. Optimal Allowed Target Zone Box (e.g. ±60mm X, ±80mm Y equivalent in canvas space)
+	var zone_w := outer_rect.size.x * 0.52
+	var zone_h := outer_rect.size.y * 0.55
+	var zone_rect := Rect2(center - Vector2(zone_w / 2.0, zone_h / 2.0), Vector2(zone_w, zone_h))
+
+	# Color zone box according to current status
+	var zone_color := Color(0.2, 0.9, 0.45, 0.8) if _is_ready else Color(0.95, 0.65, 0.15, 0.8)
+	var zone_bg := Color(0.08, 0.28, 0.16, 0.35) if _is_ready else Color(0.3, 0.2, 0.05, 0.3)
+	_placement_canvas.draw_rect(zone_rect, zone_bg, true)
+	_placement_canvas.draw_rect(zone_rect, zone_color, false, 1.5)
+
+	# 3. Crosshairs
+	_placement_canvas.draw_line(Vector2(center.x, outer_rect.position.y + 4), Vector2(center.x, outer_rect.end.y - 4), Color(1, 1, 1, 0.18), 1.0)
+	_placement_canvas.draw_line(Vector2(outer_rect.position.x + 4, center.y), Vector2(outer_rect.end.x - 4, center.y), Color(1, 1, 1, 0.18), 1.0)
+
+	# 4. Get Ball Offset Position
+	var norm_pos := _get_normalized_ball_position()
+	var norm_x: float = norm_pos.x
+	var norm_y: float = norm_pos.y
+
+	var max_offset_x := (outer_rect.size.x / 2.0) - 8.0
+	var max_offset_y := (outer_rect.size.y / 2.0) - 8.0
+	var ball_center := center + Vector2(norm_x * max_offset_x, norm_y * max_offset_y)
+
+	# Clamp inside outer bounding box
+	ball_center.x = clampf(ball_center.x, outer_rect.position.x + 6, outer_rect.end.x - 6)
+	ball_center.y = clampf(ball_center.y, outer_rect.position.y + 6, outer_rect.end.y - 6)
+
+	# Ball color coding
+	var ball_glow_color := Color(0.2, 0.95, 0.45, 0.6)
+	if not _is_ready:
+		if absf(norm_x) > 0.8 or absf(norm_y) > 0.8:
+			ball_glow_color = Color(0.95, 0.25, 0.2, 0.7) # Red when far outside
+		else:
+			ball_glow_color = Color(0.95, 0.7, 0.15, 0.7) # Amber when near edge
+
+	# Draw Ball Outer Glow & Shadow
+	_placement_canvas.draw_circle(ball_center + Vector2(1, 2), 8.0, Color(0, 0, 0, 0.35))
+	_placement_canvas.draw_circle(ball_center, 9.0, ball_glow_color)
+
+	# Draw Golf Ball Body
+	_placement_canvas.draw_circle(ball_center, 6.0, Color(0.96, 0.98, 1.0))
+	_placement_canvas.draw_arc(ball_center, 6.0, 0, TAU, 16, Color(0.3, 0.3, 0.3, 0.6), 1.0)
+	_placement_canvas.draw_circle(ball_center + Vector2(-1.5, -1.5), 2.0, Color(1, 1, 1, 0.9)) # Specular highlight
+
+
+func _get_normalized_ball_position() -> Vector2:
+	if _has_sensor_data:
+		# Square hardware sensor coordinates:
+		# PositionX: lateral offset in mm (0 center, ±60mm inside target zone)
+		# PositionY: depth offset in mm (0 center, ±80mm inside target zone)
+		var nx := float(_sensor_pos_x) / 140.0
+		var ny := float(_sensor_pos_y) / 160.0
+		return Vector2(clampf(nx, -1.0, 1.0), clampf(ny, -1.0, 1.0))
+
+	# Fallback in-game ball offset when hardware sensor packet is not active
+	var ball := _get_golf_ball()
+	if ball != null and is_instance_valid(ball):
+		# Calculate relative displacement if moving or offset from origin
+		var vel: Vector3 = ball.linear_velocity if "linear_velocity" in ball else Vector3.ZERO
+		var speed: float = vel.length()
+		if speed > 0.05:
+			# Dynamic offset visualization during ball movement
+			var angle := atan2(vel.x, vel.z)
+			return Vector2(sin(angle) * 0.65, -cos(angle) * 0.65)
+
+	if _is_ready:
+		return Vector2.ZERO
+	return Vector2(0.35, 0.45) # Default offset guidance when waiting for ball placement
+
+
+func _update_guidance_text() -> void:
+	if _guide_label == null or not is_instance_valid(_guide_label):
+		return
+
+	if _is_ready:
+		_guide_label.text = "✓ BALL IN TARGET ZONE"
+		_guide_label.add_theme_color_override("font_color", Color(0.3, 0.95, 0.5))
+		if _placement_glow_style:
+			_placement_glow_style.border_color = Color(0.2, 0.9, 0.45, 0.8)
+			_placement_glow_style.bg_color = Color(0.05, 0.14, 0.08, 0.92)
+		return
+
+	var norm := _get_normalized_ball_position()
+	var hints := []
+
+	if _has_sensor_data and not _sensor_detected:
+		_guide_label.text = "PLACE BALL ON MAT"
+		_guide_label.add_theme_color_override("font_color", Color(0.95, 0.7, 0.3))
+		if _placement_glow_style:
+			_placement_glow_style.border_color = Color(0.9, 0.65, 0.2, 0.7)
+			_placement_glow_style.bg_color = Color(0.12, 0.09, 0.05, 0.9)
+		return
+
+	if _has_sensor_data:
+		var dx_mm := _sensor_pos_x
+		var dy_mm := _sensor_pos_y
+
+		if dx_mm < -50:
+			hints.append("Move Right →")
+		elif dx_mm > 50:
+			hints.append("← Move Left")
+
+		if dy_mm < -60:
+			hints.append("Move Away ↑")
+		elif dy_mm > 60:
+			hints.append("↓ Move Closer")
+	else:
+		if norm.x > 0.2:
+			hints.append("← Move Left")
+		elif norm.x < -0.2:
+			hints.append("Move Right →")
+
+		if norm.y > 0.2:
+			hints.append("↓ Move Closer")
+		elif norm.y < -0.2:
+			hints.append("Move Away ↑")
+
+	if hints.size() > 0:
+		_guide_label.text = " & ".join(hints).to_upper()
+		_guide_label.add_theme_color_override("font_color", Color(0.95, 0.75, 0.3))
+		if _placement_glow_style:
+			_placement_glow_style.border_color = Color(0.9, 0.65, 0.2, 0.7)
+			_placement_glow_style.bg_color = Color(0.12, 0.09, 0.05, 0.9)
+	else:
+		_guide_label.text = "CENTERING BALL IN ZONE..."
+		_guide_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.6))
+
+
+func _update_placement_box_state(delta: float) -> void:
+	if _placement_panel == null or not is_instance_valid(_placement_panel):
+		return
+
+	var scene := _get_active_scene()
+	var device_connected := _is_device_connected()
+
+	# Rule: The box should show when the ball is moved, missing, or outside of target spot.
+	# Once the ball is in the correct spot and ready, it should smoothly fade away.
+	var should_show_box := false
+
+	if visible and device_connected and _placement_guide_enabled:
+		if not _is_ready or _ball_moving_prev or (_has_sensor_data and not _sensor_ready):
+			should_show_box = true
+			_ready_hold_timer = 0.0
+		else:
+			# Ball is ready & in correct spot: hold for brief moment then fade out
+			_ready_hold_timer += delta
+			if _ready_hold_timer < 0.4:
+				should_show_box = true
+			else:
+				should_show_box = false
+
+	_set_placement_box_visible(should_show_box)
+
+
+func _set_placement_box_visible(target_visible: bool) -> void:
+	if _box_visible_target == target_visible:
+		return
+	_box_visible_target = target_visible
+
+	if _box_tween != null and _box_tween.is_running():
+		_box_tween.kill()
+
+	_box_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+	if target_visible:
+		_placement_panel.visible = true
+		_placement_panel.scale = Vector2(0.95, 0.95)
+		_placement_panel.pivot_offset = _placement_panel.size / 2.0
+		_box_tween.tween_property(_placement_panel, "modulate:a", 1.0, 0.25)
+		_box_tween.tween_property(_placement_panel, "scale", Vector2(1.0, 1.0), 0.25)
+	else:
+		_box_tween.tween_property(_placement_panel, "modulate:a", 0.0, 0.35)
+		_box_tween.tween_callback(func():
+			if not _box_visible_target:
+				_placement_panel.visible = false
+		)
 
 
 func set_ready_status(is_ready: bool, status: String, enabled: bool = true) -> void:
@@ -395,6 +694,10 @@ func _update_display(instant: bool = false) -> void:
 		_glow_style.shadow_color = Color(0, 0, 0, 0.3)
 		if dot_style:
 			dot_style.bg_color = Color(0.95, 0.65, 0.15)
+
+	_update_guidance_text()
+	if _placement_canvas != null and is_instance_valid(_placement_canvas):
+		_placement_canvas.queue_redraw()
 
 
 func _trigger_pop_animation() -> void:

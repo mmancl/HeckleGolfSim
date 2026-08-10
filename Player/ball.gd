@@ -560,6 +560,12 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 		if _is_ground_normal(normal):
 			floor_normal = normal
 			var prev_normal_velocity := prev_velocity.dot(normal)
+
+			# Ignore ground collision depenetration on launch/ascent while in FLIGHT state
+			if state == PhysicsEnums.BallState.FLIGHT and prev_normal_velocity >= -0.1:
+				on_ground = false
+				return
+
 			var is_landing := (state == PhysicsEnums.BallState.FLIGHT) or prev_normal_velocity < -0.5
 
 			if is_landing:

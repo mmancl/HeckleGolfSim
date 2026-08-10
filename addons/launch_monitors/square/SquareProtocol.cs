@@ -23,11 +23,11 @@ public static class SquareProtocol
             return false;
         }
 
-        var ballReady = data[2] != 0x00 || data[3] != 0x00;
         var posX = BinaryPrimitives.ReadInt32LittleEndian(data[5..9]);
         var posY = BinaryPrimitives.ReadInt32LittleEndian(data[9..13]);
         var posZ = BinaryPrimitives.ReadInt32LittleEndian(data[13..17]);
-        var ballDetected = data[4] != 0x00 || posX != 0 || posY != 0 || posZ != 0;
+        var ballDetected = data[2] != 0x00 || data[4] != 0x00 || posX != 0 || posY != 0 || posZ != 0;
+        var ballReady = data[3] != 0x00 && ballDetected;
 
         sensor = new SquareSensorData(
             ballReady,

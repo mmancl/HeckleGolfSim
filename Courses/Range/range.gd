@@ -670,7 +670,7 @@ func _ready() -> void:
 									var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
 									var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 									var cam_pos = clamp_camera_position(spawn_pos + local_offset)
-									var target_look = (aim_target_pos + spawn_pos) * 0.5 if is_on_green else aim_target_pos + Vector3.UP * 0.5
+									var target_look = get_camera_target_look(aim_target_pos, spawn_pos, is_on_green)
 									if has_node("PhantomCamera3D"):
 										$PhantomCamera3D.global_position = cam_pos
 										$PhantomCamera3D.look_at(target_look)
@@ -918,7 +918,7 @@ func _perform_map_click_aim(mouse_pos: Vector2) -> void:
 			var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
 			var local_offset = get_camera_local_offset().rotated(Vector3.UP, -angle_rad)
 			var cam_pos = clamp_camera_position(ball_pos + local_offset)
-			var target_look = (aim_target_pos + ball_pos) * 0.5 if is_on_green else aim_target_pos + Vector3.UP * 0.5
+			var target_look = get_camera_target_look(aim_target_pos, ball_pos, is_on_green)
 			if has_node("PhantomCamera3D"):
 				$PhantomCamera3D.global_position = cam_pos
 				$PhantomCamera3D.look_at(target_look)
@@ -968,7 +968,7 @@ func _perform_practice_teleport(mouse_pos: Vector2) -> void:
 					var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
 					var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 					var cam_pos = clamp_camera_position(clicked_point + local_offset)
-					var target_look = (current_hole_location + clicked_point) * 0.5 if is_on_green else current_hole_location + Vector3.UP * 0.5
+					var target_look = get_camera_target_look(current_hole_location, clicked_point, is_on_green)
 					if has_node("PhantomCamera3D"):
 						$PhantomCamera3D.global_position = cam_pos
 						$PhantomCamera3D.look_at(target_look)
@@ -1244,7 +1244,7 @@ func _on_golf_ball_rest(_ball_data) -> void:
 			var start_pos = clamp_camera_position(ball_pos + local_offset)
 			
 			# Position cameras
-			var target_look = (current_hole_location + ball_pos) * 0.5 if is_on_green else current_hole_location + Vector3.UP * 0.5
+			var target_look = get_camera_target_look(current_hole_location, ball_pos, is_on_green)
 			if has_node("PhantomCamera3D"):
 				$PhantomCamera3D.global_position = start_pos
 				$PhantomCamera3D.look_at(target_look)
@@ -1396,9 +1396,12 @@ func reset_camera_to_start() -> void:
 	var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 	var start_pos = clamp_camera_position($Player.ball.spawn_position + local_offset)
 
+	var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
+	var target_look = get_camera_target_look(aim_target_pos, $Player.ball.spawn_position, is_on_green)
+
 	if _skip_requested:
 		camera.global_position = start_pos
-		camera.look_at_from_position(start_pos, aim_target_pos + Vector3.UP * 0.5)
+		camera.look_at_from_position(start_pos, target_look)
 	else:
 		# Tween camera back to starting position
 		var tween := create_tween()
@@ -1407,7 +1410,7 @@ func reset_camera_to_start() -> void:
 		tween.tween_property(camera, "global_position", start_pos, 1.5)
 
 		# Rotate camera to face the aim target
-		camera.look_at_from_position(start_pos, aim_target_pos + Vector3.UP * 0.5)
+		camera.look_at_from_position(start_pos, target_look)
 
 		await tween.finished
 
@@ -1562,7 +1565,7 @@ func load_practice_hole(idx: int) -> void:
 			var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
 			var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 			var cam_pos = clamp_camera_position(spawn_pos + local_offset)
-			var target_look = (aim_target_pos + spawn_pos) * 0.5 if is_on_green else aim_target_pos + Vector3.UP * 0.5
+			var target_look = get_camera_target_look(aim_target_pos, spawn_pos, is_on_green)
 			if has_node("PhantomCamera3D"):
 				$PhantomCamera3D.global_position = cam_pos
 				$PhantomCamera3D.look_at(target_look)
@@ -1969,6 +1972,15 @@ func toggle_sky_view() -> void:
 		update_camera_fov(GlobalSettings.range_settings.camera_fov.value)
 
 
+func get_camera_target_look(target_pos: Vector3, origin_pos: Vector3, is_on_green: bool = false) -> Vector3:
+	if is_on_green:
+		return (target_pos + origin_pos) * 0.5
+	var aim_dir = (target_pos - origin_pos).normalized()
+	if aim_dir.is_zero_approx():
+		aim_dir = Vector3.FORWARD
+	return origin_pos + aim_dir * 50.0 + Vector3.UP * 1.0
+
+
 func get_camera_local_offset() -> Vector3:
 	var is_on_green = false
 	if has_node("Player") and $Player.ball != null:
@@ -1976,7 +1988,7 @@ func get_camera_local_offset() -> Vector3:
 		is_on_green = (ball.get("lie_type") == "green" or ball.get("surface_type") == PhysicsEnums.SurfaceType.GREEN)
 		
 	if is_on_green:
-		return Vector3(-14.0, 4.5, 0)
+		return Vector3(-4.0, 2.0, 0)
 		
 	var cam_dist = 50.0 if is_sky_view_active else GlobalSettings.range_settings.camera_distance.value
 	var cam_height = 15.0 if is_sky_view_active else GlobalSettings.range_settings.camera_height.value
@@ -1996,7 +2008,7 @@ func update_camera_offset(_val = null) -> void:
 			var cam_pos = clamp_camera_position($Player.ball.global_position + local_offset)
 			$PhantomCamera3D.global_position = cam_pos
 			var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN)
-			var target_look = (aim_target_pos + $Player.ball.global_position) * 0.5 if is_on_green else aim_target_pos + Vector3.UP * 0.5
+			var target_look = get_camera_target_look(aim_target_pos, $Player.ball.global_position, is_on_green)
 			$PhantomCamera3D.look_at(target_look)
 			if has_node("Camera3D"):
 				$Camera3D.global_position = cam_pos
@@ -3613,7 +3625,7 @@ func _select_chipping_target(index: int) -> void:
 		var yaw_rad = -angle_rad
 		var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 		var cam_pos = clamp_camera_position($Player.ball.spawn_position + local_offset)
-		var target_look = aim_target_pos + Vector3.UP * 0.5
+		var target_look = get_camera_target_look(aim_target_pos, $Player.ball.spawn_position, false)
 		if has_node("PhantomCamera3D"):
 			$PhantomCamera3D.global_position = cam_pos
 			$PhantomCamera3D.look_at(target_look)
