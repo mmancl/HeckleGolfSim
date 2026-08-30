@@ -42,9 +42,13 @@ func resett_defaults():
 	range_settings.reset_defaults()
 	var announcer = get_node_or_null("/root/AnnouncerEngine")
 	if announcer:
-		announcer.set("AnnouncerEnabled", true)
+		announcer.set("AnnouncerCoursePlay", true)
+		announcer.set("HeckleCoursePlay", true)
+		announcer.set("AnnouncerRange", false)
+		announcer.set("HeckleRange", false)
+		announcer.set("AnnouncerMiniGames", false)
+		announcer.set("HeckleMiniGames", false)
 		announcer.set("PraiseEnabled", true)
-		announcer.set("HeckleEnabled", true)
 		announcer.set("ActiveVoice", "")
 		announcer.set("Pitch", 1.0)
 		announcer.set("Rate", 1.0)
@@ -80,10 +84,38 @@ func load_settings() -> void:
 	
 	# Load AnnouncerSettings
 	_loaded_announcer_settings.clear()
-	for key in ["AnnouncerEnabled", "PraiseEnabled", "HeckleEnabled", "ActiveVoice", "Pitch", "Rate"]:
+	var announcer_keys = [
+		"AnnouncerCoursePlay",
+		"HeckleCoursePlay",
+		"AnnouncerRange",
+		"HeckleRange",
+		"AnnouncerMiniGames",
+		"HeckleMiniGames",
+		"PraiseEnabled",
+		"ActiveVoice",
+		"Pitch",
+		"Rate"
+	]
+	for key in announcer_keys:
 		var config_key = key.to_lower()
 		if config.has_section_key("announcer", config_key):
 			_loaded_announcer_settings[key] = config.get_value("announcer", config_key)
+
+	# Migration / default fallbacks if upgrading from legacy announcer settings
+	if not _loaded_announcer_settings.has("AnnouncerCoursePlay"):
+		_loaded_announcer_settings["AnnouncerCoursePlay"] = true
+	if not _loaded_announcer_settings.has("HeckleCoursePlay"):
+		_loaded_announcer_settings["HeckleCoursePlay"] = true
+	if not _loaded_announcer_settings.has("AnnouncerRange"):
+		_loaded_announcer_settings["AnnouncerRange"] = false
+	if not _loaded_announcer_settings.has("HeckleRange"):
+		_loaded_announcer_settings["HeckleRange"] = false
+	if not _loaded_announcer_settings.has("AnnouncerMiniGames"):
+		_loaded_announcer_settings["AnnouncerMiniGames"] = false
+	if not _loaded_announcer_settings.has("HeckleMiniGames"):
+		_loaded_announcer_settings["HeckleMiniGames"] = false
+	if not _loaded_announcer_settings.has("PraiseEnabled"):
+		_loaded_announcer_settings["PraiseEnabled"] = true
 			
 	var announcer = get_node_or_null("/root/AnnouncerEngine")
 	if announcer:
@@ -100,9 +132,13 @@ func save_settings() -> void:
 	# Save AnnouncerSettings
 	var announcer = get_node_or_null("/root/AnnouncerEngine")
 	if announcer:
-		_loaded_announcer_settings["AnnouncerEnabled"] = announcer.get("AnnouncerEnabled")
+		_loaded_announcer_settings["AnnouncerCoursePlay"] = announcer.get("AnnouncerCoursePlay")
+		_loaded_announcer_settings["HeckleCoursePlay"] = announcer.get("HeckleCoursePlay")
+		_loaded_announcer_settings["AnnouncerRange"] = announcer.get("AnnouncerRange")
+		_loaded_announcer_settings["HeckleRange"] = announcer.get("HeckleRange")
+		_loaded_announcer_settings["AnnouncerMiniGames"] = announcer.get("AnnouncerMiniGames")
+		_loaded_announcer_settings["HeckleMiniGames"] = announcer.get("HeckleMiniGames")
 		_loaded_announcer_settings["PraiseEnabled"] = announcer.get("PraiseEnabled")
-		_loaded_announcer_settings["HeckleEnabled"] = announcer.get("HeckleEnabled")
 		_loaded_announcer_settings["ActiveVoice"] = announcer.get("ActiveVoice")
 		_loaded_announcer_settings["Pitch"] = announcer.get("Pitch")
 		_loaded_announcer_settings["Rate"] = announcer.get("Rate")
@@ -130,6 +166,7 @@ func play_golf_clap() -> void:
 
 var _ambient_player: AudioStreamPlayer = null
 var _menu_music_player: AudioStreamPlayer = null
+var _minigames_music_player: AudioStreamPlayer = null
 var _audio_check_timer: float = 0.0
 
 func _process(delta: float) -> void:
@@ -175,9 +212,28 @@ func _setup_audio_players() -> void:
 					if _should_play_menu_music():
 						_menu_music_player.play()
 				)
+
+	if _minigames_music_player == null:
+		_minigames_music_player = AudioStreamPlayer.new()
+		_minigames_music_player.name = "MinigamesMusicPlayer"
+		add_child(_minigames_music_player)
+		
+		var path = "res://assets/audio/minigames_music.mp3"
+		if ResourceLoader.exists(path):
+			var stream = load(path)
+			if stream:
+				if "loop" in stream:
+					stream.loop = true
+				_minigames_music_player.stream = stream
+				_minigames_music_player.volume_db = -22.0
+				_minigames_music_player.finished.connect(func():
+					if _should_play_minigame_music():
+						_minigames_music_player.play()
+				)
 				
 	range_settings.ambient_sound_enabled.setting_changed.connect(func(_val): update_audio_state())
 	range_settings.menu_music_enabled.setting_changed.connect(func(_val): update_audio_state())
+	range_settings.minigame_music_enabled.setting_changed.connect(func(_val): update_audio_state())
 	
 	if has_node("/root/SceneManager"):
 		var scn_mgr = get_node("/root/SceneManager")
@@ -200,6 +256,39 @@ func _get_active_scene() -> Node:
 	return null
 
 
+func is_minigames_menu_screen() -> bool:
+	var scene := _get_active_scene()
+	if scene == null:
+		return false
+
+	var scene_name := str(scene.name).to_lower()
+	var script: Script = scene.get_script()
+	var script_path := str(script.resource_path).to_lower() if script != null else ""
+	var file_path := str(scene.scene_file_path).to_lower() if "scene_file_path" in scene else ""
+
+	var full_id := (scene_name + " " + script_path + " " + file_path).to_lower()
+	return full_id.contains("minigames_menu") or full_id.contains("minigamesmenu")
+
+
+func is_minigames_gameplay_screen() -> bool:
+	var scene := _get_active_scene()
+	if scene == null:
+		return false
+
+	var scene_name := str(scene.name).to_lower()
+	var script: Script = scene.get_script()
+	var script_path := str(script.resource_path).to_lower() if script != null else ""
+	var file_path := str(scene.scene_file_path).to_lower() if "scene_file_path" in scene else ""
+
+	var full_id := (scene_name + " " + script_path + " " + file_path).to_lower()
+	return full_id.contains("putting_practice") or full_id.contains("puttingpractice") \
+		or full_id.contains("chipping") or full_id.contains("/minigames/")
+
+
+func is_minigames_scene() -> bool:
+	return is_minigames_menu_screen() or is_minigames_gameplay_screen()
+
+
 func is_menu_screen() -> bool:
 	var scene := _get_active_scene()
 	if scene == null:
@@ -212,11 +301,10 @@ func is_menu_screen() -> bool:
 
 	var full_id := (scene_name + " " + script_path + " " + file_path).to_lower()
 
-	# Menu / setup / selection / analytics screens
+	# Menu / setup / selection / analytics screens (excluding minigames_menu which uses minigame soundtrack)
 	if full_id.contains("main_menu") or full_id.contains("mainmenu") \
 		or full_id.contains("course_selector") or full_id.contains("courseselector") \
 		or full_id.contains("course_play_setup") or full_id.contains("courseplaysetup") \
-		or full_id.contains("minigames_menu") or full_id.contains("minigamesmenu") \
 		or full_id.contains("players_menu") or full_id.contains("playersmenu") \
 		or full_id.contains("analytics") or full_id.contains("history") \
 		or full_id.contains("custom_course_creator") or full_id.contains("osm_download") \
@@ -229,13 +317,19 @@ func is_menu_screen() -> bool:
 func _should_play_menu_music() -> bool:
 	if not range_settings.menu_music_enabled.value:
 		return false
-	return is_menu_screen()
+	return is_menu_screen() and not is_minigames_scene()
 
 
 func _should_play_ambient() -> bool:
 	if not range_settings.ambient_sound_enabled.value:
 		return false
-	return not is_menu_screen()
+	return not is_menu_screen() and not is_minigames_scene()
+
+
+func _should_play_minigame_music() -> bool:
+	if not range_settings.minigame_music_enabled.value:
+		return false
+	return is_minigames_scene()
 
 
 func update_audio_state() -> void:
@@ -248,7 +342,16 @@ func update_audio_state() -> void:
 			if _menu_music_player.playing:
 				_menu_music_player.stop()
 
-	# Ambient Nature Sounds logic
+	# Minigames Music Soundtrack logic
+	if _minigames_music_player != null and _minigames_music_player.stream != null:
+		if _should_play_minigame_music():
+			if not _minigames_music_player.playing:
+				_minigames_music_player.play()
+		else:
+			if _minigames_music_player.playing:
+				_minigames_music_player.stop()
+
+	# Ambient Nature Sounds logic (disabled in minigames and menus)
 	if _ambient_player != null and _ambient_player.stream != null:
 		if _should_play_ambient():
 			if not _ambient_player.playing:
@@ -256,5 +359,6 @@ func update_audio_state() -> void:
 		else:
 			if _ambient_player.playing:
 				_ambient_player.stop()
+
 
 

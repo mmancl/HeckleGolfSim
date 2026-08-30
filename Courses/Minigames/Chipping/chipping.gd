@@ -5,8 +5,7 @@ var PlayerScene = preload("res://Player/player.tscn")
 
 # Minigame state variables
 var player = null
-var selected_island_index = 0 # Default target is 50 yds
-var user_aim_offset_deg = 0.0
+var selected_island_index = 0 # Default target is 25 ft
 
 # Camera follow state
 var last_camera_offset = Vector3.ZERO
@@ -17,12 +16,12 @@ var is_dragging = false
 var island_stats = {}
 var total_greens_hit = 0
 
-# Island configurations: 4 greens at 50, 100, 150, 200 yards
-var island_distances_yards = [50, 100, 150, 200]
+# Island configurations: 7 greens at 25, 50, 75, 100, 125, 150, 200 feet
+var island_distances_feet = [25, 50, 75, 100, 125, 150, 200]
 
-# Fan layout: 50y left, 100y right, 150y far left, 200y far right
-# Angles from straight ahead (positive = left, negative = right)
-var island_angles_deg = [35.0, -25.0, 45.0, -35.0]
+# Fan layout: angles from straight ahead (+X axis in degrees)
+# Staggered left and right so all 7 targets have clear line-of-sight from the tee box
+var island_angles_deg = [40.0, -35.0, 20.0, -15.0, 48.0, -40.0, 3.0]
 
 var island_positions = [] # Computed world positions
 var island_data = [] # Detailed procedural shape and layout data per island
@@ -34,14 +33,11 @@ var attempts_lbl = null
 var hits_lbl = null
 var accuracy_lbl = null
 var total_hits_lbl = null
-
-var power_slider = null
-var power_val_lbl = null
-var vla_slider = null
-var vla_val_lbl = null
-var aim_slider = null
-var aim_val_lbl = null
 var banner_lbl = null
+var music_toggle_btn = null
+var hud_layer: CanvasLayer = null
+var hud_control: Control = null
+var _settings_layer: CanvasLayer = null
 
 # Materials
 var green_mat: StandardMaterial3D
@@ -55,10 +51,10 @@ var dock_mat: StandardMaterial3D
 func _ready() -> void:
 	name = "ChippingPractice"
 	
-	# 1. Compute island world positions from distance + angle fan layout
-	for i in range(island_distances_yards.size()):
+	# 1. Compute island world positions from distance (feet -> meters) + angle fan layout
+	for i in range(island_distances_feet.size()):
 		island_stats[i] = {"Attempts": 0, "Hits": 0}
-		var dist_meters = island_distances_yards[i] * 0.9144 # yards to meters
+		var dist_meters = island_distances_feet[i] * 0.3048 # feet to meters
 		var angle_rad = deg_to_rad(island_angles_deg[i])
 		var x = dist_meters * cos(angle_rad)
 		var z = dist_meters * sin(angle_rad)
@@ -76,7 +72,7 @@ func _ready() -> void:
 	# 5. Setup Tee Box (player standing area)
 	_setup_tee_box()
 	
-	# 6. Setup 4 Floating Golf Course Island Greens
+	# 6. Setup 7 Floating Golf Course Island Greens
 	_setup_islands()
 	
 	# 7. Setup Player
@@ -88,10 +84,26 @@ func _ready() -> void:
 	# Select default target
 	_select_target_island(selected_island_index)
 	
+	if has_node("/root/EventBus"):
+		var eb = get_node("/root/EventBus")
+		if eb.has_signal("club_selected"):
+			eb.club_selected.emit("Sw")
+	
 	if has_node("/root/LaunchMonitorManager"):
 		var launch_monitor = get_node("/root/LaunchMonitorManager")
 		if not launch_monitor.hit_ball.is_connected(_on_launch_monitor_hit_ball):
 			launch_monitor.hit_ball.connect(_on_launch_monitor_hit_ball)
+			
+	var tcp_server = get_node_or_null("TCPServer")
+	if tcp_server == null:
+		var tcp_script = load("res://addons/launch_monitors/common/tcp_server/TcpServer.cs")
+		if tcp_script != null:
+			tcp_server = tcp_script.new()
+			tcp_server.name = "TCPServer"
+			add_child(tcp_server)
+	if tcp_server != null and tcp_server.has_signal("HitBall"):
+		if not tcp_server.HitBall.is_connected(_on_launch_monitor_hit_ball):
+			tcp_server.HitBall.connect(_on_launch_monitor_hit_ball)
 
 # ========================================
 # MATERIAL INITIALIZATION
@@ -239,6 +251,8 @@ func _setup_environment() -> void:
 	camera.name = "Camera3D"
 	camera.current = true
 	add_child(camera)
+	if has_node("/root/TensionManager"):
+		TensionManager.register_camera(camera, 55.0)
 
 # ========================================
 # WATER HAZARD
@@ -318,126 +332,198 @@ func _setup_islands() -> void:
 	
 	for i in range(island_positions.size()):
 		var pos = island_positions[i]
-		var dist_yds = island_distances_yards[i]
+		var dist_ft = island_distances_feet[i]
 		
 		# Generate procedural 2D geometry layouts for this island
 		var data = _generate_island_layout(i)
 		island_data.append(data)
 		
 		# Build 3D island node with meshes, collision bodies, trees, dock, flag
-		var island_node = _build_floating_island_node(i, pos, dist_yds, data)
+		var island_node = _build_floating_island_node(i, pos, dist_ft, data)
 		add_child(island_node)
 
-## Generate unique organic 2D shape profiles for each of the 4 islands
+## Generate unique organic 2D shape profiles for each of the 7 islands
+## Greens grow progressively larger, with the 25 FT green at 10 ft wide (1.524m radius) + 5 ft rough perimeter (3.048m outer radius)
 func _generate_island_layout(idx: int) -> Dictionary:
 	var outer_pts: PackedVector2Array = PackedVector2Array()
 	var green_pts: PackedVector2Array = PackedVector2Array()
 	var bunker_list: Array[PackedVector2Array] = []
 	var mulch_list: Array[PackedVector2Array] = []
 	var tree_positions: Array[Vector3] = []
+	var tree_scale_mult: float = 1.0
 	var dock_pos = Vector3.ZERO
 	var dock_angle = 0.0
+	var dock_scale: float = 1.0
 	var pin_pos = Vector3.ZERO
-	var green_bounding_radius = 8.0
+	var green_bounding_radius = 1.524
 	
 	match idx:
-		0: # 50 YARDS - Smallest Kidney Bean Island Green (Orientation: 15°)
-			green_bounding_radius = 9.5
-			outer_pts = _generate_kidney_bean_polygon(9.5, 0.18, 0.10, 15.0)
-			green_pts = _generate_kidney_bean_polygon(6.5, 0.18, 0.08, 15.0)
+		0: # 25 FEET - Smallest island green: 10 ft wide green (1.524m radius) + 5 ft perimeter rough (3.048m outer radius)
+			green_bounding_radius = 1.524
+			outer_pts = _generate_kidney_bean_polygon(3.048, 0.14, 0.08, 15.0)
+			green_pts = _generate_kidney_bean_polygon(1.524, 0.14, 0.06, 15.0)
 			
-			# Sand Traps on FRONT approach side (+Y in 2D / +Z in 3D), off-centered left & right
-			bunker_list.append(_create_ellipse_polygon(Vector2(-3.8, 3.5), 2.4, 1.5, deg_to_rad(20)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(3.5, 3.8), 2.5, 1.6, deg_to_rad(-35)))
+			# Mini Sand Trap on front approach side (+Y in 2D / +Z in 3D)
+			bunker_list.append(_create_ellipse_polygon(Vector2(1.1, 1.2), 0.7, 0.45, deg_to_rad(-25)))
 			
-			# Red mulch bed strictly on BACK side (-Y in 2D / -Z in 3D)
-			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -6.5), 6.0, 2.2, deg_to_rad(0)))
+			# Mini Red mulch bed on back side (-Y in 2D / -Z in 3D)
+			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -2.1), 1.8, 0.65, deg_to_rad(0)))
 			
-			# Trees strictly on BACK side (-Z in 3D)
+			# Small decorative trees on back edge
 			tree_positions = [
-				Vector3(-4.2, 0.1, -6.0),
-				Vector3(-0.8, 0.1, -7.2),
-				Vector3(3.5, 0.1, -6.5)
+				Vector3(-1.1, 0.05, -2.0),
+				Vector3(1.0, 0.05, -2.1)
 			]
-			dock_pos = Vector3(7.0, 0.0, -2.0)
+			tree_scale_mult = 0.55
+			dock_pos = Vector3(2.3, 0.0, -0.6)
 			dock_angle = deg_to_rad(-45)
-			pin_pos = Vector3(0.5, 0.05, -0.5)
+			dock_scale = 0.5
+			pin_pos = Vector3(0.0, 0.05, -0.1)
 			
-		1: # 100 YARDS - Medium Kidney Bean Green (Orientation: -45°)
-			green_bounding_radius = 15.0
-			outer_pts = _generate_kidney_bean_polygon(15.0, 0.25, 0.16, -45.0)
-			green_pts = _generate_kidney_bean_polygon(10.5, 0.25, 0.14, -45.0)
+		1: # 50 FEET - 2.5m Green radius (16.4 ft wide) + 4.5m Outer radius
+			green_bounding_radius = 2.5
+			outer_pts = _generate_kidney_bean_polygon(4.5, 0.16, 0.10, -30.0)
+			green_pts = _generate_kidney_bean_polygon(2.5, 0.16, 0.08, -30.0)
 			
-			# Sand Traps on FRONT approach side (+Y in 2D / +Z in 3D), off-centered left & right
-			bunker_list.append(_create_ellipse_polygon(Vector2(-5.5, 5.5), 3.5, 2.0, deg_to_rad(-15)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(5.0, 6.2), 3.8, 2.2, deg_to_rad(25)))
+			# Sand Traps on front approach side
+			bunker_list.append(_create_ellipse_polygon(Vector2(-1.8, 1.8), 1.1, 0.7, deg_to_rad(20)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(1.6, 1.9), 1.0, 0.65, deg_to_rad(-35)))
 			
-			# Red mulch bed strictly on BACK side (-Y in 2D / -Z in 3D)
-			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -10.0), 9.0, 3.2, deg_to_rad(0)))
+			# Mulch bed on back side
+			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -3.1), 2.8, 1.0, deg_to_rad(0)))
 			
-			# Trees strictly on BACK side (-Z in 3D)
 			tree_positions = [
-				Vector3(-7.5, 0.1, -9.5),
-				Vector3(-3.0, 0.1, -11.0),
-				Vector3(2.5, 0.1, -11.5),
-				Vector3(7.0, 0.1, -9.8)
+				Vector3(-1.8, 0.08, -3.0),
+				Vector3(0.0, 0.08, -3.5),
+				Vector3(1.7, 0.08, -3.1)
 			]
-			dock_pos = Vector3(-11.0, 0.0, -4.0)
+			tree_scale_mult = 0.7
+			dock_pos = Vector3(-3.4, 0.0, -1.2)
 			dock_angle = deg_to_rad(120)
-			pin_pos = Vector3(-0.5, 0.05, -1.0)
+			dock_scale = 0.65
+			pin_pos = Vector3(0.1, 0.05, -0.2)
 			
-		2: # 150 YARDS - Large Kidney Bean Green (Orientation: 60°)
-			green_bounding_radius = 21.0
-			outer_pts = _generate_kidney_bean_polygon(21.0, 0.22, 0.20, 60.0)
-			green_pts = _generate_kidney_bean_polygon(15.0, 0.22, 0.16, 60.0)
+		2: # 75 FEET - 3.5m Green radius (23 ft wide) + 6.0m Outer radius
+			green_bounding_radius = 3.5
+			outer_pts = _generate_kidney_bean_polygon(6.0, 0.18, 0.12, 45.0)
+			green_pts = _generate_kidney_bean_polygon(3.5, 0.18, 0.10, 45.0)
 			
-			# Sand Traps on FRONT approach side (+Y in 2D / +Z in 3D), off-centered left, right & mid-left
-			bunker_list.append(_create_ellipse_polygon(Vector2(-8.5, 8.5), 5.0, 2.6, deg_to_rad(-25)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(8.0, 9.5), 5.2, 2.8, deg_to_rad(30)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(-2.5, 12.0), 4.0, 2.2, deg_to_rad(10)))
+			# Sand Traps on front approach side
+			bunker_list.append(_create_ellipse_polygon(Vector2(-2.4, 2.3), 1.5, 0.9, deg_to_rad(-20)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(2.2, 2.5), 1.6, 1.0, deg_to_rad(25)))
 			
-			# Red mulch beds strictly on BACK side (-Y in 2D / -Z in 3D)
-			mulch_list.append(_create_ellipse_polygon(Vector2(-6.0, -13.5), 7.0, 3.5, deg_to_rad(-20)))
-			mulch_list.append(_create_ellipse_polygon(Vector2(6.0, -13.5), 7.0, 3.5, deg_to_rad(20)))
+			# Mulch bed on back side
+			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -4.1), 3.8, 1.4, deg_to_rad(0)))
 			
-			# Trees strictly on BACK side (-Z in 3D)
 			tree_positions = [
-				Vector3(-11.0, 0.1, -13.0),
-				Vector3(-6.0, 0.1, -15.5),
-				Vector3(0.0, 0.1, -16.0),
-				Vector3(6.0, 0.1, -15.5),
-				Vector3(11.0, 0.1, -13.0)
+				Vector3(-2.6, 0.1, -3.9),
+				Vector3(0.0, 0.1, -4.6),
+				Vector3(2.4, 0.1, -4.1)
 			]
-			dock_pos = Vector3(16.0, 0.0, -3.0)
+			tree_scale_mult = 0.85
+			dock_pos = Vector3(4.5, 0.0, -1.4)
+			dock_angle = deg_to_rad(-60)
+			dock_scale = 0.78
+			pin_pos = Vector3(-0.1, 0.05, -0.3)
+			
+		3: # 100 FEET - 4.5m Green radius (29.5 ft wide) + 7.5m Outer radius
+			green_bounding_radius = 4.5
+			outer_pts = _generate_kidney_bean_polygon(7.5, 0.20, 0.14, -45.0)
+			green_pts = _generate_kidney_bean_polygon(4.5, 0.20, 0.12, -45.0)
+			
+			# Sand Traps on front approach side
+			bunker_list.append(_create_ellipse_polygon(Vector2(-3.0, 3.0), 1.9, 1.2, deg_to_rad(-15)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(2.8, 3.2), 2.0, 1.3, deg_to_rad(25)))
+			
+			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -5.2), 4.8, 1.7, deg_to_rad(0)))
+			
+			tree_positions = [
+				Vector3(-3.5, 0.1, -4.9),
+				Vector3(-1.2, 0.1, -5.8),
+				Vector3(1.2, 0.1, -5.9),
+				Vector3(3.4, 0.1, -5.0)
+			]
+			tree_scale_mult = 1.0
+			dock_pos = Vector3(-5.6, 0.0, -2.1)
+			dock_angle = deg_to_rad(120)
+			dock_scale = 0.9
+			pin_pos = Vector3(0.2, 0.05, -0.4)
+			
+		4: # 125 FEET - 5.5m Green radius (36 ft wide) + 9.0m Outer radius
+			green_bounding_radius = 5.5
+			outer_pts = _generate_kidney_bean_polygon(9.0, 0.22, 0.15, 60.0)
+			green_pts = _generate_kidney_bean_polygon(5.5, 0.22, 0.13, 60.0)
+			
+			bunker_list.append(_create_ellipse_polygon(Vector2(-3.8, 3.7), 2.3, 1.4, deg_to_rad(-25)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(3.5, 4.0), 2.4, 1.5, deg_to_rad(30)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(-1.0, 5.2), 1.8, 1.1, deg_to_rad(10)))
+			
+			mulch_list.append(_create_ellipse_polygon(Vector2(-2.7, -6.1), 3.2, 1.6, deg_to_rad(-20)))
+			mulch_list.append(_create_ellipse_polygon(Vector2(2.7, -6.1), 3.2, 1.6, deg_to_rad(20)))
+			
+			tree_positions = [
+				Vector3(-4.8, 0.1, -5.8),
+				Vector3(-2.4, 0.1, -7.0),
+				Vector3(0.0, 0.1, -7.2),
+				Vector3(2.4, 0.1, -7.0),
+				Vector3(4.8, 0.1, -5.8)
+			]
+			tree_scale_mult = 1.15
+			dock_pos = Vector3(6.8, 0.0, -1.8)
 			dock_angle = deg_to_rad(75)
-			pin_pos = Vector3(0.0, 0.05, -2.0)
+			dock_scale = 1.0
+			pin_pos = Vector3(0.0, 0.05, -0.5)
 			
-		3: # 200 YARDS - Largest Grand Kidney Bean Island Green (Orientation: -75°)
-			green_bounding_radius = 28.0
-			outer_pts = _generate_kidney_bean_polygon(28.0, 0.30, 0.12, -75.0)
-			green_pts = _generate_kidney_bean_polygon(20.0, 0.30, 0.10, -75.0)
+		5: # 150 FEET - 6.8m Green radius (44.6 ft wide) + 10.8m Outer radius
+			green_bounding_radius = 6.8
+			outer_pts = _generate_kidney_bean_polygon(10.8, 0.24, 0.16, -60.0)
+			green_pts = _generate_kidney_bean_polygon(6.8, 0.24, 0.14, -60.0)
 			
-			# Sand Traps on FRONT approach side (+Y in 2D / +Z in 3D), off-centered across front
-			bunker_list.append(_create_ellipse_polygon(Vector2(-12.0, 11.0), 6.0, 3.2, deg_to_rad(-20)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(6.5, 14.5), 6.5, 3.5, deg_to_rad(15)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(13.5, 10.0), 5.5, 3.0, deg_to_rad(65)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(-4.6, 4.5), 2.7, 1.6, deg_to_rad(-20)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(4.3, 4.8), 2.8, 1.7, deg_to_rad(25)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(0.0, 6.4), 2.2, 1.3, deg_to_rad(0)))
 			
-			# Large back pine grove mulch bed strictly on BACK side (-Y in 2D / -Z in 3D)
-			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -18.0), 14.0, 5.0, deg_to_rad(0)))
+			mulch_list.append(_create_ellipse_polygon(Vector2(-3.4, -7.4), 3.8, 1.9, deg_to_rad(-20)))
+			mulch_list.append(_create_ellipse_polygon(Vector2(3.4, -7.4), 3.8, 1.9, deg_to_rad(20)))
 			
-			# Pine grove trees strictly on BACK side (-Z in 3D)
 			tree_positions = [
-				Vector3(-14.0, 0.1, -16.0),
-				Vector3(-9.0, 0.1, -18.5),
-				Vector3(-4.0, 0.1, -20.0),
-				Vector3(1.0, 0.1, -20.5),
-				Vector3(6.0, 0.1, -19.5),
-				Vector3(11.0, 0.1, -18.0),
-				Vector3(15.0, 0.1, -16.0)
+				Vector3(-5.8, 0.1, -7.0),
+				Vector3(-3.0, 0.1, -8.4),
+				Vector3(0.0, 0.1, -8.7),
+				Vector3(3.0, 0.1, -8.4),
+				Vector3(5.8, 0.1, -7.0)
 			]
-			dock_pos = Vector3(0.0, 0.0, -22.0)
+			tree_scale_mult = 1.3
+			dock_pos = Vector3(-8.2, 0.0, -2.5)
+			dock_angle = deg_to_rad(105)
+			dock_scale = 1.1
+			pin_pos = Vector3(-0.2, 0.05, -0.8)
+			
+		6: # 200 FEET - 8.5m Green radius (55.8 ft wide) + 13.0m Outer radius
+			green_bounding_radius = 8.5
+			outer_pts = _generate_kidney_bean_polygon(13.0, 0.28, 0.18, 15.0)
+			green_pts = _generate_kidney_bean_polygon(8.5, 0.28, 0.16, 15.0)
+			
+			bunker_list.append(_create_ellipse_polygon(Vector2(-5.6, 5.2), 3.3, 1.9, deg_to_rad(-20)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(3.2, 6.8), 3.5, 2.0, deg_to_rad(15)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(6.2, 4.8), 3.0, 1.7, deg_to_rad(65)))
+			
+			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -9.0), 7.2, 2.8, deg_to_rad(0)))
+			
+			tree_positions = [
+				Vector3(-7.2, 0.1, -8.5),
+				Vector3(-4.5, 0.1, -9.8),
+				Vector3(-2.0, 0.1, -10.5),
+				Vector3(0.8, 0.1, -10.7),
+				Vector3(3.5, 0.1, -10.2),
+				Vector3(6.0, 0.1, -9.5),
+				Vector3(8.0, 0.1, -8.5)
+			]
+			tree_scale_mult = 1.45
+			dock_pos = Vector3(0.0, 0.0, -11.5)
 			dock_angle = deg_to_rad(0)
-			pin_pos = Vector3(-1.0, 0.05, -2.5)
+			dock_scale = 1.2
+			pin_pos = Vector3(-0.3, 0.05, -1.0)
 
 	return {
 		"outer_pts": outer_pts,
@@ -445,8 +531,10 @@ func _generate_island_layout(idx: int) -> Dictionary:
 		"bunkers": bunker_list,
 		"mulch": mulch_list,
 		"trees": tree_positions,
+		"tree_scale_mult": tree_scale_mult,
 		"dock_pos": dock_pos,
 		"dock_angle": dock_angle,
+		"dock_scale": dock_scale,
 		"pin_pos": pin_pos,
 		"green_radius": green_bounding_radius
 	}
@@ -465,11 +553,11 @@ func _create_ellipse_polygon(center: Vector2, rx: float, ry: float, rot: float, 
 	return poly
 
 ## Build complete 3D Floating Island Node
-func _build_floating_island_node(idx: int, pos: Vector3, dist_yds: int, data: Dictionary) -> StaticBody3D:
+func _build_floating_island_node(idx: int, pos: Vector3, dist_ft: int, data: Dictionary) -> StaticBody3D:
 	var island = StaticBody3D.new()
 	island.name = "GreenIsland_%d" % idx
 	island.set_meta("surface_type", 4) # Default surface GREEN
-	island.global_position = pos
+	island.position = pos
 	
 	# Rotate island slightly so main features face player
 	var dir_to_tee = -pos.normalized()
@@ -481,6 +569,8 @@ func _build_floating_island_node(idx: int, pos: Vector3, dist_yds: int, data: Di
 	var bunkers: Array[PackedVector2Array] = data["bunkers"]
 	var mulch_beds: Array[PackedVector2Array] = data["mulch"]
 	var tree_positions: Array[Vector3] = data["trees"]
+	var tree_scale_mult: float = data.get("tree_scale_mult", 1.0)
+	var dock_scale: float = data.get("dock_scale", 1.0)
 	
 	# 1. Wood Retaining Wall, Bottom Cap Rim & Continuous Pilings
 	var wall_mesh = _build_retaining_wall_mesh(outer_poly, 0.0, -1.4, wall_mat, cap_mat)
@@ -562,18 +652,21 @@ func _build_floating_island_node(idx: int, pos: Vector3, dist_yds: int, data: Di
 			island.add_child(bunker_body)
 
 	# 6. Evergreen / Pine Trees Placement
-	_plant_trees_on_island(island, tree_positions)
+	_plant_trees_on_island(island, tree_positions, tree_scale_mult)
 	
 	# 7. Wooden Boat Landing Dock / Gangplank
-	var dock_node = _build_boat_dock(data["dock_pos"], data["dock_angle"])
+	var dock_node = _build_boat_dock(data["dock_pos"], data["dock_angle"], dock_scale)
 	island.add_child(dock_node)
 	
 	# 8. Flagpole & Distance Label
 	var flag_colors = [
-		Color(1.0, 0.2, 0.2),   # Red for 50 yds
-		Color(0.9, 0.75, 0.0),  # Gold for 100 yds
-		Color(0.2, 0.6, 1.0),   # Blue for 150 yds
-		Color(0.9, 0.3, 0.8),   # Purple for 200 yds
+		Color(0.95, 0.22, 0.22),  # 25 FT - Red
+		Color(1.0, 0.55, 0.1),    # 50 FT - Orange
+		Color(0.95, 0.85, 0.15),  # 75 FT - Yellow
+		Color(0.2, 0.85, 0.3),    # 100 FT - Green
+		Color(0.1, 0.8, 0.9),     # 125 FT - Cyan
+		Color(0.2, 0.5, 1.0),     # 150 FT - Blue
+		Color(0.85, 0.3, 0.9),    # 200 FT - Purple
 	]
 	
 	var pin_pos = data["pin_pos"]
@@ -609,15 +702,14 @@ func _build_floating_island_node(idx: int, pos: Vector3, dist_yds: int, data: Di
 	flag_node.add_child(flag)
 	
 	var label_node = Label3D.new()
-	label_node.text = "%d YDS" % dist_yds
-	label_node.font_size = 50
+	label_node.text = "%d FT" % dist_ft
+	label_node.font_size = 46 if idx == 0 else 50
 	label_node.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label_node.outline_size = 12
 	label_node.modulate = Color.WHITE
 	label_node.outline_modulate = Color(0, 0, 0, 0.9)
 	label_node.position = Vector3(0.0, 2.8, 0.0)
 	flag_node.add_child(label_node)
-
 	return island
 
 # ========================================
@@ -704,7 +796,6 @@ func _build_retaining_wall_mesh(outer_poly: PackedVector2Array, top_y: float, bo
 			var pA = bot_poly[bot_indices[i]]
 			var pB = bot_poly[bot_indices[i + 1]]
 			var pC = bot_poly[bot_indices[i + 2]]
-			st.set_normal(Vector3.DOWN)
 			st.set_uv(Vector2(pA.x * 0.2, pA.y * 0.2))
 			st.add_vertex(Vector3(pA.x, bot_y, pA.y))
 			st.set_uv(Vector2(pC.x * 0.2, pC.y * 0.2))
@@ -803,7 +894,7 @@ func _build_wall_collision_faces(outer_poly: PackedVector2Array, top_y: float, b
 	return faces
 
 ## Plant evergreen pine trees & shrubs on island edge / mulch
-func _plant_trees_on_island(island: Node3D, tree_positions: Array[Vector3]) -> void:
+func _plant_trees_on_island(island: Node3D, tree_positions: Array[Vector3], scale_multiplier: float = 1.0) -> void:
 	var tree_paths = [
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-1-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-2-staticbody.tscn",
@@ -829,17 +920,18 @@ func _plant_trees_on_island(island: Node3D, tree_positions: Array[Vector3]) -> v
 				var t_inst = scene.instantiate()
 				t_inst.name = "IslandTree_%d" % t_idx
 				t_inst.position = t_pos
-				var scale_val = rng.randf_range(1.2, 1.8)
+				var scale_val = rng.randf_range(1.2, 1.8) * scale_multiplier
 				t_inst.scale = Vector3(scale_val, scale_val, scale_val)
 				t_inst.rotation.y = rng.randf_range(0.0, TAU)
 				trees_folder.add_child(t_inst)
 
 ## Construct wooden boat landing dock structure
-func _build_boat_dock(dock_pos: Vector3, dock_angle: float) -> Node3D:
+func _build_boat_dock(dock_pos: Vector3, dock_angle: float, dock_scale: float = 1.0) -> Node3D:
 	var dock_node = Node3D.new()
 	dock_node.name = "BoatLandingDock"
 	dock_node.position = dock_pos
 	dock_node.rotation.y = dock_angle
+	dock_node.scale = Vector3(dock_scale, dock_scale, dock_scale)
 	
 	# Dock main deck platform
 	var deck = MeshInstance3D.new()
@@ -886,9 +978,6 @@ func _build_boat_dock(dock_pos: Vector3, dock_angle: float) -> Node3D:
 
 func _select_target_island(index: int) -> void:
 	selected_island_index = index
-	user_aim_offset_deg = 0.0
-	if aim_slider:
-		aim_slider.value = 0.0
 		
 	for i in range(island_positions.size()):
 		var island_node = get_node_or_null("GreenIsland_%d" % i)
@@ -902,8 +991,8 @@ func _select_target_island(index: int) -> void:
 				var ring = MeshInstance3D.new()
 				ring.name = "TargetRing"
 				var ring_mesh = TorusMesh.new()
-				ring_mesh.inner_radius = ring_radius + 0.2
-				ring_mesh.outer_radius = ring_radius + 0.7
+				ring_mesh.inner_radius = ring_radius + 0.15
+				ring_mesh.outer_radius = ring_radius + 0.55
 				ring_mesh.rings = 36
 				ring_mesh.ring_segments = 8
 				ring.mesh = ring_mesh
@@ -918,22 +1007,19 @@ func _select_target_island(index: int) -> void:
 				ring.position = Vector3(0.0, 0.06, 0.0)
 				island_node.add_child(ring)
 				
-	var dist_yards = island_distances_yards[index]
-	if power_slider:
-		var estimated_speed = 18.0 + sqrt(dist_yards) * 2.0
-		power_slider.value = clamp(estimated_speed, 15.0, 65.0)
+	var dist_feet = island_distances_feet[index]
 		
 	for i in range(island_buttons.size()):
 		if i == index:
-			island_buttons[i].text = "▶ %d YDS" % island_distances_yards[i]
+			island_buttons[i].text = "▶ %d FT" % island_distances_feet[i]
 			island_buttons[i].add_theme_color_override("font_color", Color(0.0, 0.85, 1.0))
 		else:
-			island_buttons[i].text = "  %d YDS" % island_distances_yards[i]
+			island_buttons[i].text = "  %d FT" % island_distances_feet[i]
 			island_buttons[i].remove_theme_color_override("font_color")
 		
 	_reset_ball_position()
 	_update_hud()
-	_show_banner("Target: %d Yards — Aim and chip onto the floating green!" % dist_yards)
+	_show_banner("Target: %d Feet — Hit chip on Launch Monitor onto the green!" % dist_feet)
 
 # ========================================
 # PLAYER & AIMING
@@ -951,6 +1037,8 @@ func _setup_player() -> void:
 	player.ball.reset()
 
 func _reset_ball_position() -> void:
+	if has_node("/root/TensionManager"):
+		TensionManager.stop_tension()
 	player.global_position = Vector3(0.0, 0.05, 0.0)
 	player.ball.spawn_position = player.global_position
 	player.ball.reset()
@@ -962,12 +1050,11 @@ func _update_aim_and_camera() -> void:
 	var ball_pos = player.ball.global_position
 	
 	var diff = target_island_pos - ball_pos
-	var base_angle_rad = atan2(diff.z, diff.x)
-	var final_angle_rad = base_angle_rad + deg_to_rad(user_aim_offset_deg)
+	var angle_rad = atan2(diff.z, diff.x)
 	
-	player.ball.aim_yaw_offset_deg = rad_to_deg(-final_angle_rad)
+	player.ball.aim_yaw_offset_deg = rad_to_deg(-angle_rad)
 	
-	var back_dir = Vector3(-cos(final_angle_rad), 0.0, -sin(final_angle_rad)).normalized()
+	var back_dir = Vector3(-cos(angle_rad), 0.0, -sin(angle_rad)).normalized()
 	var cam_pos = ball_pos + back_dir * 4.0 + Vector3.UP * 2.0
 	
 	$Camera3D.global_position = cam_pos
@@ -980,16 +1067,14 @@ func _update_aim_and_camera() -> void:
 # ========================================
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _settings_layer != null and is_instance_valid(_settings_layer):
+		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+			_close_settings()
+			get_viewport().set_input_as_handled()
+		return
+
 	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_RIGHT:
-			if event.pressed:
-				is_dragging = true
-				Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-			else:
-				is_dragging = false
-				Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-				
-		elif event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 			var camera = $Camera3D
 			if camera != null:
 				var ray_start = camera.project_ray_origin(event.position)
@@ -1008,63 +1093,31 @@ func _unhandled_input(event: InputEvent) -> void:
 							closest_idx = i
 					if min_dist <= island_data[closest_idx]["green_radius"] + 4.0:
 						_select_target_island(closest_idx)
-						
-	elif event is InputEventMouseMotion and is_dragging:
-		user_aim_offset_deg += event.relative.x * 0.15
-		if aim_slider:
-			aim_slider.value = clamp(user_aim_offset_deg, aim_slider.min_value, aim_slider.max_value)
-		_update_aim_and_camera()
 					
 	if event is InputEventKey and event.pressed:
-		if event.keycode == KEY_LEFT or event.keycode == KEY_A:
-			user_aim_offset_deg += 1.5
-			if aim_slider:
-				aim_slider.value = clamp(user_aim_offset_deg, aim_slider.min_value, aim_slider.max_value)
-			_update_aim_and_camera()
-		elif event.keycode == KEY_RIGHT or event.keycode == KEY_D:
-			user_aim_offset_deg -= 1.5
-			if aim_slider:
-				aim_slider.value = clamp(user_aim_offset_deg, aim_slider.min_value, aim_slider.max_value)
-			_update_aim_and_camera()
-		elif event.keycode == KEY_H:
-			_perform_chip()
-		elif event.keycode == KEY_R:
+		if event.keycode == KEY_R:
 			_reset_ball_position()
-
-func _perform_chip() -> void:
-	if player.ball.state != PhysicsEnums.BallState.REST:
-		return
-		
-	var speed_mph = power_slider.value
-	var vla = vla_slider.value
-	var hla = user_aim_offset_deg
-	
-	var data = {
-		"Speed": speed_mph,
-		"VLA": vla,
-		"HLA": hla,
-		"TotalSpin": 4000.0,
-		"SpinAxis": 0.0,
-		"ShotType": "chip"
-	}
-	
-	player.track_points = false
-	player.create_new_tracer()
-	player.ball.call_deferred("hit_from_data", data)
-	player.track_points = true
-	player.trail_timer = 0.0
-	
-	_show_banner("Chipped! Speed: %.1f mph | Loft: %.1f°" % [speed_mph, vla])
 
 func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	if player == null or player.ball == null:
 		return
 	if player.ball.state != PhysicsEnums.BallState.REST:
 		return # Ignore if shot in progress
-		
+
+	if has_node("/root/TensionManager"):
+		TensionManager.stop_tension()
+
 	# Connect to the player's launch monitor shot handler
 	player._on_tcp_client_hit_ball(data)
-	
+
+	# Early Trajectory Prediction for Suspense
+	if has_node("/root/TensionManager") and selected_island_index < island_positions.size():
+		var target_pos = island_positions[selected_island_index]
+		var prediction = TensionManager.predict_shot_outcome(player.ball.global_position, player.ball.velocity, false, target_pos)
+		if prediction.get("will_enter_zone", false):
+			print("[ChippingPractice] Early suspense predicted for chip! Scheduling heartbeat.")
+			TensionManager.schedule_early_tension("chip", 0.35)
+
 	# Show the banner
 	var speed_mph = data.get("Speed", 0.0)
 	var vla = data.get("VLA", 0.0)
@@ -1081,14 +1134,35 @@ func _physics_process(delta: float) -> void:
 			camera_following = true
 			var ball_pos = player.ball.global_position
 			var target_cam_pos = ball_pos + last_camera_offset
+
+			# Live distance check to target island
+			if selected_island_index < island_positions.size():
+				var target_pos = island_positions[selected_island_index]
+				var dist_to_target = Vector2(ball_pos.x, ball_pos.z).distance_to(Vector2(target_pos.x, target_pos.z))
+				if dist_to_target <= 3.048: # 10 feet in meters
+					if has_node("/root/TensionManager") and not TensionManager.is_active():
+						TensionManager.start_tension("chip")
+
+			# If tension active, frame camera tighter on ball and target island
+			if has_node("/root/TensionManager") and TensionManager.is_active() and selected_island_index < island_positions.size():
+				var diff_to_target = (island_positions[selected_island_index] - ball_pos)
+				diff_to_target.y = 0.0
+				var back_dir = -diff_to_target.normalized() if not diff_to_target.is_zero_approx() else Vector3.BACK
+				var close_offset = back_dir * 3.2 + Vector3.UP * 1.3
+				target_cam_pos = ball_pos + close_offset
+
 			$Camera3D.global_position = $Camera3D.global_position.lerp(target_cam_pos, delta * 8.0)
 			$Camera3D.look_at(ball_pos + Vector3.UP * 0.1)
 		else:
 			if camera_following:
 				camera_following = false
+				if has_node("/root/TensionManager"):
+					TensionManager.stop_tension()
 				_update_aim_and_camera()
 
 func _on_ball_rest(_shot_data: Dictionary) -> void:
+	if has_node("/root/TensionManager"):
+		TensionManager.stop_tension()
 	var final_pos = player.ball.global_position
 	var target_island_pos = island_positions[selected_island_index]
 	var target_data = island_data[selected_island_index]
@@ -1112,10 +1186,10 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 			var d = Vector2(final_pos.x, final_pos.z).distance_to(Vector2(island_positions[i].x, island_positions[i].z))
 			if d <= island_data[i]["green_radius"]:
 				landed_on_other = true
-				_show_banner("Landed on the %d YDS green — but you were aiming for %d YDS!" % [island_distances_yards[i], island_distances_yards[selected_island_index]])
+				_show_banner("Landed on the %d FT green — but you were aiming for %d FT!" % [island_distances_feet[i], island_distances_feet[selected_island_index]])
 				break
 		if not landed_on_other:
-			_show_banner("Missed target green. Distance to center: %.1f yds" % (dist_to_target * 1.09361))
+			_show_banner("Missed target green. Distance to center: %.1f ft" % (dist_to_target * 3.28084))
 		
 	_update_hud()
 	
@@ -1127,14 +1201,20 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 # ========================================
 
 func _setup_ui() -> void:
-	var hud_layer = CanvasLayer.new()
+	hud_layer = CanvasLayer.new()
 	hud_layer.name = "HUDLayer"
+	hud_layer.layer = 1
 	add_child(hud_layer)
 	
-	var control = Control.new()
-	control.anchors_preset = Control.PRESET_FULL_RECT
-	control.set_anchors_preset(Control.PRESET_FULL_RECT)
-	hud_layer.add_child(control)
+	hud_control = Control.new()
+	hud_control.name = "Control"
+	hud_control.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hud_control.anchor_right = 1.0
+	hud_control.anchor_bottom = 1.0
+	hud_control.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	hud_control.grow_vertical = Control.GROW_DIRECTION_BOTH
+	hud_control.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(hud_control)
 	
 	var glass_style = StyleBoxFlat.new()
 	glass_style.bg_color = Color(0.04, 0.08, 0.12, 0.88)
@@ -1160,7 +1240,7 @@ func _setup_ui() -> void:
 	score_panel.offset_right = 390
 	score_panel.offset_top = 20
 	score_panel.offset_bottom = 110
-	control.add_child(score_panel)
+	hud_control.add_child(score_panel)
 	score_panel.add_theme_stylebox_override("panel", glass_style)
 	
 	var score_margin = MarginContainer.new()
@@ -1183,7 +1263,7 @@ func _setup_ui() -> void:
 	t_lbl.add_theme_color_override("font_color", Color(0.0, 0.85, 1.0))
 	target_col.add_child(t_lbl)
 	target_info_lbl = Label.new()
-	target_info_lbl.text = "50 YDS"
+	target_info_lbl.text = "%d FT" % island_distances_feet[selected_island_index]
 	target_info_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	target_info_lbl.add_theme_font_size_override("font_size", 28)
 	target_info_lbl.add_theme_color_override("font_color", Color.WHITE)
@@ -1259,15 +1339,15 @@ func _setup_ui() -> void:
 	
 	# Target Selection Panel
 	var target_panel = PanelContainer.new()
-	target_panel.custom_minimum_size = Vector2(170, 240)
+	target_panel.custom_minimum_size = Vector2(170, 360)
 	target_panel.anchor_left = 0.0
 	target_panel.anchor_top = 0.5
 	target_panel.anchor_bottom = 0.5
 	target_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	target_panel.offset_left = 20
-	target_panel.offset_top = -120
-	target_panel.offset_bottom = 120
-	control.add_child(target_panel)
+	target_panel.offset_top = -180
+	target_panel.offset_bottom = 180
+	hud_control.add_child(target_panel)
 	target_panel.add_theme_stylebox_override("panel", glass_style)
 	
 	var target_margin = MarginContainer.new()
@@ -1278,7 +1358,7 @@ func _setup_ui() -> void:
 	target_panel.add_child(target_margin)
 	
 	var target_vbox = VBoxContainer.new()
-	target_vbox.add_theme_constant_override("separation", 10)
+	target_vbox.add_theme_constant_override("separation", 8)
 	target_margin.add_child(target_vbox)
 	
 	var t_title = Label.new()
@@ -1289,11 +1369,11 @@ func _setup_ui() -> void:
 	target_vbox.add_child(t_title)
 	
 	island_buttons.clear()
-	for i in range(island_distances_yards.size()):
+	for i in range(island_distances_feet.size()):
 		var btn = Button.new()
-		btn.text = "  %d YDS" % island_distances_yards[i]
-		btn.custom_minimum_size = Vector2(0, 36)
-		btn.add_theme_font_size_override("font_size", 14)
+		btn.text = "  %d FT" % island_distances_feet[i]
+		btn.custom_minimum_size = Vector2(0, 34)
+		btn.add_theme_font_size_override("font_size", 13)
 		_apply_btn_style(btn, Color(0.12, 0.20, 0.28), Color(0.18, 0.30, 0.42))
 		btn.pressed.connect(func(idx = i): _select_target_island(idx))
 		target_vbox.add_child(btn)
@@ -1301,7 +1381,7 @@ func _setup_ui() -> void:
 	
 	# Banner
 	banner_lbl = Label.new()
-	banner_lbl.text = "Select a target floating green and chip away!"
+	banner_lbl.text = "Select a target floating green and hit on Launch Monitor!"
 	banner_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	banner_lbl.anchor_left = 0.5
 	banner_lbl.anchor_right = 0.5
@@ -1312,135 +1392,91 @@ func _setup_ui() -> void:
 	banner_lbl.add_theme_color_override("font_color", Color(1, 1, 0.5, 1.0))
 	banner_lbl.add_theme_constant_override("outline_size", 4)
 	banner_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
-	control.add_child(banner_lbl)
+	hud_control.add_child(banner_lbl)
 	
 	# Controls Panel
 	var ctrl_panel = PanelContainer.new()
-	ctrl_panel.custom_minimum_size = Vector2(960, 110)
+	ctrl_panel.custom_minimum_size = Vector2(340, 70)
 	ctrl_panel.anchor_left = 0.5
 	ctrl_panel.anchor_right = 0.5
 	ctrl_panel.anchor_top = 1.0
 	ctrl_panel.anchor_bottom = 1.0
 	ctrl_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	ctrl_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	ctrl_panel.offset_left = -480
-	ctrl_panel.offset_right = 480
-	ctrl_panel.offset_top = -130
+	ctrl_panel.offset_left = -170
+	ctrl_panel.offset_right = 170
+	ctrl_panel.offset_top = -90
 	ctrl_panel.offset_bottom = -20
-	control.add_child(ctrl_panel)
+	hud_control.add_child(ctrl_panel)
 	ctrl_panel.add_theme_stylebox_override("panel", glass_style)
 	
 	var ctrl_margin = MarginContainer.new()
-	ctrl_margin.add_theme_constant_override("margin_left", 24)
-	ctrl_margin.add_theme_constant_override("margin_right", 24)
+	ctrl_margin.add_theme_constant_override("margin_left", 16)
+	ctrl_margin.add_theme_constant_override("margin_right", 16)
 	ctrl_panel.add_child(ctrl_margin)
 	
 	var ctrl_hbox = HBoxContainer.new()
-	ctrl_hbox.add_theme_constant_override("separation", 18)
+	ctrl_hbox.add_theme_constant_override("separation", 14)
 	ctrl_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	ctrl_margin.add_child(ctrl_hbox)
 	
-	var power_vbox = VBoxContainer.new()
-	power_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	power_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	ctrl_hbox.add_child(power_vbox)
-	var p_lbl = Label.new()
-	p_lbl.text = "Swing Power (Speed)"
-	p_lbl.add_theme_font_size_override("font_size", 13)
-	power_vbox.add_child(p_lbl)
-	var p_slider_hbox = HBoxContainer.new()
-	power_vbox.add_child(p_slider_hbox)
-	power_slider = HSlider.new()
-	power_slider.min_value = 15.0
-	power_slider.max_value = 65.0
-	power_slider.step = 0.2
-	power_slider.value = 25.0
-	power_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	p_slider_hbox.add_child(power_slider)
-	power_val_lbl = Label.new()
-	power_val_lbl.text = "25.0 mph"
-	power_val_lbl.custom_minimum_size = Vector2(65, 0)
-	p_slider_hbox.add_child(power_val_lbl)
-	power_slider.value_changed.connect(func(val): power_val_lbl.text = "%.1f mph" % val)
-	
-	var vla_vbox = VBoxContainer.new()
-	vla_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vla_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	ctrl_hbox.add_child(vla_vbox)
-	var v_lbl = Label.new()
-	v_lbl.text = "Loft Angle (VLA)"
-	v_lbl.add_theme_font_size_override("font_size", 13)
-	vla_vbox.add_child(v_lbl)
-	var v_slider_hbox = HBoxContainer.new()
-	vla_vbox.add_child(v_slider_hbox)
-	vla_slider = HSlider.new()
-	vla_slider.min_value = 15.0
-	vla_slider.max_value = 55.0
-	vla_slider.step = 0.5
-	vla_slider.value = 32.0
-	vla_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v_slider_hbox.add_child(vla_slider)
-	vla_val_lbl = Label.new()
-	vla_val_lbl.text = "32.0°"
-	vla_val_lbl.custom_minimum_size = Vector2(45, 0)
-	v_slider_hbox.add_child(vla_val_lbl)
-	vla_slider.value_changed.connect(func(val): vla_val_lbl.text = "%.1f°" % val)
-	
-	var aim_vbox = VBoxContainer.new()
-	aim_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	aim_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	ctrl_hbox.add_child(aim_vbox)
-	var aim_lbl = Label.new()
-	aim_lbl.text = "Aim Angle Offset"
-	aim_lbl.add_theme_font_size_override("font_size", 13)
-	aim_vbox.add_child(aim_lbl)
-	var aim_slider_hbox = HBoxContainer.new()
-	aim_vbox.add_child(aim_slider_hbox)
-	aim_slider = HSlider.new()
-	aim_slider.min_value = -30.0
-	aim_slider.max_value = 30.0
-	aim_slider.step = 0.5
-	aim_slider.value = 0.0
-	aim_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	aim_slider_hbox.add_child(aim_slider)
-	aim_val_lbl = Label.new()
-	aim_val_lbl.text = "0.0°"
-	aim_val_lbl.custom_minimum_size = Vector2(45, 0)
-	aim_slider_hbox.add_child(aim_val_lbl)
-	aim_slider.value_changed.connect(_on_aim_slider_changed)
-	
-	var swing_btn = Button.new()
-	swing_btn.text = "CHIP (H)"
-	swing_btn.custom_minimum_size = Vector2(110, 50)
-	_apply_btn_style(swing_btn, Color(0.18, 0.48, 0.28), Color(0.12, 0.32, 0.18))
-	swing_btn.pressed.connect(_perform_chip)
-	ctrl_hbox.add_child(swing_btn)
-	
 	var reset_btn = Button.new()
 	reset_btn.text = "RESET (R)"
-	reset_btn.custom_minimum_size = Vector2(100, 50)
+	reset_btn.custom_minimum_size = Vector2(100, 44)
 	_apply_btn_style(reset_btn, Color(0.48, 0.28, 0.18), Color(0.32, 0.18, 0.12))
 	reset_btn.pressed.connect(_reset_ball_position)
 	ctrl_hbox.add_child(reset_btn)
+
+	# Music Toggle Button
+	music_toggle_btn = Button.new()
+	music_toggle_btn.name = "MusicToggleButton"
+	music_toggle_btn.text = ""
+	music_toggle_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	music_toggle_btn.expand_icon = true
+	music_toggle_btn.custom_minimum_size = Vector2(44, 44)
+	music_toggle_btn.pressed.connect(_toggle_music)
+	ctrl_hbox.add_child(music_toggle_btn)
 	
 	var settings_btn = Button.new()
 	settings_btn.name = "SettingsButton"
 	settings_btn.text = ""
 	settings_btn.icon = load("res://Utils/Settings/Gear.png")
 	settings_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	settings_btn.custom_minimum_size = Vector2(50, 50)
+	settings_btn.custom_minimum_size = Vector2(44, 44)
 	_apply_btn_style(settings_btn, Color(0.18, 0.34, 0.50), Color(0.24, 0.44, 0.65))
 	settings_btn.pressed.connect(_on_settings_pressed)
 	ctrl_hbox.add_child(settings_btn)
 
 	var exit_btn = Button.new()
 	exit_btn.text = "EXIT"
-	exit_btn.custom_minimum_size = Vector2(80, 50)
+	exit_btn.custom_minimum_size = Vector2(80, 44)
 	_apply_btn_style(exit_btn, Color(0.36, 0.16, 0.16), Color(0.24, 0.12, 0.12))
 	exit_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn"))
 	ctrl_hbox.add_child(exit_btn)
 	
 	_update_hud()
+	_update_music_button_state()
+	GlobalSettings.range_settings.minigame_music_enabled.setting_changed.connect(func(_val): _update_music_button_state())
+
+func _toggle_music() -> void:
+	var current = GlobalSettings.range_settings.minigame_music_enabled.value
+	GlobalSettings.range_settings.minigame_music_enabled.set_value(not current)
+	_update_music_button_state()
+
+func _update_music_button_state() -> void:
+	if music_toggle_btn == null:
+		return
+	var is_enabled: bool = GlobalSettings.range_settings.minigame_music_enabled.value
+	if is_enabled:
+		if ResourceLoader.exists("res://assets/images/menu/music_on.svg"):
+			music_toggle_btn.icon = load("res://assets/images/menu/music_on.svg")
+		music_toggle_btn.tooltip_text = "Music: Playing (Click to mute)"
+		_apply_btn_style(music_toggle_btn, Color(0.18, 0.34, 0.50), Color(0.24, 0.44, 0.65))
+	else:
+		if ResourceLoader.exists("res://assets/images/menu/music_off.svg"):
+			music_toggle_btn.icon = load("res://assets/images/menu/music_off.svg")
+		music_toggle_btn.tooltip_text = "Music: Muted (Click to play)"
+		_apply_btn_style(music_toggle_btn, Color(0.35, 0.18, 0.18), Color(0.45, 0.25, 0.25))
 
 # ========================================
 # UI HELPERS
@@ -1477,11 +1513,6 @@ func _apply_btn_style(btn: Button, norm_color: Color, hov_color: Color) -> void:
 	btn.add_theme_stylebox_override("focus", style_normal)
 	btn.add_theme_color_override("font_color", Color.WHITE)
 
-func _on_aim_slider_changed(val: float) -> void:
-	aim_val_lbl.text = "%+.1f°" % val
-	user_aim_offset_deg = val
-	_update_aim_and_camera()
-
 func _update_hud() -> void:
 	if selected_island_index < 0:
 		return
@@ -1493,7 +1524,7 @@ func _update_hud() -> void:
 		acc = int((float(hits) / float(att)) * 100.0)
 		
 	if target_info_lbl:
-		target_info_lbl.text = "%d YDS" % island_distances_yards[selected_island_index]
+		target_info_lbl.text = "%d FT" % island_distances_feet[selected_island_index]
 	if attempts_lbl:
 		attempts_lbl.text = str(att)
 	if hits_lbl:
@@ -1508,17 +1539,67 @@ func _show_banner(text: String) -> void:
 		banner_lbl.text = text
 
 func _on_settings_pressed() -> void:
+	if _settings_layer != null and is_instance_valid(_settings_layer):
+		return
+
 	var settings_scene = load("res://UI/Settings/RangeSettings/range_settings.tscn")
-	if settings_scene != null:
-		var inst = settings_scene.instantiate()
-		inst.name = "MinigameSettings"
-		inst.set_anchors_preset(Control.PRESET_CENTER)
-		inst.grow_horizontal = Control.GROW_DIRECTION_BOTH
-		inst.grow_vertical = Control.GROW_DIRECTION_BOTH
-		inst.close_settings_requested.connect(func(): inst.queue_free())
-		
-		var hud = get_node_or_null("HUDLayer/Control")
-		if hud != null:
-			hud.add_child(inst)
-		else:
-			add_child(inst)
+	if settings_scene == null:
+		return
+
+	# Hide gameplay HUD visuals (scoreboard, target panel, banner, controls)
+	if hud_layer != null and is_instance_valid(hud_layer):
+		hud_layer.visible = false
+
+	_settings_layer = CanvasLayer.new()
+	_settings_layer.name = "SettingsLayer"
+	_settings_layer.layer = 105
+	add_child(_settings_layer)
+
+	# Full-screen dimmed backdrop that blocks clicks from leaking through
+	var backdrop = ColorRect.new()
+	backdrop.name = "Backdrop"
+	backdrop.color = Color(0.02, 0.04, 0.07, 0.75)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.anchor_right = 1.0
+	backdrop.anchor_bottom = 1.0
+	backdrop.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	backdrop.grow_vertical = Control.GROW_DIRECTION_BOTH
+	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	_settings_layer.add_child(backdrop)
+
+	var margin_container = MarginContainer.new()
+	margin_container.name = "MarginContainer"
+	margin_container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin_container.anchor_right = 1.0
+	margin_container.anchor_bottom = 1.0
+	margin_container.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	margin_container.grow_vertical = Control.GROW_DIRECTION_BOTH
+	margin_container.add_theme_constant_override("margin_left", 36)
+	margin_container.add_theme_constant_override("margin_right", 36)
+	margin_container.add_theme_constant_override("margin_top", 24)
+	margin_container.add_theme_constant_override("margin_bottom", 24)
+	margin_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_settings_layer.add_child(margin_container)
+
+	var inst = settings_scene.instantiate()
+	inst.name = "MinigameSettings"
+	inst.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inst.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin_container.add_child(inst)
+
+	inst.close_settings_requested.connect(_close_settings)
+	if inst.has_signal("manage_players_requested"):
+		inst.manage_players_requested.connect(func():
+			_close_settings()
+			SceneManager.change_scene("res://UI/PlayersMenu/players_menu.tscn")
+		)
+
+
+func _close_settings() -> void:
+	if _settings_layer != null and is_instance_valid(_settings_layer):
+		_settings_layer.queue_free()
+		_settings_layer = null
+
+	# Restore gameplay HUD visuals
+	if hud_layer != null and is_instance_valid(hud_layer):
+		hud_layer.visible = true

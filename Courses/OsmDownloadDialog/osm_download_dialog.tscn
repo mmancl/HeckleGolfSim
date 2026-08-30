@@ -1,4 +1,4 @@
-[gd_scene load_steps=6 format=3 uid="uid://cbp1q8x4jdx5y"]
+[gd_scene load_steps=7 format=3 uid="uid://cbp1q8x4jdx5y"]
 
 [ext_resource type="Script" path="res://Courses/OsmDownloadDialog/osm_download_dialog.gd" id="1_dialog"]
 [ext_resource type="Script" path="res://UI/LoadingSpinner.gd" id="2_spinner"]
@@ -38,6 +38,22 @@ content_margin_left = 12
 content_margin_top = 6
 content_margin_right = 12
 content_margin_bottom = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_notice"]
+bg_color = Color(0.1, 0.16, 0.24, 0.85)
+border_width_left = 4
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.28, 0.52, 0.78, 0.7)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 14
+content_margin_top = 10
+content_margin_right = 14
+content_margin_bottom = 10
 
 [node name="OsmDownloadDialog" type="Control"]
 layout_mode = 3
@@ -94,6 +110,7 @@ theme_override_constants/separation = 12
 
 [node name="SearchInput" type="LineEdit" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/SearchHBox"]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 20
@@ -102,7 +119,7 @@ clear_button_enabled = true
 
 [node name="SearchButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/SearchHBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(120, 0)
+custom_minimum_size = Vector2(130, 48)
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
 theme_override_styles/normal = SubResource("StyleBoxFlat_btn_normal")
@@ -139,6 +156,20 @@ speed = 5.0
 thickness = 4.0
 radius = 12.0
 
+[node name="NoticePanel" type="PanelContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_notice")
+
+[node name="NoticeLabel" type="Label" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/NoticePanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.91, 0.98, 1)
+theme_override_font_sizes/font_size = 15
+text = "ℹ Generating a course can take a while. The simulator is downloading real-world map boundaries and creating a custom 3D course in real-time — this is not a preconfigured course being downloaded."
+autowrap_mode = 2
+
 [node name="ButtonHBox" type="HBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_constants/separation = 20
@@ -146,14 +177,14 @@ alignment = 2
 
 [node name="CancelButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/ButtonHBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(150, 45)
+custom_minimum_size = Vector2(150, 48)
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "Cancel"
 
 [node name="DownloadButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/ButtonHBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(240, 45)
+custom_minimum_size = Vector2(240, 48)
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
 theme_override_styles/normal = SubResource("StyleBoxFlat_btn_normal")

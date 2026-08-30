@@ -9,12 +9,57 @@ public partial class AnnouncerEngine : Node
 {
     private static readonly string LogPrefix = "[AnnouncerEngine]";
 
-    [Export] public bool AnnouncerEnabled { get; set; } = true;
+    [Export] public bool AnnouncerCoursePlay { get; set; } = true;
+    [Export] public bool HeckleCoursePlay { get; set; } = true;
+    [Export] public bool AnnouncerRange { get; set; } = false;
+    [Export] public bool HeckleRange { get; set; } = false;
+    [Export] public bool AnnouncerMiniGames { get; set; } = false;
+    [Export] public bool HeckleMiniGames { get; set; } = false;
     [Export] public bool PraiseEnabled { get; set; } = true;
-    [Export] public bool HeckleEnabled { get; set; } = true;
     [Export] public string ActiveVoice { get; set; } = "";
     [Export] public float Pitch { get; set; } = 1.0f;
     [Export] public float Rate { get; set; } = 1.0f;
+
+    // Backward compatibility properties
+    public bool AnnouncerEnabled
+    {
+        get => IsAnnouncerActiveForCurrentScene();
+        set
+        {
+            var mode = GetCurrentGameMode();
+            switch (mode)
+            {
+                case SimGameMode.CoursePlay: AnnouncerCoursePlay = value; break;
+                case SimGameMode.Range: AnnouncerRange = value; break;
+                case SimGameMode.MiniGames: AnnouncerMiniGames = value; break;
+                default:
+                    AnnouncerCoursePlay = value;
+                    AnnouncerRange = value;
+                    AnnouncerMiniGames = value;
+                    break;
+            }
+        }
+    }
+
+    public bool HeckleEnabled
+    {
+        get => IsHeckleActiveForCurrentScene();
+        set
+        {
+            var mode = GetCurrentGameMode();
+            switch (mode)
+            {
+                case SimGameMode.CoursePlay: HeckleCoursePlay = value; break;
+                case SimGameMode.Range: HeckleRange = value; break;
+                case SimGameMode.MiniGames: HeckleMiniGames = value; break;
+                default:
+                    HeckleCoursePlay = value;
+                    HeckleRange = value;
+                    HeckleMiniGames = value;
+                    break;
+            }
+        }
+    }
 
     // Audio stream player child
     private AudioStreamPlayer _audioPlayer = null!;
@@ -279,6 +324,8 @@ public partial class AnnouncerEngine : Node
     };
 
     private readonly Random _random = new();
+    private bool _shotWasHeckled = false;
+    private const double BadShotHeckleProbability = 0.65;
 
     public Array<Dictionary> GetTtsVoices()
     {
@@ -292,9 +339,113 @@ public partial class AnnouncerEngine : Node
         GD.Print($"{LogPrefix} Ready. Audio player initialized.");
     }
 
+    public enum SimGameMode
+    {
+        CoursePlay,
+        Range,
+        MiniGames,
+        MenuOrOther
+    }
+
+    public SimGameMode GetCurrentGameMode()
+    {
+        var tree = GetTree();
+        if (tree == null) return SimGameMode.MenuOrOther;
+
+        var currentScene = tree.CurrentScene;
+        if (currentScene == null) return SimGameMode.MenuOrOther;
+
+        string sceneName = currentScene.Name.ToString().ToLowerInvariant();
+        string scenePath = currentScene.SceneFilePath != null ? currentScene.SceneFilePath.ToLowerInvariant() : "";
+
+        var script = currentScene.GetScript();
+        string scriptPath = "";
+        if (script.VariantType == Variant.Type.Object)
+        {
+            var res = script.As<Resource>();
+            if (res != null && !string.IsNullOrEmpty(res.ResourcePath))
+                scriptPath = res.ResourcePath.ToLowerInvariant();
+        }
+
+        string fullId = $"{sceneName} {scriptPath} {scenePath}".ToLowerInvariant();
+
+        // 1. Check if Menu / UI screen
+        if (fullId.Contains("main_menu") || fullId.Contains("mainmenu") ||
+            fullId.Contains("course_selector") || fullId.Contains("courseselector") ||
+            fullId.Contains("course_play_setup") || fullId.Contains("courseplaysetup") ||
+            fullId.Contains("minigames_menu") || fullId.Contains("minigamesmenu") ||
+            fullId.Contains("players_menu") || fullId.Contains("playersmenu") ||
+            fullId.Contains("analytics") || fullId.Contains("history") ||
+            fullId.Contains("custom_course_creator") || fullId.Contains("osm_download") ||
+            fullId.Contains("course_preview"))
+        {
+            return SimGameMode.MenuOrOther;
+        }
+
+        // 2. Check Minigames (Putting Practice, Chipping, etc.)
+        if (fullId.Contains("chipping") || fullId.Contains("putting") ||
+            fullId.Contains("minigame") || fullId.Contains("minigames"))
+        {
+            return SimGameMode.MiniGames;
+        }
+
+        // 3. Driving Range vs Course Play
+        if (currentScene.HasNode("MultiplayerController"))
+        {
+            return SimGameMode.CoursePlay;
+        }
+
+        if (sceneName == "range" || scenePath.EndsWith("range.tscn"))
+        {
+            return SimGameMode.Range;
+        }
+
+        // 4. Any loaded Course scene
+        if (sceneName.Contains("course") || scenePath.Contains("course") ||
+            scenePath.Contains("usercourses") || sceneName.Contains("coursemanager"))
+        {
+            return SimGameMode.CoursePlay;
+        }
+
+        // 5. Fallback if Player or MultiplayerManager is in scene
+        if (currentScene.HasNode("Player") || currentScene.HasNode("MultiplayerManager"))
+        {
+            return SimGameMode.CoursePlay;
+        }
+
+        return SimGameMode.MenuOrOther;
+    }
+
+    public bool IsAnnouncerActiveForCurrentScene()
+    {
+        var mode = GetCurrentGameMode();
+        return mode switch
+        {
+            SimGameMode.CoursePlay => AnnouncerCoursePlay,
+            SimGameMode.Range => AnnouncerRange,
+            SimGameMode.MiniGames => AnnouncerMiniGames,
+            _ => false
+        };
+    }
+
+    public bool IsHeckleActiveForCurrentScene()
+    {
+        if (!IsAnnouncerActiveForCurrentScene())
+            return false;
+
+        var mode = GetCurrentGameMode();
+        return mode switch
+        {
+            SimGameMode.CoursePlay => HeckleCoursePlay,
+            SimGameMode.Range => HeckleRange,
+            SimGameMode.MiniGames => HeckleMiniGames,
+            _ => false
+        };
+    }
+
     private void PlayAudioFile(string filename)
     {
-        if (!AnnouncerEnabled) return;
+        if (!IsAnnouncerActiveForCurrentScene()) return;
         try
         {
             var path = $"res://assets/audio/announcer/{filename}.mp3";
@@ -328,7 +479,7 @@ public partial class AnnouncerEngine : Node
 
     public override void _Process(double delta)
     {
-        if (!AnnouncerEnabled || !HeckleEnabled) return;
+        if (!IsAnnouncerActiveForCurrentScene() || !IsHeckleActiveForCurrentScene()) return;
 
         // Don't play idle comments if audio is already playing
         if (_audioPlayer != null && _audioPlayer.Playing)
@@ -341,7 +492,7 @@ public partial class AnnouncerEngine : Node
         if (currentScene == null) return;
 
         // Simple check to ensure we are in a golf game and not the main menu / screens
-        if (currentScene.Name == "MainMenu" || currentScene.Name == "CourseSelector" || currentScene.Name == "CoursePlaySetup" || currentScene.Name == "OsmDownloadDialog")
+        if (GetCurrentGameMode() == SimGameMode.MenuOrOther)
         {
             _idleTimer = 0.0f;
             return;
@@ -386,8 +537,9 @@ public partial class AnnouncerEngine : Node
 
     public void AnnounceLaunch(Dictionary shotData)
     {
-        if (!AnnouncerEnabled) return;
+        if (!IsAnnouncerActiveForCurrentScene()) return;
         _idleTimer = 0.0f; // Reset idle timer!
+        _shotWasHeckled = false; // Reset per-shot heckle tracking
 
         float speedMph = shotData.TryGetValue("Speed", out var speedVal) ? (float)speedVal : 0.0f;
         float vla = shotData.TryGetValue("VLA", out var vlaVal) ? (float)vlaVal : 0.0f;
@@ -436,48 +588,58 @@ public partial class AnnouncerEngine : Node
                 }
             }
 
-            // Decide launch commentary priority
-            if (vla < 4.0f && speedMph > 30.0f) // Wormburner
+            // Check if this is a severe bad launch (lenient for amateur golfers)
+            bool isWormburner = vla < 3.0f && speedMph > 35.0f;
+            bool isSkyball = vla > 35.0f && speedMph > 80.0f;
+            bool isSevereSlice = hla > 14.0f && speedMph > 40.0f; // Way right shank/slice
+            bool isSevereHook = hla < -14.0f && speedMph > 40.0f; // Way left pull/hook
+            bool isSevereMishit = speedMph > 40.0f && smashFactor < 1.15f;
+
+            bool isBadLaunch = isWormburner || isSkyball || isSevereSlice || isSevereHook || isSevereMishit;
+
+            if (isBadLaunch)
             {
-                if (HeckleEnabled)
-                    PlayComment("launch_wormburner", _launchWormburnerTemplates);
-            }
-            else if (vla > 30.0f && speedMph > 90.0f) // Skyball / Pop-up
-            {
-                if (HeckleEnabled)
-                    PlayComment("launch_skyball", _launchSkyballTemplates);
-            }
-            else if (hla > 4.5f && speedMph > 40.0f) // Offline right
-            {
-                if (HeckleEnabled)
-                    PlayComment("launch_slice", _launchSliceTemplates);
-            }
-            else if (hla < -4.5f && speedMph > 40.0f) // Offline left
-            {
-                if (HeckleEnabled)
-                    PlayComment("launch_hook", _launchHookTemplates);
-            }
-            else if (speedMph > 40.0f && smashFactor > 1.45f) // Crushed it
-            {
-                if (PraiseEnabled)
-                    PlayComment("launch_crushed", _launchCrushedTemplates);
-            }
-            else if (speedMph > 40.0f && smashFactor < 1.25f) // Mishit
-            {
-                if (HeckleEnabled)
-                    PlayComment("launch_mishit", _launchMishitTemplates);
-            }
-            else if (speedMph > 30.0f) // Normal hit
-            {
-                if (PraiseEnabled)
+                // Heckler triggers only sometimes for bad shots (non-pros aren't barraged constantly)
+                if (IsHeckleActiveForCurrentScene() && _random.NextDouble() < BadShotHeckleProbability)
+                {
+                    _shotWasHeckled = true;
+                    if (isWormburner)
+                        PlayComment("launch_wormburner", _launchWormburnerTemplates);
+                    else if (isSkyball)
+                        PlayComment("launch_skyball", _launchSkyballTemplates);
+                    else if (isSevereSlice)
+                        PlayComment("launch_slice", _launchSliceTemplates);
+                    else if (isSevereHook)
+                        PlayComment("launch_hook", _launchHookTemplates);
+                    else if (isSevereMishit)
+                        PlayComment("launch_mishit", _launchMishitTemplates);
+                }
+                else if (PraiseEnabled && speedMph > 30.0f)
+                {
+                    // If heckler didn't trigger, play standard flight commentary
                     PlayComment("launch_generic", _launchGenericTemplates);
+                }
+            }
+            else
+            {
+                // Good / normal launch commentary (Announcer)
+                if (speedMph > 40.0f && smashFactor > 1.45f)
+                {
+                    if (PraiseEnabled)
+                        PlayComment("launch_crushed", _launchCrushedTemplates);
+                }
+                else if (speedMph > 30.0f)
+                {
+                    if (PraiseEnabled)
+                        PlayComment("launch_generic", _launchGenericTemplates);
+                }
             }
         }
     }
 
     public void EvaluateShot(Dictionary shotData, int surfaceType, float distanceToPinYards, bool isInSand = false, bool isInWater = false)
     {
-        if (!AnnouncerEnabled) return;
+        if (!IsAnnouncerActiveForCurrentScene()) return;
         _idleTimer = 0.0f; // Reset idle timer!
 
         float speedMph = shotData.TryGetValue("Speed", out var speedVal) ? (float)speedVal : 0.0f;
@@ -488,113 +650,172 @@ public partial class AnnouncerEngine : Node
 
         bool isPutt = shotType.Equals("putt", StringComparison.OrdinalIgnoreCase);
 
+        // --- PUTTING EVALUATION ---
         if (isPutt)
         {
-            if (distanceToPinYards < 0.25f) // Holed out / extremely close
+            if (distanceToPinYards < 0.25f) // Holed out / in cup
             {
                 if (totalDistYards >= 5.0f) // Long putt (>= 15 feet / 5 yards)
                 {
                     PlayComment("long_putt", _longPuttTemplates);
                 }
-                else
+                else if (PraiseEnabled)
                 {
-                    // For short putts, play one of the praise lines
                     PlayComment("praise", _praiseTemplates);
                 }
             }
-            else if (totalDistYards < 2.0f && distanceToPinYards > 5.0f)
+            else if (totalDistYards < 2.0f && distanceToPinYards > 8.0f) // Left way short
             {
-                // Missed short: play a heckle comment
-                PlayComment("heckle", _heckleTemplates);
+                if (IsHeckleActiveForCurrentScene() && _random.NextDouble() < BadShotHeckleProbability)
+                {
+                    _shotWasHeckled = true;
+                    PlayComment("heckle", _heckleTemplates);
+                }
             }
             else
             {
-                // Normal rollout: play praise if close, heckle if far
-                if (distanceToPinYards < 2.0f)
-                    PlayComment("praise", _praiseTemplates);
-                else if (distanceToPinYards > 5.0f)
-                    PlayComment("heckle", _heckleTemplates);
+                // Normal rollout
+                if (distanceToPinYards < 2.5f) // Close lag putt within ~7.5 ft
+                {
+                    if (PraiseEnabled)
+                        PlayComment("praise", _praiseTemplates);
+                }
+                else if (distanceToPinYards > 10.0f) // Very far lag putt (>30 ft away)
+                {
+                    if (IsHeckleActiveForCurrentScene() && _random.NextDouble() < BadShotHeckleProbability)
+                    {
+                        _shotWasHeckled = true;
+                        PlayComment("heckle", _heckleTemplates);
+                    }
+                }
             }
+            return;
         }
-        else if (isInWater)
+
+        // --- FULL SHOT EVALUATION ---
+
+        // 1. Water Hazard (100% Heckle guarantee)
+        if (isInWater)
         {
-            if (HeckleEnabled)
+            if (IsHeckleActiveForCurrentScene())
+            {
+                _shotWasHeckled = true;
                 PlayComment("water", _waterTemplates);
+            }
+            return;
         }
-        else if (isInSand)
+
+        // 2. Sand / Bunker (100% Heckle guarantee)
+        if (isInSand || surfaceType == 5)
         {
-            if (HeckleEnabled)
+            if (IsHeckleActiveForCurrentScene())
+            {
+                _shotWasHeckled = true;
                 PlayComment("sand", _sandTemplates);
+            }
+            return;
         }
-        else if (targetDistYards > 50.0f && totalDistYards < 30.0f && totalDistYards < targetDistYards * 0.4f) // Chunked!
+
+        // 3. Mutual Exclusivity: If the heckler already went off on launch / tree hit, suppress announcer praise!
+        if (_shotWasHeckled)
         {
-            if (HeckleEnabled)
+            return;
+        }
+
+        // 4. Check for Bad Shot Outliers (Chunks, Duffs, Severe Offlines)
+        bool isChunked = targetDistYards > 50.0f && totalDistYards < 25.0f && totalDistYards < targetDistYards * 0.35f;
+        bool isDuff = totalDistYards < 18.0f && speedMph > 20.0f;
+        
+        // Severe offline: Must be off fairway/green AND heavily offline (>45 yds or extreme ratio)
+        bool isOnShortGrass = (surfaceType == 0 || surfaceType == 1 || surfaceType == 3 || surfaceType == 4);
+        bool isSevereOffline = !isOnShortGrass && (Math.Abs(offlineYards) >= 45.0f || (totalDistYards > 40.0f && Math.Abs(offlineYards) >= 35.0f && (Math.Abs(offlineYards) / totalDistYards) > 0.28f));
+
+        if (isChunked)
+        {
+            if (IsHeckleActiveForCurrentScene() && _random.NextDouble() < BadShotHeckleProbability)
+            {
+                _shotWasHeckled = true;
                 PlayComment("chunked", _chunkedTemplates);
+            }
+            return;
         }
-        else if (targetDistYards > 50.0f && totalDistYards > targetDistYards + 15.0f) // Crushed and went further than aimed
+
+        if (isDuff)
         {
-            if (PraiseEnabled)
-                PlayComment("overshot_crushed", _overshotCrushedTemplates);
-        }
-        else if (totalDistYards > 50.0f && Math.Abs(offlineYards) > 20.0f) // Offline / Slice / Hook / Curve
-        {
-            if (HeckleEnabled)
-                PlayComment("offline_sarcastic", _offlineSarcasticTemplates);
-        }
-        else if (totalDistYards < 20.0f) // Duff
-        {
-            if (HeckleEnabled)
+            if (IsHeckleActiveForCurrentScene() && _random.NextDouble() < BadShotHeckleProbability)
+            {
+                _shotWasHeckled = true;
                 PlayComment("duff", _duffTemplates);
+            }
+            return;
         }
-        else if (distanceToPinYards < 1.0f) // Extremely close to pin
+
+        if (isSevereOffline)
+        {
+            if (IsHeckleActiveForCurrentScene() && _random.NextDouble() < BadShotHeckleProbability)
+            {
+                _shotWasHeckled = true;
+                PlayComment("offline_sarcastic", _offlineSarcasticTemplates);
+            }
+            return;
+        }
+
+        // 5. Good Shot / Announcer Praise
+        // Close to pin approach (< 3.0 yards / 9 feet)
+        if (distanceToPinYards < 3.0f && totalDistYards > 20.0f)
         {
             if (PraiseEnabled)
                 PlayComment("praise", _praiseTemplates);
+            return;
         }
-        else if (totalDistYards > 280.0f && Math.Abs(offlineYards) < 15.0f) // Massive bomb
+
+        // Long bomb drive with good control
+        if (totalDistYards > 260.0f && Math.Abs(offlineYards) < 25.0f)
         {
             if (PraiseEnabled)
                 PlayComment("praise", _praiseTemplates);
+            return;
         }
-        else
+
+        // Landed on Fairway, Tee, or Green -> Always praised as a great shot (fixes "other fairway" overshot bug)
+        if (isOnShortGrass)
         {
-            // Praise if it landed on the fairway or green
-            if (PraiseEnabled && (surfaceType == 0 || surfaceType == 4))
-            {
+            if (PraiseEnabled)
                 PlayComment("praise", _praiseTemplates);
-            }
-            // Heckle if it landed in the rough
-            else if (HeckleEnabled && surfaceType == 2)
-            {
-                PlayComment("heckle", _heckleTemplates);
-            }
+            return;
         }
+
+        // 6. Ordinary / Moderate rough landing:
+        // Amateur golfers land in the rough regularly. We do not heckle standard rough shots.
     }
 
     public void SpeakMulliganHeckle()
     {
-        if (!HeckleEnabled) return;
+        if (!IsHeckleActiveForCurrentScene()) return;
         _idleTimer = 0.0f; // Reset idle timer!
+        _shotWasHeckled = true;
         PlayComment("mulligan", _mulliganTemplates);
     }
 
     public void SpeakTreeHeckle()
     {
-        if (!HeckleEnabled) return;
+        if (!IsHeckleActiveForCurrentScene()) return;
         _idleTimer = 0.0f; // Reset idle timer!
+        _shotWasHeckled = true;
         PlayComment("heckle", _heckleTemplates);
     }
 
     public void AnnounceHoleScore(string playerName, int strokes, int par)
     {
-        if (!AnnouncerEnabled) return;
+        if (!IsAnnouncerActiveForCurrentScene()) return;
         _idleTimer = 0.0f; // Reset idle timer!
 
         int scoreType = strokes - par;
 
         if (scoreType > 0)
         {
-            if (HeckleEnabled)
+            // Heckle above par: 100% on double bogey or worse, probabilistic on bogey (+1)
+            if (IsHeckleActiveForCurrentScene() && (scoreType >= 2 || _random.NextDouble() < BadShotHeckleProbability))
                 PlayComment("above_par", _aboveParTemplates);
         }
         else if (scoreType == 0)

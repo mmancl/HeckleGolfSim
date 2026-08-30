@@ -94,7 +94,7 @@ text = "Course Aerial Layout Preview"
 
 [node name="CloseButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/HeaderHBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(40, 40)
+custom_minimum_size = Vector2(48, 48)
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "X"
@@ -105,7 +105,7 @@ theme_override_constants/separation = 10
 
 [node name="FullCourseButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(130, 40)
+custom_minimum_size = Vector2(130, 48)
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
 theme_override_styles/normal = SubResource("StyleBoxFlat_btn_normal")
@@ -114,28 +114,28 @@ text = "Full Course"
 
 [node name="PrevHoleButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(45, 40)
+custom_minimum_size = Vector2(52, 48)
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "<"
 
 [node name="HoleOptionButton" type="OptionButton" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(250, 40)
+custom_minimum_size = Vector2(250, 48)
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 18
 
 [node name="NextHoleButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(45, 40)
+custom_minimum_size = Vector2(52, 48)
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = ">"
 
 [node name="ModeToggleButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(110, 40)
+custom_minimum_size = Vector2(120, 48)
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
 text = "3D View"
@@ -146,21 +146,21 @@ theme_override_constants/separation = 6
 
 [node name="ZoomInButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox/ZoomHBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(40, 40)
+custom_minimum_size = Vector2(48, 48)
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "+"
 
 [node name="ZoomOutButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox/ZoomHBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(40, 40)
+custom_minimum_size = Vector2(48, 48)
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "-"
 
 [node name="ZoomResetButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/MainVBox/NavHBox/ZoomHBox"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(70, 40)
+custom_minimum_size = Vector2(80, 48)
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
 text = "Reset"

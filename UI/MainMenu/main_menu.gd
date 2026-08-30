@@ -1,6 +1,7 @@
 extends Control
 # TODO - add settings menu system on future PR. 
 @onready var _settings_button: Button = $VerticalLayout/TopStrip/HBoxContainer/SettingsButton
+@onready var _credits_button: Button = $VerticalLayout/TopStrip/HBoxContainer/CreditsButton
 @onready var _exit_button: Button = $VerticalLayout/TopStrip/HBoxContainer/ExitButton
 @onready var _courses_button: Button = $VerticalLayout/TilesRow/CoursesTile/CoursesTextBackdrop/CoursesButton
 @onready var _range_button: Button = $VerticalLayout/TilesRow/RangeTile/RangeTextBackdrop/RangeButton
@@ -18,6 +19,8 @@ var _version_text: String
 func _ready():
 	_exit_button.pressed.connect(_on_exit_pressed)
 	_settings_button.pressed.connect(_on_settings_pressed)
+	if _credits_button != null:
+		_credits_button.pressed.connect(_on_credits_pressed)
 	_range_button.pressed.connect(_on_range_pressed)
 	_courses_button.pressed.connect(_on_courses_pressed)
 	_practice_button.pressed.connect(_on_practice_pressed)
@@ -30,6 +33,8 @@ func _ready():
 
 	# Apply central theme styles to header buttons
 	ThemeManager.apply_nav_button_style(_settings_button, 6)
+	if _credits_button != null:
+		ThemeManager.apply_nav_button_style(_credits_button, 6)
 	ThemeManager.apply_nav_button_style(_exit_button, 6)
 
 	# Apply central theme card styling to tiles
@@ -78,8 +83,19 @@ func _on_settings_pressed() -> void:
 	if settings_scene != null:
 		var inst = settings_scene.instantiate()
 		inst.name = "MainMenuSettings"
+		inst.set_anchors_preset(Control.PRESET_FULL_RECT)
+		inst.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		inst.grow_vertical = Control.GROW_DIRECTION_BOTH
 		add_child(inst)
 		inst.close_settings_requested.connect(func(): inst.queue_free())
+
+
+func _on_credits_pressed() -> void:
+	var credits_scene = load("res://UI/CreditsModal/credits_modal.tscn")
+	if credits_scene != null:
+		var inst = credits_scene.instantiate()
+		inst.name = "MainMenuCredits"
+		add_child(inst)
 
 
 func _on_exit_pressed() -> void:

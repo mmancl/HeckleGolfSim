@@ -27,9 +27,11 @@ var custom_next_player := Setting.new(true)
 var golf_clap_enabled := Setting.new(true)
 var ambient_sound_enabled := Setting.new(true)
 var menu_music_enabled := Setting.new(true)
+var minigame_music_enabled := Setting.new(true)
 var green_speed := Setting.new(10.0, 1.0, 50.0)
 var phone_cam_url := Setting.new("")
 var use_phone_stream := Setting.new(false)
+var tension_effects_enabled := Setting.new(true)
 
 func _init():
 	init({
@@ -59,9 +61,11 @@ func _init():
 		"golf_clap_enabled": golf_clap_enabled,
 		"ambient_sound_enabled": ambient_sound_enabled,
 		"menu_music_enabled": menu_music_enabled,
+		"minigame_music_enabled": minigame_music_enabled,
 		"green_speed": green_speed,
 		"phone_cam_url": phone_cam_url,
 		"use_phone_stream": use_phone_stream,
+		"tension_effects_enabled": tension_effects_enabled,
 	})
 
 

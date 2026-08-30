@@ -8,6 +8,7 @@ var reset_spin_box : SpinBox = null
 var temperature_spin_box : SpinBox = null
 var altitude_spin_box : SpinBox = null
 var surface_option : OptionButton = null
+var ball_type_option : OptionButton = null
 var tracer_count_spin_box : SpinBox = null
 var square_enabled_button : CheckButton = null
 var square_device_option : OptionButton = null
@@ -20,10 +21,12 @@ var square_battery_label : Label = null
 var square_firmware_label : Label = null
 var square_club_option : OptionButton = null
 var square_handedness_option : OptionButton = null
+var temperature_unit_label : Label = null
+var altitude_unit_label : Label = null
 
 const SQUARE_UI_LOG_PREFIX := "[SquareUI]"
 const SQUARE_CLUBS := {
-	"Driver": "0204",
+	"Driver": "0104",
 	"Putter": "0107",
 	"3 Wood": "0305",
 	"5 Wood": "0505",
@@ -41,6 +44,8 @@ const SQUARE_CLUBS := {
 
 
 func _setup_spin_box(spin_box: SpinBox, setting: Setting, step: float) -> void:
+	if spin_box == null:
+		return
 	spin_box.set_block_signals(true)
 	spin_box.step = step
 	if setting.min_value != null:
@@ -50,36 +55,137 @@ func _setup_spin_box(spin_box: SpinBox, setting: Setting, step: float) -> void:
 	spin_box.value = setting.value
 	spin_box.set_block_signals(false)
 	
+	spin_box.custom_minimum_size = Vector2(110, 52)
+	var line_edit = spin_box.get_line_edit()
+	if line_edit != null:
+		line_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		line_edit.add_theme_font_size_override("font_size", 19)
+		ThemeManager.apply_input_style(line_edit, 8)
+	
 	if spin_box.value != setting.value:
 		setting.set_value(spin_box.value)
 
+
+func _enhance_spinbox_with_stepper(spin_box: SpinBox, step: float) -> void:
+	if spin_box == null:
+		return
+	var parent = spin_box.get_parent()
+	if parent == null:
+		return
+		
+	var minus_btn = Button.new()
+	minus_btn.name = spin_box.name + "_MinusBtn"
+	minus_btn.text = "－"
+	minus_btn.custom_minimum_size = Vector2(52, 52)
+	minus_btn.add_theme_font_size_override("font_size", 22)
+	ThemeManager.apply_nav_button_style(minus_btn, 8)
+	minus_btn.pressed.connect(func():
+		spin_box.value = clamp(spin_box.value - step, spin_box.min_value, spin_box.max_value)
+	)
+	
+	var plus_btn = Button.new()
+	plus_btn.name = spin_box.name + "_PlusBtn"
+	plus_btn.text = "＋"
+	plus_btn.custom_minimum_size = Vector2(52, 52)
+	plus_btn.add_theme_font_size_override("font_size", 22)
+	ThemeManager.apply_nav_button_style(plus_btn, 8)
+	plus_btn.pressed.connect(func():
+		spin_box.value = clamp(spin_box.value + step, spin_box.min_value, spin_box.max_value)
+	)
+	
+	var spin_index = spin_box.get_index()
+	parent.add_child(minus_btn)
+	parent.move_child(minus_btn, spin_index)
+	
+	parent.add_child(plus_btn)
+	parent.move_child(plus_btn, spin_index + 2)
+
+
+func _setup_touch_option_button(opt: OptionButton) -> void:
+	if opt == null:
+		return
+	opt.custom_minimum_size = Vector2(220, 52)
+	opt.add_theme_font_size_override("font_size", 18)
+	ThemeManager.apply_secondary_button_style(opt, 8)
+	
+	var popup = opt.get_popup()
+	if popup != null:
+		popup.add_theme_font_size_override("font_size", 18)
+		popup.add_theme_constant_override("item_start_padding", 20)
+		popup.add_theme_constant_override("item_end_padding", 20)
+		popup.add_theme_constant_override("v_separation", 14)
+
+
+func _create_tab_style(bg_color: Color, border_color: Color) -> StyleBoxFlat:
+	var style = StyleBoxFlat.new()
+	style.bg_color = bg_color
+	style.border_color = border_color
+	style.border_width_left = 1
+	style.border_width_top = 1
+	style.border_width_right = 1
+	style.border_width_bottom = 0
+	style.corner_radius_top_left = 10
+	style.corner_radius_top_right = 10
+	style.content_margin_left = 24
+	style.content_margin_right = 24
+	style.content_margin_top = 12
+	style.content_margin_bottom = 12
+	return style
+
+
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
-	ThemeManager.apply_modal_style(self)
+	ThemeManager.apply_modal_style(self, 0)
+	set_anchors_preset(Control.PRESET_FULL_RECT)
+	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+	# Header Close Button Styling
+	var header_close_btn = get_node_or_null("MarginContainer/VBoxContainer/HeaderHBox/HeaderCloseButton")
+	if header_close_btn != null:
+		header_close_btn.custom_minimum_size = Vector2(48, 48)
+		header_close_btn.add_theme_font_size_override("font_size", 20)
+		ThemeManager.apply_nav_button_style(header_close_btn, 8)
+
+	# Style TabContainer
+	var tab_container = get_node_or_null("MarginContainer/VBoxContainer/TabContainer")
+	if tab_container != null:
+		tab_container.add_theme_font_size_override("font_size", 20)
+		tab_container.add_theme_constant_override("side_margin", 16)
+		tab_container.add_theme_stylebox_override("tab_selected", _create_tab_style(ThemeManager.COLOR_PRIMARY_NORMAL, ThemeManager.COLOR_PRIMARY_NORMAL.lightened(0.2)))
+		tab_container.add_theme_stylebox_override("tab_unselected", _create_tab_style(ThemeManager.COLOR_NAV_NORMAL, Color(1, 1, 1, 0.15)))
+		tab_container.add_theme_stylebox_override("tab_hovered", _create_tab_style(ThemeManager.COLOR_NAV_HOVER, Color(1, 1, 1, 0.3)))
+		
+		# Set clear, attractive tab labels
+		tab_container.set_tab_title(0, "⛳ Gameplay")
+		tab_container.set_tab_title(1, "📷 Camera")
+		tab_container.set_tab_title(2, "📡 Launch Monitor")
+		tab_container.set_tab_title(3, "🎙 Announcer")
 
 	reset_spin_box = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer/ResetSpinBox
 	temperature_spin_box = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature/TemperatureSpinBox
 	altitude_spin_box = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude/AltitudeSpinBox
 	surface_option = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/SurfaceType/SurfaceOption
+	ball_type_option = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallType/BallTypeOption
 	tracer_count_spin_box = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/TracerCount/TracerCountSpinBox
-
-	# Clamp panel size to screen so it always fits on mobile devices
-	var viewport_size = get_viewport().get_visible_rect().size
-	var max_width = clamp(viewport_size.x * 0.92, 320.0, 500.0)
-	var max_height = clamp(viewport_size.y * 0.88, 400.0, 640.0)
-	custom_minimum_size = Vector2(max_width, max_height)
+	temperature_unit_label = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature/Label2
+	altitude_unit_label = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude/Label2
 
 	# Reset Timer Settings
 	_setup_spin_box(reset_spin_box, GlobalSettings.range_settings.ball_reset_timer, 0.5)
+	_enhance_spinbox_with_stepper(reset_spin_box, 0.5)
 
 	# Temperature Settings
 	_setup_spin_box(temperature_spin_box, GlobalSettings.range_settings.temperature, 1.0)
+	_enhance_spinbox_with_stepper(temperature_spin_box, 1.0)
 
 	# Altitude Settings
 	_setup_spin_box(altitude_spin_box, GlobalSettings.range_settings.altitude, 10.0)
+	_enhance_spinbox_with_stepper(altitude_spin_box, 10.0)
 
 	# Tracer count
 	_setup_spin_box(tracer_count_spin_box, GlobalSettings.range_settings.shot_tracer_count, 1.0)
+	_enhance_spinbox_with_stepper(tracer_count_spin_box, 1.0)
 
 	# Surface type options
 	surface_option.clear()
@@ -91,6 +197,18 @@ func _ready() -> void:
 	var surface_index := surface_option.get_item_index(surface_id)
 	if surface_index >= 0:
 		surface_option.select(surface_index)
+	_setup_touch_option_button(surface_option)
+
+	# Ball type options
+	if ball_type_option != null:
+		ball_type_option.clear()
+		ball_type_option.add_item("Standard Ball", 0)
+		ball_type_option.add_item("Tour Soft", 1)
+		ball_type_option.add_item("Distance / Firm", 2)
+		var ball_id: int = GlobalSettings.range_settings.ball_type.value
+		if ball_id < ball_type_option.item_count:
+			ball_type_option.select(ball_id)
+		_setup_touch_option_button(ball_type_option)
 
 	GlobalSettings.range_settings.range_units.setting_changed.connect(update_units)
 
@@ -118,8 +236,8 @@ func _ready() -> void:
 	
 	var gimme_label = Label.new()
 	gimme_label.text = "Gimme Ranges"
-	gimme_label.add_theme_font_size_override("font_size", 18)
-	gimme_label.add_theme_color_override("font_color", Color(0.8, 0.9, 0.8))
+	gimme_label.add_theme_font_size_override("font_size", 22)
+	gimme_label.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
 	gameplay_vbox.add_child(gimme_label)
 	
 	var gimme_1_toggle = _create_toggle_setting_row("Gimme +1 Stroke Circle", "gimme_range_1_enabled")
@@ -138,9 +256,9 @@ func _ready() -> void:
 	gameplay_vbox.add_child(turn_sep)
 	
 	var turn_label = Label.new()
-	turn_label.text = "Turn Order Settings"
-	turn_label.add_theme_font_size_override("font_size", 18)
-	turn_label.add_theme_color_override("font_color", Color(0.8, 0.9, 0.8))
+	turn_label.text = "Audio & Turn Settings"
+	turn_label.add_theme_font_size_override("font_size", 22)
+	turn_label.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
 	gameplay_vbox.add_child(turn_label)
 	
 	var custom_next_player_toggle = _create_toggle_setting_row("Custom Next Player to Hit", "custom_next_player")
@@ -154,6 +272,9 @@ func _ready() -> void:
 
 	var menu_music_toggle = _create_toggle_setting_row("Menu Soundtrack", "menu_music_enabled")
 	gameplay_vbox.add_child(menu_music_toggle)
+
+	var minigame_music_toggle = _create_toggle_setting_row("Minigame Music Soundtrack", "minigame_music_enabled")
+	gameplay_vbox.add_child(minigame_music_toggle)
 
 	var gs_sep = HSeparator.new()
 	gameplay_vbox.add_child(gs_sep)
@@ -178,23 +299,17 @@ func _ready() -> void:
 	camera_vbox.add_child(far_row)
 	
 	# Visual effects separator
+	var fx_sep = HSeparator.new()
+	camera_vbox.add_child(fx_sep)
+
 	var fx_label = Label.new()
 	fx_label.text = "Visual Effects"
-	fx_label.add_theme_font_size_override("font_size", 18)
-	fx_label.add_theme_color_override("font_color", Color(0.8, 0.9, 0.8))
+	fx_label.add_theme_font_size_override("font_size", 22)
+	fx_label.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
 	camera_vbox.add_child(fx_label)
 	
 	# DOF toggle
-	var dof_row = HBoxContainer.new()
-	dof_row.name = "DOFToggle"
-	var dof_label = Label.new()
-	dof_label.text = "Depth of Field"
-	dof_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	dof_row.add_child(dof_label)
-	var dof_check = CheckButton.new()
-	dof_check.set_pressed_no_signal(GlobalSettings.range_settings.dof_enabled.value)
-	dof_check.toggled.connect(func(on): GlobalSettings.range_settings.dof_enabled.set_value(on))
-	dof_row.add_child(dof_check)
+	var dof_row = _create_toggle_setting_row("Depth of Field", "dof_enabled")
 	camera_vbox.add_child(dof_row)
 	
 	# DOF blur amount
@@ -202,31 +317,35 @@ func _ready() -> void:
 	camera_vbox.add_child(blur_row)
 	
 	# Vignette toggle
-	var vig_row = HBoxContainer.new()
-	vig_row.name = "VignetteToggle"
-	var vig_label = Label.new()
-	vig_label.text = "Vignette"
-	vig_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vig_row.add_child(vig_label)
-	var vig_check = CheckButton.new()
-	vig_check.set_pressed_no_signal(GlobalSettings.range_settings.vignette_enabled.value)
-	vig_check.toggled.connect(func(on): GlobalSettings.range_settings.vignette_enabled.set_value(on))
-	vig_row.add_child(vig_check)
+	var vig_row = _create_toggle_setting_row("Vignette", "vignette_enabled")
 	camera_vbox.add_child(vig_row)
 	
 	# Vignette intensity
 	var vig_int_row = _create_spinbox_setting_row("Vignette Intensity", "vignette_intensity", 0.0, 3.0, 0.1, "")
 	camera_vbox.add_child(vig_int_row)
 
-	# Add Close button dynamically to ButtonsHBox
+	# Add Close button dynamically to ButtonsHBox and style all buttons
 	var buttons_hbox = get_node_or_null("MarginContainer/VBoxContainer/ButtonsHBox")
 	if buttons_hbox != null:
+		var reset_btn = buttons_hbox.get_node_or_null("ResetLayoutButton")
+		if reset_btn != null:
+			reset_btn.custom_minimum_size = Vector2(170, 54)
+			reset_btn.add_theme_font_size_override("font_size", 18)
+			ThemeManager.apply_secondary_button_style(reset_btn, 8)
+
+		var exit_btn = buttons_hbox.get_node_or_null("ExitButton")
+		if exit_btn != null:
+			exit_btn.custom_minimum_size = Vector2(170, 54)
+			exit_btn.add_theme_font_size_override("font_size", 18)
+			ThemeManager.apply_danger_button_style(exit_btn, 8)
+
 		if not MultiplayerManager.players.is_empty() and not MultiplayerManager.practice_mode_active:
 			var players_btn = Button.new()
 			players_btn.name = "PlayersButton"
 			players_btn.text = "👥 Players"
-			players_btn.custom_minimum_size = Vector2(140, 40)
-			_apply_material_button_style(players_btn, Color(0.25, 0.55, 0.35, 0.85)) # Green-ish
+			players_btn.custom_minimum_size = Vector2(170, 54)
+			players_btn.add_theme_font_size_override("font_size", 18)
+			ThemeManager.apply_primary_button_style(players_btn, 8)
 			players_btn.pressed.connect(func():
 				manage_players_requested.emit()
 				close_settings_requested.emit()
@@ -236,14 +355,15 @@ func _ready() -> void:
 		var close_btn = Button.new()
 		close_btn.name = "CloseButton"
 		close_btn.text = "Close"
-		close_btn.custom_minimum_size = Vector2(140, 40)
+		close_btn.custom_minimum_size = Vector2(170, 54)
+		close_btn.add_theme_font_size_override("font_size", 18)
+		ThemeManager.apply_primary_button_style(close_btn, 8)
 		close_btn.pressed.connect(func(): close_settings_requested.emit())
 		buttons_hbox.add_child(close_btn)
 
 
-# Called every frame. 'delta' is the elapsed time since the previous frame.
-func _process(_delta: float) -> void:
-	pass
+func _on_header_close_button_pressed() -> void:
+	close_settings_requested.emit()
 
 
 func _on_settings_button_pressed() -> void:
@@ -288,6 +408,7 @@ func _on_auto_reset_check_button_toggled(toggled_on: bool) -> void:
 func _on_injector_check_button_toggled(toggled_on: bool) -> void:
 	GlobalSettings.range_settings.shot_injector_enabled.set_value(toggled_on)
 
+
 func _on_reset_spin_box_value_changed(value: float) -> void:
 	GlobalSettings.range_settings.ball_reset_timer.set_value(value)
 
@@ -327,49 +448,74 @@ func _setup_square_monitor_section() -> void:
 	var root := $MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox
 	var section := VBoxContainer.new()
 	section.name = "SquareMonitor"
-	section.add_theme_constant_override("separation", 8)
+	section.add_theme_constant_override("separation", 16)
 
 	var title := Label.new()
-	title.text = "Square"
-	title.add_theme_font_size_override("font_size", 18)
+	title.text = "Square Launch Monitor"
+	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
 	section.add_child(title)
 
 	var enabled_row := HBoxContainer.new()
+	enabled_row.custom_minimum_size = Vector2(0, 52)
 	enabled_row.add_child(_make_label("Enabled"))
 	enabled_row.add_child(_make_spacer())
 	square_enabled_button = CheckButton.new()
+	square_enabled_button.custom_minimum_size = Vector2(72, 48)
 	square_enabled_button.set_pressed_no_signal(bool(launch_monitor.settings.get("enabled", false)))
 	square_enabled_button.toggled.connect(_on_square_enabled_toggled)
 	enabled_row.add_child(square_enabled_button)
 	section.add_child(enabled_row)
 
 	var device_row := HBoxContainer.new()
+	device_row.custom_minimum_size = Vector2(0, 52)
 	device_row.add_child(_make_label("Device"))
 	square_device_option = OptionButton.new()
 	square_device_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_setup_touch_option_button(square_device_option)
 	device_row.add_child(square_device_option)
 	section.add_child(device_row)
 
 	var action_row := HBoxContainer.new()
+	action_row.custom_minimum_size = Vector2(0, 52)
+	action_row.add_theme_constant_override("separation", 12)
+	
 	square_scan_button = Button.new()
 	square_scan_button.text = "Scan"
+	square_scan_button.custom_minimum_size = Vector2(120, 52)
+	square_scan_button.add_theme_font_size_override("font_size", 18)
+	ThemeManager.apply_secondary_button_style(square_scan_button, 8)
 	square_scan_button.pressed.connect(_on_square_scan_pressed)
 	action_row.add_child(square_scan_button)
+	
 	square_connect_button = Button.new()
 	square_connect_button.text = "Connect"
+	square_connect_button.custom_minimum_size = Vector2(120, 52)
+	square_connect_button.add_theme_font_size_override("font_size", 18)
+	ThemeManager.apply_primary_button_style(square_connect_button, 8)
 	square_connect_button.pressed.connect(_on_square_connect_pressed)
 	action_row.add_child(square_connect_button)
+	
 	square_disconnect_button = Button.new()
 	square_disconnect_button.text = "Disconnect"
+	square_disconnect_button.custom_minimum_size = Vector2(120, 52)
+	square_disconnect_button.add_theme_font_size_override("font_size", 18)
+	ThemeManager.apply_danger_button_style(square_disconnect_button, 8)
 	square_disconnect_button.pressed.connect(_on_square_disconnect_pressed)
 	action_row.add_child(square_disconnect_button)
+	
 	square_ready_button = Button.new()
 	square_ready_button.text = "Ready"
+	square_ready_button.custom_minimum_size = Vector2(120, 52)
+	square_ready_button.add_theme_font_size_override("font_size", 18)
+	ThemeManager.apply_primary_button_style(square_ready_button, 8)
 	square_ready_button.pressed.connect(_on_square_ready_pressed)
 	action_row.add_child(square_ready_button)
+	
 	section.add_child(action_row)
 
 	var club_row := HBoxContainer.new()
+	club_row.custom_minimum_size = Vector2(0, 52)
 	club_row.add_child(_make_label("Club"))
 	square_club_option = OptionButton.new()
 	square_club_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -377,13 +523,15 @@ func _setup_square_monitor_section() -> void:
 		var index := square_club_option.item_count
 		square_club_option.add_item(club_name)
 		square_club_option.set_item_metadata(index, SQUARE_CLUBS[club_name])
-	var current_club := str(launch_monitor.settings.get("club_code", "0204"))
+	var current_club := str(launch_monitor.settings.get("club_code", "0104"))
 	_select_option_by_metadata(square_club_option, current_club)
 	square_club_option.item_selected.connect(_on_square_club_selected)
+	_setup_touch_option_button(square_club_option)
 	club_row.add_child(square_club_option)
 	section.add_child(club_row)
 
 	var handedness_row := HBoxContainer.new()
+	handedness_row.custom_minimum_size = Vector2(0, 52)
 	handedness_row.add_child(_make_label("Handedness"))
 	square_handedness_option = OptionButton.new()
 	square_handedness_option.add_item("Right", 0)
@@ -393,13 +541,16 @@ func _setup_square_monitor_section() -> void:
 	if hand_index >= 0:
 		square_handedness_option.select(hand_index)
 	square_handedness_option.item_selected.connect(_on_square_handedness_selected)
+	_setup_touch_option_button(square_handedness_option)
 	handedness_row.add_child(square_handedness_option)
 	section.add_child(handedness_row)
 
 	var sound_row := HBoxContainer.new()
+	sound_row.custom_minimum_size = Vector2(0, 52)
 	sound_row.add_child(_make_label("Ready Sound"))
 	sound_row.add_child(_make_spacer())
 	var sound_button := CheckButton.new()
+	sound_button.custom_minimum_size = Vector2(72, 48)
 	sound_button.set_pressed_no_signal(bool(launch_monitor.settings.get("ready_ding_enabled", true)))
 	sound_button.toggled.connect(func(toggled_on: bool):
 		launch_monitor.set_ready_ding_enabled(toggled_on)
@@ -408,11 +559,13 @@ func _setup_square_monitor_section() -> void:
 	section.add_child(sound_row)
 
 	var hud_row := HBoxContainer.new()
+	hud_row.custom_minimum_size = Vector2(0, 52)
 	var hud_label := _make_label("Ready Indicator")
-	hud_label.custom_minimum_size = Vector2(130, 0)
+	hud_label.custom_minimum_size = Vector2(160, 0)
 	hud_row.add_child(hud_label)
 	hud_row.add_child(_make_spacer())
 	var hud_button := CheckButton.new()
+	hud_button.custom_minimum_size = Vector2(72, 48)
 	hud_button.set_pressed_no_signal(bool(launch_monitor.settings.get("ready_indicator_enabled", true)))
 	hud_button.toggled.connect(func(toggled_on: bool):
 		launch_monitor.set_ready_indicator_enabled(toggled_on)
@@ -421,11 +574,13 @@ func _setup_square_monitor_section() -> void:
 	section.add_child(hud_row)
 
 	var guide_row := HBoxContainer.new()
+	guide_row.custom_minimum_size = Vector2(0, 52)
 	var guide_label := _make_label("Placement Guide")
-	guide_label.custom_minimum_size = Vector2(130, 0)
+	guide_label.custom_minimum_size = Vector2(160, 0)
 	guide_row.add_child(guide_label)
 	guide_row.add_child(_make_spacer())
 	var guide_button := CheckButton.new()
+	guide_button.custom_minimum_size = Vector2(72, 48)
 	guide_button.set_pressed_no_signal(bool(launch_monitor.settings.get("ball_placement_guide_enabled", true)))
 	guide_button.toggled.connect(func(toggled_on: bool):
 		if launch_monitor.has_method("set_ball_placement_guide_enabled"):
@@ -435,8 +590,17 @@ func _setup_square_monitor_section() -> void:
 	section.add_child(guide_row)
 
 	square_status_label = Label.new()
+	square_status_label.add_theme_font_size_override("font_size", 18)
+	square_status_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	
 	square_battery_label = Label.new()
+	square_battery_label.add_theme_font_size_override("font_size", 18)
+	square_battery_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	
 	square_firmware_label = Label.new()
+	square_firmware_label.add_theme_font_size_override("font_size", 18)
+	square_firmware_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	
 	section.add_child(square_status_label)
 	section.add_child(square_battery_label)
 	section.add_child(square_firmware_label)
@@ -465,7 +629,9 @@ func _setup_square_monitor_section() -> void:
 func _make_label(text: String) -> Label:
 	var label := Label.new()
 	label.text = text
-	label.custom_minimum_size = Vector2(90, 0)
+	label.add_theme_font_size_override("font_size", 19)
+	label.custom_minimum_size = Vector2(140, 0)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	return label
 
 
@@ -634,28 +800,57 @@ func update_units(value) -> void:
 	altitude_spin_box.set_block_signals(true)
 
 	if value == PhysicsEnums.Units.IMPERIAL:
-		$MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature/Label2.text = "F"
+		if temperature_unit_label != null:
+			temperature_unit_label.text = "F"
 		var temp_f = GlobalSettings.range_settings.temperature.value * 9.0 / 5.0 + 32.0
 		temperature_spin_box.value = temp_f
 		GlobalSettings.range_settings.temperature.set_value(temp_f)
 
-		$MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude/Label2.text = "ft"
+		if altitude_unit_label != null:
+			altitude_unit_label.text = "ft"
 		var alt_ft = GlobalSettings.range_settings.altitude.value * m2ft
 		altitude_spin_box.value = alt_ft
 		GlobalSettings.range_settings.altitude.set_value(alt_ft)
 	else:
-		$MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature/Label2.text = "C"
+		if temperature_unit_label != null:
+			temperature_unit_label.text = "C"
 		var temp_c = (GlobalSettings.range_settings.temperature.value - 32.0) * 5.0 / 9.0
 		temperature_spin_box.value = temp_c
 		GlobalSettings.range_settings.temperature.set_value(temp_c)
 
-		$MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude/Label2.text = "m"
+		if altitude_unit_label != null:
+			altitude_unit_label.text = "m"
 		var alt_m = GlobalSettings.range_settings.altitude.value / m2ft
 		altitude_spin_box.value = alt_m
 		GlobalSettings.range_settings.altitude.set_value(alt_m)
 
 	temperature_spin_box.set_block_signals(false)
 	altitude_spin_box.set_block_signals(false)
+
+
+func _create_announcer_toggle_row(label_text: String, prop_name: String, announcer: Node) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.custom_minimum_size = Vector2(0, 52)
+	var lbl := Label.new()
+	lbl.text = label_text
+	lbl.add_theme_font_size_override("font_size", 19)
+	lbl.custom_minimum_size = Vector2(200, 0)
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(lbl)
+	
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
+	
+	var btn := CheckButton.new()
+	btn.custom_minimum_size = Vector2(72, 48)
+	btn.set_pressed_no_signal(bool(announcer.get(prop_name)))
+	btn.toggled.connect(func(toggled_on: bool):
+		announcer.set(prop_name, toggled_on)
+		GlobalSettings.save_settings()
+	)
+	row.add_child(btn)
+	return row
 
 
 func _setup_hecklelinks_announcer_section() -> void:
@@ -665,76 +860,74 @@ func _setup_hecklelinks_announcer_section() -> void:
 	var announcer = get_node("/root/AnnouncerEngine")
 	var root := $MarginContainer/VBoxContainer/TabContainer/Announcer/MarginContainer/AnnouncerVBox
 	
+	for child in root.get_children():
+		child.queue_free()
+
 	var section := VBoxContainer.new()
 	section.name = "AnnouncerSettings"
-	section.add_theme_constant_override("separation", 8)
+	section.add_theme_constant_override("separation", 16)
 
 	var title := Label.new()
-	title.text = "HeckleLinks Announcer"
-	title.add_theme_font_size_override("font_size", 18)
+	title.text = "HeckleLinks Announcer Settings"
+	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
 	section.add_child(title)
 
-	var announcer_row := HBoxContainer.new()
-	var ann_label := Label.new()
-	ann_label.text = "Announcer Voice"
-	ann_label.custom_minimum_size = Vector2(150, 0)
-	announcer_row.add_child(ann_label)
-	
-	var spacer1 := Control.new()
-	spacer1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	announcer_row.add_child(spacer1)
-	
-	var ann_btn := CheckButton.new()
-	ann_btn.set_pressed_no_signal(announcer.get("AnnouncerEnabled"))
-	ann_btn.toggled.connect(func(toggled_on): 
-		announcer.set("AnnouncerEnabled", toggled_on)
-		GlobalSettings.save_settings()
-	)
-	announcer_row.add_child(ann_btn)
-	section.add_child(announcer_row)
+	# --- 1. COURSE PLAY ---
+	var course_lbl := Label.new()
+	course_lbl.text = "Course Play"
+	course_lbl.add_theme_font_size_override("font_size", 18)
+	course_lbl.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
+	section.add_child(course_lbl)
 
-	var praise_row := HBoxContainer.new()
-	var praise_label := Label.new()
-	praise_label.text = "Praise Enabled"
-	praise_label.custom_minimum_size = Vector2(150, 0)
-	praise_row.add_child(praise_label)
-	
-	var spacer2 := Control.new()
-	spacer2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	praise_row.add_child(spacer2)
-	
-	var praise_btn := CheckButton.new()
-	praise_btn.set_pressed_no_signal(announcer.get("PraiseEnabled"))
-	praise_btn.toggled.connect(func(toggled_on): 
-		announcer.set("PraiseEnabled", toggled_on)
-		GlobalSettings.save_settings()
-	)
-	praise_row.add_child(praise_btn)
-	section.add_child(praise_row)
+	section.add_child(_create_announcer_toggle_row("Announcer Voice", "AnnouncerCoursePlay", announcer))
+	section.add_child(_create_announcer_toggle_row("Heckling", "HeckleCoursePlay", announcer))
 
-	var heckle_row := HBoxContainer.new()
-	var heckle_label := Label.new()
-	heckle_label.text = "Heckling Enabled"
-	heckle_label.custom_minimum_size = Vector2(150, 0)
-	heckle_row.add_child(heckle_label)
-	
-	var spacer3 := Control.new()
-	spacer3.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	heckle_row.add_child(spacer3)
-	
-	var heckle_btn := CheckButton.new()
-	heckle_btn.set_pressed_no_signal(announcer.get("HeckleEnabled"))
-	heckle_btn.toggled.connect(func(toggled_on): 
-		announcer.set("HeckleEnabled", toggled_on)
-		GlobalSettings.save_settings()
-	)
-	heckle_row.add_child(heckle_btn)
-	section.add_child(heckle_row)
+	var sep1 := HSeparator.new()
+	section.add_child(sep1)
+
+	# --- 2. DRIVING RANGE ---
+	var range_lbl := Label.new()
+	range_lbl.text = "Driving Range"
+	range_lbl.add_theme_font_size_override("font_size", 18)
+	range_lbl.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
+	section.add_child(range_lbl)
+
+	section.add_child(_create_announcer_toggle_row("Announcer Voice", "AnnouncerRange", announcer))
+	section.add_child(_create_announcer_toggle_row("Heckling", "HeckleRange", announcer))
+
+	var sep2 := HSeparator.new()
+	section.add_child(sep2)
+
+	# --- 3. MINI GAMES ---
+	var mg_lbl := Label.new()
+	mg_lbl.text = "Mini Games (Putting & Chipping)"
+	mg_lbl.add_theme_font_size_override("font_size", 18)
+	mg_lbl.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
+	section.add_child(mg_lbl)
+
+	section.add_child(_create_announcer_toggle_row("Announcer Voice", "AnnouncerMiniGames", announcer))
+	section.add_child(_create_announcer_toggle_row("Heckling", "HeckleMiniGames", announcer))
+
+	var sep3 := HSeparator.new()
+	section.add_child(sep3)
+
+	# --- 4. VOICE OPTIONS ---
+	var voice_header := Label.new()
+	voice_header.text = "Voice & Commentary Options"
+	voice_header.add_theme_font_size_override("font_size", 18)
+	voice_header.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
+	section.add_child(voice_header)
+
+	section.add_child(_create_announcer_toggle_row("Praise Commentary", "PraiseEnabled", announcer))
 
 	var voice_row := HBoxContainer.new()
+	voice_row.custom_minimum_size = Vector2(0, 52)
 	var voice_lbl := Label.new()
 	voice_lbl.text = "Voice Locale"
-	voice_lbl.custom_minimum_size = Vector2(150, 0)
+	voice_lbl.add_theme_font_size_override("font_size", 19)
+	voice_lbl.custom_minimum_size = Vector2(200, 0)
+	voice_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	voice_row.add_child(voice_lbl)
 	
 	var voice_opt := OptionButton.new()
@@ -780,21 +973,35 @@ func _setup_hecklelinks_announcer_section() -> void:
 		announcer.set("ActiveVoice", chosen_id)
 		GlobalSettings.save_settings()
 	)
+	_setup_touch_option_button(voice_opt)
 	voice_row.add_child(voice_opt)
 	section.add_child(voice_row)
 
-	# Voice Pitch Slider Row
+	# Voice Pitch Slider Row with Touch Stepper
 	var pitch_row := HBoxContainer.new()
+	pitch_row.custom_minimum_size = Vector2(0, 52)
+	pitch_row.add_theme_constant_override("separation", 10)
+	
 	var pitch_label := Label.new()
 	pitch_label.text = "Voice Pitch: %.1f" % announcer.get("Pitch")
-	pitch_label.custom_minimum_size = Vector2(150, 0)
+	pitch_label.add_theme_font_size_override("font_size", 19)
+	pitch_label.custom_minimum_size = Vector2(200, 0)
+	pitch_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	pitch_row.add_child(pitch_label)
+	
+	var pitch_minus_btn := Button.new()
+	pitch_minus_btn.text = "－"
+	pitch_minus_btn.custom_minimum_size = Vector2(48, 48)
+	pitch_minus_btn.add_theme_font_size_override("font_size", 20)
+	ThemeManager.apply_nav_button_style(pitch_minus_btn, 8)
+	pitch_row.add_child(pitch_minus_btn)
 	
 	var pitch_slider := HSlider.new()
 	pitch_slider.min_value = 0.5
 	pitch_slider.max_value = 2.0
 	pitch_slider.step = 0.1
 	pitch_slider.value = announcer.get("Pitch")
+	pitch_slider.custom_minimum_size = Vector2(180, 48)
 	pitch_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	pitch_slider.value_changed.connect(func(val):
 		announcer.set("Pitch", val)
@@ -802,20 +1009,47 @@ func _setup_hecklelinks_announcer_section() -> void:
 		GlobalSettings.save_settings()
 	)
 	pitch_row.add_child(pitch_slider)
+	
+	var pitch_plus_btn := Button.new()
+	pitch_plus_btn.text = "＋"
+	pitch_plus_btn.custom_minimum_size = Vector2(48, 48)
+	pitch_plus_btn.add_theme_font_size_override("font_size", 20)
+	ThemeManager.apply_nav_button_style(pitch_plus_btn, 8)
+	pitch_row.add_child(pitch_plus_btn)
+	
+	pitch_minus_btn.pressed.connect(func():
+		pitch_slider.value = clamp(pitch_slider.value - 0.1, pitch_slider.min_value, pitch_slider.max_value)
+	)
+	pitch_plus_btn.pressed.connect(func():
+		pitch_slider.value = clamp(pitch_slider.value + 0.1, pitch_slider.min_value, pitch_slider.max_value)
+	)
 	section.add_child(pitch_row)
 
-	# Voice Speed/Rate Slider Row
+	# Voice Speed/Rate Slider Row with Touch Stepper
 	var rate_row := HBoxContainer.new()
+	rate_row.custom_minimum_size = Vector2(0, 52)
+	rate_row.add_theme_constant_override("separation", 10)
+	
 	var rate_label := Label.new()
 	rate_label.text = "Voice Speed: %.1f" % announcer.get("Rate")
-	rate_label.custom_minimum_size = Vector2(150, 0)
+	rate_label.add_theme_font_size_override("font_size", 19)
+	rate_label.custom_minimum_size = Vector2(200, 0)
+	rate_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	rate_row.add_child(rate_label)
+	
+	var rate_minus_btn := Button.new()
+	rate_minus_btn.text = "－"
+	rate_minus_btn.custom_minimum_size = Vector2(48, 48)
+	rate_minus_btn.add_theme_font_size_override("font_size", 20)
+	ThemeManager.apply_nav_button_style(rate_minus_btn, 8)
+	rate_row.add_child(rate_minus_btn)
 	
 	var rate_slider := HSlider.new()
 	rate_slider.min_value = 0.5
 	rate_slider.max_value = 2.0
 	rate_slider.step = 0.1
 	rate_slider.value = announcer.get("Rate")
+	rate_slider.custom_minimum_size = Vector2(180, 48)
 	rate_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rate_slider.value_changed.connect(func(val):
 		announcer.set("Rate", val)
@@ -823,6 +1057,20 @@ func _setup_hecklelinks_announcer_section() -> void:
 		GlobalSettings.save_settings()
 	)
 	rate_row.add_child(rate_slider)
+	
+	var rate_plus_btn := Button.new()
+	rate_plus_btn.text = "＋"
+	rate_plus_btn.custom_minimum_size = Vector2(48, 48)
+	rate_plus_btn.add_theme_font_size_override("font_size", 20)
+	ThemeManager.apply_nav_button_style(rate_plus_btn, 8)
+	rate_row.add_child(rate_plus_btn)
+	
+	rate_minus_btn.pressed.connect(func():
+		rate_slider.value = clamp(rate_slider.value - 0.1, rate_slider.min_value, rate_slider.max_value)
+	)
+	rate_plus_btn.pressed.connect(func():
+		rate_slider.value = clamp(rate_slider.value + 0.1, rate_slider.min_value, rate_slider.max_value)
+	)
 	section.add_child(rate_row)
 
 	root.add_child(section)
@@ -855,38 +1103,70 @@ func _get_friendly_accent_name(lang: String) -> String:
 func _create_spinbox_setting_row(label_text: String, setting_name: String, min_val: float, max_val: float, step: float, suffix: String = "") -> HBoxContainer:
 	var row = HBoxContainer.new()
 	row.name = label_text.replace(" ", "")
+	row.custom_minimum_size = Vector2(0, 52)
+	row.add_theme_constant_override("separation", 8)
 	
 	var label = Label.new()
-	label.text = label_text + ": "
+	label.text = label_text
+	label.add_theme_font_size_override("font_size", 19)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(label)
 	
 	var spacer1 = Control.new()
 	spacer1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	spacer1.size_flags_stretch_ratio = 0.6
 	row.add_child(spacer1)
 	
+	var setting = GlobalSettings.range_settings.settings[setting_name]
+	
+	# Minus Button
+	var minus_btn = Button.new()
+	minus_btn.text = "－"
+	minus_btn.custom_minimum_size = Vector2(52, 52)
+	minus_btn.add_theme_font_size_override("font_size", 22)
+	ThemeManager.apply_nav_button_style(minus_btn, 8)
+	row.add_child(minus_btn)
+	
 	var spinbox = SpinBox.new()
-	spinbox.custom_minimum_size = Vector2(100, 0)
-	spinbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	spinbox.custom_minimum_size = Vector2(110, 52)
 	spinbox.min_value = min_val
 	spinbox.max_value = max_val
 	spinbox.step = step
-	
-	var setting = GlobalSettings.range_settings.settings[setting_name]
 	spinbox.value = setting.value
+	
+	var line_edit = spinbox.get_line_edit()
+	if line_edit != null:
+		line_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		line_edit.add_theme_font_size_override("font_size", 19)
+		ThemeManager.apply_input_style(line_edit, 8)
+		
 	spinbox.value_changed.connect(func(val):
 		setting.set_value(val)
 	)
 	row.add_child(spinbox)
 	
+	# Plus Button
+	var plus_btn = Button.new()
+	plus_btn.text = "＋"
+	plus_btn.custom_minimum_size = Vector2(52, 52)
+	plus_btn.add_theme_font_size_override("font_size", 22)
+	ThemeManager.apply_nav_button_style(plus_btn, 8)
+	row.add_child(plus_btn)
+	
+	minus_btn.pressed.connect(func():
+		spinbox.value = clamp(spinbox.value - step, spinbox.min_value, spinbox.max_value)
+	)
+	plus_btn.pressed.connect(func():
+		spinbox.value = clamp(spinbox.value + step, spinbox.min_value, spinbox.max_value)
+	)
+	
 	if suffix != "":
 		var label2 = Label.new()
 		label2.text = suffix
+		label2.custom_minimum_size = Vector2(30, 0)
+		label2.add_theme_font_size_override("font_size", 18)
+		label2.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+		label2.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		row.add_child(label2)
-		
-	var spacer2 = Control.new()
-	spacer2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(spacer2)
 	
 	return row
 
@@ -894,13 +1174,17 @@ func _create_spinbox_setting_row(label_text: String, setting_name: String, min_v
 func _create_toggle_setting_row(label_text: String, setting_name: String) -> HBoxContainer:
 	var row = HBoxContainer.new()
 	row.name = label_text.replace(" ", "")
+	row.custom_minimum_size = Vector2(0, 52)
 	
 	var label = Label.new()
 	label.text = label_text
+	label.add_theme_font_size_override("font_size", 19)
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(label)
 	
 	var check = CheckButton.new()
+	check.custom_minimum_size = Vector2(72, 48)
 	var setting = GlobalSettings.range_settings.settings[setting_name]
 	check.set_pressed_no_signal(setting.value)
 	check.toggled.connect(func(on):
@@ -914,55 +1198,50 @@ func _create_toggle_setting_row(label_text: String, setting_name: String) -> HBo
 func _create_slider_setting_row(label_prefix: String, setting_name: String, min_val: float, max_val: float, step: float) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.name = label_prefix.replace(" ", "")
+	row.custom_minimum_size = Vector2(0, 52)
+	row.add_theme_constant_override("separation", 10)
 	
 	var setting = GlobalSettings.range_settings.settings[setting_name]
 	
 	var label := Label.new()
 	label.text = "%s: %.0f" % [label_prefix, setting.value]
-	label.custom_minimum_size = Vector2(180, 0)
+	label.add_theme_font_size_override("font_size", 19)
+	label.custom_minimum_size = Vector2(200, 0)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(label)
+	
+	var minus_btn := Button.new()
+	minus_btn.text = "－"
+	minus_btn.custom_minimum_size = Vector2(48, 48)
+	minus_btn.add_theme_font_size_override("font_size", 20)
+	ThemeManager.apply_nav_button_style(minus_btn, 8)
+	row.add_child(minus_btn)
 	
 	var slider := HSlider.new()
 	slider.min_value = min_val
 	slider.max_value = max_val
 	slider.step = step
 	slider.value = setting.value
+	slider.custom_minimum_size = Vector2(180, 48)
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.value_changed.connect(func(val):
 		setting.set_value(val)
 		label.text = "%s: %.0f" % [label_prefix, val]
 	)
 	row.add_child(slider)
+	
+	var plus_btn := Button.new()
+	plus_btn.text = "＋"
+	plus_btn.custom_minimum_size = Vector2(48, 48)
+	plus_btn.add_theme_font_size_override("font_size", 20)
+	ThemeManager.apply_nav_button_style(plus_btn, 8)
+	row.add_child(plus_btn)
+	
+	minus_btn.pressed.connect(func():
+		slider.value = clamp(slider.value - step, slider.min_value, slider.max_value)
+	)
+	plus_btn.pressed.connect(func():
+		slider.value = clamp(slider.value + step, slider.min_value, slider.max_value)
+	)
+	
 	return row
-
-
-
-func _apply_material_button_style(btn: Button, bg_color: Color):
-	var style_normal = StyleBoxFlat.new()
-	style_normal.bg_color = bg_color
-	style_normal.corner_radius_top_left = 20 # Pill style
-	style_normal.corner_radius_top_right = 20
-	style_normal.corner_radius_bottom_left = 20
-	style_normal.corner_radius_bottom_right = 20
-	style_normal.content_margin_left = 16
-	style_normal.content_margin_right = 16
-	style_normal.content_margin_top = 8
-	style_normal.content_margin_bottom = 8
-
-	var style_hover = style_normal.duplicate()
-	style_hover.bg_color = bg_color.lightened(0.15)
-
-	var style_pressed = style_normal.duplicate()
-	style_pressed.bg_color = bg_color.darkened(0.15)
-
-	var style_disabled = style_normal.duplicate()
-	style_disabled.bg_color = Color(0.3, 0.3, 0.3, 0.5)
-
-	btn.add_theme_stylebox_override("normal", style_normal)
-	btn.add_theme_stylebox_override("hover", style_hover)
-	btn.add_theme_stylebox_override("pressed", style_pressed)
-	btn.add_theme_stylebox_override("disabled", style_disabled)
-	btn.add_theme_color_override("font_color", Color.WHITE)
-	btn.add_theme_color_override("font_hover_color", Color.WHITE)
-	btn.add_theme_color_override("font_pressed_color", Color.WHITE)
-

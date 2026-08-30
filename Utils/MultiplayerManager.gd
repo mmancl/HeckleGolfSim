@@ -113,7 +113,9 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 			"lie_type": "fairway",
 			"color": player_colors[i % player_colors.size()],
 			"mulligan_history": {},
-			"last_shot_tracer_points": []
+			"last_shot_tracer_points": [],
+			"last_aim_target_pos": Vector3.ZERO,
+			"last_aim_yaw_offset_deg": 0.0
 		}
 		players.append(p)
 		register_player(p_name)
@@ -199,9 +201,12 @@ func start_hole() -> void:
 		# Set player position to their chosen tee box
 		var tee_color: String = p["tee"]
 		var tee_pos = tee_boxes.get(tee_color, [0.0, 0.0])
-		# Node coordinates in 3D: X and Z represent ground plane coordinates
-		p["position"] = Vector3(tee_pos[0], 0.02, tee_pos[1])
+		var is_driver = current_club.to_lower() in ["dr", "driver", "1w"]
+		var offset_y = 0.059435 if is_driver else 0.021335
+		p["position"] = Vector3(tee_pos[0], offset_y, tee_pos[1])
 		p["shot_history"].clear()
+		p["last_aim_target_pos"] = Vector3.ZERO
+		p["last_aim_yaw_offset_deg"] = 0.0
 
 	# Determine honors (Tee-off order)
 	if current_hole_index == 0:
@@ -252,11 +257,19 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 	# Record the tracer points of the shot that just ended
 	var tracer_pts = []
 	var player_node = get_tree().root.find_child("Player", true, false)
+	var last_aim_target = Vector3.ZERO
+	var last_aim_yaw = 0.0
 	if player_node != null:
 		var current_tracer = player_node.get("current_tracer")
 		if is_instance_valid(current_tracer) and "points" in current_tracer:
 			tracer_pts = current_tracer.points.duplicate()
+		if player_node.get("_last_aim_target_pos") != null:
+			last_aim_target = player_node.get("_last_aim_target_pos")
+		if player_node.get("_last_aim_yaw_offset_deg") != null:
+			last_aim_yaw = player_node.get("_last_aim_yaw_offset_deg")
 	active_player["last_shot_tracer_points"] = tracer_pts
+	active_player["last_aim_target_pos"] = last_aim_target
+	active_player["last_aim_yaw_offset_deg"] = last_aim_yaw
 
 	if not hole_ids.is_empty():
 		var hole_id: String = hole_ids[current_hole_index]
@@ -666,7 +679,9 @@ func add_new_player(player_name: String, tee_color: String) -> void:
 		"shot_reduction": 0.0,
 		"lie_type": "fairway",
 		"mulligan_history": {},
-		"last_shot_tracer_points": []
+		"last_shot_tracer_points": [],
+		"last_aim_target_pos": Vector3.ZERO,
+		"last_aim_yaw_offset_deg": 0.0
 	}
 	
 	# Mark all previous holes as "-" (null)
@@ -680,7 +695,9 @@ func add_new_player(player_name: String, tee_color: String) -> void:
 		var current_hole = hole_info[hole_id]
 		var tee_boxes = current_hole.get("Tee Boxes", {})
 		var tee_pos = tee_boxes.get(tee_color, [0.0, 0.0])
-		p["position"] = Vector3(tee_pos[0], 0.02, tee_pos[1])
+		var is_driver = current_club.to_lower() in ["dr", "driver", "1w"]
+		var offset_y = 0.059435 if is_driver else 0.021335
+		p["position"] = Vector3(tee_pos[0], offset_y, tee_pos[1])
 		
 	players.append(p)
 	register_player(player_name)
@@ -719,6 +736,8 @@ func toggle_player_active(idx: int, active: bool) -> void:
 		player["strokes"] = 0
 		player["last_shot_penalty"] = 0
 		player["shot_history"].clear()
+		player["last_aim_target_pos"] = Vector3.ZERO
+		player["last_aim_yaw_offset_deg"] = 0.0
 		
 		# Set position to current tee box
 		if current_hole_index < hole_ids.size():
@@ -727,7 +746,9 @@ func toggle_player_active(idx: int, active: bool) -> void:
 			var tee_boxes = current_hole.get("Tee Boxes", {})
 			# FIXED tee_color bug: use player["tee"] instead of undefined tee_color
 			var tee_pos = tee_boxes.get(player["tee"], [0.0, 0.0])
-			player["position"] = Vector3(tee_pos[0], 0.02, tee_pos[1])
+			var is_driver = current_club.to_lower() in ["dr", "driver", "1w"]
+			var offset_y = 0.059435 if is_driver else 0.021335
+			player["position"] = Vector3(tee_pos[0], offset_y, tee_pos[1])
 			
 		# If current active player is empty/inactive, select this one
 		var current_active = get_active_player()
@@ -884,6 +905,11 @@ func _serialize_players(players_array: Array[Dictionary]) -> Array:
 					pts_serialized.append(pt)
 			dup["last_shot_tracer_points"] = pts_serialized
 			
+		# Convert last_aim_target_pos
+		if dup.has("last_aim_target_pos") and typeof(dup["last_aim_target_pos"]) == TYPE_VECTOR3:
+			var pos: Vector3 = dup["last_aim_target_pos"]
+			dup["last_aim_target_pos"] = [pos.x, pos.y, pos.z]
+			
 		# Convert Vector3 in mulligan_history
 		if dup.has("mulligan_history") and typeof(dup["mulligan_history"]) == TYPE_DICTIONARY:
 			var mulligan_hist_serialized = {}
@@ -900,6 +926,9 @@ func _serialize_players(players_array: Array[Dictionary]) -> Array:
 							if entry_dup.has("end_pos") and typeof(entry_dup["end_pos"]) == TYPE_VECTOR3:
 								var pos: Vector3 = entry_dup["end_pos"]
 								entry_dup["end_pos"] = [pos.x, pos.y, pos.z]
+							if entry_dup.has("aim_target_pos") and typeof(entry_dup["aim_target_pos"]) == TYPE_VECTOR3:
+								var pos: Vector3 = entry_dup["aim_target_pos"]
+								entry_dup["aim_target_pos"] = [pos.x, pos.y, pos.z]
 							if entry_dup.has("tracer_points") and typeof(entry_dup["tracer_points"]) == TYPE_ARRAY:
 								var pts_serialized = []
 								for pt in entry_dup["tracer_points"]:
@@ -965,6 +994,14 @@ func _deserialize_players(serialized_array: Array) -> Array[Dictionary]:
 					pts_deserialized.append(pt)
 			dup["last_shot_tracer_points"] = pts_deserialized
 			
+		# Convert last_aim_target_pos back
+		if dup.has("last_aim_target_pos") and typeof(dup["last_aim_target_pos"]) == TYPE_ARRAY:
+			var arr = dup["last_aim_target_pos"]
+			if arr.size() == 3:
+				dup["last_aim_target_pos"] = Vector3(arr[0], arr[1], arr[2])
+			else:
+				dup["last_aim_target_pos"] = Vector3.ZERO
+				
 		# Convert Vector3 in mulligan_history back
 		if dup.has("mulligan_history") and typeof(dup["mulligan_history"]) == TYPE_DICTIONARY:
 			var mulligan_hist_deserialized = {}
@@ -983,6 +1020,10 @@ func _deserialize_players(serialized_array: Array) -> Array[Dictionary]:
 								var arr = entry_dup["end_pos"]
 								if arr.size() == 3:
 									entry_dup["end_pos"] = Vector3(arr[0], arr[1], arr[2])
+							if entry_dup.has("aim_target_pos") and typeof(entry_dup["aim_target_pos"]) == TYPE_ARRAY:
+								var arr = entry_dup["aim_target_pos"]
+								if arr.size() == 3:
+									entry_dup["aim_target_pos"] = Vector3(arr[0], arr[1], arr[2])
 							if entry_dup.has("tracer_points") and typeof(entry_dup["tracer_points"]) == TYPE_ARRAY:
 								var pts_deserialized = []
 								for pt in entry_dup["tracer_points"]:

@@ -1,78 +1,212 @@
-# Open Shot Golf Simulator
-![img missing](https://github.com/jhauck2/OpenShotGolf/blob/main/Screenshots/Screenshot_20250715_152214.png)
+# Heckle Golf Simulator
+![Heckle Golf Simulator Splash](assets/images/heckle_splash.png)
+
+An open-source, full-featured golf simulator and practice suite built with the Godot Engine (C# / .NET) using JoltPhysics3D and OpenFairway aerodynamics. 
+
+**Heckle Golf Simulator** (formerly Open Shot Golf / JaySimG) delivers real-time launch monitor integration (Square, PiTrac, GSPro Open Connect v1), full 18-hole multiplayer course play, worldwide OpenStreetMap real course generation, custom course editing, putting and chipping minigames, dynamic heckle audio commentary, and AI golfer swing pose analysis via MediaPipe.
+
+---
 
 ## Table of Contents
 - [Overview](#overview)
-- [Current State](#current-state)
-- [Feature Highlights](#feature-highlights)
-- [Color Theme](#color-theme)
-- [Ball Physics and Distance Calculation](#ball-physics-and-distance-calculation)
-- [Aerodynamics and Reynolds Number Modeling](#aerodynamics-and-reynolds-number-modeling)
-- [Surface and Rollout Tuning](#surface-and-rollout-tuning)
-- [Launch Monitor and Networking](#launch-monitor-and-networking)
-- [Data Sequence Diagram](#data-sequence-diagram)
-- [Sample Data Payload](#sample-data-payload)
+- [Key Features & Game Modes](#key-features--game-modes)
+  - [1. Driving Range & Telemetry](#1-driving-range--telemetry)
+  - [2. Full Course Play & Multiplayer](#2-full-course-play--multiplayer)
+  - [3. Minigames](#3-minigames)
+  - [4. On-Course Practice Mode](#4-on-course-practice-mode)
+  - [5. History, Session Logs & Shot Dispersion](#5-history-session-logs--shot-dispersion)
+  - [6. Player Management & Profiles](#6-player-management--profiles)
+  - [7. Achievements & Gamification](#7-achievements--gamification)
+- [Course Generation & Creator](#course-generation--creator)
+  - [OpenStreetMap (OSM) Real-World Course Importer](#openstreetmap-osm-real-world-course-importer)
+  - [In-Game Custom Course Creator](#in-game-custom-course-creator)
+  - [Course Loading & Discovery Architecture](#course-loading--discovery-architecture)
+- [Dynamic Commentary & Heckle Announcer Engine](#dynamic-commentary--heckle-announcer-engine)
+- [AI Golfer Camera & MediaPipe Pose Tracking](#ai-golfer-camera--mediapipe-pose-tracking)
+- [Ball Physics & Aerodynamics](#ball-physics--aerodynamics)
+  - [Reynolds Number Aerodynamic Modeling](#reynolds-number-aerodynamic-modeling)
+  - [Turf Interaction & Rollout Tuning](#turf-interaction--rollout-tuning)
+- [Hardware & Launch Monitor Connectivity](#hardware--launch-monitor-connectivity)
+  - [Square Launch Monitor (Direct BLE / Serial / TCP)](#square-launch-monitor-direct-ble--serial--tcp)
+  - [GSPro Open Connect v1 TCP Listener](#gspro-open-connect-v1-tcp-listener)
+  - [Data Sequence Diagram](#data-sequence-diagram)
+  - [Sample Data Payload](#sample-data-payload)
+  - [Testing & Shot Injection Utilities](#testing--shot-injection-utilities)
 - [Build and Run](#build-and-run)
+  - [Prerequisites](#prerequisites)
+  - [Clone & Import](#clone--import)
+  - [Running the Project](#running-the-project)
+  - [Android Wireless Debugging](#android-wireless-debugging)
+  - [Android MediaPipe Pose Plugin Rebuild](#android-mediapipe-pose-plugin-rebuild)
+  - [Publishing to Google Play Store (Generating .AAB)](#publishing-to-google-play-store-generating-aab)
 - [Controls](#controls)
-- [Project Layout](#project-layout)
-- [Future Plans](#future-plans)
+- [Project Architecture & Directory Layout](#project-architecture--directory-layout)
+
+---
 
 ## Overview
-Open Shot Golf (formerly JaySimG) is an open source golf simulator built with the Godot Engine. It is designed to work out of the box with the PiTrac Launch Monitor and any GSPro-style interface that sends ball data to the configured port. PiTrac project: https://github.com/jamespilgrim/PiTrac
+Heckle Golf Simulator is designed to provide an open, hackable, and expandable golf simulation environment running natively on Windows, Linux, and Android. It pairs directly with launch monitors (such as the Square Golf Launch Monitor and PiTrac) or with any hardware that transmits GSPro Open Connect v1 JSON packets over TCP.
 
-## Current State
-- **Launch monitor support:** Officially tested with PiTrac and Square. 
-- **Game modes:** Driving range with data readouts, club selection, and range session recording.
-- **Platforms:** Linux and Windows confirmed; macOS is untested but expected to work.
+Whether you want to dial in your yardages on the range, play an 18-hole match against friends on real-world golf courses downloaded straight from satellite open data, work on your short game with break-reading putting minigames, or have a witty announcer roast your slices, Heckle Golf Simulator has you covered.
 
-## Feature Highlights
-- Uses GSPro Open Connect v1 https://gsprogolf.com/GSProConnectV1.html TCP listener for incoming ball/club data.
-- Physics based ball flight with drag, lift (Magnus), grass drag, and friction modeling.
-- On-range telemetry: carry, total, apex, offline, and shot trails.
-- Environment tuning for temperature and altitude, impacting air density and flight.
-- Range session recorder and basic UI for club selection and shot playback.
+---
 
-## Color Theme
-- **Blue:** `0b2e4feb` (normalized: `#0B2E4FEB`), `#163655`
-- **Light Blue:** `101620db` (normalized: `#101620DB`), `#1620DB`
-- **Red Flag Color:** `#820000`
+## Key Features & Game Modes
 
-## Ball Physics and Distance Calculation
-- Ball flight is driven by `Player/ball.gd` using force/torque helpers in `physics/ball_physics.gd` (gravity, drag, Magnus lift, grass drag, and frictional torque for bounce and rollout).
-- Spin, launch angle, and ball speed are applied in `hit_from_data`, and the ball transitions through FLIGHT, ROLLOUT, and REST states.
-- Distance metrics come from `Player/player.gd`: horizontal distance is `Vector2(x, z).length()` in meters, converted to yards in range UI when needed (`Courses/Range/range.gd`). Carry, apex, and offline distances are tracked until the ball rests.
+### 1. Driving Range & Telemetry
+- **Full On-Screen Telemetry HUD**: Real-time readouts for Carry Distance, Total Distance, Ball Speed, Club Speed, Smash Factor, Launch Angles (Vertical Launch Angle / Horizontal Launch Angle), Total Spin, Backspin, Sidespin, Spin Axis, Apex Height, and Offline yards.
+- **Dynamic Shot Trails & Dispersion Ellipses**: 3D ribbon trails rendered in real time, with color-coded dispersion groupings mapped by club type.
+- **Target Greens & Distance Markers**: Multiple target greens and flags across realistic range distances with yardage markers.
+- **Environmental Simulation**: Real-time atmospheric controls for Altitude, Temperature, Humidity, and Wind speed/direction, adjusting air density and ball drag on the fly.
+- **Surface Presets**: Configurable turf conditions (Firm, Fairway, Soft Fairway, Rough) adjusting ground friction and rollout.
 
-## Aerodynamics and Reynolds Number Modeling
-- Drag (Cd) and lift (Cl) coefficients are calculated in `physics/aerodynamics.gd` based on Reynolds number (Re) and spin ratio (S).
-- **Reynolds number** determines flow regime: `Re = (air_density × velocity × diameter) / viscosity`
-  - **Re < 50k**: Low Reynolds regime (slow wedges/chips < 77 mph) - constant Cl = 0.1
-  - **50k < Re < 75k**: Polynomial interpolation between Re-specific models
-  - **75k < Re < 200k**: Linear model for most normal golf shots (77-155 mph)
-  - **Re > 200k**: Very high Reynolds (extreme long drive competition) - clamped linear model
-- A Python script (`assets/scripts/reynolds_calculator.py`) is provided to analyze Reynolds numbers for different shot speeds and validate aerodynamic regime assignments.
-- This implementation ensures physically realistic behavior across the full range of golf shot speeds, from chips to drivers.
+### 2. Full Course Play & Multiplayer
+- **Complete Round Simulation**: Support for 9-hole and 18-hole rounds across built-in, imported, or user-created golf courses.
+- **Multiple Game Formats**: Stroke Play, Match Play, and Skins game modes.
+- **USGA Rules of Play**: Automated turn management with "away player hits first" and honors rotation based on lowest previous-hole scores.
+- **Overhead GPS Minimap**: Real-time top-down course overview displaying tee boxes, fairways, hazards, ball positions, and pin locations, with automated green zoom when on the putting surface.
+- **Distance to Pin HUD**: Dynamic calculation showing distances to the Front, Middle, and Back of the green.
+- **Full Scorecard & Mulligan Support**: Interactive in-game scorecard overlay and optional mulligan allowances for casual play.
 
-## Surface and Rollout Tuning
-- Range settings expose a surface preset (Firm/Fairway/Soft Fairway/Rough) that maps to ground friction and grass drag parameters in `physics/surface.gd` (`u_k`, `u_kr`, `nu_g`).
-- Firm uses lower friction/grass drag for faster rollout; Rough uses higher values to shorten rollout; Fairway sits between.
-- These were limited tested with PiTrac hits with limited ball speeds between 40-80mph. These numbers are always subjected to weather (morning dew), slightly longer grass in rough vs shorter, etc. Overall, its a good starting point to give options. In the future the code leaves room to scale to sand, and different types of grass (e.g. FIRM_FESCUE vs FIRM_BERMUDA)
-- Defaults are heuristic (tuned for believable rollout) and can be adjusted in the range settings UI. They are not direct measurements from a single study but informed by typical rolling/sliding friction ranges on turf and the drag curve below.
-- References: 
-  - USGA Green Speed Physics (Stimpmeter deceleration): https://www.waddengolfacademy.com/putting/USGA%20Green%20Speed%20Physics.pdf
-  - Jenkins et al., “Drag Coefficients of Golf Balls,” World Journal of Mechanics 2018 (Cd vs Re): https://www.scirp.org/pdf/WJM_2018062515520887.pdf
-  - USGA Stimpmeter Booklet (green speed measurement): https://www.usga.org/content/dam/usga/pdf/imported/StimpmeterBookletFINAL.pdf
+![Course Play Tee View](assets/images/screenshots/course_play_tee_view.png)
+*Course Play: 3D tee box view with real-time distance HUD, ball status, and GPS minimap.*
 
-## Launch Monitor and Networking
-- A TCP server in `addons/launch_monitors/common/tcp_server/TcpServer.cs` listens on port `49152` for JSON payloads. When `ShotDataOptions.ContainsBallData` is true, ball data is emitted to the gameplay layer.
-- Good data responses return `{ "Code": 200 }`; malformed data returns a 50x response. Adjust your launch monitor to target the host IP and port `49152`.
-- Keyboard shortcuts remain available for local testing without hardware (see Controls).
+![Overhead GPS Course View](assets/images/screenshots/course_play_overhead_map.png)
+*Course Play: Top-down GPS overview displaying hole layout, shot aim trajectory corridor, and quick toggles.*
 
-## Data Sequence Diagram
+![In-Game Scorecard Overlay](assets/images/screenshots/scorecard_view.png)
+*Full 18-hole scorecard overlay with par, yardage breakdown, and live scoring.*
+
+### 3. Minigames
+- **Putting Practice**:
+  - Procedurally generated, undulating putting green featuring realistic ridges, slopes, and break lines.
+  - Interactive 3D Orbit Camera (Right-click drag, keyboard A/D or arrow keys, and UI aim slider) to read break contours from any vantage point.
+  - Floating target selection panel with quick-switch targets (Holes 1–5).
+  - Accurate cup entry snap and drop physics with authentic golf cup sound effects.
+
+![Putting Practice Minigame](assets/images/screenshots/putting_practice_minigame.png)
+*Putting Practice: Break-reading, target cup selection, power/aim offset sliders, and accuracy tracking.*
+
+- **Chipping Practice**:
+  - Staggered island targets spaced across 50, 100, 150, 200, 250, and 300 feet surrounded by water.
+  - Authentic multi-tier island construction with wooden retaining wall bulkheads and turf tops.
+  - Staggered layout requiring precise horizontal aim (HLA) and trajectory control.
+  - Dynamic follow-camera tracking ball flight and splash/rest states.
+
+![Chipping Practice Minigame](assets/images/screenshots/chipping_practice_minigame.png)
+*Chipping Practice: Multi-distance island targets over water with launch speed and loft controls.*
+
+### 4. On-Course Practice Mode
+- Select any hole on any course to practice specific shots repeatedly without advancing scores.
+- Free ball placement and instant reset options for dialing in approach shots or trouble escapes.
+
+### 5. History, Session Logs & Shot Dispersion
+- **Session Recorder**: Automatically saves all hit data, shot vectors, and club selections.
+- **Shot Playback & Review**: Revisit prior sessions, inspect individual shot statistics, and review club distance averages and dispersion groupings.
+- **Match History & Resumption**: Resume in-progress 9 or 18-hole rounds or review previous match scorecards.
+
+![Match History & Saved Rounds](assets/images/screenshots/match_history_menu.png)
+*Match History: Manage saved rounds, inspect scorecards, or resume in-progress matches.*
+
+### 6. Player Management & Profiles
+- Manage multiple golfers with custom player names, handicaps, preferred tee boxes, and distinct player color tags for minimap and HUD identification.
+
+### 7. Achievements & Gamification
+- Integrated `AchievementManager` system that monitors shot metrics in real time.
+- On-screen popups celebrating milestones such as 300+ yard drives, holes-in-one, pin-seeking approaches, and consecutive greens in regulation.
+
+---
+
+## Course Generation & Creator
+
+### OpenStreetMap (OSM) Real-World Course Importer
+`Courses/OsmMapLoader.cs` and the in-game Download Dialog allow you to search and download **any golf course in the world** directly into the game:
+- **Global Search**: Queries OpenStreetMap Overpass API endpoints for `leisure=golf_course`, `golf=fairway`, `golf=green`, `golf=bunker`, `golf=tee`, and `golf=hole`.
+- **Elevation Integration**: Downloads digital terrain elevation models to generate realistic 3D topography, rolling hills, and elevation changes.
+- **3D Procedural Mesh Generation**: Generates 3D polygonal meshes (`ArrayMesh`) for each surface with collision shapes and surface physics tags (`"surface_type"`).
+- **Automated Caching**: Courses are compiled into Godot `PackedScene` files (`user://courses/{course_name}/course.tscn`) with structured metadata (`course.json`) for instantaneous loading on subsequent playthroughs.
+
+![OpenStreetMap Course Downloader](assets/images/screenshots/osm_course_downloader.png)
+*OpenStreetMap Downloader: Search real-world golf courses worldwide and procedurally generate 3D course layouts.*
+
+### In-Game Custom Course Creator
+- Use the built-in Custom Course Creator (`UI/CustomCourseCreator/`) to layout your own golf holes.
+- Plot tee boxes, fairway boundaries, green perimeters, and hazard locations with interactive vector tools.
+
+### Course Loading & Discovery Architecture
+![Course Addition Architecture](assets/images/course_addition_components.png)
+- `CourseValidator` validates each course directory upon discovery (verifying `course.json`, title, par configuration, and scene integrity).
+- `CourseList` indexes validated courses into UI metadata for fast, responsive selection.
+- `CourseManager` instantiates and manages course transitions through `SceneManager`.
+
+---
+
+## Dynamic Commentary & Heckle Announcer Engine
+The announcer engine (`addons/announcer/AnnouncerEngine.cs`) brings personality and humor to every round:
+- **Smart Context Detection**: Analyzes ball telemetry in real time to categorize shots:
+  - **Slices & Hooks**: Humorous commentary on sharp curves and migrating balls.
+  - **Crushed Drives / Bombs**: Praise for flushed shots traveling over 270+ yards.
+  - **Bunkers & Kitty Litter**: Beach roasts when landing in sand traps.
+  - **Wormburners & Skyballs**: Roasts for low skimmers (< 4° launch) or sky-high popups.
+  - **Duffs & Topped Shots**: Witty remarks for shots under 20 yards.
+  - **Idle Banter**: Quips if the golfer takes too long between swings (45-second timer).
+- **Text-to-Speech (TTS) Integration**: Utilizes native platform TTS engines (Godot `DisplayServer.TtsSpeak` and `AndroidTTS.cs`).
+- **Customizable**: Adjust pitch, rate, speech voice, and independently toggle praise or heckles in the Settings menu.
+
+---
+
+## AI Golfer Camera & MediaPipe Pose Tracking
+Heckle Golf Simulator includes a real-time swing analysis and golfer pose estimation system (`UI/GolferCamera/`):
+- **Native Android MediaPipe GPU Plugin**: Powered by `MediaPipePosePlugin.aar`, utilizing MediaPipe Pose Landmarker Lite running directly on the Android GPU.
+- **Live 33-Point Skeletal Landmark Overlay**: Displays full-body skeletal tracking over the golfer's live camera feed.
+- **Real-Time Swing Telemetry**:
+  - Swing tempo and backswing-to-downswing timing ratio (e.g., 3:1 tempo).
+  - Spine angle maintenance throughout the swing.
+  - Shoulder turn and hip rotation angles.
+  - Top-of-backswing (address), impact, and follow-through detection.
+- **Swing Replay Modal**: Buffer and replay recorded swings with slow-motion scrub and frame-by-frame review.
+
+---
+
+## Ball Physics & Aerodynamics
+Ball flight is powered by the **OpenFairway v1.0.6** physics system combined with Godot's **JoltPhysics3D** engine:
+- Ball flight transitions through discrete states: `FLIGHT`, `ROLLOUT`, and `REST`.
+- Horizontal distance is calculated in meters and converted to yards in UI readouts (`carry`, `total`, `apex`, `offline`).
+
+### Reynolds Number Aerodynamic Modeling
+Drag ($C_d$) and Lift ($C_l$) coefficients are calculated dynamically in `physics/aerodynamics.gd` based on Reynolds number ($Re$) and spin ratio ($S$):
+$$Re = \frac{\rho \cdot v \cdot d}{\mu}$$
+- **$Re < 50\text{k}$**: Low Reynolds regime (slow wedges and short chips under 77 mph) — constant $C_l = 0.1$.
+- **$50\text{k} < Re < 75\text{k}$**: Polynomial transition interpolation between regime models.
+- **$75\text{k} < Re < 200\text{k}$**: Linear model for normal golf shots (77–155 mph).
+- **$Re > 200\text{k}$**: Clamped high-velocity aerodynamic regime (extreme long drive speeds).
+- A Python validation script (`assets/scripts/reynolds_calculator.py`) is provided for aerodynamic model verification.
+
+### Turf Interaction & Rollout Tuning
+- Surface presets (Firm, Fairway, Soft Fairway, Rough, Sand, Green) dynamically apply kinetic friction ($\mu_k$), rolling resistance ($\mu_{kr}$), and grass drag ($\nu_g$) via `physics/surface.gd`.
+- Informed by USGA Stimpmeter and turf friction literature:
+  - [USGA Green Speed Physics (Deceleration on Greens)](https://www.waddengolfacademy.com/putting/USGA%20Green%20Speed%20Physics.pdf)
+  - [Jenkins et al., “Drag Coefficients of Golf Balls” (World Journal of Mechanics 2018)](https://www.scirp.org/pdf/WJM_2018062515520887.pdf)
+  - [USGA Stimpmeter Measuring Guide](https://www.usga.org/content/dam/usga/pdf/imported/StimpmeterBookletFINAL.pdf)
+
+---
+
+## Hardware & Launch Monitor Connectivity
+
+### Square Launch Monitor (Direct BLE / Serial / TCP)
+Full native support for the Square Golf Launch Monitor under `addons/launch_monitors/square/`:
+- Connects directly via Bluetooth Low Energy (BLE), Serial Port, or TCP network socket.
+- Decodes full binary protocol packets into Godot shot metrics (Ball Speed, Launch Angle, Direction, Total Spin, Spin Axis, Club Speed).
+- Real-time device state events (`Connected`, `Ready`, `BallDetected`, `ShotReceived`, `Disconnected`).
+
+### GSPro Open Connect v1 TCP Listener
+A built-in C# TCP server (`addons/launch_monitors/common/tcp_server/TcpServer.cs`) listens on port **`49152`** for standard GSPro Open Connect v1 JSON packets. Any launch monitor bridge (PiTrac, Garmin, FlightScope, etc.) sending to port 49152 works seamlessly out of the box.
+
+### Data Sequence Diagram
 ![System Data Flow](assets/images/dataflow_ssd.png)
 
-## Sample Data Payload
+### Sample Data Payload
 Example GSPro Open Connect v1 message used for socket testing (`assets/data/drive_test_shot.json`):
-
 ```json
 {
     "DeviceID": "PiTrac LM 1.1",
@@ -111,25 +245,30 @@ Example GSPro Open Connect v1 message used for socket testing (`assets/data/driv
 }
 ```
 
+### Testing & Shot Injection Utilities
+- **In-Game Shot Injector**: Access the built-in injector UI (`UI/shot_injector.gd`) to test shots without physical hardware.
+- **Python Shot Injector**: Run `python inject_shot.py` to send customizable test shot payloads to port 49152.
+- **PowerShell Script**: Run `.\inject_shot.ps1` for rapid Windows socket testing.
+
+---
+
 ## Build and Run
-### Install Godot
-Download and install the .NET version of Godot 4.6 for your operating system: https://godotengine.org/download  
-Download and install the .NET SDK version 9.0 or later.
 
-### Clone Repository
-- Clone repository into a local folder:  
-  `git clone https://github.com/jhauck2/OpenShotGolf.git`
+### Prerequisites
+1. **Godot Engine**: Download and install **Godot 4.6+ or 4.7 .NET (C#) edition**: https://godotengine.org/download
+2. **.NET SDK**: Install **.NET SDK version 9.0 or later**: https://dotnet.microsoft.com/download
 
-### Import Project
-- Open Godot.
-- In the Project Manager window, select **Import**.
-- Navigate to the `OpenShotGolf` folder and select `project.godot`.
+### Clone & Import
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/mmancl/HeckleGolfSim.git
+   ```
+2. Open the Godot Project Manager, click **Import**, select `project.godot` inside the repository directory, and confirm.
+3. Build the C# solution inside Godot (click **Build** in the top right corner of the Godot editor).
 
-### Run
-- Press the play button or `F5` to start the project.
-- When opening the project for the first time, Godot errors may appear due to importing add-ons. Simply close and re-open. 
-- Set your launch monitor to send data to port `49152`, or use the local hit/reset shortcuts below.
-  - Python script `~/Resources/SocketTest/SocketTest.py` could be used to test TCP functionality (defaults to `assets/data/drive_test_shot.json`). 
+### Running the Project
+- Press **F5** or the Play button in Godot to run the main menu.
+- If testing locally, use keyboard shortcut `H` to simulate a hit or `R` to reset the ball.
 
 ### Android Wireless Debugging
 If you want to deploy and debug directly to an Android device over Wi-Fi, Godot requires you to pair and connect the device via ADB first:
@@ -146,6 +285,7 @@ If you want to deploy and debug directly to an Android device over Wi-Fi, Godot 
    ```bash
    adb connect <IP_ADDRESS>:<PORT>
    ```
+
 ### Android MediaPipe Pose Plugin Rebuild
 To rebuild the native Android GPU MediaPipe pose detection plugin (`MediaPipePosePlugin.aar`):
 1. Ensure the task model `pose_landmarker_lite.task` is located in `android/plugins/MediaPipePosePlugin/src/main/assets/`.
@@ -156,23 +296,145 @@ To rebuild the native Android GPU MediaPipe pose detection plugin (`MediaPipePos
    - Copy `android/plugins/MediaPipePosePlugin/build/outputs/aar/MediaPipePosePlugin-release.aar` to `android/plugins/MediaPipePosePlugin/MediaPipePosePlugin.aar`.
    - Verify the copied `.aar` is **~5 MB** in size (containing the bundled MediaPipe ML model).
 
+### Publishing to Google Play Store (Generating .AAB)
+
+To publish Heckle Golf Simulator to the Google Play Store (including Closed, Internal, or Open Beta testing tracks), Google requires an **Android App Bundle (`.aab`)** signed with a production release key.
+
+#### 1. Prerequisites
+- **Godot 4.6+ or 4.7 .NET Edition** with official **Godot Android Export Templates** installed (`Editor` -> `Manage Export Templates...`).
+- **Android SDK & Command-Line Tools** (API level 34+), configured in Godot under `Editor` -> `Editor Settings` -> `Export` -> `Android` (`Android SDK Path`).
+- **Java OpenJDK 17 or 21** (contains `keytool` and `jarsigner`).
+
+#### 2. Step 1: Generate a Release Keystore (App Signing Key)
+Google Play requires every release build to be cryptographically signed. You can generate a dedicated 25-year RSA release keystore using the provided script or `keytool`:
+
+- **Using PowerShell (Recommended on Windows):**
+  ```powershell
+  .\generate_keystore.ps1
+  ```
+- **Using Batch:**
+  ```cmd
+  generate_keystore.bat
+  ```
+- **Manual Command Line:**
+  ```bash
+  keytool -genkeypair -v -keystore release.keystore -alias hecklegolf -keyalg RSA -keysize 2048 -validity 10000
+  ```
+  *(Enter your keystore password, organization name, and country code when prompted. This creates `release.keystore` in your project folder).*
+
+> [!CAUTION]
+> **Keep your `release.keystore` safe and backed up!** If you lose this keystore file, Google Play will permanently reject future updates for this application ID. `release.keystore` is already excluded in `.gitignore` to prevent committing secrets to git.
+
+#### 3. Step 2: Configure Android Export Preset in Godot
+The Android export preset in `export_presets.cfg` is pre-configured with:
+- **Unique Name (Package ID)**: `com.hecklegolf.simulator`
+- **Application Name**: `Heckle Golf Simulator`
+- **Export Format**: `Export AAB (.aab)` (`gradle_build/export_format=1`)
+- **Architectures**: `arm64-v8a` (required 64-bit Google Play standard) and `x86_64` (Chromebooks & Google Play Games on PC)
+- **Target SDK**: `34` (Android 14+) / **Min SDK**: `30` (Android 11+)
+
+To link your keystore in Godot:
+1. Open Godot and go to **Project** -> **Export...**.
+2. Select the **Android** preset.
+3. In the right-hand **Options** inspector, scroll down to the **Keystore** section:
+   - **Release**: Path to your `release.keystore` (e.g. `C:/Users/<User>/Repositories/HeckleGolfSim/release.keystore`).
+   - **Release User**: `hecklegolf` (or the alias entered when generating).
+   - **Release Password**: The password you set during keystore generation.
+4. Set the **Version / Code** (e.g., `1`, `2`, `3` — must increase with each Play Console upload) and **Version / Name** (e.g., `0.14.5`).
+
+#### 4. Step 3: Export the `.aab` Bundle
+You can build the bundle using any of the following methods:
+
+- **Method A — Using the Build Script (Fastest):**
+  ```powershell
+  .\build_aab.ps1
+  ```
+  *(or `build_aab.bat` in Command Prompt)*. This builds the bundle via Gradle and outputs `HeckleGolfSim.aab` directly in the project root.
+
+- **Method B — Directly inside the Godot Editor:**
+  1. Go to **Project** -> **Export...**.
+  2. Select the **Android** preset.
+  3. Click **Export Project...** at the bottom.
+  4. Ensure **Export With Debug** is **UNCHECKED**.
+  5. Choose filename `HeckleGolfSim.aab` and click **Save**.
+
+- **Method C — Godot CLI (Headless CI/CD):**
+  ```bash
+  godot --headless --export-release "Android" HeckleGolfSim.aab
+  ```
+
+#### 5. Step 4: Uploading & Publishing Beta on Google Play Console
+1. **Log in to Play Console**: Go to [Google Play Console](https://play.google.com/console).
+2. **Create Application**:
+   - Click **Create app**, enter App name: `Heckle Golf Simulator`, select **Game**, **Free** (or Paid), and accept developer policies.
+3. **Set Up Closed / Internal Beta Track**:
+   - In the left sidebar, navigate to **Testing** -> **Closed testing** (or **Internal testing** for immediate rollout to trusted testers).
+   - Click **Create track** (or select the Alpha/Beta track) and click **Create new release**.
+4. **Upload the AAB**:
+   - Drag and drop `HeckleGolfSim.aab` into the **App bundles** dropzone.
+   - Enter release notes (e.g., *“Initial Beta release: 18-hole courses, driving range, putting/chipping minigames, Square LM integration, MediaPipe AI swing tracking”*).
+5. **App Declarations & Permissions**:
+   - Complete the **App Content** dashboard (Data Safety, Privacy Policy, Target Audience, Content Rating).
+   - When asked about camera and Bluetooth permissions:
+     - **Camera**: Used locally on-device for MediaPipe AI golfer swing analysis and pose tracking (no video data transmitted off-device).
+     - **Bluetooth**: Used for wireless connection to Square Golf Launch Monitor hardware.
+     - **Internet**: Used for OpenStreetMap real course generation and GSPro Open Connect v1 socket communication.
+6. **Roll Out Release**:
+   - Click **Next** -> **Save** -> **Review release** -> **Start rollout to Closed/Internal testing**.
+
+---
+
 ## Controls
-- `h`: Simulate a built-in hit with sample ball data.
-- `r`: Reset the ball and clear the shot trail.
+| Action | Key / Input | Context |
+| :--- | :--- | :--- |
+| **Simulate Hit** | `H` | Range, Course Play, Minigames |
+| **Reset Ball** | `R` | Range, Course Play, Minigames |
+| **Orbit Aim / Look Around** | **Right-Click Drag** | Putting & Chipping Minigames |
+| **Rotate Aim Yaw** | `A` / `D` or **Left / Right Arrows** | Putting & Chipping Minigames |
+| **Select Target** | **Click Left Target Panel** | Putting & Chipping Minigames |
+| **Open Menu / Settings** | **Escape** or **UI Cog Button** | All Game Modes |
 
-## Project Layout
-- `Player/`: Ball physics, player controller, and shot metric tracking.
-- `physics/`: Shared physics modules (BallPhysics, Aerodynamics, surfaces, docs).
-- `addons/launch_monitors/`: Launch monitor implementations (e.g. `square/`) plus shared plumbing under `common/` (`common/bluetooth/` transport, `common/tcp_server/` GSPro listener) and the `launch_monitor_manager.gd` autoload.
-- `Courses/Range/`: Range scene, UI, and yardage output.
-- `Resources/`, `UI/`, `Utils/`: Art assets, UI components, and helper scripts.
+---
 
-## Course Loader/Finder Diagram
-The idea is to reduce redundancy and simplify creating new courses. CourseValidator validates each course directory during discovery (config parsing, title extraction, scene resolution). CourseList stores pre-validated data as item metadata so accessors are simple lookups. CourseManager (loaded as a scene by SceneManager) parses the `course.json` config, applies defaults, and loads the course scene. For more technical details, please view `~/assets/images/course_addition.png`
+## Project Architecture & Directory Layout
+```text
+HeckleGolfSim/
+├── addons/
+│   ├── announcer/             # Heckle announcer C# engine & Android TTS bindings
+│   ├── launch_monitors/       # Square LM, GSPro TCP server, and LM manager
+│   ├── openfairway/           # OpenFairway realistic ball aerodynamics physics
+│   ├── phantom_camera/        # Dynamic cinematic & follow camera system
+│   ├── sky_3d/ & terrain_3d/  # Realistic sky, lighting, and terrain rendering
+├── android/                   # Android build templates & native MediaPipe plugin
+├── assets/                    # Textures, UI artwork, sample shot data, test scripts
+├── Courses/
+│   ├── CoursePlay/            # Multi-hole course play, HUD, minimap, rules
+│   ├── CourseSelector/        # Course picker, validation, and preview
+│   ├── Minigames/             # Putting Practice & Chipping Practice minigames
+│   ├── OsmMapLoader.cs        # OpenStreetMap global course downloader & 3D builder
+│   ├── OsmDownloadDialog/     # In-game OSM search & download dialog
+│   └── Range/                 # Driving range scene and target markers
+├── Player/                    # Ball physics controller, telemetry calculations
+├── physics/                   # Aerodynamics (Reynolds/spin ratio), surfaces, turf
+├── UI/
+│   ├── AchievementPopup/      # Milestone reward notifications
+│   ├── ClubSelector/          # Club selection carousel & bag configuration
+│   ├── CustomCourseCreator/   # Interactive custom course editor
+│   ├── GolferCamera/          # MediaPipe skeleton overlay, swing analyzer & replay
+│   ├── HistoryMenu/           # Historical shot data & session analytics
+│   ├── MainMenu/              # Responsive card-based main menu
+│   ├── MiniGamesMenu/         # Minigames hub selector
+│   ├── PlayersMenu/           # Golfer profiles, handicaps, and colors
+│   ├── Settings/              # Environmental, display, and LM configuration
+│   └── theme/                 # Centralized UI design tokens and style rules
+└── Utils/                     # SceneManager, MultiplayerManager, AchievementManager
+```
 
-![](/assets/images/course_addition_components.png)
+---
 
-## Future Plans
-- Full course play (currently in early design).
-- Additional range features and recording improvements.
-- Mobile (Android/iOS) builds once platform pipelines are tested.
+## License & Credits
+- Built with [Godot Engine](https://godotengine.org/) (.NET C#).
+- Forked and evolved from [OpenShotGolf](https://github.com/jhauck2/OpenShotGolf) by jhauck2.
+- Physics modeled with [OpenFairway](https://github.com/jesseincode/OpenFairway) and [Jolt Physics](https://github.com/jrouwe/JoltPhysics).
+- Launch monitor integrations inspired by [PiTrac](https://github.com/jamespilgrim/PiTrac) and [GSPro Open Connect v1](https://gsprogolf.com/GSProConnectV1.html).
+- Global golf course geometry courtesy of [OpenStreetMap](https://www.openstreetmap.org/) contributors.

@@ -230,7 +230,7 @@ func _ready() -> void:
 	
 	var download_btn = Button.new()
 	download_btn.text = "Download Course"
-	download_btn.custom_minimum_size = Vector2(180, 48)
+	download_btn.custom_minimum_size = Vector2(180, 52)
 	download_btn.add_theme_font_size_override("font_size", 20)
 	download_btn.pressed.connect(func():
 		var dialog_scene = load("res://Courses/OsmDownloadDialog/osm_download_dialog.tscn")
@@ -245,7 +245,7 @@ func _ready() -> void:
 	
 	var delete_btn = Button.new()
 	delete_btn.text = "Delete Course"
-	delete_btn.custom_minimum_size = Vector2(150, 48)
+	delete_btn.custom_minimum_size = Vector2(150, 52)
 	delete_btn.add_theme_font_size_override("font_size", 20)
 	delete_btn.pressed.connect(_on_delete_course_pressed)
 	action_row.add_child(delete_btn)
@@ -258,7 +258,7 @@ func _ready() -> void:
 	add_child(delete_confirm_dialog)
 	
 	preview_button.text = "Preview Course"
-	preview_button.custom_minimum_size = Vector2(160, 48)
+	preview_button.custom_minimum_size = Vector2(160, 52)
 	preview_button.add_theme_font_size_override("font_size", 20)
 	ThemeManager.apply_secondary_button_style(preview_button)
 	preview_button.disabled = true
@@ -266,7 +266,7 @@ func _ready() -> void:
 	action_row.add_child(preview_button)
 
 	start_button.text = "Play Course"
-	start_button.custom_minimum_size = Vector2(160, 48)
+	start_button.custom_minimum_size = Vector2(160, 52)
 	start_button.add_theme_font_size_override("font_size", 20)
 	ThemeManager.apply_primary_button_style(start_button)
 	start_button.disabled = true
@@ -369,17 +369,17 @@ func _create_tab_selector() -> HBoxContainer:
 
 	real_tab_btn = Button.new()
 	real_tab_btn.text = "Real Courses"
-	real_tab_btn.custom_minimum_size = Vector2(160, 44)
+	real_tab_btn.custom_minimum_size = Vector2(160, 48)
 	real_tab_btn.add_theme_font_size_override("font_size", 20)
 
 	custom_tab_btn = Button.new()
 	custom_tab_btn.text = "Custom Courses"
-	custom_tab_btn.custom_minimum_size = Vector2(160, 44)
+	custom_tab_btn.custom_minimum_size = Vector2(160, 48)
 	custom_tab_btn.add_theme_font_size_override("font_size", 20)
 
 	create_custom_btn = Button.new()
 	create_custom_btn.text = "+ Create Custom Course"
-	create_custom_btn.custom_minimum_size = Vector2(220, 44)
+	create_custom_btn.custom_minimum_size = Vector2(230, 48)
 	create_custom_btn.add_theme_font_size_override("font_size", 20)
 
 	real_tab_btn.pressed.connect(func(): _switch_course_tab("Real"))

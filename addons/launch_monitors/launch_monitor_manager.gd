@@ -13,7 +13,7 @@ signal club_code_changed(club_code: String)
 signal sensor_data_updated(pos_x: int, pos_y: int, pos_z: int, is_ready: bool, is_detected: bool)
 
 const SETTINGS_PATH := "user://square_launch_monitor.cfg"
-const DEFAULT_CLUB_CODE := "0204"
+const DEFAULT_CLUB_CODE := "0104"
 const SQUARE_CLASS_NAME := "SquareLaunchMonitor"
 const SQUARE_SCRIPT_PATH := "res://addons/launch_monitors/square/SquareLaunchMonitor.cs"
 const SQUARE_LOG_PREFIX := "[SquareLM]"
@@ -594,7 +594,7 @@ func _on_club_selected(club_name: String) -> void:
 
 func _map_in_game_club_to_square_code(club_name: String) -> String:
 	match club_name:
-		"Dr": return "0204"
+		"Dr": return "0104"
 		"3w": return "0305"
 		"5w": return "0505"
 		"2H", "3H", "4H", "1i", "2i", "3i": return "0305" # Fallback to 3 Wood/Hybrids
@@ -609,4 +609,4 @@ func _map_in_game_club_to_square_code(club_name: String) -> String:
 		"Sw": return "0c06"
 		"Lw": return "0b06"
 		"Pt": return "0107"
-		_: return "0204" # Default to Driver
+		_: return "0104" # Default to Driver

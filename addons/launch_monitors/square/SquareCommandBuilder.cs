@@ -5,7 +5,7 @@ namespace LaunchMonitors.Square;
 
 public static class SquareCommandBuilder
 {
-    public const string DriverClubCode = "0204";
+    public const string DriverClubCode = "0104";
 
     public static byte[] Heartbeat(byte sequence)
     {

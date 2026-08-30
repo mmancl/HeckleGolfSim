@@ -584,7 +584,7 @@ func _render_player_profile(player_name: String) -> void:
 
 	var email_report_btn = Button.new()
 	email_report_btn.text = "✉ Email Profile Report"
-	email_report_btn.custom_minimum_size = Vector2(190, 40)
+	email_report_btn.custom_minimum_size = Vector2(200, 48)
 	email_report_btn.add_theme_font_size_override("font_size", 15)
 	ThemeManager.apply_primary_button_style(email_report_btn, 6)
 	email_report_btn.pressed.connect(func(): _email_player_profile_report(player_name))
@@ -592,7 +592,7 @@ func _render_player_profile(player_name: String) -> void:
 	
 	var clear_btn = Button.new()
 	clear_btn.text = "🧹 Clear Ball History"
-	clear_btn.custom_minimum_size = Vector2(190, 40)
+	clear_btn.custom_minimum_size = Vector2(200, 48)
 	clear_btn.add_theme_font_size_override("font_size", 15)
 	ThemeManager.apply_secondary_button_style(clear_btn, 6)
 	clear_btn.pressed.connect(func(): clear_confirm_dialog.popup_centered())
@@ -600,7 +600,7 @@ func _render_player_profile(player_name: String) -> void:
 	
 	var delete_btn = Button.new()
 	delete_btn.text = "❌ Delete Profile permanently"
-	delete_btn.custom_minimum_size = Vector2(230, 40)
+	delete_btn.custom_minimum_size = Vector2(240, 48)
 	delete_btn.add_theme_font_size_override("font_size", 15)
 	ThemeManager.apply_danger_button_style(delete_btn, 6)
 	delete_btn.pressed.connect(func(): delete_confirm_dialog.popup_centered())

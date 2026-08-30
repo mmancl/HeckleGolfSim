@@ -34,19 +34,16 @@ theme_override_font_sizes/font_size = 32
 text = "Player1"
 vertical_alignment = 1
 
-[node name="RecButton" type="Button" parent="HBoxContainer" unique_id=613824307]
-layout_mode = 2
-size_flags_vertical = 0
-tooltip_text = "Start Recording Range Session"
-text = "REC: Off"
-
 [node name="Control" type="Control" parent="HBoxContainer" unique_id=1083315582]
 layout_mode = 2
 size_flags_horizontal = 3
 
 [node name="SettingsButton" type="TextureButton" parent="HBoxContainer" unique_id=1578608442]
+custom_minimum_size = Vector2(48, 48)
 layout_mode = 2
 texture_normal = ExtResource("3_omvf4")
+ignore_texture_size = true
+stretch_mode = 5
 
 [node name="OverlayLayer" type="CanvasLayer" parent="." unique_id=1184377481]
 layer = 100
@@ -85,12 +82,11 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-alignment = 2
 
 [node name="RangeSettings" parent="SettingsLayer/Container" unique_id=1548142448 instance=ExtResource("3_bxj45")]
 layout_mode = 2
-size_flags_horizontal = 8
-size_flags_vertical = 0
+size_flags_horizontal = 3
+size_flags_vertical = 3
 
 [node name="SessionPopUp" parent="." unique_id=110874520 instance=ExtResource("4_7kh1v")]
 layout_mode = 2
@@ -266,7 +262,6 @@ value = 12.0
 layout_mode = 2
 text = "Hit Shot"
 
-[connection signal="pressed" from="HBoxContainer/RecButton" to="." method="_on_rec_button_pressed"]
 [connection signal="pressed" from="HBoxContainer/SettingsButton" to="SettingsLayer/Container/RangeSettings" method="_on_settings_button_pressed"]
 [connection signal="gui_input" from="SettingsLayer/Background" to="SettingsLayer/Container/RangeSettings" method="_on_background_clicked"]
 [connection signal="close_settings_requested" from="SettingsLayer/Container/RangeSettings" to="." method="_on_close_settings_requested"]

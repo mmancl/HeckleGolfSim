@@ -34,3 +34,9 @@ __pycache__/
 
 # Ignore large binary files
 *.scn
+
+# Android signing keystores and build artifacts
+*.keystore
+*.jks
+*.aab
+*.apk

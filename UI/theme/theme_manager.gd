@@ -36,36 +36,36 @@ const COLOR_TEXT_DIM = Color(0.50, 0.56, 0.64)
 static func apply_primary_button_style(btn: Button, corner_radius: int = 8) -> void:
 	_apply_button_styles(
 		btn,
-		_create_stylebox(COLOR_PRIMARY_NORMAL, COLOR_PRIMARY_NORMAL.lightened(0.2), corner_radius, 1, 14, 8, 14, 8),
-		_create_stylebox(COLOR_PRIMARY_HOVER, Color(1, 1, 1, 0.3), corner_radius, 1, 14, 8, 14, 8),
-		_create_stylebox(COLOR_PRIMARY_PRESSED, Color(1, 1, 1, 0.2), corner_radius, 1, 14, 8, 14, 8),
+		_create_stylebox(COLOR_PRIMARY_NORMAL, COLOR_PRIMARY_NORMAL.lightened(0.2), corner_radius, 1, 18, 12, 18, 12),
+		_create_stylebox(COLOR_PRIMARY_HOVER, Color(1, 1, 1, 0.3), corner_radius, 1, 18, 12, 18, 12),
+		_create_stylebox(COLOR_PRIMARY_PRESSED, Color(1, 1, 1, 0.2), corner_radius, 1, 18, 12, 18, 12),
 		COLOR_TEXT_WHITE
 	)
 
 static func apply_secondary_button_style(btn: Button, corner_radius: int = 8) -> void:
 	_apply_button_styles(
 		btn,
-		_create_stylebox(COLOR_SECONDARY_NORMAL, COLOR_SECONDARY_NORMAL.lightened(0.2), corner_radius, 1, 14, 8, 14, 8),
-		_create_stylebox(COLOR_SECONDARY_HOVER, Color(1, 1, 1, 0.3), corner_radius, 1, 14, 8, 14, 8),
-		_create_stylebox(COLOR_SECONDARY_PRESSED, Color(1, 1, 1, 0.2), corner_radius, 1, 14, 8, 14, 8),
+		_create_stylebox(COLOR_SECONDARY_NORMAL, COLOR_SECONDARY_NORMAL.lightened(0.2), corner_radius, 1, 18, 12, 18, 12),
+		_create_stylebox(COLOR_SECONDARY_HOVER, Color(1, 1, 1, 0.3), corner_radius, 1, 18, 12, 18, 12),
+		_create_stylebox(COLOR_SECONDARY_PRESSED, Color(1, 1, 1, 0.2), corner_radius, 1, 18, 12, 18, 12),
 		COLOR_TEXT_WHITE
 	)
 
 static func apply_nav_button_style(btn: Button, corner_radius: int = 8) -> void:
 	_apply_button_styles(
 		btn,
-		_create_stylebox(COLOR_NAV_NORMAL, Color(1, 1, 1, 0.15), corner_radius, 1, 14, 8, 14, 8),
-		_create_stylebox(COLOR_NAV_HOVER, Color(1, 1, 1, 0.30), corner_radius, 1, 14, 8, 14, 8),
-		_create_stylebox(COLOR_NAV_PRESSED, Color(1, 1, 1, 0.10), corner_radius, 1, 14, 8, 14, 8),
+		_create_stylebox(COLOR_NAV_NORMAL, Color(1, 1, 1, 0.15), corner_radius, 1, 18, 12, 18, 12),
+		_create_stylebox(COLOR_NAV_HOVER, Color(1, 1, 1, 0.30), corner_radius, 1, 18, 12, 18, 12),
+		_create_stylebox(COLOR_NAV_PRESSED, Color(1, 1, 1, 0.10), corner_radius, 1, 18, 12, 18, 12),
 		COLOR_TEXT_WHITE
 	)
 
 static func apply_danger_button_style(btn: Button, corner_radius: int = 8) -> void:
 	_apply_button_styles(
 		btn,
-		_create_stylebox(COLOR_DANGER_NORMAL, COLOR_DANGER_NORMAL.lightened(0.2), corner_radius, 1, 14, 8, 14, 8),
-		_create_stylebox(COLOR_DANGER_HOVER, Color(1, 1, 1, 0.3), corner_radius, 1, 14, 8, 14, 8),
-		_create_stylebox(COLOR_DANGER_PRESSED, Color(1, 1, 1, 0.2), corner_radius, 1, 14, 8, 14, 8),
+		_create_stylebox(COLOR_DANGER_NORMAL, COLOR_DANGER_NORMAL.lightened(0.2), corner_radius, 1, 18, 12, 18, 12),
+		_create_stylebox(COLOR_DANGER_HOVER, Color(1, 1, 1, 0.3), corner_radius, 1, 18, 12, 18, 12),
+		_create_stylebox(COLOR_DANGER_PRESSED, Color(1, 1, 1, 0.2), corner_radius, 1, 18, 12, 18, 12),
 		COLOR_TEXT_WHITE
 	)
 
@@ -91,13 +91,15 @@ static func apply_modal_style(panel: Control, corner_radius: int = 12) -> void:
 		panel.add_theme_stylebox_override("panel", style)
 
 static func apply_input_style(control: Control, corner_radius: int = 6) -> void:
-	var normal_style = _create_stylebox(COLOR_INPUT_BG, COLOR_INPUT_BORDER, corner_radius, 1, 10, 6, 10, 6)
-	var focus_style = _create_stylebox(COLOR_INPUT_BG, COLOR_SECONDARY_HOVER, corner_radius, 2, 10, 6, 10, 6)
+	var normal_style = _create_stylebox(COLOR_INPUT_BG, COLOR_INPUT_BORDER, corner_radius, 1, 12, 10, 12, 10)
+	var focus_style = _create_stylebox(COLOR_INPUT_BG, COLOR_SECONDARY_HOVER, corner_radius, 2, 12, 10, 12, 10)
 	if control is LineEdit:
 		control.add_theme_stylebox_override("normal", normal_style)
 		control.add_theme_stylebox_override("focus", focus_style)
 		control.add_theme_color_override("font_color", COLOR_TEXT_WHITE)
 		control.add_theme_color_override("placeholder_color", COLOR_TEXT_DIM)
+		if control.custom_minimum_size.y < 48:
+			control.custom_minimum_size.y = 48
 
 static func _apply_button_styles(btn: Button, style_normal: StyleBoxFlat, style_hover: StyleBoxFlat, style_pressed: StyleBoxFlat, text_color: Color) -> void:
 	btn.add_theme_stylebox_override("normal", style_normal)
@@ -107,6 +109,8 @@ static func _apply_button_styles(btn: Button, style_normal: StyleBoxFlat, style_
 	btn.add_theme_color_override("font_color", text_color)
 	btn.add_theme_color_override("font_hover_color", text_color)
 	btn.add_theme_color_override("font_pressed_color", text_color)
+	if btn.custom_minimum_size.y < 48:
+		btn.custom_minimum_size.y = 48
 
 static func _create_stylebox(bg: Color, border: Color, corner_radius: int, border_width: int, m_left: int, m_top: int, m_right: int, m_bottom: int) -> StyleBoxFlat:
 	var style = StyleBoxFlat.new()

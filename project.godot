@@ -15,7 +15,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="Heckle Golf Simulator"
-config/version="0.7.4"
+config/version="0.11.12"
 run/main_scene="uid://dgyd437dgyv0y"
 config/features=PackedStringArray("4.7", "C#", "Mobile")
 boot_splash/image="uid://cjp4o151j14xr"
@@ -27,6 +27,7 @@ PhantomCameraManager="*uid://duq6jhf6unyis"
 SceneManager="*res://Utils/SceneManager.gd"
 EventBus="*res://Utils/EventBus.gd"
 GlobalSettings="*res://Utils/Settings/global_settings.gd"
+TensionManager="*res://Utils/TensionManager.gd"
 LaunchMonitorManager="*res://addons/launch_monitors/launch_monitor_manager.gd"
 AnnouncerEngine="*res://addons/announcer/AnnouncerEngine.cs"
 MultiplayerManager="*res://Utils/MultiplayerManager.gd"
@@ -37,6 +38,7 @@ PoseDetectionBridge="*res://UI/GolferCamera/pose_detection_bridge.gd"
 
 window/size/viewport_width=1728
 window/size/viewport_height=972
+window/stretch/mode="canvas_items"
 
 [dotnet]
 
@@ -63,6 +65,11 @@ reset={
 
 3d/physics_engine="JoltPhysics3D"
 common/physics_interpolation=true
+
+[pointing]
+
+emulate_touch_from_mouse=true
+emulate_mouse_from_touch=true
 
 [rendering]
 

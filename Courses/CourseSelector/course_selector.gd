@@ -41,7 +41,6 @@ func _ready() -> void:
 	_switch_course_tab("Real")
 
 	# Dynamic OSM Download UI
-	var vbox = $ContentPanel/ContentMargin/VBoxContainer
 	if vbox != null:
 		var download_panel = PanelContainer.new()
 		download_panel.name = "OsmDownloadPanel"
@@ -549,7 +548,3 @@ func _on_create_custom_pressed() -> void:
 			_switch_course_tab("Custom")
 			_request_course_reload()
 		)
-
-
-
-

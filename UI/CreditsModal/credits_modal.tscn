@@ -1,0 +1,326 @@
+[gd_scene format=3 uid="uid://b5k8qm3vw7r2x"]
+
+[ext_resource type="Script" path="res://UI/CreditsModal/credits_modal.gd" id="1_credits"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_modal_bg"]
+bg_color = Color(0.07, 0.11, 0.16, 0.95)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.24, 0.44, 0.65, 0.5)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+shadow_color = Color(0, 0, 0, 0.7)
+shadow_size = 18
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_card_section"]
+bg_color = Color(0.10, 0.14, 0.20, 0.7)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.2, 0.35, 0.5, 0.3)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+content_margin_left = 16.0
+content_margin_top = 14.0
+content_margin_right = 16.0
+content_margin_bottom = 14.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_feedback"]
+bg_color = Color(0.08, 0.24, 0.14, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.2, 0.7, 0.35, 0.6)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+content_margin_left = 14.0
+content_margin_top = 10.0
+content_margin_right = 14.0
+content_margin_bottom = 10.0
+
+[node name="CreditsModal" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("1_credits")
+
+[node name="Backdrop" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.03, 0.05, 0.08, 0.85)
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ModalPanel" type="PanelContainer" parent="CenterContainer"]
+custom_minimum_size = Vector2(860, 680)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_modal_bg")
+
+[node name="MarginContainer" type="MarginContainer" parent="CenterContainer/ModalPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 22
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 22
+theme_override_constants/margin_bottom = 18
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="HeaderHBox" type="HBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="TitleVBox" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/HeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="TitleLabel" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/HeaderHBox/TitleVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.98, 1, 1)
+theme_override_font_sizes/font_size = 26
+text = "About & Credits"
+
+[node name="SubtitleLabel" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/HeaderHBox/TitleVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.72, 0.82, 1)
+theme_override_font_sizes/font_size = 14
+text = "Heckle Golf Simulator • Open Source Community Project"
+
+[node name="CloseHeaderButton" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/HeaderHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(44, 44)
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_font_sizes/font_size = 18
+text = "✕"
+
+[node name="HeaderSeparator" type="HSeparator" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="ScrollContainer" type="ScrollContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="ScrollVBox" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 14
+
+[node name="AboutCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card_section")
+
+[node name="AboutVBox" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/AboutCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="AboutTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/AboutCard/AboutVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.85, 0.55, 1)
+theme_override_font_sizes/font_size = 18
+text = "⛳ The Story & Personal Project"
+
+[node name="AboutText" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/AboutCard/AboutVBox"]
+layout_mode = 2
+theme_override_colors/default_color = Color(0.9, 0.93, 0.96, 1)
+theme_override_font_sizes/normal_font_size = 14
+bbcode_enabled = true
+text = "Heckle Golf Simulator is an open-source personal project born out of two big passions:
+
+• [b]More Courses & Freedom[/b]: I wanted a virtually unlimited selection of real-world courses for myself to practice and play with the Square Golf launch monitor, and figured fellow simulator golfers would love to enjoy them too!
+• [b]Classic PS2 Announcer Roasts[/b]: I grew up loving classic arcade golf games on the PlayStation 2 where witty announcers would relentlessly roast and make fun of your terrible shots, duffs, hooks, and wormburners. Heckle Golf is bringing that unique humor, personality, and heckling commentary back into golf simulation!
+
+Any feedback, bug reports, feature suggestions, or community contributions are awesome and warmly welcomed."
+fit_content = true
+
+[node name="AboutBtnHBox" type="HBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/AboutCard/AboutVBox"]
+layout_mode = 2
+
+[node name="RepoButton" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/AboutCard/AboutVBox/AboutBtnHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(260, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "⭐ View HeckleGolfSim on GitHub"
+
+[node name="ForkCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card_section")
+
+[node name="ForkVBox" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/ForkCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ForkTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/ForkCard/ForkVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.75, 0.95, 1)
+theme_override_font_sizes/font_size = 18
+text = "🔬 Base Fork, Connectivity & Aerodynamics"
+
+[node name="ForkText" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/ForkCard/ForkVBox"]
+layout_mode = 2
+theme_override_colors/default_color = Color(0.9, 0.93, 0.96, 1)
+theme_override_font_sizes/normal_font_size = 14
+bbcode_enabled = true
+text = "This simulator was forked and evolved from [b]OpenShotGolf[/b] (by [b]jhauck2[/b]), which provided the foundational architecture for launch monitor connectivity and the realistic Reynolds-number golf ball aerodynamics / rollout physics simulation."
+fit_content = true
+
+[node name="ForkBtnHBox" type="HBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/ForkCard/ForkVBox"]
+layout_mode = 2
+
+[node name="BaseRepoButton" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/ForkCard/ForkVBox/ForkBtnHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(260, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "🔗 View Base Repo (OpenShotGolf)"
+
+[node name="AttributionsCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card_section")
+
+[node name="AttrVBox" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/AttributionsCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="AttrTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/AttributionsCard/AttrVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.75, 0.35, 1)
+theme_override_font_sizes/font_size = 18
+text = "📜 Built With & Special Thanks"
+
+[node name="AttrText" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/AttributionsCard/AttrVBox"]
+layout_mode = 2
+theme_override_colors/default_color = Color(0.9, 0.93, 0.96, 1)
+theme_override_font_sizes/normal_font_size = 14
+bbcode_enabled = true
+text = "• [b]Godot Engine[/b] ([url=https://godotengine.org/]godotengine.org[/url]) - High-performance open-source 2D & 3D game engine (C# / .NET).
+• [b]OpenFairway[/b] ([url=https://github.com/jesseincode/OpenFairway]github.com/jesseincode/OpenFairway[/url]) - Realistic Reynolds-number golf ball aerodynamics and rollout physics engine by Jesse Inman / Jakobi.
+• [b]OpenStreetMap[/b] ([url=https://www.openstreetmap.org/]openstreetmap.org[/url]) - Global course layouts, satellite vectors, and terrain elevation data © OpenStreetMap contributors (ODbL).
+• [b]Jolt Physics 3D[/b] ([url=https://github.com/jrouwe/JoltPhysics]github.com/jrouwe/JoltPhysics[/url]) - Advanced 3D physics and collision solver by Jorrit Rouwe.
+• [b]Google MediaPipe[/b] ([url=https://developers.google.com/mediapipe]developers.google.com/mediapipe[/url]) - Real-time on-device golfer pose estimation & swing tempo analysis.
+• [b]PiTrac & GSPro Open Connect v1[/b] - Launch monitor packet specification & socket networking protocols.
+• [b]Community Addons[/b] - Sky3D, Terrain3D, and Phantom Camera for dynamic environments and follow cams."
+fit_content = true
+
+[node name="DonationsCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card_section")
+
+[node name="DonateVBox" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/DonationsCard"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="DonateTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/DonationsCard/DonateVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.5, 0.5, 1)
+theme_override_font_sizes/font_size = 18
+text = "☕ Support the Developer"
+
+[node name="DonateText" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/DonationsCard/DonateVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.88, 0.92, 1)
+theme_override_font_sizes/font_size = 14
+text = "Enjoying the simulator? Support continuous improvements and new course tools! (Google Play Store in-app billing is being configured for an upcoming update)."
+autowrap_mode = 3
+
+[node name="DonationGrid" type="GridContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/DonationsCard/DonateVBox"]
+layout_mode = 2
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 10
+columns = 2
+
+[node name="Donate1Button" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/DonationsCard/DonateVBox/DonationGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+text = "☕ Buy Coffee ($1)"
+
+[node name="Donate5Button" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/DonationsCard/DonateVBox/DonationGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+text = "🪵 Buy Some Tees ($5)"
+
+[node name="Donate10Button" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/DonationsCard/DonateVBox/DonationGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+text = "⚪ Buy Some Balls ($10)"
+
+[node name="Donate50Button" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/DonationsCard/DonateVBox/DonationGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+text = "🏌️ Buy Round of Golf ($50)"
+
+[node name="Donate100Button" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/DonationsCard/DonateVBox/DonationGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+text = "🏆 Buy a Club ($100)"
+
+[node name="DonationFeedbackPanel" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/DonationsCard/DonateVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_feedback")
+
+[node name="DonationFeedbackLabel" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/DonationsCard/DonateVBox/DonationFeedbackPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 1, 0.9, 1)
+theme_override_font_sizes/font_size = 14
+text = "Thank you for your support!"
+autowrap_mode = 3
+
+[node name="FooterSeparator" type="HSeparator" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="FooterHBox" type="HBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="CloseFooterButton" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/FooterHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Close"

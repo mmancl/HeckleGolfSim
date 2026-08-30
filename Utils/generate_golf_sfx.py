@@ -164,6 +164,74 @@ def generate_ball_hit_putt():
     audio = pop * 0.6 + click_noise * 0.3
     return normalize(audio, 0.82)
 
+def generate_heartbeat():
+    # 3.20s: 4 seamless cycles of punchy, cinematic, clearly audible 'lub-dub' heartbeat (~75 BPM)
+    cycle_dur = 0.80
+    num_cycles = 4
+    total_dur = cycle_dur * num_cycles
+    total_samples = int(SR * total_dur)
+    audio = np.zeros(total_samples)
+    
+    for cycle in range(num_cycles):
+        cycle_start_s = cycle * cycle_dur
+        
+        # --- S1: 'Lub' (Main ventricular contraction) ---
+        s1_dur = 0.22
+        s1_samples = int(SR * s1_dur)
+        s1_t = np.linspace(0, s1_dur, s1_samples, endpoint=False)
+        
+        # Deep body thump (85Hz -> 55Hz)
+        s1_freq = 85.0 - 30.0 * (s1_t / s1_dur)**0.6
+        s1_phase = 2 * np.pi * np.cumsum(s1_freq) / SR
+        s1_thump = np.sin(s1_phase) * np.exp(-s1_t * 16.0)
+        
+        # Audible punch harmonic (140Hz -> 90Hz) - audible on all speakers
+        s1_punch_freq = 140.0 - 50.0 * (s1_t / s1_dur)
+        s1_punch = np.sin(2 * np.pi * np.cumsum(s1_punch_freq) / SR) * np.exp(-s1_t * 22.0) * 0.7
+        
+        # Mid-body resonance (240Hz)
+        s1_mid = np.sin(2 * np.pi * 240.0 * s1_t) * np.exp(-s1_t * 35.0) * 0.35
+        
+        # Sub-bass rumble (48Hz)
+        s1_sub = np.sin(2 * np.pi * 48.0 * s1_t) * np.exp(-s1_t * 12.0) * 0.5
+        
+        # Muffled acoustic thump
+        s1_snap = bandpass(noise(len(s1_t)), 80, 450) * np.exp(-s1_t * 30.0) * 0.4
+        
+        s1_signal = s1_thump * 0.75 + s1_punch * 0.55 + s1_mid * 0.3 + s1_sub * 0.4 + s1_snap * 0.35
+        start_idx = int(cycle_start_s * SR)
+        audio[start_idx : start_idx + s1_samples] += s1_signal
+        
+        # --- S2: 'Dub' (Semilunar valve closure) ---
+        s2_offset = 0.28
+        s2_dur = 0.18
+        s2_samples = int(SR * s2_dur)
+        s2_t = np.linspace(0, s2_dur, s2_samples, endpoint=False)
+        
+        # S2 Thump (110Hz -> 75Hz)
+        s2_freq = 110.0 - 35.0 * (s2_t / s2_dur)**0.6
+        s2_phase = 2 * np.pi * np.cumsum(s2_freq) / SR
+        s2_thump = np.sin(s2_phase) * np.exp(-s2_t * 20.0)
+        
+        # S2 Punch harmonic (180Hz)
+        s2_punch = np.sin(2 * np.pi * 180.0 * s2_t) * np.exp(-s2_t * 28.0) * 0.6
+        
+        # S2 Mid body (310Hz)
+        s2_mid = np.sin(2 * np.pi * 310.0 * s2_t) * np.exp(-s2_t * 40.0) * 0.3
+        
+        # S2 Sub (60Hz)
+        s2_sub = np.sin(2 * np.pi * 60.0 * s2_t) * np.exp(-s2_t * 16.0) * 0.45
+        
+        # S2 Snap
+        s2_snap = bandpass(noise(len(s2_t)), 100, 550) * np.exp(-s2_t * 36.0) * 0.35
+        
+        s2_signal = (s2_thump * 0.70 + s2_punch * 0.50 + s2_mid * 0.28 + s2_sub * 0.35 + s2_snap * 0.3) * 0.90
+        s2_start_idx = int((cycle_start_s + s2_offset) * SR)
+        audio[s2_start_idx : s2_start_idx + s2_samples] += s2_signal
+
+    audio = np.tanh(audio * 1.5)
+    return normalize(audio, 0.98)
+
 def main():
     output_dir = os.path.join(os.path.dirname(__file__), "..", "assets", "audio", "sfx")
     output_dir = os.path.abspath(output_dir)
@@ -178,14 +246,20 @@ def main():
         "leaf_rustle.ogg": generate_leaf_rustle,
         "water_splash.ogg": generate_water_splash,
         "ball_hit_drive.ogg": generate_ball_hit_drive,
-        "ball_hit_putt.ogg": generate_ball_hit_putt
+        "ball_hit_putt.ogg": generate_ball_hit_putt,
+        "heartbeat.ogg": generate_heartbeat
     }
     
     for filename, gen_fn in generators.items():
         filepath = os.path.join(output_dir, filename)
         audio = gen_fn()
         sf.write(filepath, audio, SR, format='OGG', subtype='VORBIS')
+        # Also write WAV format for maximum compatibility
+        if filename.startswith("heartbeat"):
+            wav_path = os.path.join(output_dir, "heartbeat.wav")
+            sf.write(wav_path, audio, SR, format='WAV', subtype='PCM_16')
         print(f"Generated {filename:20s}: duration={len(audio)/SR:.2f}s, peak={np.max(np.abs(audio)):.3f}")
 
 if __name__ == "__main__":
     main()
+

@@ -3,97 +3,136 @@
 [ext_resource type="Script" uid="uid://coaq5bnt4i7s6" path="res://UI/Settings/RangeSettings/range_settings.gd" id="1_btrk3"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_settings_bg"]
-bg_color = Color(0.08, 0.08, 0.08, 0.95)
+bg_color = Color(0.06, 0.09, 0.13, 0.96)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(0.25, 0.25, 0.25, 0.8)
-corner_radius_top_left = 12
-corner_radius_top_right = 12
-corner_radius_bottom_right = 12
-corner_radius_bottom_left = 12
+border_color = Color(0.24, 0.44, 0.65, 0.6)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+shadow_color = Color(0, 0, 0, 0.6)
+shadow_size = 20
 
 [node name="RangeSettings" type="PanelContainer"]
-offset_right = 400.0
-offset_bottom = 560.0
-size_flags_horizontal = 4
-size_flags_vertical = 4
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
 theme_override_styles/panel = SubResource("StyleBoxFlat_settings_bg")
 script = ExtResource("1_btrk3")
 
 [node name="MarginContainer" type="MarginContainer" parent="."]
 layout_mode = 2
 theme_override_constants/margin_left = 20
-theme_override_constants/margin_top = 20
+theme_override_constants/margin_top = 16
 theme_override_constants/margin_right = 20
-theme_override_constants/margin_bottom = 20
+theme_override_constants/margin_bottom = 16
 
 [node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
 layout_mode = 2
-theme_override_constants/separation = 15
+theme_override_constants/separation = 12
 
-[node name="SettingsTitle" type="Label" parent="MarginContainer/VBoxContainer"]
+[node name="HeaderHBox" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 24
-text = "Settings"
+theme_override_constants/separation = 10
+
+[node name="HeaderSpacerLeft" type="Control" parent="MarginContainer/VBoxContainer/HeaderHBox"]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+
+[node name="SettingsTitle" type="Label" parent="MarginContainer/VBoxContainer/HeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.96, 0.98, 1, 1)
+theme_override_font_sizes/font_size = 28
+text = "⚙ Settings"
 horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="HeaderCloseButton" type="Button" parent="MarginContainer/VBoxContainer/HeaderHBox"]
+custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
+tooltip_text = "Close Settings"
+theme_override_font_sizes/font_size = 20
+text = "✕"
 
 [node name="TabContainer" type="TabContainer" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 clip_contents = true
+tab_alignment = 1
 
-[node name="Gameplay" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
+[node name="Gameplay" type="ScrollContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
 layout_mode = 2
-theme_override_constants/separation = 12
+size_flags_horizontal = 3
+size_flags_vertical = 3
+follow_focus = true
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 1
 metadata/_tab_index = 0
 
 [node name="MarginContainer" type="MarginContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay"]
 layout_mode = 2
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 10
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
 
 [node name="GameplayVBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer"]
 layout_mode = 2
-theme_override_constants/separation = 12
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
 
 [node name="Units" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
+custom_minimum_size = Vector2(0, 52)
 layout_mode = 2
 
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units"]
 layout_mode = 2
-text = "Units: "
+theme_override_font_sizes/font_size = 19
+text = "Units"
+vertical_alignment = 1
 
 [node name="Control" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_stretch_ratio = 2.4
 
 [node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 18
 text = "Imperial"
+vertical_alignment = 1
 
 [node name="CheckButton" type="CheckButton" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units"]
+custom_minimum_size = Vector2(72, 48)
 layout_mode = 2
 
 [node name="Label3" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 18
 text = "Metric"
-
-[node name="Control2" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units"]
-layout_mode = 2
-size_flags_horizontal = 3
+vertical_alignment = 1
 
 [node name="AutoBallReset" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
+custom_minimum_size = Vector2(0, 52)
 layout_mode = 2
 
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset"]
 layout_mode = 2
-text = "Auto Ball Reset: "
+theme_override_font_sizes/font_size = 19
+text = "Auto Ball Reset"
+vertical_alignment = 1
 
 [node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset"]
 layout_mode = 2
@@ -101,220 +140,259 @@ size_flags_horizontal = 3
 
 [node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 18
 text = "Off"
+vertical_alignment = 1
 
 [node name="CheckButton" type="CheckButton" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset"]
+custom_minimum_size = Vector2(72, 48)
 layout_mode = 2
 
 [node name="Label3" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 18
 text = "On"
-
-[node name="Control2" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset"]
-layout_mode = 2
-size_flags_horizontal = 3
+vertical_alignment = 1
 
 [node name="BallResetTimer" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
+custom_minimum_size = Vector2(0, 52)
 layout_mode = 2
+theme_override_constants/separation = 8
 
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer"]
 layout_mode = 2
-text = "Ball Reset Timer: "
+theme_override_font_sizes/font_size = 19
+text = "Ball Reset Timer"
+vertical_alignment = 1
 
 [node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_stretch_ratio = 0.6
 
 [node name="ResetSpinBox" type="SpinBox" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer"]
-custom_minimum_size = Vector2(100, 0)
+custom_minimum_size = Vector2(120, 52)
 layout_mode = 2
-size_flags_horizontal = 3
 
 [node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer"]
+custom_minimum_size = Vector2(30, 0)
 layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 18
 text = "sec"
-
-[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer"]
-layout_mode = 2
-size_flags_horizontal = 3
+vertical_alignment = 1
 
 [node name="Temperature" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
+custom_minimum_size = Vector2(0, 52)
 layout_mode = 2
+theme_override_constants/separation = 8
 
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature"]
 layout_mode = 2
-text = "Temperature: "
+theme_override_font_sizes/font_size = 19
+text = "Temperature"
+vertical_alignment = 1
 
 [node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature"]
 layout_mode = 2
 size_flags_horizontal = 3
 
 [node name="TemperatureSpinBox" type="SpinBox" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature"]
-custom_minimum_size = Vector2(100, 0)
+custom_minimum_size = Vector2(120, 52)
 layout_mode = 2
-size_flags_horizontal = 3
 
 [node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature"]
+custom_minimum_size = Vector2(30, 0)
 layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 18
 text = "F"
-
-[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature"]
-layout_mode = 2
-size_flags_horizontal = 3
+vertical_alignment = 1
 
 [node name="Altitude" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
+custom_minimum_size = Vector2(0, 52)
 layout_mode = 2
+theme_override_constants/separation = 8
 
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude"]
 layout_mode = 2
-text = "Altitude: "
+theme_override_font_sizes/font_size = 19
+text = "Altitude"
+vertical_alignment = 1
 
 [node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_stretch_ratio = 1.7
 
 [node name="AltitudeSpinBox" type="SpinBox" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude"]
-custom_minimum_size = Vector2(100, 0)
+custom_minimum_size = Vector2(120, 52)
 layout_mode = 2
-size_flags_horizontal = 3
 
 [node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude"]
+custom_minimum_size = Vector2(30, 0)
 layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 18
 text = "ft"
-
-[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude"]
-layout_mode = 2
-size_flags_horizontal = 3
+vertical_alignment = 1
 
 [node name="SurfaceType" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
+custom_minimum_size = Vector2(0, 52)
 layout_mode = 2
+theme_override_constants/separation = 12
 
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/SurfaceType"]
 layout_mode = 2
-text = "Surface: "
+theme_override_font_sizes/font_size = 19
+text = "Surface"
+vertical_alignment = 1
 
 [node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/SurfaceType"]
 layout_mode = 2
 size_flags_horizontal = 3
 
 [node name="SurfaceOption" type="OptionButton" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/SurfaceType"]
+custom_minimum_size = Vector2(220, 52)
 layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/SurfaceType"]
-layout_mode = 2
-size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 18
 
 [node name="BallType" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
+custom_minimum_size = Vector2(0, 52)
 layout_mode = 2
+theme_override_constants/separation = 12
 
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallType"]
 layout_mode = 2
-text = "Ball: "
+theme_override_font_sizes/font_size = 19
+text = "Ball Type"
+vertical_alignment = 1
 
 [node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallType"]
 layout_mode = 2
 size_flags_horizontal = 3
 
 [node name="BallTypeOption" type="OptionButton" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallType"]
+custom_minimum_size = Vector2(220, 52)
 layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallType"]
-layout_mode = 2
-size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 18
 
 [node name="TracerCount" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox"]
+custom_minimum_size = Vector2(0, 52)
 layout_mode = 2
+theme_override_constants/separation = 8
 
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/TracerCount"]
 layout_mode = 2
-text = "Shot Tracers: "
+theme_override_font_sizes/font_size = 19
+text = "Shot Tracers"
+vertical_alignment = 1
 
 [node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/TracerCount"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_stretch_ratio = 1.4
 
 [node name="TracerCountSpinBox" type="SpinBox" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/TracerCount"]
-custom_minimum_size = Vector2(100, 0)
+custom_minimum_size = Vector2(120, 52)
 layout_mode = 2
-size_flags_horizontal = 3
 
-[node name="Control4" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/TracerCount"]
+[node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/TracerCount"]
+custom_minimum_size = Vector2(30, 0)
 layout_mode = 2
-size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 18
+text = "shots"
+vertical_alignment = 1
 
-[node name="Camera" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
+[node name="Camera" type="ScrollContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
 visible = false
 layout_mode = 2
-theme_override_constants/separation = 12
+size_flags_horizontal = 3
+size_flags_vertical = 3
+follow_focus = true
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 1
 metadata/_tab_index = 1
 
 [node name="MarginContainer" type="MarginContainer" parent="MarginContainer/VBoxContainer/TabContainer/Camera"]
 layout_mode = 2
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 10
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
 
 [node name="CameraVBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer"]
 layout_mode = 2
-theme_override_constants/separation = 12
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
 
 [node name="CameraFollow" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox"]
+custom_minimum_size = Vector2(0, 52)
 layout_mode = 2
 
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow"]
 layout_mode = 2
-text = "Camera
-Follow Mode"
+theme_override_font_sizes/font_size = 19
+text = "Camera Follow Mode"
+vertical_alignment = 1
 
 [node name="Control" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_stretch_ratio = 1.5
 
 [node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 18
 text = "Off"
+vertical_alignment = 1
 
 [node name="CheckButton" type="CheckButton" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow"]
+custom_minimum_size = Vector2(72, 48)
 layout_mode = 2
 
 [node name="Label3" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 18
 text = "On"
+vertical_alignment = 1
 
-[node name="Control2" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="LaunchMonitor" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
+[node name="LaunchMonitor" type="ScrollContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
 visible = false
 layout_mode = 2
-theme_override_constants/separation = 12
+size_flags_horizontal = 3
+size_flags_vertical = 3
+follow_focus = true
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 1
 metadata/_tab_index = 2
 
 [node name="MarginContainer" type="MarginContainer" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor"]
 layout_mode = 2
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 10
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
 
 [node name="LaunchMonitorVBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer"]
 layout_mode = 2
-theme_override_constants/separation = 12
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
 
 [node name="ShotInjector" type="HBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox"]
+custom_minimum_size = Vector2(0, 52)
 layout_mode = 2
 
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector"]
 layout_mode = 2
+theme_override_font_sizes/font_size = 19
 text = "Shot Injector"
+vertical_alignment = 1
 
 [node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector"]
 layout_mode = 2
@@ -322,51 +400,64 @@ size_flags_horizontal = 3
 
 [node name="Label2" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 18
 text = "Off"
+vertical_alignment = 1
 
 [node name="CheckButton" type="CheckButton" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector"]
+custom_minimum_size = Vector2(72, 48)
 layout_mode = 2
 
 [node name="Label3" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 18
 text = "On"
+vertical_alignment = 1
 
-[node name="Control2" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="Announcer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
+[node name="Announcer" type="ScrollContainer" parent="MarginContainer/VBoxContainer/TabContainer"]
 visible = false
 layout_mode = 2
-theme_override_constants/separation = 12
+size_flags_horizontal = 3
+size_flags_vertical = 3
+follow_focus = true
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 1
 metadata/_tab_index = 3
 
 [node name="MarginContainer" type="MarginContainer" parent="MarginContainer/VBoxContainer/TabContainer/Announcer"]
 layout_mode = 2
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 10
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
 
 [node name="AnnouncerVBox" type="VBoxContainer" parent="MarginContainer/VBoxContainer/TabContainer/Announcer/MarginContainer"]
 layout_mode = 2
-theme_override_constants/separation = 12
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
 
 [node name="ButtonsHBox" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
-theme_override_constants/separation = 20
+theme_override_constants/separation = 16
 alignment = 1
 
 [node name="ResetLayoutButton" type="Button" parent="MarginContainer/VBoxContainer/ButtonsHBox"]
-custom_minimum_size = Vector2(140, 56)
+custom_minimum_size = Vector2(170, 54)
 layout_mode = 2
+theme_override_font_sizes/font_size = 18
 text = "Reset Layout"
 
 [node name="ExitButton" type="Button" parent="MarginContainer/VBoxContainer/ButtonsHBox"]
-custom_minimum_size = Vector2(140, 56)
+custom_minimum_size = Vector2(170, 54)
 layout_mode = 2
+theme_override_font_sizes/font_size = 18
 text = "Exit to Menu"
 
+[connection signal="pressed" from="MarginContainer/VBoxContainer/HeaderHBox/HeaderCloseButton" to="." method="_on_header_close_button_pressed"]
 [connection signal="toggled" from="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units/CheckButton" to="." method="_on_units_check_button_toggled"]
 [connection signal="toggled" from="MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow/CheckButton" to="." method="_on_camer_check_button_toggled"]
 [connection signal="toggled" from="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset/CheckButton" to="." method="_on_auto_reset_check_button_toggled"]
@@ -379,3 +470,4 @@ text = "Exit to Menu"
 [connection signal="value_changed" from="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/TracerCount/TracerCountSpinBox" to="." method="_on_tracer_count_spin_box_value_changed"]
 [connection signal="pressed" from="MarginContainer/VBoxContainer/ButtonsHBox/ResetLayoutButton" to="." method="_on_reset_layout_button_pressed"]
 [connection signal="pressed" from="MarginContainer/VBoxContainer/ButtonsHBox/ExitButton" to="." method="_on_exit_button_pressed"]
+

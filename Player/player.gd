@@ -9,6 +9,8 @@ var carry := 0.0
 var side_distance := 0.0
 var shot_data: Dictionary = {}
 var _last_starting_pos : Vector3 = Vector3.ZERO
+var _last_aim_target_pos : Vector3 = Vector3.ZERO
+var _last_aim_yaw_offset_deg : float = 0.0
 var current_shot_reduction : float = 0.0
 var current_lie_type : String = "fairway"
 
@@ -129,6 +131,10 @@ func _process(_delta: float) -> void:
 
 	if Input.is_action_just_pressed("hit"):
 		_last_starting_pos = ball.global_position
+		var parent_scene = get_parent()
+		if parent_scene != null and "aim_target_pos" in parent_scene:
+			_last_aim_target_pos = parent_scene.aim_target_pos
+		_last_aim_yaw_offset_deg = ball.aim_yaw_offset_deg if ball != null else 0.0
 		track_points = false
 		create_new_tracer()
 		print("[player.gd] Hitting ball manually! ball.aim_yaw_offset_deg = ", ball.aim_yaw_offset_deg)
@@ -229,6 +235,8 @@ func _on_tcp_client_hit_ball(data: Dictionary) -> void:
 	var parent_scene = get_parent()
 	if parent_scene != null and "aim_target_pos" in parent_scene:
 		target_dist = ball.global_position.distance_to(parent_scene.aim_target_pos)
+		_last_aim_target_pos = parent_scene.aim_target_pos
+	_last_aim_yaw_offset_deg = ball.aim_yaw_offset_deg if ball != null else 0.0
 
 	_last_starting_pos = ball.global_position
 	shot_data = data.duplicate()
@@ -260,6 +268,8 @@ func _on_range_ui_hit_shot(data: Variant) -> void:
 	var parent_scene = get_parent()
 	if parent_scene != null and "aim_target_pos" in parent_scene:
 		target_dist = ball.global_position.distance_to(parent_scene.aim_target_pos)
+		_last_aim_target_pos = parent_scene.aim_target_pos
+	_last_aim_yaw_offset_deg = ball.aim_yaw_offset_deg if ball != null else 0.0
 
 	_last_starting_pos = ball.global_position
 	shot_data = data.duplicate()
@@ -293,7 +303,7 @@ func _on_range_ui_set_env(data: Variant) -> void:
 func mulligan() -> void:
 	reset_shot_data()
 	ball.spawn_position = _last_starting_pos
-	ball.call_deferred("reset")
+	ball.reset()
 	
 	if not tracers.is_empty():
 		var last_tracer = tracers.pop_back()

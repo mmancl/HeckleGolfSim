@@ -18,6 +18,10 @@ var _prev_shot_data_label: Label
 var _last_shot_data: Dictionary = {}
 var _averages_panel: PanelContainer = null
 var _right_panel: VBoxContainer = null
+var _home_btn: Button = null
+var _hide_helpers_btn: Button = null
+var _stats_btn: Button = null
+var _map_btn: Button = null
 var _skip_btn: Button = null
 var _golfer_cam_panel: PanelContainer = null
 var _camera_feed_rect: TextureRect = null
@@ -89,57 +93,85 @@ func _ready() -> void:
 	$HBoxContainer/PlayerName.add_theme_color_override("font_color", Color.WHITE)
 	$HBoxContainer/PlayerName.add_theme_color_override("font_outline_color", Color.BLACK)
 	$HBoxContainer/PlayerName.add_theme_constant_override("outline_size", 6)
-	
-	# Style the RecButton initially
-	var rec_btn = $HBoxContainer/RecButton
-	if rec_btn != null:
-		rec_btn.mouse_filter = Control.MOUSE_FILTER_STOP
-		apply_material_button_style(rec_btn, Color(0.2, 0.2, 0.2, 0.7))
 
 	if not is_course_play:
 		# Dynamically create Settings Button in the top-right corner, enlarged for touch
 		var settings_btn = Button.new()
 		settings_btn.name = "SettingsButton"
 		settings_btn.text = ""
+		settings_btn.tooltip_text = "Settings"
 		settings_btn.icon = load("res://Utils/Settings/Gear.png")
 		settings_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		settings_btn.custom_minimum_size = Vector2(56, 56)
 		apply_circular_button_style(settings_btn, Color(0.15, 0.15, 0.15, 0.85))
 		settings_btn.anchor_left = 1.0
 		settings_btn.anchor_right = 1.0
-		settings_btn.offset_left = -86
+		settings_btn.offset_left = -80
 		settings_btn.offset_top = 24
-		settings_btn.offset_right = -30
+		settings_btn.offset_right = -24
 		settings_btn.offset_bottom = 80
 		settings_btn.pressed.connect(_on_toggle_settings_requested)
 		$OverlayLayer.add_child(settings_btn)
 
-		# Dynamically create vertical RightPanel anchored to full screen height for scrolling
+		# Home / Main Menu Button (Icon Only) - positioned between Settings and HideHelpers
+		var home_btn = Button.new()
+		home_btn.name = "HomeButton"
+		home_btn.text = ""
+		home_btn.tooltip_text = "Main Menu"
+		if ResourceLoader.exists("res://assets/images/icons/home.svg"):
+			home_btn.icon = load("res://assets/images/icons/home.svg")
+		home_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		home_btn.custom_minimum_size = Vector2(56, 56)
+		apply_circular_button_style(home_btn, Color(0.15, 0.15, 0.15, 0.85))
+		home_btn.anchor_left = 1.0
+		home_btn.anchor_right = 1.0
+		home_btn.offset_left = -168
+		home_btn.offset_top = 24
+		home_btn.offset_right = -112
+		home_btn.offset_bottom = 80
+		home_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn"))
+		$OverlayLayer.add_child(home_btn)
+		_home_btn = home_btn
+
+		# Hide/Show Helpers Button (Icon Only) - positioned to the left of Home Button
+		var hide_helpers_btn = Button.new()
+		hide_helpers_btn.name = "HideHelpersButton"
+		hide_helpers_btn.text = ""
+		hide_helpers_btn.tooltip_text = "Toggle Helpers (Show/Hide)"
+		if ResourceLoader.exists("res://assets/images/icons/helpers.svg"):
+			hide_helpers_btn.icon = load("res://assets/images/icons/helpers.svg")
+		hide_helpers_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		hide_helpers_btn.custom_minimum_size = Vector2(56, 56)
+		apply_circular_button_style(hide_helpers_btn, Color(0.15, 0.15, 0.15, 0.85))
+		hide_helpers_btn.anchor_left = 1.0
+		hide_helpers_btn.anchor_right = 1.0
+		hide_helpers_btn.offset_left = -256
+		hide_helpers_btn.offset_top = 24
+		hide_helpers_btn.offset_right = -200
+		hide_helpers_btn.offset_bottom = 80
+		$OverlayLayer.add_child(hide_helpers_btn)
+		_hide_helpers_btn = hide_helpers_btn
+
+		# Dynamically create vertical RightPanel anchored to full screen height for scrolling - starts below ClubSelector
 		var right_panel = VBoxContainer.new()
 		right_panel.name = "RightPanel"
 		right_panel.anchor_left = 1.0
 		right_panel.anchor_right = 1.0
 		right_panel.anchor_top = 0.0
 		right_panel.anchor_bottom = 1.0
-		right_panel.offset_left = -220
-		right_panel.offset_top = 96
+		right_panel.offset_left = -256
+		right_panel.offset_top = 152
 		right_panel.offset_right = -24
-		right_panel.offset_bottom = -24
+		right_panel.offset_bottom = -96
 		right_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 		right_panel.add_theme_constant_override("separation", 12)
 		$OverlayLayer.add_child(right_panel)
 		_right_panel = right_panel
 
-		# Hide Toggles Button - enlarged for mobile touch
-		var hide_toggles_btn = Button.new()
-		hide_toggles_btn.name = "HideTogglesButton"
-		hide_toggles_btn.text = "👁 Hide Toggles"
-		hide_toggles_btn.custom_minimum_size = Vector2(180, 56)
-		apply_material_button_style(hide_toggles_btn, Color(0.2, 0.2, 0.2, 0.85))
-		
-		# ScrollContainer so buttons are always reachable on short screens
+		# ScrollContainer so buttons are always reachable on short screens - hidden by default!
 		var toggles_scroll = ScrollContainer.new()
 		toggles_scroll.name = "TogglesScroll"
+		toggles_scroll.visible = false
 		toggles_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		toggles_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 		toggles_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
@@ -149,26 +181,42 @@ func _ready() -> void:
 		toggles_container.add_theme_constant_override("separation", 12)
 		toggles_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		
-		hide_toggles_btn.pressed.connect(func():
+		hide_helpers_btn.pressed.connect(func():
 			toggles_scroll.visible = not toggles_scroll.visible
 			if toggles_scroll.visible:
-				hide_toggles_btn.text = "👁 Hide Toggles"
+				apply_circular_button_style(hide_helpers_btn, Color(0.25, 0.45, 0.7, 0.9))
 			else:
-				hide_toggles_btn.text = "👁 Show Toggles"
+				apply_circular_button_style(hide_helpers_btn, Color(0.15, 0.15, 0.15, 0.85))
 		)
 		
 		toggles_scroll.add_child(toggles_container)
-		right_panel.add_child(hide_toggles_btn)
 		right_panel.add_child(toggles_scroll)
 
-		# Main Menu Button
-		var menu_btn = Button.new()
-		menu_btn.name = "MainMenuButton"
-		menu_btn.text = "⌂ Main Menu"
-		menu_btn.custom_minimum_size = Vector2(180, 56)
-		apply_material_button_style(menu_btn, Color(0.56, 0.22, 0.22, 0.85)) # Reddish
-		menu_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn"))
-		toggles_container.add_child(menu_btn)
+		# Announcer Mute/Unmute Toggle Button
+		var announcer_btn = Button.new()
+		announcer_btn.name = "AnnouncerToggleButton"
+		var announcer_node = get_node_or_null("/root/AnnouncerEngine")
+		var is_announcer_on = announcer_node.get("AnnouncerRange") if announcer_node != null else false
+		announcer_btn.text = "🎙 Announcer: ON" if is_announcer_on else "🎙 Announcer: MUTED"
+		announcer_btn.tooltip_text = "Toggle Announcer Commentary"
+		announcer_btn.custom_minimum_size = Vector2(180, 56)
+		var initial_ann_color = Color(0.2, 0.6, 0.3, 0.85) if is_announcer_on else Color(0.5, 0.5, 0.5, 0.85)
+		apply_material_button_style(announcer_btn, initial_ann_color)
+		announcer_btn.pressed.connect(func():
+			var a = get_node_or_null("/root/AnnouncerEngine")
+			if a != null:
+				var current_val = a.get("AnnouncerRange") as bool
+				var new_val = not current_val
+				a.set("AnnouncerRange", new_val)
+				GlobalSettings.save_settings()
+				if new_val:
+					announcer_btn.text = "🎙 Announcer: ON"
+					apply_material_button_style(announcer_btn, Color(0.2, 0.6, 0.3, 0.85))
+				else:
+					announcer_btn.text = "🎙 Announcer: MUTED"
+					apply_material_button_style(announcer_btn, Color(0.5, 0.5, 0.5, 0.85))
+		)
+		toggles_container.add_child(announcer_btn)
 
 		# Distance Menu Button
 		var dist_btn = Button.new()
@@ -202,21 +250,6 @@ func _ready() -> void:
 		dist_menu.inject_shot.connect(_on_shot_injector_inject)
 		toggles_container.add_child(dist_menu)
 
-		# Stats Toggle Button
-		var stats_btn = Button.new()
-		stats_btn.name = "StatsButton"
-		stats_btn.text = "📊 Hide Stats"
-		stats_btn.custom_minimum_size = Vector2(180, 56)
-		apply_material_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85)) # Blue
-		stats_btn.pressed.connect(func():
-			toggle_stats_visibility()
-			if is_stats_visible():
-				stats_btn.text = "📊 Hide Stats"
-			else:
-				stats_btn.text = "📊 Show Stats"
-		)
-		toggles_container.add_child(stats_btn)
-
 		# Golfer Cam Toggle Button
 		var golfer_cam_btn = Button.new()
 		golfer_cam_btn.name = "GolferCamButton"
@@ -235,27 +268,75 @@ func _ready() -> void:
 		)
 		toggles_container.add_child(golfer_cam_btn)
 
-		# Map Toggle Button
+		# Position ClubSelector directly underneath SettingsButton and HideHelpersButton
+		var club_sel = get_node_or_null("GridCanvas/ClubSelector")
+		if club_sel != null:
+			club_sel.reparent($OverlayLayer)
+			club_sel.anchor_left = 1.0
+			club_sel.anchor_right = 1.0
+			club_sel.anchor_top = 0.0
+			club_sel.anchor_bottom = 0.0
+			club_sel.offset_left = -256
+			club_sel.offset_top = 92
+			club_sel.offset_right = -24
+			club_sel.offset_bottom = 144
+			club_sel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+			club_sel.custom_minimum_size = Vector2(232, 48)
+			club_sel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+
+		# Dedicated Stats Button (Icon Only) - Bottom-Left Corner
+		var stats_btn = Button.new()
+		stats_btn.name = "StatsButton"
+		stats_btn.text = ""
+		stats_btn.tooltip_text = "Toggle Stats (Show/Hide)"
+		if ResourceLoader.exists("res://assets/images/icons/stats.svg"):
+			stats_btn.icon = load("res://assets/images/icons/stats.svg")
+		stats_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		stats_btn.custom_minimum_size = Vector2(56, 56)
+		apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85)) # Blue
+		stats_btn.anchor_left = 0.0
+		stats_btn.anchor_right = 0.0
+		stats_btn.anchor_top = 1.0
+		stats_btn.anchor_bottom = 1.0
+		stats_btn.offset_left = 30
+		stats_btn.offset_top = -80
+		stats_btn.offset_right = 86
+		stats_btn.offset_bottom = -24
+		stats_btn.pressed.connect(func():
+			toggle_stats_visibility()
+			if is_stats_visible():
+				apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85))
+			else:
+				apply_circular_button_style(stats_btn, Color(0.15, 0.15, 0.15, 0.85))
+		)
+		$OverlayLayer.add_child(stats_btn)
+		_stats_btn = stats_btn
+
+		# Dedicated Map Toggle Button (Icon Only) - Bottom-Right Corner
 		var map_btn = Button.new()
 		map_btn.name = "MapButton"
-		map_btn.text = "🗺 Toggle Map View"
-		map_btn.custom_minimum_size = Vector2(180, 56)
-		apply_material_button_style(map_btn, Color(0.18, 0.45, 0.25, 0.85)) # Forest green
+		map_btn.text = ""
+		map_btn.tooltip_text = "Toggle Map View"
+		if ResourceLoader.exists("res://assets/images/icons/golf_course.svg"):
+			map_btn.icon = load("res://assets/images/icons/golf_course.svg")
+		map_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		map_btn.custom_minimum_size = Vector2(56, 56)
+		apply_circular_button_style(map_btn, Color(0.18, 0.45, 0.25, 0.85)) # Forest green
+		map_btn.anchor_left = 1.0
+		map_btn.anchor_right = 1.0
+		map_btn.anchor_top = 1.0
+		map_btn.anchor_bottom = 1.0
+		map_btn.offset_left = -86
+		map_btn.offset_top = -80
+		map_btn.offset_right = -30
+		map_btn.offset_bottom = -24
 		map_btn.pressed.connect(func():
 			var p = get_parent()
 			if p and p.has_method("_on_map_button_pressed"):
 				p.call("_on_map_button_pressed")
 		)
-		toggles_container.add_child(map_btn)
-
-		# Reparent ClubSelector to RightPanel directly under HitDistanceButton / DistanceMenu
-		var club_sel = get_node_or_null("GridCanvas/ClubSelector")
-		if club_sel != null:
-			club_sel.reparent(toggles_container)
-			club_sel.custom_minimum_size = Vector2(180, 56)
-			club_sel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
-			var dist_menu_idx = dist_menu.get_index()
-			toggles_container.move_child(club_sel, dist_menu_idx + 1)
+		$OverlayLayer.add_child(map_btn)
+		_map_btn = map_btn
 	else:
 		$HBoxContainer.visible = false
 
@@ -373,15 +454,18 @@ func _on_rec_button_pressed() -> void:
 
 
 func _on_session_recorder_recording_state(value: bool) -> void:
+	var rec_btn = get_node_or_null("HBoxContainer/RecButton")
 	if value:
-		$HBoxContainer/RecButton.text = "🔴 REC: On"
-		apply_material_button_style($HBoxContainer/RecButton, Color(0.6, 0.15, 0.15, 0.85))
-		$HBoxContainer/RecButton.tooltip_text = "Stop Recording Range Session"
+		if rec_btn != null:
+			rec_btn.text = "🔴 REC: On"
+			apply_material_button_style(rec_btn, Color(0.6, 0.15, 0.15, 0.85))
+			rec_btn.tooltip_text = "Stop Recording Range Session"
 		$SessionPopUp.open()
 	else:
-		$HBoxContainer/RecButton.text = "REC: Off"
-		apply_material_button_style($HBoxContainer/RecButton, Color(0.2, 0.2, 0.2, 0.7))
-		$HBoxContainer/RecButton.tooltip_text = "Start Recording Range Session"
+		if rec_btn != null:
+			rec_btn.text = "REC: Off"
+			apply_material_button_style(rec_btn, Color(0.2, 0.2, 0.2, 0.7))
+			rec_btn.tooltip_text = "Start Recording Range Session"
 
 
 func _on_session_pop_up_dir_selected(dir: String, player_name: String) -> void:
@@ -430,40 +514,64 @@ func _setup_averages_ui() -> void:
 	var averages_hbox = HBoxContainer.new()
 	averages_hbox.name = "AveragesBar"
 	averages_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	averages_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	averages_hbox.add_theme_constant_override("separation", 20)
+	
 	_averages_panel = PanelContainer.new()
 	_averages_panel.name = "AveragesPanel"
-	_averages_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_averages_panel.custom_minimum_size = Vector2(0, 45)
+	_averages_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_averages_panel.size_flags_vertical = Control.SIZE_SHRINK_END
+	_averages_panel.custom_minimum_size = Vector2(0, 48)
+	
+	var panel_style = StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.12, 0.15, 0.18, 0.85)
+	panel_style.corner_radius_top_left = 12
+	panel_style.corner_radius_top_right = 12
+	panel_style.corner_radius_bottom_left = 12
+	panel_style.corner_radius_bottom_right = 12
+	panel_style.border_color = Color(1.0, 1.0, 1.0, 0.15)
+	panel_style.border_width_left = 1
+	panel_style.border_width_right = 1
+	panel_style.border_width_top = 1
+	panel_style.border_width_bottom = 1
+	panel_style.content_margin_left = 22
+	panel_style.content_margin_right = 22
+	panel_style.content_margin_top = 8
+	panel_style.content_margin_bottom = 8
+	_averages_panel.add_theme_stylebox_override("panel", panel_style)
 	
 	_avg_carry = Label.new()
 	_avg_carry.text = "Avg Carry: ---"
+	_avg_carry.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	averages_hbox.add_child(_avg_carry)
 	
 	_avg_speed = Label.new()
 	_avg_speed.text = "Avg Speed: ---"
+	_avg_speed.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	averages_hbox.add_child(_avg_speed)
 	
 	_avg_spin = Label.new()
 	_avg_spin.text = "Avg Spin: ---"
+	_avg_spin.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	averages_hbox.add_child(_avg_spin)
 	
 	_avg_offline = Label.new()
 	_avg_offline.text = "Avg Offline: ---"
+	_avg_offline.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	averages_hbox.add_child(_avg_offline)
 	
 	_avg_target_diff = Label.new()
 	_avg_target_diff.text = "Avg +/- Target: ---"
+	_avg_target_diff.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	averages_hbox.add_child(_avg_target_diff)
 	
 	var view_prev_btn = Button.new()
 	view_prev_btn.text = "View Previous Shot"
+	view_prev_btn.custom_minimum_size = Vector2(160, 36)
+	apply_material_button_style(view_prev_btn, Color(0.25, 0.35, 0.45, 0.85))
 	view_prev_btn.pressed.connect(_on_view_prev_shot_pressed)
 	averages_hbox.add_child(view_prev_btn)
 	
 	_averages_panel.add_child(averages_hbox)
-	_averages_panel.size_flags_vertical = Control.SIZE_SHRINK_END
 	add_child(_averages_panel)
 
 
@@ -636,18 +744,17 @@ func apply_circular_button_style(btn: Button, bg_color: Color):
 
 
 func update_map_button_text(is_aerial: bool) -> void:
-	var map_btn = null
-	if _right_panel != null:
-		map_btn = _right_panel.get_node_or_null("TogglesScroll/TogglesContainer/MapButton")
-		if map_btn == null:
-			map_btn = _right_panel.get_node_or_null("TogglesContainer/MapButton")
-		if map_btn == null:
-			map_btn = _right_panel.get_node_or_null("MapButton")
-	if map_btn != null:
+	var target_btn = _map_btn
+	if target_btn == null and has_node("OverlayLayer/MapButton"):
+		target_btn = $OverlayLayer/MapButton
+	if target_btn != null:
+		target_btn.text = ""
 		if is_aerial:
-			map_btn.text = "👤 Return to Player"
+			target_btn.tooltip_text = "Return to Player"
+			apply_circular_button_style(target_btn, Color(0.2, 0.7, 0.35, 0.95))
 		else:
-			map_btn.text = "🗺 Toggle Map View"
+			target_btn.tooltip_text = "Toggle Map View"
+			apply_circular_button_style(target_btn, Color(0.18, 0.45, 0.25, 0.85))
 
 
 func show_skip_button() -> void:

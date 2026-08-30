@@ -1,5 +1,7 @@
 extends Control
 
+var _music_btn: Button = null
+
 func _ready() -> void:
 	name = "MiniGamesMenu"
 	
@@ -25,6 +27,32 @@ func _ready() -> void:
 	glass_panel.anchor_top = 0.0
 	glass_panel.anchor_bottom = 1.0
 	add_child(glass_panel)
+	
+	# Top Right Header Strip for Quick Controls (Music Toggle)
+	var top_strip = MarginContainer.new()
+	top_strip.anchor_left = 0.0
+	top_strip.anchor_right = 1.0
+	top_strip.anchor_top = 0.0
+	top_strip.anchor_bottom = 0.0
+	top_strip.offset_left = 30
+	top_strip.offset_top = 24
+	top_strip.offset_right = -30
+	top_strip.offset_bottom = 74
+	add_child(top_strip)
+	
+	var top_hbox = HBoxContainer.new()
+	top_hbox.alignment = BoxContainer.ALIGNMENT_END
+	top_strip.add_child(top_hbox)
+	
+	_music_btn = Button.new()
+	_music_btn.name = "MusicToggleButton"
+	_music_btn.text = ""
+	_music_btn.custom_minimum_size = Vector2(44, 44)
+	_music_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_music_btn.expand_icon = true
+	ThemeManager.apply_nav_button_style(_music_btn, 6)
+	_music_btn.pressed.connect(_toggle_music)
+	top_hbox.add_child(_music_btn)
 	
 	# Main layout margin
 	var main_margin = MarginContainer.new()
@@ -70,7 +98,7 @@ func _ready() -> void:
 	# --- TILE 1: Putting Practice ---
 	var putting_tile = _create_minigame_tile(
 		"Putting Practice",
-		"Practice your short game on a large, undulating 100x100 ft green with multiple target holes and real-time score tracking.",
+		"Practice your short game on a large, undulating green with 8 target holes (5, 10, 15, 20, 25, 30, 40, 50 ft) and automatic reset after each putt.",
 		"res://assets/images/menu/practice_color.png", # Fallback to existing practice image
 		func(): SceneManager.change_scene("res://Courses/Minigames/PuttingPractice/putting_practice.tscn")
 	)
@@ -79,7 +107,7 @@ func _ready() -> void:
 	# --- TILE 2: Chipping Practice ---
 	var chipping_tile = _create_minigame_tile(
 		"Chipping Practice",
-		"Chip onto 4 custom-crafted floating island golf course greens (50, 100, 150, 200 yds) complete with wood retaining walls, sandtraps, pine trees, and boat docks!",
+		"Chip onto 7 custom-crafted floating island golf course greens (25, 50, 75, 100, 125, 150, 200 ft) complete with wood retaining walls, sandtraps, pine trees, and boat docks!",
 		"res://assets/images/menu/range_small.png",
 		func(): SceneManager.change_scene("res://Courses/Minigames/Chipping/chipping.tscn")
 	)
@@ -99,6 +127,39 @@ func _ready() -> void:
 	ThemeManager.apply_nav_button_style(back_btn)
 	back_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn") )
 	main_vbox.add_child(back_btn)
+
+	_update_music_button()
+	GlobalSettings.range_settings.minigame_music_enabled.setting_changed.connect(func(_val): _update_music_button())
+
+
+func _toggle_music() -> void:
+	var current = GlobalSettings.range_settings.minigame_music_enabled.value
+	GlobalSettings.range_settings.minigame_music_enabled.set_value(not current)
+	_update_music_button()
+
+
+func _update_music_button() -> void:
+	if _music_btn == null:
+		return
+	var is_enabled: bool = GlobalSettings.range_settings.minigame_music_enabled.value
+	if is_enabled:
+		if ResourceLoader.exists("res://assets/images/menu/music_on.svg"):
+			_music_btn.icon = load("res://assets/images/menu/music_on.svg")
+		_music_btn.tooltip_text = "Music: Playing (Click to mute)"
+		ThemeManager.apply_nav_button_style(_music_btn, 6)
+	else:
+		if ResourceLoader.exists("res://assets/images/menu/music_off.svg"):
+			_music_btn.icon = load("res://assets/images/menu/music_off.svg")
+		_music_btn.tooltip_text = "Music: Muted (Click to play)"
+		var style = StyleBoxFlat.new()
+		style.bg_color = Color(0.35, 0.18, 0.18, 0.8)
+		style.corner_radius_top_left = 6
+		style.corner_radius_top_right = 6
+		style.corner_radius_bottom_right = 6
+		style.corner_radius_bottom_left = 6
+		_music_btn.add_theme_stylebox_override("normal", style)
+		_music_btn.add_theme_stylebox_override("hover", style)
+		_music_btn.add_theme_stylebox_override("pressed", style)
 
 
 func _create_minigame_tile(title: String, desc: String, icon_path: String, on_click: Callable) -> PanelContainer:

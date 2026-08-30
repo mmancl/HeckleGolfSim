@@ -9,9 +9,12 @@ signal course_downloaded(course_name: String)
 @onready var cancel_button: Button = %CancelButton
 @onready var download_button: Button = %DownloadButton
 @onready var spinner: Control = %Spinner
+@onready var notice_panel: Control = %NoticePanel
 
 var _loader: Node = null
 var _results: Array = []
+var _download_in_progress: bool = false
+var _download_token: int = 0
 
 
 func _ready() -> void:
@@ -32,6 +35,8 @@ func _ready() -> void:
 	
 	results_list.clear()
 	download_button.disabled = true
+	if notice_panel != null:
+		notice_panel.visible = false
 	
 	var loader_script = load("res://Courses/OsmMapLoader.cs")
 	if loader_script != null:
@@ -55,6 +60,8 @@ func _on_search_pressed() -> void:
 	_results.clear()
 	download_button.disabled = true
 	spinner.visible = true
+	if notice_panel != null:
+		notice_panel.visible = false
 	
 	# Call C# search and await signal
 	_loader.SearchGolfCourses(query)
@@ -102,11 +109,19 @@ func _on_download_pressed() -> void:
 	download_button.disabled = true
 	cancel_button.disabled = true
 	spinner.visible = true
+	if notice_panel != null:
+		notice_panel.visible = false
+	
+	_download_in_progress = true
+	_download_token += 1
+	var current_token = _download_token
+	_start_download_notice_timer(current_token)
 	
 	# Call C# download and generate and await signal
 	_loader.DownloadAndGenerateCourse(lat, lon, course_name)
 	var success = await _loader.CourseGenerated
 	
+	_download_in_progress = false
 	spinner.visible = false
 	if success:
 		var msg = ""
@@ -119,8 +134,11 @@ func _on_download_pressed() -> void:
 		course_downloaded.emit(course_name)
 		# Wait 1.5 seconds before auto-closing
 		await get_tree().create_timer(1.5).timeout
-		queue_free()
+		if is_instance_valid(self):
+			queue_free()
 	else:
+		if notice_panel != null:
+			notice_panel.visible = false
 		var msg = ""
 		if _loader.has_method("GetGenerationMessage"):
 			msg = _loader.GetGenerationMessage()
@@ -133,7 +151,19 @@ func _on_download_pressed() -> void:
 		cancel_button.disabled = false
 
 
+func _start_download_notice_timer(token: int) -> void:
+	await get_tree().create_timer(15.0).timeout
+	if _download_in_progress and _download_token == token and is_instance_valid(self) and is_inside_tree():
+		if notice_panel != null:
+			notice_panel.visible = true
+			notice_panel.modulate.a = 0.0
+			var tween = create_tween()
+			if tween != null:
+				tween.tween_property(notice_panel, "modulate:a", 1.0, 0.4)
+
+
 func _on_cancel_pressed() -> void:
+	_download_in_progress = false
 	queue_free()
 
 

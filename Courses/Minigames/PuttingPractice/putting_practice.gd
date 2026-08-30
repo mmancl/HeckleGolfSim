@@ -8,7 +8,6 @@ var player = null
 var selected_hole_index = 0
 var last_putt_start_pos = Vector3.ZERO
 var last_putt_target_hole = Vector3.ZERO
-var user_aim_offset_deg = 0.0
 var show_green_grid: bool = false
 
 # Stats counters
@@ -29,16 +28,20 @@ var green_max_x = 24.0
 var green_min_z = -24.0
 var green_max_z = 24.0
 
-# Hole locations (Y will be calculated dynamically based on terrain height)
-var holes = [
-	Vector3(0.0, 0.0, -10.0),    # Hole 1: North Elevated Tier (~33 ft North)
-	Vector3(3.0, 0.0, 11.0),     # Hole 2: South Downhill Tier (~37 ft South)
-	Vector3(10.0, 0.0, -3.0),    # Hole 3: East Sidehill Break (~34 ft East-North)
-	Vector3(-9.0, 0.0, 5.0),     # Hole 4: West Valley Counter-Slope (~35 ft West-South)
-	Vector3(-1.0, 0.0, -1.0),    # Hole 5: Center Flat Tier (~26 ft Center)
-	Vector3(11.0, 0.0, 12.0),    # Hole 6: Long Diagonal Putt (~53 ft Southeast)
+# Hole configurations (5, 10, 15, 20, 25, 30, 40, 50 feet from starting spot)
+var hole_data = [
+	{"dist_ft": 5, "angle_deg": -45.0, "desc": "Short Warmup"},
+	{"dist_ft": 10, "angle_deg": 135.0, "desc": "Pressure Putt"},
+	{"dist_ft": 15, "angle_deg": -120.0, "desc": "Mid-Short Break"},
+	{"dist_ft": 20, "angle_deg": 30.0, "desc": "Mid Downhill"},
+	{"dist_ft": 25, "angle_deg": -75.0, "desc": "Mid-Long Ridge"},
+	{"dist_ft": 30, "angle_deg": 105.0, "desc": "Long Slope"},
+	{"dist_ft": 40, "angle_deg": -105.0, "desc": "Lag Cross-Slope"},
+	{"dist_ft": 50, "angle_deg": 50.0, "desc": "Long Distance Lag"},
 ]
+var holes = []
 var hole_buttons = []
+var shot_counter: int = 0
 
 # UI elements
 var attempts_val_lbl = null
@@ -46,13 +49,12 @@ var within_10_val_lbl = null
 var within_5_val_lbl = null
 var made_val_lbl = null
 var dist_25_val_lbl = null
-
-var power_slider = null
-var power_val_lbl = null
-var aim_slider = null
-var aim_val_lbl = null
 var banner_lbl = null
 var grid_toggle_btn = null
+var music_toggle_btn = null
+var hud_layer: CanvasLayer = null
+var hud_control: Control = null
+var _settings_layer: CanvasLayer = null
 
 func _ready() -> void:
 	name = "PuttingPractice"
@@ -79,10 +81,26 @@ func _ready() -> void:
 	# Select first hole by default
 	_select_hole(0)
 	
+	if has_node("/root/EventBus"):
+		var eb = get_node("/root/EventBus")
+		if eb.has_signal("club_selected"):
+			eb.club_selected.emit("Pt")
+	
 	if has_node("/root/LaunchMonitorManager"):
 		var launch_monitor = get_node("/root/LaunchMonitorManager")
 		if not launch_monitor.hit_ball.is_connected(_on_launch_monitor_hit_ball):
 			launch_monitor.hit_ball.connect(_on_launch_monitor_hit_ball)
+			
+	var tcp_server = get_node_or_null("TCPServer")
+	if tcp_server == null:
+		var tcp_script = load("res://addons/launch_monitors/common/tcp_server/TcpServer.cs")
+		if tcp_script != null:
+			tcp_server = tcp_script.new()
+			tcp_server.name = "TCPServer"
+			add_child(tcp_server)
+	if tcp_server != null and tcp_server.has_signal("HitBall"):
+		if not tcp_server.HitBall.is_connected(_on_launch_monitor_hit_ball):
+			tcp_server.HitBall.connect(_on_launch_monitor_hit_ball)
 
 # ----------------- ENVIRONMENT SETUP -----------------
 
@@ -112,32 +130,34 @@ func _setup_environment() -> void:
 	camera.name = "Camera3D"
 	camera.current = true
 	add_child(camera)
+	if has_node("/root/TensionManager"):
+		TensionManager.register_camera(camera, 55.0)
 
 # ----------------- PROCEDURAL TERRAIN -----------------
 
 func get_height(x: float, z: float) -> float:
 	var z_clamped = clamp(z, green_min_z, green_max_z)
-	var base_slope = - (z_clamped / 15.24) * 0.762
-	var undulation = 0.09 * sin(x * 0.35) + 0.08 * cos(z * 0.28 + 0.6) + 0.05 * sin(x * 0.22 - z * 0.25)
+	var base_slope = - (z_clamped / 15.24) * 0.15
+	var undulation = 0.035 * sin(x * 0.35) + 0.03 * cos(z * 0.28 + 0.6) + 0.015 * sin(x * 0.22 - z * 0.25)
 	var dist_from_center = Vector2(x, z).length()
 	var outer_mound = 0.0
 	if dist_from_center > 21.0:
 		var factor = (dist_from_center - 21.0) * 0.05
-		outer_mound = sin(x * 0.15 + z * 0.15) * 0.3 * factor
+		outer_mound = sin(x * 0.15 + z * 0.15) * 0.15 * factor
 		
 	return base_slope + undulation + outer_mound
 
 func get_green_radius(angle: float) -> float:
-	var r = 14.8
+	var r = 18.0
 	# North-South elongation
 	r += 3.5 * sin(angle - 0.1)
 	# Dual lobe structure
-	r -= 2.6 * cos(2.0 * (angle - 0.1))
-	# Southeast bulge for Hole 6
-	r += 1.8 * exp(- pow(angle - 0.8, 2) / 0.8)
+	r -= 2.0 * cos(2.0 * (angle - 0.1))
+	# Southeast bulge for 50 ft hole
+	r += 2.5 * exp(- pow(angle - 0.87, 2) / 0.8)
 	# West side kidney notch
 	var notch_angle = angle - 2.8 if angle > 0 else angle + 2.8
-	var notch = 4.0 * exp(- (notch_angle * notch_angle) / 0.6)
+	var notch = 3.5 * exp(- (notch_angle * notch_angle) / 0.6)
 	r -= notch
 	return r
 
@@ -334,7 +354,8 @@ func _generate_trees() -> void:
 	while spawned < total_trees and attempts < 250:
 		attempts += 1
 		var angle = rng.randf_range(0.0, TAU)
-		var dist = rng.randf_range(18.0, 42.0)
+		var min_tree_dist = max(get_green_radius(angle) + 2.0, 20.0)
+		var dist = rng.randf_range(min_tree_dist, 44.0)
 		
 		var tx = cos(angle) * dist
 		var tz = sin(angle) * dist
@@ -353,6 +374,59 @@ func _generate_trees() -> void:
 			
 			trees_folder.add_child(tree_inst)
 			spawned += 1
+
+func _create_arrow_mesh() -> Mesh:
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	
+	var half_w = 0.028
+	var half_l = 0.036
+	var h = 0.003
+	
+	var t_tip = Vector3(0.0, h, half_l)
+	var t_left = Vector3(-half_w, h, -half_l)
+	var t_right = Vector3(half_w, h, -half_l)
+	
+	var b_tip = Vector3(0.0, -h, half_l)
+	var b_left = Vector3(-half_w, -h, -half_l)
+	var b_right = Vector3(half_w, -h, -half_l)
+	
+	# Top face
+	st.add_vertex(t_tip)
+	st.add_vertex(t_left)
+	st.add_vertex(t_right)
+	
+	# Bottom face
+	st.add_vertex(b_tip)
+	st.add_vertex(b_right)
+	st.add_vertex(b_left)
+	
+	# Left side
+	st.add_vertex(t_tip)
+	st.add_vertex(b_tip)
+	st.add_vertex(b_left)
+	st.add_vertex(t_tip)
+	st.add_vertex(b_left)
+	st.add_vertex(t_left)
+	
+	# Right side
+	st.add_vertex(t_tip)
+	st.add_vertex(t_right)
+	st.add_vertex(b_right)
+	st.add_vertex(t_tip)
+	st.add_vertex(b_right)
+	st.add_vertex(b_tip)
+	
+	# Back side
+	st.add_vertex(t_left)
+	st.add_vertex(b_left)
+	st.add_vertex(b_right)
+	st.add_vertex(t_left)
+	st.add_vertex(b_right)
+	st.add_vertex(t_right)
+	
+	st.generate_normals()
+	return st.commit()
 
 # ----------------- SLOPE GRID & HEATMAP SYSTEM -----------------
 
@@ -392,7 +466,7 @@ func _generate_green_grid_and_heatmap() -> void:
 	
 	var heatmap_y_offset = 0.005
 	var grid_y_offset = 0.012
-	var dot_y_offset = 0.018
+	var dot_y_offset = 0.022
 	
 	var height_cache = {}
 	var get_cached_height = func(gx: float, gz: float) -> float:
@@ -459,7 +533,7 @@ func _generate_green_grid_and_heatmap() -> void:
 			st_grid.add_vertex(g01)
 			st_grid.add_vertex(g00)
 			
-	# Collect edges for slope flow dots
+	# Collect edges for slope flow arrows
 	var h_edges = {}
 	var v_edges = {}
 	for iz in range(iz_start, iz_end + 1):
@@ -472,7 +546,7 @@ func _generate_green_grid_and_heatmap() -> void:
 			
 	var dots_data = []
 	
-	# Horizontal edges (slope dots)
+	# Horizontal edges (slope arrows)
 	for edge in h_edges.keys():
 		var x0 = edge.x * spacing
 		var z0 = edge.y * spacing
@@ -486,7 +560,7 @@ func _generate_green_grid_and_heatmap() -> void:
 		var y1 = get_cached_height.call(x1, z1)
 		
 		var slope = abs(y0 - y1)
-		if slope > 0.003:
+		if slope > 0.0005:
 			var start_pos: Vector3
 			var end_pos: Vector3
 			if y0 > y1:
@@ -496,7 +570,7 @@ func _generate_green_grid_and_heatmap() -> void:
 				start_pos = Vector3(x1, y1 + dot_y_offset, z1)
 				end_pos = Vector3(x0, y0 + dot_y_offset, z0)
 				
-			var dots_per_segment = 3
+			var dots_per_segment = 2
 			for j in range(dots_per_segment):
 				dots_data.append({
 					"start": start_pos,
@@ -505,7 +579,7 @@ func _generate_green_grid_and_heatmap() -> void:
 					"phase_offset": float(j) / float(dots_per_segment)
 				})
 				
-	# Vertical edges (slope dots)
+	# Vertical edges (slope arrows)
 	for edge in v_edges.keys():
 		var x0 = edge.x * spacing
 		var z0 = edge.y * spacing
@@ -519,7 +593,7 @@ func _generate_green_grid_and_heatmap() -> void:
 		var y1 = get_cached_height.call(x1, z1)
 		
 		var slope = abs(y0 - y1)
-		if slope > 0.003:
+		if slope > 0.0005:
 			var start_pos: Vector3
 			var end_pos: Vector3
 			if y0 > y1:
@@ -529,7 +603,7 @@ func _generate_green_grid_and_heatmap() -> void:
 				start_pos = Vector3(x1, y1 + dot_y_offset, z1)
 				end_pos = Vector3(x0, y0 + dot_y_offset, z0)
 				
-			var dots_per_segment = 3
+			var dots_per_segment = 2
 			for j in range(dots_per_segment):
 				dots_data.append({
 					"start": start_pos,
@@ -538,7 +612,7 @@ func _generate_green_grid_and_heatmap() -> void:
 					"phase_offset": float(j) / float(dots_per_segment)
 				})
 				
-	# Commit Heatmap Mesh
+	# Commit Heatmap Mesh (hidden by default to match regular course play)
 	var heatmap_mesh = st_heatmap.commit()
 	var heatmap_mi = MeshInstance3D.new()
 	heatmap_mi.name = "GreenHeatmapMesh"
@@ -549,7 +623,7 @@ func _generate_green_grid_and_heatmap() -> void:
 	mat_hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat_hm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	heatmap_mi.material_override = mat_hm
-	heatmap_mi.visible = show_green_grid
+	heatmap_mi.visible = false
 	add_child(heatmap_mi)
 	
 	# Commit Grid Mesh
@@ -558,14 +632,14 @@ func _generate_green_grid_and_heatmap() -> void:
 	grid_mi.name = "GreenGridMesh"
 	grid_mi.mesh = grid_mesh
 	var mat_g = StandardMaterial3D.new()
-	mat_g.albedo_color = Color(1.0, 1.0, 1.0, 0.4)
+	mat_g.albedo_color = Color(1.0, 1.0, 1.0, 0.35)
 	mat_g.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 	mat_g.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	grid_mi.material_override = mat_g
 	grid_mi.visible = show_green_grid
 	add_child(grid_mi)
 	
-	# Commit Moving Slope Dots MultiMesh
+	# Commit Moving Slope Arrows MultiMesh
 	var dots_mi = MultiMeshInstance3D.new()
 	dots_mi.name = "GreenDotsMesh"
 	
@@ -574,20 +648,21 @@ func _generate_green_grid_and_heatmap() -> void:
 	multimesh.use_colors = true
 	multimesh.use_custom_data = true
 	multimesh.instance_count = dots_data.size()
-	
-	var dot_sphere = SphereMesh.new()
-	dot_sphere.radius = 0.018
-	dot_sphere.height = 0.036
-	dot_sphere.radial_segments = 6
-	dot_sphere.rings = 3
-	multimesh.mesh = dot_sphere
+	multimesh.mesh = _create_arrow_mesh()
 	
 	for i in range(dots_data.size()):
 		var data = dots_data[i]
-		var tx = Transform3D(Basis(), data.start)
+		var disp = data.displacement
+		var fwd = disp.normalized()
+		var up = Vector3.UP
+		if abs(fwd.dot(up)) > 0.95:
+			up = Vector3.FORWARD
+		var right = up.cross(fwd).normalized()
+		up = fwd.cross(right).normalized()
+		var basis = Basis(right, up, fwd)
+		var tx = Transform3D(basis, data.start)
 		multimesh.set_instance_transform(i, tx)
 		
-		var disp = data.displacement
 		var custom = Color(disp.x, disp.y, disp.z, data.slope)
 		multimesh.set_instance_custom_data(i, custom)
 		multimesh.set_instance_color(i, Color(data.phase_offset, 0.0, 0.0, 1.0))
@@ -597,23 +672,22 @@ func _generate_green_grid_and_heatmap() -> void:
 	var shader = Shader.new()
 	shader.code = """
 shader_type spatial;
-render_mode unshaded, cull_back;
+render_mode unshaded, cull_disabled;
 
 uniform float time_scale = 1.0;
-uniform vec4 dot_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
-uniform float min_y = 0.0;
-uniform float max_y = 1.0;
 
 varying vec4 v_color;
 
 void vertex() {
 	vec3 displacement = INSTANCE_CUSTOM.xyz;
-	float speed = INSTANCE_CUSTOM.w;
+	float slope_val = INSTANCE_CUSTOM.w;
 	
 	float phase_offset = COLOR.r;
-	float segment_phase = float(INSTANCE_ID / 3) * 0.15;
+	float segment_phase = float(INSTANCE_ID / 2) * 0.25;
 	
-	float progress = fract(TIME * speed * time_scale * 3.5 + phase_offset + segment_phase);
+	// Speed scales dynamically with slope so steeper slopes flow faster, but subtle slopes remain clearly active
+	float move_speed = 0.4 + clamp(slope_val * 35.0, 0.0, 2.6);
+	float progress = fract(TIME * move_speed * time_scale + phase_offset + segment_phase);
 	
 	vec4 world_offset = vec4(displacement * progress, 0.0);
 	vec4 local_offset = inverse(MODEL_MATRIX) * world_offset;
@@ -621,21 +695,28 @@ void vertex() {
 	
 	float fade = sin(progress * 3.14159265);
 	
-	float current_y = MODEL_MATRIX[3].y + displacement.y * progress;
-	float t = clamp((current_y - min_y) / (max_y - min_y), 0.0, 1.0);
+	// Dynamic color transition based on slope severity (0.2% to 3.6%+)
+	float t = clamp(slope_val * 28.0, 0.0, 1.0);
 	
 	vec3 col;
-	if (t < 0.25) {
-		col = mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), t / 0.25);
-	} else if (t < 0.5) {
-		col = mix(vec3(0.0, 1.0, 1.0), vec3(0.0, 1.0, 0.0), (t - 0.25) / 0.25);
-	} else if (t < 0.75) {
-		col = mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), (t - 0.5) / 0.25);
+	if (t < 0.2) {
+		// 0% - 0.7% slope: Sky Blue -> Cyan
+		col = mix(vec3(0.1, 0.6, 1.0), vec3(0.0, 0.95, 0.9), t / 0.2);
+	} else if (t < 0.4) {
+		// 0.7% - 1.4% slope: Cyan -> Lime Green
+		col = mix(vec3(0.0, 0.95, 0.9), vec3(0.2, 0.95, 0.2), (t - 0.2) / 0.2);
+	} else if (t < 0.6) {
+		// 1.4% - 2.1% slope: Lime Green -> Bright Yellow
+		col = mix(vec3(0.2, 0.95, 0.2), vec3(1.0, 0.95, 0.0), (t - 0.4) / 0.2);
+	} else if (t < 0.8) {
+		// 2.1% - 2.8% slope: Bright Yellow -> Vivid Orange
+		col = mix(vec3(1.0, 0.95, 0.0), vec3(1.0, 0.5, 0.0), (t - 0.6) / 0.2);
 	} else {
-		col = mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), (t - 0.75) / 0.25);
+		// 2.8% - 3.6%+ slope: Vivid Orange -> Hot Crimson / Red
+		col = mix(vec3(1.0, 0.5, 0.0), vec3(1.0, 0.08, 0.15), (t - 0.8) / 0.2);
 	}
 	
-	v_color = vec4(col, dot_color.a * fade);
+	v_color = vec4(col, fade * 0.95);
 }
 
 void fragment() {
@@ -646,8 +727,6 @@ void fragment() {
 	
 	var mat_dots = ShaderMaterial.new()
 	mat_dots.shader = shader
-	mat_dots.set_shader_parameter("min_y", min_y)
-	mat_dots.set_shader_parameter("max_y", max_y)
 	dots_mi.material_override = mat_dots
 	dots_mi.visible = show_green_grid
 	add_child(dots_mi)
@@ -676,7 +755,7 @@ func _update_green_grid_visibility() -> void:
 	var dots_node = get_node_or_null("GreenDotsMesh")
 	
 	if heatmap_node:
-		heatmap_node.visible = show_green_grid
+		heatmap_node.visible = false
 	if grid_node:
 		grid_node.visible = show_green_grid
 	if dots_node:
@@ -696,7 +775,8 @@ func _update_grid_button_state() -> void:
 func _setup_player() -> void:
 	player = PlayerScene.instantiate()
 	add_child(player)
-	player.global_position = Vector3(0.0, get_height(0.0, 0.0) + 0.02, 0.0)
+	var start_pos = Vector3(0.0, get_height(0.0, 0.0) + 0.02, 0.0)
+	player.global_position = start_pos
 	
 	# Disable default process update
 	player.set_process(false)
@@ -705,21 +785,27 @@ func _setup_player() -> void:
 	player.rest.connect(_on_ball_rest)
 	
 	# Initialize spawn position
-	player.ball.spawn_position = player.global_position
+	player.ball.spawn_position = start_pos
 	player.ball.reset()
 
 # ----------------- TARGET HOLES -----------------
 
 func _setup_holes() -> void:
-	# Calculate correct Y height for each hole based on terrain
-	for i in range(holes.size()):
-		var h = holes[i]
-		holes[i] = Vector3(h.x, get_height(h.x, h.z), h.z)
+	holes.clear()
+	for i in range(hole_data.size()):
+		var data = hole_data[i]
+		var dist_m = data["dist_ft"] * 0.3048
+		var rad = deg_to_rad(data["angle_deg"])
+		var h_x = dist_m * cos(rad)
+		var h_z = dist_m * sin(rad)
+		var h_y = get_height(h_x, h_z)
+		var hole_pos = Vector3(h_x, h_y, h_z)
+		holes.append(hole_pos)
 		
 		# Spawn realistic golf cup (white cup liner/rim with dark interior bottom) matching course play
 		var cup_root = Node3D.new()
 		cup_root.name = "CupMarker_%d" % i
-		cup_root.position = holes[i]
+		cup_root.position = hole_pos
 		
 		# White cup rim/liner
 		var cup_white = MeshInstance3D.new()
@@ -756,34 +842,30 @@ func _setup_holes() -> void:
 		add_child(cup_root)
 
 func _select_hole(index: int) -> void:
+	if index < 0 or index >= holes.size():
+		return
 	selected_hole_index = index
-	user_aim_offset_deg = 0.0
-	if aim_slider:
-		aim_slider.value = 0.0
 		
 	# Draw/Reposition flagpole
 	_spawn_flagpole(holes[index])
 	
-	# Re-aim and reset ball to target
+	# Always reset ball to starting position aiming towards the selected hole
 	_reset_ball_position()
 	
-	_show_banner("Target Hole %d Selected!" % (index + 1))
+	_show_banner("Target Hole %d (%d ft) Selected! Hit with Launch Monitor." % [index + 1, hole_data[index]["dist_ft"]])
 	
 	# Update active button visuals & distances
 	_update_hole_button_labels()
 
 func _update_hole_button_labels() -> void:
-	if player == null or player.ball == null:
-		return
-	var ball_pos = player.ball.global_position
 	for i in range(holes.size()):
 		if i < hole_buttons.size():
-			var dist_ft = ball_pos.distance_to(holes[i]) * 3.28084
+			var dist_ft = hole_data[i]["dist_ft"]
 			if i == selected_hole_index:
-				hole_buttons[i].text = "Hole %d (%.0f ft) ▶" % [i + 1, dist_ft]
+				hole_buttons[i].text = "Hole %d (%d ft) ▶" % [i + 1, dist_ft]
 				hole_buttons[i].add_theme_color_override("font_color", Color(0.0, 0.8, 1.0))
 			else:
-				hole_buttons[i].text = "Hole %d (%.0f ft)" % [i + 1, dist_ft]
+				hole_buttons[i].text = "Hole %d (%d ft)" % [i + 1, dist_ft]
 				hole_buttons[i].remove_theme_color_override("font_color")
 
 func _spawn_flagpole(pos: Vector3) -> void:
@@ -842,21 +924,20 @@ func _spawn_flagpole(pos: Vector3) -> void:
 # ----------------- BALL TELEPORTATION & DYNAMIC AIMING -----------------
 
 func _reset_ball_position() -> void:
-	var current_pos = player.ball.global_position
-	# If ball was reset or out of bounds, set to center
-	if current_pos.length_squared() < 0.01 or not is_inside_green(current_pos.x, current_pos.z):
-		current_pos = Vector3(0.0, get_height(0.0, 0.0) + 0.02, 0.0)
-		
-	_teleport_ball(current_pos)
+	var start_pos = Vector3(0.0, get_height(0.0, 0.0) + 0.02, 0.0)
+	_teleport_ball(start_pos)
 
 func _teleport_ball(pos: Vector3) -> void:
+	if has_node("/root/TensionManager"):
+		TensionManager.stop_tension()
 	pos.y = get_height(pos.x, pos.z) + 0.02
 	player.global_position = pos
 	player.ball.spawn_position = pos
 	player.ball.reset()
 	
 	last_putt_start_pos = pos
-	last_putt_target_hole = holes[selected_hole_index]
+	if selected_hole_index >= 0 and selected_hole_index < holes.size():
+		last_putt_target_hole = holes[selected_hole_index]
 	
 	# Clear tracers
 	player.reset_ball()
@@ -873,14 +954,13 @@ func _update_aim_and_camera() -> void:
 	var ball_pos = player.ball.global_position
 	
 	var diff = target_hole - ball_pos
-	var base_angle_rad = atan2(diff.z, diff.x)
-	var final_angle_rad = base_angle_rad + deg_to_rad(user_aim_offset_deg)
+	var angle_rad = atan2(diff.z, diff.x)
 	
 	# Apply aim yaw offset to player ball
-	player.ball.aim_yaw_offset_deg = rad_to_deg(-final_angle_rad)
+	player.ball.aim_yaw_offset_deg = rad_to_deg(-angle_rad)
 	
 	# Position camera behind the ball along the target line (higher elevation & angled down)
-	var back_dir = Vector3(-cos(final_angle_rad), 0.0, -sin(final_angle_rad)).normalized()
+	var back_dir = Vector3(-cos(angle_rad), 0.0, -sin(angle_rad)).normalized()
 	var cam_pos = ball_pos + back_dir * 3.5 + Vector3.UP * 2.2
 	
 	$Camera3D.global_position = cam_pos
@@ -892,18 +972,14 @@ func _update_aim_and_camera() -> void:
 # ----------------- INPUT & HIT SIMULATION -----------------
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Right-click dragging to orbit camera (aim)
+	if _settings_layer != null and is_instance_valid(_settings_layer):
+		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+			_close_settings()
+			get_viewport().set_input_as_handled()
+		return
+
 	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_RIGHT:
-			if event.pressed:
-				is_dragging = true
-				Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-			else:
-				is_dragging = false
-				Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-				
-		elif event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			# Left-click on green to teleport/aim
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 			var camera = $Camera3D
 			if camera != null:
 				var ray_start = camera.project_ray_origin(event.position)
@@ -921,77 +997,57 @@ func _unhandled_input(event: InputEvent) -> void:
 							min_dist = d
 							closest_idx = i
 							
-					# Selection within 4 meters (~13 feet) of any hole
-					if min_dist <= 4.0:
+					# Selection within 4 meters of any hole
+					if closest_idx >= 0 and min_dist <= 4.0:
 						_select_hole(closest_idx)
-					else:
-						_teleport_ball(clicked_point)
 						
-	elif event is InputEventMouseMotion and is_dragging:
-		user_aim_offset_deg += event.relative.x * 0.15
-		if aim_slider:
-			aim_slider.value = clamp(user_aim_offset_deg, aim_slider.min_value, aim_slider.max_value)
-		_update_aim_and_camera()
-					
-	# Keyboard Arrow keys, A/D, H (putt), R (reset), G (grid)
+	# Keyboard R (reset), G (grid), H/Space (test hit)
 	if event is InputEventKey and event.pressed:
-		if event.keycode == KEY_LEFT or event.keycode == KEY_A:
-			user_aim_offset_deg += 1.5
-			if aim_slider:
-				aim_slider.value = clamp(user_aim_offset_deg, aim_slider.min_value, aim_slider.max_value)
-			_update_aim_and_camera()
-		elif event.keycode == KEY_RIGHT or event.keycode == KEY_D:
-			user_aim_offset_deg -= 1.5
-			if aim_slider:
-				aim_slider.value = clamp(user_aim_offset_deg, aim_slider.min_value, aim_slider.max_value)
-			_update_aim_and_camera()
-		elif event.keycode == KEY_H:
-			_perform_putt()
-		elif event.keycode == KEY_R:
-			_teleport_ball(last_putt_start_pos)
+		if event.keycode == KEY_R:
+			_reset_ball_position()
 		elif event.keycode == KEY_G:
 			_toggle_green_grid()
-
-func _perform_putt() -> void:
-	if player.ball.state != PhysicsEnums.BallState.REST:
-		return # Cannot putt while ball is moving
-		
-	last_putt_start_pos = player.ball.global_position
-	last_putt_target_hole = holes[selected_hole_index]
-	
-	var speed_mph = power_slider.value
-	var hla = user_aim_offset_deg
-	
-	var data = {
-		"Speed": speed_mph,
-		"VLA": 0.0,
-		"HLA": hla,
-		"TotalSpin": 100.0,
-		"SpinAxis": 0.0,
-		"ShotType": "putt"
-	}
-	
-	# Execute putt simulation
-	player.track_points = false
-	player.create_new_tracer()
-	player.ball.call_deferred("hit_from_data", data)
-	player.track_points = true
-	player.trail_timer = 0.0
-	
-	_show_banner("Putt Hit! (Speed: %.1f mph)" % speed_mph)
+		elif event.keycode == KEY_H or event.keycode == KEY_SPACE:
+			if player and player.ball and player.ball.state == PhysicsEnums.BallState.REST:
+				var target_dist_ft = hole_data[selected_hole_index]["dist_ft"]
+				var sim_speed = sqrt(target_dist_ft) * 1.85
+				var test_data = {
+					"Speed": sim_speed,
+					"VLA": 0.0,
+					"HLA": 0.0,
+					"SpinAxis": 0.0,
+					"TotalSpin": 0.0,
+					"BackSpin": 0.0,
+					"SideSpin": 0.0,
+					"ShotType": "putt",
+					"club": "Pt"
+				}
+				_on_launch_monitor_hit_ball(test_data)
 
 func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	if player == null or player.ball == null:
 		return
 	if player.ball.state != PhysicsEnums.BallState.REST:
 		return # Ignore if putt in progress
-		
+
+	if has_node("/root/TensionManager"):
+		TensionManager.stop_tension()
+
+	shot_counter += 1
 	last_putt_start_pos = player.ball.global_position
-	last_putt_target_hole = holes[selected_hole_index]
-	
+	if selected_hole_index >= 0 and selected_hole_index < holes.size():
+		last_putt_target_hole = holes[selected_hole_index]
+
 	# Connect to the player's launch monitor shot handler
 	player._on_tcp_client_hit_ball(data)
-	
+
+	# Early Trajectory Prediction for Suspense
+	if has_node("/root/TensionManager") and not last_putt_target_hole.is_zero_approx():
+		var prediction = TensionManager.predict_shot_outcome(player.ball.global_position, player.ball.velocity, true, last_putt_target_hole)
+		if prediction.get("will_enter_zone", false):
+			print("[PuttingPractice] Early suspense predicted for putt! Scheduling heartbeat.")
+			TensionManager.schedule_early_tension("putt", 0.35)
+
 	# Show the banner
 	var speed_mph = data.get("Speed", 0.0)
 	_show_banner("Putt Hit (Launch Monitor)! Speed: %.1f mph" % speed_mph)
@@ -999,22 +1055,42 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 # ----------------- DYNAMIC CUP-ENTRY & CAMERA FOLLOW -----------------
 
 func _physics_process(delta: float) -> void:
-	# Camera Smooth Follow
+	# Camera Smooth Follow & Tension
 	if player and player.ball:
 		var ball_state = player.ball.state
 		if ball_state == PhysicsEnums.BallState.FLIGHT or ball_state == PhysicsEnums.BallState.ROLLOUT:
 			camera_following = true
 			var ball_pos = player.ball.global_position
 			var target_cam_pos = ball_pos + last_camera_offset
+
+			# Live distance check to hole
+			if not last_putt_target_hole.is_zero_approx():
+				var dist_to_hole = Vector2(ball_pos.x, ball_pos.z).distance_to(Vector2(last_putt_target_hole.x, last_putt_target_hole.z))
+				if dist_to_hole <= 1.524: # 5 feet in meters
+					if has_node("/root/TensionManager") and not TensionManager.is_active():
+						TensionManager.start_tension("putt")
+
+			# If tension active, tighten camera closer to ball and cup
+			if has_node("/root/TensionManager") and TensionManager.is_active() and not last_putt_target_hole.is_zero_approx():
+				var diff_to_hole = (last_putt_target_hole - ball_pos)
+				diff_to_hole.y = 0.0
+				var back_dir = -diff_to_hole.normalized() if not diff_to_hole.is_zero_approx() else Vector3.BACK
+				var close_offset = back_dir * 2.2 + Vector3.UP * 1.1
+				target_cam_pos = ball_pos + close_offset
+
 			$Camera3D.global_position = $Camera3D.global_position.lerp(target_cam_pos, delta * 8.0)
 			$Camera3D.look_at(ball_pos)
 		else:
 			if camera_following:
 				camera_following = false
+				if has_node("/root/TensionManager"):
+					TensionManager.stop_tension()
 				_update_aim_and_camera()
 				_update_hole_button_labels()
 
 func _on_ball_rest(_shot_data: Dictionary) -> void:
+	if has_node("/root/TensionManager"):
+		TensionManager.stop_tension()
 	var final_pos = player.ball.global_position
 	var target_hole = last_putt_target_hole
 	
@@ -1026,7 +1102,7 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 	stats_attempts += 1
 	
 	# 2. 25+ Foot Putt
-	if start_dist_feet >= 25.0:
+	if start_dist_feet >= 24.5:
 		stats_attempts_25_plus += 1
 		
 	# 3. Made into hole
@@ -1035,9 +1111,9 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 		made = true
 		stats_made += 1
 		GlobalSettings.play_golf_clap()
-		_show_banner("HOLED OUT! AMAZING PUTT!")
+		_show_banner("HOLED OUT! AMAZING PUTT! (%.0f ft)" % start_dist_feet)
 	else:
-		_show_banner("Ended %.1f feet from cup" % end_dist_feet)
+		_show_banner("Ended %.1f ft from cup (Target: %.0f ft)" % [end_dist_feet, start_dist_feet])
 		
 	# 4. Within 5 feet
 	if end_dist_feet <= 5.0 or made:
@@ -1051,23 +1127,31 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 	_update_hud()
 	_update_hole_button_labels()
 	
-	# If ball was holed, reset back to starting position after a short delay
-	if made:
-		await get_tree().create_timer(2.0).timeout
-		_teleport_ball(last_putt_start_pos)
+	# Always reset player back to the starting spot after hitting
+	var current_shot_id = shot_counter
+	await get_tree().create_timer(2.5).timeout
+	if is_inside_tree() and player != null and player.ball != null:
+		if shot_counter == current_shot_id and player.ball.state == PhysicsEnums.BallState.REST:
+			_reset_ball_position()
 
 # ----------------- GUI SETUP -----------------
 
 func _setup_ui() -> void:
-	var hud_layer = CanvasLayer.new()
+	hud_layer = CanvasLayer.new()
 	hud_layer.name = "HUDLayer"
+	hud_layer.layer = 1
 	add_child(hud_layer)
 	
 	# Main HUD Control Node
-	var control = Control.new()
-	control.anchors_preset = Control.PRESET_FULL_RECT
-	control.set_anchors_preset(Control.PRESET_FULL_RECT)
-	hud_layer.add_child(control)
+	hud_control = Control.new()
+	hud_control.name = "Control"
+	hud_control.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hud_control.anchor_right = 1.0
+	hud_control.anchor_bottom = 1.0
+	hud_control.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	hud_control.grow_vertical = Control.GROW_DIRECTION_BOTH
+	hud_control.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_layer.add_child(hud_control)
 	
 	# --- TOP SCOREBOARD PANEL ---
 	var score_panel = PanelContainer.new()
@@ -1081,7 +1165,7 @@ func _setup_ui() -> void:
 	score_panel.offset_right = 400
 	score_panel.offset_top = 20
 	score_panel.offset_bottom = 110
-	control.add_child(score_panel)
+	hud_control.add_child(score_panel)
 	
 	var glass_style = StyleBoxFlat.new()
 	glass_style.bg_color = Color(0.04, 0.08, 0.12, 0.85)
@@ -1113,15 +1197,15 @@ func _setup_ui() -> void:
 	
 	# --- LEFT FLOATING TARGET SELECTION PANEL ---
 	var target_panel = PanelContainer.new()
-	target_panel.custom_minimum_size = Vector2(200, 310)
+	target_panel.custom_minimum_size = Vector2(210, 390)
 	target_panel.anchor_left = 0.0
 	target_panel.anchor_top = 0.5
 	target_panel.anchor_bottom = 0.5
 	target_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	target_panel.offset_left = 20
-	target_panel.offset_top = -155
-	target_panel.offset_bottom = 155
-	control.add_child(target_panel)
+	target_panel.offset_top = -195
+	target_panel.offset_bottom = 195
+	hud_control.add_child(target_panel)
 	target_panel.add_theme_stylebox_override("panel", glass_style)
 	
 	var target_margin = MarginContainer.new()
@@ -1132,7 +1216,7 @@ func _setup_ui() -> void:
 	target_panel.add_child(target_margin)
 	
 	var target_vbox = VBoxContainer.new()
-	target_vbox.add_theme_constant_override("separation", 8)
+	target_vbox.add_theme_constant_override("separation", 6)
 	target_margin.add_child(target_vbox)
 	
 	var t_title = Label.new()
@@ -1142,11 +1226,11 @@ func _setup_ui() -> void:
 	t_title.add_theme_color_override("font_color", Color(0.0, 0.8, 1.0))
 	target_vbox.add_child(t_title)
 	
-	# Create 6 hole buttons
+	# Create 8 hole buttons
 	hole_buttons.clear()
 	for i in range(holes.size()):
 		var btn = Button.new()
-		btn.text = "Hole %d" % (i + 1)
+		btn.text = "Hole %d (%d ft)" % [i + 1, hole_data[i]["dist_ft"]]
 		btn.custom_minimum_size = Vector2(0, 32)
 		btn.add_theme_font_size_override("font_size", 12)
 		_apply_btn_style(btn, Color(0.12, 0.20, 0.28), Color(0.18, 0.30, 0.42))
@@ -1156,7 +1240,7 @@ func _setup_ui() -> void:
 		
 	# --- BANNER TEXT (Center-ish screen) ---
 	banner_lbl = Label.new()
-	banner_lbl.text = "RMB Drag: Look | Left/Right: Aim | Click green: Teleport | G: Slope Grid"
+	banner_lbl.text = "Select a target hole (5-50 ft) | Hit putt on Launch Monitor | R: Reset | G: Grid"
 	banner_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	banner_lbl.anchor_left = 0.5
 	banner_lbl.anchor_right = 0.5
@@ -1167,132 +1251,76 @@ func _setup_ui() -> void:
 	banner_lbl.add_theme_color_override("font_color", Color(1, 1, 0.5, 1.0))
 	banner_lbl.add_theme_constant_override("outline_size", 3)
 	banner_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
-	control.add_child(banner_lbl)
+	hud_control.add_child(banner_lbl)
 	
 	# --- BOTTOM CONTROLS PANEL ---
 	var ctrl_panel = PanelContainer.new()
-	ctrl_panel.custom_minimum_size = Vector2(980, 100)
+	ctrl_panel.custom_minimum_size = Vector2(460, 70)
 	ctrl_panel.anchor_left = 0.5
 	ctrl_panel.anchor_right = 0.5
 	ctrl_panel.anchor_top = 1.0
 	ctrl_panel.anchor_bottom = 1.0
 	ctrl_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	ctrl_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	ctrl_panel.offset_left = -490
-	ctrl_panel.offset_right = 490
-	ctrl_panel.offset_top = -120
+	ctrl_panel.offset_left = -230
+	ctrl_panel.offset_right = 230
+	ctrl_panel.offset_top = -90
 	ctrl_panel.offset_bottom = -20
-	control.add_child(ctrl_panel)
+	hud_control.add_child(ctrl_panel)
 	ctrl_panel.add_theme_stylebox_override("panel", glass_style)
 	
 	var ctrl_margin = MarginContainer.new()
-	ctrl_margin.add_theme_constant_override("margin_left", 20)
-	ctrl_margin.add_theme_constant_override("margin_right", 20)
+	ctrl_margin.add_theme_constant_override("margin_left", 16)
+	ctrl_margin.add_theme_constant_override("margin_right", 16)
 	ctrl_panel.add_child(ctrl_margin)
 	
 	var ctrl_hbox = HBoxContainer.new()
-	ctrl_hbox.add_theme_constant_override("separation", 16)
+	ctrl_hbox.add_theme_constant_override("separation", 14)
 	ctrl_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	ctrl_margin.add_child(ctrl_hbox)
 	
-	# 1. Putt Power slider
-	var power_vbox = VBoxContainer.new()
-	power_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	power_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	ctrl_hbox.add_child(power_vbox)
-	
-	var power_lbl = Label.new()
-	power_lbl.text = "Putt Power (Speed)"
-	power_lbl.add_theme_font_size_override("font_size", 14)
-	power_vbox.add_child(power_lbl)
-	
-	var p_slider_hbox = HBoxContainer.new()
-	power_vbox.add_child(p_slider_hbox)
-	
-	power_slider = HSlider.new()
-	power_slider.min_value = 2.0
-	power_slider.max_value = 20.0
-	power_slider.step = 0.1
-	power_slider.value = 8.0
-	power_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	p_slider_hbox.add_child(power_slider)
-	
-	power_val_lbl = Label.new()
-	power_val_lbl.text = "8.0 mph"
-	power_val_lbl.custom_minimum_size = Vector2(60, 0)
-	p_slider_hbox.add_child(power_val_lbl)
-	
-	power_slider.value_changed.connect(func(val): power_val_lbl.text = "%.1f mph" % val)
-	
-	# 2. Aim offset slider
-	var aim_vbox = VBoxContainer.new()
-	aim_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	aim_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	ctrl_hbox.add_child(aim_vbox)
-	
-	var aim_lbl = Label.new()
-	aim_lbl.text = "Aim Angle Offset"
-	aim_lbl.add_theme_font_size_override("font_size", 14)
-	aim_vbox.add_child(aim_lbl)
-	
-	var aim_slider_hbox = HBoxContainer.new()
-	aim_vbox.add_child(aim_slider_hbox)
-	
-	aim_slider = HSlider.new()
-	aim_slider.min_value = -30.0
-	aim_slider.max_value = 30.0
-	aim_slider.step = 0.5
-	aim_slider.value = 0.0
-	aim_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	aim_slider_hbox.add_child(aim_slider)
-	
-	aim_val_lbl = Label.new()
-	aim_val_lbl.text = "0.0°"
-	aim_val_lbl.custom_minimum_size = Vector2(50, 0)
-	aim_slider_hbox.add_child(aim_val_lbl)
-	
-	aim_slider.value_changed.connect(_on_aim_slider_changed)
-	
-	# 3. Slope Grid Toggle Button
+	# 1. Slope Grid Toggle Button
 	grid_toggle_btn = Button.new()
 	grid_toggle_btn.name = "GridToggleButton"
 	grid_toggle_btn.text = "📊 Grid: OFF"
-	grid_toggle_btn.custom_minimum_size = Vector2(110, 50)
+	grid_toggle_btn.custom_minimum_size = Vector2(110, 44)
 	_apply_btn_style(grid_toggle_btn, Color(0.25, 0.25, 0.25), Color(0.35, 0.35, 0.35))
 	grid_toggle_btn.pressed.connect(_toggle_green_grid)
 	ctrl_hbox.add_child(grid_toggle_btn)
 	
-	# 4. Swing Button
-	var swing_btn = Button.new()
-	swing_btn.text = "PUTT (H)"
-	swing_btn.custom_minimum_size = Vector2(120, 50)
-	_apply_btn_style(swing_btn, Color(0.18, 0.48, 0.28), Color(0.12, 0.32, 0.18))
-	swing_btn.pressed.connect(_perform_putt)
-	ctrl_hbox.add_child(swing_btn)
-	
-	# 5. Reset Button
+	# 2. Reset Button
 	var reset_btn = Button.new()
 	reset_btn.text = "RESET (R)"
-	reset_btn.custom_minimum_size = Vector2(110, 50)
+	reset_btn.custom_minimum_size = Vector2(100, 44)
 	_apply_btn_style(reset_btn, Color(0.48, 0.28, 0.18), Color(0.32, 0.18, 0.12))
-	reset_btn.pressed.connect(func(): _teleport_ball(last_putt_start_pos))
+	reset_btn.pressed.connect(_reset_ball_position)
 	ctrl_hbox.add_child(reset_btn)
+
+	# 3. Music Toggle Button
+	music_toggle_btn = Button.new()
+	music_toggle_btn.name = "MusicToggleButton"
+	music_toggle_btn.text = ""
+	music_toggle_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	music_toggle_btn.expand_icon = true
+	music_toggle_btn.custom_minimum_size = Vector2(44, 44)
+	music_toggle_btn.pressed.connect(_toggle_music)
+	ctrl_hbox.add_child(music_toggle_btn)
 	
-	# Settings Button
+	# 4. Settings Button
 	var settings_btn = Button.new()
 	settings_btn.name = "SettingsButton"
 	settings_btn.text = ""
 	settings_btn.icon = load("res://Utils/Settings/Gear.png")
 	settings_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	settings_btn.custom_minimum_size = Vector2(50, 50)
+	settings_btn.custom_minimum_size = Vector2(44, 44)
 	_apply_btn_style(settings_btn, Color(0.18, 0.34, 0.50), Color(0.24, 0.44, 0.65))
 	settings_btn.pressed.connect(_on_settings_pressed)
 	ctrl_hbox.add_child(settings_btn)
 
-	# 6. Exit Button
+	# 5. Exit Button
 	var exit_btn = Button.new()
 	exit_btn.text = "EXIT"
-	exit_btn.custom_minimum_size = Vector2(80, 50)
+	exit_btn.custom_minimum_size = Vector2(80, 44)
 	_apply_btn_style(exit_btn, Color(0.36, 0.16, 0.16), Color(0.24, 0.12, 0.12))
 	exit_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn"))
 	ctrl_hbox.add_child(exit_btn)
@@ -1300,6 +1328,28 @@ func _setup_ui() -> void:
 	# Update initial states
 	_update_hud()
 	_update_grid_button_state()
+	_update_music_button_state()
+	GlobalSettings.range_settings.minigame_music_enabled.setting_changed.connect(func(_val): _update_music_button_state())
+
+func _toggle_music() -> void:
+	var current = GlobalSettings.range_settings.minigame_music_enabled.value
+	GlobalSettings.range_settings.minigame_music_enabled.set_value(not current)
+	_update_music_button_state()
+
+func _update_music_button_state() -> void:
+	if music_toggle_btn == null:
+		return
+	var is_enabled: bool = GlobalSettings.range_settings.minigame_music_enabled.value
+	if is_enabled:
+		if ResourceLoader.exists("res://assets/images/menu/music_on.svg"):
+			music_toggle_btn.icon = load("res://assets/images/menu/music_on.svg")
+		music_toggle_btn.tooltip_text = "Music: Playing (Click to mute)"
+		_apply_btn_style(music_toggle_btn, Color(0.18, 0.34, 0.50), Color(0.24, 0.44, 0.65))
+	else:
+		if ResourceLoader.exists("res://assets/images/menu/music_off.svg"):
+			music_toggle_btn.icon = load("res://assets/images/menu/music_off.svg")
+		music_toggle_btn.tooltip_text = "Music: Muted (Click to play)"
+		_apply_btn_style(music_toggle_btn, Color(0.35, 0.18, 0.18), Color(0.45, 0.25, 0.25))
 
 func _create_stat_column(parent: HBoxContainer, title: String) -> Label:
 	var col = VBoxContainer.new()
@@ -1324,11 +1374,6 @@ func _create_stat_column(parent: HBoxContainer, title: String) -> Label:
 	col.add_child(val_lbl)
 	
 	return val_lbl
-
-func _on_aim_slider_changed(val: float) -> void:
-	aim_val_lbl.text = "%+.1f°" % val
-	user_aim_offset_deg = val
-	_update_aim_and_camera()
 
 func _update_hud() -> void:
 	if attempts_val_lbl:
@@ -1378,17 +1423,67 @@ func _apply_btn_style(btn: Button, norm_color: Color, hov_color: Color) -> void:
 	btn.add_theme_color_override("font_color", Color.WHITE)
 
 func _on_settings_pressed() -> void:
+	if _settings_layer != null and is_instance_valid(_settings_layer):
+		return
+
 	var settings_scene = load("res://UI/Settings/RangeSettings/range_settings.tscn")
-	if settings_scene != null:
-		var inst = settings_scene.instantiate()
-		inst.name = "MinigameSettings"
-		inst.set_anchors_preset(Control.PRESET_CENTER)
-		inst.grow_horizontal = Control.GROW_DIRECTION_BOTH
-		inst.grow_vertical = Control.GROW_DIRECTION_BOTH
-		inst.close_settings_requested.connect(func(): inst.queue_free())
-		
-		var hud = get_node_or_null("HUDLayer/Control")
-		if hud != null:
-			hud.add_child(inst)
-		else:
-			add_child(inst)
+	if settings_scene == null:
+		return
+
+	# Hide gameplay HUD visuals (score tracker, target hole buttons, banner, controls)
+	if hud_layer != null and is_instance_valid(hud_layer):
+		hud_layer.visible = false
+
+	_settings_layer = CanvasLayer.new()
+	_settings_layer.name = "SettingsLayer"
+	_settings_layer.layer = 105
+	add_child(_settings_layer)
+
+	# Full-screen dimmed backdrop that blocks clicks from leaking through
+	var backdrop = ColorRect.new()
+	backdrop.name = "Backdrop"
+	backdrop.color = Color(0.02, 0.04, 0.07, 0.75)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.anchor_right = 1.0
+	backdrop.anchor_bottom = 1.0
+	backdrop.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	backdrop.grow_vertical = Control.GROW_DIRECTION_BOTH
+	backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	_settings_layer.add_child(backdrop)
+
+	var margin_container = MarginContainer.new()
+	margin_container.name = "MarginContainer"
+	margin_container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin_container.anchor_right = 1.0
+	margin_container.anchor_bottom = 1.0
+	margin_container.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	margin_container.grow_vertical = Control.GROW_DIRECTION_BOTH
+	margin_container.add_theme_constant_override("margin_left", 36)
+	margin_container.add_theme_constant_override("margin_right", 36)
+	margin_container.add_theme_constant_override("margin_top", 24)
+	margin_container.add_theme_constant_override("margin_bottom", 24)
+	margin_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_settings_layer.add_child(margin_container)
+
+	var inst = settings_scene.instantiate()
+	inst.name = "MinigameSettings"
+	inst.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inst.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin_container.add_child(inst)
+
+	inst.close_settings_requested.connect(_close_settings)
+	if inst.has_signal("manage_players_requested"):
+		inst.manage_players_requested.connect(func():
+			_close_settings()
+			SceneManager.change_scene("res://UI/PlayersMenu/players_menu.tscn")
+		)
+
+
+func _close_settings() -> void:
+	if _settings_layer != null and is_instance_valid(_settings_layer):
+		_settings_layer.queue_free()
+		_settings_layer = null
+
+	# Restore gameplay HUD visuals
+	if hud_layer != null and is_instance_valid(hud_layer):
+		hud_layer.visible = true

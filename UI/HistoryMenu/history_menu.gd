@@ -242,7 +242,7 @@ func _render_history_list() -> void:
 		if not is_finished:
 			var resume_btn = Button.new()
 			resume_btn.text = "Resume"
-			resume_btn.custom_minimum_size = Vector2(110, 40)
+			resume_btn.custom_minimum_size = Vector2(120, 48)
 			apply_button_style(resume_btn, Color(0.72, 0.56, 0.24, 0.85)) # Gold
 			resume_btn.pressed.connect(func():
 				MultiplayerManager.resume_match(match_data)
@@ -251,7 +251,7 @@ func _render_history_list() -> void:
 			
 		var card_btn = Button.new()
 		card_btn.text = "Scorecard"
-		card_btn.custom_minimum_size = Vector2(110, 40)
+		card_btn.custom_minimum_size = Vector2(120, 48)
 		apply_button_style(card_btn, Color(0.24, 0.46, 0.72, 0.85)) # Blue
 		card_btn.pressed.connect(func():
 			_show_scorecard(match_data)
@@ -260,7 +260,7 @@ func _render_history_list() -> void:
 		
 		var delete_btn = Button.new()
 		delete_btn.text = "Delete"
-		delete_btn.custom_minimum_size = Vector2(90, 40)
+		delete_btn.custom_minimum_size = Vector2(100, 48)
 		apply_button_style(delete_btn, Color(0.72, 0.24, 0.24, 0.85)) # Red
 		delete_btn.pressed.connect(func():
 			selected_match_to_delete = match_data
@@ -333,7 +333,7 @@ func _show_scorecard(match_data: Dictionary) -> void:
 	
 	var close_btn = Button.new()
 	close_btn.text = "Close"
-	close_btn.custom_minimum_size = Vector2(160, 44)
+	close_btn.custom_minimum_size = Vector2(160, 48)
 	apply_button_style(close_btn, Color(0.3, 0.35, 0.4, 0.9))
 	close_btn.pressed.connect(func(): scorecard_overlay.visible = false)
 	action_hbox.add_child(close_btn)
@@ -411,10 +411,10 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		style.border_width_right = 1
 		style.border_width_bottom = 1
 		style.border_color = Color(0.3, 0.3, 0.3, 0.3)
-		style.content_margin_left = 8
-		style.content_margin_right = 8
-		style.content_margin_top = 6
-		style.content_margin_bottom = 6
+		style.content_margin_left = 10
+		style.content_margin_right = 10
+		style.content_margin_top = 8
+		style.content_margin_bottom = 8
 		cell.add_theme_stylebox_override("panel", style)
 		
 		var label = Label.new()
@@ -423,9 +423,9 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		label.add_theme_color_override("font_color", fg)
 		if is_header:
-			label.add_theme_font_size_override("font_size", 14)
+			label.add_theme_font_size_override("font_size", 16)
 		else:
-			label.add_theme_font_size_override("font_size", 13)
+			label.add_theme_font_size_override("font_size", 15)
 		cell.add_child(label)
 		parent_grid.add_child(cell)
 		return cell

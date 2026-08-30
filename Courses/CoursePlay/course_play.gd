@@ -33,11 +33,21 @@ var _cached_player_textures: Dictionary = {}
 var range_ui: Control = null
 var top_bar: HBoxContainer = null
 var right_panel: VBoxContainer = null
+var toggles_scroll: ScrollContainer = null
 var settings_btn: Button = null
+var home_btn: Button = null
+var hide_helpers_btn: Button = null
+var stats_btn: Button = null
+var map_btn: Button = null
+var mulligan_btn: Button = null
+var club_selector_node: Control = null
 
 var course_instance: Node = null
 var active_ball: Node = null
 var mulligan_confirm_dialog: PanelContainer = null
+
+var _was_helpers_visible_before_aerial: bool = false
+var _is_aerial_active_practice: bool = false
 
 func _ready() -> void:
 	MultiplayerManager.active_player_changed.connect(_on_active_player_changed)
@@ -361,15 +371,16 @@ func _setup_hud() -> void:
 	settings_btn = Button.new()
 	settings_btn.name = "SettingsButton"
 	settings_btn.text = ""
+	settings_btn.tooltip_text = "Settings"
 	settings_btn.icon = load("res://Utils/Settings/Gear.png")
 	settings_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	settings_btn.custom_minimum_size = Vector2(56, 56)
 	apply_circular_button_style(settings_btn, Color(0.15, 0.15, 0.15, 0.85))
 	settings_btn.anchor_left = 1.0
 	settings_btn.anchor_right = 1.0
-	settings_btn.offset_left = -86
+	settings_btn.offset_left = -80
 	settings_btn.offset_top = 24
-	settings_btn.offset_right = -30
+	settings_btn.offset_right = -24
 	settings_btn.offset_bottom = 80
 	settings_btn.pressed.connect(func():
 		if range_ui != null:
@@ -377,31 +388,62 @@ func _setup_hud() -> void:
 	)
 	canvas.add_child(settings_btn)
 
-	# RightPanel vertical stack - starts below the settings cog button
+	# Home / Main Menu Button (Icon Only) - positioned between Settings and HideHelpers
+	home_btn = Button.new()
+	home_btn.name = "HomeButton"
+	home_btn.text = ""
+	home_btn.tooltip_text = "Main Menu"
+	if ResourceLoader.exists("res://assets/images/icons/home.svg"):
+		home_btn.icon = load("res://assets/images/icons/home.svg")
+	home_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	home_btn.custom_minimum_size = Vector2(56, 56)
+	apply_circular_button_style(home_btn, Color(0.15, 0.15, 0.15, 0.85))
+	home_btn.anchor_left = 1.0
+	home_btn.anchor_right = 1.0
+	home_btn.offset_left = -168
+	home_btn.offset_top = 24
+	home_btn.offset_right = -112
+	home_btn.offset_bottom = 80
+	home_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn"))
+	canvas.add_child(home_btn)
+
+	# Hide/Show Helpers Button (Icon Only) - positioned to the left of Home Button
+	hide_helpers_btn = Button.new()
+	hide_helpers_btn.name = "HideHelpersButton"
+	hide_helpers_btn.text = ""
+	hide_helpers_btn.tooltip_text = "Toggle Helpers (Show/Hide)"
+	if ResourceLoader.exists("res://assets/images/icons/helpers.svg"):
+		hide_helpers_btn.icon = load("res://assets/images/icons/helpers.svg")
+	hide_helpers_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hide_helpers_btn.custom_minimum_size = Vector2(56, 56)
+	apply_circular_button_style(hide_helpers_btn, Color(0.15, 0.15, 0.15, 0.85))
+	hide_helpers_btn.anchor_left = 1.0
+	hide_helpers_btn.anchor_right = 1.0
+	hide_helpers_btn.offset_left = -256
+	hide_helpers_btn.offset_top = 24
+	hide_helpers_btn.offset_right = -200
+	hide_helpers_btn.offset_bottom = 80
+	canvas.add_child(hide_helpers_btn)
+
+	# RightPanel vertical stack - starts below ClubSelector
 	right_panel = VBoxContainer.new()
 	right_panel.name = "RightPanel"
 	right_panel.anchor_left = 1.0
 	right_panel.anchor_right = 1.0
 	right_panel.anchor_top = 0.0
 	right_panel.anchor_bottom = 1.0
-	right_panel.offset_left = -220
-	right_panel.offset_top = 96
+	right_panel.offset_left = -256
+	right_panel.offset_top = 152
 	right_panel.offset_right = -24
-	right_panel.offset_bottom = -24
+	right_panel.offset_bottom = -96
 	right_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	right_panel.add_theme_constant_override("separation", 12)
 	canvas.add_child(right_panel)
 
-	# Hide Toggles Button - tall touch target
-	var hide_toggles_btn = Button.new()
-	hide_toggles_btn.name = "HideTogglesButton"
-	hide_toggles_btn.text = "👁 Hide Toggles"
-	hide_toggles_btn.custom_minimum_size = Vector2(180, 56)
-	apply_material_button_style(hide_toggles_btn, Color(0.2, 0.2, 0.2, 0.85))
-	
-	# ScrollContainer keeps buttons visible on short screens
-	var toggles_scroll = ScrollContainer.new()
+	# ScrollContainer keeps buttons visible on short screens - hidden by default!
+	toggles_scroll = ScrollContainer.new()
 	toggles_scroll.name = "TogglesScroll"
+	toggles_scroll.visible = false
 	toggles_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	toggles_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	toggles_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
@@ -411,26 +453,39 @@ func _setup_hud() -> void:
 	toggles_container.add_theme_constant_override("separation", 12)
 	toggles_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
-	hide_toggles_btn.pressed.connect(func():
-		toggles_scroll.visible = not toggles_scroll.visible
-		if toggles_scroll.visible:
-			hide_toggles_btn.text = "👁 Hide Toggles"
-		else:
-			hide_toggles_btn.text = "👁 Show Toggles"
+	hide_helpers_btn.pressed.connect(func():
+		var new_vis = not toggles_scroll.visible
+		_set_helpers_visible(new_vis)
 	)
 	
 	toggles_scroll.add_child(toggles_container)
-	right_panel.add_child(hide_toggles_btn)
 	right_panel.add_child(toggles_scroll)
 
-	# Main Menu Button
-	var menu_btn = Button.new()
-	menu_btn.name = "MainMenuButton"
-	menu_btn.text = "⌂ Main Menu"
-	menu_btn.custom_minimum_size = Vector2(180, 56)
-	apply_material_button_style(menu_btn, Color(0.56, 0.22, 0.22, 0.85))
-	menu_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn"))
-	toggles_container.add_child(menu_btn)
+	# Announcer Mute/Unmute Toggle Button
+	var announcer_btn = Button.new()
+	announcer_btn.name = "AnnouncerToggleButton"
+	var announcer_node = get_node_or_null("/root/AnnouncerEngine")
+	var is_announcer_on = announcer_node.get("AnnouncerCoursePlay") if announcer_node != null else true
+	announcer_btn.text = "🎙 Announcer: ON" if is_announcer_on else "🎙 Announcer: MUTED"
+	announcer_btn.tooltip_text = "Toggle Announcer Commentary"
+	announcer_btn.custom_minimum_size = Vector2(180, 56)
+	var initial_ann_color = Color(0.2, 0.6, 0.3, 0.85) if is_announcer_on else Color(0.5, 0.5, 0.5, 0.85)
+	apply_material_button_style(announcer_btn, initial_ann_color)
+	announcer_btn.pressed.connect(func():
+		var a = get_node_or_null("/root/AnnouncerEngine")
+		if a != null:
+			var current_val = a.get("AnnouncerCoursePlay") as bool
+			var new_val = not current_val
+			a.set("AnnouncerCoursePlay", new_val)
+			GlobalSettings.save_settings()
+			if new_val:
+				announcer_btn.text = "🎙 Announcer: ON"
+				apply_material_button_style(announcer_btn, Color(0.2, 0.6, 0.3, 0.85))
+			else:
+				announcer_btn.text = "🎙 Announcer: MUTED"
+				apply_material_button_style(announcer_btn, Color(0.5, 0.5, 0.5, 0.85))
+	)
+	toggles_container.add_child(announcer_btn)
 
 	# Distance Menu setup
 	var distance_menu_script = load("res://UI/distance_menu.gd")
@@ -460,22 +515,6 @@ func _setup_hud() -> void:
 	)
 	toggles_container.add_child(dist_btn)
 	toggles_container.add_child(dist_menu)
-
-	# Stats Toggle Button
-	var stats_btn = Button.new()
-	stats_btn.name = "StatsButton"
-	stats_btn.text = "📊 Hide Stats"
-	stats_btn.custom_minimum_size = Vector2(180, 56)
-	apply_material_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85)) # Blue
-	stats_btn.pressed.connect(func():
-		if range_ui != null:
-			range_ui.call("toggle_stats_visibility")
-			if range_ui.call("is_stats_visible"):
-				stats_btn.text = "📊 Hide Stats"
-			else:
-				stats_btn.text = "📊 Show Stats"
-	)
-	toggles_container.add_child(stats_btn)
 
 	# Golfer Cam Toggle Button
 	var golfer_cam_btn = Button.new()
@@ -533,27 +572,6 @@ func _setup_hud() -> void:
 		apply_material_button_style(players_btn, Color(0.25, 0.55, 0.35, 0.85)) # Green-ish
 		players_btn.pressed.connect(_on_manage_players_toggle_pressed)
 		toggles_container.add_child(players_btn)
-
-		# Mulligan Button
-		var mulligan_btn = Button.new()
-		mulligan_btn.name = "MulliganButton"
-		mulligan_btn.text = "↺ Mulligan"
-		mulligan_btn.custom_minimum_size = Vector2(180, 40)
-		apply_material_button_style(mulligan_btn, Color(0.24, 0.46, 0.72, 0.85))
-		mulligan_btn.pressed.connect(_on_mulligan_pressed)
-		toggles_container.add_child(mulligan_btn)
-
-	# Map Toggle Button
-	var map_btn = Button.new()
-	map_btn.name = "MapButton"
-	map_btn.text = "🗺 Toggle Map View"
-	map_btn.custom_minimum_size = Vector2(180, 56)
-	apply_material_button_style(map_btn, Color(0.18, 0.45, 0.25, 0.85)) # Forest green
-	map_btn.pressed.connect(func():
-		if course_instance and course_instance.has_method("_on_map_button_pressed"):
-			course_instance.call("_on_map_button_pressed")
-	)
-	toggles_container.add_child(map_btn)
 
 	# Green Grid Toggle Button
 	var grid_btn = Button.new()
@@ -614,32 +632,111 @@ func _setup_hud() -> void:
 		next_btn.visible = false
 		toggles_container.add_child(next_btn)
 		
-		# Move them after MainMenuButton so they are ordered nicely
-		var menu_idx = menu_btn.get_index()
-		toggles_container.move_child(place_btn, menu_idx + 1)
-		toggles_container.move_child(prev_btn, menu_idx + 2)
-		toggles_container.move_child(next_btn, menu_idx + 3)
+		# Move them to the top of toggles_container so they are ordered nicely
+		var top_idx = announcer_btn.get_index()
+		toggles_container.move_child(place_btn, top_idx + 1)
+		toggles_container.move_child(prev_btn, top_idx + 2)
+		toggles_container.move_child(next_btn, top_idx + 3)
 	
-	# Reparent ClubSelector to right panel directly under HitDistanceButton / DistanceMenu
+	# Reparent ClubSelector to canvas directly underneath SettingsButton and HideHelpersButton
 	if range_ui != null:
 		var club_sel = range_ui.get_node_or_null("GridCanvas/ClubSelector")
 		if club_sel == null:
-			club_sel = range_ui.get_node_or_null("RightPanel/TogglesScroll/TogglesContainer/ClubSelector")
+			club_sel = range_ui.get_node_or_null("OverlayLayer/ClubSelector")
 			if club_sel == null:
-				club_sel = range_ui.get_node_or_null("RightPanel/TogglesContainer/ClubSelector")
-			if club_sel == null:
-				club_sel = range_ui.get_node_or_null("RightPanel/ClubSelector")
+				club_sel = range_ui.get_node_or_null("RightPanel/TogglesScroll/TogglesContainer/ClubSelector")
+				if club_sel == null:
+					club_sel = range_ui.get_node_or_null("RightPanel/TogglesContainer/ClubSelector")
+					if club_sel == null:
+						club_sel = range_ui.get_node_or_null("RightPanel/ClubSelector")
 		if club_sel != null:
-			club_sel.reparent(toggles_container)
-			club_sel.custom_minimum_size = Vector2(180, 56)
+			club_sel.reparent(canvas)
+			club_sel.anchor_left = 1.0
+			club_sel.anchor_right = 1.0
+			club_sel.anchor_top = 0.0
+			club_sel.anchor_bottom = 0.0
+			club_sel.offset_left = -256
+			club_sel.offset_top = 92
+			club_sel.offset_right = -24
+			club_sel.offset_bottom = 144
+			club_sel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+			club_sel.custom_minimum_size = Vector2(232, 48)
 			club_sel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
-			var dist_menu_node = toggles_container.get_node_or_null("DistanceMenu")
-			if dist_menu_node != null:
-				toggles_container.move_child(club_sel, dist_menu_node.get_index() + 1)
+			club_selector_node = club_sel
+
+	# Stats Button (Icon Only) - Bottom-Left Corner
+	stats_btn = Button.new()
+	stats_btn.name = "StatsButton"
+	stats_btn.text = ""
+	stats_btn.tooltip_text = "Toggle Stats (Show/Hide)"
+	if ResourceLoader.exists("res://assets/images/icons/stats.svg"):
+		stats_btn.icon = load("res://assets/images/icons/stats.svg")
+	stats_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stats_btn.custom_minimum_size = Vector2(56, 56)
+	apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85)) # Blue
+	stats_btn.anchor_left = 0.0
+	stats_btn.anchor_right = 0.0
+	stats_btn.anchor_top = 1.0
+	stats_btn.anchor_bottom = 1.0
+	stats_btn.offset_left = 30
+	stats_btn.offset_top = -80
+	stats_btn.offset_right = 86
+	stats_btn.offset_bottom = -24
+	stats_btn.pressed.connect(func():
+		if range_ui != null:
+			range_ui.call("toggle_stats_visibility")
+			if range_ui.call("is_stats_visible"):
+				apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85))
 			else:
-				var dist_btn_node = toggles_container.get_node_or_null("HitDistanceButton")
-				if dist_btn_node != null:
-					toggles_container.move_child(club_sel, dist_btn_node.get_index() + 1)
+				apply_circular_button_style(stats_btn, Color(0.15, 0.15, 0.15, 0.85))
+	)
+	canvas.add_child(stats_btn)
+
+	# Map Toggle Button (Icon Only) - Bottom-Right Corner
+	map_btn = Button.new()
+	map_btn.name = "MapButton"
+	map_btn.text = ""
+	map_btn.tooltip_text = "Toggle Map View"
+	if ResourceLoader.exists("res://assets/images/icons/golf_course.svg"):
+		map_btn.icon = load("res://assets/images/icons/golf_course.svg")
+	map_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	map_btn.custom_minimum_size = Vector2(56, 56)
+	apply_circular_button_style(map_btn, Color(0.18, 0.45, 0.25, 0.85)) # Forest green
+	map_btn.anchor_left = 1.0
+	map_btn.anchor_right = 1.0
+	map_btn.anchor_top = 1.0
+	map_btn.anchor_bottom = 1.0
+	map_btn.offset_left = -86
+	map_btn.offset_top = -80
+	map_btn.offset_right = -30
+	map_btn.offset_bottom = -24
+	map_btn.pressed.connect(func():
+		if course_instance and course_instance.has_method("_on_map_button_pressed"):
+			course_instance.call("_on_map_button_pressed")
+	)
+	canvas.add_child(map_btn)
+
+	# Mulligan Button (Icon Only) - Bottom-Right next to Map button
+	mulligan_btn = Button.new()
+	mulligan_btn.name = "MulliganButton"
+	mulligan_btn.text = ""
+	mulligan_btn.tooltip_text = "Mulligan (Undo Shot)"
+	if ResourceLoader.exists("res://assets/images/icons/mulligan.svg"):
+		mulligan_btn.icon = load("res://assets/images/icons/mulligan.svg")
+	mulligan_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mulligan_btn.custom_minimum_size = Vector2(56, 56)
+	apply_circular_button_style(mulligan_btn, Color(0.24, 0.46, 0.72, 0.85))
+	mulligan_btn.anchor_left = 1.0
+	mulligan_btn.anchor_right = 1.0
+	mulligan_btn.anchor_top = 1.0
+	mulligan_btn.anchor_bottom = 1.0
+	mulligan_btn.offset_left = -154
+	mulligan_btn.offset_top = -80
+	mulligan_btn.offset_right = -98
+	mulligan_btn.offset_bottom = -24
+	mulligan_btn.pressed.connect(_on_mulligan_pressed)
+	mulligan_btn.visible = is_match_play
+	canvas.add_child(mulligan_btn)
 	
 	# --- Minimap Viewport Construction ---
 	# HBoxContainer grouping minimap and distance tracker side by side
@@ -1241,7 +1338,9 @@ func _on_active_player_changed(player: Dictionary) -> void:
 				
 		# Update tee-off distance
 		if player.get("strokes", 0) == 0 and course_instance != null and course_instance.has_method("get_height"):
-			player["position"].y = course_instance.get_height(player["position"].x, player["position"].z) + 0.02
+			var is_driver = MultiplayerManager.current_club.to_lower() in ["dr", "driver", "1w"]
+			var offset_y = 0.059435 if is_driver else 0.021335
+			player["position"].y = course_instance.get_height(player["position"].x, player["position"].z) + offset_y
 		var spawn_pos = player["position"]
 		course_instance.current_hole_tee_dist_yards = int(spawn_pos.distance_to(course_instance.current_hole_location) * 1.09361)
 		
@@ -1493,6 +1592,17 @@ func _on_mulligan_confirmed() -> void:
 		var last_start_pos = player_node.get("_last_starting_pos")
 		var current_ball_pos = active_player.get("position", Vector3.ZERO)
 		
+		# Capture last aim target pos and yaw
+		var last_aim_target = player_node.get("_last_aim_target_pos")
+		if last_aim_target == null or last_aim_target == Vector3.ZERO:
+			if active_player.has("last_aim_target_pos") and typeof(active_player["last_aim_target_pos"]) == TYPE_VECTOR3 and active_player["last_aim_target_pos"] != Vector3.ZERO:
+				last_aim_target = active_player["last_aim_target_pos"]
+			elif course_instance != null and "aim_target_pos" in course_instance:
+				last_aim_target = course_instance.aim_target_pos
+		var last_aim_yaw = player_node.get("_last_aim_yaw_offset_deg")
+		if last_aim_yaw == null:
+			last_aim_yaw = active_player.get("last_aim_yaw_offset_deg", 0.0)
+		
 		# Capture current shot details
 		var current_stats = {}
 		if active_player.has("shot_stats") and typeof(active_player["shot_stats"]) == TYPE_DICTIONARY and active_player["shot_stats"].has(hole_id) and not active_player["shot_stats"][hole_id].is_empty():
@@ -1518,7 +1628,9 @@ func _on_mulligan_confirmed() -> void:
 			"last_shot_penalty": active_player.get("last_shot_penalty", 0),
 			"shot_stats": current_stats,
 			"course_shot_data": course_shot_data,
-			"tracer_points": tracer_pts
+			"tracer_points": tracer_pts,
+			"aim_target_pos": last_aim_target,
+			"aim_yaw_offset_deg": last_aim_yaw
 		}
 		
 		if not active_player.has("mulligan_history") or typeof(active_player["mulligan_history"]) != TYPE_DICTIONARY:
@@ -1557,6 +1669,17 @@ func _on_mulligan_confirmed() -> void:
 			course_instance.call("update_current_lie_and_reduction")
 			
 		_on_active_player_changed(active_player)
+		
+		# Retain previous shot's aim target and camera look
+		if last_aim_target != null and last_aim_target != Vector3.ZERO:
+			if course_instance != null and course_instance.has_method("set_aim_target"):
+				course_instance.call("set_aim_target", last_aim_target, true)
+			if player_node != null:
+				player_node.set("_last_aim_target_pos", last_aim_target)
+				player_node.set("_last_aim_yaw_offset_deg", last_aim_yaw)
+			active_player["last_aim_target_pos"] = last_aim_target
+			active_player["last_aim_yaw_offset_deg"] = last_aim_yaw
+			
 		MultiplayerManager.save_current_match()
 
 
@@ -1569,6 +1692,16 @@ func _on_previous_mulligan_selected(prev_shot: Dictionary) -> void:
 		# 1. Capture current shot and put it in mulligan history
 		var last_start_pos = player_node.get("_last_starting_pos")
 		var current_ball_pos = active_player.get("position", Vector3.ZERO)
+		var last_aim_target = player_node.get("_last_aim_target_pos")
+		if last_aim_target == null or last_aim_target == Vector3.ZERO:
+			if active_player.has("last_aim_target_pos") and typeof(active_player["last_aim_target_pos"]) == TYPE_VECTOR3:
+				last_aim_target = active_player["last_aim_target_pos"]
+			elif course_instance != null and "aim_target_pos" in course_instance:
+				last_aim_target = course_instance.aim_target_pos
+		var last_aim_yaw = player_node.get("_last_aim_yaw_offset_deg")
+		if last_aim_yaw == null:
+			last_aim_yaw = active_player.get("last_aim_yaw_offset_deg", 0.0)
+			
 		var current_stats = {}
 		if active_player.has("shot_stats") and typeof(active_player["shot_stats"]) == TYPE_DICTIONARY and active_player["shot_stats"].has(hole_id) and not active_player["shot_stats"][hole_id].is_empty():
 			current_stats = active_player["shot_stats"][hole_id].back()
@@ -1593,7 +1726,9 @@ func _on_previous_mulligan_selected(prev_shot: Dictionary) -> void:
 			"last_shot_penalty": active_player.get("last_shot_penalty", 0),
 			"shot_stats": current_stats,
 			"course_shot_data": course_shot_data,
-			"tracer_points": tracer_pts
+			"tracer_points": tracer_pts,
+			"aim_target_pos": last_aim_target,
+			"aim_yaw_offset_deg": last_aim_yaw
 		}
 		
 		if not active_player.has("mulligan_history") or typeof(active_player["mulligan_history"]) != TYPE_DICTIONARY:
@@ -1653,7 +1788,7 @@ func _on_previous_mulligan_selected(prev_shot: Dictionary) -> void:
 		if ball != null:
 			ball.global_position = prev_shot["end_pos"]
 			ball.spawn_position = prev_shot["end_pos"]
-			ball.call_deferred("reset")
+			ball.reset()
 			
 		# Re-add to course_instance's shot_history
 		if course_instance != null and "shot_history" in course_instance:
@@ -1926,23 +2061,34 @@ func apply_circular_button_style(btn: Button, bg_color: Color):
 
 
 func update_map_button_text(is_aerial: bool) -> void:
-	var map_btn = null
-	for child in get_children():
-		if child is CanvasLayer:
-			var panel = child.get_node_or_null("RightPanel")
-			if panel != null:
-				map_btn = panel.get_node_or_null("TogglesScroll/TogglesContainer/MapButton")
-				if map_btn == null:
-					map_btn = panel.get_node_or_null("TogglesContainer/MapButton")
-				if map_btn == null:
-					map_btn = panel.get_node_or_null("MapButton")
-				break
+	var target_btn = map_btn
+	if target_btn == null:
+		for child in get_children():
+			if child is CanvasLayer:
+				target_btn = child.get_node_or_null("MapButton")
+				if target_btn != null:
+					break
 				
-	if map_btn != null:
+	if target_btn != null:
+		target_btn.text = ""
 		if is_aerial:
-			map_btn.text = "👤 Return to Player"
+			target_btn.tooltip_text = "Return to Player"
+			apply_circular_button_style(target_btn, Color(0.2, 0.7, 0.35, 0.95))
 		else:
-			map_btn.text = "🗺 Toggle Map View"
+			target_btn.tooltip_text = "Toggle Map View"
+			apply_circular_button_style(target_btn, Color(0.18, 0.45, 0.25, 0.85))
+
+
+func _set_helpers_visible(is_vis: bool) -> void:
+	if toggles_scroll == null and right_panel != null:
+		toggles_scroll = right_panel.get_node_or_null("TogglesScroll")
+	if toggles_scroll != null:
+		toggles_scroll.visible = is_vis
+	if hide_helpers_btn != null:
+		if is_vis:
+			apply_circular_button_style(hide_helpers_btn, Color(0.25, 0.45, 0.7, 0.9))
+		else:
+			apply_circular_button_style(hide_helpers_btn, Color(0.15, 0.15, 0.15, 0.85))
 
 
 func update_practice_ui_visibility(is_aerial: bool) -> void:
@@ -1967,6 +2113,17 @@ func update_practice_ui_visibility(is_aerial: bool) -> void:
 					prev_btn.visible = is_aerial
 				if next_btn != null:
 					next_btn.visible = is_aerial
+
+	if MultiplayerManager.practice_mode_active and not GlobalSettings.is_chipping_minigame:
+		if is_aerial:
+			if not _is_aerial_active_practice:
+				_was_helpers_visible_before_aerial = toggles_scroll.visible if toggles_scroll != null else false
+				_is_aerial_active_practice = true
+			_set_helpers_visible(true)
+		else:
+			if _is_aerial_active_practice:
+				_set_helpers_visible(_was_helpers_visible_before_aerial)
+				_is_aerial_active_practice = false
 
 
 func _on_scorecard_toggle_pressed() -> void:
@@ -2349,8 +2506,21 @@ func _set_other_elements_visible(is_visible: bool) -> void:
 		top_bar.visible = is_visible
 	if settings_btn != null:
 		settings_btn.visible = is_visible
+	if home_btn != null:
+		home_btn.visible = is_visible
+	if hide_helpers_btn != null:
+		hide_helpers_btn.visible = is_visible
 	if right_panel != null:
 		right_panel.visible = is_visible
+	if stats_btn != null:
+		stats_btn.visible = is_visible
+	if map_btn != null:
+		map_btn.visible = is_visible
+	if mulligan_btn != null:
+		var is_match_play = not MultiplayerManager.players.is_empty() and not MultiplayerManager.practice_mode_active
+		mulligan_btn.visible = is_visible and is_match_play
+	if club_selector_node != null:
+		club_selector_node.visible = is_visible
 
 
 func _on_manage_players_toggle_pressed() -> void:

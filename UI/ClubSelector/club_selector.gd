@@ -54,7 +54,8 @@ func _input(event: InputEvent) -> void:
 func _create_club_display_button() -> void:
 	club_button = Button.new()
 	club_button.text = "🏌 Club: " + clubs[0]
-	club_button.custom_minimum_size = Vector2(180, 40)
+	club_button.custom_minimum_size = Vector2(232, 48)
+	club_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	club_button.theme = _create_display_button_theme()
 	club_button.pressed.connect(_on_display_button_pressed)
 
@@ -67,7 +68,7 @@ func _create_club_buttons() -> void:
 	for i in range(clubs.size()):
 		var button = Button.new()
 		button.text = clubs[i]
-		button.custom_minimum_size = Vector2(40, 40)
+		button.custom_minimum_size = Vector2(52, 52)
 		button.theme = button_theme
 		button.pressed.connect(_on_club_button_pressed.bindv([button]))
 		grid_container.add_child(button)
@@ -75,7 +76,7 @@ func _create_club_buttons() -> void:
 
 func _create_club_button_theme() -> Theme:
 	var button_theme = Theme.new()
-	button_theme.set_font_size("font_size", "Button", 14)
+	button_theme.set_font_size("font_size", "Button", 16)
 
 	var normal_style = _create_button_style(BUTTON_BG_NORMAL)
 	button_theme.set_stylebox("normal", "Button", normal_style)
@@ -92,10 +93,10 @@ func _create_club_button_theme() -> Theme:
 func _create_button_style(bg_color: Color) -> StyleBoxFlat:
 	var style = StyleBoxFlat.new()
 	style.bg_color = bg_color
-	style.corner_radius_top_left = 6
-	style.corner_radius_top_right = 6
-	style.corner_radius_bottom_left = 6
-	style.corner_radius_bottom_right = 6
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
 	style.border_color = BUTTON_BORDER
 	style.border_width_left = 1
 	style.border_width_right = 1
@@ -106,7 +107,7 @@ func _create_button_style(bg_color: Color) -> StyleBoxFlat:
 
 func _create_display_button_theme() -> Theme:
 	var display_theme = Theme.new()
-	display_theme.set_font_size("font_size", "Button", 16)
+	display_theme.set_font_size("font_size", "Button", 18)
 
 	var normal_style = StyleBoxFlat.new()
 	normal_style.bg_color = DISPLAY_BG_NORMAL
@@ -114,10 +115,10 @@ func _create_display_button_theme() -> Theme:
 	normal_style.corner_radius_top_right = 20
 	normal_style.corner_radius_bottom_left = 20
 	normal_style.corner_radius_bottom_right = 20
-	normal_style.content_margin_left = 16
-	normal_style.content_margin_right = 16
-	normal_style.content_margin_top = 8
-	normal_style.content_margin_bottom = 8
+	normal_style.content_margin_left = 18
+	normal_style.content_margin_right = 18
+	normal_style.content_margin_top = 10
+	normal_style.content_margin_bottom = 10
 	display_theme.set_stylebox("normal", "Button", normal_style)
 
 	var hover_style = normal_style.duplicate()
@@ -131,7 +132,7 @@ func _toggle_grid_visibility() -> void:
 	grid_container.visible = not grid_container.visible
 	var wrapper = get_node_or_null("MarginContainer/VBoxContainer/DropdownWrapper")
 	if wrapper != null:
-		wrapper.custom_minimum_size.y = 230 if grid_container.visible else 0
+		wrapper.custom_minimum_size.y = 300 if grid_container.visible else 0
 
 
 func _on_display_button_pressed() -> void:

@@ -10,12 +10,23 @@
 [ext_resource type="Texture2D" uid="uid://jbxciy4wpcvj" path="res://assets/images/menu/history_color.jpg" id="8_history_color"]
 [ext_resource type="Texture2D" uid="uid://dfwn5ft1keq3j" path="res://assets/images/menu/players_color.png" id="9_players_color"]
 [ext_resource type="Texture2D" uid="uid://c0b2qds3yndft" path="res://assets/images/menu/minigames_color.png" id="10_minigames_color"]
+[ext_resource type="Texture2D" uid="uid://li2ev4hci02e" path="res://UI/MainMenu/images/credits.svg" id="11_credits_icon"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_bddxb"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_iau2q"]
 
-[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_pbebc"]
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_iau2q"]
+content_margin_left = 4.0
+content_margin_top = 4.0
+content_margin_right = 4.0
+content_margin_bottom = 4.0
+bg_color = Color(0.225, 0.225, 0.225, 0.6)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+corner_detail = 5
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_u0e1r"]
 
@@ -36,18 +47,6 @@ corner_radius_top_left = 12
 corner_radius_top_right = 12
 corner_radius_bottom_right = 12
 corner_radius_bottom_left = 12
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_iau2q"]
-content_margin_left = 4.0
-content_margin_top = 4.0
-content_margin_right = 4.0
-content_margin_bottom = 4.0
-bg_color = Color(0.225, 0.225, 0.225, 0.6)
-corner_radius_top_left = 3
-corner_radius_top_right = 3
-corner_radius_bottom_right = 3
-corner_radius_bottom_left = 3
-corner_detail = 5
 
 [node name="Main Menu" type="Control" unique_id=1031038325]
 layout_mode = 3
@@ -81,7 +80,7 @@ theme_override_constants/separation = 0
 alignment = 1
 
 [node name="TopStrip" type="ColorRect" parent="VerticalLayout" unique_id=116081111]
-custom_minimum_size = Vector2(0, 70)
+custom_minimum_size = Vector2(0, 76)
 layout_mode = 2
 size_flags_vertical = 0
 mouse_filter = 2
@@ -102,6 +101,7 @@ size_flags_horizontal = 3
 size_flags_stretch_ratio = 0.01
 
 [node name="SettingsButton" type="Button" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=7225641]
+custom_minimum_size = Vector2(140, 52)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_stretch_ratio = 0.5
@@ -111,15 +111,17 @@ theme_override_colors/font_hover_color = Color(0.95, 0.95, 0.95, 1)
 theme_override_colors/icon_normal_color = Color(1, 1, 1, 1)
 theme_override_colors/icon_pressed_color = Color(1, 1, 1, 1)
 theme_override_colors/icon_hover_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 18
 theme_override_styles/normal = SubResource("StyleBoxEmpty_bddxb")
 theme_override_styles/pressed = SubResource("StyleBoxEmpty_iau2q")
-theme_override_styles/hover = SubResource("StyleBoxEmpty_pbebc")
+theme_override_styles/hover = SubResource("StyleBoxFlat_iau2q")
 theme_override_styles/disabled = SubResource("StyleBoxEmpty_u0e1r")
 theme_override_styles/focus = SubResource("StyleBoxEmpty_ejg71")
 text = "SETTINGS"
 icon = ExtResource("3_iyy2y")
 
-[node name="ExitButton" type="Button" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=801750399]
+[node name="CreditsButton" type="Button" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=7225642]
+custom_minimum_size = Vector2(140, 52)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_stretch_ratio = 0.5
@@ -129,9 +131,30 @@ theme_override_colors/font_hover_color = Color(0.95, 0.95, 0.95, 1)
 theme_override_colors/icon_normal_color = Color(1, 1, 1, 1)
 theme_override_colors/icon_pressed_color = Color(1, 1, 1, 1)
 theme_override_colors/icon_hover_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 18
 theme_override_styles/normal = SubResource("StyleBoxEmpty_bddxb")
 theme_override_styles/pressed = SubResource("StyleBoxEmpty_iau2q")
-theme_override_styles/hover = SubResource("StyleBoxEmpty_pbebc")
+theme_override_styles/hover = SubResource("StyleBoxFlat_iau2q")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_u0e1r")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_ejg71")
+text = "CREDITS"
+icon = ExtResource("11_credits_icon")
+
+[node name="ExitButton" type="Button" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=801750399]
+custom_minimum_size = Vector2(140, 52)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 0.5
+theme_override_colors/font_color = Color(0.875, 0.875, 0.875, 1)
+theme_override_colors/font_pressed_color = Color(1, 1, 1, 1)
+theme_override_colors/font_hover_color = Color(0.95, 0.95, 0.95, 1)
+theme_override_colors/icon_normal_color = Color(1, 1, 1, 1)
+theme_override_colors/icon_pressed_color = Color(1, 1, 1, 1)
+theme_override_colors/icon_hover_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_iau2q")
+theme_override_styles/hover = SubResource("StyleBoxFlat_iau2q")
 theme_override_styles/disabled = SubResource("StyleBoxEmpty_u0e1r")
 theme_override_styles/focus = SubResource("StyleBoxEmpty_ejg71")
 text = "EXIT"
