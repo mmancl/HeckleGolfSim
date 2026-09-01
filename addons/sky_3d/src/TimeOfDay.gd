@@ -62,8 +62,11 @@ func _init() -> void:
 func _ready() -> void:
 	set_dome_path(dome_path)
 	
-	# Force always noon and disable progression
-	set_total_hours(12.0)
+	# Bright, angled afternoon golf sun (2:15 PM) for crisp hill shadows and clear illumination
+	var default_time := 14.25
+	if total_hours > 0.0 and abs(total_hours - 12.0) > 0.001:
+		default_time = total_hours
+	set_total_hours(default_time)
 	update_in_game = false
 	update_in_editor = false
 

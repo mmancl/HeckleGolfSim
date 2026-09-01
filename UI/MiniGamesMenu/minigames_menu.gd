@@ -91,7 +91,7 @@ func _ready() -> void:
 	
 	# Grid/Container for Minigame Selection Tiles
 	var tiles_hbox = HBoxContainer.new()
-	tiles_hbox.add_theme_constant_override("separation", 40)
+	tiles_hbox.add_theme_constant_override("separation", 24)
 	tiles_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	main_vbox.add_child(tiles_hbox)
 	
@@ -99,7 +99,7 @@ func _ready() -> void:
 	var putting_tile = _create_minigame_tile(
 		"Putting Practice",
 		"Practice your short game on a large, undulating green with 8 target holes (5, 10, 15, 20, 25, 30, 40, 50 ft) and automatic reset after each putt.",
-		"res://assets/images/menu/practice_color.png", # Fallback to existing practice image
+		"res://assets/images/menu/putting.jpg",
 		func(): SceneManager.change_scene("res://Courses/Minigames/PuttingPractice/putting_practice.tscn")
 	)
 	tiles_hbox.add_child(putting_tile)
@@ -107,11 +107,29 @@ func _ready() -> void:
 	# --- TILE 2: Chipping Practice ---
 	var chipping_tile = _create_minigame_tile(
 		"Chipping Practice",
-		"Chip onto 7 custom-crafted floating island golf course greens (25, 50, 75, 100, 125, 150, 200 ft) complete with wood retaining walls, sandtraps, pine trees, and boat docks!",
-		"res://assets/images/menu/range_small.png",
+		"Chip onto 7 custom-crafted floating island golf course greens (25, 50, 75, 100, 125, 150, 200 yards) complete with wood retaining walls, sandtraps, and boat docks!",
+		"res://assets/images/menu/chipping.jpg",
 		func(): SceneManager.change_scene("res://Courses/Minigames/Chipping/chipping.tscn")
 	)
 	tiles_hbox.add_child(chipping_tile)
+	
+	# --- TILE 3: Loft Control ---
+	var loft_tile = _create_minigame_tile(
+		"Loft Control",
+		"Shatter a 3x3 grid of glass panes on a target wall 100 yards out! Control your vertical launch angle and elevation to break all 9 panes of glass.",
+		"res://assets/images/menu/loft_control.jpg",
+		func(): SceneManager.change_scene("res://Courses/Minigames/LoftControl/loft_control.tscn")
+	)
+	tiles_hbox.add_child(loft_tile)
+	
+	# --- TILE 4: Shape Practice (Draw & Fade) ---
+	var shape_tile = _create_minigame_tile(
+		"Shape Practice",
+		"Master shot shaping by curving around barrier walls placed every 25 yards. Launch through the open middle gate and draw left or fade right to land on greens from 50 to 300 yards!",
+		"res://assets/images/menu/shape_control.jpg",
+		func(): SceneManager.change_scene("res://Courses/Minigames/ShapePractice/shape_practice.tscn")
+	)
+	tiles_hbox.add_child(shape_tile)
 	
 	# Spacer
 	var spacer = Control.new()
@@ -164,9 +182,12 @@ func _update_music_button() -> void:
 
 func _create_minigame_tile(title: String, desc: String, icon_path: String, on_click: Callable) -> PanelContainer:
 	var panel = PanelContainer.new()
-	panel.custom_minimum_size = Vector2(360, 320)
+	panel.custom_minimum_size = Vector2(330, 320)
 	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	panel.clip_contents = true
 	ThemeManager.apply_card_panel_style(panel, false, 12)
+	panel.mouse_entered.connect(func(): ThemeManager.apply_card_panel_style(panel, true, 12))
+	panel.mouse_exited.connect(func(): ThemeManager.apply_card_panel_style(panel, false, 12))
 	
 	var margin = MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 24)
@@ -184,8 +205,13 @@ func _create_minigame_tile(title: String, desc: String, icon_path: String, on_cl
 	tex.custom_minimum_size = Vector2(0, 100)
 	tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	tex.clip_contents = true
 	if ResourceLoader.exists(icon_path):
 		tex.texture = load(icon_path)
+	elif FileAccess.file_exists(icon_path):
+		var img = Image.load_from_file(icon_path)
+		if img != null:
+			tex.texture = ImageTexture.create_from_image(img)
 	
 	vbox.add_child(tex)
 	

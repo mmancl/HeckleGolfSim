@@ -110,7 +110,7 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 			"active": true,
 			"shot_stats": {},
 			"shot_reduction": 0.0,
-			"lie_type": "fairway",
+			"lie_type": "teebox",
 			"color": player_colors[i % player_colors.size()],
 			"mulligan_history": {},
 			"last_shot_tracer_points": [],
@@ -194,7 +194,7 @@ func start_hole() -> void:
 		p["holed_out"] = not p.get("active", true)
 		p["last_shot_penalty"] = 0
 		p["shot_reduction"] = 0.0
-		p["lie_type"] = "fairway"
+		p["lie_type"] = "teebox"
 		p["lies_in_hole"] = []
 		p["last_putt_dist_yards"] = 0.0
 		
@@ -677,7 +677,7 @@ func add_new_player(player_name: String, tee_color: String) -> void:
 		"active": true,
 		"shot_stats": {},
 		"shot_reduction": 0.0,
-		"lie_type": "fairway",
+		"lie_type": "teebox",
 		"mulligan_history": {},
 		"last_shot_tracer_points": [],
 		"last_aim_target_pos": Vector3.ZERO,
@@ -717,7 +717,7 @@ func toggle_player_active(idx: int, active: bool) -> void:
 	
 	if not active:
 		# Mark current hole score as null
-		if not hole_ids.is_empty():
+		if current_hole_index < hole_ids.size():
 			var hole_id = hole_ids[current_hole_index]
 			player["hole_scores"][hole_id] = null
 		player["holed_out"] = true

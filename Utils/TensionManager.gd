@@ -152,14 +152,78 @@ func _create_procedural_heartbeat_wav() -> AudioStreamWAV:
 func is_active() -> bool:
 	return tension_active
 
+func is_course_play_active() -> bool:
+	# 1. Global Settings minigame and menu checks
+	if has_node("/root/GlobalSettings"):
+		if GlobalSettings.is_minigames_scene() or GlobalSettings.is_chipping_minigame or GlobalSettings.is_putting_minigame:
+			return false
+		if GlobalSettings.is_menu_screen():
+			return false
+
+	# 2. MultiplayerManager checks (Course Play requires active round without practice mode)
+	if has_node("/root/MultiplayerManager"):
+		var mp = get_node("/root/MultiplayerManager")
+		if mp.practice_mode_active:
+			return false
+		if mp.players.is_empty():
+			return false
+
+	# 3. Active Scene checks
+	var tree = get_tree()
+	if tree == null:
+		return false
+	var current_scene = tree.current_scene
+	if current_scene == null:
+		return false
+
+	# Check practice mode on current scene
+	if current_scene.get("practice_mode_active") == true:
+		return false
+
+	var scene_name = str(current_scene.name).to_lower()
+	var script: Script = current_scene.get_script()
+	var script_path = str(script.resource_path).to_lower() if script != null else ""
+	var scene_path = str(current_scene.scene_file_path).to_lower() if "scene_file_path" in current_scene else ""
+	var full_id = (scene_name + " " + script_path + " " + scene_path).to_lower()
+
+	# Exclude menus and setup screens
+	if full_id.contains("main_menu") or full_id.contains("mainmenu") \
+		or full_id.contains("course_selector") or full_id.contains("courseselector") \
+		or full_id.contains("course_play_setup") or full_id.contains("courseplaysetup") \
+		or full_id.contains("minigames_menu") or full_id.contains("minigamesmenu") \
+		or full_id.contains("players_menu") or full_id.contains("playersmenu") \
+		or full_id.contains("analytics") or full_id.contains("history") \
+		or full_id.contains("custom_course_creator") or full_id.contains("osm_download") \
+		or full_id.contains("course_preview"):
+		return false
+
+	# Exclude all Minigames
+	if full_id.contains("chipping") or full_id.contains("putting") \
+		or full_id.contains("loft_control") or full_id.contains("shape_practice") \
+		or full_id.contains("minigame") or full_id.contains("minigames"):
+		return false
+
+	# Exclude standalone Driving Range
+	if (scene_name == "range" or scene_path.ends_with("range.tscn")) and not current_scene.has_node("CoursePlay"):
+		return false
+
+	# Must have CoursePlay node or be a course scene with active hole play
+	if current_scene.has_node("CoursePlay") or scene_name == "courseplay" or full_id.contains("course_play") or full_id.contains("usercourses") or scene_name.contains("course"):
+		return true
+
+	return false
+
 # ---------------- TRAJECTORY PREDICTION ----------------
 
 func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool, target_pos: Vector3) -> Dictionary:
+	if not is_course_play_active():
+		return {"will_enter_zone": false, "min_dist": 999.0}
 	if target_pos.is_zero_approx():
 		return {"will_enter_zone": false, "min_dist": 999.0}
 
 	var target_2d = Vector2(target_pos.x, target_pos.z)
-	var threshold = PUTT_THRESHOLD_METERS if is_putt else CHIP_THRESHOLD_METERS
+	# Broad prediction threshold to start suspense early on shots heading towards the target zone
+	var threshold = (PUTT_THRESHOLD_METERS * 1.65) if is_putt else (CHIP_THRESHOLD_METERS * 1.5)
 	var mode = "putt" if is_putt else "chip"
 
 	var sim_pos = start_pos
@@ -169,7 +233,7 @@ func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool
 
 	if is_putt:
 		sim_vel.y = 0.0
-		for step in range(160):
+		for step in range(180):
 			var current_2d = Vector2(sim_pos.x, sim_pos.z)
 			var d = current_2d.distance_to(target_2d)
 			if d < min_dist_2d:
@@ -221,7 +285,9 @@ func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool
 		"mode": mode
 	}
 
-func schedule_early_tension(mode: String, delay_seconds: float = 0.35) -> void:
+func schedule_early_tension(mode: String, delay_seconds: float = 0.10) -> void:
+	if not is_course_play_active():
+		return
 	cancel_scheduled_tension()
 	_is_scheduled = true
 	var timer = get_tree().create_timer(delay_seconds)
@@ -236,6 +302,8 @@ func cancel_scheduled_tension() -> void:
 # ---------------- LIVE PROXIMITY CHECK ----------------
 
 func check_ball_proximity(ball_pos: Vector3, target_pos: Vector3, is_putt: bool) -> bool:
+	if not is_course_play_active():
+		return false
 	if target_pos.is_zero_approx():
 		return false
 
@@ -253,6 +321,8 @@ func check_ball_proximity(ball_pos: Vector3, target_pos: Vector3, is_putt: bool)
 # ----------------- ACTIVATION / DEACTIVATION -----------------
 
 func start_tension(mode: String = "putt", initial_closeness: float = 0.40) -> void:
+	if not is_course_play_active():
+		return
 	cancel_scheduled_tension()
 	if has_node("/root/GlobalSettings") and not GlobalSettings.range_settings.tension_effects_enabled.value:
 		return
@@ -339,4 +409,3 @@ func get_tension_intensity() -> float:
 
 func get_tension_pulse() -> float:
 	return current_pulse
-

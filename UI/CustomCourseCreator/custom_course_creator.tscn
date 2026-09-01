@@ -52,6 +52,22 @@ content_margin_bottom = 30.0
 shadow_color = Color(0, 0, 0, 0.6)
 shadow_size = 16
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_gen_notice"]
+bg_color = Color(0.04, 0.14, 0.08, 0.85)
+border_width_left = 4
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.3, 0.7, 0.4, 0.7)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 16.0
+content_margin_top = 12.0
+content_margin_right = 16.0
+content_margin_bottom = 12.0
+
 [node name="CustomCourseCreator" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -251,6 +267,14 @@ layout_mode = 2
 alignment = 2
 theme_override_constants/separation = 16
 
+[node name="FooterNoteLabel" type="Label" parent="MainPanel/VBoxContainer/FooterHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.65, 0.82, 0.7, 0.85)
+theme_override_font_sizes/font_size = 14
+text = "ℹ Note: Generation can take awhile as each hole is pieced together individually in 3D."
+autowrap_mode = 2
+
 [node name="CancelButton" type="Button" parent="MainPanel/VBoxContainer/FooterHBox" unique_id=111]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(140, 48)
@@ -281,6 +305,7 @@ custom_minimum_size = Vector2(2000, 2000)
 theme_override_styles/panel = SubResource("StyleBoxFlat_dimmer")
 
 [node name="GenCard" type="PanelContainer" parent="GenerationOverlay"]
+custom_minimum_size = Vector2(540, 0)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_gen_card")
 
@@ -306,9 +331,22 @@ theme_override_font_sizes/font_size = 24
 text = "Generating Custom 3D Course..."
 horizontal_alignment = 1
 
-[node name="GenSubtitle" type="Label" parent="GenerationOverlay/GenCard/VBox"]
+[node name="GenSubtitle" type="Label" parent="GenerationOverlay/GenCard/VBox" unique_id=118]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.85, 0.75, 1)
 theme_override_font_sizes/font_size = 16
-text = "Splicing 3D holes & adding 50ft rough corridor..."
+text = "Piecing together holes in 3D..."
+horizontal_alignment = 1
+
+[node name="GenNoticePanel" type="PanelContainer" parent="GenerationOverlay/GenCard/VBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_gen_notice")
+
+[node name="GenNoticeLabel" type="Label" parent="GenerationOverlay/GenCard/VBox/GenNoticePanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.88, 0.96, 0.9, 1)
+theme_override_font_sizes/font_size = 15
+text = "ℹ Generating a custom course can take awhile. The simulator is piecing together each hole one at a time, extracting 3D terrain, splat maps, and course geometry."
+autowrap_mode = 2
 horizontal_alignment = 1

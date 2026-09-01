@@ -5,7 +5,7 @@ var PlayerScene = preload("res://Player/player.tscn")
 
 # Minigame state variables
 var player = null
-var selected_island_index = 0 # Default target is 25 ft
+var selected_island_index = 0 # Default target is 25 yards
 
 # Camera follow state
 var last_camera_offset = Vector3.ZERO
@@ -16,12 +16,12 @@ var is_dragging = false
 var island_stats = {}
 var total_greens_hit = 0
 
-# Island configurations: 7 greens at 25, 50, 75, 100, 125, 150, 200 feet
-var island_distances_feet = [25, 50, 75, 100, 125, 150, 200]
+# Island configurations: 7 greens at 25, 50, 75, 100, 125, 150, 200 yards
+var island_distances_yards = [25, 50, 75, 100, 125, 150, 200]
 
 # Fan layout: angles from straight ahead (+X axis in degrees)
 # Staggered left and right so all 7 targets have clear line-of-sight from the tee box
-var island_angles_deg = [40.0, -35.0, 20.0, -15.0, 48.0, -40.0, 3.0]
+var island_angles_deg = [52.0, -52.0, 25.0, -18.0, 58.0, -56.0, 0.0]
 
 var island_positions = [] # Computed world positions
 var island_data = [] # Detailed procedural shape and layout data per island
@@ -51,10 +51,10 @@ var dock_mat: StandardMaterial3D
 func _ready() -> void:
 	name = "ChippingPractice"
 	
-	# 1. Compute island world positions from distance (feet -> meters) + angle fan layout
-	for i in range(island_distances_feet.size()):
+	# 1. Compute island world positions from distance (yards -> meters) + angle fan layout
+	for i in range(island_distances_yards.size()):
 		island_stats[i] = {"Attempts": 0, "Hits": 0}
-		var dist_meters = island_distances_feet[i] * 0.3048 # feet to meters
+		var dist_meters = island_distances_yards[i] * 0.9144 # yards to meters (1 yd = 0.9144 m)
 		var angle_rad = deg_to_rad(island_angles_deg[i])
 		var x = dist_meters * cos(angle_rad)
 		var z = dist_meters * sin(angle_rad)
@@ -151,30 +151,39 @@ func _init_materials() -> void:
 	mulch_mat.albedo_color = Color(0.38, 0.16, 0.11)
 	mulch_mat.roughness = 0.95
 	
-	# Wood retaining wall logs/planks with real bark/wood texture
+	# Rugged rock pillar & retaining wall stone material
 	wall_mat = StandardMaterial3D.new()
-	if ResourceLoader.exists("res://Courses/Environments/tree-bark/albedo.png"):
-		wall_mat.albedo_texture = load("res://Courses/Environments/tree-bark/albedo.png")
-		if ResourceLoader.exists("res://Courses/Environments/tree-bark/normal.png"):
+	if ResourceLoader.exists("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_albedo.png"):
+		wall_mat.albedo_texture = load("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_albedo.png")
+		if ResourceLoader.exists("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_normal-ogl.png"):
 			wall_mat.normal_enabled = true
-			wall_mat.normal_texture = load("res://Courses/Environments/tree-bark/normal.png")
-		if ResourceLoader.exists("res://Courses/Environments/tree-bark/roughness.png"):
-			wall_mat.roughness_texture = load("res://Courses/Environments/tree-bark/roughness.png")
-		wall_mat.uv1_scale = Vector3(0.3, 0.3, 0.3)
+			wall_mat.normal_texture = load("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_normal-ogl.png")
+		if ResourceLoader.exists("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_roughness.png"):
+			wall_mat.roughness_texture = load("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_roughness.png")
+		if ResourceLoader.exists("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_ao.png"):
+			wall_mat.ao_enabled = true
+			wall_mat.ao_texture = load("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_ao.png")
+		wall_mat.albedo_color = Color(0.88, 0.88, 0.90)
+		wall_mat.uv1_scale = Vector3(0.4, 0.4, 0.4)
+		wall_mat.uv1_triplanar = true
+	elif ResourceLoader.exists("res://Courses/Environments/dry-rocky-ground-bl/dry-rocky-ground_albedo.png"):
+		wall_mat.albedo_texture = load("res://Courses/Environments/dry-rocky-ground-bl/dry-rocky-ground_albedo.png")
+		wall_mat.uv1_scale = Vector3(0.4, 0.4, 0.4)
 		wall_mat.uv1_triplanar = true
 	else:
-		wall_mat.albedo_color = Color(0.26, 0.18, 0.11)
-	wall_mat.roughness = 0.85
+		wall_mat.albedo_color = Color(0.32, 0.32, 0.35)
+	wall_mat.roughness = 0.9
 	
-	# Dark wood cap trim
+	# Dark rock cap trim
 	cap_mat = StandardMaterial3D.new()
-	if ResourceLoader.exists("res://Courses/Environments/tree-bark/albedo.png"):
-		cap_mat.albedo_texture = load("res://Courses/Environments/tree-bark/albedo.png")
-		cap_mat.albedo_color = Color(0.5, 0.4, 0.35)
-		cap_mat.uv1_scale = Vector3(0.4, 0.4, 0.4)
+	if ResourceLoader.exists("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_albedo.png"):
+		cap_mat.albedo_texture = load("res://Courses/Environments/jagged-rocky-ground1-bl/jagged-rocky-ground_albedo.png")
+		cap_mat.albedo_color = Color(0.65, 0.65, 0.68)
+		cap_mat.uv1_scale = Vector3(0.5, 0.5, 0.5)
+		cap_mat.uv1_triplanar = true
 	else:
-		cap_mat.albedo_color = Color(0.18, 0.12, 0.07)
-	cap_mat.roughness = 0.8
+		cap_mat.albedo_color = Color(0.22, 0.22, 0.25)
+	cap_mat.roughness = 0.88
 	
 	# Wooden dock
 	dock_mat = StandardMaterial3D.new()
@@ -216,7 +225,15 @@ func _setup_environment() -> void:
 	sun.name = "SunLight"
 	sun.transform.basis = Basis(Vector3.RIGHT, deg_to_rad(-52)).rotated(Vector3.UP, deg_to_rad(35))
 	sun.shadow_enabled = true
-	sun.light_energy = 1.25
+	sun.light_energy = 1.2
+	sun.directional_shadow_max_distance = 500.0
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_blend_splits = true
+	sun.directional_shadow_split_1 = 0.05
+	sun.directional_shadow_split_2 = 0.15
+	sun.directional_shadow_split_3 = 0.40
+	sun.shadow_bias = 0.03
+	sun.shadow_normal_bias = 2.0
 	add_child(sun)
 	
 	var world_env = WorldEnvironment.new()
@@ -236,8 +253,18 @@ func _setup_environment() -> void:
 	env.sky = sky
 	
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.55
+	env.ambient_light_energy = 0.50
+	env.ambient_light_sky_contribution = 0.55
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_white = 5.0
+	env.tonemap_exposure = 1.0
+	env.ssao_enabled = true
+	env.ssao_radius = 2.0
+	env.ssao_intensity = 1.2
+	env.ssao_power = 1.5
+	env.ssao_detail = 0.2
+	env.ssao_horizon = 0.06
+	env.ssao_ao_channel_affect = 0.5
 	
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.65, 0.78, 0.88)
@@ -332,18 +359,18 @@ func _setup_islands() -> void:
 	
 	for i in range(island_positions.size()):
 		var pos = island_positions[i]
-		var dist_ft = island_distances_feet[i]
+		var dist_yds = island_distances_yards[i]
 		
 		# Generate procedural 2D geometry layouts for this island
 		var data = _generate_island_layout(i)
 		island_data.append(data)
 		
 		# Build 3D island node with meshes, collision bodies, trees, dock, flag
-		var island_node = _build_floating_island_node(i, pos, dist_ft, data)
+		var island_node = _build_floating_island_node(i, pos, dist_yds, data)
 		add_child(island_node)
 
 ## Generate unique organic 2D shape profiles for each of the 7 islands
-## Greens grow progressively larger, with the 25 FT green at 10 ft wide (1.524m radius) + 5 ft rough perimeter (3.048m outer radius)
+## Well-proportioned, generous green sizes with wide open water between all islands
 func _generate_island_layout(idx: int) -> Dictionary:
 	var outer_pts: PackedVector2Array = PackedVector2Array()
 	var green_pts: PackedVector2Array = PackedVector2Array()
@@ -355,174 +382,176 @@ func _generate_island_layout(idx: int) -> Dictionary:
 	var dock_angle = 0.0
 	var dock_scale: float = 1.0
 	var pin_pos = Vector3.ZERO
-	var green_bounding_radius = 1.524
+	var green_bounding_radius = 3.5
+	var outer_bounding_radius = 4.4
 	
 	match idx:
-		0: # 25 FEET - Smallest island green: 10 ft wide green (1.524m radius) + 5 ft perimeter rough (3.048m outer radius)
-			green_bounding_radius = 1.524
-			outer_pts = _generate_kidney_bean_polygon(3.048, 0.14, 0.08, 15.0)
-			green_pts = _generate_kidney_bean_polygon(1.524, 0.14, 0.06, 15.0)
+		0: # 25 YARDS - Green: 3.5m radius (~7.7 yds wide), Island Outer: 4.4m radius (~9.6 yds wide)
+			green_bounding_radius = 3.5
+			outer_bounding_radius = 4.4
+			outer_pts = _generate_kidney_bean_polygon(4.4, 0.12, 0.06, 15.0)
+			green_pts = _generate_kidney_bean_polygon(3.5, 0.12, 0.05, 15.0)
 			
-			# Mini Sand Trap on front approach side (+Y in 2D / +Z in 3D)
-			bunker_list.append(_create_ellipse_polygon(Vector2(1.1, 1.2), 0.7, 0.45, deg_to_rad(-25)))
+			# Mini Sand Trap on front approach side
+			bunker_list.append(_create_ellipse_polygon(Vector2(1.6, 1.8), 1.1, 0.7, deg_to_rad(-25)))
 			
-			# Mini Red mulch bed on back side (-Y in 2D / -Z in 3D)
-			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -2.1), 1.8, 0.65, deg_to_rad(0)))
+			# Mini Red mulch bed on back side
+			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -3.2), 2.6, 1.0, deg_to_rad(0)))
 			
-			# Small decorative trees on back edge
 			tree_positions = [
-				Vector3(-1.1, 0.05, -2.0),
-				Vector3(1.0, 0.05, -2.1)
+				Vector3(-1.8, 0.05, -3.0),
+				Vector3(1.6, 0.05, -3.2)
 			]
-			tree_scale_mult = 0.55
-			dock_pos = Vector3(2.3, 0.0, -0.6)
+			tree_scale_mult = 0.65
+			dock_pos = Vector3(3.6, 0.0, -1.0)
 			dock_angle = deg_to_rad(-45)
-			dock_scale = 0.5
-			pin_pos = Vector3(0.0, 0.05, -0.1)
+			dock_scale = 0.65
+			pin_pos = Vector3(0.0, 0.05, -0.2)
 			
-		1: # 50 FEET - 2.5m Green radius (16.4 ft wide) + 4.5m Outer radius
-			green_bounding_radius = 2.5
-			outer_pts = _generate_kidney_bean_polygon(4.5, 0.16, 0.10, -30.0)
-			green_pts = _generate_kidney_bean_polygon(2.5, 0.16, 0.08, -30.0)
+		1: # 50 YARDS - Green: 4.8m radius (~10.5 yds wide), Island Outer: 5.8m radius (~12.7 yds wide)
+			green_bounding_radius = 4.8
+			outer_bounding_radius = 5.8
+			outer_pts = _generate_kidney_bean_polygon(5.8, 0.14, 0.08, -30.0)
+			green_pts = _generate_kidney_bean_polygon(4.8, 0.14, 0.06, -30.0)
 			
-			# Sand Traps on front approach side
-			bunker_list.append(_create_ellipse_polygon(Vector2(-1.8, 1.8), 1.1, 0.7, deg_to_rad(20)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(1.6, 1.9), 1.0, 0.65, deg_to_rad(-35)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(-2.5, 2.5), 1.4, 0.9, deg_to_rad(20)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(2.4, 2.6), 1.3, 0.8, deg_to_rad(-35)))
 			
-			# Mulch bed on back side
-			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -3.1), 2.8, 1.0, deg_to_rad(0)))
+			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -4.3), 3.6, 1.3, deg_to_rad(0)))
 			
 			tree_positions = [
-				Vector3(-1.8, 0.08, -3.0),
-				Vector3(0.0, 0.08, -3.5),
-				Vector3(1.7, 0.08, -3.1)
+				Vector3(-2.5, 0.08, -4.1),
+				Vector3(0.0, 0.08, -4.7),
+				Vector3(2.4, 0.08, -4.2)
 			]
-			tree_scale_mult = 0.7
-			dock_pos = Vector3(-3.4, 0.0, -1.2)
+			tree_scale_mult = 0.78
+			dock_pos = Vector3(-4.8, 0.0, -1.6)
 			dock_angle = deg_to_rad(120)
-			dock_scale = 0.65
+			dock_scale = 0.78
 			pin_pos = Vector3(0.1, 0.05, -0.2)
 			
-		2: # 75 FEET - 3.5m Green radius (23 ft wide) + 6.0m Outer radius
-			green_bounding_radius = 3.5
-			outer_pts = _generate_kidney_bean_polygon(6.0, 0.18, 0.12, 45.0)
-			green_pts = _generate_kidney_bean_polygon(3.5, 0.18, 0.10, 45.0)
+		2: # 75 YARDS - Green: 5.8m radius (~12.7 yds wide), Island Outer: 7.0m radius (~15.3 yds wide)
+			green_bounding_radius = 5.8
+			outer_bounding_radius = 7.0
+			outer_pts = _generate_kidney_bean_polygon(7.0, 0.16, 0.10, 45.0)
+			green_pts = _generate_kidney_bean_polygon(5.8, 0.16, 0.08, 45.0)
 			
-			# Sand Traps on front approach side
-			bunker_list.append(_create_ellipse_polygon(Vector2(-2.4, 2.3), 1.5, 0.9, deg_to_rad(-20)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(2.2, 2.5), 1.6, 1.0, deg_to_rad(25)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(-3.1, 3.0), 1.8, 1.1, deg_to_rad(-20)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(2.9, 3.2), 1.9, 1.2, deg_to_rad(25)))
 			
-			# Mulch bed on back side
-			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -4.1), 3.8, 1.4, deg_to_rad(0)))
+			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -5.2), 4.6, 1.6, deg_to_rad(0)))
 			
 			tree_positions = [
-				Vector3(-2.6, 0.1, -3.9),
-				Vector3(0.0, 0.1, -4.6),
-				Vector3(2.4, 0.1, -4.1)
+				Vector3(-3.3, 0.1, -4.9),
+				Vector3(0.0, 0.1, -5.8),
+				Vector3(3.1, 0.1, -5.2)
 			]
-			tree_scale_mult = 0.85
-			dock_pos = Vector3(4.5, 0.0, -1.4)
+			tree_scale_mult = 0.9
+			dock_pos = Vector3(5.8, 0.0, -1.8)
 			dock_angle = deg_to_rad(-60)
-			dock_scale = 0.78
+			dock_scale = 0.9
 			pin_pos = Vector3(-0.1, 0.05, -0.3)
 			
-		3: # 100 FEET - 4.5m Green radius (29.5 ft wide) + 7.5m Outer radius
-			green_bounding_radius = 4.5
-			outer_pts = _generate_kidney_bean_polygon(7.5, 0.20, 0.14, -45.0)
-			green_pts = _generate_kidney_bean_polygon(4.5, 0.20, 0.12, -45.0)
+		3: # 100 YARDS - Green: 7.0m radius (~15.3 yds wide), Island Outer: 8.4m radius (~18.4 yds wide)
+			green_bounding_radius = 7.0
+			outer_bounding_radius = 8.4
+			outer_pts = _generate_kidney_bean_polygon(8.4, 0.18, 0.11, -45.0)
+			green_pts = _generate_kidney_bean_polygon(7.0, 0.18, 0.09, -45.0)
 			
-			# Sand Traps on front approach side
-			bunker_list.append(_create_ellipse_polygon(Vector2(-3.0, 3.0), 1.9, 1.2, deg_to_rad(-15)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(2.8, 3.2), 2.0, 1.3, deg_to_rad(25)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(-3.7, 3.7), 2.2, 1.3, deg_to_rad(-15)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(3.4, 3.9), 2.3, 1.4, deg_to_rad(25)))
 			
-			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -5.2), 4.8, 1.7, deg_to_rad(0)))
+			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -6.3), 5.5, 1.9, deg_to_rad(0)))
 			
 			tree_positions = [
-				Vector3(-3.5, 0.1, -4.9),
-				Vector3(-1.2, 0.1, -5.8),
-				Vector3(1.2, 0.1, -5.9),
-				Vector3(3.4, 0.1, -5.0)
+				Vector3(-4.3, 0.1, -5.9),
+				Vector3(-1.5, 0.1, -7.0),
+				Vector3(1.5, 0.1, -7.1),
+				Vector3(4.2, 0.1, -6.1)
 			]
 			tree_scale_mult = 1.0
-			dock_pos = Vector3(-5.6, 0.0, -2.1)
+			dock_pos = Vector3(-6.8, 0.0, -2.4)
 			dock_angle = deg_to_rad(120)
-			dock_scale = 0.9
+			dock_scale = 1.0
 			pin_pos = Vector3(0.2, 0.05, -0.4)
 			
-		4: # 125 FEET - 5.5m Green radius (36 ft wide) + 9.0m Outer radius
-			green_bounding_radius = 5.5
-			outer_pts = _generate_kidney_bean_polygon(9.0, 0.22, 0.15, 60.0)
-			green_pts = _generate_kidney_bean_polygon(5.5, 0.22, 0.13, 60.0)
+		4: # 125 YARDS - Green: 8.2m radius (~17.9 yds wide), Island Outer: 9.8m radius (~21.4 yds wide)
+			green_bounding_radius = 8.2
+			outer_bounding_radius = 9.8
+			outer_pts = _generate_kidney_bean_polygon(9.8, 0.20, 0.12, 60.0)
+			green_pts = _generate_kidney_bean_polygon(8.2, 0.20, 0.10, 60.0)
 			
-			bunker_list.append(_create_ellipse_polygon(Vector2(-3.8, 3.7), 2.3, 1.4, deg_to_rad(-25)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(3.5, 4.0), 2.4, 1.5, deg_to_rad(30)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(-1.0, 5.2), 1.8, 1.1, deg_to_rad(10)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(-4.4, 4.3), 2.5, 1.5, deg_to_rad(-25)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(4.1, 4.6), 2.6, 1.6, deg_to_rad(30)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(-1.1, 5.9), 2.0, 1.2, deg_to_rad(10)))
 			
-			mulch_list.append(_create_ellipse_polygon(Vector2(-2.7, -6.1), 3.2, 1.6, deg_to_rad(-20)))
-			mulch_list.append(_create_ellipse_polygon(Vector2(2.7, -6.1), 3.2, 1.6, deg_to_rad(20)))
+			mulch_list.append(_create_ellipse_polygon(Vector2(-3.1, -7.0), 3.7, 1.8, deg_to_rad(-20)))
+			mulch_list.append(_create_ellipse_polygon(Vector2(3.1, -7.0), 3.7, 1.8, deg_to_rad(20)))
 			
 			tree_positions = [
-				Vector3(-4.8, 0.1, -5.8),
-				Vector3(-2.4, 0.1, -7.0),
-				Vector3(0.0, 0.1, -7.2),
-				Vector3(2.4, 0.1, -7.0),
-				Vector3(4.8, 0.1, -5.8)
+				Vector3(-5.5, 0.1, -6.6),
+				Vector3(-2.8, 0.1, -8.1),
+				Vector3(0.0, 0.1, -8.4),
+				Vector3(2.8, 0.1, -8.1),
+				Vector3(5.5, 0.1, -6.6)
 			]
-			tree_scale_mult = 1.15
-			dock_pos = Vector3(6.8, 0.0, -1.8)
+			tree_scale_mult = 1.1
+			dock_pos = Vector3(7.8, 0.0, -2.2)
 			dock_angle = deg_to_rad(75)
-			dock_scale = 1.0
+			dock_scale = 1.1
 			pin_pos = Vector3(0.0, 0.05, -0.5)
 			
-		5: # 150 FEET - 6.8m Green radius (44.6 ft wide) + 10.8m Outer radius
-			green_bounding_radius = 6.8
-			outer_pts = _generate_kidney_bean_polygon(10.8, 0.24, 0.16, -60.0)
-			green_pts = _generate_kidney_bean_polygon(6.8, 0.24, 0.14, -60.0)
+		5: # 150 YARDS - Green: 9.6m radius (~21.0 yds wide), Island Outer: 11.4m radius (~24.9 yds wide)
+			green_bounding_radius = 9.6
+			outer_bounding_radius = 11.4
+			outer_pts = _generate_kidney_bean_polygon(11.4, 0.22, 0.14, -60.0)
+			green_pts = _generate_kidney_bean_polygon(9.6, 0.22, 0.12, -60.0)
 			
-			bunker_list.append(_create_ellipse_polygon(Vector2(-4.6, 4.5), 2.7, 1.6, deg_to_rad(-20)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(4.3, 4.8), 2.8, 1.7, deg_to_rad(25)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(0.0, 6.4), 2.2, 1.3, deg_to_rad(0)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(-5.2, 5.1), 2.9, 1.7, deg_to_rad(-20)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(4.9, 5.4), 3.0, 1.8, deg_to_rad(25)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(0.0, 7.1), 2.4, 1.4, deg_to_rad(0)))
 			
-			mulch_list.append(_create_ellipse_polygon(Vector2(-3.4, -7.4), 3.8, 1.9, deg_to_rad(-20)))
-			mulch_list.append(_create_ellipse_polygon(Vector2(3.4, -7.4), 3.8, 1.9, deg_to_rad(20)))
+			mulch_list.append(_create_ellipse_polygon(Vector2(-3.9, -8.3), 4.3, 2.2, deg_to_rad(-20)))
+			mulch_list.append(_create_ellipse_polygon(Vector2(3.9, -8.3), 4.3, 2.2, deg_to_rad(20)))
 			
 			tree_positions = [
-				Vector3(-5.8, 0.1, -7.0),
-				Vector3(-3.0, 0.1, -8.4),
-				Vector3(0.0, 0.1, -8.7),
-				Vector3(3.0, 0.1, -8.4),
-				Vector3(5.8, 0.1, -7.0)
+				Vector3(-6.6, 0.1, -7.9),
+				Vector3(-3.5, 0.1, -9.5),
+				Vector3(0.0, 0.1, -9.8),
+				Vector3(3.5, 0.1, -9.5),
+				Vector3(6.6, 0.1, -7.9)
 			]
-			tree_scale_mult = 1.3
-			dock_pos = Vector3(-8.2, 0.0, -2.5)
+			tree_scale_mult = 1.15
+			dock_pos = Vector3(-9.2, 0.0, -2.9)
 			dock_angle = deg_to_rad(105)
-			dock_scale = 1.1
+			dock_scale = 1.15
 			pin_pos = Vector3(-0.2, 0.05, -0.8)
 			
-		6: # 200 FEET - 8.5m Green radius (55.8 ft wide) + 13.0m Outer radius
-			green_bounding_radius = 8.5
-			outer_pts = _generate_kidney_bean_polygon(13.0, 0.28, 0.18, 15.0)
-			green_pts = _generate_kidney_bean_polygon(8.5, 0.28, 0.16, 15.0)
+		6: # 200 YARDS - Green: 11.5m radius (~25.2 yds wide), Island Outer: 13.5m radius (~29.5 yds wide)
+			green_bounding_radius = 11.5
+			outer_bounding_radius = 13.5
+			outer_pts = _generate_kidney_bean_polygon(13.5, 0.25, 0.15, 15.0)
+			green_pts = _generate_kidney_bean_polygon(11.5, 0.25, 0.13, 15.0)
 			
-			bunker_list.append(_create_ellipse_polygon(Vector2(-5.6, 5.2), 3.3, 1.9, deg_to_rad(-20)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(3.2, 6.8), 3.5, 2.0, deg_to_rad(15)))
-			bunker_list.append(_create_ellipse_polygon(Vector2(6.2, 4.8), 3.0, 1.7, deg_to_rad(65)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(-6.2, 5.8), 3.6, 2.1, deg_to_rad(-20)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(3.6, 7.6), 3.7, 2.2, deg_to_rad(15)))
+			bunker_list.append(_create_ellipse_polygon(Vector2(6.8, 5.3), 3.2, 1.9, deg_to_rad(65)))
 			
-			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -9.0), 7.2, 2.8, deg_to_rad(0)))
+			mulch_list.append(_create_ellipse_polygon(Vector2(0.0, -10.1), 7.9, 3.0, deg_to_rad(0)))
 			
 			tree_positions = [
-				Vector3(-7.2, 0.1, -8.5),
-				Vector3(-4.5, 0.1, -9.8),
-				Vector3(-2.0, 0.1, -10.5),
-				Vector3(0.8, 0.1, -10.7),
-				Vector3(3.5, 0.1, -10.2),
-				Vector3(6.0, 0.1, -9.5),
-				Vector3(8.0, 0.1, -8.5)
+				Vector3(-8.1, 0.1, -9.5),
+				Vector3(-5.0, 0.1, -11.0),
+				Vector3(-2.2, 0.1, -11.8),
+				Vector3(0.9, 0.1, -12.0),
+				Vector3(3.9, 0.1, -11.4),
+				Vector3(6.6, 0.1, -10.6),
+				Vector3(8.9, 0.1, -9.5)
 			]
-			tree_scale_mult = 1.45
-			dock_pos = Vector3(0.0, 0.0, -11.5)
+			tree_scale_mult = 1.25
+			dock_pos = Vector3(0.0, 0.0, -12.2)
 			dock_angle = deg_to_rad(0)
-			dock_scale = 1.2
+			dock_scale = 1.25
 			pin_pos = Vector3(-0.3, 0.05, -1.0)
 
 	return {
@@ -536,7 +565,8 @@ func _generate_island_layout(idx: int) -> Dictionary:
 		"dock_angle": dock_angle,
 		"dock_scale": dock_scale,
 		"pin_pos": pin_pos,
-		"green_radius": green_bounding_radius
+		"green_radius": green_bounding_radius,
+		"outer_radius": outer_bounding_radius
 	}
 
 func _create_ellipse_polygon(center: Vector2, rx: float, ry: float, rot: float, pts_count: int = 24) -> PackedVector2Array:
@@ -553,7 +583,7 @@ func _create_ellipse_polygon(center: Vector2, rx: float, ry: float, rot: float, 
 	return poly
 
 ## Build complete 3D Floating Island Node
-func _build_floating_island_node(idx: int, pos: Vector3, dist_ft: int, data: Dictionary) -> StaticBody3D:
+func _build_floating_island_node(idx: int, pos: Vector3, dist_yds: int, data: Dictionary) -> StaticBody3D:
 	var island = StaticBody3D.new()
 	island.name = "GreenIsland_%d" % idx
 	island.set_meta("surface_type", 4) # Default surface GREEN
@@ -572,31 +602,43 @@ func _build_floating_island_node(idx: int, pos: Vector3, dist_ft: int, data: Dic
 	var tree_scale_mult: float = data.get("tree_scale_mult", 1.0)
 	var dock_scale: float = data.get("dock_scale", 1.0)
 	
-	# 1. Wood Retaining Wall, Bottom Cap Rim & Continuous Pilings
-	var wall_mesh = _build_retaining_wall_mesh(outer_poly, 0.0, -1.4, wall_mat, cap_mat)
+	# 1. Rock Retaining Wall, Bottom Cap Rim & Continuous Gapless Rock Pillars
+	var wall_mesh = _build_retaining_wall_mesh(outer_poly, 0.04, -1.6, wall_mat, cap_mat)
 	if wall_mesh:
 		var wall_inst = MeshInstance3D.new()
 		wall_inst.mesh = wall_mesh
-		wall_inst.name = "WoodRetainingWall"
+		wall_inst.name = "RockRetainingWall"
 		island.add_child(wall_inst)
 		
 	# Retaining wall physics collision shape
 	var wall_col_shape = ConcavePolygonShape3D.new()
-	wall_col_shape.set_faces(_build_wall_collision_faces(outer_poly, 0.0, -1.4))
+	wall_col_shape.set_faces(_build_wall_collision_faces(outer_poly, 0.04, -1.6))
 	var wall_col = CollisionShape3D.new()
 	wall_col.shape = wall_col_shape
 	island.add_child(wall_col)
 	
-	# Dense wooden log pilings fully surrounding the island perimeter (top level with platform, not protruding)
-	_add_island_pilings(island, outer_poly, 0.0, -1.4)
+	# Dense rock pillars fully surrounding the island green with zero gaps
+	_add_island_rock_pillars(island, outer_poly, 0.04, -1.6)
 	
 	# 2. Rough Grass Surround Platform Mesh & Physics
-	var fringe_mesh = _build_flat_polygon_mesh(outer_poly, 0.0, fringe_mat)
+	var fringe_mesh = _build_flat_polygon_mesh(outer_poly, 0.01, fringe_mat)
 	if fringe_mesh:
 		var f_inst = MeshInstance3D.new()
 		f_inst.mesh = fringe_mesh
 		f_inst.name = "RoughSurroundTurf"
 		island.add_child(f_inst)
+		
+		# Solid Rough Platform Collision across the entire island (from rock circle to green)
+		var rough_body = StaticBody3D.new()
+		rough_body.name = "RoughBody"
+		rough_body.set_meta("surface_type", 2) # ROUGH
+		
+		var rough_concave = ConcavePolygonShape3D.new()
+		rough_concave.set_faces(_build_flat_poly_faces(outer_poly, 0.01))
+		var r_col = CollisionShape3D.new()
+		r_col.shape = rough_concave
+		rough_body.add_child(r_col)
+		island.add_child(rough_body)
 		
 	# 3. Red Mulch / Flowerbed Accent Meshes
 	for m_idx in range(mulch_beds.size()):
@@ -609,7 +651,7 @@ func _build_floating_island_node(idx: int, pos: Vector3, dist_ft: int, data: Dic
 			island.add_child(m_inst)
 			
 	# 4. Putting Green Mesh & Main Green Collision Body
-	var green_mesh = _build_flat_polygon_mesh(green_poly, 0.03, green_mat)
+	var green_mesh = _build_flat_polygon_mesh(green_poly, 0.035, green_mat)
 	if green_mesh:
 		var g_inst = MeshInstance3D.new()
 		g_inst.mesh = green_mesh
@@ -622,7 +664,7 @@ func _build_floating_island_node(idx: int, pos: Vector3, dist_ft: int, data: Dic
 		green_body.set_meta("surface_type", 4) # GREEN
 		
 		var green_concave = ConcavePolygonShape3D.new()
-		green_concave.set_faces(_build_flat_poly_faces(green_poly, 0.03))
+		green_concave.set_faces(_build_flat_poly_faces(green_poly, 0.035))
 		var g_col = CollisionShape3D.new()
 		g_col.shape = green_concave
 		green_body.add_child(g_col)
@@ -660,13 +702,13 @@ func _build_floating_island_node(idx: int, pos: Vector3, dist_ft: int, data: Dic
 	
 	# 8. Flagpole & Distance Label
 	var flag_colors = [
-		Color(0.95, 0.22, 0.22),  # 25 FT - Red
-		Color(1.0, 0.55, 0.1),    # 50 FT - Orange
-		Color(0.95, 0.85, 0.15),  # 75 FT - Yellow
-		Color(0.2, 0.85, 0.3),    # 100 FT - Green
-		Color(0.1, 0.8, 0.9),     # 125 FT - Cyan
-		Color(0.2, 0.5, 1.0),     # 150 FT - Blue
-		Color(0.85, 0.3, 0.9),    # 200 FT - Purple
+		Color(0.95, 0.22, 0.22),  # 25 YDS - Red
+		Color(1.0, 0.55, 0.1),    # 50 YDS - Orange
+		Color(0.95, 0.85, 0.15),  # 75 YDS - Yellow
+		Color(0.2, 0.85, 0.3),    # 100 YDS - Green
+		Color(0.1, 0.8, 0.9),     # 125 YDS - Cyan
+		Color(0.2, 0.5, 1.0),     # 150 YDS - Blue
+		Color(0.85, 0.3, 0.9),    # 200 YDS - Purple
 	]
 	
 	var pin_pos = data["pin_pos"]
@@ -702,7 +744,7 @@ func _build_floating_island_node(idx: int, pos: Vector3, dist_ft: int, data: Dic
 	flag_node.add_child(flag)
 	
 	var label_node = Label3D.new()
-	label_node.text = "%d FT" % dist_ft
+	label_node.text = "%d YDS" % dist_yds
 	label_node.font_size = 46 if idx == 0 else 50
 	label_node.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label_node.outline_size = 12
@@ -835,44 +877,96 @@ func _build_retaining_wall_mesh(outer_poly: PackedVector2Array, top_y: float, bo
 	st_cap.commit(mesh)
 	return mesh
 
-func _add_island_pilings(island: Node3D, outer_poly: PackedVector2Array, top_y: float, bot_y: float) -> void:
-	var pilings_folder = Node3D.new()
-	pilings_folder.name = "WoodenPilings"
-	island.add_child(pilings_folder)
-	
-	var n = outer_poly.size()
-	# Top of log pilings is flush with platform (0.0), NOT protruding above green
-	var piling_top = 0.0
-	var piling_height = (piling_top - bot_y)
-	var center_y = (piling_top + bot_y) * 0.5
-	
+## Calculates total perimeter length of a 2D closed polygon
+func _get_polygon_perimeter_length(poly: PackedVector2Array) -> float:
+	var total = 0.0
+	var n = poly.size()
+	if n < 2:
+		return 0.0
 	for i in range(n):
-		var p0 = outer_poly[i]
-		var p1 = outer_poly[(i + 1) % n]
+		total += poly[i].distance_to(poly[(i + 1) % n])
+	return total
+
+## Continuously samples a point along the closed polygon perimeter at given distance
+func _sample_polygon_perimeter(poly: PackedVector2Array, dist: float) -> Vector2:
+	var n = poly.size()
+	if n == 0:
+		return Vector2.ZERO
+	if n == 1:
+		return poly[0]
+	var total_len = _get_polygon_perimeter_length(poly)
+	if total_len <= 0.0001:
+		return poly[0]
 		
-		var post = MeshInstance3D.new()
-		var p_mesh = CylinderMesh.new()
-		p_mesh.top_radius = 0.25
-		p_mesh.bottom_radius = 0.25
-		p_mesh.height = piling_height
-		post.mesh = p_mesh
-		post.material_override = wall_mat
-		post.position = Vector3(p0.x * 0.97, center_y, p0.y * 0.97)
-		pilings_folder.add_child(post)
+	var d = fposmod(dist, total_len)
+	var accum = 0.0
+	for i in range(n):
+		var p0 = poly[i]
+		var p1 = poly[(i + 1) % n]
+		var seg_len = p0.distance_to(p1)
+		if seg_len > 0.00001:
+			if accum + seg_len >= d:
+				var t = clampf((d - accum) / seg_len, 0.0, 1.0)
+				return p0.lerp(p1, t)
+			accum += seg_len
+	return poly[0]
+
+## Adds dense, seamless rock pillars fully surrounding the island perimeter with zero gaps
+func _add_island_rock_pillars(island: Node3D, outer_poly: PackedVector2Array, top_y: float, bot_y: float) -> void:
+	var pillars_folder = Node3D.new()
+	pillars_folder.name = "RockPillars"
+	island.add_child(pillars_folder)
+	
+	var total_len = _get_polygon_perimeter_length(outer_poly)
+	if total_len <= 0.001:
+		return
 		
-		# Place intermediate log piling if segment is long
-		var dist = p0.distance_to(p1)
-		if dist > 0.8:
-			var mid_p = (p0 + p1) * 0.5
-			var mid_post = MeshInstance3D.new()
-			var m_mesh = CylinderMesh.new()
-			m_mesh.top_radius = 0.25
-			m_mesh.bottom_radius = 0.25
-			m_mesh.height = piling_height
-			mid_post.mesh = m_mesh
-			mid_post.material_override = wall_mat
-			mid_post.position = Vector3(mid_p.x * 0.97, center_y, mid_p.y * 0.97)
-			pilings_folder.add_child(mid_post)
+	var pillar_radius = 0.32
+	var target_spacing = 0.38 # Overlapping placement (0.64m diameter vs 0.38m spacing) ensures 0 gaps
+	var count = int(ceil(total_len / target_spacing))
+	if count < 3:
+		count = 3
+	var actual_spacing = total_len / float(count)
+	
+	var pillar_height = (top_y - bot_y)
+	var center_y = (top_y + bot_y) * 0.5
+	
+	var pillar_mesh = CylinderMesh.new()
+	pillar_mesh.top_radius = pillar_radius
+	pillar_mesh.bottom_radius = pillar_radius * 1.05
+	pillar_mesh.height = pillar_height
+	pillar_mesh.radial_segments = 14
+	pillar_mesh.rings = 2
+	
+	var multimesh = MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.instance_count = count
+	multimesh.mesh = pillar_mesh
+	
+	var rng = RandomNumberGenerator.new()
+	rng.seed = island.name.hash() + 42
+	
+	for i in range(count):
+		var dist_along = float(i) * actual_spacing
+		var pt2d = _sample_polygon_perimeter(outer_poly, dist_along)
+		
+		# Slight organic height and scale variation for realistic basalt stone look
+		var height_var = rng.randf_range(0.97, 1.03)
+		var scale_var = rng.randf_range(0.98, 1.04)
+		var rot_y = rng.randf_range(0.0, TAU)
+		
+		var t = Transform3D()
+		t = t.scaled(Vector3(scale_var, height_var, scale_var))
+		t = t.rotated(Vector3.UP, rot_y)
+		t.origin = Vector3(pt2d.x * 0.98, center_y, pt2d.y * 0.98)
+		
+		multimesh.set_instance_transform(i, t)
+		
+	var mm_inst = MultiMeshInstance3D.new()
+	mm_inst.name = "RockPillarsMultiMesh"
+	mm_inst.multimesh = multimesh
+	mm_inst.material_override = wall_mat
+	pillars_folder.add_child(mm_inst)
 
 func _build_wall_collision_faces(outer_poly: PackedVector2Array, top_y: float, bot_y: float) -> PackedVector3Array:
 	var faces = PackedVector3Array()
@@ -970,6 +1064,18 @@ func _build_boat_dock(dock_pos: Vector3, dock_angle: float, dock_scale: float = 
 	gangway.rotation.x = deg_to_rad(-8)
 	dock_node.add_child(gangway)
 	
+	# Solid physics collision for boat landing dock
+	var dock_body = StaticBody3D.new()
+	dock_body.name = "DockBody"
+	dock_body.set_meta("surface_type", 3) # FIRM
+	var dock_col = CollisionShape3D.new()
+	var d_box = BoxShape3D.new()
+	d_box.size = Vector3(2.5, 0.25, 4.0)
+	dock_col.shape = d_box
+	dock_col.position = Vector3(0.0, -0.05, 0.0)
+	dock_body.add_child(dock_col)
+	dock_node.add_child(dock_body)
+	
 	return dock_node
 
 # ========================================
@@ -1007,19 +1113,19 @@ func _select_target_island(index: int) -> void:
 				ring.position = Vector3(0.0, 0.06, 0.0)
 				island_node.add_child(ring)
 				
-	var dist_feet = island_distances_feet[index]
+	var dist_yards = island_distances_yards[index]
 		
 	for i in range(island_buttons.size()):
 		if i == index:
-			island_buttons[i].text = "▶ %d FT" % island_distances_feet[i]
+			island_buttons[i].text = "▶ %d YDS" % island_distances_yards[i]
 			island_buttons[i].add_theme_color_override("font_color", Color(0.0, 0.85, 1.0))
 		else:
-			island_buttons[i].text = "  %d FT" % island_distances_feet[i]
+			island_buttons[i].text = "  %d YDS" % island_distances_yards[i]
 			island_buttons[i].remove_theme_color_override("font_color")
 		
 	_reset_ball_position()
 	_update_hud()
-	_show_banner("Target: %d Feet — Hit chip on Launch Monitor onto the green!" % dist_feet)
+	_show_banner("Target: %d Yards — Hit chip on Launch Monitor onto the green!" % dist_yards)
 
 # ========================================
 # PLAYER & AIMING
@@ -1091,7 +1197,7 @@ func _unhandled_input(event: InputEvent) -> void:
 						if d < min_dist:
 							min_dist = d
 							closest_idx = i
-					if min_dist <= island_data[closest_idx]["green_radius"] + 4.0:
+					if min_dist <= island_data[closest_idx]["outer_radius"] + 2.0:
 						_select_target_island(closest_idx)
 					
 	if event is InputEventKey and event.pressed:
@@ -1110,14 +1216,6 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	# Connect to the player's launch monitor shot handler
 	player._on_tcp_client_hit_ball(data)
 
-	# Early Trajectory Prediction for Suspense
-	if has_node("/root/TensionManager") and selected_island_index < island_positions.size():
-		var target_pos = island_positions[selected_island_index]
-		var prediction = TensionManager.predict_shot_outcome(player.ball.global_position, player.ball.velocity, false, target_pos)
-		if prediction.get("will_enter_zone", false):
-			print("[ChippingPractice] Early suspense predicted for chip! Scheduling heartbeat.")
-			TensionManager.schedule_early_tension("chip", 0.35)
-
 	# Show the banner
 	var speed_mph = data.get("Speed", 0.0)
 	var vla = data.get("VLA", 0.0)
@@ -1134,23 +1232,6 @@ func _physics_process(delta: float) -> void:
 			camera_following = true
 			var ball_pos = player.ball.global_position
 			var target_cam_pos = ball_pos + last_camera_offset
-
-			# Live distance check to target island
-			if selected_island_index < island_positions.size():
-				var target_pos = island_positions[selected_island_index]
-				var dist_to_target = Vector2(ball_pos.x, ball_pos.z).distance_to(Vector2(target_pos.x, target_pos.z))
-				if dist_to_target <= 3.048: # 10 feet in meters
-					if has_node("/root/TensionManager") and not TensionManager.is_active():
-						TensionManager.start_tension("chip")
-
-			# If tension active, frame camera tighter on ball and target island
-			if has_node("/root/TensionManager") and TensionManager.is_active() and selected_island_index < island_positions.size():
-				var diff_to_target = (island_positions[selected_island_index] - ball_pos)
-				diff_to_target.y = 0.0
-				var back_dir = -diff_to_target.normalized() if not diff_to_target.is_zero_approx() else Vector3.BACK
-				var close_offset = back_dir * 3.2 + Vector3.UP * 1.3
-				target_cam_pos = ball_pos + close_offset
-
 			$Camera3D.global_position = $Camera3D.global_position.lerp(target_cam_pos, delta * 8.0)
 			$Camera3D.look_at(ball_pos + Vector3.UP * 0.1)
 		else:
@@ -1186,10 +1267,10 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 			var d = Vector2(final_pos.x, final_pos.z).distance_to(Vector2(island_positions[i].x, island_positions[i].z))
 			if d <= island_data[i]["green_radius"]:
 				landed_on_other = true
-				_show_banner("Landed on the %d FT green — but you were aiming for %d FT!" % [island_distances_feet[i], island_distances_feet[selected_island_index]])
+				_show_banner("Landed on the %d YDS green — but you were aiming for %d YDS!" % [island_distances_yards[i], island_distances_yards[selected_island_index]])
 				break
 		if not landed_on_other:
-			_show_banner("Missed target green. Distance to center: %.1f ft" % (dist_to_target * 3.28084))
+			_show_banner("Missed target green. Distance to center: %.1f yards" % (dist_to_target * 1.09361))
 		
 	_update_hud()
 	
@@ -1263,7 +1344,7 @@ func _setup_ui() -> void:
 	t_lbl.add_theme_color_override("font_color", Color(0.0, 0.85, 1.0))
 	target_col.add_child(t_lbl)
 	target_info_lbl = Label.new()
-	target_info_lbl.text = "%d FT" % island_distances_feet[selected_island_index]
+	target_info_lbl.text = "%d YDS" % island_distances_yards[selected_island_index]
 	target_info_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	target_info_lbl.add_theme_font_size_override("font_size", 28)
 	target_info_lbl.add_theme_color_override("font_color", Color.WHITE)
@@ -1369,9 +1450,9 @@ func _setup_ui() -> void:
 	target_vbox.add_child(t_title)
 	
 	island_buttons.clear()
-	for i in range(island_distances_feet.size()):
+	for i in range(island_distances_yards.size()):
 		var btn = Button.new()
-		btn.text = "  %d FT" % island_distances_feet[i]
+		btn.text = "  %d YDS" % island_distances_yards[i]
 		btn.custom_minimum_size = Vector2(0, 34)
 		btn.add_theme_font_size_override("font_size", 13)
 		_apply_btn_style(btn, Color(0.12, 0.20, 0.28), Color(0.18, 0.30, 0.42))
@@ -1524,7 +1605,7 @@ func _update_hud() -> void:
 		acc = int((float(hits) / float(att)) * 100.0)
 		
 	if target_info_lbl:
-		target_info_lbl.text = "%d FT" % island_distances_feet[selected_island_index]
+		target_info_lbl.text = "%d YDS" % island_distances_yards[selected_island_index]
 	if attempts_lbl:
 		attempts_lbl.text = str(att)
 	if hits_lbl:

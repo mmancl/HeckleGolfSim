@@ -47,13 +47,6 @@ public static class SquareProtocol
             return false;
         }
 
-        var shotType = data[2] switch
-        {
-            0x37 => "full",
-            0x13 => "putt",
-            _ => "unknown"
-        };
-
         var rawSpeed = BinaryPrimitives.ReadInt16LittleEndian(data[3..5]);
         var rawVla = BinaryPrimitives.ReadInt16LittleEndian(data[5..7]);
         var rawHla = BinaryPrimitives.ReadInt16LittleEndian(data[7..9]);
@@ -70,6 +63,13 @@ public static class SquareProtocol
         var spinAxis = rawSpinAxis == -32768 ? 0.0f : rawSpinAxis / -100.0f;
         var backSpin = rawBackSpin == -32768 ? 0 : (int)rawBackSpin;
         var sideSpin = rawSideSpin == -32768 ? 0 : (int)rawSideSpin;
+
+        var shotType = data[2] switch
+        {
+            0x37 => "full",
+            0x13 => speed > 20.0f ? "full" : "putt",
+            _ => "unknown"
+        };
 
         metrics = new SquareShotMetrics(
             speed,

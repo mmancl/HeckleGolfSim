@@ -19,6 +19,7 @@ signal course_created(course_dict: Dictionary)
 @onready var sub_viewport: SubViewport = %SubViewport
 @onready var loading_overlay: CenterContainer = %LoadingOverlay
 @onready var generation_overlay: CenterContainer = %GenerationOverlay
+@onready var gen_subtitle: Label = %GenSubtitle
 
 var available_real_courses: Array[Dictionary] = []
 var current_course_holes: Array[Dictionary] = [] # [{key: "Hole 1", par: 4, dist: 385, data: {}}]
@@ -29,6 +30,13 @@ var loaded_course_path: String = ""
 var loaded_course_node: Node = null
 var aerial_camera: Camera3D = null
 var _is_loading_3d: bool = false
+var _build_thread: Thread = null
+
+
+func _exit_tree() -> void:
+	if _build_thread != null and _build_thread.is_alive():
+		_build_thread.wait_to_finish()
+		_build_thread = null
 
 
 func _ready() -> void:
@@ -216,13 +224,12 @@ func _update_aerial_overview() -> void:
 		var image_filename = "aerial_hole_%d.png" % hole_num
 		var image_path = course_dir.path_join(image_filename)
 
-		if FileAccess.file_exists(image_path):
-			var tex = load(image_path)
-			if tex != null:
-				preview_texture_rect.texture = tex
-				preview_texture_rect.visible = true
-				fallback_canvas.visible = false
-				return
+		var tex = _load_texture(image_path)
+		if tex != null:
+			preview_texture_rect.texture = tex
+			preview_texture_rect.visible = true
+			fallback_canvas.visible = false
+			return
 
 		# Fallback 2D schematic layout
 		preview_texture_rect.visible = false
@@ -464,6 +471,9 @@ func _on_done_pressed() -> void:
 	if selected_holes.is_empty():
 		return
 
+	if gen_subtitle != null:
+		gen_subtitle.text = "Starting custom course generation..."
+
 	generation_overlay.visible = true
 	done_btn.disabled = true
 	cancel_btn.disabled = true
@@ -474,7 +484,34 @@ func _on_done_pressed() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	var result = CustomCourseBuilder.build_custom_course(course_title, selected_holes)
+	var progress_cb = func(_curr: int, _total: int, msg: String):
+		Callable(func():
+			if is_instance_valid(self) and gen_subtitle != null:
+				gen_subtitle.text = msg
+		).call_deferred()
+
+	# Run course building in a background Thread so the main thread renders at 60 FPS and the spinner spins continuously
+	_build_thread = Thread.new()
+	var thread_err = _build_thread.start(
+		func():
+			return CustomCourseBuilder.build_custom_course(course_title, selected_holes, progress_cb)
+	)
+
+	if thread_err != OK:
+		var res = CustomCourseBuilder.build_custom_course(course_title, selected_holes, progress_cb)
+		_handle_generation_result(res)
+		return
+
+	while _build_thread != null and _build_thread.is_alive():
+		await get_tree().process_frame
+
+	if _build_thread != null:
+		var result = _build_thread.wait_to_finish()
+		_build_thread = null
+		_handle_generation_result(result)
+
+
+func _handle_generation_result(result: Dictionary) -> void:
 	if not result.is_empty():
 		course_created.emit(result)
 		queue_free()
@@ -482,3 +519,14 @@ func _on_done_pressed() -> void:
 		generation_overlay.visible = false
 		done_btn.disabled = false
 		cancel_btn.disabled = false
+
+
+func _load_texture(path: String) -> Texture2D:
+	if not FileAccess.file_exists(path):
+		return null
+	if path.begins_with("res://") and ResourceLoader.exists(path):
+		return load(path) as Texture2D
+	var img = Image.load_from_file(path)
+	if img != null:
+		return ImageTexture.create_from_image(img)
+	return null

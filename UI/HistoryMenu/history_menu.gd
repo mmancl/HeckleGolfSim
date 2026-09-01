@@ -76,6 +76,7 @@ func _ready() -> void:
 	var scroll_container = ScrollContainer.new()
 	scroll_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	ThemeManager.apply_scroll_container_style(scroll_container, 28)
 	main_vbox.add_child(scroll_container)
 	
 	matches_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -316,6 +317,7 @@ func _show_scorecard(match_data: Dictionary) -> void:
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	ThemeManager.apply_scroll_container_style(scroll, 28)
 	card_vbox.add_child(scroll)
 	
 	var grid = GridContainer.new()

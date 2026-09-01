@@ -1731,9 +1731,18 @@ public partial class OsmMapLoader : Node
                 Sky = sky,
                 AmbientLightSource = Godot.Environment.AmbientSource.Sky,
                 AmbientLightColor = new Color(0.9631823f, 0.9631823f, 0.9631823f, 1f),
+                AmbientLightSkyContribution = 0.55f,
+                AmbientLightEnergy = 0.50f,
                 ReflectedLightSource = Godot.Environment.ReflectionSource.Sky,
                 TonemapMode = Godot.Environment.ToneMapper.Aces,
-                TonemapWhite = 6.0f,
+                TonemapWhite = 5.0f,
+                TonemapExposure = 1.0f,
+                SsaoEnabled = true,
+                SsaoRadius = 2.0f,
+                SsaoIntensity = 1.2f,
+                SsaoPower = 1.5f,
+                SsaoDetail = 0.2f,
+                SsaoHorizon = 0.06f,
                 GlowEnabled = true,
                 GlowIntensity = 0.4f,
                 GlowBloom = 0.1f,
@@ -1755,8 +1764,16 @@ public partial class OsmMapLoader : Node
 
             // Add SunLight
             var sunLight = new DirectionalLight3D { Name = "SunLight" };
-            sunLight.LightEnergy = 0.5f;
+            sunLight.LightEnergy = 1.2f;
             sunLight.ShadowEnabled = true;
+            sunLight.DirectionalShadowMaxDistance = 600.0f;
+            sunLight.DirectionalShadowMode = DirectionalLight3D.ShadowMode.Parallel4Splits;
+            sunLight.DirectionalShadowBlendSplits = true;
+            sunLight.DirectionalShadowSplit1 = 0.05f;
+            sunLight.DirectionalShadowSplit2 = 0.15f;
+            sunLight.DirectionalShadowSplit3 = 0.40f;
+            sunLight.ShadowBias = 0.03f;
+            sunLight.ShadowNormalBias = 2.0f;
             sunLight.Transform = new Transform3D(
                 new Basis(
                     new Vector3(0f, -0.6049699f, -0.7962483f),
@@ -2923,9 +2940,11 @@ public partial class OsmMapLoader : Node
             return SampleRawHeight(lat, lon) - _currentElevationMap.Offset;
         }
 
-        double h = Math.Sin(x * 0.01) * Math.Cos(z * 0.01) * 3.5
-                 + Math.Sin(x * 0.03 + z * 0.02) * 1.2
-                 + Math.Cos(x * 0.07 - z * 0.05) * 0.3;
+        // Multi-octave golf course procedural topography with rolling fairways, swales, mounds, and ridges
+        double h = Math.Sin(x * 0.022 + z * 0.012) * Math.Cos(z * 0.025 - x * 0.015) * 7.5
+                 + Math.Sin(x * 0.045 - z * 0.035) * 3.2
+                 + Math.Cos(x * 0.085 + z * 0.065) * 1.6
+                 + Math.Sin(x * 0.16 + z * 0.14) * 0.65;
         return (float)h;
     }
 
@@ -4073,8 +4092,8 @@ public partial class OsmMapLoader : Node
                 if (inside)
                 {
                     float dist = DistanceToPolygon(point, excl.Polygon);
-                    float bowlRadius = 2.0f;
-                    float maxDepth = 0.6f;
+                    float bowlRadius = 3.5f;
+                    float maxDepth = 1.15f;
                     if (dist < bowlRadius)
                     {
                         float t = dist / bowlRadius;
@@ -4088,13 +4107,13 @@ public partial class OsmMapLoader : Node
                 }
                 else
                 {
-                    // Smooth lip outside bunker boundary
+                    // Raised lip outside bunker boundary
                     float dist = DistanceToPolygon(point, excl.Polygon);
-                    if (dist < 1.5f)
+                    if (dist < 2.0f)
                     {
-                        float t = 1.0f - (dist / 1.5f);
+                        float t = 1.0f - (dist / 2.0f);
                         float smoothT = t * t * (3.0f - 2.0f * t);
-                        bunkerDepression = Math.Max(bunkerDepression, smoothT * 0.05f);
+                        bunkerDepression = Math.Max(bunkerDepression, -smoothT * 0.20f);
                     }
                 }
             }
@@ -4377,8 +4396,21 @@ public partial class OsmMapLoader : Node
         mat.SetShaderParameter("tex_green", GD.Load<Texture2D>("res://Courses/Environments/grass-green/albedo.png"));
         mat.SetShaderParameter("tex_fairway", GD.Load<Texture2D>("res://Courses/Environments/grass-fairway/albedo.png"));
         mat.SetShaderParameter("tex_bunker", GD.Load<Texture2D>("res://Courses/Environments/sand-bunker/albedo.png"));
-        mat.SetShaderParameter("normal_bunker", GD.Load<Texture2D>("res://Courses/Environments/sand-bunker/normal.png"));
         mat.SetShaderParameter("tex_mulch", GD.Load<Texture2D>("res://Courses/Environments/tree-bark/albedo.png"));
+        
+        // Normal Maps
+        mat.SetShaderParameter("normal_rough", GD.Load<Texture2D>("res://Courses/Environments/grass-rough/normal.png"));
+        mat.SetShaderParameter("normal_green", GD.Load<Texture2D>("res://Courses/Environments/grass-green/normal.png"));
+        mat.SetShaderParameter("normal_fairway", GD.Load<Texture2D>("res://Courses/Environments/grass-fairway/normal.png"));
+        mat.SetShaderParameter("normal_bunker", GD.Load<Texture2D>("res://Courses/Environments/sand-bunker/normal.png"));
+        mat.SetShaderParameter("normal_mulch", GD.Load<Texture2D>("res://Courses/Environments/tree-bark/normal.png"));
+
+        // Ambient Occlusion Maps
+        mat.SetShaderParameter("ao_rough", GD.Load<Texture2D>("res://Courses/Environments/grass-rough/ao.png"));
+        mat.SetShaderParameter("ao_green", GD.Load<Texture2D>("res://Courses/Environments/grass-green/ao.png"));
+        mat.SetShaderParameter("ao_fairway", GD.Load<Texture2D>("res://Courses/Environments/grass-fairway/ao.png"));
+        mat.SetShaderParameter("ao_bunker", GD.Load<Texture2D>("res://Courses/Environments/sand-bunker/ao.png"));
+        mat.SetShaderParameter("ao_mulch", GD.Load<Texture2D>("res://Courses/Environments/tree-bark/ao.png"));
 
         arrayMesh.SurfaceSetMaterial(0, mat);
 

@@ -217,6 +217,31 @@ func _ready() -> void:
 					apply_material_button_style(announcer_btn, Color(0.5, 0.5, 0.5, 0.85))
 		)
 		toggles_container.add_child(announcer_btn)
+		
+		# Suspense Heartbeat & Tunnel Vision Toggle Button
+		var tension_btn = Button.new()
+		tension_btn.name = "SuspenseToggleButton"
+		var is_tension_on = GlobalSettings.range_settings.tension_effects_enabled.value if has_node("/root/GlobalSettings") else true
+		tension_btn.text = "💓 Suspense: ON" if is_tension_on else "💓 Suspense: OFF"
+		tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision in Course Play"
+		tension_btn.custom_minimum_size = Vector2(180, 56)
+		var initial_tension_color = Color(0.75, 0.2, 0.3, 0.85) if is_tension_on else Color(0.5, 0.5, 0.5, 0.85)
+		apply_material_button_style(tension_btn, initial_tension_color)
+		tension_btn.pressed.connect(func():
+			if has_node("/root/GlobalSettings"):
+				var new_val = not GlobalSettings.range_settings.tension_effects_enabled.value
+				GlobalSettings.range_settings.tension_effects_enabled.value = new_val
+				GlobalSettings.save_settings()
+				if not new_val and has_node("/root/TensionManager"):
+					TensionManager.stop_tension()
+				if new_val:
+					tension_btn.text = "💓 Suspense: ON"
+					apply_material_button_style(tension_btn, Color(0.75, 0.2, 0.3, 0.85))
+				else:
+					tension_btn.text = "💓 Suspense: OFF"
+					apply_material_button_style(tension_btn, Color(0.5, 0.5, 0.5, 0.85))
+		)
+		toggles_container.add_child(tension_btn)
 
 		# Distance Menu Button
 		var dist_btn = Button.new()

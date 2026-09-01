@@ -38,6 +38,7 @@ var settings_btn: Button = null
 var home_btn: Button = null
 var hide_helpers_btn: Button = null
 var stats_btn: Button = null
+var grid_btn: Button = null
 var map_btn: Button = null
 var mulligan_btn: Button = null
 var club_selector_node: Control = null
@@ -447,6 +448,7 @@ func _setup_hud() -> void:
 	toggles_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	toggles_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	toggles_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	ThemeManager.apply_scroll_container_style(toggles_scroll, 28)
 	
 	var toggles_container = VBoxContainer.new()
 	toggles_container.name = "TogglesContainer"
@@ -486,6 +488,31 @@ func _setup_hud() -> void:
 				apply_material_button_style(announcer_btn, Color(0.5, 0.5, 0.5, 0.85))
 	)
 	toggles_container.add_child(announcer_btn)
+
+	# Suspense Heartbeat & Tunnel Vision Toggle Button
+	var tension_btn = Button.new()
+	tension_btn.name = "SuspenseToggleButton"
+	var is_tension_on = GlobalSettings.range_settings.tension_effects_enabled.value if has_node("/root/GlobalSettings") else true
+	tension_btn.text = "💓 Suspense: ON" if is_tension_on else "💓 Suspense: OFF"
+	tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision in Course Play"
+	tension_btn.custom_minimum_size = Vector2(180, 56)
+	var initial_tension_color = Color(0.75, 0.2, 0.3, 0.85) if is_tension_on else Color(0.5, 0.5, 0.5, 0.85)
+	apply_material_button_style(tension_btn, initial_tension_color)
+	tension_btn.pressed.connect(func():
+		if has_node("/root/GlobalSettings"):
+			var new_val = not GlobalSettings.range_settings.tension_effects_enabled.value
+			GlobalSettings.range_settings.tension_effects_enabled.value = new_val
+			GlobalSettings.save_settings()
+			if not new_val and has_node("/root/TensionManager"):
+				TensionManager.stop_tension()
+			if new_val:
+				tension_btn.text = "💓 Suspense: ON"
+				apply_material_button_style(tension_btn, Color(0.75, 0.2, 0.3, 0.85))
+			else:
+				tension_btn.text = "💓 Suspense: OFF"
+				apply_material_button_style(tension_btn, Color(0.5, 0.5, 0.5, 0.85))
+	)
+	toggles_container.add_child(tension_btn)
 
 	# Distance Menu setup
 	var distance_menu_script = load("res://UI/distance_menu.gd")
@@ -572,19 +599,6 @@ func _setup_hud() -> void:
 		apply_material_button_style(players_btn, Color(0.25, 0.55, 0.35, 0.85)) # Green-ish
 		players_btn.pressed.connect(_on_manage_players_toggle_pressed)
 		toggles_container.add_child(players_btn)
-
-	# Green Grid Toggle Button
-	var grid_btn = Button.new()
-	grid_btn.name = "GreenGridToggleButton"
-	grid_btn.text = "📊 Slope Grid: OFF"
-	grid_btn.custom_minimum_size = Vector2(180, 56)
-	apply_material_button_style(grid_btn, Color(0.5, 0.5, 0.5, 0.85)) # Gray by default
-	grid_btn.pressed.connect(func():
-		if course_instance != null and course_instance.get("show_green_grid") != null:
-			var current_grid = course_instance.get("show_green_grid") as bool
-			course_instance.set("show_green_grid", not current_grid)
-	)
-	toggles_container.add_child(grid_btn)
 
 	# If in practice mode, create practice buttons (initially hidden, shown only in map view)
 	if MultiplayerManager.practice_mode_active and not GlobalSettings.is_chipping_minigame:
@@ -691,6 +705,31 @@ func _setup_hud() -> void:
 				apply_circular_button_style(stats_btn, Color(0.15, 0.15, 0.15, 0.85))
 	)
 	canvas.add_child(stats_btn)
+
+	# Slope Grid Toggle Button (Icon Only) - Bottom-Left, right of Stats button
+	grid_btn = Button.new()
+	grid_btn.name = "GreenGridToggleButton"
+	grid_btn.text = ""
+	grid_btn.tooltip_text = "Toggle Slope Grid (Show/Hide)"
+	if ResourceLoader.exists("res://assets/images/icons/slope_grid.svg"):
+		grid_btn.icon = load("res://assets/images/icons/slope_grid.svg")
+	grid_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	grid_btn.custom_minimum_size = Vector2(56, 56)
+	apply_circular_button_style(grid_btn, Color(0.15, 0.15, 0.15, 0.85)) # Gray (off) by default
+	grid_btn.anchor_left = 0.0
+	grid_btn.anchor_right = 0.0
+	grid_btn.anchor_top = 1.0
+	grid_btn.anchor_bottom = 1.0
+	grid_btn.offset_left = 98   # 86 (stats right) + 12px gap
+	grid_btn.offset_top = -80
+	grid_btn.offset_right = 154 # 98 + 56 button width
+	grid_btn.offset_bottom = -24
+	grid_btn.pressed.connect(func():
+		if course_instance != null and course_instance.get("show_green_grid") != null:
+			var current_grid = course_instance.get("show_green_grid") as bool
+			course_instance.set("show_green_grid", not current_grid)
+	)
+	canvas.add_child(grid_btn)
 
 	# Map Toggle Button (Icon Only) - Bottom-Right Corner
 	map_btn = Button.new()
@@ -955,6 +994,7 @@ func _setup_hud() -> void:
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	ThemeManager.apply_scroll_container_style(scroll, 28)
 	vbox.add_child(scroll)
 	
 	var center_container = CenterContainer.new()
@@ -1024,6 +1064,7 @@ func _setup_hud() -> void:
 	m_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	m_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	m_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	ThemeManager.apply_scroll_container_style(m_scroll, 28)
 	m_vbox.add_child(m_scroll)
 	
 	var m_list = VBoxContainer.new()
@@ -1274,11 +1315,14 @@ func _update_top_hud(player: Dictionary) -> void:
 	hud_overall_score_lbl.text = overall_score_str
 	
 	# 3. Update hole number
-	var hole_num = MultiplayerManager.current_hole_index + 1
+	var hole_idx = clamp(MultiplayerManager.current_hole_index, 0, max(0, MultiplayerManager.hole_ids.size() - 1))
+	var hole_num = hole_idx + 1
 	hud_hole_num_lbl.text = str(hole_num)
 	
 	# 4. Update shots and current hole par diff
-	var hole_id = MultiplayerManager.hole_ids[MultiplayerManager.current_hole_index]
+	if MultiplayerManager.hole_ids.is_empty():
+		return
+	var hole_id = MultiplayerManager.hole_ids[hole_idx]
 	var active_hole = MultiplayerManager.hole_info.get(hole_id, {})
 	var hole_par = active_hole.get("Par", 4)
 	var strokes = player.get("strokes", 0)
@@ -1307,12 +1351,13 @@ func _update_top_hud(player: Dictionary) -> void:
 
 
 func _on_active_player_changed(player: Dictionary) -> void:
-	if player.is_empty():
+	if player.is_empty() or MultiplayerManager.hole_ids.is_empty():
 		return
 		
 	_clear_map_markers()
 		
-	var hole_id = MultiplayerManager.hole_ids[MultiplayerManager.current_hole_index]
+	var hole_idx = clamp(MultiplayerManager.current_hole_index, 0, MultiplayerManager.hole_ids.size() - 1)
+	var hole_id = MultiplayerManager.hole_ids[hole_idx]
 	var active_hole = MultiplayerManager.hole_info.get(hole_id, {})
 	_update_top_hud(player)
 
@@ -1339,7 +1384,7 @@ func _on_active_player_changed(player: Dictionary) -> void:
 		# Update tee-off distance
 		if player.get("strokes", 0) == 0 and course_instance != null and course_instance.has_method("get_height"):
 			var is_driver = MultiplayerManager.current_club.to_lower() in ["dr", "driver", "1w"]
-			var offset_y = 0.059435 if is_driver else 0.021335
+			var offset_y = 0.059435 if is_driver else (GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET)
 			player["position"].y = course_instance.get_height(player["position"].x, player["position"].z) + offset_y
 		var spawn_pos = player["position"]
 		course_instance.current_hole_tee_dist_yards = int(spawn_pos.distance_to(course_instance.current_hole_location) * 1.09361)
@@ -1399,7 +1444,7 @@ func _on_active_player_changed(player: Dictionary) -> void:
 						if course_instance.has_method("clamp_camera_position"):
 							cam_pos = course_instance.call("clamp_camera_position", cam_pos)
 						camera.global_position = cam_pos
-						var is_on_green = (active_ball.get("lie_type") == "green" or active_ball.get("surface_type") == PhysicsEnums.SurfaceType.GREEN)
+						var is_on_green = (active_ball.get("lie_type") == "green")
 						var aim_dir = (pin_pos - ball_pos).normalized()
 						if aim_dir.is_zero_approx():
 							aim_dir = Vector3.FORWARD
@@ -1454,7 +1499,8 @@ func _on_mulligan_pressed() -> void:
 		
 	var player_node = course_instance.get_node_or_null("Player") if course_instance != null else null
 	var last_start_pos = player_node.get("_last_starting_pos") if player_node != null else Vector3.ZERO
-	var hole_id = MultiplayerManager.hole_ids[MultiplayerManager.current_hole_index] if not MultiplayerManager.hole_ids.is_empty() else "Hole 1"
+	var hole_idx = clamp(MultiplayerManager.current_hole_index, 0, MultiplayerManager.hole_ids.size() - 1) if not MultiplayerManager.hole_ids.is_empty() else 0
+	var hole_id = MultiplayerManager.hole_ids[hole_idx] if not MultiplayerManager.hole_ids.is_empty() else "Hole 1"
 	
 	var matching_mulligans = []
 	if active_player.has("mulligan_history") and typeof(active_player["mulligan_history"]) == TYPE_DICTIONARY:
@@ -1486,6 +1532,7 @@ func _on_mulligan_pressed() -> void:
 	scroll.custom_minimum_size = Vector2(400, 160)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	ThemeManager.apply_scroll_container_style(scroll, 28)
 	content_vbox.add_child(scroll)
 	
 	var list_vbox = VBoxContainer.new()
@@ -1588,7 +1635,8 @@ func _on_mulligan_confirmed() -> void:
 	var player_node = course_instance.get_node_or_null("Player")
 	if player_node != null:
 		var active_player = MultiplayerManager.get_active_player()
-		var hole_id = MultiplayerManager.hole_ids[MultiplayerManager.current_hole_index] if not MultiplayerManager.hole_ids.is_empty() else "Hole 1"
+		var hole_idx = clamp(MultiplayerManager.current_hole_index, 0, MultiplayerManager.hole_ids.size() - 1) if not MultiplayerManager.hole_ids.is_empty() else 0
+		var hole_id = MultiplayerManager.hole_ids[hole_idx] if not MultiplayerManager.hole_ids.is_empty() else "Hole 1"
 		var last_start_pos = player_node.get("_last_starting_pos")
 		var current_ball_pos = active_player.get("position", Vector3.ZERO)
 		
@@ -1687,7 +1735,8 @@ func _on_previous_mulligan_selected(prev_shot: Dictionary) -> void:
 	var player_node = course_instance.get_node_or_null("Player")
 	if player_node != null:
 		var active_player = MultiplayerManager.get_active_player()
-		var hole_id = MultiplayerManager.hole_ids[MultiplayerManager.current_hole_index] if not MultiplayerManager.hole_ids.is_empty() else "Hole 1"
+		var hole_idx = clamp(MultiplayerManager.current_hole_index, 0, MultiplayerManager.hole_ids.size() - 1) if not MultiplayerManager.hole_ids.is_empty() else 0
+		var hole_id = MultiplayerManager.hole_ids[hole_idx] if not MultiplayerManager.hole_ids.is_empty() else "Hole 1"
 		
 		# 1. Capture current shot and put it in mulligan history
 		var last_start_pos = player_node.get("_last_starting_pos")
@@ -1905,7 +1954,7 @@ func _update_minimap() -> void:
 		return
 		
 	# Check for on-green state transition
-	var is_on_green = (ball.get("lie_type") == "green" or ball.get("surface_type") == PhysicsEnums.SurfaceType.GREEN)
+	var is_on_green = (ball.get("lie_type") == "green")
 	if is_on_green != _last_was_on_green:
 		if is_on_green:
 			var green_zoom = 60.0
@@ -2481,7 +2530,8 @@ func _populate_scorecard(action_type: String) -> void:
 			_set_other_elements_visible(true)
 		)
 	elif action_type == "hole_completed":
-		action_btn.text = "Next Hole"
+		var is_final_hole = (MultiplayerManager.current_hole_index >= MultiplayerManager.hole_ids.size() - 1)
+		action_btn.text = "Finish Round" if is_final_hole else "Next Hole"
 		action_btn.pressed.connect(func():
 			hud_scorecard.visible = false
 			_set_other_elements_visible(true)
@@ -2514,6 +2564,8 @@ func _set_other_elements_visible(is_visible: bool) -> void:
 		right_panel.visible = is_visible
 	if stats_btn != null:
 		stats_btn.visible = is_visible
+	if grid_btn != null:
+		grid_btn.visible = is_visible
 	if map_btn != null:
 		map_btn.visible = is_visible
 	if mulligan_btn != null:
@@ -3007,6 +3059,7 @@ func _populate_overview() -> void:
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	ThemeManager.apply_scroll_container_style(scroll, 28)
 	vbox.add_child(scroll)
 	
 	var players_list_vbox = VBoxContainer.new()
@@ -3128,7 +3181,7 @@ func _draw_ball_overlays(overlay: Control) -> void:
 	if pin_pos != null and not pin_pos.is_zero_approx():
 		var is_on_green = false
 		if active_ball != null:
-			is_on_green = (active_ball.get("lie_type") == "green" or active_ball.get("surface_type") == PhysicsEnums.SurfaceType.GREEN)
+			is_on_green = (active_ball.get("lie_type") == "green")
 		if not is_on_green and not camera.is_position_behind(pin_pos):
 			var screen_pos = camera.unproject_position(pin_pos)
 			var view_rect = overlay.get_viewport_rect()
@@ -3257,21 +3310,12 @@ func apply_zoom_button_style(btn: Button, bg_color: Color):
 
 
 func _update_grid_button_state(active: bool) -> void:
-	var btn = null
-	if has_node("TogglesScroll/TogglesContainer/GreenGridToggleButton"):
-		btn = get_node("TogglesScroll/TogglesContainer/GreenGridToggleButton")
-	elif has_node("TogglesContainer/GreenGridToggleButton"):
-		btn = get_node("TogglesContainer/GreenGridToggleButton")
-	elif has_node("GreenGridToggleButton"):
-		btn = get_node("GreenGridToggleButton")
-		
-	if btn != null:
-		if active:
-			btn.text = "📊 Slope Grid: ON"
-			apply_material_button_style(btn, Color(0.2, 0.6, 0.3, 0.85)) # Green when active
-		else:
-			btn.text = "📊 Slope Grid: OFF"
-			apply_material_button_style(btn, Color(0.5, 0.5, 0.5, 0.85)) # Gray when inactive
+	if grid_btn == null:
+		return
+	if active:
+		apply_circular_button_style(grid_btn, Color(0.2, 0.6, 0.3, 0.85)) # Green when active
+	else:
+		apply_circular_button_style(grid_btn, Color(0.15, 0.15, 0.15, 0.85)) # Gray when inactive
 
 
 class MultiplayerBallOverlay extends Control:

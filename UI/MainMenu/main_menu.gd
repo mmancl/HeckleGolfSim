@@ -9,10 +9,13 @@ extends Control
 @onready var _history_button: Button = $VerticalLayout/TilesRow/HistoryTile/HistoryTextBackdrop/HistoryButton
 @onready var _players_button: Button = $VerticalLayout/TilesRow/PlayersTile/PlayersTextBackdrop/PlayersButton
 @onready var _minigames_button: Button = $VerticalLayout/TilesRow/MiniGamesTile/MiniGamesTextBackdrop/MiniGamesButton
-@onready var _version_label: Label = $VerticalLayout/VersionContainer/VersionLabel
+@onready var _version_label: Label = $VerticalLayout/BottomBarContainer/HBoxContainer/VersionLabel
+@onready var _discord_button: Button = $VerticalLayout/TopStrip/HBoxContainer/DiscordButton
 var _version_fall_back: String = "dev"
 var _version_setting_path: String = "application/config/version"
 var _version_text: String
+
+static var _startup_lm_checked: bool = false
 
 
 # Called when the node enters the scene tree for the first time.
@@ -21,6 +24,8 @@ func _ready():
 	_settings_button.pressed.connect(_on_settings_pressed)
 	if _credits_button != null:
 		_credits_button.pressed.connect(_on_credits_pressed)
+	if _discord_button != null:
+		_discord_button.pressed.connect(_on_discord_pressed)
 	_range_button.pressed.connect(_on_range_pressed)
 	_courses_button.pressed.connect(_on_courses_pressed)
 	_practice_button.pressed.connect(_on_practice_pressed)
@@ -31,11 +36,15 @@ func _ready():
 	_update_version_label()
 	SceneManager.current_scene = self
 
-	# Apply central theme styles to header buttons
+	_check_startup_launch_monitor()
+
+	# Apply central theme styles to header and footer buttons
 	ThemeManager.apply_nav_button_style(_settings_button, 6)
 	if _credits_button != null:
 		ThemeManager.apply_nav_button_style(_credits_button, 6)
 	ThemeManager.apply_nav_button_style(_exit_button, 6)
+	if _discord_button != null:
+		ThemeManager.apply_icon_button_style(_discord_button, 6, 12)
 
 	# Apply central theme card styling to tiles
 	var tiles_row = get_node_or_null("VerticalLayout/TilesRow")
@@ -102,6 +111,10 @@ func _on_exit_pressed() -> void:
 	get_tree().quit()
 
 
+func _on_discord_pressed() -> void:
+	OS.shell_open("https://discord.gg/gjaNhkQwJ")
+
+
 func _on_history_pressed() -> void:
 	SceneManager.change_scene("res://UI/HistoryMenu/history_menu.tscn")
 
@@ -112,3 +125,27 @@ func _on_players_pressed() -> void:
 
 func _on_minigames_pressed() -> void:
 	SceneManager.change_scene("res://UI/MiniGamesMenu/minigames_menu.tscn")
+
+
+func _check_startup_launch_monitor() -> void:
+	if _startup_lm_checked:
+		return
+	_startup_lm_checked = true
+
+	var is_connected := false
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		var status = str(lm.status)
+		if status == "Connected" or status == "Ready" or lm.is_ready:
+			is_connected = true
+
+	if not is_connected:
+		call_deferred("_show_launch_monitor_connect_modal")
+
+
+func _show_launch_monitor_connect_modal() -> void:
+	var modal_scene = load("res://UI/LaunchMonitorConnectModal/launch_monitor_connect_modal.tscn")
+	if modal_scene != null:
+		var modal = modal_scene.instantiate()
+		modal.name = "StartupLaunchMonitorModal"
+		add_child(modal)

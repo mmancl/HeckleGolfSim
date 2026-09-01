@@ -77,7 +77,7 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="ModalPanel" type="PanelContainer" parent="CenterContainer"]
-custom_minimum_size = Vector2(860, 680)
+custom_minimum_size = Vector2(880, 700)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_modal_bg")
 
@@ -105,7 +105,7 @@ theme_override_constants/separation = 2
 layout_mode = 2
 theme_override_colors/font_color = Color(0.96, 0.98, 1, 1)
 theme_override_font_sizes/font_size = 26
-text = "About & Credits"
+text = "About, Credits & Legal Disclaimers"
 
 [node name="SubtitleLabel" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/HeaderHBox/TitleVBox"]
 layout_mode = 2
@@ -155,14 +155,18 @@ theme_override_font_sizes/normal_font_size = 14
 bbcode_enabled = true
 text = "Heckle Golf Simulator is an open-source personal project born out of two big passions:
 
-• [b]More Courses & Freedom[/b]: I wanted a virtually unlimited selection of real-world courses for myself to practice and play with the Square Golf launch monitor, and figured fellow simulator golfers would love to enjoy them too!
+• [b]More Courses & Freedom[/b]: I wanted a virtually unlimited selection of real-world courses for myself to practice and play with my personal launch monitor, and figured fellow simulator golfers would love to enjoy them too!
 • [b]Classic PS2 Announcer Roasts[/b]: I grew up loving classic arcade golf games on the PlayStation 2 where witty announcers would relentlessly roast and make fun of your terrible shots, duffs, hooks, and wormburners. Heckle Golf is bringing that unique humor, personality, and heckling commentary back into golf simulation!
+
+• [b]Hardware & Device Testing[/b]: I personally own and test with a Square Golf launch monitor. While connection protocols for other devices (such as GSPro Open Connect v1 and PiTrac over TCP) are implemented, I cannot physically test hardware I do not own. Adjustments and improvements are continuously made based on community feedback!
+• [b]Development Pace[/b]: I am only able to physically test about once a week, so development progresses incrementally, but I am committed to improving the simulator and responding to feedback.
 
 Any feedback, bug reports, feature suggestions, or community contributions are awesome and warmly welcomed."
 fit_content = true
 
 [node name="AboutBtnHBox" type="HBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/AboutCard/AboutVBox"]
 layout_mode = 2
+theme_override_constants/separation = 12
 
 [node name="RepoButton" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/AboutCard/AboutVBox/AboutBtnHBox"]
 unique_name_in_owner = true
@@ -170,6 +174,13 @@ custom_minimum_size = Vector2(260, 44)
 layout_mode = 2
 theme_override_font_sizes/font_size = 15
 text = "⭐ View HeckleGolfSim on GitHub"
+
+[node name="DiscordModalButton" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/AboutCard/AboutVBox/AboutBtnHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "💬 Join Discord Community"
 
 [node name="ForkCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]
 layout_mode = 2
@@ -183,14 +194,16 @@ theme_override_constants/separation = 10
 layout_mode = 2
 theme_override_colors/font_color = Color(0.4, 0.75, 0.95, 1)
 theme_override_font_sizes/font_size = 18
-text = "🔬 Base Fork, Connectivity & Aerodynamics"
+text = "🔬 Base Fork & Open-Source Lineage"
 
 [node name="ForkText" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/ForkCard/ForkVBox"]
 layout_mode = 2
 theme_override_colors/default_color = Color(0.9, 0.93, 0.96, 1)
 theme_override_font_sizes/normal_font_size = 14
 bbcode_enabled = true
-text = "This simulator was forked and evolved from [b]OpenShotGolf[/b] (by [b]jhauck2[/b]), which provided the foundational architecture for launch monitor connectivity and the realistic Reynolds-number golf ball aerodynamics / rollout physics simulation."
+text = "This simulator was forked and evolved from [b]OpenShotGolf[/b] (by [b]jhauck2[/b]), which provided foundational architecture for launch monitor connectivity and golf simulation under the MIT License.
+
+Physics modeling incorporates the [b]OpenFairway[/b] realistic Reynolds-number golf ball aerodynamics and rollout physics engine by Jesse Inman and Jakobi."
 fit_content = true
 
 [node name="ForkBtnHBox" type="HBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/ForkCard/ForkVBox"]
@@ -215,23 +228,155 @@ theme_override_constants/separation = 10
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.75, 0.35, 1)
 theme_override_font_sizes/font_size = 18
-text = "📜 Built With & Special Thanks"
+text = "📜 Built With, Addons & Asset Attributions"
 
 [node name="AttrText" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/AttributionsCard/AttrVBox"]
 layout_mode = 2
 theme_override_colors/default_color = Color(0.9, 0.93, 0.96, 1)
 theme_override_font_sizes/normal_font_size = 14
 bbcode_enabled = true
-text = "• [b]Godot Engine[/b] ([url=https://godotengine.org/]godotengine.org[/url]) - High-performance open-source 2D & 3D game engine (C# / .NET).
-• [b]OpenFairway[/b] ([url=https://github.com/jesseincode/OpenFairway]github.com/jesseincode/OpenFairway[/url]) - Realistic Reynolds-number golf ball aerodynamics and rollout physics engine by Jesse Inman / Jakobi.
-• [b]OpenStreetMap[/b] ([url=https://www.openstreetmap.org/]openstreetmap.org[/url]) - Global course layouts, satellite vectors, and terrain elevation data © OpenStreetMap contributors (ODbL).
-• [b]Jolt Physics 3D[/b] ([url=https://github.com/jrouwe/JoltPhysics]github.com/jrouwe/JoltPhysics[/url]) - Advanced 3D physics and collision solver by Jorrit Rouwe.
-• [b]Google MediaPipe[/b] ([url=https://developers.google.com/mediapipe]developers.google.com/mediapipe[/url]) - Real-time on-device golfer pose estimation & swing tempo analysis.
-• [b]PiTrac & GSPro Open Connect v1[/b] - Launch monitor packet specification & socket networking protocols.
-• [b]Community Addons[/b] - Sky3D, Terrain3D, and Phantom Camera for dynamic environments and follow cams."
+text = "Heckle Golf Simulator is built using outstanding open-source technologies, libraries, and creative commons assets:
+
+• [b]Godot Engine[/b] ([url=https://godotengine.org/]godotengine.org[/url]) - High-performance open-source 2D & 3D game engine (MIT License). Copyright © 2014-present Godot Engine contributors; Copyright © 2007-2014 Juan Linietsky, Ariel Manzur.
+• [b]OpenFairway[/b] ([url=https://github.com/jesseincode/OpenFairway]github.com/jesseincode/OpenFairway[/url]) - Realistic Reynolds-number golf ball aerodynamics and rollout physics engine by Jesse Inman / Jakobi (MIT License).
+• [b]Jolt Physics 3D[/b] ([url=https://github.com/jrouwe/JoltPhysics]github.com/jrouwe/JoltPhysics[/url]) - Advanced 3D physics and collision solver by Jorrit Rouwe (MIT License).
+• [b]Google MediaPipe & TensorFlow.js[/b] ([url=https://developers.google.com/mediapipe]developers.google.com/mediapipe[/url]) - Golfer skeleton pose estimation & swing tempo analysis (Apache License 2.0). Copyright © Google LLC.
+• [b]Sky3D Dynamic Environment[/b] ([url=https://github.com/CoryPetkovsek/godot-sky3d]github.com/CoryPetkovsek/godot-sky3d[/url]) - Procedural sky and atmosphere system by Cory Petkovsek and J. Cuéllar (MIT License).
+  — [i]Milky Way Texture[/i]: \"The Milky Way panorama\" by ESO/S. Brunier, licensed under [url=https://creativecommons.org/licenses/by/4.0/]CC BY 4.0[/url] and used in original and modified forms ([url=https://www.eso.org/public/images/eso0932a/]ESO Archive[/url]).
+  — [i]Moon Texture[/i]: Copyright © 2019 GPoSM (MIT License).
+• [b]Terrain3D[/b] ([url=https://github.com/CoryPetkovsek/godot-terrain3d]github.com/CoryPetkovsek/godot-terrain3d[/url]) - High-performance editable terrain system by Cory Petkovsek, Roope Palmroos, and Contributors (MIT License).
+• [b]Phantom Camera[/b] ([url=https://github.com/ramok/phantom-camera]github.com/ramok/phantom-camera[/url]) - Dynamic camera controls by Marcus Skov (MIT License).
+• [b]PBR Textures & 3D Foliage[/b] - Materials sourced from [url=https://ambientcg.com/]ambientCG.com[/url] and Shapespark low-poly plants, dedicated to the public domain under [url=https://creativecommons.org/publicdomain/zero/1.0/]Creative Commons CC0 1.0 Universal[/url].
+• [b]OpenStreetMap Geodata[/b] ([url=https://www.openstreetmap.org/]openstreetmap.org[/url]) - Real-world course layouts and terrain vectors © [url=https://www.openstreetmap.org/copyright]OpenStreetMap contributors[/url] (Open Database License ODbL 1.0)."
+fit_content = true
+
+[node name="HardwareCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card_section")
+
+[node name="HardwareVBox" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/HardwareCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="HardwareTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/HardwareCard/HardwareVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.45, 0.45, 1)
+theme_override_font_sizes/font_size = 18
+text = "📡 Hardware Compatibility & Trademark Disclaimers"
+
+[node name="HardwareText" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/HardwareCard/HardwareVBox"]
+layout_mode = 2
+theme_override_colors/default_color = Color(0.9, 0.93, 0.96, 1)
+theme_override_font_sizes/normal_font_size = 14
+bbcode_enabled = true
+text = "• [b]Non-Affiliation Disclaimer[/b]: Heckle Golf Simulator is an independent, community-driven, open-source project. It is [b]NOT[/b] affiliated with, endorsed by, sponsored by, authorized by, or in any way officially connected with [b]Square Golf[/b] (SquareGolf Co., Ltd.), [b]GSPro[/b] (FlightPath Golf LLC), [b]Garmin Ltd.[/b], [b]PiTrac[/b], [b]SkyTrak[/b], [b]Bushnell Golf[/b], [b]TrackMan[/b], [b]Foresight Sports[/b], [b]FlightScope[/b], [b]Rapsodo[/b], [b]Full Swing Golf[/b], [b]Uneekor[/b], or any of their respective subsidiaries or affiliates.
+
+• [b]Trademarks & Nominative Fair Use[/b]: All product names, trademarks, logos, registered trademarks, and brand names referenced in this software or documentation are the property of their respective owners. The use of brand names (such as \"Square Golf Launch Monitor\" or \"GSPro Open Connect v1\") is solely for technical identification, compatibility description, and interoperability purposes under nominative fair use principles.
+
+• [b]Clean-Room Interoperability[/b]: Device connectivity in Heckle Golf Simulator utilizes open wireless Bluetooth Low Energy (BLE) GATT protocols and local TCP/IP socket network streams. [b]No proprietary software, binary drivers, decompiled copyrighted source code, firmware, or official manufacturer SDKs are packaged, copied, or distributed with this repository.[/b]"
+fit_content = true
+
+[node name="CourseDataCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card_section")
+
+[node name="CourseDataVBox" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/CourseDataCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="CourseDataTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/CourseDataCard/CourseDataVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.85, 0.85, 1)
+theme_override_font_sizes/font_size = 18
+text = "🗺️ Course Geometry & OpenStreetMap Data"
+
+[node name="CourseDataText" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/CourseDataCard/CourseDataVBox"]
+layout_mode = 2
+theme_override_colors/default_color = Color(0.9, 0.93, 0.96, 1)
+theme_override_font_sizes/normal_font_size = 14
+bbcode_enabled = true
+text = "• [b]OpenStreetMap (ODbL)[/b]: Real-world course layouts, hole geometries, satellite vectors, and terrain data are dynamically retrieved from the [url=https://www.openstreetmap.org/]OpenStreetMap[/url] project. OpenStreetMap data is licensed under the [b]Open Data Commons Open Database License 1.0 (ODbL)[/b] by the OpenStreetMap Foundation. © [url=https://www.openstreetmap.org/copyright]OpenStreetMap contributors[/url].
+
+• [b]Elevation Sources[/b]: Terrain elevations are derived from public domain US Geological Survey (USGS 3DEP) data and AWS Terrain Tiles / Mapzen Terrarium open geodata.
+
+• [b]Course Names & Geographic Realism[/b]: Real-world golf course routings, tee boxes, and yardages represent factual geographic information. Names of golf clubs, resorts, and courses are queried directly from open geographic databases and used purely as factual geographic location references. Heckle Golf Simulator has no affiliation with or endorsement from any golf club, resort, course designer, or governing body (such as the USGA, The R&A, or the PGA TOUR)."
+fit_content = true
+
+[node name="CommentaryCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card_section")
+
+[node name="CommentaryVBox" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/CommentaryCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="CommentaryTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/CommentaryCard/CommentaryVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.55, 0.95, 1)
+theme_override_font_sizes/font_size = 18
+text = "🎙️ Announcer Commentary & Homage"
+
+[node name="CommentaryText" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/CommentaryCard/CommentaryVBox"]
+layout_mode = 2
+theme_override_colors/default_color = Color(0.9, 0.93, 0.96, 1)
+theme_override_font_sizes/normal_font_size = 14
+bbcode_enabled = true
+text = "• [b]Original Audio & Content[/b]: All voice lines, announcer jokes, heckling commentary scripts, and audio cues included in Heckle Golf Simulator are original creative works and comedic parodies produced specifically for this simulator.
+
+• [b]Homage & Fair Expression[/b]: References to classic PlayStation 2 era golf video games represent an artistic homage and comedic inspiration to the arcade sports genre. This project does not use or redistribute any proprietary audio samples, sound effects, voice recordings, or trademarked characters belonging to Sony Interactive Entertainment, Electronic Arts, or any commercial game publisher."
+fit_content = true
+
+[node name="SafetyCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card_section")
+
+[node name="SafetyVBox" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/SafetyCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="SafetyTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/SafetyCard/SafetyVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.65, 0.25, 1)
+theme_override_font_sizes/font_size = 18
+text = "⚠️ Physical Safety & Disclaimer of Warranties"
+
+[node name="SafetyText" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/SafetyCard/SafetyVBox"]
+layout_mode = 2
+theme_override_colors/default_color = Color(0.9, 0.93, 0.96, 1)
+theme_override_font_sizes/normal_font_size = 13
+bbcode_enabled = true
+text = "• [b]Physical Simulator Safety Warning[/b]: Golf simulation involves swinging real golf clubs and striking high-velocity golf balls. Always ensure you have sufficient ceiling height, side clearance, secure impact screens/enclosures, and that spectators and pets remain well clear of the hitting zone. The developers and open-source contributors accept NO responsibility or liability for any personal injury, property damage, hardware malfunction, or broken equipment resulting from use.
+
+• [b]Disclaimer of Warranties (AS-IS)[/b]:
+THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."
+fit_content = true
+
+[node name="ContactCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card_section")
+
+[node name="ContactVBox" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/ContactCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ContactTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/ContactCard/ContactVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.8, 0.95, 1)
+theme_override_font_sizes/font_size = 18
+text = "⚖️ Intellectual Property Inquiries & Contact"
+
+[node name="ContactText" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/ContactCard/ContactVBox"]
+layout_mode = 2
+theme_override_colors/default_color = Color(0.9, 0.93, 0.96, 1)
+theme_override_font_sizes/normal_font_size = 14
+bbcode_enabled = true
+text = "Heckle Golf Simulator is dedicated to respecting all intellectual property rights, open-source licenses, and trademark boundaries.
+
+If you are a trademark or copyright holder with questions, licensing feedback, or notices regarding any material in this repository, please reach out directly through our [url=https://github.com/mmancl/HeckleGolfSim/issues]GitHub Issues page[/url] so that we can promptly review and address your request in good faith."
 fit_content = true
 
 [node name="DonationsCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]
+visible = false
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_card_section")
 

@@ -7,6 +7,7 @@ var range_settings := RangeSettings.new()
 const OPENFAIRWAY_LOG_LEVEL_INFO := 2
 var practice_mode_primed : bool = false
 var is_chipping_minigame : bool = false
+var is_putting_minigame : bool = false
 
 
 var _loaded_announcer_settings := {}

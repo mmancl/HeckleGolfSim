@@ -24,15 +24,16 @@ var current_selected_club: String = "Dr"
 var spawn_position := Vector3(0.0, START_HEIGHT, 0.0)
 
 # Preloaded sound streams
-var _sfx_hit_drive = preload("res://assets/audio/sfx/ball_hit_drive.ogg")
-var _sfx_hit_putt = preload("res://assets/audio/sfx/ball_hit_putt.ogg")
-var _sfx_tree_hit = preload("res://assets/audio/sfx/tree_hit.ogg")
-var _sfx_leaf_rustle = preload("res://assets/audio/sfx/leaf_rustle.ogg")
-var _sfx_water_splash = preload("res://assets/audio/sfx/water_splash.ogg")
-var _sfx_sand_thud = preload("res://assets/audio/sfx/sand_thud.ogg")
-var _sfx_bounce_fairway = preload("res://assets/audio/sfx/bounce_fairway.ogg")
-var _sfx_bounce_green = preload("res://assets/audio/sfx/bounce_green.ogg")
-var _sfx_rough_thump = preload("res://assets/audio/sfx/rough_thump.ogg")
+var _sfx_hit_drive = preload("res://assets/audio/sfx/golf_tee_shot.wav")
+var _sfx_hit_other = preload("res://assets/audio/sfx/golf_sand_shot.mp3")
+var _sfx_hit_putt = preload("res://assets/audio/sfx/putt.mp3")
+var _sfx_tree_hit = preload("res://assets/audio/sfx/ball_hit_tree.mp3")
+var _sfx_leaf_rustle = preload("res://assets/audio/sfx/leaves.mp3")
+var _sfx_water_splash = preload("res://assets/audio/sfx/water.mp3")
+var _sfx_sand_thud = preload("res://assets/audio/sfx/sand.mp3")
+var _sfx_bounce_fairway = preload("res://assets/audio/sfx/fairway_maybe.mp3")
+var _sfx_bounce_green = preload("res://assets/audio/sfx/fairway_maybe.mp3")
+var _sfx_rough_thump = preload("res://assets/audio/sfx/rough.mp3")
 
 # SFX players
 var _sfx_player: AudioStreamPlayer = null
@@ -308,11 +309,17 @@ func _update_tee_elevation() -> void:
 			global_position.y = ground_y + TEED_CENTER_HEIGHT
 	else:
 		_tee_mesh.visible = false
-		if is_teebox: # Teebox with non-driver club -> rest right on top of the grass
-			var probe := _try_probe_ground()
-			if probe.get("hit", false):
-				var ground_y: float = probe.get("position", Vector3.ZERO).y
-				global_position.y = ground_y + GROUND_CENTER_HEIGHT
+		# For all non-teed balls (green, fairway, rough, teebox with irons/putter),
+		# probe the ground and seat the ball cleanly on top of the surface normal.
+		var probe := _try_probe_ground()
+		if probe.get("hit", false):
+			var hit_pos: Vector3 = probe.get("position", Vector3.ZERO)
+			var hit_norm: Vector3 = probe.get("normal", Vector3.UP)
+			global_position = hit_pos + hit_norm * (_ball_radius + GROUND_SNAP_OFFSET)
+			floor_normal = hit_norm
+			on_ground = true
+			if probe.has("collider") and probe["collider"] != null:
+				_update_surface_from_collider(probe["collider"])
 
 
 func _create_physics_params():
@@ -450,8 +457,6 @@ func _process(_delta: float) -> void:
 			_ball_mesh.position.y = -0.017 # Sink 1.7 cm in sand traps
 		elif lie_type == "rough":
 			_ball_mesh.position.y = -0.014 # Sink 1/3 of ball diameter
-		elif lie_type == "green" or surface_type == PhysicsEnums.SurfaceType.GREEN or is_putt:
-			_ball_mesh.position.y = 0.005 # Float ontop of the ground (e.g. 5mm)
 		else:
 			_ball_mesh.position.y = 0.0
 
@@ -460,9 +465,9 @@ func _physics_process(delta: float) -> void:
 	if state == PhysicsEnums.BallState.REST:
 		return
 
-	# Live proximity check for suspense
+	# Live proximity check for suspense (Course Play only)
 	var target_hole_live = get_target_hole_position()
-	if has_node("/root/TensionManager") and not target_hole_live.is_zero_approx():
+	if has_node("/root/TensionManager") and not target_hole_live.is_zero_approx() and TensionManager.is_course_play_active():
 		TensionManager.check_ball_proximity(global_position, target_hole_live, is_putt)
 
 	# Check if we should fall into the hole
@@ -566,6 +571,11 @@ func _physics_process(delta: float) -> void:
 	# Move and handle collisions
 	var collision := move_and_collide(velocity * delta, false, COLLISION_SAFE_MARGIN)
 	_handle_collision(collision, was_on_ground, prev_velocity)
+
+	# If on ground (rollout / putt / grounded), ensure ball spin matches physical forward roll along ground normal
+	if on_ground and (state == PhysicsEnums.BallState.ROLLOUT or is_putt):
+		if velocity.length_squared() > 0.0001:
+			omega = (floor_normal.cross(velocity)) / _ball_radius
 
 	# Rotate ball mesh based on angular velocity (omega)
 	if _ball_mesh != null and omega.length_squared() > 0.00001:
@@ -686,15 +696,32 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 				else:
 					on_ground = false
 			else:
+				# Rolling / putting contact on ground
 				on_ground = true
 				velocity = _remove_velocity_along_normal(velocity, normal)
+				# Slight depenetration along normal to prevent snagging on triangle mesh seams
+				global_position += normal * (COLLISION_SAFE_MARGIN * 2.0 + GROUND_SNAP_OFFSET)
+				# Continue motion along the slope tangent for the remainder of this frame
+				var remainder := collision.get_remainder()
+				remainder = _remove_velocity_along_normal(remainder, normal)
+				if remainder.length_squared() > 0.000001:
+					var col2 := move_and_collide(remainder, false, COLLISION_SAFE_MARGIN)
+					if col2:
+						var norm2 := col2.get_normal()
+						if _is_ground_normal(norm2):
+							floor_normal = norm2
+							velocity = _remove_velocity_along_normal(velocity, norm2)
+							global_position += norm2 * (COLLISION_SAFE_MARGIN * 2.0 + GROUND_SNAP_OFFSET)
 		else:
 			# Wall collision - damped reflection
 			on_ground = false
 			floor_normal = Vector3.UP
-			velocity = velocity.bounce(normal) * 0.30
-			
-			if collider != null and collider.name.to_lower().contains("tree"):
+			var is_tree := false
+			if collider != null:
+				var col_name = collider.name.to_lower()
+				if col_name.contains("tree") or col_name.contains("trunk") or (collider.get_parent() != null and (collider.get_parent().name.to_lower().contains("tree") or collider.get_parent().name.to_lower().contains("trunk"))):
+					is_tree = true
+			if is_tree:
 				if _sfx_player != null and not _skipping_flight:
 					_sfx_player.pitch_scale = randf_range(0.95, 1.05)
 					_sfx_player.stream = _sfx_tree_hit
@@ -705,9 +732,9 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 		if state != PhysicsEnums.BallState.FLIGHT and was_on_ground and bool(probe.get("hit", false)):
 			on_ground = true
 			floor_normal = probe.get("normal", Vector3.UP)
-			# Snap ball height to the ground to prevent floating when rolling down slopes
-			var hit_pos = probe.get("position", Vector3.ZERO)
-			global_position.y = hit_pos.y + _ball_radius
+			# Snap ball height along normal to sit cleanly ontop of the surface without penetrating slopes
+			var hit_pos: Vector3 = probe.get("position", Vector3.ZERO)
+			global_position = hit_pos + floor_normal * (_ball_radius + GROUND_SNAP_OFFSET)
 			# Align velocity with the slope tangent
 			velocity = _remove_velocity_along_normal(velocity, floor_normal)
 		else:
@@ -753,8 +780,8 @@ func _try_probe_ground() -> Dictionary:
 	if world == null:
 		return {"hit": false, "normal": Vector3.UP}
 
-	var ray_start := global_position + Vector3.UP * 0.1
-	var ray_end := global_position + Vector3.DOWN * (_ball_radius + TEE_LIFT_HEIGHT + GROUND_PROBE_DISTANCE)
+	var ray_start := global_position + Vector3.UP * 1.5
+	var ray_end := global_position + Vector3.DOWN * 4.0
 	var query := PhysicsRayQueryParameters3D.create(ray_start, ray_end)
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
@@ -769,7 +796,12 @@ func _try_probe_ground() -> Dictionary:
 		ground_normal = Vector3.UP
 	else:
 		ground_normal = ground_normal.normalized()
-	return {"hit": true, "normal": ground_normal, "position": ray_hit["position"]}
+	return {
+		"hit": true,
+		"normal": ground_normal,
+		"position": ray_hit["position"],
+		"collider": ray_hit.get("collider", null)
+	}
 
 
 func _is_ground_normal(normal: Vector3) -> bool:
@@ -825,7 +857,14 @@ func reset() -> void:
 	rollout_impact_spin_rpm = 0.0
 	is_putt = false
 	_surface_zone_stack.clear()
-	set_surface(int(GlobalSettings.range_settings.surface_type.value))
+	if lie_type == "teebox" or lie_type == "fairway":
+		set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+	elif lie_type == "rough" or lie_type == "sand":
+		set_surface(PhysicsEnums.SurfaceType.ROUGH)
+	elif lie_type == "green":
+		set_surface(PhysicsEnums.SurfaceType.GREEN)
+	else:
+		set_surface(int(GlobalSettings.range_settings.surface_type.value))
 	state = PhysicsEnums.BallState.REST
 	on_ground = false
 	is_in_water = false
@@ -839,7 +878,7 @@ func reset() -> void:
 
 func hit() -> void:
 	var target_hole = get_target_hole_position()
-	var is_on_green = (lie_type == "green" or surface_type == PhysicsEnums.SurfaceType.GREEN or current_selected_club.to_lower() in ["pt", "putt", "putter"])
+	var is_on_green = (lie_type == "green" or current_selected_club.to_lower() in ["pt", "putt", "putter"])
 	if is_on_green:
 		var dist_to_hole = global_position.distance_to(target_hole) if not target_hole.is_zero_approx() else 5.0
 		var putt_speed_mps = sqrt(2.0 * 0.48 * maxf(dist_to_hole, 0.5)) * 1.02
@@ -848,7 +887,7 @@ func hit() -> void:
 			"Speed": clampf(putt_speed_mph, 3.0, 25.0),
 			"VLA": 0.0,
 			"HLA": 0.0,
-			"TotalSpin": 400.0,
+			"TotalSpin": 0.0,
 			"SpinAxis": 0.0,
 			"Club": "Pt",
 			"ShotType": "putt"
@@ -912,6 +951,32 @@ func hit_from_data(data: Dictionary) -> void:
 	var vla_deg: float = float(data.get("VLA", 0.0))
 	var hla_deg: float = float(data.get("HLA", 0.0))
 
+	var shot_type: String = str(data.get("ShotType", ""))
+	var club_name: String = str(data.get("Club", data.get("club", current_selected_club)))
+	if club_name != "":
+		current_selected_club = club_name
+
+	var is_driver := current_selected_club.to_lower() in ["dr", "driver", "1w"]
+	var is_putter := current_selected_club.to_lower() in ["pt", "putt", "putter"]
+	var is_teebox := (lie_type == "teebox")
+
+	# Putt determination logic:
+	# Driver shots, teebox shots, and full swings (> 45 mph) are strictly never putts.
+	if is_driver or is_teebox or speed_mph > 45.0:
+		is_putt = false
+	elif is_putter:
+		is_putt = true
+	elif lie_type == "green":
+		is_putt = shot_type.to_lower() == "putt" or is_putter
+	else:
+		is_putt = shot_type.to_lower() == "putt"
+
+	# If VLA is 0 or unmeasured on a driver shot with high speed (> 45 mph),
+	# default VLA to standard driver launch angle (11.5 deg) to prevent grounded rollout.
+	if is_driver and vla_deg <= 0.01 and speed_mph > 45.0 and not is_putt:
+		vla_deg = 11.5
+		print("[ball.gd] Driver shot detected with zero/missing VLA. Auto-correcting VLA to 11.5 deg.")
+
 	var spin_data: Dictionary = {}
 	if _shot_setup != null:
 		var parsed_spin = _call_openfairway_method(_shot_setup, &"parse_spin", &"ParseSpin", [data])
@@ -959,15 +1024,6 @@ func hit_from_data(data: Dictionary) -> void:
 		launch_direction = Vector3.RIGHT
 	launch_direction = launch_direction.normalized()
 
-	var shot_type: String = str(data.get("ShotType", ""))
-	var club_name: String = str(data.get("Club", data.get("club", current_selected_club)))
-	if club_name != "":
-		current_selected_club = club_name
-	is_putt = shot_type.to_lower() == "putt" or club_name.to_lower() in ["pt", "putt", "putter"]
-	# If taking a shot from the green, it is ALWAYS a putt!
-	if not is_putt and (lie_type == "green" or surface_type == PhysicsEnums.SurfaceType.GREEN):
-		is_putt = true
-
 	if is_putt:
 		state = PhysicsEnums.BallState.ROLLOUT
 		on_ground = true
@@ -978,7 +1034,16 @@ func hit_from_data(data: Dictionary) -> void:
 		state = PhysicsEnums.BallState.FLIGHT
 		on_ground = false
 		_surface_zone_stack.clear()
-		set_surface(int(GlobalSettings.range_settings.surface_type.value))
+		if is_teebox or lie_type == "teebox":
+			set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+		elif lie_type == "fairway":
+			set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+		elif lie_type == "rough":
+			set_surface(PhysicsEnums.SurfaceType.ROUGH)
+		elif lie_type == "sand":
+			set_surface(PhysicsEnums.SurfaceType.ROUGH)
+		else:
+			set_surface(int(GlobalSettings.range_settings.surface_type.value))
 		if _tee_mesh != null:
 			_tee_mesh.visible = false
 
@@ -989,19 +1054,23 @@ func hit_from_data(data: Dictionary) -> void:
 	if is_putt:
 		var probe := _try_probe_ground()
 		if probe.get("hit", false):
-			global_position.y = probe.get("position", Vector3.ZERO).y + GROUND_CENTER_HEIGHT
+			var hit_pos: Vector3 = probe.get("position", global_position)
 			floor_normal = probe.get("normal", Vector3.UP)
-		launch_velocity.y = 0.0
+			global_position = hit_pos + floor_normal * (_ball_radius + GROUND_SNAP_OFFSET)
+		var speed_mag := speed_mps
 		var flat_vel := Vector3(launch_velocity.x, 0.0, launch_velocity.z)
 		if flat_vel.length_squared() > 0.000001:
 			launch_velocity = flat_vel
+		# Project launch velocity along the slope contour to avoid ramming into uphill slopes or floating
+		launch_velocity = _remove_velocity_along_normal(launch_velocity, floor_normal)
+		if launch_velocity.length_squared() > 0.000001:
+			launch_velocity = launch_velocity.normalized() * speed_mag
+		launch_omega = (floor_normal.cross(launch_velocity)) / _ball_radius
 	else:
 		# Airborne shots (driver, woods, irons, wedges)
 		var probe := _try_probe_ground()
 		if probe.get("hit", false):
 			var ground_y: float = probe.get("position", Vector3.ZERO).y
-			var is_teebox := (lie_type == "teebox")
-			var is_driver := current_selected_club.to_lower() in ["dr", "driver", "1w"]
 			var target_launch_y: float
 			if is_teebox:
 				# Teebox shot: Driver is teed up 1.5 inches above ground; other clubs rest right on grass
@@ -1025,15 +1094,22 @@ func hit_from_data(data: Dictionary) -> void:
 
 	_print_launch_debug(data, speed_mps, vla_deg, hla_deg, total_spin, spin_axis)
 
-	# Early Suspense Prediction
+	# Early Suspense Prediction (Course Play only)
 	var target_hole = get_target_hole_position()
-	if has_node("/root/TensionManager") and not target_hole.is_zero_approx():
+	if has_node("/root/TensionManager") and not target_hole.is_zero_approx() and TensionManager.is_course_play_active():
 		var prediction = TensionManager.predict_shot_outcome(global_position, velocity, is_putt, target_hole)
-		if prediction.get("will_enter_zone", false):
+		var will_enter = prediction.get("will_enter_zone", false)
+		# For putts on the green, any putt aimed towards the hole triggers suspense early
+		if not will_enter and is_putt:
+			var hole_dir = (target_hole - global_position).normalized()
+			var shot_dir_norm = shot_dir.normalized()
+			if hole_dir.dot(shot_dir_norm) > 0.35:
+				will_enter = true
+		if will_enter:
 			print("[ball.gd] TensionManager early suspense scheduled! Mode: %s, Min Dist: %.2fm" % [
 				prediction.get("mode", "putt"), prediction.get("min_dist", 0.0)
 			])
-			TensionManager.schedule_early_tension(prediction.get("mode", "putt"), 0.35)
+			TensionManager.schedule_early_tension(prediction.get("mode", "putt"), 0.08)
 
 	# Play hit sound effect
 	if _sfx_player != null:
@@ -1041,8 +1117,10 @@ func hit_from_data(data: Dictionary) -> void:
 		_sfx_player.pitch_scale = randf_range(0.97, 1.03)
 		if is_putt:
 			_sfx_player.stream = _sfx_hit_putt
-		else:
+		elif is_driver:
 			_sfx_player.stream = _sfx_hit_drive
+		else:
+			_sfx_player.stream = _sfx_hit_other
 		_sfx_player.play()
 
 

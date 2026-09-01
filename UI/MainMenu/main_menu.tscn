@@ -11,6 +11,7 @@
 [ext_resource type="Texture2D" uid="uid://dfwn5ft1keq3j" path="res://assets/images/menu/players_color.png" id="9_players_color"]
 [ext_resource type="Texture2D" uid="uid://c0b2qds3yndft" path="res://assets/images/menu/minigames_color.png" id="10_minigames_color"]
 [ext_resource type="Texture2D" uid="uid://li2ev4hci02e" path="res://UI/MainMenu/images/credits.svg" id="11_credits_icon"]
+[ext_resource type="Texture2D" uid="uid://b7kff328e3nra" path="res://UI/MainMenu/images/discord.svg" id="12_discord_icon"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_bddxb"]
 
@@ -86,25 +87,35 @@ size_flags_vertical = 0
 mouse_filter = 2
 color = Color(0.043137256, 0.18039216, 0.30980393, 0.92156863)
 
-[node name="HBoxContainer" type="HBoxContainer" parent="VerticalLayout/TopStrip" unique_id=1106119119]
+[node name="TitleLabel" type="Label" parent="VerticalLayout/TopStrip" unique_id=1261978394]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/separation = 22
+mouse_filter = 2
+theme_override_font_sizes/font_size = 36
+text = "Heckle Golf Simulator"
+horizontal_alignment = 1
+vertical_alignment = 1
 
-[node name="Control3" type="Control" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=1410551906]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_stretch_ratio = 0.01
+[node name="HBoxContainer" type="HBoxContainer" parent="VerticalLayout/TopStrip" unique_id=1106119119]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 18.0
+offset_right = -18.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 16
 
 [node name="SettingsButton" type="Button" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=7225641]
 custom_minimum_size = Vector2(140, 52)
 layout_mode = 2
-size_flags_horizontal = 3
-size_flags_stretch_ratio = 0.5
+size_flags_vertical = 4
 theme_override_colors/font_color = Color(0.875, 0.875, 0.875, 1)
 theme_override_colors/font_pressed_color = Color(1, 1, 1, 1)
 theme_override_colors/font_hover_color = Color(0.95, 0.95, 0.95, 1)
@@ -123,8 +134,7 @@ icon = ExtResource("3_iyy2y")
 [node name="CreditsButton" type="Button" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=7225642]
 custom_minimum_size = Vector2(140, 52)
 layout_mode = 2
-size_flags_horizontal = 3
-size_flags_stretch_ratio = 0.5
+size_flags_vertical = 4
 theme_override_colors/font_color = Color(0.875, 0.875, 0.875, 1)
 theme_override_colors/font_pressed_color = Color(1, 1, 1, 1)
 theme_override_colors/font_hover_color = Color(0.95, 0.95, 0.95, 1)
@@ -143,8 +153,7 @@ icon = ExtResource("11_credits_icon")
 [node name="ExitButton" type="Button" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=801750399]
 custom_minimum_size = Vector2(140, 52)
 layout_mode = 2
-size_flags_horizontal = 3
-size_flags_stretch_ratio = 0.5
+size_flags_vertical = 4
 theme_override_colors/font_color = Color(0.875, 0.875, 0.875, 1)
 theme_override_colors/font_pressed_color = Color(1, 1, 1, 1)
 theme_override_colors/font_hover_color = Color(0.95, 0.95, 0.95, 1)
@@ -160,25 +169,32 @@ theme_override_styles/focus = SubResource("StyleBoxEmpty_ejg71")
 text = "EXIT"
 icon = ExtResource("4_trkrl")
 
-[node name="Control" type="Control" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=1594888509]
+[node name="Spacer" type="Control" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=1594888509]
 layout_mode = 2
 size_flags_horizontal = 3
+mouse_filter = 2
 
-[node name="TitleLabel" type="Label" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=1261978394]
+[node name="DiscordButton" type="Button" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=1316645988]
+custom_minimum_size = Vector2(52, 52)
 layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 1
-size_flags_stretch_ratio = 10.0
-theme_override_font_sizes/font_size = 36
-text = "Heckle Golf Simulator"
-horizontal_alignment = 1
-vertical_alignment = 1
-autowrap_mode = 3
-
-[node name="Control2" type="Control" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=751780754]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_stretch_ratio = 2.0
+size_flags_vertical = 4
+tooltip_text = "Join Discord"
+theme_override_colors/font_color = Color(0.875, 0.875, 0.875, 1)
+theme_override_colors/font_pressed_color = Color(1, 1, 1, 1)
+theme_override_colors/font_hover_color = Color(0.95, 0.95, 0.95, 1)
+theme_override_colors/icon_normal_color = Color(1, 1, 1, 1)
+theme_override_colors/icon_pressed_color = Color(1, 1, 1, 1)
+theme_override_colors/icon_hover_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_iau2q")
+theme_override_styles/hover = SubResource("StyleBoxFlat_iau2q")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_u0e1r")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_ejg71")
+icon = ExtResource("12_discord_icon")
+icon_alignment = 1
+vertical_icon_alignment = 1
+expand_icon = true
 
 [node name="TopStripAccent" type="ColorRect" parent="VerticalLayout" unique_id=47812395]
 custom_minimum_size = Vector2(0, 10)
@@ -480,14 +496,25 @@ theme_override_styles/focus = SubResource("StyleBoxEmpty_bddxb")
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="VersionContainer" type="MarginContainer" parent="VerticalLayout" unique_id=1316645985]
+[node name="BottomBarContainer" type="MarginContainer" parent="VerticalLayout" unique_id=1316645985]
 layout_mode = 2
 size_flags_vertical = 10
+theme_override_constants/margin_left = 28
 theme_override_constants/margin_right = 28
 theme_override_constants/margin_bottom = 18
 
-[node name="VersionLabel" type="Label" parent="VerticalLayout/VersionContainer" unique_id=1316645986]
+[node name="HBoxContainer" type="HBoxContainer" parent="VerticalLayout/BottomBarContainer" unique_id=1316645987]
 layout_mode = 2
+theme_override_constants/separation = 16
+alignment = 2
+
+[node name="Spacer" type="Control" parent="VerticalLayout/BottomBarContainer/HBoxContainer" unique_id=1316645989]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="VersionLabel" type="Label" parent="VerticalLayout/BottomBarContainer/HBoxContainer" unique_id=1316645986]
+layout_mode = 2
+size_flags_horizontal = 8
 theme_override_colors/font_color = Color(1, 1, 1, 1)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
 theme_override_font_sizes/font_size = 18

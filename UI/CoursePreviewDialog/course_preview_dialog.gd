@@ -335,14 +335,13 @@ func _update_view_display() -> void:
 		var image_filename = "aerial_course.png" if current_view_index == 0 else "aerial_hole_%d.png" % current_view_index
 		var image_path = course_dir.path_join(image_filename)
 
-		if FileAccess.file_exists(image_path):
-			var tex = load(image_path)
-			if tex != null:
-				preview_texture_rect.texture = tex
-				preview_texture_rect.visible = true
-				if layout_2d_canvas != null:
-					layout_2d_canvas.queue_redraw()
-				return
+		var tex = _load_texture(image_path)
+		if tex != null:
+			preview_texture_rect.texture = tex
+			preview_texture_rect.visible = true
+			if layout_2d_canvas != null:
+				layout_2d_canvas.queue_redraw()
+			return
 
 		# 2D schematic overlay fallback
 		preview_texture_rect.visible = false
@@ -585,3 +584,15 @@ func _on_zoom_reset() -> void:
 func _on_close_pressed() -> void:
 	closed.emit()
 	queue_free()
+
+
+func _load_texture(path: String) -> Texture2D:
+	if not FileAccess.file_exists(path):
+		return null
+	if path.begins_with("res://") and ResourceLoader.exists(path):
+		return load(path) as Texture2D
+	var img = Image.load_from_file(path)
+	if img != null:
+		return ImageTexture.create_from_image(img)
+	return null
+

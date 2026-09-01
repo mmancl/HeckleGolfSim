@@ -294,12 +294,27 @@ public partial class BallPhysics : RefCounted
     {
         Vector3 grassTorque = -6.0f * Mathf.Pi * parameters.GrassViscosity * RADIUS * omega;
 
-        Vector3 frictionForce = CalculateFrictionForce(velocity, omega, parameters);
+        Vector3 contactVelocity = velocity + omega.Cross(-parameters.FloorNormal * RADIUS);
+        Vector3 tangentVelocity = contactVelocity - parameters.FloorNormal * contactVelocity.Dot(parameters.FloorNormal);
+        float tangentVelMag = tangentVelocity.Length();
 
         Vector3 frictionTorque = Vector3.Zero;
-        if (frictionForce.Length() > 0.001f)
+        if (tangentVelMag < DefaultRollout.TangentVelocityThreshold)
         {
-            frictionTorque = (-parameters.FloorNormal * RADIUS).Cross(frictionForce);
+            Vector3 frictionForce = CalculateFrictionForce(velocity, omega, parameters);
+            if (frictionForce.Length() > 0.001f)
+            {
+                Vector3 normal = parameters.FloorNormal.LengthSquared() > 0.000001f ? parameters.FloorNormal.Normalized() : Vector3.Up;
+                frictionTorque = 0.4f * RADIUS * normal.Cross(frictionForce);
+            }
+        }
+        else
+        {
+            Vector3 frictionForce = CalculateFrictionForce(velocity, omega, parameters);
+            if (frictionForce.Length() > 0.001f)
+            {
+                frictionTorque = (-parameters.FloorNormal * RADIUS).Cross(frictionForce);
+            }
         }
 
         return frictionTorque + grassTorque;

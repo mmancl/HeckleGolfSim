@@ -11,7 +11,7 @@ We have successfully implemented and refined the minigame system, incorporating 
   - **Grass Turf Top**: A cylinder sitting on top with the same `grass-green/albedo.png` texture as the green.
 
 ### 2. Staggered Island Layout (Chipping Minigame)
-- The 6 chipping islands (50, 100, 150, 200, 250, and 300 feet) are now **staggered on the Z-axis** (left and right of the player) instead of being in a single straight line.
+- The 7 chipping islands (25, 50, 75, 100, 125, 150, and 200 yards) are **staggered on the Z-axis** (left and right of the player) instead of being in a single straight line.
 - This prevents visual blocking, gives clear flight paths, and forces players to adjust their horizontal aim (HLA) for each island!
 
 ### 3. Height Topography & Reader Slopes (Putting Minigame)
@@ -25,7 +25,7 @@ We have successfully implemented and refined the minigame system, incorporating 
 
 ### 5. Floating Target Selector Panels
 - Added a floating panel on the **left side of the screen** in both minigames.
-- Players can select different targets by clicking **Hole 1 - 5** (Putting) or **Target 50 - 300 FT** (Chipping) directly from the screen, in addition to clicking on the 3D world targets.
+- Players can select different targets by clicking **Hole 1 - 8** (Putting) or **Target 25 - 200 YDS** (Chipping) directly from the screen, in addition to clicking on the 3D world targets.
 
 ### 6. Accurate Programmatic Cup Entry SNAP (Putting Minigame)
 - Since the procedurally generated green mesh is continuous, the ball would normally roll right over the cup marker.
@@ -43,11 +43,10 @@ We have successfully implemented and refined the minigame system, incorporating 
 2. Select **Putting Practice**:
    - Hold the **Right Mouse Button** and drag to rotate the camera around the ball to read breaks or look around the green.
    - Press **A/D** or **Left/Right arrows** to rotate.
-   - Click the buttons on the left panel (**Hole 1 - 5**) or click near flags in the 3D scene to change targets.
-   - Click **PUTT** (or press **H**) to stroke. The camera will follow the ball rollout.
+   - Click the buttons on the left panel (**5 - 50 FT**) or click near flags in the 3D scene to change targets.
+   - Hit or simulate a putt. The camera will follow the ball rollout.
    - Putts rolling slowly over the white cup marker snap and drop into the cup.
 3. Select **Chipping Practice**:
-   - View the staggered green islands with their wood base retaining walls.
-   - Select targets (e.g. **Target: 150 FT**) on the left panel or click on the islands.
-   - Adjust loft angle (VLA) and power.
-   - Click **CHIP** (or press **H**). The camera will track the ball flight.
+   - View the staggered green islands with their wood base retaining walls and flags showing **25 - 200 YDS**.
+   - Select targets (e.g. **25 - 200 YDS**) on the left panel or click on the islands.
+   - Hit shot on Launch Monitor (or test hit). The camera will track the ball flight.

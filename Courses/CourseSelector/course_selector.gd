@@ -37,6 +37,8 @@ func _ready() -> void:
 		var scroll_node = vbox.get_node_or_null("ScrollContainer")
 		if scroll_node != null:
 			vbox.move_child(tab_hbox, scroll_node.get_index())
+			if scroll_node is ScrollContainer:
+				ThemeManager.apply_scroll_container_style(scroll_node, 28)
 
 	_switch_course_tab("Real")
 

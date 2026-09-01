@@ -162,6 +162,12 @@ func _ready() -> void:
 		tab_container.set_tab_title(2, "📡 Launch Monitor")
 		tab_container.set_tab_title(3, "🎙 Announcer")
 
+	# Apply touch-friendly scrollbar styling and kinetic swipe scrolling to all tabs
+	for tab_name in ["Gameplay", "Camera", "LaunchMonitor", "Announcer"]:
+		var tab_scroll = get_node_or_null("MarginContainer/VBoxContainer/TabContainer/" + tab_name) as ScrollContainer
+		if tab_scroll != null:
+			ThemeManager.apply_scroll_container_style(tab_scroll, 28)
+
 	reset_spin_box = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer/ResetSpinBox
 	temperature_spin_box = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Temperature/TemperatureSpinBox
 	altitude_spin_box = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Altitude/AltitudeSpinBox
@@ -275,6 +281,9 @@ func _ready() -> void:
 
 	var minigame_music_toggle = _create_toggle_setting_row("Minigame Music Soundtrack", "minigame_music_enabled")
 	gameplay_vbox.add_child(minigame_music_toggle)
+
+	var suspense_toggle = _create_toggle_setting_row("Course Play Suspense (Heartbeat & Tunnel Vision)", "tension_effects_enabled")
+	gameplay_vbox.add_child(suspense_toggle)
 
 	var gs_sep = HSeparator.new()
 	gameplay_vbox.add_child(gs_sep)

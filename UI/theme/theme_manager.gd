@@ -60,6 +60,15 @@ static func apply_nav_button_style(btn: Button, corner_radius: int = 8) -> void:
 		COLOR_TEXT_WHITE
 	)
 
+static func apply_icon_button_style(btn: Button, corner_radius: int = 8, padding: int = 12) -> void:
+	_apply_button_styles(
+		btn,
+		_create_stylebox(COLOR_NAV_NORMAL, Color(1, 1, 1, 0.15), corner_radius, 1, padding, padding, padding, padding),
+		_create_stylebox(COLOR_NAV_HOVER, Color(1, 1, 1, 0.30), corner_radius, 1, padding, padding, padding, padding),
+		_create_stylebox(COLOR_NAV_PRESSED, Color(1, 1, 1, 0.10), corner_radius, 1, padding, padding, padding, padding),
+		COLOR_TEXT_WHITE
+	)
+
 static func apply_danger_button_style(btn: Button, corner_radius: int = 8) -> void:
 	_apply_button_styles(
 		btn,
@@ -100,6 +109,36 @@ static func apply_input_style(control: Control, corner_radius: int = 6) -> void:
 		control.add_theme_color_override("placeholder_color", COLOR_TEXT_DIM)
 		if control.custom_minimum_size.y < 48:
 			control.custom_minimum_size.y = 48
+
+static func apply_scrollbar_style(scrollbar: ScrollBar, width: int = 28) -> void:
+	if scrollbar == null:
+		return
+	if scrollbar is VScrollBar:
+		scrollbar.custom_minimum_size = Vector2(width, 0)
+	else:
+		scrollbar.custom_minimum_size = Vector2(0, width)
+	
+	var track_style = _create_stylebox(Color(0.04, 0.07, 0.11, 0.65), Color(0.24, 0.44, 0.65, 0.3), 8, 1, 3, 3, 3, 3)
+	var grabber_normal = _create_stylebox(COLOR_SECONDARY_HOVER, Color(0.40, 0.65, 0.90, 0.5), 8, 1, 2, 2, 2, 2)
+	var grabber_hover = _create_stylebox(Color(0.35, 0.65, 0.95, 0.95), Color(0.70, 0.88, 1.0, 0.8), 8, 1, 2, 2, 2, 2)
+	var grabber_pressed = _create_stylebox(COLOR_PRIMARY_HOVER, Color(0.80, 1.0, 0.80, 0.9), 8, 1, 2, 2, 2, 2)
+
+	scrollbar.add_theme_stylebox_override("scroll", track_style)
+	scrollbar.add_theme_stylebox_override("scroll_focus", track_style)
+	scrollbar.add_theme_stylebox_override("grabber", grabber_normal)
+	scrollbar.add_theme_stylebox_override("grabber_highlight", grabber_hover)
+	scrollbar.add_theme_stylebox_override("grabber_pressed", grabber_pressed)
+
+static func apply_scroll_container_style(scroll: ScrollContainer, width: int = 28) -> void:
+	if scroll == null:
+		return
+	var v_bar = scroll.get_v_scroll_bar()
+	if v_bar != null:
+		apply_scrollbar_style(v_bar, width)
+	var h_bar = scroll.get_h_scroll_bar()
+	if h_bar != null:
+		apply_scrollbar_style(h_bar, width)
+	TouchScrollHelper.attach_to(scroll)
 
 static func _apply_button_styles(btn: Button, style_normal: StyleBoxFlat, style_hover: StyleBoxFlat, style_pressed: StyleBoxFlat, text_color: Color) -> void:
 	btn.add_theme_stylebox_override("normal", style_normal)

@@ -33,3 +33,9 @@ AI tools have made it possible and even trivial to implement entire features wit
 It is NOT the intent of these rules to discourage new contributors or to ban AI usage outright.  
   
 Contributors are highly encouraged to use github issues or discussions to get answers to any questions they may have on how to best implement a feature or bug fix.
+
+### Community & Discord
+Join our community on Discord ([https://discord.gg/gjaNhkQwJ](https://discord.gg/gjaNhkQwJ))!
+- Leave general feedback & thoughts in `#feedback`.
+- Post feature requests and ideas in `#feature_requests`.
+- Report bugs with reproduction steps and screenshots in `#bug_reports`.

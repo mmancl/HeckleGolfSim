@@ -292,7 +292,7 @@ func set_cloud_intensity(value: float) -> void:
 
 
 ## Maximum brightness of the Sun DirectionalLight, visible during the day.
-@export_range(0, 16, 0.005) var sun_energy: float = 0.5: set = set_sun_energy
+@export_range(0, 16, 0.005) var sun_energy: float = 1.2: set = set_sun_energy
 		
 func set_sun_energy(value: float) -> void:
 	sun_energy = value
@@ -310,7 +310,7 @@ func set_sun_shadow_opacity(value: float) -> void:
 
 
 ## Ratio of ambient light to sky light. See Environment.ambient_light_sky_contribution.
-@export_range(0, 1, 0.005) var sky_contribution: float = 1.0: set = set_sky_contribution
+@export_range(0, 1, 0.005) var sky_contribution: float = 0.55: set = set_sky_contribution
 
 func set_sky_contribution(value: float) -> void:
 	if environment:
@@ -321,7 +321,7 @@ func set_sky_contribution(value: float) -> void:
 
 ## Strength of ambient light. Works outside of Reflection Probe / GI volumes and sky_contribution < 1.
 ## See Environment.ambient_light_energy.
-@export_range(0, 16, 0.005) var ambient_energy: float = 1.0: set = set_ambient_energy
+@export_range(0, 16, 0.005) var ambient_energy: float = 0.50: set = set_ambient_energy
 
 func set_ambient_energy(value: float) -> void:
 	if environment:
@@ -469,12 +469,25 @@ func _initialize() -> void:
 		environment = Environment.new()
 		environment.background_mode = Environment.BG_SKY
 		environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-		environment.ambient_light_sky_contribution = 0.7
-		environment.ambient_light_energy = 1.0
+		environment.ambient_light_sky_contribution = 0.55
+		environment.ambient_light_energy = 0.50
 		environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 		environment.tonemap_mode = Environment.TONE_MAPPER_ACES
-		environment.tonemap_white = 6
+		environment.tonemap_white = 5.0
+		environment.tonemap_exposure = 1.0
+		environment.ssao_enabled = true
+		environment.ssao_radius = 2.0
+		environment.ssao_intensity = 1.2
+		environment.ssao_power = 1.5
+		environment.ssao_detail = 0.2
+		environment.ssao_horizon = 0.06
+		environment.ssao_ao_channel_affect = 0.5
 		emit_signal("environment_changed", environment)
+	else:
+		environment.ssao_enabled = true
+		environment.ssao_radius = 2.0
+		environment.ssao_intensity = 1.2
+		environment.ssao_detail = 0.2
 
 	# Setup Sky material & Upgrade old
 	if environment.sky == null or environment.sky.sky_material is PhysicalSkyMaterial:
@@ -498,7 +511,18 @@ func _initialize() -> void:
 		sun.name = "SunLight"
 		add_child(sun, true)
 		sun.owner = get_tree().edited_scene_root
+	
+	if sun != null:
 		sun.shadow_enabled = true
+		sun.directional_shadow_max_distance = 600.0
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+		sun.directional_shadow_blend_splits = true
+		sun.directional_shadow_split_1 = 0.05
+		sun.directional_shadow_split_2 = 0.15
+		sun.directional_shadow_split_3 = 0.40
+		sun.shadow_bias = 0.03
+		sun.shadow_normal_bias = 2.0
+		sun.light_energy = sun_energy
 	
 	if has_node("MoonLight"):
 		moon = $MoonLight

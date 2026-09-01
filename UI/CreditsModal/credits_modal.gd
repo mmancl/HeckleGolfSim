@@ -3,9 +3,11 @@ extends Control
 signal closed
 
 @onready var modal_panel: PanelContainer = $CenterContainer/ModalPanel
+@onready var scroll_container: ScrollContainer = $CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer
 @onready var close_header_button: Button = %CloseHeaderButton
 @onready var close_footer_button: Button = %CloseFooterButton
 @onready var repo_button: Button = %RepoButton
+@onready var discord_button: Button = %DiscordModalButton
 @onready var base_repo_button: Button = %BaseRepoButton
 @onready var donation_feedback_label: Label = %DonationFeedbackLabel
 @onready var donation_feedback_panel: PanelContainer = %DonationFeedbackPanel
@@ -27,14 +29,20 @@ func _ready() -> void:
 
 	# Responsive modal sizing
 	var viewport_size = get_viewport().get_visible_rect().size
-	var target_width = clamp(viewport_size.x * 0.85, 360.0, 920.0)
-	var target_height = clamp(viewport_size.y * 0.88, 480.0, 740.0)
+	var target_width = clamp(viewport_size.x * 0.92, 320.0, 920.0)
+	var target_height = clamp(viewport_size.y * 0.92, 280.0, 760.0)
 	modal_panel.custom_minimum_size = Vector2(target_width, target_height)
+
+	# Apply touch-friendly scrollbar styling and kinetic swipe scrolling
+	if scroll_container != null:
+		ThemeManager.apply_scroll_container_style(scroll_container, 28)
 
 	# Style primary and navigation buttons
 	ThemeManager.apply_nav_button_style(close_header_button, 6)
 	ThemeManager.apply_secondary_button_style(close_footer_button, 8)
 	ThemeManager.apply_primary_button_style(repo_button, 8)
+	if discord_button != null:
+		ThemeManager.apply_primary_button_style(discord_button, 8)
 	ThemeManager.apply_secondary_button_style(base_repo_button, 8)
 
 	# Style donation buttons
@@ -48,8 +56,10 @@ func _ready() -> void:
 	close_header_button.pressed.connect(_on_close_pressed)
 	close_footer_button.pressed.connect(_on_close_pressed)
 
-	# Connect Repo links
+	# Connect Repo and Community links
 	repo_button.pressed.connect(_on_repo_pressed)
+	if discord_button != null:
+		discord_button.pressed.connect(_on_discord_pressed)
 	base_repo_button.pressed.connect(_on_base_repo_pressed)
 
 	# Connect Donation buttons
@@ -84,6 +94,10 @@ func _on_repo_pressed() -> void:
 	OS.shell_open("https://github.com/mmancl/HeckleGolfSim")
 
 
+func _on_discord_pressed() -> void:
+	OS.shell_open("https://discord.gg/gjaNhkQwJ")
+
+
 func _on_base_repo_pressed() -> void:
 	OS.shell_open("https://github.com/jhauck2/OpenShotGolf")
 
@@ -111,6 +125,8 @@ func _on_meta_clicked(meta) -> void:
 
 func _connect_rich_text_links(node: Node) -> void:
 	if node is RichTextLabel:
+		node.mouse_filter = Control.MOUSE_FILTER_PASS
+		node.selection_enabled = false
 		if not node.meta_clicked.is_connected(_on_meta_clicked):
 			node.meta_clicked.connect(_on_meta_clicked)
 	for child in node.get_children():

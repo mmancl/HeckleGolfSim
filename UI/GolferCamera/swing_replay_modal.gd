@@ -351,6 +351,7 @@ func _build_ui() -> void:
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	ThemeManager.apply_scroll_container_style(scroll, 28)
 
 	_rec_vbox = VBoxContainer.new()
 	_rec_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL

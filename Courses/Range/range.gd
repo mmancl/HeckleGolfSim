@@ -122,7 +122,8 @@ func get_height(x: float, z: float) -> float:
 	if _has_elevation_map:
 		return sample_elevation(x, z)
 		
-	var h = sin(x * 0.01) * cos(z * 0.01) * 3.5 + sin(x * 0.03 + z * 0.02) * 1.2 + cos(x * 0.07 - z * 0.05) * 0.3
+	# Multi-octave golf course procedural topography with rolling fairways, swales, mounds, and ridges
+	var h = sin(x * 0.022 + z * 0.012) * cos(z * 0.025 - x * 0.015) * 7.5 + sin(x * 0.045 - z * 0.035) * 3.2 + cos(x * 0.085 + z * 0.065) * 1.6 + sin(x * 0.16 + z * 0.14) * 0.65
 	return h
 
 
@@ -223,6 +224,8 @@ func _generate_ground_terrain() -> void:
 	if shader:
 		mat.shader = shader
 		mat.set_shader_parameter("albedo_tex", load("res://Courses/Environments/grassy-meadow1-bl/grassy-meadow1_albedo.png"))
+		mat.set_shader_parameter("normal_tex", load("res://Courses/Environments/grassy-meadow1-bl/grassy-meadow1_normal-ogl.png"))
+		mat.set_shader_parameter("ao_tex", load("res://Courses/Environments/grassy-meadow1-bl/grassy-meadow1_ao.png"))
 		
 		# Generate procedural Simplex noise texture for volumetric turf details
 		var noise = FastNoiseLite.new()
@@ -239,6 +242,7 @@ func _generate_ground_terrain() -> void:
 		mat.set_shader_parameter("depth_strength", 0.4)
 		mat.set_shader_parameter("grass_color_tint", Color(0.9, 0.9, 0.9))
 		mat.set_shader_parameter("roughness", 0.8)
+		mat.set_shader_parameter("normal_depth", 0.85)
 	st.set_material(mat)
 	
 	for z in range(subdiv_z):
@@ -295,7 +299,7 @@ func _generate_ground_terrain() -> void:
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
-	is_driving_range = (name == "Range" or scene_file_path.contains("range.tscn"))
+	is_driving_range = (name == "Range" and (scene_file_path.is_empty() or scene_file_path.ends_with("Range/range.tscn") or scene_file_path.ends_with("Range/range.scn")))
 	if is_driving_range:
 		var mp_mgr = get_node_or_null("/root/MultiplayerManager")
 		if mp_mgr != null:
@@ -333,7 +337,10 @@ func _ready() -> void:
 			$RangeUI.disconnect("hit_shot", Callable($Player, "_on_range_ui_hit_shot"))
 			
 	if has_node("RangeUI"):
-		$RangeUI.skip_flight_requested.connect(_on_skip_flight_requested)
+		if not $RangeUI.is_connected("hit_shot", Callable(self, "_on_range_ui_hit_shot")):
+			$RangeUI.connect("hit_shot", Callable(self, "_on_range_ui_hit_shot"))
+		if not $RangeUI.skip_flight_requested.is_connected(_on_skip_flight_requested):
+			$RangeUI.skip_flight_requested.connect(_on_skip_flight_requested)
 			
 	# Visual effects setup
 	setup_depth_of_field()
@@ -674,7 +681,7 @@ func _ready() -> void:
 									
 									# Immediately rotate/position player cameras to face the hole on startup
 									var yaw_rad = -angle_rad
-									var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
+									var is_on_green = ($Player.ball.get("lie_type") == "green") if ($Player and $Player.ball) else false
 									var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 									var cam_pos = clamp_camera_position(spawn_pos + local_offset)
 									var target_look = get_camera_target_look(aim_target_pos, spawn_pos, is_on_green)
@@ -730,6 +737,9 @@ func _ready() -> void:
 			var rec_rest_callable = Callable(session_rec, "_on_golf_ball_rest")
 			if not player_node.is_connected("rest", rec_rest_callable):
 				player_node.connect("rest", rec_rest_callable)
+		var self_hit_callable = Callable(self, "_on_player_manual_hit")
+		if player_node.has_signal("manual_hit") and not player_node.is_connected("manual_hit", self_hit_callable):
+			player_node.connect("manual_hit", self_hit_callable)
 				
 	if range_ui != null and session_rec != null:
 		if range_ui.has_signal("rec_button_pressed"):
@@ -924,7 +934,7 @@ func set_aim_target(target_pos: Vector3, update_club: bool = true) -> void:
 		if update_club:
 			update_auto_club(true)
 			
-		var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN)
+		var is_on_green = ($Player.ball.get("lie_type") == "green") if ($Player and $Player.ball) else false
 		var local_offset = get_camera_local_offset().rotated(Vector3.UP, -angle_rad)
 		var cam_pos = clamp_camera_position(ball_pos + local_offset)
 		var target_look = get_camera_target_look(aim_target_pos, ball_pos, is_on_green)
@@ -973,11 +983,21 @@ func _perform_practice_teleport(mouse_pos: Vector2) -> void:
 		var hit = get_world_3d().direct_space_state.intersect_ray(query)
 		if not hit.is_empty():
 			var clicked_point = hit["position"]
-			clicked_point.y = get_height(clicked_point.x, clicked_point.z) + 0.02
+			clicked_point.y = get_height(clicked_point.x, clicked_point.z) + GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET
 			practice_start_pos = clicked_point
 			$Player.ball.spawn_position = clicked_point
+			$Player.ball.global_position = clicked_point
 			$Player.ball.reset()
 			print("[PracticeMode] Ball spawned at: ", clicked_point)
+			
+			var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+			if mp_mgr != null and not mp_mgr.players.is_empty():
+				var active_player = mp_mgr.get_active_player()
+				if not active_player.is_empty():
+					active_player["position"] = clicked_point
+			
+			_user_custom_club = ""
+			update_current_lie_and_reduction()
 			
 			# Automatically aim at the pin and position the camera behind the ball
 			if not current_hole_location.is_zero_approx():
@@ -997,7 +1017,7 @@ func _perform_practice_teleport(mouse_pos: Vector2) -> void:
 				
 				if not is_aerial_view:
 					var yaw_rad = -angle_rad
-					var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
+					var is_on_green = ($Player.ball.get("lie_type") == "green") if ($Player and $Player.ball) else false
 					var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 					var cam_pos = clamp_camera_position(clicked_point + local_offset)
 					var target_look = get_camera_target_look(current_hole_location, clicked_point, is_on_green)
@@ -1047,7 +1067,7 @@ func _process_screen_aiming(delta: float) -> void:
 	update_auto_club(false)
 	update_dof_focus()
 
-	var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN)
+	var is_on_green = ($Player.ball.get("lie_type") == "green") if ($Player and $Player.ball) else false
 	var local_offset = get_camera_local_offset().rotated(Vector3.UP, -new_angle)
 	var cam_pos = clamp_camera_position(ball_pos + local_offset)
 	var target_look = get_camera_target_look(aim_target_pos, ball_pos, is_on_green)
@@ -1086,7 +1106,7 @@ func _process(delta: float) -> void:
 	# Check for on-green state transition
 	var is_on_green = false
 	if $Player and $Player.ball:
-		is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN)
+		is_on_green = ($Player.ball.get("lie_type") == "green")
 	
 	if is_on_green != _last_was_on_green:
 		if is_on_green:
@@ -1100,36 +1120,33 @@ func _process(delta: float) -> void:
 	if player.get_ball_state() != PhysicsEnums.BallState.REST:
 		_update_ball_display()
 		
-	# Putt & Chip camera suspense zoom & heartbeat tension
-	if (player.get_ball_state() != PhysicsEnums.BallState.REST or _shot_active) and has_node("Player") and $Player.ball != null:
-		var ball_node = $Player.ball
-		var target_pos = current_hole_location
-		if GlobalSettings.is_chipping_minigame and not chipping_island_positions.is_empty() and selected_chipping_target_idx < chipping_island_positions.size():
-			target_pos = chipping_island_positions[selected_chipping_target_idx]
-		
-		if not target_pos.is_zero_approx():
-			var ball_pos_2d = Vector2(ball_node.global_position.x, ball_node.global_position.z)
-			var hole_pos_2d = Vector2(target_pos.x, target_pos.z)
-			var dist_to_target = ball_pos_2d.distance_to(hole_pos_2d)
+	# Putt & Chip camera suspense zoom & heartbeat tension (Course Play only)
+	if has_node("/root/TensionManager") and TensionManager.is_course_play_active():
+		if (player.get_ball_state() != PhysicsEnums.BallState.REST or _shot_active) and has_node("Player") and $Player.ball != null:
+			var ball_node = $Player.ball
+			var target_pos = current_hole_location
 			
-			if ball_node.is_putt:
-				if not _putt_close_view_triggered and dist_to_target <= 1.524: # 5 feet in meters
-					_putt_close_view_triggered = true
-					if has_node("/root/TensionManager"):
+			if not target_pos.is_zero_approx():
+				var ball_pos_2d = Vector2(ball_node.global_position.x, ball_node.global_position.z)
+				var hole_pos_2d = Vector2(target_pos.x, target_pos.z)
+				var dist_to_target = ball_pos_2d.distance_to(hole_pos_2d)
+				
+				if ball_node.is_putt:
+					if not _putt_close_view_triggered and dist_to_target <= 1.524: # 5 feet in meters
+						_putt_close_view_triggered = true
 						TensionManager.start_tension("putt")
-				
-				if (_putt_close_view_triggered or (has_node("/root/TensionManager") and TensionManager.is_active())) and has_node("PhantomCamera3D") and $PhantomCamera3D.follow_mode == PhantomCamera3D.FollowMode.SIMPLE:
-					var target_offset = Vector3(-5.0, 1.2, 0).rotated(Vector3.UP, _last_travel_yaw)
-					$PhantomCamera3D.follow_offset = $PhantomCamera3D.follow_offset.lerp(target_offset, delta * 4.0)
-			else:
-				if not _chip_close_view_triggered and dist_to_target <= 3.048: # 10 feet in meters
-					_chip_close_view_triggered = true
-					if has_node("/root/TensionManager"):
+					
+					if (_putt_close_view_triggered or TensionManager.is_active()) and has_node("PhantomCamera3D") and $PhantomCamera3D.follow_mode == PhantomCamera3D.FollowMode.SIMPLE:
+						var target_offset = Vector3(-5.0, 1.2, 0).rotated(Vector3.UP, _last_travel_yaw)
+						$PhantomCamera3D.follow_offset = $PhantomCamera3D.follow_offset.lerp(target_offset, delta * 4.0)
+				else:
+					if not _chip_close_view_triggered and dist_to_target <= 3.048: # 10 feet in meters
+						_chip_close_view_triggered = true
 						TensionManager.start_tension("chip")
-				
-				if (_chip_close_view_triggered or (has_node("/root/TensionManager") and TensionManager.is_active())) and has_node("PhantomCamera3D") and $PhantomCamera3D.follow_mode == PhantomCamera3D.FollowMode.SIMPLE:
-					var target_offset = Vector3(-6.0, 1.4, 0).rotated(Vector3.UP, _last_travel_yaw)
-					$PhantomCamera3D.follow_offset = $PhantomCamera3D.follow_offset.lerp(target_offset, delta * 4.0)
+					
+					if (_chip_close_view_triggered or TensionManager.is_active()) and has_node("PhantomCamera3D") and $PhantomCamera3D.follow_mode == PhantomCamera3D.FollowMode.SIMPLE:
+						var target_offset = Vector3(-6.0, 1.4, 0).rotated(Vector3.UP, _last_travel_yaw)
+						$PhantomCamera3D.follow_offset = $PhantomCamera3D.follow_offset.lerp(target_offset, delta * 4.0)
 		
 	if GlobalSettings.range_settings.dof_enabled.value:
 		update_dof_focus()
@@ -1271,11 +1288,12 @@ func _on_golf_ball_rest(_ball_data) -> void:
 				
 				var rec_pos_2d = closest_pt_2d + away_dir * 0.3048 # 1 ft away
 				var h = get_height(rec_pos_2d.x, rec_pos_2d.y)
-				recovery_pos = Vector3(rec_pos_2d.x, h + 0.02, rec_pos_2d.y)
+				recovery_pos = Vector3(rec_pos_2d.x, h + GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET, rec_pos_2d.y)
 		
 		# 2. Update ball position and spawn position
 		ball.global_position = recovery_pos
-		ball.spawn_position = recovery_pos
+		if not practice_mode_active:
+			ball.spawn_position = recovery_pos
 		ball_pos = recovery_pos
 		
 		# 3. Add penalty stroke to active player
@@ -1305,6 +1323,10 @@ func _on_golf_ball_rest(_ball_data) -> void:
 
 	if is_dynamic_course:
 		if practice_mode_active:
+			var saved_club = _get_current_club()
+			var saved_target = aim_target_pos
+			var saved_yaw = _last_aim_yaw_offset_deg
+			
 			if not _skip_requested:
 				var reset_delay = GlobalSettings.range_settings.ball_reset_timer.value
 				await get_tree().create_timer(reset_delay).timeout
@@ -1313,21 +1335,58 @@ func _on_golf_ball_rest(_ball_data) -> void:
 				_reset_display_data()
 				if has_node("RangeUI"):
 					$RangeUI.set_data(display_data)
-				
-			var saved_yaw = $Player.ball.aim_yaw_offset_deg
+			
+			# Ensure ball position and spawn position are restored to practice_start_pos
+			$Player.ball.spawn_position = practice_start_pos
+			$Player.ball.global_position = practice_start_pos
 			
 			var mp_mgr = get_node_or_null("/root/MultiplayerManager")
 			if mp_mgr != null and not mp_mgr.players.is_empty():
 				var active_player = mp_mgr.get_active_player()
 				if not active_player.is_empty():
 					active_player["position"] = practice_start_pos
+					active_player["last_aim_target_pos"] = saved_target
+					active_player["last_aim_yaw_offset_deg"] = saved_yaw
+			
+			aim_target_pos = saved_target
+			if has_node("AimMarker"):
+				$AimMarker.global_position = aim_target_pos
 			
 			if GlobalSettings.range_settings.camera_follow_mode.value:
-				reset_camera_to_start()
+				$Player.ball.aim_yaw_offset_deg = saved_yaw
+				await reset_camera_to_start()
 			else:
 				$Player.reset_ball()
 				$Player.ball.aim_yaw_offset_deg = saved_yaw
+			
+			# Recalculate lie for the practice starting position
+			update_current_lie_and_reduction()
+			
+			# Restore aim yaw, aim distance and camera look
+			$Player.ball.aim_yaw_offset_deg = saved_yaw
+			if has_node("MapCanvas/AimDistanceLabel"):
+				set_aim_distance(int(practice_start_pos.distance_to(aim_target_pos) * 1.09361))
 				
+			var yaw_rad = deg_to_rad(-saved_yaw)
+			var is_on_green = ($Player.ball.get("lie_type") == "green")
+			var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
+			var cam_pos = clamp_camera_position(practice_start_pos + local_offset)
+			var target_look = get_camera_target_look(aim_target_pos, practice_start_pos, is_on_green)
+			if has_node("PhantomCamera3D"):
+				$PhantomCamera3D.global_position = cam_pos
+				$PhantomCamera3D.look_at(target_look)
+			if has_node("Camera3D"):
+				$Camera3D.global_position = cam_pos
+				$Camera3D.look_at(target_look)
+				
+			# Retain the exact club used on the previous shot
+			_user_custom_club = saved_club
+			var club_sel = get_club_selector()
+			if club_sel != null and club_sel.has_method("select_club_by_name"):
+				_is_updating_auto_club = true
+				club_sel.select_club_by_name(saved_club)
+				_is_updating_auto_club = false
+			
 			_update_hole_info_label(true)
 			if has_node("RangeUI"):
 				$RangeUI.hide_skip_button()
@@ -1362,7 +1421,7 @@ func _on_golf_ball_rest(_ball_data) -> void:
 	
 			# Position camera behind the ball facing the pin
 			var yaw_rad = -angle_rad
-			var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
+			var is_on_green = ($Player.ball.get("lie_type") == "green") if ($Player and $Player.ball) else false
 			var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 			var start_pos = clamp_camera_position(ball_pos + local_offset)
 			
@@ -1410,7 +1469,6 @@ func _on_golf_ball_rest(_ball_data) -> void:
 		$Player.reset_ball()
 		$Player.ball.aim_yaw_offset_deg = saved_yaw
 		
-	_user_custom_club = ""
 	update_auto_club()
 	if has_node("RangeUI"):
 		$RangeUI.hide_skip_button()
@@ -1535,12 +1593,15 @@ func reset_camera_to_start() -> void:
 	var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 	var start_pos = clamp_camera_position($Player.ball.spawn_position + local_offset)
 
-	var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
+	var is_on_green = ($Player.ball.get("lie_type") == "green") if ($Player and $Player.ball) else false
 	var target_look = get_camera_target_look(aim_target_pos, $Player.ball.spawn_position, is_on_green)
 
 	if _skip_requested:
 		camera.global_position = start_pos
 		camera.look_at_from_position(start_pos, target_look)
+		if has_node("Camera3D"):
+			$Camera3D.global_position = start_pos
+			$Camera3D.look_at(target_look)
 	else:
 		# Tween camera back to starting position
 		var tween := create_tween()
@@ -1550,6 +1611,9 @@ func reset_camera_to_start() -> void:
 
 		# Rotate camera to face the aim target
 		camera.look_at_from_position(start_pos, target_look)
+		if has_node("Camera3D"):
+			$Camera3D.global_position = start_pos
+			$Camera3D.look_at(target_look)
 
 		await tween.finished
 
@@ -1621,7 +1685,10 @@ func set_practice_mode(enabled: bool) -> void:
 
 func _on_range_ui_reset_practice_clicked() -> void:
 	$Player.ball.spawn_position = practice_start_pos
+	$Player.ball.global_position = practice_start_pos
 	$Player.ball.reset()
+	update_current_lie_and_reduction()
+	_update_hole_info_label(true)
 
 
 func load_practice_hole(idx: int) -> void:
@@ -1655,6 +1722,7 @@ func load_practice_hole(idx: int) -> void:
 		practice_start_pos = spawn_pos
 		if has_node("Player") and $Player.ball != null:
 			$Player.ball.spawn_position = spawn_pos
+			$Player.ball.global_position = spawn_pos
 			$Player.reset_ball()
 			
 		var hole_loc = hole_data.get("Hole Location")
@@ -1664,6 +1732,8 @@ func load_practice_hole(idx: int) -> void:
 		current_hole_name = hole_name
 		current_hole_par = par
 		shot_count = 0
+		_user_custom_club = ""
+		update_current_lie_and_reduction()
 		
 		if hole_loc != null:
 			current_hole_location = Vector3(hole_loc[0], get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
@@ -1701,7 +1771,7 @@ func load_practice_hole(idx: int) -> void:
 				
 			# Rotate/position cameras to face the hole
 			var yaw_rad = -angle_rad
-			var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN) if ($Player and $Player.ball) else false
+			var is_on_green = ($Player.ball.get("lie_type") == "green") if ($Player and $Player.ball) else false
 			var local_offset = get_camera_local_offset().rotated(Vector3.UP, yaw_rad)
 			var cam_pos = clamp_camera_position(spawn_pos + local_offset)
 			var target_look = get_camera_target_look(aim_target_pos, spawn_pos, is_on_green)
@@ -1916,20 +1986,16 @@ func _on_shot_initiated() -> void:
 	if has_node("RangeUI"):
 		$RangeUI.show_skip_button()
 
-	# Early Trajectory Prediction for Suspense
-	var target_pos = current_hole_location
-	if GlobalSettings.is_chipping_minigame and not chipping_island_positions.is_empty() and selected_chipping_target_idx < chipping_island_positions.size():
-		target_pos = chipping_island_positions[selected_chipping_target_idx]
-
-	if not target_pos.is_zero_approx() and has_node("Player") and $Player.ball != null and has_node("/root/TensionManager"):
+	# Early Trajectory Prediction for Suspense (Course Play only)
+	if has_node("/root/TensionManager") and TensionManager.is_course_play_active() and not current_hole_location.is_zero_approx() and has_node("Player") and $Player.ball != null:
 		var ball_node = $Player.ball
 		var is_putt = ball_node.is_putt
-		var prediction = TensionManager.predict_shot_outcome(ball_node.global_position, ball_node.velocity, is_putt, target_pos)
+		var prediction = TensionManager.predict_shot_outcome(ball_node.global_position, ball_node.velocity, is_putt, current_hole_location)
 		if prediction.get("will_enter_zone", false):
-			print("[TensionManager] Early suspense predicted for shot! Mode: %s, Min Dist: %.2fm. Scheduling heartbeat." % [
+			print("[TensionManager] Early suspense predicted for Course Play shot! Mode: %s, Min Dist: %.2fm. Scheduling heartbeat." % [
 				prediction.get("mode", "putt"), prediction.get("min_dist", 0.0)
 			])
-			TensionManager.schedule_early_tension(prediction.get("mode", "putt"), 0.35)
+			TensionManager.schedule_early_tension(prediction.get("mode", "putt"), 0.08)
 
 	if current_hole_location.is_zero_approx():
 		return
@@ -2116,8 +2182,11 @@ func get_path_buffer_polygon(path_list: Array, radius: float) -> Array[Vector3]:
 
 func get_active_hole_config() -> Dictionary:
 	if has_node("/root/MultiplayerManager") and not get_node("/root/MultiplayerManager").players.is_empty():
-		var hole_id = MultiplayerManager.hole_ids[MultiplayerManager.current_hole_index]
-		return MultiplayerManager.hole_info.get(hole_id, {})
+		var mp_mgr = get_node("/root/MultiplayerManager")
+		if not mp_mgr.hole_ids.is_empty():
+			var hole_idx = clamp(mp_mgr.current_hole_index, 0, mp_mgr.hole_ids.size() - 1)
+			var hole_id = mp_mgr.hole_ids[hole_idx]
+			return mp_mgr.hole_info.get(hole_id, {})
 		
 	if not course_data_dict.is_empty():
 		var hole_info_data = course_data_dict.get("Hole Info", {})
@@ -2151,7 +2220,7 @@ func get_camera_local_offset() -> Vector3:
 	var is_on_green = false
 	if has_node("Player") and $Player.ball != null:
 		var ball = $Player.ball
-		is_on_green = (ball.get("lie_type") == "green" or ball.get("surface_type") == PhysicsEnums.SurfaceType.GREEN)
+		is_on_green = (ball.get("lie_type") == "green")
 		
 	if is_on_green:
 		return Vector3(-4.0, 2.0, 0)
@@ -2173,7 +2242,7 @@ func update_camera_offset(_val = null) -> void:
 			var local_offset = offset.rotated(Vector3.UP, yaw_rad)
 			var cam_pos = clamp_camera_position($Player.ball.global_position + local_offset)
 			$PhantomCamera3D.global_position = cam_pos
-			var is_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN)
+			var is_on_green = ($Player.ball.get("lie_type") == "green")
 			var target_look = get_camera_target_look(aim_target_pos, $Player.ball.global_position, is_on_green)
 			$PhantomCamera3D.look_at(target_look)
 			if has_node("Camera3D"):
@@ -2492,18 +2561,19 @@ func update_auto_club(force_auto: bool = false) -> void:
 		var dist_m = ball_pos.distance_to(aim_target_pos)
 		var dist_yards = int(dist_m * 1.09361)
 		
-		# Determine if ball is on the green (PhysicsEnums.SurfaceType.GREEN is 4)
-		var is_on_green = ($Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN)
+		# Determine if ball is on the green
+		var is_on_green = ($Player.ball.get("lie_type") == "green")
 		
-		# Determine if we are in the teebox (shot_count/strokes == 0)
-		var is_in_teebox = false
-		var mp_mgr = get_node_or_null("/root/MultiplayerManager")
-		if mp_mgr != null and not mp_mgr.players.is_empty():
-			var active_p = mp_mgr.get_active_player()
-			if not active_p.is_empty():
-				is_in_teebox = (active_p["strokes"] == 0)
-		else:
-			is_in_teebox = (shot_count == 0)
+		# Determine if we are in the teebox
+		var is_in_teebox = ($Player.ball.get("lie_type") == "teebox")
+		if not is_in_teebox:
+			var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+			if mp_mgr != null and not mp_mgr.players.is_empty():
+				var active_p = mp_mgr.get_active_player()
+				if not active_p.is_empty():
+					is_in_teebox = (active_p.get("strokes", 0) == 0)
+			else:
+				is_in_teebox = (shot_count == 0)
 		
 		# Rule 1: Green check
 		if is_on_green:
@@ -2781,12 +2851,19 @@ func _get_current_player_name() -> String:
 
 
 func _get_current_club() -> String:
+	if not _user_custom_club.is_empty():
+		return _user_custom_club
 	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
 	if mp_mgr != null and not mp_mgr.current_club.is_empty():
 		return mp_mgr.current_club
+	var club_sel = get_club_selector()
+	if club_sel != null and "current_club" in club_sel and club_sel.current_club != null and not club_sel.current_club.text.is_empty():
+		return club_sel.current_club.text
 	var session_rec = get_node_or_null("SessionRecorder")
 	if session_rec != null and not session_rec.current_club.is_empty():
 		return session_rec.current_club
+	if has_node("Player") and $Player.ball != null and not $Player.ball.current_selected_club.is_empty():
+		return $Player.ball.current_selected_club
 	return "Dr"
 
 
@@ -2799,13 +2876,15 @@ func _on_club_selected(club_name: String) -> void:
 
 
 func _on_active_player_changed(_player: Dictionary) -> void:
-	_user_custom_club = ""
+	if not practice_mode_active:
+		_user_custom_club = ""
 	_update_averages()
 	update_auto_club()
 
 
 func _on_player_changed(_dir: String, _player_name: String) -> void:
-	_user_custom_club = ""
+	if not practice_mode_active:
+		_user_custom_club = ""
 	_update_averages()
 	update_auto_club()
 
@@ -3350,7 +3429,7 @@ func _get_arrow_color(slope_len: float) -> Color:
 func _is_player_near_green() -> bool:
 	if not $Player or not $Player.ball:
 		return false
-	var ball_on_green = ($Player.ball.get("lie_type") == "green" or $Player.ball.surface_type == PhysicsEnums.SurfaceType.GREEN)
+	var ball_on_green = ($Player.ball.get("lie_type") == "green")
 	if ball_on_green:
 		return true
 	if not current_hole_location.is_zero_approx():

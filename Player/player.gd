@@ -25,6 +25,7 @@ var ball : GolfBall = null
 # Tree occlusion variables
 var _cached_trees: Array[Node3D] = []
 var _last_tree_cache_time: float = 0.0
+var _has_scanned_trees: bool = false
 
 signal good_data
 signal bad_data
@@ -70,7 +71,7 @@ func _get_selected_club() -> String:
 func _is_putting_on_green() -> bool:
 	var is_on_green = false
 	if ball != null:
-		is_on_green = (str(ball.lie_type) == "green" or ball.surface_type == PhysicsEnums.SurfaceType.GREEN or str(current_lie_type) == "green")
+		is_on_green = (str(ball.lie_type) == "green" or str(current_lie_type) == "green")
 	
 	var is_putting = false
 	if is_on_green:
@@ -373,7 +374,8 @@ func _update_cached_trees() -> void:
 	_cached_trees.clear()
 	var root = get_tree().root
 	_find_trees_recursive(root, _cached_trees)
-	print("[player.gd] Cached %d trees for camera obstruction check." % _cached_trees.size())
+	if not _cached_trees.is_empty():
+		print("[player.gd] Cached %d trees for camera obstruction check." % _cached_trees.size())
 
 func _find_trees_recursive(node: Node, out_list: Array[Node3D]) -> void:
 	if _is_tree_node(node):
@@ -395,11 +397,12 @@ func _handle_tree_occlusion() -> void:
 		_restore_all_trees_visibility()
 		return
 
-	# Periodically update tree cache (every 2 seconds) or if empty
+	# Periodically update tree cache (every 2 seconds)
 	var time_now = Time.get_ticks_msec() / 1000.0
-	if _cached_trees.is_empty() or (time_now - _last_tree_cache_time) > 2.0:
-		_update_cached_trees()
+	if not _has_scanned_trees or (time_now - _last_tree_cache_time) > 2.0:
+		_has_scanned_trees = true
 		_last_tree_cache_time = time_now
+		_update_cached_trees()
 
 	var camera = get_viewport().get_camera_3d()
 	if camera == null or not is_instance_valid(camera) or camera.name == "MinimapCamera":
@@ -415,9 +418,11 @@ func _handle_tree_occlusion() -> void:
 	var AB_len_sq = AB.length_squared()
 
 	# Clean up invalid nodes in the cache
-	_cached_trees = _cached_trees.filter(func(t): return is_instance_valid(t))
+	_cached_trees = _cached_trees.filter(func(t): return is_instance_valid(t) and t.is_inside_tree())
 
 	for tree in _cached_trees:
+		if not is_instance_valid(tree) or not tree.is_inside_tree():
+			continue
 		var is_blocking = false
 		if AB_len_sq > 0.0001:
 			var P = Vector2(tree.global_position.x, tree.global_position.z)

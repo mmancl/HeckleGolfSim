@@ -528,8 +528,10 @@ func _detect_current_gameplay_screen() -> ScreenLayout:
 
 	var full_id := (scene_name + " " + script_path + " " + file_path).to_lower()
 
-	# Chipping Minigame or Putting Practice -> TOP_LEFT (Avoids 780px-800px top-center scoreboard panel)
-	if full_id.contains("chipping") or scene_name.contains("chipping") or full_id.contains("putting") or scene_name.contains("putting"):
+	# Chipping Minigame, Putting Practice, or Shape Practice -> TOP_LEFT (Avoids 780px-840px top-center scoreboard panel)
+	if full_id.contains("chipping") or scene_name.contains("chipping") \
+		or full_id.contains("putting") or scene_name.contains("putting") \
+		or full_id.contains("shape") or scene_name.contains("shape"):
 		return ScreenLayout.TOP_LEFT
 
 	# Driving Range, Course Play, CourseManager, and all loaded course scenes -> TOP_CENTER_UNDER_AIM

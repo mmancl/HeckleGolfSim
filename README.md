@@ -88,7 +88,7 @@ Whether you want to dial in your yardages on the range, play an 18-hole match ag
 *Putting Practice: Break-reading, target cup selection, power/aim offset sliders, and accuracy tracking.*
 
 - **Chipping Practice**:
-  - Staggered island targets spaced across 50, 100, 150, 200, 250, and 300 feet surrounded by water.
+  - Staggered island targets spaced across 25, 50, 75, 100, 125, 150, and 200 yards surrounded by water.
   - Authentic multi-tier island construction with wooden retaining wall bulkheads and turf tops.
   - Staggered layout requiring precise horizontal aim (HLA) and trajectory control.
   - Dynamic follow-camera tracking ball flight and splash/rest states.
@@ -340,7 +340,7 @@ To link your keystore in Godot:
    - **Release**: Path to your `release.keystore` (e.g. `C:/Users/<User>/Repositories/HeckleGolfSim/release.keystore`).
    - **Release User**: `hecklegolf` (or the alias entered when generating).
    - **Release Password**: The password you set during keystore generation.
-4. Set the **Version / Code** (e.g., `1`, `2`, `3` — must increase with each Play Console upload) and **Version / Name** (e.g., `0.14.5`).
+4. Set the **Version / Code** (e.g., `1`, `2`, `3` — must increase with each Play Console upload) and **Version / Name** (e.g., `0.15.0`).
 
 #### 4. Step 3: Export the `.aab` Bundle
 You can build the bundle using any of the following methods:
@@ -430,11 +430,25 @@ HeckleGolfSim/
 └── Utils/                     # SceneManager, MultiplayerManager, AchievementManager
 ```
 
+## Community & Discord
+Join the official **Heckle Golf Simulator Discord** to connect with fellow golfers, share feedback, request features, and get troubleshooting help:
+- 💬 **Discord Server**: [https://discord.gg/gjaNhkQwJ](https://discord.gg/gjaNhkQwJ)
+- 💡 **General Feedback**: Share impressions and tuning suggestions in `#feedback`.
+- 🚀 **Feature Requests**: Propose new game modes, course tools, and device integrations in `#feature_requests`.
+- 🐛 **Bug Reports**: Report issues with reproduction steps and screenshots in `#bug_reports`.
+
 ---
 
-## License & Credits
-- Built with [Godot Engine](https://godotengine.org/) (.NET C#).
-- Forked and evolved from [OpenShotGolf](https://github.com/jhauck2/OpenShotGolf) by jhauck2.
-- Physics modeled with [OpenFairway](https://github.com/jesseincode/OpenFairway) and [Jolt Physics](https://github.com/jrouwe/JoltPhysics).
-- Launch monitor integrations inspired by [PiTrac](https://github.com/jamespilgrim/PiTrac) and [GSPro Open Connect v1](https://gsprogolf.com/GSProConnectV1.html).
-- Global golf course geometry courtesy of [OpenStreetMap](https://www.openstreetmap.org/) contributors.
+## License, Credits & Legal Disclaimers
+- **Core Engine**: Built with [Godot Engine](https://godotengine.org/) (.NET C# / MIT License).
+- **Open-Source Lineage**: Forked and evolved from [OpenShotGolf](https://github.com/jhauck2/OpenShotGolf) by jhauck2 (MIT License).
+- **Ball Aerodynamics & Rollout**: Modeled with [OpenFairway](https://github.com/jesseincode/OpenFairway) (by Jesse Inman and Jakobi) and [Jolt Physics 3D](https://github.com/jrouwe/JoltPhysics) (by Jorrit Rouwe).
+- **Golfer Pose AI**: Powered by [Google MediaPipe](https://developers.google.com/mediapipe) and TensorFlow.js (Apache 2.0).
+- **Atmosphere & Skybox**: [Sky3D](https://github.com/CoryPetkovsek/godot-sky3d) by Cory Petkovsek & J. Cuéllar (MIT License). Milky Way panorama: *"The Milky Way panorama"* by ESO/S. Brunier under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- **Terrain & Follow Cam**: [Terrain3D](https://github.com/CoryPetkovsek/godot-terrain3d) and [Phantom Camera](https://github.com/ramok/phantom-camera) (MIT License).
+- **Course Geometries & Open Data**: Course layouts and vector geography © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL 1.0); elevation data from USGS 3DEP and AWS Terrain Tiles.
+- **PBR Textures & Models**: Materials from [ambientCG.com](https://ambientcg.com/) and Shapespark exterior plants under Creative Commons CC0 1.0 Universal (Public Domain).
+- **Announcer Audio**: Original comedic commentary produced for Heckle Golf Sim as an artistic homage to classic PS2-era arcade golf games.
+- **Hardware Non-Affiliation**: Heckle Golf Simulator is an independent open-source project and is **not affiliated with, endorsed by, or sponsored by Square Golf (SquareGolf Co., Ltd.), GSPro (FlightPath Golf LLC), Garmin Ltd., PiTrac, or any launch monitor manufacturer.** All trademarks are property of their respective owners and used under nominative fair use for technical compatibility.
+
+For complete legal notices, safety warnings, and trademark terms, see [DISCLAIMER.md](DISCLAIMER.md).

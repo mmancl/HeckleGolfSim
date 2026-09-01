@@ -97,6 +97,7 @@ func _ready() -> void:
 	# ScrollContainer for player list
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	ThemeManager.apply_scroll_container_style(scroll, 28)
 	left_vbox.add_child(scroll)
 	
 	players_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -359,6 +360,7 @@ func _render_player_profile(player_name: String) -> void:
 	
 	var records_scroll = ScrollContainer.new()
 	records_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	ThemeManager.apply_scroll_container_style(records_scroll, 28)
 	overview_vbox.add_child(records_scroll)
 	
 	var records_vbox = VBoxContainer.new()
@@ -403,6 +405,7 @@ func _render_player_profile(player_name: String) -> void:
 	
 	var ach_scroll = ScrollContainer.new()
 	ach_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	ThemeManager.apply_scroll_container_style(ach_scroll, 28)
 	ach_vbox.add_child(ach_scroll)
 	
 	var ach_grid = GridContainer.new()
@@ -517,6 +520,7 @@ func _render_player_profile(player_name: String) -> void:
 
 	var swing_scroll = ScrollContainer.new()
 	swing_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	ThemeManager.apply_scroll_container_style(swing_scroll, 28)
 	swing_vbox.add_child(swing_scroll)
 
 	var swing_content_vbox = VBoxContainer.new()

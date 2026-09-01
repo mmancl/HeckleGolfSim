@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Courses/Minigames/ShapePractice/shape_practice.gd" id="1_shape_practice_gd"]
+
+[node name="ShapePractice" type="Node3D"]
+script = ExtResource("1_shape_practice_gd")

@@ -139,9 +139,19 @@ sky_material = SubResource("ShaderMaterial_0yxxa")
 background_mode = 2
 sky = SubResource("Sky_rybw1")
 ambient_light_source = 2
+ambient_light_energy = 0.50
+ambient_light_sky_contribution = 0.55
 reflected_light_source = 2
 tonemap_mode = 3
-tonemap_white = 6.0
+tonemap_white = 5.0
+tonemap_exposure = 1.0
+ssao_enabled = true
+ssao_radius = 2.0
+ssao_intensity = 1.2
+ssao_power = 1.5
+ssao_detail = 0.2
+ssao_horizon = 0.06
+ssao_ao_channel_affect = 0.5
 glow_enabled = true
 glow_intensity = 0.4
 glow_bloom = 0.1
@@ -172,12 +182,24 @@ camera_attributes = SubResource("CameraAttributesPractical_ainke")
 script = ExtResource("12_6rpr1")
 enable_editor_time = false
 enable_game_time = false
-current_time = 15.682
+current_time = 14.25
+sun_energy = 1.2
+sky_contribution = 0.55
+ambient_energy = 0.50
 metadata/_custom_type_script = "uid://deo0gxkmk2ahd"
 
 [node name="SunLight" type="DirectionalLight3D" parent="Sky3D" unique_id=889199116]
 transform = Transform3D(0, -0.6049699, -0.7962483, -0.36520752, -0.7412484, 0.5631823, -0.9309262, 0.29079586, -0.22093955, -0.7962483, 0.5631823, -0.22093955)
+light_energy = 1.2
 shadow_enabled = true
+shadow_bias = 0.03
+shadow_normal_bias = 2.0
+directional_shadow_mode = 2
+directional_shadow_split_1 = 0.05
+directional_shadow_split_2 = 0.15
+directional_shadow_split_3 = 0.4
+directional_shadow_blend_splits = true
+directional_shadow_max_distance = 600.0
 
 [node name="MoonLight" type="DirectionalLight3D" parent="Sky3D" unique_id=1624375170]
 transform = Transform3D(0, -0.51897305, -0.8547907, -0.35659954, 0.79859453, -0.48485434, 0.9342574, 0.30481797, -0.18506554, -0.8547906, -0.4848543, -0.18506552)

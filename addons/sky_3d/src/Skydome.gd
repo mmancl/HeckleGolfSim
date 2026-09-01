@@ -262,7 +262,7 @@ func set_equatorial_color(value: Color) -> void:
 
 @export_group("Sun")
 @export_node_path("DirectionalLight3D") var sun_light_path: NodePath = NodePath("../SunLight"): set = set_sun_light_path
-@export var sun_light_energy: float = 0.5: set = set_sun_light_energy
+@export var sun_light_energy: float = 1.2: set = set_sun_light_energy
 @export var sun_disk_color: Color = Color(0.996094, 0.541334, 0.140076): set = set_sun_disk_color
 @export_range(0.0, 100.0) var sun_disk_intensity: float = 30.0: set = set_sun_disk_intensity
 @export_range(0.0, 0.5, 0.001) var sun_disk_size: float = 0.02: set = set_sun_disk_size
@@ -1021,6 +1021,16 @@ func set_sun_light_path(value: NodePath) -> void:
 func update_sun_light_path() -> void:
 	if sun_light_path != null:
 		_sun_light_node = get_node_or_null(sun_light_path) as DirectionalLight3D
+		if _sun_light_node != null:
+			_sun_light_node.shadow_enabled = true
+			_sun_light_node.directional_shadow_max_distance = 600.0
+			_sun_light_node.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+			_sun_light_node.directional_shadow_blend_splits = true
+			_sun_light_node.directional_shadow_split_1 = 0.05
+			_sun_light_node.directional_shadow_split_2 = 0.15
+			_sun_light_node.directional_shadow_split_3 = 0.40
+			_sun_light_node.shadow_bias = 0.03
+			_sun_light_node.shadow_normal_bias = 2.0
 	else:
 		_sun_light_node = null
 

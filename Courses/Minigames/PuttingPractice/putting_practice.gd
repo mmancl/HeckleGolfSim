@@ -108,19 +108,47 @@ func _setup_environment() -> void:
 	# Add DirectionalLight3D
 	var sun = DirectionalLight3D.new()
 	sun.name = "SunLight"
-	sun.transform.basis = Basis(Vector3.RIGHT, deg_to_rad(-60)).rotated(Vector3.UP, deg_to_rad(45))
+	sun.transform.basis = Basis(Vector3.RIGHT, deg_to_rad(-50)).rotated(Vector3.UP, deg_to_rad(45))
 	sun.shadow_enabled = true
+	sun.light_energy = 1.2
+	sun.directional_shadow_max_distance = 200.0
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_blend_splits = true
+	sun.directional_shadow_split_1 = 0.08
+	sun.directional_shadow_split_2 = 0.20
+	sun.directional_shadow_split_3 = 0.50
+	sun.shadow_bias = 0.02
+	sun.shadow_normal_bias = 2.0
 	add_child(sun)
 	
-	# WorldEnvironment with a simple sky
+	# WorldEnvironment with a procedural sky
 	var world_env = WorldEnvironment.new()
 	world_env.name = "WorldEnvironment"
 	
 	var env = Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.45, 0.65, 0.85) # Sky blue
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.6, 0.6, 0.6)
+	env.background_mode = Environment.BG_SKY
+	var sky = Sky.new()
+	var sky_mat = ProceduralSkyMaterial.new()
+	sky_mat.sky_top_color = Color(0.25, 0.55, 0.88)
+	sky_mat.sky_horizon_color = Color(0.60, 0.78, 0.92)
+	sky_mat.ground_bottom_color = Color(0.16, 0.28, 0.18)
+	sky_mat.ground_horizon_color = Color(0.60, 0.78, 0.92)
+	sky.sky_material = sky_mat
+	env.sky = sky
+	
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy = 0.50
+	env.ambient_light_sky_contribution = 0.55
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_white = 5.0
+	env.tonemap_exposure = 1.0
+	env.ssao_enabled = true
+	env.ssao_radius = 2.0
+	env.ssao_intensity = 1.2
+	env.ssao_power = 1.5
+	env.ssao_detail = 0.2
+	env.ssao_horizon = 0.05
+	env.ssao_ao_channel_affect = 0.5
 	
 	world_env.environment = env
 	add_child(world_env)
@@ -775,7 +803,7 @@ func _update_grid_button_state() -> void:
 func _setup_player() -> void:
 	player = PlayerScene.instantiate()
 	add_child(player)
-	var start_pos = Vector3(0.0, get_height(0.0, 0.0) + 0.02, 0.0)
+	var start_pos = Vector3(0.0, get_height(0.0, 0.0) + GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET, 0.0)
 	player.global_position = start_pos
 	
 	# Disable default process update
@@ -924,13 +952,13 @@ func _spawn_flagpole(pos: Vector3) -> void:
 # ----------------- BALL TELEPORTATION & DYNAMIC AIMING -----------------
 
 func _reset_ball_position() -> void:
-	var start_pos = Vector3(0.0, get_height(0.0, 0.0) + 0.02, 0.0)
+	var start_pos = Vector3(0.0, get_height(0.0, 0.0) + GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET, 0.0)
 	_teleport_ball(start_pos)
 
 func _teleport_ball(pos: Vector3) -> void:
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
-	pos.y = get_height(pos.x, pos.z) + 0.02
+	pos.y = get_height(pos.x, pos.z) + GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET
 	player.global_position = pos
 	player.ball.spawn_position = pos
 	player.ball.reset()
@@ -1041,13 +1069,6 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	# Connect to the player's launch monitor shot handler
 	player._on_tcp_client_hit_ball(data)
 
-	# Early Trajectory Prediction for Suspense
-	if has_node("/root/TensionManager") and not last_putt_target_hole.is_zero_approx():
-		var prediction = TensionManager.predict_shot_outcome(player.ball.global_position, player.ball.velocity, true, last_putt_target_hole)
-		if prediction.get("will_enter_zone", false):
-			print("[PuttingPractice] Early suspense predicted for putt! Scheduling heartbeat.")
-			TensionManager.schedule_early_tension("putt", 0.35)
-
 	# Show the banner
 	var speed_mph = data.get("Speed", 0.0)
 	_show_banner("Putt Hit (Launch Monitor)! Speed: %.1f mph" % speed_mph)
@@ -1055,29 +1076,13 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 # ----------------- DYNAMIC CUP-ENTRY & CAMERA FOLLOW -----------------
 
 func _physics_process(delta: float) -> void:
-	# Camera Smooth Follow & Tension
+	# Camera Smooth Follow
 	if player and player.ball:
 		var ball_state = player.ball.state
 		if ball_state == PhysicsEnums.BallState.FLIGHT or ball_state == PhysicsEnums.BallState.ROLLOUT:
 			camera_following = true
 			var ball_pos = player.ball.global_position
 			var target_cam_pos = ball_pos + last_camera_offset
-
-			# Live distance check to hole
-			if not last_putt_target_hole.is_zero_approx():
-				var dist_to_hole = Vector2(ball_pos.x, ball_pos.z).distance_to(Vector2(last_putt_target_hole.x, last_putt_target_hole.z))
-				if dist_to_hole <= 1.524: # 5 feet in meters
-					if has_node("/root/TensionManager") and not TensionManager.is_active():
-						TensionManager.start_tension("putt")
-
-			# If tension active, tighten camera closer to ball and cup
-			if has_node("/root/TensionManager") and TensionManager.is_active() and not last_putt_target_hole.is_zero_approx():
-				var diff_to_hole = (last_putt_target_hole - ball_pos)
-				diff_to_hole.y = 0.0
-				var back_dir = -diff_to_hole.normalized() if not diff_to_hole.is_zero_approx() else Vector3.BACK
-				var close_offset = back_dir * 2.2 + Vector3.UP * 1.1
-				target_cam_pos = ball_pos + close_offset
-
 			$Camera3D.global_position = $Camera3D.global_position.lerp(target_cam_pos, delta * 8.0)
 			$Camera3D.look_at(ball_pos)
 		else:
