@@ -94,7 +94,6 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 2
 theme_override_font_sizes/font_size = 36
 text = "Heckle Golf Simulator"
 horizontal_alignment = 1
@@ -193,7 +192,6 @@ theme_override_styles/disabled = SubResource("StyleBoxEmpty_u0e1r")
 theme_override_styles/focus = SubResource("StyleBoxEmpty_ejg71")
 icon = ExtResource("12_discord_icon")
 icon_alignment = 1
-vertical_icon_alignment = 1
 expand_icon = true
 
 [node name="TopStripAccent" type="ColorRect" parent="VerticalLayout" unique_id=47812395]

@@ -464,6 +464,8 @@ func _notification(what: int) -> void:
 
 
 func _initialize() -> void:
+	var is_mobile_platform: bool = OS.get_name() == "Android" or OS.get_name() == "iOS"
+
 	# Create default environment
 	if environment == null:
 		environment = Environment.new()
@@ -475,25 +477,34 @@ func _initialize() -> void:
 		environment.tonemap_mode = Environment.TONE_MAPPER_ACES
 		environment.tonemap_white = 5.0
 		environment.tonemap_exposure = 1.0
-		environment.ssao_enabled = true
-		environment.ssao_radius = 2.0
-		environment.ssao_intensity = 1.2
-		environment.ssao_power = 1.5
-		environment.ssao_detail = 0.2
-		environment.ssao_horizon = 0.06
-		environment.ssao_ao_channel_affect = 0.5
+		if is_mobile_platform:
+			environment.ssao_enabled = false
+		else:
+			environment.ssao_enabled = true
+			environment.ssao_radius = 2.0
+			environment.ssao_intensity = 1.2
+			environment.ssao_power = 1.5
+			environment.ssao_detail = 0.2
+			environment.ssao_horizon = 0.06
+			environment.ssao_ao_channel_affect = 0.5
 		emit_signal("environment_changed", environment)
 	else:
-		environment.ssao_enabled = true
-		environment.ssao_radius = 2.0
-		environment.ssao_intensity = 1.2
-		environment.ssao_detail = 0.2
+		if is_mobile_platform:
+			environment.ssao_enabled = false
+		else:
+			environment.ssao_enabled = true
+			environment.ssao_radius = 2.0
+			environment.ssao_intensity = 1.2
+			environment.ssao_detail = 0.2
 
 	# Setup Sky material & Upgrade old
 	if environment.sky == null or environment.sky.sky_material is PhysicalSkyMaterial:
 		environment.sky = Sky.new()
 		environment.sky.sky_material = ShaderMaterial.new()
 		environment.sky.sky_material.shader = sky_shader
+	
+	if is_mobile_platform and environment.sky != null:
+		environment.sky.process_mode = Sky.PROCESS_MODE_QUALITY
 		
 	# Set a reference to the sky material for easy access.
 	sky_material = environment.sky.sky_material
@@ -514,15 +525,25 @@ func _initialize() -> void:
 	
 	if sun != null:
 		sun.shadow_enabled = true
-		sun.directional_shadow_max_distance = 600.0
-		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-		sun.directional_shadow_blend_splits = true
-		sun.directional_shadow_split_1 = 0.05
-		sun.directional_shadow_split_2 = 0.15
-		sun.directional_shadow_split_3 = 0.40
+		if is_mobile_platform:
+			sun.directional_shadow_max_distance = 200.0
+			sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+			sun.directional_shadow_blend_splits = true
+			sun.directional_shadow_split_1 = 0.1
+		else:
+			sun.directional_shadow_max_distance = 600.0
+			sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+			sun.directional_shadow_blend_splits = true
+			sun.directional_shadow_split_1 = 0.05
+			sun.directional_shadow_split_2 = 0.15
+			sun.directional_shadow_split_3 = 0.40
 		sun.shadow_bias = 0.03
 		sun.shadow_normal_bias = 2.0
 		sun.light_energy = sun_energy
+	
+	if is_mobile_platform:
+		clouds_enabled = false
+		fog_enabled = false
 	
 	if has_node("MoonLight"):
 		moon = $MoonLight

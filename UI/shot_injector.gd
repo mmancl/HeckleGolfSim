@@ -41,6 +41,8 @@ func _populate_payloads() -> void:
 	payload_option.select(selected)
 
 
+var _club_data: Dictionary = {}
+
 func _apply_payload(_payload_path: String) -> void:
 	var file := FileAccess.open(_payload_path, FileAccess.READ)
 	if file:
@@ -48,6 +50,9 @@ func _apply_payload(_payload_path: String) -> void:
 		var json := JSON.new()
 		if json.parse(json_text) == OK:
 			var parsed = json.data
+			_club_data.clear()
+			if parsed.has("ClubData"):
+				_club_data = parsed["ClubData"].duplicate()
 			if parsed.has("BallData"):
 				var data = parsed["BallData"].duplicate()
 				$SpeedSpinBox.value = float(data["Speed"])
@@ -55,7 +60,7 @@ func _apply_payload(_payload_path: String) -> void:
 				$TotalSpinSpinBox.value = float(data["TotalSpin"])
 				$HLASpinBox.value = float(data["HLA"])
 				$VLASpinBox.value = float(data["VLA"])
-				
+
 
 func _on_button_pressed() -> void:
 	# Inject the spinboxes values within the shot data
@@ -65,6 +70,9 @@ func _on_button_pressed() -> void:
 	data["TotalSpin"] = $TotalSpinSpinBox.value
 	data["HLA"] = $HLASpinBox.value
 	data["VLA"] = $VLASpinBox.value
+	
+	for k in _club_data.keys():
+		data[k] = _club_data[k]
 	
 	print("Local shot injection payload: ", JSON.stringify(data))
 	

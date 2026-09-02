@@ -131,7 +131,25 @@ public partial class TcpServer : Node
 				&& _shotData.TryGetValue("BallData", out var ballDataVar)
 				&& ballDataVar.VariantType == Variant.Type.Dictionary)
 			{
-				EmitSignal(SignalName.HitBall, ballDataVar.AsGodotDictionary());
+				var hitData = ballDataVar.AsGodotDictionary().Duplicate();
+				if (_shotData.TryGetValue("ClubData", out var clubDataVar)
+					&& clubDataVar.VariantType == Variant.Type.Dictionary)
+				{
+					var clubData = clubDataVar.AsGodotDictionary();
+					foreach (var kvp in clubData)
+					{
+						hitData[kvp.Key] = kvp.Value;
+					}
+					if (clubData.TryGetValue("Speed", out var cs)) hitData["ClubSpeed"] = cs;
+					if (clubData.TryGetValue("AngleOfAttack", out var aoa)) hitData["AttackAngle"] = aoa;
+					if (clubData.TryGetValue("FaceToTarget", out var ft)) hitData["FaceAngle"] = ft;
+					if (clubData.TryGetValue("Path", out var cp)) hitData["ClubPath"] = cp;
+					if (clubData.TryGetValue("FaceToPath", out var ftp)) hitData["FaceToPath"] = ftp;
+					if (clubData.TryGetValue("SmashFactor", out var sf)) hitData["SmashFactor"] = sf;
+					if (clubData.TryGetValue("DynamicLoft", out var dl)) hitData["DynamicLoft"] = dl;
+				}
+
+				EmitSignal(SignalName.HitBall, hitData);
 				return;
 			}
 		}

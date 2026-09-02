@@ -23,6 +23,8 @@ var square_club_option : OptionButton = null
 var square_handedness_option : OptionButton = null
 var temperature_unit_label : Label = null
 var altitude_unit_label : Label = null
+var _stats_count_label : Label = null
+var _stat_limit_modal : Control = null
 
 const SQUARE_UI_LOG_PREFIX := "[SquareUI]"
 const SQUARE_CLUBS := {
@@ -158,12 +160,13 @@ func _ready() -> void:
 		
 		# Set clear, attractive tab labels
 		tab_container.set_tab_title(0, "⛳ Gameplay")
-		tab_container.set_tab_title(1, "📷 Camera")
-		tab_container.set_tab_title(2, "📡 Launch Monitor")
-		tab_container.set_tab_title(3, "🎙 Announcer")
+		tab_container.set_tab_title(1, "📊 Stats")
+		tab_container.set_tab_title(2, "📷 Camera")
+		tab_container.set_tab_title(3, "📡 Launch Monitor")
+		tab_container.set_tab_title(4, "🎙 Announcer")
 
 	# Apply touch-friendly scrollbar styling and kinetic swipe scrolling to all tabs
-	for tab_name in ["Gameplay", "Camera", "LaunchMonitor", "Announcer"]:
+	for tab_name in ["Gameplay", "Stats", "Camera", "LaunchMonitor", "Announcer"]:
 		var tab_scroll = get_node_or_null("MarginContainer/VBoxContainer/TabContainer/" + tab_name) as ScrollContainer
 		if tab_scroll != null:
 			ThemeManager.apply_scroll_container_style(tab_scroll, 28)
@@ -231,6 +234,7 @@ func _ready() -> void:
 	$MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector/CheckButton.set_pressed_no_signal(
 		GlobalSettings.range_settings.shot_injector_enabled.value
 	)
+	_setup_displayed_stats_section()
 	_setup_square_monitor_section()
 	_setup_hecklelinks_announcer_section()
 
@@ -390,6 +394,9 @@ func _on_exit_button_pressed() -> void:
 
 
 func _on_reset_layout_button_pressed() -> void:
+	GlobalSettings.range_settings.displayed_stats.set_value(StatDefinitions.DEFAULT_ENABLED_STAT_IDS.duplicate())
+	GlobalSettings.save_settings()
+	_setup_displayed_stats_section()
 	var grid_canvas = get_node_or_null("../../../GridCanvas")
 	if grid_canvas != null and grid_canvas.has_method("reset_layout"):
 		grid_canvas.reset_layout()
@@ -1254,3 +1261,209 @@ func _create_slider_setting_row(label_prefix: String, setting_name: String, min_
 	)
 	
 	return row
+
+
+func _setup_displayed_stats_section() -> void:
+	var root := get_node_or_null("MarginContainer/VBoxContainer/TabContainer/Stats/MarginContainer/StatsVBox")
+	if root == null:
+		return
+	for child in root.get_children():
+		child.queue_free()
+
+	# --- Header & Instruction Card ---
+	var header_card := PanelContainer.new()
+	ThemeManager.apply_card_panel_style(header_card, true, 10, 16, 14, 16, 14)
+	
+	var header_vbox := VBoxContainer.new()
+	header_vbox.add_theme_constant_override("separation", 6)
+	
+	var header_top_hbox := HBoxContainer.new()
+	var header_title := Label.new()
+	header_title.text = "🎯 On-Screen Displayed Statistics"
+	header_title.add_theme_font_size_override("font_size", 20)
+	header_title.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	header_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_top_hbox.add_child(header_title)
+	
+	_stats_count_label = Label.new()
+	_stats_count_label.add_theme_font_size_override("font_size", 18)
+	header_top_hbox.add_child(_stats_count_label)
+	header_vbox.add_child(header_top_hbox)
+	
+	var header_desc := Label.new()
+	header_desc.text = "Select up to 12 metrics to display in on-screen tiles during play. You can drag and drop tiles on the range to customize your layout. Only 12 stats can be enabled at a time."
+	header_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	header_desc.add_theme_font_size_override("font_size", 16)
+	header_desc.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	header_vbox.add_child(header_desc)
+	
+	header_card.add_child(header_vbox)
+	root.add_child(header_card)
+
+	_update_stats_count_label()
+
+	# --- Categorized Stat Cards ---
+	var categories = ["Ball Flight", "Club Delivery", "Trajectory"]
+	for cat in categories:
+		var cat_label := Label.new()
+		cat_label.text = cat.to_upper() + " METRICS"
+		cat_label.add_theme_font_size_override("font_size", 18)
+		cat_label.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
+		root.add_child(cat_label)
+
+		for stat in StatDefinitions.STATS:
+			if stat.get("category", "") != cat:
+				continue
+			var card = _create_stat_card_row(stat)
+			root.add_child(card)
+
+		var cat_sep := HSeparator.new()
+		root.add_child(cat_sep)
+
+
+func _update_stats_count_label() -> void:
+	if _stats_count_label == null:
+		return
+	var active_count: int = GlobalSettings.range_settings.displayed_stats.value.size()
+	var max_count := StatDefinitions.MAX_DISPLAYED_STATS
+	_stats_count_label.text = "Active: %d / %d (Max %d)" % [active_count, max_count, max_count]
+	if active_count >= max_count:
+		_stats_count_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.3))
+	else:
+		_stats_count_label.add_theme_color_override("font_color", Color(0.4, 0.9, 0.6))
+
+
+func _create_stat_card_row(stat: Dictionary) -> PanelContainer:
+	var card := PanelContainer.new()
+	ThemeManager.apply_card_panel_style(card, false, 8, 16, 12, 16, 12)
+	
+	var hbox := HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 16)
+	hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	
+	var text_vbox := VBoxContainer.new()
+	text_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text_vbox.add_theme_constant_override("separation", 4)
+	
+	var title_hbox := HBoxContainer.new()
+	title_hbox.add_theme_constant_override("separation", 10)
+	
+	var title_lbl := Label.new()
+	title_lbl.text = str(stat.get("name", ""))
+	title_lbl.add_theme_font_size_override("font_size", 18)
+	title_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	title_hbox.add_child(title_lbl)
+	
+	var u_str = str(stat.get("units_imperial", ""))
+	var short_badge := Label.new()
+	short_badge.text = "[Tile: %s | %s]" % [str(stat.get("short_label", "")), u_str]
+	short_badge.add_theme_font_size_override("font_size", 14)
+	short_badge.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_DIM)
+	title_hbox.add_child(short_badge)
+	
+	text_vbox.add_child(title_hbox)
+	
+	var desc_lbl := Label.new()
+	desc_lbl.text = str(stat.get("description", ""))
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_lbl.add_theme_font_size_override("font_size", 15)
+	desc_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	text_vbox.add_child(desc_lbl)
+	
+	hbox.add_child(text_vbox)
+	
+	var check_btn := CheckButton.new()
+	check_btn.custom_minimum_size = Vector2(72, 48)
+	var stat_id := str(stat.get("id", ""))
+	var active_stats: Array = GlobalSettings.range_settings.displayed_stats.value
+	check_btn.set_pressed_no_signal(active_stats.has(stat_id))
+	
+	check_btn.toggled.connect(func(toggled_on: bool):
+		_on_stat_toggled(stat_id, toggled_on, check_btn)
+	)
+	
+	hbox.add_child(check_btn)
+	card.add_child(hbox)
+	return card
+
+
+func _on_stat_toggled(stat_id: String, toggled_on: bool, btn: CheckButton) -> void:
+	var active_stats: Array = GlobalSettings.range_settings.displayed_stats.value.duplicate()
+	if toggled_on:
+		if active_stats.size() >= StatDefinitions.MAX_DISPLAYED_STATS:
+			# Max limit reached! Revert toggle and display modal warning prompt
+			btn.set_pressed_no_signal(false)
+			_show_stat_limit_popup()
+			return
+		if not active_stats.has(stat_id):
+			active_stats.append(stat_id)
+	else:
+		active_stats.erase(stat_id)
+		
+	GlobalSettings.range_settings.displayed_stats.set_value(active_stats)
+	GlobalSettings.save_settings()
+	_update_stats_count_label()
+
+
+func _show_stat_limit_popup() -> void:
+	if _stat_limit_modal != null and is_instance_valid(_stat_limit_modal):
+		_stat_limit_modal.queue_free()
+		_stat_limit_modal = null
+		
+	var overlay := ColorRect.new()
+	overlay.name = "StatLimitOverlay"
+	overlay.color = Color(0, 0, 0, 0.70)
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	
+	var modal := PanelContainer.new()
+	modal.custom_minimum_size = Vector2(520, 270)
+	ThemeManager.apply_modal_style(modal, 14)
+	
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	
+	var title := Label.new()
+	title.text = "⚠️ Maximum Display Limit Reached"
+	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(title)
+	
+	var msg := Label.new()
+	msg.text = "You can display a maximum of 12 stats on screen at a time.\n\nPlease disable one of your currently enabled stats before enabling this one to keep it at 12 total displayed stats."
+	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	msg.add_theme_font_size_override("font_size", 17)
+	msg.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	vbox.add_child(msg)
+	
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 10)
+	vbox.add_child(spacer)
+	
+	var ok_btn := Button.new()
+	ok_btn.text = "Got It"
+	ok_btn.custom_minimum_size = Vector2(160, 52)
+	ok_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	ThemeManager.apply_primary_button_style(ok_btn, 8)
+	ok_btn.pressed.connect(func():
+		overlay.queue_free()
+		_stat_limit_modal = null
+	)
+	vbox.add_child(ok_btn)
+	
+	modal.add_child(vbox)
+	overlay.add_child(modal)
+	
+	modal.anchor_left = 0.5
+	modal.anchor_top = 0.5
+	modal.anchor_right = 0.5
+	modal.anchor_bottom = 0.5
+	modal.offset_left = -260
+	modal.offset_top = -135
+	modal.offset_right = 260
+	modal.offset_bottom = 135
+	
+	add_child(overlay)
+	_stat_limit_modal = overlay

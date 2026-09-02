@@ -1023,12 +1023,19 @@ func update_sun_light_path() -> void:
 		_sun_light_node = get_node_or_null(sun_light_path) as DirectionalLight3D
 		if _sun_light_node != null:
 			_sun_light_node.shadow_enabled = true
-			_sun_light_node.directional_shadow_max_distance = 600.0
-			_sun_light_node.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-			_sun_light_node.directional_shadow_blend_splits = true
-			_sun_light_node.directional_shadow_split_1 = 0.05
-			_sun_light_node.directional_shadow_split_2 = 0.15
-			_sun_light_node.directional_shadow_split_3 = 0.40
+			var is_mobile_platform: bool = OS.get_name() == "Android" or OS.get_name() == "iOS"
+			if is_mobile_platform:
+				_sun_light_node.directional_shadow_max_distance = 200.0
+				_sun_light_node.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+				_sun_light_node.directional_shadow_blend_splits = true
+				_sun_light_node.directional_shadow_split_1 = 0.1
+			else:
+				_sun_light_node.directional_shadow_max_distance = 600.0
+				_sun_light_node.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+				_sun_light_node.directional_shadow_blend_splits = true
+				_sun_light_node.directional_shadow_split_1 = 0.05
+				_sun_light_node.directional_shadow_split_2 = 0.15
+				_sun_light_node.directional_shadow_split_3 = 0.40
 			_sun_light_node.shadow_bias = 0.03
 			_sun_light_node.shadow_normal_bias = 2.0
 	else:

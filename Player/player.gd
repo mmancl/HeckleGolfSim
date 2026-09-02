@@ -26,6 +26,7 @@ var ball : GolfBall = null
 var _cached_trees: Array[Node3D] = []
 var _last_tree_cache_time: float = 0.0
 var _has_scanned_trees: bool = false
+var _trees_restored_for_flight: bool = false
 
 signal good_data
 signal bad_data
@@ -119,16 +120,19 @@ func create_new_tracer() -> MeshInstance3D:
 	return new_tracer
 
 
+func clear_tracers() -> void:
+	for tracer in tracers:
+		if is_instance_valid(tracer):
+			tracer.queue_free()
+	tracers.clear()
+	current_tracer = null
+
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(_delta: float) -> void:
 	_handle_tree_occlusion()
 	if _is_putting_on_green():
 		if not tracers.is_empty():
-			for tracer in tracers:
-				if is_instance_valid(tracer):
-					tracer.queue_free()
-			tracers.clear()
-			current_tracer = null
+			clear_tracers()
 
 	if Input.is_action_just_pressed("hit"):
 		_last_starting_pos = ball.global_position
@@ -151,11 +155,7 @@ func _process(_delta: float) -> void:
 		carry = 0.0
 		side_distance = 0.0
 		track_points = false
-		# Clear all tracers
-		for tracer in tracers:
-			tracer.queue_free()
-		tracers.clear()
-		current_tracer = null
+		clear_tracers()
 
 
 func _physics_process(delta: float) -> void:
@@ -186,11 +186,7 @@ func validate_data(data: Dictionary) -> bool:
 
 func reset_ball():
 	ball.reset()
-	# Clear all tracers
-	for tracer in tracers:
-		tracer.queue_free()
-	tracers.clear()
-	current_tracer = null
+	clear_tracers()
 	apex = 0.0
 	carry = 0.0
 	side_distance = 0.0
@@ -218,6 +214,8 @@ func _on_ball_rest() -> void:
 	shot_data["Apex"] = int(apex)
 	shot_data["SideDistance"] = int(side_distance)
 	emit_signal("rest", shot_data)
+	
+	clear_tracers()
 
 
 func get_ball_state():
@@ -305,13 +303,7 @@ func mulligan() -> void:
 	reset_shot_data()
 	ball.spawn_position = _last_starting_pos
 	ball.reset()
-	
-	if not tracers.is_empty():
-		var last_tracer = tracers.pop_back()
-		if is_instance_valid(last_tracer):
-			last_tracer.queue_free()
-		current_tracer = tracers.back() if not tracers.is_empty() else null
-		
+	clear_tracers()
 	apex = 0.0
 	carry = 0.0
 	side_distance = 0.0
@@ -389,13 +381,20 @@ func _restore_all_trees_visibility() -> void:
 			tree.visible = true
 
 func _handle_tree_occlusion() -> void:
+	if MobilePerformance.is_mobile():
+		return
+
 	if ball == null or not is_instance_valid(ball):
 		return
 
 	# Only check tree occlusion when the ball is at rest
 	if ball.state != PhysicsEnums.BallState.REST:
-		_restore_all_trees_visibility()
+		if not _trees_restored_for_flight:
+			_restore_all_trees_visibility()
+			_trees_restored_for_flight = true
 		return
+
+	_trees_restored_for_flight = false
 
 	# Periodically update tree cache (every 2 seconds)
 	var time_now = Time.get_ticks_msec() / 1000.0

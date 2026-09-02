@@ -221,17 +221,25 @@ func _generate_kidney_bean_polygon(base_radius: float, notch: float, lobe: float
 # ========================================
 
 func _setup_environment() -> void:
+	var is_mobile := MobilePerformance.is_mobile()
+
 	var sun = DirectionalLight3D.new()
 	sun.name = "SunLight"
 	sun.transform.basis = Basis(Vector3.RIGHT, deg_to_rad(-52)).rotated(Vector3.UP, deg_to_rad(35))
 	sun.shadow_enabled = true
 	sun.light_energy = 1.2
-	sun.directional_shadow_max_distance = 500.0
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-	sun.directional_shadow_blend_splits = true
-	sun.directional_shadow_split_1 = 0.05
-	sun.directional_shadow_split_2 = 0.15
-	sun.directional_shadow_split_3 = 0.40
+	if is_mobile:
+		sun.directional_shadow_max_distance = 200.0
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+		sun.directional_shadow_blend_splits = true
+		sun.directional_shadow_split_1 = 0.1
+	else:
+		sun.directional_shadow_max_distance = 500.0
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+		sun.directional_shadow_blend_splits = true
+		sun.directional_shadow_split_1 = 0.05
+		sun.directional_shadow_split_2 = 0.15
+		sun.directional_shadow_split_3 = 0.40
 	sun.shadow_bias = 0.03
 	sun.shadow_normal_bias = 2.0
 	add_child(sun)
@@ -243,6 +251,8 @@ func _setup_environment() -> void:
 	env.background_mode = Environment.BG_SKY
 	
 	var sky = Sky.new()
+	if is_mobile:
+		sky.process_mode = Sky.PROCESS_MODE_QUALITY
 	var sky_mat = ProceduralSkyMaterial.new()
 	sky_mat.sky_top_color = Color(0.22, 0.52, 0.86)
 	sky_mat.sky_horizon_color = Color(0.58, 0.76, 0.92)
@@ -258,13 +268,16 @@ func _setup_environment() -> void:
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_white = 5.0
 	env.tonemap_exposure = 1.0
-	env.ssao_enabled = true
-	env.ssao_radius = 2.0
-	env.ssao_intensity = 1.2
-	env.ssao_power = 1.5
-	env.ssao_detail = 0.2
-	env.ssao_horizon = 0.06
-	env.ssao_ao_channel_affect = 0.5
+	if is_mobile:
+		env.ssao_enabled = false
+	else:
+		env.ssao_enabled = true
+		env.ssao_radius = 2.0
+		env.ssao_intensity = 1.2
+		env.ssao_power = 1.5
+		env.ssao_detail = 0.2
+		env.ssao_horizon = 0.06
+		env.ssao_ao_channel_affect = 0.5
 	
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.65, 0.78, 0.88)

@@ -153,9 +153,9 @@ ssao_detail = 0.2
 ssao_horizon = 0.06
 ssao_ao_channel_affect = 0.5
 glow_enabled = true
-glow_intensity = 0.4
-glow_bloom = 0.1
-glow_blend_mode = 0
+glow_intensity = 0.2
+glow_bloom = 0.0
+glow_blend_mode = 1
 
 [sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_ainke"]
 dof_blur_far_enabled = true
@@ -182,15 +182,15 @@ camera_attributes = SubResource("CameraAttributesPractical_ainke")
 script = ExtResource("12_6rpr1")
 enable_editor_time = false
 enable_game_time = false
-current_time = 14.25
-sun_energy = 1.2
+current_time = 13.25
+sun_energy = 1.1
 sky_contribution = 0.55
 ambient_energy = 0.50
 metadata/_custom_type_script = "uid://deo0gxkmk2ahd"
 
 [node name="SunLight" type="DirectionalLight3D" parent="Sky3D" unique_id=889199116]
 transform = Transform3D(0, -0.6049699, -0.7962483, -0.36520752, -0.7412484, 0.5631823, -0.9309262, 0.29079586, -0.22093955, -0.7962483, 0.5631823, -0.22093955)
-light_energy = 1.2
+light_energy = 1.1
 shadow_enabled = true
 shadow_bias = 0.03
 shadow_normal_bias = 2.0
@@ -217,7 +217,7 @@ moon_altitude = -119.00287765558052
 script = ExtResource("14_oe2rx")
 update_in_editor = false
 dome_path = NodePath("../Skydome")
-total_hours = 15.682
+total_hours = 13.25
 day = 28
 month = 5
 

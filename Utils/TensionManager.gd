@@ -8,6 +8,8 @@ signal tension_stopped()
 
 const PUTT_THRESHOLD_METERS := 1.524  # 5 feet in meters
 const CHIP_THRESHOLD_METERS := 3.048  # 10 feet in meters
+const PUTT_MIN_SUSPENSE_DISTANCE_METERS := 12.192  # 40 feet in meters (40.0 * 0.3048)
+const CHIP_MIN_SUSPENSE_DISTANCE_METERS := 30.48   # 100 feet in meters (100.0 * 0.3048)
 const CYCLE_DURATION := 0.80          # ~75 BPM double-thump heartbeat cycle
 
 var tension_active: bool = false
@@ -213,13 +215,28 @@ func is_course_play_active() -> bool:
 
 	return false
 
+# ---------------- SUSPENSE ELIGIBILITY ----------------
+
+func is_shot_eligible_for_suspense(start_pos: Vector3, target_pos: Vector3, is_putt: bool, is_sand: bool = false) -> bool:
+	if not is_course_play_active():
+		return false
+	if target_pos.is_zero_approx():
+		return false
+	var dist_2d = Vector2(start_pos.x, start_pos.z).distance_to(Vector2(target_pos.x, target_pos.z))
+	if is_putt:
+		return dist_2d > PUTT_MIN_SUSPENSE_DISTANCE_METERS
+	else:
+		return is_sand or (dist_2d > CHIP_MIN_SUSPENSE_DISTANCE_METERS)
+
 # ---------------- TRAJECTORY PREDICTION ----------------
 
-func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool, target_pos: Vector3) -> Dictionary:
+func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool, target_pos: Vector3, is_sand: bool = false) -> Dictionary:
 	if not is_course_play_active():
 		return {"will_enter_zone": false, "min_dist": 999.0}
 	if target_pos.is_zero_approx():
 		return {"will_enter_zone": false, "min_dist": 999.0}
+	if not is_shot_eligible_for_suspense(start_pos, target_pos, is_putt, is_sand):
+		return {"will_enter_zone": false, "min_dist": 999.0, "mode": "putt" if is_putt else "chip"}
 
 	var target_2d = Vector2(target_pos.x, target_pos.z)
 	# Broad prediction threshold to start suspense early on shots heading towards the target zone
@@ -301,11 +318,14 @@ func cancel_scheduled_tension() -> void:
 
 # ---------------- LIVE PROXIMITY CHECK ----------------
 
-func check_ball_proximity(ball_pos: Vector3, target_pos: Vector3, is_putt: bool) -> bool:
+func check_ball_proximity(ball_pos: Vector3, target_pos: Vector3, is_putt: bool, shot_start_pos: Vector3 = Vector3.ZERO, is_sand: bool = false) -> bool:
 	if not is_course_play_active():
 		return false
 	if target_pos.is_zero_approx():
 		return false
+	if not shot_start_pos.is_zero_approx():
+		if not is_shot_eligible_for_suspense(shot_start_pos, target_pos, is_putt, is_sand):
+			return false
 
 	var dist_2d = Vector2(ball_pos.x, ball_pos.z).distance_to(Vector2(target_pos.x, target_pos.z))
 	var threshold = PUTT_THRESHOLD_METERS if is_putt else CHIP_THRESHOLD_METERS

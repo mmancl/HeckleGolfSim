@@ -261,7 +261,7 @@ func unlock_achievement(player_name: String, ach_id: String) -> bool:
 
 # --- Evaluation Helpers ---
 
-func check_hole_achievements(player_name: String, hole_par: int, strokes: int, lies_in_hole: Array = [], putt_dist_yards: float = 0.0) -> void:
+func check_hole_achievements(player_name: String, hole_par: int, strokes: int, lies_in_hole: Array = [], putt_dist_yards: float = 0.0, holed_in_cup: bool = true) -> void:
 	if player_name.is_empty() or strokes <= 0:
 		return
 		
@@ -279,8 +279,8 @@ func check_hole_achievements(player_name: String, hole_par: int, strokes: int, l
 	elif diff <= -3:
 		unlock_achievement(player_name, "first_albatross")
 		
-	# Long putt (if holed out with putt >= 10 yards / 30 feet)
-	if putt_dist_yards >= 10.0 and lies_in_hole.size() > 0 and lies_in_hole[-1] == "green":
+	# Long putt (if holed out with putt >= 10 yards / 30 feet directly into cup, never from gimme range)
+	if holed_in_cup and putt_dist_yards >= 10.0 and lies_in_hole.size() > 0 and lies_in_hole[-1] == "green":
 		unlock_achievement(player_name, "long_putt")
 		
 	# Sand save: Par or better after hitting out of a bunker

@@ -200,12 +200,18 @@ static func _build_and_save_course_scene(
 	sun.rotation_degrees = Vector3(-45, 45, 0)
 	sun.shadow_enabled = true
 	sun.light_energy = 1.2
-	sun.directional_shadow_max_distance = 600.0
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-	sun.directional_shadow_blend_splits = true
-	sun.directional_shadow_split_1 = 0.05
-	sun.directional_shadow_split_2 = 0.15
-	sun.directional_shadow_split_3 = 0.40
+	if MobilePerformance.is_mobile():
+		sun.directional_shadow_max_distance = 200.0
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+		sun.directional_shadow_blend_splits = true
+		sun.directional_shadow_split_1 = 0.1
+	else:
+		sun.directional_shadow_max_distance = 600.0
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+		sun.directional_shadow_blend_splits = true
+		sun.directional_shadow_split_1 = 0.05
+		sun.directional_shadow_split_2 = 0.15
+		sun.directional_shadow_split_3 = 0.40
 	sun.shadow_bias = 0.03
 	sun.shadow_normal_bias = 2.0
 	sky_env.add_child(sun)
@@ -976,7 +982,26 @@ static func _build_hole_unified_terrain(
 	mat.set_shader_parameter("ao_green", load("res://Courses/Environments/grass-green/ao.png"))
 	mat.set_shader_parameter("ao_fairway", load("res://Courses/Environments/grass-fairway/ao.png"))
 	mat.set_shader_parameter("ao_bunker", load("res://Courses/Environments/sand-bunker/ao.png"))
-	mat.set_shader_parameter("ao_mulch", load("res://Courses/Environments/tree-bark/ao.png"))
+	if ResourceLoader.exists("res://Courses/Environments/tree-bark/ao.png"):
+		mat.set_shader_parameter("ao_mulch", load("res://Courses/Environments/tree-bark/ao.png"))
+
+	# Roughness Maps
+	mat.set_shader_parameter("roughness_tex_rough", load("res://Courses/Environments/grass-rough/roughness.png"))
+	mat.set_shader_parameter("roughness_tex_green", load("res://Courses/Environments/grass-green/roughness.png"))
+	mat.set_shader_parameter("roughness_tex_fairway", load("res://Courses/Environments/grass-fairway/roughness.png"))
+	mat.set_shader_parameter("roughness_tex_bunker", load("res://Courses/Environments/sand-bunker/roughness.png"))
+	if ResourceLoader.exists("res://Courses/Environments/tree-bark/roughness.png"):
+		mat.set_shader_parameter("roughness_tex_mulch", load("res://Courses/Environments/tree-bark/roughness.png"))
+
+	# Height Maps
+	mat.set_shader_parameter("height_rough", load("res://Courses/Environments/grass-rough/height.png"))
+	mat.set_shader_parameter("height_green", load("res://Courses/Environments/grass-green/height.png"))
+	mat.set_shader_parameter("height_fairway", load("res://Courses/Environments/grass-fairway/height.png"))
+	mat.set_shader_parameter("height_bunker", load("res://Courses/Environments/sand-bunker/height.png"))
+	if ResourceLoader.exists("res://Courses/Environments/tree-bark/height.png"):
+		mat.set_shader_parameter("height_mulch", load("res://Courses/Environments/tree-bark/height.png"))
+
+	mat.set_shader_parameter("sun_direction", Vector3(-0.45, -0.65, -0.60).normalized())
 
 	arr_mesh.surface_set_material(0, mat)
 

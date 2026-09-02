@@ -32,6 +32,7 @@ var green_speed := Setting.new(10.0, 1.0, 50.0)
 var phone_cam_url := Setting.new("")
 var use_phone_stream := Setting.new(false)
 var tension_effects_enabled := Setting.new(true)
+var displayed_stats := Setting.new(StatDefinitions.DEFAULT_ENABLED_STAT_IDS.duplicate())
 
 func _init():
 	init({
@@ -66,6 +67,7 @@ func _init():
 		"phone_cam_url": phone_cam_url,
 		"use_phone_stream": use_phone_stream,
 		"tension_effects_enabled": tension_effects_enabled,
+		"displayed_stats": displayed_stats,
 	})
 
 

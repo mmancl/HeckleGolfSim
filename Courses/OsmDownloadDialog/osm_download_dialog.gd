@@ -42,6 +42,11 @@ func _ready() -> void:
 	if loader_script != null:
 		_loader = loader_script.new()
 		add_child(_loader)
+		if _loader.has_signal("DownloadProgress"):
+			_loader.DownloadProgress.connect(func(msg: String):
+				if _download_in_progress and is_instance_valid(self):
+					status_label.text = msg
+			)
 	else:
 		status_label.text = "Error: Failed to load OsmMapLoader.cs script."
 		search_button.disabled = true
@@ -54,6 +59,7 @@ func _on_search_pressed() -> void:
 		status_label.text = "Please enter a search query."
 		return
 		
+	status_label.add_theme_color_override("font_color", Color(0.78, 0.82, 0.88, 1.0))
 	status_label.text = "Searching OpenStreetMap for '" + query + "'..."
 	_set_ui_disabled(true)
 	results_list.clear()
@@ -104,6 +110,7 @@ func _on_download_pressed() -> void:
 	var lat = course.get("lat", 0.0)
 	var lon = course.get("lon", 0.0)
 	
+	status_label.add_theme_color_override("font_color", Color(0.78, 0.82, 0.88, 1.0))
 	status_label.text = "Downloading and generating 3D map for '" + course_name + "'..."
 	_set_ui_disabled(true)
 	download_button.disabled = true
@@ -124,6 +131,7 @@ func _on_download_pressed() -> void:
 	_download_in_progress = false
 	spinner.visible = false
 	if success:
+		status_label.add_theme_color_override("font_color", Color(0.4, 0.9, 0.4, 1.0))
 		var msg = ""
 		if _loader.has_method("GetGenerationMessage"):
 			msg = _loader.GetGenerationMessage()
@@ -139,13 +147,14 @@ func _on_download_pressed() -> void:
 	else:
 		if notice_panel != null:
 			notice_panel.visible = false
+		status_label.add_theme_color_override("font_color", Color(1.0, 0.45, 0.45, 1.0))
 		var msg = ""
 		if _loader.has_method("GetGenerationMessage"):
 			msg = _loader.GetGenerationMessage()
 		if msg != "":
 			status_label.text = msg
 		else:
-			status_label.text = "Error: Failed to download or generate course data."
+			status_label.text = "Error: Course generation timed out or failed. Please retry the download, and if it continues to fail, please log a bug."
 		_set_ui_disabled(false)
 		download_button.disabled = false
 		cancel_button.disabled = false

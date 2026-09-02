@@ -188,6 +188,8 @@ func start_hole() -> void:
 	var current_hole = hole_info[hole_id]
 	var tee_boxes = current_hole.get("Tee Boxes", {})
 	
+	current_club = "Dr"
+	
 	# Reset states for current hole
 	for p in players:
 		p["strokes"] = 0
@@ -201,8 +203,8 @@ func start_hole() -> void:
 		# Set player position to their chosen tee box
 		var tee_color: String = p["tee"]
 		var tee_pos = tee_boxes.get(tee_color, [0.0, 0.0])
-		var is_driver = current_club.to_lower() in ["dr", "driver", "1w"]
-		var offset_y = 0.059435 if is_driver else 0.021335
+		var is_driver = true
+		var offset_y = 0.059435
 		p["position"] = Vector3(tee_pos[0], offset_y, tee_pos[1])
 		p["shot_history"].clear()
 		p["last_aim_target_pos"] = Vector3.ZERO
@@ -360,7 +362,7 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 				get_node("/root/AnnouncerEngine").call("AnnounceHoleScore", active_player["name"], active_player["strokes"], par)
 			if has_node("/root/AchievementManager"):
 				var putt_dist = active_player.get("last_putt_dist_yards", 0.0)
-				get_node("/root/AchievementManager").check_hole_achievements(active_player.get("name", ""), par, active_player["strokes"], active_player.get("lies_in_hole", []), putt_dist)
+				get_node("/root/AchievementManager").check_hole_achievements(active_player.get("name", ""), par, active_player["strokes"], active_player.get("lies_in_hole", []), putt_dist, true)
 		else:
 			# Play clap if drive lands in fairway, or ball lands on green in par-1 or less strokes
 			var landed_in_fairway = (par >= 4 and active_player["strokes"] == 1 and active_player.get("lie_type", "") == "fairway")
@@ -658,8 +660,8 @@ func _apply_gimme(active_player, extra_strokes: int, hole_id: String) -> void:
 		get_node("/root/AnnouncerEngine").call("AnnounceHoleScore", active_player["name"], active_player["strokes"], par)
 		
 	if has_node("/root/AchievementManager") and not practice_mode_active:
-		var putt_dist = active_player.get("last_putt_dist_yards", 0.0)
-		get_node("/root/AchievementManager").check_hole_achievements(active_player.get("name", ""), par, active_player["strokes"], active_player.get("lies_in_hole", []), putt_dist)
+		# Putting achievements require sinking the putt into the cup, so gimmes cannot earn them
+		get_node("/root/AchievementManager").check_hole_achievements(active_player.get("name", ""), par, active_player["strokes"], active_player.get("lies_in_hole", []), 0.0, false)
 
 
 func add_new_player(player_name: String, tee_color: String) -> void:

@@ -62,9 +62,9 @@ func _init() -> void:
 func _ready() -> void:
 	set_dome_path(dome_path)
 	
-	# Bright, angled afternoon golf sun (2:15 PM) for crisp hill shadows and clear illumination
-	var default_time := 14.25
-	if total_hours > 0.0 and abs(total_hours - 12.0) > 0.001:
+	# Early afternoon golf sun (1:15 PM / 13.25) for clean high lighting with subtle slope shadows
+	var default_time := 13.25
+	if total_hours >= 10.0 and total_hours <= 16.0:
 		default_time = total_hours
 	set_total_hours(default_time)
 	update_in_game = false

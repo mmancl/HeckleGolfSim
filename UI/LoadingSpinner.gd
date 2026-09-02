@@ -9,6 +9,7 @@ class_name LoadingSpinner
 var _angle: float = 0.0
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	# Ensure the control uses a reasonable default size if not explicitly set
 	if custom_minimum_size == Vector2.ZERO:
 		custom_minimum_size = Vector2(radius * 2 + thickness + 10, radius * 2 + thickness + 10)

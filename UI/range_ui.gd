@@ -402,40 +402,27 @@ func _process(_delta: float) -> void:
 
 func set_data(data: Dictionary) -> void:
 	_last_shot_data = data.duplicate()
-	if GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL:
-		$GridCanvas/Distance.set_data(data["Distance"])
-		$GridCanvas/Carry.set_data(data["Carry"])
-		$GridCanvas/Side.set_data(data["Offline"])
-		$GridCanvas/Apex.set_data(data["Apex"])
-		$GridCanvas/Speed.set_units("mph")
-		$GridCanvas/Speed.set_data(str(data["Speed"]))
-		$GridCanvas/BackSpin.set_units("rpm")
-		$GridCanvas/BackSpin.set_data(str(data["BackSpin"]))
-		$GridCanvas/SideSpin.set_units("rpm")
-		$GridCanvas/SideSpin.set_data(str(data["SideSpin"]))
-		$GridCanvas/TotalSpin.set_units("rpm")
-		$GridCanvas/TotalSpin.set_data(str(data["TotalSpin"]))
-		$GridCanvas/SpinAxis.set_units("deg")
-		$GridCanvas/SpinAxis.set_data(str(data["SpinAxis"]))
-		$GridCanvas/VLA.set_data(_format_angle(data.get("VLA")))
-		$GridCanvas/HLA.set_data(_format_angle(data.get("HLA")))
-	else:
-		$GridCanvas/Distance.set_data(data["Distance"])
-		$GridCanvas/Carry.set_data(data["Carry"])
-		$GridCanvas/Side.set_data(data["Offline"])
-		$GridCanvas/Apex.set_data(data["Apex"])
-		$GridCanvas/Speed.set_units("m/s")
-		$GridCanvas/Speed.set_data(str(data["Speed"]))
-		$GridCanvas/BackSpin.set_units("rpm")
-		$GridCanvas/BackSpin.set_data(str(data["BackSpin"]))
-		$GridCanvas/SideSpin.set_units("rpm")
-		$GridCanvas/SideSpin.set_data(str(data["SideSpin"]))
-		$GridCanvas/TotalSpin.set_units("rpm")
-		$GridCanvas/TotalSpin.set_data(str(data["TotalSpin"]))
-		$GridCanvas/SpinAxis.set_units("deg")
-		$GridCanvas/SpinAxis.set_data(str(data["SpinAxis"]))
-		$GridCanvas/VLA.set_data(_format_angle(data.get("VLA")))
-		$GridCanvas/HLA.set_data(_format_angle(data.get("HLA")))
+	var is_imperial: bool = GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL if has_node("/root/GlobalSettings") else true
+
+	var grid = get_node_or_null("GridCanvas")
+	if grid != null:
+		for child in grid.get_children():
+			if child.name == "ClubSelector":
+				continue
+			var stat_id = child.name
+			var stat_def = StatDefinitions.get_stat_by_id(stat_id)
+			if stat_def.is_empty():
+				continue
+
+			var u_str: String = str(stat_def.get("units_imperial" if is_imperial else "units_metric", ""))
+			if child.has_method("set_units"):
+				child.call("set_units", u_str)
+
+			var val = data.get(stat_id, "---")
+			if stat_id == "VLA" or stat_id == "HLA":
+				val = _format_angle(val)
+			if child.has_method("set_data"):
+				child.call("set_data", str(val))
 	
 	if is_golfer_camera_visible():
 		trigger_swing_replay_modal(data)
@@ -640,26 +627,45 @@ func _setup_prev_shot_ui() -> void:
 	_prev_shot_popup = Panel.new()
 	_prev_shot_popup.name = "PrevShotPopup"
 	_prev_shot_popup.visible = false
-	_prev_shot_popup.custom_minimum_size = Vector2(400, 300)
+	_prev_shot_popup.custom_minimum_size = Vector2(460, 420)
 	_prev_shot_popup.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_prev_shot_popup.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	ThemeManager.apply_modal_style(_prev_shot_popup, 12)
 	
 	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 10)
-	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 12)
+	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vbox.offset_left = 16
+	vbox.offset_top = 16
+	vbox.offset_right = -16
+	vbox.offset_bottom = -16
 	
 	var title = Label.new()
-	title.text = "Previous Shot Details"
+	title.text = "📊 Previous Shot Details"
+	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(title)
 	
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	ThemeManager.apply_scroll_container_style(scroll, 24)
+	
 	_prev_shot_data_label = Label.new()
 	_prev_shot_data_label.text = "No shot data recorded."
-	vbox.add_child(_prev_shot_data_label)
+	_prev_shot_data_label.add_theme_font_size_override("font_size", 16)
+	_prev_shot_data_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	_prev_shot_data_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_prev_shot_data_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	scroll.add_child(_prev_shot_data_label)
+	vbox.add_child(scroll)
 	
 	var close_btn = Button.new()
 	close_btn.text = "Close"
+	close_btn.custom_minimum_size = Vector2(140, 48)
+	close_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	ThemeManager.apply_primary_button_style(close_btn, 8)
 	close_btn.pressed.connect(func(): _prev_shot_popup.visible = false)
 	vbox.add_child(close_btn)
 	
@@ -671,21 +677,23 @@ func _on_view_prev_shot_pressed() -> void:
 	if _last_shot_data.is_empty():
 		_prev_shot_data_label.text = "No shot recorded in this session yet."
 	else:
-		var u_label := "yds" if GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL else "m"
-		var s_label := "mph" if GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL else "m/s"
+		var is_imperial: bool = GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL if has_node("/root/GlobalSettings") else true
+		var stats: Array[String] = []
+		for stat_def in StatDefinitions.STATS:
+			var id_str: String = str(stat_def.get("id", ""))
+			if _last_shot_data.has(id_str):
+				var name_str: String = str(stat_def.get("name", id_str))
+				var u_str: String = str(stat_def.get("units_imperial" if is_imperial else "units_metric", ""))
+				var val = _last_shot_data.get(id_str)
+				if u_str != "" and u_str != "ratio":
+					stats.append("• %s: %s %s" % [name_str, str(val), u_str])
+				else:
+					stats.append("• %s: %s" % [name_str, str(val)])
 		
-		var stats := []
-		stats.append("Speed: %s %s" % [str(_last_shot_data.get("Speed", "---")), s_label])
-		stats.append("VLA: %s deg" % str(_last_shot_data.get("VLA", "---")))
-		stats.append("HLA: %s deg" % str(_last_shot_data.get("HLA", "---")))
-		stats.append("Total Spin: %s rpm" % str(_last_shot_data.get("TotalSpin", "---")))
-		stats.append("Spin Axis: %s deg" % str(_last_shot_data.get("SpinAxis", "---")))
-		stats.append("Carry Distance: %s %s" % [str(_last_shot_data.get("Carry", "---")), u_label])
-		stats.append("Total Distance: %s %s" % [str(_last_shot_data.get("Distance", "---")), u_label])
-		stats.append("Offline: %s %s" % [str(_last_shot_data.get("Offline", "---")), u_label])
-		stats.append("Club Path: %s deg" % str(_last_shot_data.get("ClubPath", "0.0")))
-		
-		_prev_shot_data_label.text = "\n".join(stats)
+		if stats.is_empty():
+			_prev_shot_data_label.text = "No shot recorded in this session yet."
+		else:
+			_prev_shot_data_label.text = "\n".join(stats)
 	
 	_prev_shot_popup.visible = true
 

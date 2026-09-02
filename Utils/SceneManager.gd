@@ -6,6 +6,10 @@ var current_scene = null
 var _loading_screen: CanvasLayer = null
 
 
+func _ready() -> void:
+	MobilePerformance.apply_global_render_settings(get_tree())
+
+
 func change_scene(path):
 	call_deferred("_deferred_change_scene", path)
 

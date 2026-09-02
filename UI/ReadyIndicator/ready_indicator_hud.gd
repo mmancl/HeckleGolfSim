@@ -27,9 +27,9 @@ var _placement_panel: PanelContainer
 var _placement_canvas: Control
 var _placement_glow_style: StyleBoxFlat
 var _guide_label: Label
-var _box_tween: Tween = null
-var _box_visible_target := false
-var _ready_hold_timer := 0.0
+
+const MAX_SENSING_RANGE_MM := 127.0 # 5.0 inches half-width / half-depth (10" x 10" full area)
+const TARGET_ZONE_RANGE_MM := 76.2  # 3.0 inches half-width / half-depth (6" x 6" full zone)
 
 # Sensor & Position state
 var _is_ready := false
@@ -49,8 +49,8 @@ var _sensor_pos_z := 0
 var _sensor_ready := false
 var _sensor_detected := false
 var _has_sensor_data := false
-var _last_sensor_pos_x := 0
-var _last_sensor_pos_y := 0
+var _sensor_unit_scale := 0.0 # Auto-calibrated scale multiplier to convert raw sensor coordinates to mm
+var _displayed_norm_pos := Vector2.ZERO # Smoothly interpolated normalized ball position
 var _last_ball_pos := Vector3.ZERO
 
 
@@ -68,25 +68,20 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	# Check ball state every frame for immediate show/hide response
 	var ball = _get_golf_ball()
 	var ball_moving = false
 	if ball != null and is_instance_valid(ball):
 		ball_moving = ball.state != 0 # REST is 0
-		var ball_curr_pos: Vector3 = ball.global_position
-		if _last_ball_pos != Vector3.ZERO and ball_curr_pos.distance_to(_last_ball_pos) > 0.01:
-			# Ball was adjusted / moved in 3D scene
-			_ready_hold_timer = 0.0
-			if not _box_visible_target and not ball_moving:
-				_set_placement_box_visible(true)
-		_last_ball_pos = ball_curr_pos
 
 	if ball_moving != _ball_moving_prev:
 		_ball_moving_prev = ball_moving
 		_update_display(true)
 
-	# Update placement box auto-hide / show logic
-	_update_placement_box_state(delta)
+	var target_norm_pos := _get_normalized_ball_position()
+	# Smoothly interpolate displayed position so ball moves fluidly without discrete quadrant jumping
+	_displayed_norm_pos = _displayed_norm_pos.lerp(target_norm_pos, clampf(delta * 18.0, 0.0, 1.0))
+	if _placement_canvas != null and is_instance_valid(_placement_canvas) and _placement_panel != null and _placement_panel.visible:
+		_placement_canvas.queue_redraw()
 
 	_check_timer += delta
 	if _check_timer >= 0.05:
@@ -101,27 +96,19 @@ func _on_scene_changed() -> void:
 	_cached_ball = null
 	_ball_moving_prev = false
 	_has_sensor_data = false
+	_sensor_unit_scale = 0.0
+	_displayed_norm_pos = Vector2.ZERO
 	_last_ball_pos = Vector3.ZERO
-	_last_sensor_pos_x = 0
-	_last_sensor_pos_y = 0
-	_ready_hold_timer = 0.0
 	call_deferred("_refresh_layout_and_display", true)
 
 
 func set_sensor_position(pos_x: int, pos_y: int, pos_z: int, ready: bool, detected: bool) -> void:
-	var pos_changed := _has_sensor_data and (absi(pos_x - _sensor_pos_x) >= 2 or absi(pos_y - _sensor_pos_y) >= 2)
 	_sensor_pos_x = pos_x
 	_sensor_pos_y = pos_y
 	_sensor_pos_z = pos_z
 	_sensor_ready = ready
 	_sensor_detected = detected
 	_has_sensor_data = true
-
-	# If the player is actively moving/adjusting the ball, reset hold timer and ensure full guide visibility
-	if pos_changed and detected:
-		_ready_hold_timer = 0.0
-		if not _box_visible_target:
-			_set_placement_box_visible(true)
 
 	if _placement_canvas != null and is_instance_valid(_placement_canvas):
 		_placement_canvas.queue_redraw()
@@ -130,6 +117,8 @@ func set_sensor_position(pos_x: int, pos_y: int, pos_z: int, ready: bool, detect
 
 func set_placement_guide_enabled(enabled: bool) -> void:
 	_placement_guide_enabled = enabled
+	if _placement_panel != null and is_instance_valid(_placement_panel):
+		_placement_panel.visible = enabled
 	_update_display(false)
 
 
@@ -265,8 +254,8 @@ func _setup_placement_box_ui() -> void:
 	inner_vbox.add_child(_guide_label)
 
 	_main_vbox.add_child(_placement_panel)
-	_placement_panel.visible = false
-	_placement_panel.modulate.a = 0.0
+	_placement_panel.visible = _placement_guide_enabled
+	_placement_panel.modulate.a = 1.0
 
 
 func _on_placement_canvas_draw() -> void:
@@ -299,9 +288,10 @@ func _on_placement_canvas_draw() -> void:
 		# Right: Player's Right / Target
 		_placement_canvas.draw_string(font, Vector2(size.x - 17, center.y + 3), "R ▶", HORIZONTAL_ALIGNMENT_RIGHT, 16, 8, label_color)
 
-	# 3. Optimal Allowed Target Zone Box (e.g. ±60mm lateral X, ±80mm depth Y equivalent)
-	var zone_w := outer_rect.size.x * 0.52
-	var zone_h := outer_rect.size.y * 0.55
+	# 3. Optimal Allowed Target Zone Box (±3.0 inches / ±76.2mm inside ±5.0 inches / ±127.0mm outer sensing zone = 60% ratio)
+	var target_zone_ratio := TARGET_ZONE_RANGE_MM / MAX_SENSING_RANGE_MM # 0.60
+	var zone_w := outer_rect.size.x * target_zone_ratio
+	var zone_h := outer_rect.size.y * target_zone_ratio
 	var zone_rect := Rect2(center - Vector2(zone_w / 2.0, zone_h / 2.0), Vector2(zone_w, zone_h))
 
 	# Color zone box according to current status
@@ -317,26 +307,33 @@ func _on_placement_canvas_draw() -> void:
 	# 5. Target Zone Center Reticle
 	_placement_canvas.draw_circle(center, 2.0, Color(1, 1, 1, 0.4))
 
-	# 6. Get Ball Offset Position
-	var norm_pos := _get_normalized_ball_position()
-	var norm_x: float = norm_pos.x
-	var norm_y: float = norm_pos.y
+	# 6. Get Ball Offset Position - continuous & proportional to real-world offset
+	var norm_x: float = _displayed_norm_pos.x
+	var norm_y: float = _displayed_norm_pos.y
 
 	var max_offset_x := (outer_rect.size.x / 2.0) - 7.0
 	var max_offset_y := (outer_rect.size.y / 2.0) - 7.0
 	var ball_center := center + Vector2(norm_x * max_offset_x, norm_y * max_offset_y)
 
 	# Clamp inside outer bounding box
-	ball_center.x = clampf(ball_center.x, outer_rect.position.x + 5, outer_rect.end.x - 5)
-	ball_center.y = clampf(ball_center.y, outer_rect.position.y + 5, outer_rect.end.y - 5)
+	ball_center.x = clampf(ball_center.x, outer_rect.position.x + 6, outer_rect.end.x - 6)
+	ball_center.y = clampf(ball_center.y, outer_rect.position.y + 6, outer_rect.end.y - 6)
 
-	# Ball color coding
+	# If hardware reports no ball detected, draw a pulsing searching target indicator instead of a phantom ball
+	if _has_sensor_data and not _sensor_detected:
+		var pulse := (sin(Time.get_ticks_msec() / 150.0) + 1.0) * 0.5
+		var search_ring_color := Color(0.9, 0.7, 0.2, 0.3 + (pulse * 0.4))
+		_placement_canvas.draw_arc(center, 10.0 + (pulse * 3.0), 0, TAU, 24, search_ring_color, 1.5)
+		_placement_canvas.draw_circle(center, 3.0, Color(0.9, 0.7, 0.2, 0.5))
+		return
+
+	# Ball color coding: green when ready, amber when in zone/approaching, red when outside target zone
 	var ball_glow_color := Color(0.2, 0.95, 0.45, 0.6)
 	if not _is_ready:
-		if absf(norm_x) > 0.75 or absf(norm_y) > 0.75:
-			ball_glow_color = Color(0.95, 0.25, 0.2, 0.7) # Red when far outside
+		if absf(norm_x) > target_zone_ratio or absf(norm_y) > target_zone_ratio:
+			ball_glow_color = Color(0.95, 0.25, 0.2, 0.75) # Red when outside target zone
 		else:
-			ball_glow_color = Color(0.95, 0.7, 0.15, 0.7) # Amber when near edge
+			ball_glow_color = Color(0.95, 0.7, 0.15, 0.7) # Amber when inside target zone settling
 
 	# Draw Ball Outer Glow & Shadow
 	_placement_canvas.draw_circle(ball_center + Vector2(1, 2), 8.0, Color(0, 0, 0, 0.35))
@@ -348,16 +345,45 @@ func _on_placement_canvas_draw() -> void:
 	_placement_canvas.draw_circle(ball_center + Vector2(-1.5, -1.5), 2.0, Color(1, 1, 1, 0.9)) # Specular highlight
 
 
+func _raw_sensor_to_mm(raw_val: float) -> float:
+	if raw_val == 0.0:
+		return 0.0
+
+	var abs_val := absf(raw_val)
+	# Determine and adapt the unit scale multiplier based on value magnitude:
+	# 1) Hundredths of mm (e.g. 2540 = 25.4 mm = 1.0 inch)
+	if abs_val > 1500.0:
+		_sensor_unit_scale = 0.01
+	# 2) Tenths of mm (e.g. 254 = 25.4 mm = 1.0 inch)
+	elif abs_val > 150.0 and (_sensor_unit_scale == 0.0 or _sensor_unit_scale > 0.1):
+		_sensor_unit_scale = 0.1
+	# 3) Millimeters (e.g. 25.4 = 1.0 inch)
+	elif abs_val > 5.0 and (_sensor_unit_scale == 0.0 or _sensor_unit_scale > 1.0):
+		_sensor_unit_scale = 1.0
+	# Default to 1.0 (millimeters) if uncalibrated
+	elif _sensor_unit_scale == 0.0:
+		_sensor_unit_scale = 1.0
+
+	return raw_val * _sensor_unit_scale
+
+
 func _get_normalized_ball_position() -> Vector2:
 	if _has_sensor_data:
-		# Square hardware sensor coordinates:
-		# PositionX: lateral offset in mm (0 center, ±60mm inside target zone)
-		# PositionY: depth offset in mm (0 center, ±80mm inside target zone)
+		if not _sensor_detected:
+			return Vector2.ZERO
+		# Convert raw hardware sensor coordinates to physical millimeters:
+		# PositionX: lateral offset in mm (0 center, ±76.2mm inside target zone)
+		# PositionY: depth offset in mm (0 center, ±76.2mm inside target zone)
 		# Player perspective: Left/Right is X axis, Away/Closer is Y axis
-		var nx := float(_sensor_pos_x) / 140.0
+		var mm_x := _raw_sensor_to_mm(float(_sensor_pos_x))
+		var mm_y := _raw_sensor_to_mm(float(_sensor_pos_y))
+
+		# Proportional normalized coordinates (-1.0 to 1.0 across full 5" sensing boundary)
+		# 1 inch (25.4mm) -> 0.20 offset, 2 inches (50.8mm) -> 0.40 offset, 3 inches (76.2mm) -> 0.60 offset
+		var nx := clampf(mm_x / MAX_SENSING_RANGE_MM, -1.0, 1.0)
 		# ny < 0 is Away (top of screen) and ny > 0 is Closer (bottom of screen)
-		var ny := -float(_sensor_pos_y) / 160.0
-		return Vector2(clampf(nx, -1.0, 1.0), clampf(ny, -1.0, 1.0))
+		var ny := clampf(-mm_y / MAX_SENSING_RANGE_MM, -1.0, 1.0)
+		return Vector2(nx, ny)
 
 	# Fallback in-game ball offset when hardware sensor packet is not active
 	var ball := _get_golf_ball()
@@ -376,14 +402,13 @@ func _get_normalized_ball_position() -> Vector2:
 
 		var spawn_pos: Vector3 = ball.spawn_position if "spawn_position" in ball else Vector3.ZERO
 		var rel_pos: Vector3 = ball.global_position - spawn_pos
-		if rel_pos.length() > 0.01:
-			var nx := clampf(rel_pos.x / 0.15, -1.0, 1.0)
-			var ny := clampf(-rel_pos.z / 0.15, -1.0, 1.0)
+		# 0.127 meters in Godot 3D = 127mm = 5.0 inches max sensing half-range
+		if rel_pos.length() > 0.001:
+			var nx := clampf(rel_pos.x / 0.127, -1.0, 1.0)
+			var ny := clampf(-rel_pos.z / 0.127, -1.0, 1.0)
 			return Vector2(nx, ny)
 
-	if _is_ready:
-		return Vector2.ZERO
-	return Vector2(0.35, 0.45) # Default offset guidance when waiting for ball placement
+	return Vector2.ZERO
 
 
 func _update_guidance_text() -> void:
@@ -414,14 +439,14 @@ func _update_guidance_text() -> void:
 	# norm.x > 0 -> ball is to player's Right -> move left toward center
 	# norm.y < 0 -> ball is Away (toward monitor) -> move closer toward player
 	# norm.y > 0 -> ball is Closer (toward player's feet) -> move away toward monitor
-	if norm.x < -0.2:
+	if norm.x < -0.15:
 		hints.append("Move Right →")
-	elif norm.x > 0.2:
+	elif norm.x > 0.15:
 		hints.append("← Move Left")
 
-	if norm.y < -0.2:
+	if norm.y < -0.15:
 		hints.append("↓ Move Closer")
-	elif norm.y > 0.2:
+	elif norm.y > 0.15:
 		hints.append("Move Away ↑")
 
 	if hints.size() > 0:
@@ -433,58 +458,6 @@ func _update_guidance_text() -> void:
 	else:
 		_guide_label.text = "CENTERING BALL IN ZONE..."
 		_guide_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.6))
-
-
-func _update_placement_box_state(delta: float) -> void:
-	if _placement_panel == null or not is_instance_valid(_placement_panel):
-		return
-
-	var scene := _get_active_scene()
-	var device_connected := _is_device_connected()
-
-	# Rule: The box should show when the ball is moved, missing, or outside of target spot.
-	# Once the ball is in the correct spot and ready, it slowly fades away over 2 seconds
-	# allowing the player ample time to check centering and adjust ball positioning.
-	var should_show_box := false
-
-	if visible and device_connected and _placement_guide_enabled:
-		if not _is_ready or _ball_moving_prev or (_has_sensor_data and not _sensor_ready):
-			should_show_box = true
-			_ready_hold_timer = 0.0
-		else:
-			# Ball is ready & in correct spot: hold briefly then fade out slowly over 2 seconds
-			_ready_hold_timer += delta
-			if _ready_hold_timer < 0.2:
-				should_show_box = true
-			else:
-				should_show_box = false
-
-	_set_placement_box_visible(should_show_box)
-
-
-func _set_placement_box_visible(target_visible: bool) -> void:
-	if _box_visible_target == target_visible:
-		return
-	_box_visible_target = target_visible
-
-	if _box_tween != null and _box_tween.is_running():
-		_box_tween.kill()
-
-	_box_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-
-	if target_visible:
-		_placement_panel.visible = true
-		_placement_panel.scale = Vector2(0.95, 0.95)
-		_placement_panel.pivot_offset = _placement_panel.size / 2.0
-		_box_tween.tween_property(_placement_panel, "modulate:a", 1.0, 0.2)
-		_box_tween.tween_property(_placement_panel, "scale", Vector2(1.0, 1.0), 0.2)
-	else:
-		# Slow 2.0-second fade out so player can see ball position and adjust to center if desired
-		_box_tween.tween_property(_placement_panel, "modulate:a", 0.0, 2.0)
-		_box_tween.tween_callback(func():
-			if not _box_visible_target:
-				_placement_panel.visible = false
-		)
 
 
 func set_ready_status(is_ready: bool, status: String, enabled: bool = true) -> void:
@@ -528,10 +501,11 @@ func _detect_current_gameplay_screen() -> ScreenLayout:
 
 	var full_id := (scene_name + " " + script_path + " " + file_path).to_lower()
 
-	# Chipping Minigame, Putting Practice, or Shape Practice -> TOP_LEFT (Avoids 780px-840px top-center scoreboard panel)
+	# Chipping Minigame, Putting Practice, Shape Practice, Loft Control -> TOP_LEFT
 	if full_id.contains("chipping") or scene_name.contains("chipping") \
 		or full_id.contains("putting") or scene_name.contains("putting") \
-		or full_id.contains("shape") or scene_name.contains("shape"):
+		or full_id.contains("shape") or scene_name.contains("shape") \
+		or full_id.contains("loft") or scene_name.contains("loft"):
 		return ScreenLayout.TOP_LEFT
 
 	# Driving Range, Course Play, CourseManager, and all loaded course scenes -> TOP_CENTER_UNDER_AIM
@@ -589,59 +563,58 @@ func _is_in_aerial_or_map_view(scene: Node) -> bool:
 	if scene == null or not is_instance_valid(scene):
 		return false
 
-	# Check active Camera3D in viewport
+	# 1. Viewport camera check: if active camera is AerialCamera, aerial view is active
 	var vp := get_viewport()
 	if vp != null:
-		var cam := vp.get_camera_3d()
-		if cam != null and is_instance_valid(cam):
-			var cam_name := str(cam.name).to_lower()
-			if cam_name.contains("aerial") or cam_name.contains("sky") or cam_name.contains("flyover") or cam_name.contains("overview"):
+		var active_cam := vp.get_camera_3d()
+		if active_cam != null and is_instance_valid(active_cam):
+			var cam_name := str(active_cam.name).to_lower()
+			if cam_name == "aerialcamera" or (cam_name.contains("aerial") and not cam_name.contains("minimap")):
 				return true
 
-	# Check properties on scene
-	if "is_aerial_view" in scene and bool(scene.get("is_aerial_view")):
+	# 2. Check scene and all active scene tree nodes recursively
+	return _check_aerial_in_subtree(scene)
+
+
+func _check_aerial_in_subtree(node: Node) -> bool:
+	if node == null or not is_instance_valid(node):
+		return false
+
+	# Check aerial properties on any node (e.g. Range, Course, CoursePlay)
+	if "is_aerial_view" in node and bool(node.get("is_aerial_view")):
 		return true
-	if "is_sky_view_active" in scene and bool(scene.get("is_sky_view_active")):
+	if "is_sky_view_active" in node and bool(node.get("is_sky_view_active")):
+		return true
+	if "_is_aerial_active_practice" in node and bool(node.get("_is_aerial_active_practice")):
 		return true
 
-	# Check course_instance on scene (e.g. CoursePlay)
-	if "course_instance" in scene:
-		var ci = scene.get("course_instance")
-		if ci != null and is_instance_valid(ci):
-			if "is_aerial_view" in ci and bool(ci.get("is_aerial_view")):
-				return true
-			if "is_sky_view_active" in ci and bool(ci.get("is_sky_view_active")):
-				return true
-			if ci.has_node("AerialCamera"):
-				var ac = ci.get_node("AerialCamera")
-				if ac is Camera3D and (ac as Camera3D).current:
-					return true
-
-	# Check AerialCamera in scene
-	if scene.has_node("AerialCamera"):
-		var ac = scene.get_node("AerialCamera")
-		if ac is Camera3D and (ac as Camera3D).current:
+	# Check Camera3D current status
+	if node is Camera3D:
+		var c_name := str(node.name).to_lower()
+		if (c_name == "aerialcamera" or (c_name.contains("aerial") and not c_name.contains("minimap"))) and (node as Camera3D).current:
 			return true
 
-	# Check MapCanvas zoom controls in scene
-	if scene.has_node("MapCanvas/AerialZoomVBox"):
-		var zoom_box = scene.get_node("MapCanvas/AerialZoomVBox")
-		if zoom_box != null and is_instance_valid(zoom_box) and _is_node_visible_in_tree(zoom_box):
+	# Check Aerial controls (e.g. AerialZoomVBox inside MapCanvas)
+	if node is Control:
+		var n_name := str(node.name).to_lower()
+		if n_name == "aerialzoomvbox" and _is_node_visible_in_tree(node):
 			return true
 
-	# Check children for any course instance having aerial or sky view active
-	for child in scene.get_children():
-		if child != null and is_instance_valid(child):
-			if "is_aerial_view" in child and bool(child.get("is_aerial_view")):
-				return true
-			if "is_sky_view_active" in child and bool(child.get("is_sky_view_active")):
-				return true
+	for child in node.get_children():
+		if _check_aerial_in_subtree(child):
+			return true
 
 	return false
 
 
 func _is_node_visible_in_tree(node: Node) -> bool:
 	if node == null or not is_instance_valid(node):
+		return false
+	if node is CanvasItem and not (node as CanvasItem).visible:
+		return false
+	if node is CanvasLayer and not (node as CanvasLayer).visible:
+		return false
+	if node is Window and not (node as Window).visible:
 		return false
 
 	var curr: Node = node
@@ -664,90 +637,73 @@ func _is_menu_overlay_open(scene: Node) -> bool:
 	if scene == null or not is_instance_valid(scene):
 		return false
 
-	# Direct property checks on scene (e.g. CoursePlay)
-	if "hud_scorecard" in scene:
-		var sc = scene.get("hud_scorecard")
-		if sc != null and is_instance_valid(sc) and _is_node_visible_in_tree(sc):
-			return true
-	if "hud_manage_players" in scene:
-		var mp = scene.get("hud_manage_players")
-		if mp != null and is_instance_valid(mp) and _is_node_visible_in_tree(mp):
-			return true
-	if "hud_overview" in scene:
-		var ov = scene.get("hud_overview")
-		if ov != null and is_instance_valid(ov) and _is_node_visible_in_tree(ov):
-			return true
-	if "mulligan_confirm_dialog" in scene:
-		var mc = scene.get("mulligan_confirm_dialog")
-		if mc != null and is_instance_valid(mc) and _is_node_visible_in_tree(mc):
-			return true
-
-	# Check course_instance on CoursePlay
-	if "course_instance" in scene:
-		var ci = scene.get("course_instance")
-		if ci != null and is_instance_valid(ci):
-			if _is_menu_overlay_open(ci):
-				return true
-
-	# Check the active scene tree
-	if _find_visible_overlay_node(scene):
-		return true
-
-	# Check root viewport for popups/dialogs added directly to root
-	var tree := get_tree()
-	if tree != null and tree.root != null:
-		for child in tree.root.get_children():
-			if child != scene and child != self and child.name != "LaunchMonitorManager":
-				if child is Window and (child as Window).visible:
-					return true
-				if child is CanvasLayer and (child as CanvasLayer).visible:
-					var cl_name := str(child.name).to_lower()
-					if cl_name.contains("settings") or cl_name.contains("dialog") or cl_name.contains("modal") or cl_name.contains("menu"):
-						return true
-
-	return false
+	return _check_menu_overlay_in_subtree(scene)
 
 
-func _find_visible_overlay_node(node: Node) -> bool:
+func _check_menu_overlay_in_subtree(node: Node) -> bool:
 	if node == null or not is_instance_valid(node):
 		return false
 
-	if node == self or (node is CanvasLayer and node.name.contains("ReadyHUD")):
+	# Ignore self and ready HUD layer
+	if node == self or (node is CanvasLayer and str(node.name).to_lower().contains("readyhud")):
 		return false
 
-	if node is Window and (node as Window).visible:
+	# Check CoursePlay specific properties
+	if "hud_scorecard" in node:
+		var sc = node.get("hud_scorecard")
+		if sc != null and is_instance_valid(sc) and _is_node_visible_in_tree(sc):
+			return true
+	if "hud_manage_players" in node:
+		var mp = node.get("hud_manage_players")
+		if mp != null and is_instance_valid(mp) and _is_node_visible_in_tree(mp):
+			return true
+	if "hud_overview" in node:
+		var ov = node.get("hud_overview")
+		if ov != null and is_instance_valid(ov) and _is_node_visible_in_tree(ov):
+			return true
+	if "mulligan_confirm_dialog" in node:
+		var mc = node.get("mulligan_confirm_dialog")
+		if mc != null and is_instance_valid(mc) and _is_node_visible_in_tree(mc):
+			return true
+
+	# Check Dialogs / Popups / Windows (if visible in tree)
+	if (node is Popup or node is AcceptDialog or node is ConfirmationDialog or node is FileDialog) and _is_node_visible_in_tree(node):
 		return true
 
+	# Check Settings CanvasLayers (RangeUI.$SettingsLayer, minigames _settings_layer)
 	if node is CanvasLayer:
-		var cl = node as CanvasLayer
-		if cl.visible:
-			var cl_name := str(cl.name).to_lower()
-			if cl_name.contains("settings") or cl_name.contains("scorecard") \
-				or cl_name.contains("pause") or cl_name.contains("replay") \
-				or cl_name.contains("history") or cl_name.contains("analytics") \
-				or cl_name.contains("dialog") or cl_name.contains("modal"):
+		var cl_name := str(node.name).to_lower()
+		if cl_name == "settingslayer" or cl_name == "settingsmodallayer":
+			if (node as CanvasLayer).visible:
 				return true
 
-	if node is Control:
-		var ctrl = node as Control
-		if _is_node_visible_in_tree(ctrl):
-			var n_lower := str(ctrl.name).to_lower()
-			var script: Script = ctrl.get_script()
-			var s_path := str(script.resource_path).to_lower() if script != null else ""
+	# Check Controls (exclude interactive HUD buttons like MapButton, ScorecardToggleButton, SettingsButton)
+	if node is Control and not (node is BaseButton) and _is_node_visible_in_tree(node):
+		var n_lower := str(node.name).to_lower()
 
-			if n_lower.contains("rangesettings") or n_lower.contains("minigamesettings") \
-				or n_lower.contains("settingslayer") or n_lower.contains("sessionpopup") \
-				or n_lower.contains("swingreplay") or n_lower.contains("pausemenu") \
-				or n_lower.contains("settingsmodal") or n_lower.contains("optionsmenu") \
-				or n_lower.contains("distancemenu") or n_lower.contains("mulligan") \
-				or n_lower.contains("scorecard") or n_lower.contains("overview") \
-				or n_lower.contains("manage_players") or n_lower.contains("manageplayers") \
-				or s_path.contains("range_settings") or s_path.contains("swing_replay") \
-				or s_path.contains("session_pop_up") or s_path.contains("distance_menu"):
-				return true
+		# Settings panel (RangeSettings, MinigameSettings)
+		if n_lower == "rangesettings" or n_lower == "minigamesettings":
+			return true
+
+		# Scorecard panel (hud_scorecard, ScorecardPanel)
+		if n_lower == "scorecardpanel" or n_lower == "hudscorecard":
+			return true
+
+		# Manage Players panel & Hole Overview & Mulligan dialogs
+		if n_lower == "manageplayerspanel" or n_lower == "hudoverview" \
+			or n_lower == "holeoverviewpanel" or n_lower == "mulliganconfirmdialog":
+			return true
+
+		# Session Recorder PopUp (CenterContainer inside RangeUI)
+		if n_lower == "sessionpopup":
+			return true
+
+		# Swing Replay & Pause Modals
+		if n_lower == "swingreplaymodal" or n_lower == "pausemenu":
+			return true
 
 	for child in node.get_children():
-		if _find_visible_overlay_node(child):
+		if _check_menu_overlay_in_subtree(child):
 			return true
 
 	return false
@@ -818,6 +774,9 @@ func _update_display(instant: bool = false) -> void:
 	var visibility_just_enabled := not visible
 	visible = true
 	_panel.modulate.a = 1.0
+	if _placement_panel != null and is_instance_valid(_placement_panel):
+		_placement_panel.visible = _placement_guide_enabled
+		_placement_panel.modulate.a = 1.0
 
 	var ready_state_changed := (_is_ready != _last_rendered_ready) or visibility_just_enabled or not _last_rendered_visible
 	_last_rendered_visible = true

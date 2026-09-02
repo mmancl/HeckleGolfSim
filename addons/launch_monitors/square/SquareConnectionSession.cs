@@ -179,24 +179,10 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         _logInfo($"SetHandedness requested. handedness={_handedness}");
     }
 
-    private int GetDetectBallModeForClub(string clubCode)
-    {
-        if (string.Equals(clubCode, SquareCommandBuilder.DriverClubCode, StringComparison.OrdinalIgnoreCase))
-        {
-            return 2; // Tee mode for Driver
-        }
-        if (string.Equals(clubCode, "0107", StringComparison.OrdinalIgnoreCase))
-        {
-            return 3; // Putting mode for Putter
-        }
-        return 1; // Mat mode for Irons / Woods / Wedges
-    }
-
     public async Task SetReadyAsync(CancellationToken cancellationToken = default)
     {
-        var mode = GetDetectBallModeForClub(_clubCode);
-        _logInfo($"Sending DetectBall ready command. mode={mode}, clubCode={_clubCode}");
-        await WriteCommandAsync(SquareCommandBuilder.DetectBall(NextSequence(), mode: mode, spinMode: 1), cancellationToken);
+        _logInfo("Sending DetectBall ready command.");
+        await WriteCommandAsync(SquareCommandBuilder.DetectBall(NextSequence(), mode: 1, spinMode: 1), cancellationToken);
         _isDetectBallActive = true;
         _lastSensorPacketTime = DateTime.UtcNow;
         EmitStatus("Ready");

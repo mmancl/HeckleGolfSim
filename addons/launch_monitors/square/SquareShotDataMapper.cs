@@ -20,9 +20,13 @@ public static class SquareShotDataMapper
             sideSpin = (int)MathF.Round(totalSpin * MathF.Sin(spinAxisRadians));
         }
 
+        var speedMph = metrics.BallSpeedMps * MetersPerSecondToMph;
+        var clubSpeedMph = metrics.ClubSpeedMps > 0 ? metrics.ClubSpeedMps * MetersPerSecondToMph : (speedMph > 0 ? speedMph / 1.45f : 0.0f);
+        var smash = metrics.SmashFactor > 0 ? metrics.SmashFactor : (clubSpeedMph > 0 ? speedMph / clubSpeedMph : 1.45f);
+
         return new Dictionary<string, object>
         {
-            { "Speed", metrics.BallSpeedMps * MetersPerSecondToMph },
+            { "Speed", speedMph },
             { "VLA", metrics.VerticalAngle },
             { "HLA", metrics.HorizontalAngle },
             { "TotalSpin", totalSpin },
@@ -30,7 +34,13 @@ public static class SquareShotDataMapper
             { "BackSpin", backSpin },
             { "SideSpin", sideSpin },
             { "ShotType", metrics.ShotType },
-            { "ClubPath", metrics.ClubPath }
+            { "ClubPath", metrics.ClubPath },
+            { "FaceAngle", metrics.FaceAngle },
+            { "AttackAngle", metrics.AttackAngle },
+            { "DynamicLoft", metrics.DynamicLoft },
+            { "ClubSpeed", clubSpeedMph },
+            { "SmashFactor", smash },
+            { "FaceToPath", metrics.FaceAngle - metrics.ClubPath }
         };
     }
 }

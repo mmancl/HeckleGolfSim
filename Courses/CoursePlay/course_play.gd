@@ -21,10 +21,14 @@ var _last_hud_hole_index: int = -1
 @onready var hud_manage_players = Panel.new()
 @onready var hud_overview = Panel.new()
 var _minimap_camera: Camera3D = null
+var _minimap_viewport: SubViewport = null
 var _minimap_panel: PanelContainer = null
 var minimap_zoom: float = 300.0
 var _last_was_on_green: bool = false
 var _default_non_green_minimap_zoom: float = 300.0
+
+var _cached_green_verts: PackedVector3Array = PackedVector3Array()
+var _cached_green_hole_index: int = -1
 
 var _overlay_node: Control = null
 var _player_map_markers: Dictionary = {}
@@ -892,6 +896,7 @@ func _setup_hud() -> void:
 	minimap_camera.size = minimap_zoom
 	minimap_camera.position = Vector3(0, 150, 0)
 	minimap_camera.rotation = Vector3(-PI/2, 0, 0) # Look straight down
+	minimap_camera.cull_mask = minimap_camera.cull_mask & ~4
 	
 	viewport.add_child(minimap_camera)
 	minimap_container.add_child(viewport)
@@ -901,6 +906,7 @@ func _setup_hud() -> void:
 	minimap_camera.make_current()
 	
 	_minimap_camera = minimap_camera
+	_minimap_viewport = viewport
 	_minimap_panel = minimap_panel
 	
 	# Add Zoom buttons to Minimap Panel
@@ -950,6 +956,7 @@ func _setup_hud() -> void:
 	zoom_vbox.add_child(zoom_out_btn)
 	
 	# Scorecard Panel
+	hud_scorecard.name = "ScorecardPanel"
 	hud_scorecard.visible = false
 	hud_scorecard.anchor_left = 0.5
 	hud_scorecard.anchor_right = 0.5
@@ -1018,6 +1025,7 @@ func _setup_hud() -> void:
 
 
 	# Manage Players Panel
+	hud_manage_players.name = "ManagePlayersPanel"
 	hud_manage_players.visible = false
 	hud_manage_players.anchor_left = 0.5
 	hud_manage_players.anchor_right = 0.5
@@ -1252,6 +1260,14 @@ func _get_current_green_vertices() -> PackedVector3Array:
 	return global_verts
 
 
+func _get_cached_green_vertices() -> PackedVector3Array:
+	var hole_idx = MultiplayerManager.current_hole_index
+	if hole_idx != _cached_green_hole_index or _cached_green_verts.is_empty():
+		_cached_green_verts = _get_current_green_vertices()
+		_cached_green_hole_index = hole_idx
+	return _cached_green_verts
+
+
 func _update_top_hud(player: Dictionary) -> void:
 	if hud_player_name_lbl == null or MultiplayerManager.hole_ids.is_empty():
 		return
@@ -1392,6 +1408,7 @@ func _on_active_player_changed(player: Dictionary) -> void:
 		# Reset camera user offset when moving to a new hole or if starting hole
 		if player["strokes"] == 0:
 			course_instance.aerial_cam_user_offset = Vector3.ZERO
+			reset_zoom_to_default()
 			
 		# Update labels
 		course_instance.call("_update_hole_info_label", player["strokes"] > 0)
@@ -1408,6 +1425,7 @@ func _on_active_player_changed(player: Dictionary) -> void:
 		if should_initialize:
 			# Teleport the ball to this player's current resting position
 			active_ball.spawn_position = player["position"]
+			active_ball.lie_type = player.get("lie_type", "teebox")
 			active_ball.reset()
 			
 			# Recalculate lie immediately after teleporting/resetting
@@ -1434,21 +1452,38 @@ func _on_active_player_changed(player: Dictionary) -> void:
 					if camera != null:
 						camera.follow_mode = PhantomCamera3D.FollowMode.NONE
 						camera.look_at_mode = PhantomCamera3D.LookAtMode.NONE
+						var is_on_green = false
+						if active_ball != null:
+							var lie = str(active_ball.get("lie_type")).to_lower()
+							is_on_green = (lie == "green")
+							if not is_on_green and course_instance != null and course_instance.has_method("is_ball_on_green"):
+								is_on_green = course_instance.call("is_ball_on_green")
 						var cam_dist = GlobalSettings.range_settings.camera_distance.value
 						var cam_height = GlobalSettings.range_settings.camera_height.value
-						var local_offset = Vector3(-cam_dist, cam_height, 0)
+						var local_offset = Vector3(-1.05, 0.6, 0) if is_on_green else Vector3(-cam_dist, cam_height, 0)
 						if course_instance.has_method("get_camera_local_offset"):
-							local_offset = course_instance.call("get_camera_local_offset")
+							local_offset = course_instance.call("get_camera_local_offset", is_on_green)
 						var rotated_offset = local_offset.rotated(Vector3.UP, -angle_rad)
 						var cam_pos = ball_pos + rotated_offset
 						if course_instance.has_method("clamp_camera_position"):
 							cam_pos = course_instance.call("clamp_camera_position", cam_pos)
 						camera.global_position = cam_pos
-						var is_on_green = (active_ball.get("lie_type") == "green")
-						var aim_dir = (pin_pos - ball_pos).normalized()
-						if aim_dir.is_zero_approx():
-							aim_dir = Vector3.FORWARD
-						var target_look = (pin_pos + ball_pos) * 0.5 if is_on_green else ball_pos + aim_dir * 50.0 + Vector3.UP * 1.0
+						
+						var target_look: Vector3
+						if course_instance.has_method("get_camera_target_look"):
+							target_look = course_instance.call("get_camera_target_look", pin_pos, ball_pos, is_on_green)
+						elif is_on_green:
+							var dist = ball_pos.distance_to(pin_pos)
+							var look_dist = clamp(dist * 0.4, 2.0, 6.0)
+							if dist < 2.0:
+								look_dist = dist
+							var fraction = clamp(look_dist / max(dist, 0.001), 0.0, 1.0)
+							target_look = ball_pos.lerp(pin_pos, fraction)
+						else:
+							var aim_dir = (pin_pos - ball_pos).normalized()
+							if aim_dir.is_zero_approx():
+								aim_dir = Vector3.FORWARD
+							target_look = ball_pos + aim_dir * 50.0 + Vector3.UP * 1.0
 						camera.look_at(target_look)
 						if camera.camera_3d_resource != null:
 							camera.camera_3d_resource.fov = GlobalSettings.range_settings.camera_fov.value
@@ -1459,23 +1494,14 @@ func _on_active_player_changed(player: Dictionary) -> void:
 							cam3d.look_at(target_look)
 							cam3d.fov = GlobalSettings.range_settings.camera_fov.value
 			
-		# Redraw active player's tracer trails if any
+		# Clear tracer trails so the player has a clean view for their next shot
 		var player_node = course_instance.get_node_or_null("Player")
 		if player_node != null:
 			player_node.call("reset_shot_data")
-			# Re-draw the player's last shot tracer line
-			var last_pts = player.get("last_shot_tracer_points", [])
-			if not last_pts.is_empty():
-				player_node.call("create_new_tracer")
-				var tracer = player_node.get("current_tracer")
-				if tracer != null and "points" in tracer:
-					tracer.points = last_pts.duplicate()
-			elif not player["shot_history"].is_empty():
-				player_node.call("create_new_tracer")
-				var tracer = player_node.get("current_tracer")
-				if tracer != null:
-					for pt in player["shot_history"]:
-						tracer.call("add_point", pt)
+			player_node.call("clear_tracers")
+
+		if course_instance != null and course_instance.has_method("update_auto_club"):
+			course_instance.call("update_auto_club", true)
 
 
 
@@ -1855,12 +1881,14 @@ func _on_previous_mulligan_selected(prev_shot: Dictionary) -> void:
 
 
 func _on_hole_completed(scores: Array) -> void:
+	reset_zoom_to_default()
 	_populate_scorecard("hole_completed")
 	hud_scorecard.visible = true
 	_set_other_elements_visible(false)
 
 
 func _on_game_over(scores: Array) -> void:
+	reset_zoom_to_default()
 	MultiplayerManager.is_finished = true
 	MultiplayerManager.save_current_match()
 	_populate_overview()
@@ -1870,6 +1898,15 @@ func _on_game_over(scores: Array) -> void:
 
 
 func _process(_delta: float) -> void:
+	var ball = active_ball
+	if ball == null and course_instance != null:
+		var player_node = course_instance.get_node_or_null("Player")
+		if player_node != null:
+			ball = player_node.get("ball")
+			active_ball = ball
+
+	var ball_is_moving: bool = (ball != null and ball.state != PhysicsEnums.BallState.REST)
+
 	if course_instance != null and course_instance.get("show_green_grid") != null:
 		_update_grid_button_state(course_instance.get("show_green_grid") as bool)
 		
@@ -1889,9 +1926,10 @@ func _process(_delta: float) -> void:
 			
 	# Manage 2D overlays and 3D map markers for multiplayer ball tracking
 	if _overlay_node != null:
-		_overlay_node.queue_redraw()
+		if not ball_is_moving or Engine.get_process_frames() % 3 == 0:
+			_overlay_node.queue_redraw()
 		
-	if MultiplayerManager.players.size() > 1 and not MultiplayerManager.is_finished:
+	if not ball_is_moving and MultiplayerManager.players.size() > 1 and not MultiplayerManager.is_finished:
 		var show_markers = true
 		if hud_scorecard.visible or hud_manage_players.visible:
 			show_markers = false
@@ -1920,8 +1958,31 @@ func _process(_delta: float) -> void:
 				var marker = _player_map_markers.get(i)
 				if marker != null and is_instance_valid(marker):
 					marker.visible = false
-	else:
+	elif not ball_is_moving:
 		_clear_map_markers()
+
+
+func reset_zoom_to_default() -> void:
+	minimap_zoom = 300.0
+	_default_non_green_minimap_zoom = 300.0
+	_last_was_on_green = false
+	if _minimap_camera != null:
+		_minimap_camera.size = minimap_zoom
+	if course_instance != null:
+		if course_instance.has_method("reset_zoom_to_default"):
+			course_instance.reset_zoom_to_default()
+		else:
+			if "aerial_zoom" in course_instance:
+				course_instance.aerial_zoom = 300.0
+			if "_default_non_green_aerial_zoom" in course_instance:
+				course_instance._default_non_green_aerial_zoom = 300.0
+			if "_last_was_on_green" in course_instance:
+				course_instance._last_was_on_green = false
+			if "show_green_grid" in course_instance:
+				course_instance.show_green_grid = false
+			var aerial_cam = course_instance.get_node_or_null("AerialCamera")
+			if aerial_cam != null:
+				aerial_cam.size = 300.0
 
 
 func _update_minimap() -> void:
@@ -1932,6 +1993,8 @@ func _update_minimap() -> void:
 	if hud_scorecard.visible or hud_manage_players.visible or hud_overview.visible:
 		if _minimap_group != null:
 			_minimap_group.visible = false
+		if _minimap_viewport != null and _minimap_viewport.render_target_update_mode != SubViewport.UPDATE_DISABLED:
+			_minimap_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		return
 		
 	# Check if the course is in full-screen aerial view
@@ -1940,9 +2003,6 @@ func _update_minimap() -> void:
 	# The box shouldn't show at all when the full-screen aerial view is active
 	if _minimap_group != null:
 		_minimap_group.visible = not is_aerial
-	
-	if is_aerial:
-		return # No need to calculate if it's hidden
 		
 	var ball = active_ball
 	if ball == null:
@@ -1952,23 +2012,58 @@ func _update_minimap() -> void:
 			
 	if ball == null:
 		return
+
+	# Pause minimap SubViewport rendering and calculations during active ball flight to prevent double 3D rendering pass
+	if ball.state != PhysicsEnums.BallState.REST:
+		if _minimap_viewport != null and _minimap_viewport.render_target_update_mode != SubViewport.UPDATE_DISABLED:
+			_minimap_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		return
+
+	if _minimap_viewport != null and _minimap_viewport.render_target_update_mode != SubViewport.UPDATE_ALWAYS:
+		_minimap_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 		
 	# Check for on-green state transition
-	var is_on_green = (ball.get("lie_type") == "green")
+	var is_on_green = false
+	if course_instance != null and course_instance.has_method("is_ball_on_green"):
+		is_on_green = course_instance.call("is_ball_on_green")
+	elif ball != null:
+		var lie_str = str(ball.get("lie_type")).to_lower()
+		var club_str = str(ball.get("current_selected_club")).to_lower()
+		is_on_green = (lie_str == "green" or club_str in ["pt", "putt", "putter"])
+	if not is_on_green and has_node("/root/MultiplayerManager"):
+		var mp_mgr = get_node("/root/MultiplayerManager")
+		if not mp_mgr.players.is_empty():
+			var ap = mp_mgr.get_active_player()
+			if ap.get("lie_type", "").to_lower() == "green" or mp_mgr.current_club.to_lower() in ["pt", "putt", "putter"]:
+				is_on_green = true
+
 	if is_on_green != _last_was_on_green:
 		if is_on_green:
-			var green_zoom = 60.0
+			var green_zoom = 50.0
 			if course_instance != null and course_instance.has_method("get_green_zoom_size"):
 				green_zoom = course_instance.get_green_zoom_size()
 			minimap_zoom = green_zoom
+			if course_instance != null and "aerial_zoom" in course_instance:
+				course_instance.aerial_zoom = green_zoom
+				var aerial_cam = course_instance.get_node_or_null("AerialCamera")
+				if aerial_cam != null:
+					aerial_cam.size = green_zoom
 		else:
 			minimap_zoom = _default_non_green_minimap_zoom
+			if course_instance != null and "_default_non_green_aerial_zoom" in course_instance:
+				course_instance.aerial_zoom = course_instance._default_non_green_aerial_zoom
+				var aerial_cam = course_instance.get_node_or_null("AerialCamera")
+				if aerial_cam != null:
+					aerial_cam.size = course_instance.aerial_zoom
 		
 		# Auto-toggle green slope grid
 		if course_instance != null and course_instance.get("show_green_grid") != null:
 			course_instance.set("show_green_grid", is_on_green)
 			
 		_last_was_on_green = is_on_green
+	
+	if is_aerial:
+		return # No need to calculate minimap camera position or distance tracker if hidden
 		
 	var ball_pos = ball.global_position
 	var pin_pos = course_instance.get("current_hole_location")
@@ -2016,7 +2111,7 @@ func _update_minimap() -> void:
 				pin_dir_2d = Vector2(dir_3d.x, dir_3d.z).normalized()
 			
 			# Get green vertices
-			var global_verts = _get_current_green_vertices()
+			var global_verts = _get_cached_green_vertices()
 			if global_verts.is_empty():
 				# Fallback: create a circle of 24 points around pin_pos with a 15-yard (13.7m) radius
 				var radius = 13.7
@@ -2535,6 +2630,7 @@ func _populate_scorecard(action_type: String) -> void:
 		action_btn.pressed.connect(func():
 			hud_scorecard.visible = false
 			_set_other_elements_visible(true)
+			reset_zoom_to_default()
 			MultiplayerManager.advance_hole()
 		)
 	elif action_type == "game_over":
@@ -3182,12 +3278,13 @@ func _draw_ball_overlays(overlay: Control) -> void:
 		var is_on_green = false
 		if active_ball != null:
 			is_on_green = (active_ball.get("lie_type") == "green")
-		if not is_on_green and not camera.is_position_behind(pin_pos):
+		var dist_m = active_player_pos.distance_to(pin_pos)
+		var dist_feet = dist_m * 3.28084
+		if not is_on_green and dist_feet >= 50.0 and not camera.is_position_behind(pin_pos):
 			var screen_pos = camera.unproject_position(pin_pos)
 			var view_rect = overlay.get_viewport_rect()
 			if view_rect.has_point(screen_pos):
 				# Calculate dynamic height based on distance
-				var dist_m = active_player_pos.distance_to(pin_pos)
 				var dist_yards = dist_m * 1.09361
 				var height = 0.0
 				if dist_yards > 10.0:

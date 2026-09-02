@@ -105,6 +105,8 @@ func _ready() -> void:
 # ----------------- ENVIRONMENT SETUP -----------------
 
 func _setup_environment() -> void:
+	var is_mobile := MobilePerformance.is_mobile()
+
 	# Add DirectionalLight3D
 	var sun = DirectionalLight3D.new()
 	sun.name = "SunLight"
@@ -112,11 +114,16 @@ func _setup_environment() -> void:
 	sun.shadow_enabled = true
 	sun.light_energy = 1.2
 	sun.directional_shadow_max_distance = 200.0
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-	sun.directional_shadow_blend_splits = true
-	sun.directional_shadow_split_1 = 0.08
-	sun.directional_shadow_split_2 = 0.20
-	sun.directional_shadow_split_3 = 0.50
+	if is_mobile:
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+		sun.directional_shadow_blend_splits = true
+		sun.directional_shadow_split_1 = 0.1
+	else:
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+		sun.directional_shadow_blend_splits = true
+		sun.directional_shadow_split_1 = 0.08
+		sun.directional_shadow_split_2 = 0.20
+		sun.directional_shadow_split_3 = 0.50
 	sun.shadow_bias = 0.02
 	sun.shadow_normal_bias = 2.0
 	add_child(sun)
@@ -128,6 +135,8 @@ func _setup_environment() -> void:
 	var env = Environment.new()
 	env.background_mode = Environment.BG_SKY
 	var sky = Sky.new()
+	if is_mobile:
+		sky.process_mode = Sky.PROCESS_MODE_QUALITY
 	var sky_mat = ProceduralSkyMaterial.new()
 	sky_mat.sky_top_color = Color(0.25, 0.55, 0.88)
 	sky_mat.sky_horizon_color = Color(0.60, 0.78, 0.92)
@@ -142,13 +151,16 @@ func _setup_environment() -> void:
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_white = 5.0
 	env.tonemap_exposure = 1.0
-	env.ssao_enabled = true
-	env.ssao_radius = 2.0
-	env.ssao_intensity = 1.2
-	env.ssao_power = 1.5
-	env.ssao_detail = 0.2
-	env.ssao_horizon = 0.05
-	env.ssao_ao_channel_affect = 0.5
+	if is_mobile:
+		env.ssao_enabled = false
+	else:
+		env.ssao_enabled = true
+		env.ssao_radius = 2.0
+		env.ssao_intensity = 1.2
+		env.ssao_power = 1.5
+		env.ssao_detail = 0.2
+		env.ssao_horizon = 0.05
+		env.ssao_ao_channel_affect = 0.5
 	
 	world_env.environment = env
 	add_child(world_env)
@@ -156,6 +168,7 @@ func _setup_environment() -> void:
 	# Create Camera3D
 	var camera = Camera3D.new()
 	camera.name = "Camera3D"
+	camera.cull_mask = camera.cull_mask & ~2
 	camera.current = true
 	add_child(camera)
 	if has_node("/root/TensionManager"):
@@ -651,6 +664,7 @@ func _generate_green_grid_and_heatmap() -> void:
 	mat_hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat_hm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	heatmap_mi.material_override = mat_hm
+	heatmap_mi.layers = 2
 	heatmap_mi.visible = false
 	add_child(heatmap_mi)
 	
@@ -664,6 +678,7 @@ func _generate_green_grid_and_heatmap() -> void:
 	mat_g.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 	mat_g.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	grid_mi.material_override = mat_g
+	grid_mi.layers = 4
 	grid_mi.visible = show_green_grid
 	add_child(grid_mi)
 	
@@ -756,6 +771,7 @@ void fragment() {
 	var mat_dots = ShaderMaterial.new()
 	mat_dots.shader = shader
 	dots_mi.material_override = mat_dots
+	dots_mi.layers = 4
 	dots_mi.visible = show_green_grid
 	add_child(dots_mi)
 
@@ -783,7 +799,7 @@ func _update_green_grid_visibility() -> void:
 	var dots_node = get_node_or_null("GreenDotsMesh")
 	
 	if heatmap_node:
-		heatmap_node.visible = false
+		heatmap_node.visible = show_green_grid
 	if grid_node:
 		grid_node.visible = show_green_grid
 	if dots_node:
@@ -987,12 +1003,19 @@ func _update_aim_and_camera() -> void:
 	# Apply aim yaw offset to player ball
 	player.ball.aim_yaw_offset_deg = rad_to_deg(-angle_rad)
 	
-	# Position camera behind the ball along the target line (higher elevation & angled down)
+	# Position camera behind the ball closer to ball and ground so slope is easy to read
 	var back_dir = Vector3(-cos(angle_rad), 0.0, -sin(angle_rad)).normalized()
-	var cam_pos = ball_pos + back_dir * 3.5 + Vector3.UP * 2.2
+	var cam_pos = ball_pos + back_dir * 1.05 + Vector3.UP * 0.6
+	
+	var dist = ball_pos.distance_to(target_hole)
+	var look_dist = clamp(dist * 0.4, 2.0, 6.0)
+	if dist < 2.0:
+		look_dist = dist
+	var fraction = clamp(look_dist / max(dist, 0.001), 0.0, 1.0)
+	var target_look = ball_pos.lerp(target_hole, fraction)
 	
 	$Camera3D.global_position = cam_pos
-	$Camera3D.look_at(ball_pos + back_dir * -2.0)
+	$Camera3D.look_at(target_look)
 	
 	# Store relative camera offset for smooth flight following
 	last_camera_offset = cam_pos - ball_pos

@@ -1,16 +1,12 @@
 extends Control
 
-var show_grid := false
-var _edit_mode := true
 var golfer_camera_active: bool = false:
 	set(val):
 		golfer_camera_active = val
 		_update_camera_shift()
 
 const CELL_SIZE = Vector2(100, 64)
-const GRID_SPACING = Vector2(6, 6)
-const GRID_SIZE = CELL_SIZE + GRID_SPACING
-const GRID_ORIGIN := Vector2(15, 15)
+const DATA_PANEL_SCENE = preload("res://UI/data_panel.tscn")
 
 func set_golfer_camera_active(active: bool) -> void:
 	golfer_camera_active = active
@@ -21,100 +17,74 @@ func _update_camera_shift() -> void:
 	else:
 		position.x = 0.0
 
-		
-func _draw():
-	if not show_grid:
-		return
-
-	var padding_correction := Vector2(0, 0)  # Adjust Y as needed
-	var offset = global_position - global_position + padding_correction
-	var viewport_size = get_viewport_rect().size
-	var origin = Vector2(0, 0)  # if we need to offset the grid (x+10 for the top)
-	for x in range(0, viewport_size.x, GRID_SIZE.x):
-		var grid_x = x + offset.x + origin.x
-		draw_line(Vector2(grid_x, 0), Vector2(grid_x, viewport_size.y), Color.GRAY)
-	for y in range(0, viewport_size.y, GRID_SIZE.y):
-		var grid_y = y + offset.y + origin.y
-		draw_line(Vector2(0, grid_y), Vector2(viewport_size.x, grid_y), Color.GRAY)
-
 func _ready():
-	load_layout()
+	sync_data_panels()
 	
-	GlobalSettings.range_settings.range_units.setting_changed.connect(set_units)
+	if has_node("/root/GlobalSettings"):
+		GlobalSettings.range_settings.range_units.setting_changed.connect(func(_v): update_units())
+		GlobalSettings.range_settings.displayed_stats.setting_changed.connect(func(_v):
+			sync_data_panels()
+		)
 
-func snap_to_grid(panel: Control):
-	var global_snap_x = round((panel.global_position.x - GRID_ORIGIN.x) / GRID_SIZE.x) * GRID_SIZE.x + GRID_ORIGIN.x
-	var global_snap_y = round((panel.global_position.y - GRID_ORIGIN.y) / GRID_SIZE.y) * GRID_SIZE.y + GRID_ORIGIN.y
-	panel.global_position = Vector2(global_snap_x, global_snap_y)
-
-func toggle_edit_mode():
-	_edit_mode = !_edit_mode
-	for panel in $VBoxContainer.get_children():
-		panel.set_editable(_edit_mode)
-
-func save_layout():
-	var config = ConfigFile.new()
-	for panel in get_children():
-		config.set_value("positions", panel.name, panel.position)
-	config.save("user://layout.cfg")
-
-func load_layout():
-	var config = ConfigFile.new()
-	var loaded_ok = (config.load("user://layout.cfg") == OK)
+func sync_data_panels():
+	var active_ids: Array = GlobalSettings.range_settings.displayed_stats.value if has_node("/root/GlobalSettings") else StatDefinitions.DEFAULT_ENABLED_STAT_IDS
+	var is_imperial: bool = GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL if has_node("/root/GlobalSettings") else true
 	
-	if loaded_ok:
-		if config.get_value("positions", "Carry", Vector2.ZERO) != Vector2(0, 432):
-			config.load("res://UI/default_layout.cfg")
-			config.save("user://layout.cfg")
-		else:
-			var overlaps = false
-			if config.has_section("positions"):
-				for panel_name in config.get_section_keys("positions"):
-					var pos = config.get_value("positions", panel_name)
-					if pos is Vector2 and pos.x < 200 and pos.y < 360:
-						overlaps = true
-						break
-			if overlaps:
-				config.load("res://UI/default_layout.cfg")
-	else:
-		config.load("res://UI/default_layout.cfg")
+	# First, hide and move away all existing panels not in active_ids
+	for child in get_children():
+		if child.name == "ClubSelector":
+			continue
+		if not active_ids.has(child.name):
+			child.visible = false
+			child.position = Vector2(-1000, -1000)
+
+	# Now place each active stat strictly in its sequential static slot (0 to N-1)
+	for i in range(active_ids.size()):
+		var stat_id = str(active_ids[i])
+		var panel = get_node_or_null(stat_id)
+		if panel == null:
+			# Check alias "Side" for "Offline"
+			if stat_id == "Offline" and has_node("Side"):
+				panel = get_node("Side")
+				panel.name = "Offline"
+			else:
+				panel = DATA_PANEL_SCENE.instantiate()
+				panel.name = stat_id
+				add_child(panel)
+
+		var stat = StatDefinitions.get_stat_by_id(stat_id)
+		if not stat.is_empty():
+			if panel.has_method("set_label"):
+				panel.call("set_label", str(stat.get("short_label", stat_id)))
+			var u_str = str(stat.get("units_imperial" if is_imperial else "units_metric", ""))
+			if panel.has_method("set_units"):
+				panel.call("set_units", u_str)
 		
-	for panel in get_children():
-		if panel is Control:
-			panel.custom_minimum_size = CELL_SIZE
-			panel.size = CELL_SIZE
-		if config.has_section_key("positions", panel.name):  # <-- not "layout"
-			panel.position = config.get_value("positions", panel.name)
-	
+		panel.custom_minimum_size = CELL_SIZE
+		panel.size = CELL_SIZE
+		panel.position = get_slot_position(i)
+		panel.visible = true
+
+static func get_slot_position(index: int) -> Vector2:
+	var col := 0 if index < 6 else 1
+	var row := index if index < 6 else (index - 6)
+	var x := 0.0 if col == 0 else 106.0
+	var y := 360.0 + row * 70.0
+	return Vector2(x, y)
+
 func reset_layout():
 	var dir = DirAccess.open("user://")
 	if dir and dir.file_exists("layout.cfg"):
 		dir.remove("layout.cfg")
-	load_layout()
-	
-				
-func _on_panel_drag_started():
-	show_grid = true
-	queue_redraw()
+	sync_data_panels()
 
-func _on_panel_drag_ended(panel):
-	show_grid = false
-	queue_redraw()
-	snap_to_grid(panel)
-	
-func _notification(what):
-	if what == NOTIFICATION_WM_CLOSE_REQUEST:
-		save_layout()
-		get_tree().quit()  # Actually close the game after saving
-		
-func set_units(value):
-	if value == PhysicsEnums.Units.IMPERIAL:
-		$Distance.set_units("yd")
-		$Carry.set_units("yd")
-		$Side.set_units("yd")
-		$Apex.set_units("ft")
-	else:
-		$Distance.set_units("m")
-		$Carry.set_units("m")
-		$Side.set_units("m")
-		$Apex.set_units("m")
+func update_units():
+	var is_imperial: bool = GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL if has_node("/root/GlobalSettings") else true
+	for child in get_children():
+		if child.name == "ClubSelector":
+			continue
+		var stat = StatDefinitions.get_stat_by_id(child.name)
+		if not stat.is_empty():
+			var u_str = str(stat.get("units_imperial" if is_imperial else "units_metric", ""))
+			if child.has_method("set_units"):
+				child.call("set_units", u_str)

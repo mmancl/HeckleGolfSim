@@ -80,6 +80,25 @@ func load_settings() -> void:
 	if range_settings.camera_height.value < 2.0:
 		range_settings.camera_height.set_value(2.4)
 		migrated = true
+	
+	# Migration / validation for displayed_stats
+	var stats_val = range_settings.displayed_stats.value
+	if not (stats_val is Array) or stats_val.is_empty():
+		range_settings.displayed_stats.set_value(StatDefinitions.DEFAULT_ENABLED_STAT_IDS.duplicate())
+		migrated = true
+	else:
+		var valid_ids = StatDefinitions.get_all_stat_ids()
+		var cleaned_stats: Array[String] = []
+		for s in stats_val:
+			var s_str = str(s)
+			if valid_ids.has(s_str) and not cleaned_stats.has(s_str) and cleaned_stats.size() < StatDefinitions.MAX_DISPLAYED_STATS:
+				cleaned_stats.append(s_str)
+		if cleaned_stats.is_empty():
+			cleaned_stats = StatDefinitions.DEFAULT_ENABLED_STAT_IDS.duplicate()
+		if cleaned_stats != stats_val:
+			range_settings.displayed_stats.set_value(cleaned_stats)
+			migrated = true
+
 	if migrated:
 		save_settings()
 	

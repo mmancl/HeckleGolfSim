@@ -89,6 +89,8 @@ var _lift_scale := 1.0
 
 # Shot tracking
 var shot_start_pos := Vector3.ZERO
+var shot_start_pos_global := Vector3.ZERO
+var shot_was_in_sand := false
 var shot_dir := Vector3(1.0, 0.0, 0.0)  # Normalized horizontal direction
 var aim_yaw_offset_deg := 0.0  # Camera/world rotation offset applied at launch
 var launch_spin_rpm := 0.0  # Stored for bounce calculations
@@ -468,7 +470,8 @@ func _physics_process(delta: float) -> void:
 	# Live proximity check for suspense (Course Play only)
 	var target_hole_live = get_target_hole_position()
 	if has_node("/root/TensionManager") and not target_hole_live.is_zero_approx() and TensionManager.is_course_play_active():
-		TensionManager.check_ball_proximity(global_position, target_hole_live, is_putt)
+		var start_p = shot_start_pos_global if not shot_start_pos_global.is_zero_approx() else (position if not position.is_zero_approx() else spawn_position)
+		TensionManager.check_ball_proximity(global_position, target_hole_live, is_putt, start_p, shot_was_in_sand)
 
 	# Check if we should fall into the hole
 	if not is_falling_in_hole:
@@ -503,7 +506,8 @@ func _physics_process(delta: float) -> void:
 			_enter_rest_state()
 		return
 
-	_update_surface_from_underneath()
+	if state != PhysicsEnums.BallState.FLIGHT or on_ground:
+		_update_surface_from_underneath()
 
 	var was_on_ground := on_ground
 	var prev_velocity := velocity
@@ -726,6 +730,10 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 					_sfx_player.pitch_scale = randf_range(0.95, 1.05)
 					_sfx_player.stream = _sfx_tree_hit
 					_sfx_player.play()
+
+			# Damped reflection off vertical surfaces (walls, barriers, trees, etc.)
+			velocity = velocity.bounce(normal) * 0.35
+			omega = omega * 0.5
 	else:
 		# No collision - only stay grounded if terrain is still directly beneath the ball.
 		var probe := _try_probe_ground()
@@ -856,6 +864,9 @@ func reset() -> void:
 	launch_spin_rpm = 0.0
 	rollout_impact_spin_rpm = 0.0
 	is_putt = false
+	shot_start_pos = Vector3.ZERO
+	shot_start_pos_global = Vector3.ZERO
+	shot_was_in_sand = false
 	_surface_zone_stack.clear()
 	if lie_type == "teebox" or lie_type == "fairway":
 		set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
@@ -878,6 +889,7 @@ func reset() -> void:
 
 func hit() -> void:
 	var target_hole = get_target_hole_position()
+	var dist_to_target = global_position.distance_to(target_hole) if not target_hole.is_zero_approx() else 999.0
 	var is_on_green = (lie_type == "green" or current_selected_club.to_lower() in ["pt", "putt", "putter"])
 	if is_on_green:
 		var dist_to_hole = global_position.distance_to(target_hole) if not target_hole.is_zero_approx() else 5.0
@@ -1090,26 +1102,11 @@ func hit_from_data(data: Dictionary) -> void:
 	shot_dir = launch_direction
 
 	shot_start_pos = position
+	shot_start_pos_global = global_position
+	shot_was_in_sand = is_in_sand or (lie_type == "sand")
 	launch_spin_rpm = total_spin
 
 	_print_launch_debug(data, speed_mps, vla_deg, hla_deg, total_spin, spin_axis)
-
-	# Early Suspense Prediction (Course Play only)
-	var target_hole = get_target_hole_position()
-	if has_node("/root/TensionManager") and not target_hole.is_zero_approx() and TensionManager.is_course_play_active():
-		var prediction = TensionManager.predict_shot_outcome(global_position, velocity, is_putt, target_hole)
-		var will_enter = prediction.get("will_enter_zone", false)
-		# For putts on the green, any putt aimed towards the hole triggers suspense early
-		if not will_enter and is_putt:
-			var hole_dir = (target_hole - global_position).normalized()
-			var shot_dir_norm = shot_dir.normalized()
-			if hole_dir.dot(shot_dir_norm) > 0.35:
-				will_enter = true
-		if will_enter:
-			print("[ball.gd] TensionManager early suspense scheduled! Mode: %s, Min Dist: %.2fm" % [
-				prediction.get("mode", "putt"), prediction.get("min_dist", 0.0)
-			])
-			TensionManager.schedule_early_tension(prediction.get("mode", "putt"), 0.08)
 
 	# Play hit sound effect
 	if _sfx_player != null:
@@ -1268,7 +1265,7 @@ func _update_surface_from_underneath() -> void:
 	var world := get_world_3d()
 	if world == null:
 		return
-	var query = PhysicsRayQueryParameters3D.create(global_position + Vector3.UP * 0.1, global_position + Vector3.DOWN * 0.3)
+	var query = PhysicsRayQueryParameters3D.create(global_position + Vector3.UP * 0.5, global_position + Vector3.DOWN * 0.6)
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
 	query.exclude = [get_rid()]
@@ -1292,7 +1289,7 @@ func _update_surface_from_underneath() -> void:
 		
 	# Collect all colliders hit at this point
 	var hit_colliders: Array = []
-	for attempt in range(5):
+	for attempt in range(4):
 		var hit = world.direct_space_state.intersect_ray(query)
 		if hit.is_empty():
 			break

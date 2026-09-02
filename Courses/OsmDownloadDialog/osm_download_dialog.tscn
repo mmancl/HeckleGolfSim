@@ -167,7 +167,7 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.91, 0.98, 1)
 theme_override_font_sizes/font_size = 15
-text = "ℹ Generating a course can take a while. The simulator is downloading real-world map boundaries and creating a custom 3D course in real-time — this is not a preconfigured course being downloaded."
+text = "ℹ Generating a course can take a while. The simulator is downloading real-world map boundaries and creating a custom 3D course in real-time. If generation times out, please retry the download, and if it continues to fail, please log a bug."
 autowrap_mode = 2
 
 [node name="ButtonHBox" type="HBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]

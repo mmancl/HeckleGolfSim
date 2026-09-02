@@ -125,7 +125,7 @@ func _ready() -> void:
 	# --- TILE 4: Shape Practice (Draw & Fade) ---
 	var shape_tile = _create_minigame_tile(
 		"Shape Practice",
-		"Master shot shaping by curving around barrier walls placed every 25 yards. Launch through the open middle gate and draw left or fade right to land on greens from 50 to 300 yards!",
+		"Master shot shaping by curving around barrier walls placed every 25 yards. Launch through the open middle gate and draw left or fade right to land in wall target zones (≥10 ft past wall start) from 50 to 300 yards!",
 		"res://assets/images/menu/shape_control.jpg",
 		func(): SceneManager.change_scene("res://Courses/Minigames/ShapePractice/shape_practice.tscn")
 	)

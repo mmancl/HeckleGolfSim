@@ -9,6 +9,10 @@ var line_width : float = 0.08
 var material : StandardMaterial3D = StandardMaterial3D.new()
 
 
+var _mesh_dirty: bool = true
+var _last_camera_pos: Vector3 = Vector3(999999, 999999, 999999)
+
+
 func _ready():
 	mesh = ArrayMesh.new()
 
@@ -22,11 +26,20 @@ func _ready():
 	material.no_depth_test = false
 
 func _process(_delta):
-	draw()
+	var camera := get_viewport().get_camera_3d()
+	if camera != null:
+		var cam_pos = camera.global_position
+		if cam_pos.distance_squared_to(_last_camera_pos) > 0.5:
+			_mesh_dirty = true
+			_last_camera_pos = cam_pos
+	if _mesh_dirty:
+		draw()
+		_mesh_dirty = false
 
 func setColor(a):
 	color = a
 	dark_red = a
+	_mesh_dirty = true
 
 func draw():
 	mesh.clear_surfaces()
@@ -144,7 +157,9 @@ func create_ribbon_mesh():
 func add_point(point: Vector3):
 	#points.append(points[-1])
 	points.append(point)
+	_mesh_dirty = true
 
 func clear_points():
 	points = []
 	mesh.clear_surfaces()
+	_mesh_dirty = false

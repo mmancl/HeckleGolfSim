@@ -112,12 +112,12 @@ offset_bottom = 494.0
 label = "Carry"
 units = "yd"
 
-[node name="Side" parent="GridCanvas" unique_id=2003394921 instance=ExtResource("1_q72xt")]
+[node name="Offline" parent="GridCanvas" unique_id=2003394921 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_top = 500.0
 offset_right = 100.0
 offset_bottom = 564.0
-label = "Side"
+label = "Offline"
 units = "yd"
 
 [node name="Apex" parent="GridCanvas" unique_id=1199759367 instance=ExtResource("1_q72xt")]
@@ -187,6 +187,15 @@ offset_top = 640.0
 offset_right = 206.0
 offset_bottom = 704.0
 label = "SpinAxis"
+units = "deg"
+
+[node name="FaceAngle" parent="GridCanvas" unique_id=1999999999 instance=ExtResource("1_q72xt")]
+layout_mode = 0
+offset_left = 106.0
+offset_top = 710.0
+offset_right = 206.0
+offset_bottom = 774.0
+label = "Face Ang"
 units = "deg"
 
 [node name="ClubSelector" parent="GridCanvas" unique_id=1107551091 instance=ExtResource("3_crlyb")]
@@ -271,8 +280,8 @@ text = "Hit Shot"
 [connection signal="drag_started" from="GridCanvas/Distance" to="GridCanvas" method="_on_panel_drag_started"]
 [connection signal="drag_ended" from="GridCanvas/Carry" to="GridCanvas" method="_on_panel_drag_ended"]
 [connection signal="drag_started" from="GridCanvas/Carry" to="GridCanvas" method="_on_panel_drag_started"]
-[connection signal="drag_ended" from="GridCanvas/Side" to="GridCanvas" method="_on_panel_drag_ended"]
-[connection signal="drag_started" from="GridCanvas/Side" to="GridCanvas" method="_on_panel_drag_started"]
+[connection signal="drag_ended" from="GridCanvas/Offline" to="GridCanvas" method="_on_panel_drag_ended"]
+[connection signal="drag_started" from="GridCanvas/Offline" to="GridCanvas" method="_on_panel_drag_started"]
 [connection signal="drag_ended" from="GridCanvas/Apex" to="GridCanvas" method="_on_panel_drag_ended"]
 [connection signal="drag_started" from="GridCanvas/Apex" to="GridCanvas" method="_on_panel_drag_started"]
 [connection signal="drag_ended" from="GridCanvas/VLA" to="GridCanvas" method="_on_panel_drag_ended"]
@@ -289,6 +298,8 @@ text = "Hit Shot"
 [connection signal="drag_started" from="GridCanvas/TotalSpin" to="GridCanvas" method="_on_panel_drag_started"]
 [connection signal="drag_ended" from="GridCanvas/SpinAxis" to="GridCanvas" method="_on_panel_drag_ended"]
 [connection signal="drag_started" from="GridCanvas/SpinAxis" to="GridCanvas" method="_on_panel_drag_started"]
+[connection signal="drag_ended" from="GridCanvas/FaceAngle" to="GridCanvas" method="_on_panel_drag_ended"]
+[connection signal="drag_started" from="GridCanvas/FaceAngle" to="GridCanvas" method="_on_panel_drag_started"]
 [connection signal="inject" from="ShotInjector" to="." method="_on_shot_injector_inject"]
 [connection signal="item_selected" from="ShotInjector/PayloadOption" to="ShotInjector" method="_on_payload_option_item_selected"]
 [connection signal="pressed" from="ShotInjector/Button" to="ShotInjector" method="_on_button_pressed"]
