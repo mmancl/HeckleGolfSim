@@ -241,12 +241,40 @@ func set_handedness(handedness: int) -> void:
 		_square.call("SetHandedness", handedness)
 
 
-func set_ready() -> void:
-	play_ready_ding()
-	is_ready = true
+var _pending_ready_ding := false
+
+
+func is_ball_in_flight() -> bool:
+	if _ready_hud != null and _ready_hud.has_method("is_ball_in_flight"):
+		return bool(_ready_hud.call("is_ball_in_flight"))
+	return false
+
+
+func notify_shot_started() -> void:
+	is_ready = false
+	_pending_ready_ding = false
+	if _ready_hud != null and _ready_hud.has_method("notify_shot_started"):
+		_ready_hud.call("notify_shot_started")
+
+
+func notify_ball_at_rest() -> void:
+	if _ready_hud != null and _ready_hud.has_method("notify_ball_at_rest"):
+		_ready_hud.call("notify_ball_at_rest")
+	if is_ready and _pending_ready_ding:
+		_pending_ready_ding = false
+		play_ready_ding()
 	_update_hud_display()
+
+
+func set_ready() -> void:
 	if _square != null:
 		_debug_log("set_ready requested")
+		_square.call("SetReady")
+
+
+func rearm() -> void:
+	_debug_log("rearm requested")
+	if _square != null:
 		_square.call("SetReady")
 
 
@@ -404,7 +432,13 @@ func _on_square_ready_changed(value: bool) -> void:
 	var became_ready := value and not is_ready
 	is_ready = value
 	if became_ready:
-		play_ready_ding()
+		if is_ball_in_flight():
+			_pending_ready_ding = true
+		else:
+			_pending_ready_ding = false
+			play_ready_ding()
+	elif not value:
+		_pending_ready_ding = false
 	emit_signal("ready_changed", value)
 	_update_hud_display()
 
@@ -424,9 +458,9 @@ func _on_square_sensor_data_received(pos_x: int, pos_y: int, pos_z: int, ready: 
 
 func _on_square_shot_received(data: Dictionary) -> void:
 	_debug_log("shot received with %d fields" % data.size())
-	is_ready = false
-	_update_hud_display()
+	notify_shot_started()
 	emit_signal("hit_ball", data)
+	_update_hud_display()
 
 
 func _missing_support_message() -> String:

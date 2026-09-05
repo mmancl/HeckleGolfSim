@@ -24,6 +24,7 @@ var mode_std_btn: Button
 var mode_scramble_btn: Button
 var mode_2v2_btn: Button
 var mode_skins_btn: Button
+var mode_closest_btn: Button
 var mode_desc_lbl: Label
 var team_assignments: Dictionary = {}
 
@@ -230,8 +231,8 @@ func _ready() -> void:
 	
 	var download_btn = Button.new()
 	download_btn.text = "Download Course"
-	download_btn.custom_minimum_size = Vector2(180, 52)
-	download_btn.add_theme_font_size_override("font_size", 20)
+	download_btn.custom_minimum_size = Vector2(220, 64)
+	download_btn.add_theme_font_size_override("font_size", 22)
 	download_btn.pressed.connect(func():
 		var dialog_scene = load("res://Courses/OsmDownloadDialog/osm_download_dialog.tscn")
 		if dialog_scene != null:
@@ -245,8 +246,8 @@ func _ready() -> void:
 	
 	var delete_btn = Button.new()
 	delete_btn.text = "Delete Course"
-	delete_btn.custom_minimum_size = Vector2(150, 52)
-	delete_btn.add_theme_font_size_override("font_size", 20)
+	delete_btn.custom_minimum_size = Vector2(180, 64)
+	delete_btn.add_theme_font_size_override("font_size", 22)
 	delete_btn.pressed.connect(_on_delete_course_pressed)
 	action_row.add_child(delete_btn)
 	
@@ -258,16 +259,16 @@ func _ready() -> void:
 	add_child(delete_confirm_dialog)
 	
 	preview_button.text = "Preview Course"
-	preview_button.custom_minimum_size = Vector2(160, 52)
-	preview_button.add_theme_font_size_override("font_size", 20)
+	preview_button.custom_minimum_size = Vector2(200, 64)
+	preview_button.add_theme_font_size_override("font_size", 22)
 	ThemeManager.apply_secondary_button_style(preview_button)
 	preview_button.disabled = true
 	preview_button.pressed.connect(_on_preview_pressed)
 	action_row.add_child(preview_button)
 
 	start_button.text = "Play Course"
-	start_button.custom_minimum_size = Vector2(160, 52)
-	start_button.add_theme_font_size_override("font_size", 20)
+	start_button.custom_minimum_size = Vector2(200, 64)
+	start_button.add_theme_font_size_override("font_size", 22)
 	ThemeManager.apply_primary_button_style(start_button)
 	start_button.disabled = true
 	start_button.pressed.connect(_on_start_pressed)
@@ -281,13 +282,43 @@ func _ready() -> void:
 
 func _add_player_ui(p_name: String, tee: String) -> void:
 	var idx = players_to_add.size()
-	var player_data = {"name": p_name, "tee": tee}
+	var avatar_path = MultiplayerManager.get_player_avatar(p_name)
+	var email = MultiplayerManager.get_player_email(p_name)
+	var player_data = {"name": p_name, "tee": tee, "avatar": avatar_path, "email": email}
 	players_to_add.append(player_data)
 	
 	var row = HBoxContainer.new()
 	row.name = "PlayerRow_" + str(idx)
 	row.add_theme_constant_override("separation", 20)
 	
+	if not avatar_path.is_empty() and ResourceLoader.exists(avatar_path):
+		var avatar_rect = TextureRect.new()
+		avatar_rect.texture = load(avatar_path)
+		avatar_rect.custom_minimum_size = Vector2(44, 44)
+		avatar_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		avatar_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		avatar_rect.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(avatar_rect)
+	else:
+		var badge = PanelContainer.new()
+		badge.custom_minimum_size = Vector2(40, 40)
+		badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var badge_style = StyleBoxFlat.new()
+		var p_color = MultiplayerManager.player_colors[idx % MultiplayerManager.player_colors.size()]
+		badge_style.bg_color = p_color
+		badge_style.corner_radius_top_left = 20
+		badge_style.corner_radius_top_right = 20
+		badge_style.corner_radius_bottom_left = 20
+		badge_style.corner_radius_bottom_right = 20
+		badge.add_theme_stylebox_override("panel", badge_style)
+		var badge_lbl = Label.new()
+		badge_lbl.text = p_name.substr(0, 1).to_upper()
+		badge_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		badge_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		badge_lbl.add_theme_font_size_override("font_size", 20)
+		badge.add_child(badge_lbl)
+		row.add_child(badge)
+
 	var name_lbl = Label.new()
 	name_lbl.text = p_name
 	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -572,27 +603,33 @@ func _create_game_mode_selector() -> PanelContainer:
 
 	mode_std_btn = Button.new()
 	mode_std_btn.text = "Standard"
-	mode_std_btn.custom_minimum_size = Vector2(130, 48)
-	mode_std_btn.add_theme_font_size_override("font_size", 18)
+	mode_std_btn.custom_minimum_size = Vector2(115, 48)
+	mode_std_btn.add_theme_font_size_override("font_size", 17)
 	seg_hbox.add_child(mode_std_btn)
 
 	mode_scramble_btn = Button.new()
 	mode_scramble_btn.text = "Scramble"
-	mode_scramble_btn.custom_minimum_size = Vector2(130, 48)
-	mode_scramble_btn.add_theme_font_size_override("font_size", 18)
+	mode_scramble_btn.custom_minimum_size = Vector2(115, 48)
+	mode_scramble_btn.add_theme_font_size_override("font_size", 17)
 	seg_hbox.add_child(mode_scramble_btn)
 
 	mode_2v2_btn = Button.new()
 	mode_2v2_btn.text = "2v2 Scramble"
-	mode_2v2_btn.custom_minimum_size = Vector2(150, 48)
-	mode_2v2_btn.add_theme_font_size_override("font_size", 18)
+	mode_2v2_btn.custom_minimum_size = Vector2(135, 48)
+	mode_2v2_btn.add_theme_font_size_override("font_size", 17)
 	seg_hbox.add_child(mode_2v2_btn)
 
 	mode_skins_btn = Button.new()
 	mode_skins_btn.text = "Skins"
-	mode_skins_btn.custom_minimum_size = Vector2(110, 48)
-	mode_skins_btn.add_theme_font_size_override("font_size", 18)
+	mode_skins_btn.custom_minimum_size = Vector2(95, 48)
+	mode_skins_btn.add_theme_font_size_override("font_size", 17)
 	seg_hbox.add_child(mode_skins_btn)
+
+	mode_closest_btn = Button.new()
+	mode_closest_btn.text = "Closest to Pin"
+	mode_closest_btn.custom_minimum_size = Vector2(145, 48)
+	mode_closest_btn.add_theme_font_size_override("font_size", 17)
+	seg_hbox.add_child(mode_closest_btn)
 
 	mode_desc_lbl = Label.new()
 	mode_desc_lbl.add_theme_font_size_override("font_size", 16)
@@ -604,6 +641,7 @@ func _create_game_mode_selector() -> PanelContainer:
 	mode_scramble_btn.pressed.connect(func(): _select_game_mode("Scramble"))
 	mode_2v2_btn.pressed.connect(func(): _select_game_mode("2v2 Scramble"))
 	mode_skins_btn.pressed.connect(func(): _select_game_mode("Skins"))
+	mode_closest_btn.pressed.connect(func(): _select_game_mode("Closest to Pin"))
 
 	_select_game_mode("Standard")
 	return panel
@@ -613,7 +651,8 @@ func _select_game_mode(mode_name: String) -> void:
 	_style_seg_button(mode_std_btn, "left", selected_game_mode == "Standard")
 	_style_seg_button(mode_scramble_btn, "middle", selected_game_mode == "Scramble")
 	_style_seg_button(mode_2v2_btn, "middle", selected_game_mode == "2v2 Scramble")
-	_style_seg_button(mode_skins_btn, "right", selected_game_mode == "Skins")
+	_style_seg_button(mode_skins_btn, "middle", selected_game_mode == "Skins")
+	_style_seg_button(mode_closest_btn, "right", selected_game_mode == "Closest to Pin")
 
 	match selected_game_mode:
 		"Standard":
@@ -624,6 +663,8 @@ func _select_game_mode(mode_name: String) -> void:
 			mode_desc_lbl.text = "2v2 Scramble: Group makes 2 teams (Team 1 vs Team 2). Scramble works off your teammate's shot."
 		"Skins":
 			mode_desc_lbl.text = "Skins: Each hole is worth 1 Skin for the lowest score. Ties carry over to the next hole!"
+		"Closest to Pin":
+			mode_desc_lbl.text = "Closest to Pin: Each player takes one shot per hole. Whoever is closest to the pin gets 1 point, and everyone else gets 0. Highest score at the end wins!"
 
 
 func _create_length_selector() -> PanelContainer:

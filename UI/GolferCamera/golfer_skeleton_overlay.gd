@@ -13,6 +13,7 @@ var show_skeleton: bool = true
 var is_replay_mode: bool = false
 var frame_buffer: SwingFrameBuffer = null
 var _last_img: Image = null
+var _last_push_time: float = 0.0
 
 # Camera & Detection State
 var active_camera_detected: bool = false
@@ -77,6 +78,8 @@ func _connect_to_bridge() -> void:
 			bridge.pose_detected.connect(_on_pose_detected)
 		if not bridge.pose_lost.is_connected(_on_pose_lost):
 			bridge.pose_lost.connect(_on_pose_lost)
+		if bridge.has_signal("desktop_frame_received") and not bridge.desktop_frame_received.is_connected(_on_desktop_frame_received):
+			bridge.desktop_frame_received.connect(_on_desktop_frame_received)
 		_bridge_connected = true
 
 
@@ -98,6 +101,9 @@ func _is_modal_active() -> bool:
 
 
 func _process(_delta: float) -> void:
+	if not is_visible_in_tree():
+		return
+
 	if is_replay_mode:
 		queue_redraw()
 		return
@@ -105,25 +111,29 @@ func _process(_delta: float) -> void:
 	if _is_modal_active():
 		return
 
-	if not _bridge_connected:
-		_connect_to_bridge()
-	
-	# Find the camera texture from parent hierarchy
-	var parent_tex_rect = get_parent() as TextureRect
-	if parent_tex_rect != null and parent_tex_rect.texture != null:
-		_send_frame_to_bridge(parent_tex_rect.texture)
-	else:
-		var parent_node = get_parent()
-		if parent_node != null:
-			var cam_rect = parent_node.get_node_or_null("CameraFeedRect") as TextureRect
-			if cam_rect != null and cam_rect.texture != null:
-				_send_frame_to_bridge(cam_rect.texture)
-			elif parent_node.has_node("ReplayFeedRect"):
-				var replay_rect = parent_node.get_node_or_null("ReplayFeedRect") as TextureRect
-				if replay_rect != null and replay_rect.texture != null:
-					_send_frame_to_bridge(replay_rect.texture)
-	
-	queue_redraw()
+	# In live camera mode, we do NOT run live inference over the bridge.
+	# Real-time pose analysis is deferred to the post-shot replay modal.
+	# For mobile CameraServer / phone streams, record incoming frames to frame_buffer:
+	if frame_buffer != null and frame_buffer.is_recording():
+		var bridge = _get_bridge()
+		var is_desktop_active = bridge != null and "active_desktop_camera_index" in bridge and bridge.active_desktop_camera_index >= 0
+		if not is_desktop_active:
+			var parent_tex_rect = get_parent() as TextureRect
+			var tex: Texture2D = parent_tex_rect.texture if parent_tex_rect != null else null
+			if tex == null:
+				var parent_node = get_parent()
+				if parent_node != null:
+					var cam_rect = parent_node.get_node_or_null("CameraFeedRect") as TextureRect
+					if cam_rect != null:
+						tex = cam_rect.texture
+			if tex != null and tex.has_method("get_image"):
+				var now := Time.get_ticks_msec() / 1000.0
+				if now - _last_push_time >= 0.066: # ~15 FPS cap
+					_last_push_time = now
+					var img = tex.get_image()
+					if img != null and not img.is_empty():
+						frame_buffer.push_frame(img, {})
+
 
 
 func _send_frame_to_bridge(tex: Texture2D) -> void:
@@ -137,6 +147,9 @@ func _send_frame_to_bridge(tex: Texture2D) -> void:
 	
 	var bridge = _get_bridge()
 	if bridge == null or not bridge.is_ready():
+		return
+	
+	if (bridge.has_method("is_android_camera_active") and bridge.is_android_camera_active()) or (bridge.get("_desktop_polling_active") == true):
 		return
 	
 	# Extract image from texture
@@ -161,15 +174,21 @@ func _send_frame_to_bridge(tex: Texture2D) -> void:
 						full_img.decompress()
 					if full_img.get_format() != Image.FORMAT_RGBA8 and full_img.get_format() != Image.FORMAT_RGB8:
 						full_img.convert(Image.FORMAT_RGBA8)
-					full_img.flip_y()
-					var glob_rect = get_global_rect()
+					
+					var cam_rect = get_parent() as TextureRect
+					if cam_rect == null:
+						var parent_node = get_parent()
+						if parent_node != null:
+							cam_rect = parent_node.get_node_or_null("CameraFeedRect") as TextureRect
+					var target_rect: Rect2 = cam_rect.get_global_rect() if cam_rect != null else get_global_rect()
 					var vp_sz = vp.get_visible_rect().size
-					if glob_rect.size.x > 10 and glob_rect.size.y > 10:
-						var crop_x = clamp(int(glob_rect.position.x), 0, int(vp_sz.x - 10))
-						var crop_y = clamp(int(glob_rect.position.y), 0, int(vp_sz.y - 10))
-						var crop_w = clamp(int(glob_rect.size.x), 10, int(vp_sz.x - crop_x))
-						var crop_h = clamp(int(glob_rect.size.y), 10, int(vp_sz.y - crop_y))
-						img = full_img.get_region(Rect2i(crop_x, crop_y, crop_w, crop_h))
+					if target_rect.size.x > 10 and target_rect.size.y > 10:
+						var crop_x = clamp(int(target_rect.position.x), 0, int(vp_sz.x - 10))
+						var crop_y = clamp(int(target_rect.position.y), 0, int(vp_sz.y - 10))
+						var crop_w = clamp(int(target_rect.size.x), 10, int(vp_sz.x - crop_x))
+						var crop_h = clamp(int(target_rect.size.y), 10, int(vp_sz.y - crop_y))
+						if crop_w > 0 and crop_h > 0:
+							img = full_img.get_region(Rect2i(crop_x, crop_y, crop_w, crop_h))
 	
 	if img != null and not img.is_empty():
 		_last_img = img
@@ -199,7 +218,28 @@ func reset_baseline() -> void:
 
 # ─── Pose Detection Callbacks ───────────────────────────────────────────────
 
+func _on_desktop_frame_received(img: Image, tex: Texture2D, raw_landmarks: Dictionary) -> void:
+	if not is_replay_mode and _is_modal_active():
+		return
+	
+	active_camera_detected = true
+	_target_texture = tex
+	_last_img = img
+	
+	# Always record incoming camera frame to replay buffer
+	if frame_buffer != null and img != null and not is_replay_mode:
+		frame_buffer.push_frame(img, raw_landmarks)
+	
+	if is_replay_mode:
+		if raw_landmarks.size() > 0:
+			_on_pose_detected(raw_landmarks)
+		else:
+			_on_pose_lost()
+		queue_redraw()
+
+
 func _on_pose_detected(raw_landmarks: Dictionary) -> void:
+
 	if not is_replay_mode and _is_modal_active():
 		return
 	human_detected = true
@@ -215,10 +255,6 @@ func _on_pose_detected(raw_landmarks: Dictionary) -> void:
 	
 	# Compute real biomechanical telemetry from landmarks
 	_compute_telemetry()
-	
-	# Push frame to buffer if recording
-	if frame_buffer != null and _last_img != null and not is_replay_mode:
-		frame_buffer.push_frame(_last_img, raw_landmarks)
 
 
 func _on_pose_lost() -> void:
@@ -309,14 +345,13 @@ func get_measured_telemetry() -> Dictionary:
 # ─── Drawing ─────────────────────────────────────────────────────────────────
 
 func _draw() -> void:
-	if is_replay_mode:
-		if not human_detected:
-			return
-	else:
-		if _is_modal_active():
-			return
-		if not active_camera_detected or not human_detected or _target_texture == null:
-			return
+	if not show_skeleton:
+		return
+	# Live camera mode: NEVER draw wireframe overlay (post-shot replay computes and displays it)
+	if not is_replay_mode:
+		return
+	if not human_detected:
+		return
 		
 	var sz = size
 	if sz.x <= 1 or sz.y <= 1:

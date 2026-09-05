@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 36" width="32" height="36">
+  <!-- Hole / Cup base ellipse on green surface -->
+  <ellipse cx="8" cy="32" rx="5.5" ry="2.5" fill="#111111" stroke="#FFFFFF" stroke-width="1.5"/>
+  <!-- Flagpole black outline -->
+  <line x1="8" y1="3" x2="8" y2="32" stroke="#000000" stroke-width="3" stroke-linecap="round"/>
+  <!-- Flagpole silver/white body -->
+  <line x1="8" y1="3" x2="8" y2="32" stroke="#EEEEEE" stroke-width="1.8" stroke-linecap="round"/>
+  <!-- Gold finial ball on top -->
+  <circle cx="8" cy="3" r="2.2" fill="#FFCA28" stroke="#000000" stroke-width="1"/>
+  <!-- Flag black outer border for high contrast -->
+  <polygon points="8,3.5 28.5,10.5 8,17.5" fill="#000000"/>
+  <!-- Flag white inner border for contrast against red/dark heatmap zones -->
+  <polygon points="8,4.5 26.5,10.5 8,16.5" fill="#FFFFFF"/>
+  <!-- Vibrant solid red golf flag -->
+  <polygon points="8.5,5.8 24.5,10.5 8.5,15.2" fill="#D32F2F"/>
+</svg>

@@ -24,6 +24,7 @@ public partial class PhysicsParams : Resource
     [Export] public float RolloutImpactSpin { get; set; }  // Spin RPM when ball first landed for rollout
     [Export] public float SpinbackResponseScale { get; set; } = 1.0f;
     [Export] public float SlopeForceScale { get; set; } = 0.5f;
+    [Export] public bool IsInSand { get; set; }
 
     // Spinback parameters — non-zero values enable check/spin-back behavior on steep high-spin impacts.
     [Export] public float SpinbackThetaBoostMax { get; set; }
@@ -56,7 +57,8 @@ public partial class PhysicsParams : Resource
         float spinbackSpeedStartMps = 0.0f,
         float spinbackSpeedEndMps = 0.0f,
         float initialLaunchAngleDeg = 0.0f,
-        FlightProfile flightProfile = null)
+        FlightProfile flightProfile = null,
+        bool isInSand = false)
     {
         AirDensity = airDensity;
         AirViscosity = airViscosity;
@@ -77,5 +79,6 @@ public partial class PhysicsParams : Resource
         SpinbackSpeedEndMps = spinbackSpeedEndMps;
         InitialLaunchAngleDeg = initialLaunchAngleDeg;
         FlightProfile = flightProfile ?? FlightProfile.Default;
+        IsInSand = isInSand;
     }
 }

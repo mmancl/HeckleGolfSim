@@ -38,8 +38,10 @@ var _visible_mode := true
 var _placement_guide_enabled := true
 var _current_layout := ScreenLayout.HIDDEN
 var _check_timer := 0.0
-var _cached_ball: GolfBall = null
+var _cached_ball: Node = null
 var _ball_moving_prev := false
+var _shot_active := false
+var _rearm_feedback_timer := 0.0
 var _last_rendered_ready := false
 var _last_rendered_visible := false
 
@@ -63,25 +65,163 @@ func _ready() -> void:
 		var scn_mgr = get_node("/root/SceneManager")
 		if scn_mgr.has_signal("scene_changed"):
 			scn_mgr.scene_changed.connect(_on_scene_changed)
+
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm.has_signal("hit_ball") and not lm.is_connected("hit_ball", _on_lm_hit_ball):
+			lm.connect("hit_ball", _on_lm_hit_ball)
 			
 	_refresh_layout_and_display(true)
 
 
-func _process(delta: float) -> void:
-	var ball = _get_golf_ball()
-	var ball_moving = false
-	if ball != null and is_instance_valid(ball):
-		ball_moving = ball.state != 0 # REST is 0
+func _on_lm_hit_ball(_data: Dictionary) -> void:
+	notify_shot_started()
 
-	if ball_moving != _ball_moving_prev:
-		_ball_moving_prev = ball_moving
+
+func notify_shot_started() -> void:
+	_shot_active = true
+	_ball_moving_prev = true
+	if visible:
+		visible = false
+		_stop_pulse_animation()
+		_last_rendered_visible = false
+
+
+func notify_ball_at_rest() -> void:
+	_shot_active = false
+	_ball_moving_prev = false
+	_update_display(false)
+
+
+func is_ball_in_flight() -> bool:
+	if _shot_active:
+		var b := _get_golf_ball()
+		if b != null and is_instance_valid(b):
+			if _is_ball_at_rest(b):
+				_shot_active = false
+		else:
+			var scn := _get_active_scene()
+			if scn != null and not _check_scene_shot_active(scn):
+				_shot_active = false
+		if _shot_active:
+			return true
+
+	var ball := _get_golf_ball()
+	if ball != null and is_instance_valid(ball):
+		if not _is_ball_at_rest(ball):
+			return true
+
+	var scene := _get_active_scene()
+	if scene != null and is_instance_valid(scene):
+		if _check_scene_shot_active(scene):
+			return true
+
+	return false
+
+
+func _is_ball_at_rest(ball: Node) -> bool:
+	if ball == null or not is_instance_valid(ball):
+		return true
+
+	if "state" in ball and ball.state != 0: # 0 is PhysicsEnums.BallState.REST
+		return false
+
+	var vel: Vector3 = ball.velocity if "velocity" in ball else (ball.linear_velocity if "linear_velocity" in ball else Vector3.ZERO)
+	if vel.length() > 0.05:
+		return false
+
+	if "is_falling_in_hole" in ball and bool(ball.get("is_falling_in_hole")):
+		return false
+
+	return true
+
+
+func _check_scene_shot_active(scene: Node) -> bool:
+	if scene == null or not is_instance_valid(scene):
+		return false
+
+	if "_shot_active" in scene and bool(scene.get("_shot_active")):
+		return true
+
+	if "_shot_transition_active" in scene and bool(scene.get("_shot_transition_active")):
+		return true
+
+	if "course_instance" in scene:
+		var ci = scene.get("course_instance")
+		if ci != null and is_instance_valid(ci):
+			if "_shot_active" in ci and bool(ci.get("_shot_active")):
+				return true
+			if "_shot_transition_active" in ci and bool(ci.get("_shot_transition_active")):
+				return true
+
+	var player_node = _find_player_node(scene)
+	if player_node != null and is_instance_valid(player_node):
+		if player_node.has_method("get_ball_state"):
+			var st = player_node.call("get_ball_state")
+			if st != null and int(st) != 0:
+				return true
+		if "track_points" in player_node and bool(player_node.get("track_points")):
+			return true
+		if "ball" in player_node and player_node.ball != null:
+			if not _is_ball_at_rest(player_node.ball):
+				return true
+
+	if scene.has_node("course_scene"):
+		var cs = scene.get_node("course_scene")
+		if cs != null and is_instance_valid(cs):
+			if "_shot_active" in cs and bool(cs.get("_shot_active")):
+				return true
+			if "_shot_transition_active" in cs and bool(cs.get("_shot_transition_active")):
+				return true
+
+	return false
+
+
+func _find_player_node(node: Node) -> Node:
+	if node == null or not is_instance_valid(node):
+		return null
+	if "ball" in node:
+		return node
+	if node.has_node("Player"):
+		return node.get_node("Player")
+	if "player" in node and node.get("player") is Node:
+		return node.get("player")
+	for child in node.get_children():
+		if "ball" in child:
+			return child
+		if child.name == "Player":
+			return child
+	return null
+
+
+func _process(delta: float) -> void:
+	var in_flight := is_ball_in_flight()
+
+	if in_flight != _ball_moving_prev:
+		_ball_moving_prev = in_flight
+		if in_flight:
+			_shot_active = true
+		else:
+			_shot_active = false
 		_update_display(true)
+
+	if in_flight:
+		if visible:
+			visible = false
+			_stop_pulse_animation()
+			_last_rendered_visible = false
+		return
 
 	var target_norm_pos := _get_normalized_ball_position()
 	# Smoothly interpolate displayed position so ball moves fluidly without discrete quadrant jumping
 	_displayed_norm_pos = _displayed_norm_pos.lerp(target_norm_pos, clampf(delta * 18.0, 0.0, 1.0))
 	if _placement_canvas != null and is_instance_valid(_placement_canvas) and _placement_panel != null and _placement_panel.visible:
 		_placement_canvas.queue_redraw()
+
+	if _rearm_feedback_timer > 0.0:
+		_rearm_feedback_timer = maxf(0.0, _rearm_feedback_timer - delta)
+		if _rearm_feedback_timer == 0.0:
+			_update_display(true)
 
 	_check_timer += delta
 	if _check_timer >= 0.05:
@@ -95,6 +235,7 @@ func _process(delta: float) -> void:
 func _on_scene_changed() -> void:
 	_cached_ball = null
 	_ball_moving_prev = false
+	_shot_active = false
 	_has_sensor_data = false
 	_sensor_unit_scale = 0.0
 	_displayed_norm_pos = Vector2.ZERO
@@ -109,6 +250,9 @@ func set_sensor_position(pos_x: int, pos_y: int, pos_z: int, ready: bool, detect
 	_sensor_ready = ready
 	_sensor_detected = detected
 	_has_sensor_data = true
+
+	if is_ball_in_flight():
+		return
 
 	if _placement_canvas != null and is_instance_valid(_placement_canvas):
 		_placement_canvas.queue_redraw()
@@ -137,10 +281,13 @@ func _setup_ui() -> void:
 	_main_vbox.add_theme_constant_override("separation", 6)
 	_container.add_child(_main_vbox)
 
-	# Top Status Badge Pill
+	# Top Status Badge Pill (interactive: click/tap to re-arm/wake launch monitor)
 	_panel = PanelContainer.new()
 	_panel.name = "StatusBadge"
-	_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_panel.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_panel.tooltip_text = "Click to re-arm / wake launch monitor (or press 'R')"
+	_panel.gui_input.connect(_on_status_badge_gui_input)
 	_main_vbox.add_child(_panel)
 
 	_glow_style = StyleBoxFlat.new()
@@ -194,7 +341,7 @@ func _setup_ui() -> void:
 
 	_sub_label = Label.new()
 	_sub_label.text = "READY TO HIT"
-	_sub_label.add_theme_font_size_override("font_size", 10)
+	_sub_label.add_theme_font_size_override("font_size", 12)
 	_sub_label.add_theme_color_override("font_color", Color(0.7, 0.9, 0.75))
 	text_vbox.add_child(_sub_label)
 
@@ -235,7 +382,7 @@ func _setup_placement_box_ui() -> void:
 	var header = Label.new()
 	header.text = "BALL PLACEMENT ZONE"
 	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	header.add_theme_font_size_override("font_size", 9)
+	header.add_theme_font_size_override("font_size", 11)
 	header.add_theme_color_override("font_color", Color(0.65, 0.8, 0.95))
 	inner_vbox.add_child(header)
 
@@ -249,8 +396,8 @@ func _setup_placement_box_ui() -> void:
 	_guide_label = Label.new()
 	_guide_label.text = "PLACE BALL IN TARGET ZONE"
 	_guide_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_guide_label.add_theme_font_size_override("font_size", 10)
-	_guide_label.add_theme_color_override("font_color", Color(0.9, 0.8, 0.4))
+	_guide_label.add_theme_font_size_override("font_size", 12)
+	_guide_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
 	inner_vbox.add_child(_guide_label)
 
 	_main_vbox.add_child(_placement_panel)
@@ -280,13 +427,13 @@ func _on_placement_canvas_draw() -> void:
 	var label_color := Color(0.55, 0.7, 0.85, 0.65)
 	if font != null:
 		# Top: Away (toward monitor)
-		_placement_canvas.draw_string(font, Vector2(center.x - 28, outer_rect.position.y - 3), "▲ AWAY", HORIZONTAL_ALIGNMENT_CENTER, 56, 8, label_color)
+		_placement_canvas.draw_string(font, Vector2(center.x - 28, outer_rect.position.y - 3), "▲ AWAY", HORIZONTAL_ALIGNMENT_CENTER, 56, 10, label_color)
 		# Bottom: Closer (toward player)
-		_placement_canvas.draw_string(font, Vector2(center.x - 32, outer_rect.end.y + 10), "▼ CLOSER", HORIZONTAL_ALIGNMENT_CENTER, 64, 8, label_color)
+		_placement_canvas.draw_string(font, Vector2(center.x - 32, outer_rect.end.y + 10), "▼ CLOSER", HORIZONTAL_ALIGNMENT_CENTER, 64, 10, label_color)
 		# Left: Player's Left
-		_placement_canvas.draw_string(font, Vector2(1, center.y + 3), "◀ L", HORIZONTAL_ALIGNMENT_LEFT, 16, 8, label_color)
+		_placement_canvas.draw_string(font, Vector2(1, center.y + 3), "◀ L", HORIZONTAL_ALIGNMENT_LEFT, 16, 10, label_color)
 		# Right: Player's Right / Target
-		_placement_canvas.draw_string(font, Vector2(size.x - 17, center.y + 3), "R ▶", HORIZONTAL_ALIGNMENT_RIGHT, 16, 8, label_color)
+		_placement_canvas.draw_string(font, Vector2(size.x - 17, center.y + 3), "R ▶", HORIZONTAL_ALIGNMENT_RIGHT, 16, 10, label_color)
 
 	# 3. Optimal Allowed Target Zone Box (±3.0 inches / ±76.2mm inside ±5.0 inches / ±127.0mm outer sensing zone = 60% ratio)
 	var target_zone_ratio := TARGET_ZONE_RANGE_MM / MAX_SENSING_RANGE_MM # 0.60
@@ -425,7 +572,7 @@ func _update_guidance_text() -> void:
 
 	if _has_sensor_data and not _sensor_detected:
 		_guide_label.text = "PLACE BALL ON MAT"
-		_guide_label.add_theme_color_override("font_color", Color(0.95, 0.7, 0.3))
+		_guide_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
 		if _placement_glow_style:
 			_placement_glow_style.border_color = Color(0.9, 0.65, 0.2, 0.7)
 			_placement_glow_style.bg_color = Color(0.12, 0.09, 0.05, 0.9)
@@ -451,13 +598,13 @@ func _update_guidance_text() -> void:
 
 	if hints.size() > 0:
 		_guide_label.text = " & ".join(hints).to_upper()
-		_guide_label.add_theme_color_override("font_color", Color(0.95, 0.75, 0.3))
+		_guide_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
 		if _placement_glow_style:
 			_placement_glow_style.border_color = Color(0.9, 0.65, 0.2, 0.7)
 			_placement_glow_style.bg_color = Color(0.12, 0.09, 0.05, 0.9)
 	else:
 		_guide_label.text = "CENTERING BALL IN ZONE..."
-		_guide_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.6))
+		_guide_label.add_theme_color_override("font_color", Color(0.96, 0.98, 1.0))
 
 
 func set_ready_status(is_ready: bool, status: String, enabled: bool = true) -> void:
@@ -745,8 +892,8 @@ func _should_indicator_be_visible(scene: Node) -> bool:
 	if tree != null and tree.paused:
 		return false
 
-	# 4. Hide when the ball is moving
-	if _ball_moving_prev:
+	# 4. Hide when the ball is in flight / moving / shot active / in transition
+	if is_ball_in_flight() or _is_shot_transition_active(scene):
 		return false
 
 	# 5. Hide when in map/aerial view or sky view (not in hitting spot)
@@ -757,7 +904,91 @@ func _should_indicator_be_visible(scene: Node) -> bool:
 	if _is_menu_overlay_open(scene):
 		return false
 
+	# 7. Hide when an achievement popup notification is actively showing or queued
+	if _is_achievement_popup_showing():
+		return false
+
+	# 8. Hide when a gimmie banner is actively displaying
+	if _is_gimme_banner_showing(scene):
+		return false
+
+	# 9. Hide when the current active player is holed out (finished hole) or hole is completed
+	if _is_hole_or_player_finished(scene):
+		return false
+
 	return true
+
+
+func _is_shot_transition_active(scene: Node) -> bool:
+	if scene == null or not is_instance_valid(scene):
+		return false
+	if "_shot_transition_active" in scene and bool(scene.get("_shot_transition_active")):
+		return true
+	if "course_instance" in scene:
+		var ci = scene.get("course_instance")
+		if ci != null and is_instance_valid(ci) and "_shot_transition_active" in ci and bool(ci.get("_shot_transition_active")):
+			return true
+	if scene.has_node("course_scene"):
+		var cs = scene.get_node("course_scene")
+		if cs != null and is_instance_valid(cs) and "_shot_transition_active" in cs and bool(cs.get("_shot_transition_active")):
+			return true
+	return false
+
+
+func _is_achievement_popup_showing() -> bool:
+	if has_node("/root/AchievementManager"):
+		var ach_mgr = get_node("/root/AchievementManager")
+		if ach_mgr != null and is_instance_valid(ach_mgr) and ach_mgr.has_method("is_showing_achievement"):
+			if ach_mgr.call("is_showing_achievement"):
+				return true
+	var tree := get_tree()
+	if tree != null and tree.root != null:
+		var pop = tree.root.find_child("AchievementPopup", true, false)
+		if pop != null and is_instance_valid(pop):
+			if pop.has_method("is_showing_achievement") and pop.call("is_showing_achievement"):
+				return true
+			if "popup_control" in pop and pop.popup_control != null and is_instance_valid(pop.popup_control):
+				if pop.popup_control.modulate.a > 0.05 and pop.popup_control.offset_top > -160.0:
+					return true
+	return false
+
+
+func _is_gimme_banner_showing(scene: Node) -> bool:
+	if scene != null and is_instance_valid(scene):
+		if scene.has_method("is_gimme_banner_active") and scene.call("is_gimme_banner_active"):
+			return true
+		if "gimme_banner" in scene:
+			var gb = scene.get("gimme_banner")
+			if gb != null and is_instance_valid(gb) and gb is CanvasItem:
+				if gb.visible and gb.modulate.a > 0.05:
+					return true
+	var tree := get_tree()
+	if tree != null and tree.root != null:
+		var banner = tree.root.find_child("GimmeBanner", true, false)
+		if banner != null and is_instance_valid(banner) and banner is CanvasItem:
+			if banner.visible and banner.modulate.a > 0.05:
+				return true
+	return false
+
+
+func _is_hole_or_player_finished(scene: Node) -> bool:
+	if has_node("/root/MultiplayerManager"):
+		var mp_mgr = get_node("/root/MultiplayerManager")
+		if mp_mgr != null and is_instance_valid(mp_mgr):
+			if bool(mp_mgr.get("is_finished")):
+				return true
+			if mp_mgr.has_method("is_active_player_holed_out") and mp_mgr.call("is_active_player_holed_out"):
+				return true
+			if mp_mgr.has_method("is_current_hole_completed") and mp_mgr.call("is_current_hole_completed"):
+				return true
+			if not mp_mgr.players.is_empty():
+				var active_p = mp_mgr.get_active_player()
+				if not active_p.is_empty() and bool(active_p.get("holed_out", false)):
+					return true
+	if scene != null and is_instance_valid(scene):
+		if "is_player_turn_ready" in scene and not bool(scene.get("is_player_turn_ready")):
+			return true
+	return false
 
 
 func _update_display(instant: bool = false) -> void:
@@ -786,6 +1017,7 @@ func _update_display(instant: bool = false) -> void:
 		var dot_style = _dot_panel.get_theme_stylebox("panel") as StyleBoxFlat
 
 		if _is_ready:
+			_rearm_feedback_timer = 0.0
 			_status_label.text = "BALL READY"
 			_sub_label.text = "READY TO HIT"
 			_status_label.add_theme_color_override("font_color", Color(0.95, 1.0, 0.95))
@@ -800,12 +1032,15 @@ func _update_display(instant: bool = false) -> void:
 			_trigger_pulse_animation()
 			if not instant and not visibility_just_enabled:
 				_trigger_pop_animation()
+		elif _rearm_feedback_timer > 0.0:
+			_stop_pulse_animation()
+			_show_rearming_feedback()
 		else:
 			_stop_pulse_animation()
 			_status_label.text = "PLACE BALL IN ZONE"
 			_sub_label.text = "WAITING FOR BALL"
-			_status_label.add_theme_color_override("font_color", Color(0.95, 0.9, 0.8))
-			_sub_label.add_theme_color_override("font_color", Color(0.85, 0.7, 0.4))
+			_status_label.add_theme_color_override("font_color", Color(0.98, 0.95, 0.9))
+			_sub_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
 			
 			_glow_style.bg_color = Color(0.12, 0.1, 0.05, 0.85)
 			_glow_style.border_color = Color(0.9, 0.65, 0.2, 0.7)
@@ -816,6 +1051,51 @@ func _update_display(instant: bool = false) -> void:
 	_update_guidance_text()
 	if _placement_canvas != null and is_instance_valid(_placement_canvas):
 		_placement_canvas.queue_redraw()
+
+
+func _on_status_badge_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			trigger_manual_rearm()
+
+
+func trigger_manual_rearm() -> void:
+	if is_ball_in_flight():
+		return
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("rearm"):
+			lm.call("rearm")
+	_rearm_feedback_timer = 1.5
+	_last_rendered_ready = false
+	_show_rearming_feedback()
+
+
+func _show_rearming_feedback() -> void:
+	_status_label.text = "RE-ARMING MONITOR..."
+	_sub_label.text = "CLICK / 'R' TO WAKE"
+	_status_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.38))
+	_sub_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
+	_glow_style.bg_color = Color(0.14, 0.11, 0.05, 0.92)
+	_glow_style.border_color = Color(0.95, 0.7, 0.2, 0.85)
+	_glow_style.shadow_color = Color(0.4, 0.3, 0.05, 0.3)
+	var dot_style = _dot_panel.get_theme_stylebox("panel") as StyleBoxFlat
+	if dot_style:
+		dot_style.bg_color = Color(0.95, 0.7, 0.2)
+	_trigger_pop_animation()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if (event as InputEventKey).keycode == KEY_R:
+			var scene := _get_active_scene()
+			if scene != null and not _is_menu_screen(scene) and not _is_menu_overlay_open(scene) and not is_ball_in_flight():
+				var focus_owner = get_viewport().gui_get_focus_owner()
+				if focus_owner is LineEdit or focus_owner is TextEdit:
+					return
+				trigger_manual_rearm()
+				get_viewport().set_input_as_handled()
 
 
 func _trigger_pop_animation() -> void:
@@ -849,15 +1129,45 @@ func _fade_out() -> void:
 	_tween.tween_callback(func(): visible = false)
 
 
-func _find_golf_ball(node: Node) -> Node:
-	if node == null:
-		return null
+func _is_golf_ball(node: Node) -> bool:
+	if node == null or not is_instance_valid(node):
+		return false
 	if node is GolfBall:
+		return true
+	if node.get_script() != null:
+		var s_path := str(node.get_script().resource_path)
+		if s_path.ends_with("ball.gd"):
+			return true
+	if "state" in node and ("launch_spin_rpm" in node or "get_downrange_yards" in node or "aim_yaw_offset_deg" in node):
+		return true
+	return false
+
+
+func _connect_ball_signals(ball: Node) -> void:
+	if ball == null or not is_instance_valid(ball):
+		return
+	if ball.has_signal("rest") and not ball.is_connected("rest", _on_ball_rest_signal):
+		ball.connect("rest", _on_ball_rest_signal)
+
+
+func _on_ball_rest_signal(_data = null) -> void:
+	_shot_active = false
+	_ball_moving_prev = false
+	_update_display(false)
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("notify_ball_at_rest"):
+			lm.notify_ball_at_rest()
+
+
+func _find_golf_ball(node: Node) -> Node:
+	if node == null or not is_instance_valid(node):
+		return null
+	if _is_golf_ball(node):
 		return node
-	# Also check if the node has a "ball" property that is a GolfBall
 	if "ball" in node:
 		var b = node.get("ball")
-		if b is GolfBall:
+		if _is_golf_ball(b):
 			return b
 	for child in node.get_children():
 		var b = _find_golf_ball(child)
@@ -866,12 +1176,33 @@ func _find_golf_ball(node: Node) -> Node:
 	return null
 
 
-func _get_golf_ball() -> GolfBall:
+func _get_golf_ball() -> Node:
 	if _cached_ball != null and is_instance_valid(_cached_ball):
 		return _cached_ball
-		
-	var scene = _get_active_scene()
-	if scene != null:
-		_cached_ball = _find_golf_ball(scene) as GolfBall
+
+	var scene := _get_active_scene()
+	if scene == null or not is_instance_valid(scene):
+		return null
+
+	var player = _find_player_node(scene)
+	if player != null and is_instance_valid(player) and "ball" in player and player.ball != null:
+		if _is_golf_ball(player.ball):
+			_cached_ball = player.ball
+			_connect_ball_signals(_cached_ball)
+			return _cached_ball
+
+	var found = _find_golf_ball(scene)
+	if found != null:
+		_cached_ball = found
+		_connect_ball_signals(_cached_ball)
 		return _cached_ball
+
+	var tree := get_tree()
+	if tree != null and tree.root != null:
+		var b = tree.root.find_child("GolfBall", true, false)
+		if b != null and _is_golf_ball(b):
+			_cached_ball = b
+			_connect_ball_signals(_cached_ball)
+			return _cached_ball
+
 	return null

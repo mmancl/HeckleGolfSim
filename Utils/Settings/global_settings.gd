@@ -80,6 +80,9 @@ func load_settings() -> void:
 	if range_settings.camera_height.value < 2.0:
 		range_settings.camera_height.set_value(2.4)
 		migrated = true
+	if is_equal_approx(range_settings.ball_reset_timer.value, 3.0):
+		range_settings.ball_reset_timer.set_value(1.5)
+		migrated = true
 	
 	# Migration / validation for displayed_stats
 	var stats_val = range_settings.displayed_stats.value

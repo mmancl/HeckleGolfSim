@@ -2,9 +2,15 @@ extends Object
 class_name ShotFormatter
 
 # Formats ball/shot data for UI display, with unit conversion and derived spin/club delivery metrics.
-# If show_distance is false, Distance is left unchanged from prev_data (or set to "---" if not provided).
-static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: int, show_distance: bool, prev_data: Dictionary = {}) -> Dictionary:
+# If is_final_rest is false (during flight/rollout), dynamic stats (Distance, Carry, Apex, Offline, HangTime, DescentAngle)
+# display "---" so that static metrics show immediately on strike while dynamic stats wait until the ball finishes rolling.
+static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: int, is_final_rest: bool = true, prev_data: Dictionary = {}) -> Dictionary:
 	var ball_data: Dictionary = {}
+	if raw_ball_data.is_empty():
+		for stat_id in StatDefinitions.get_all_stat_ids():
+			ball_data[stat_id] = "---"
+		return ball_data
+
 	var m2yd := 1.09361
 	var has_backspin := raw_ball_data.has("BackSpin")
 	var has_sidespin := raw_ball_data.has("SideSpin")
@@ -29,40 +35,59 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 	var raw_hla := float(raw_ball_data.get("HLA", 0.0))
 
 	# --- 1. Ball & Distance Metrics ---
+	var has_saved_data = raw_ball_data.has("TotalDistance") or raw_ball_data.has("CarryDistance")
 	if units == PhysicsEnums.Units.IMPERIAL:
-		if show_distance:
-			ball_data["Distance"] = "%.1f" % (player.get_distance() * m2yd)
-		else:
-			ball_data["Distance"] = prev_data.get("Distance", "---")
-		var carry_val = player.carry
-		if carry_val <= 0 and raw_ball_data.has("CarryDistance"):
-			carry_val = raw_ball_data.get("CarryDistance", 0.0) as float
-		ball_data["Carry"] = "%.1f" % (carry_val * m2yd)
-		ball_data["Apex"] = "%.1f" % (player.apex * 3.28084)
-		var side_distance = player.get_side_distance() * m2yd
-		var side_text := "R"
-		if side_distance < 0:
-			side_text = "L"
-		side_text += ("%.1f" % abs(side_distance))
-		ball_data["Offline"] = side_text
 		ball_data["Speed"] = "%.1f" % raw_speed_mph
-	else:
-		if show_distance:
-			ball_data["Distance"] = "%.1f" % player.get_distance()
+		if player != null or has_saved_data:
+			var dist_m = player.get_distance() if player != null else float(raw_ball_data.get("TotalDistance", 0.0))
+			ball_data["Distance"] = "%.1f" % (dist_m * m2yd)
+			var carry_val = player.carry if player != null else 0.0
+			if carry_val <= 0:
+				if raw_ball_data.has("CarryDistance"):
+					carry_val = raw_ball_data.get("CarryDistance", 0.0) as float
+				elif not is_final_rest:
+					carry_val = dist_m
+			ball_data["Carry"] = "%.1f" % (carry_val * m2yd)
+			var apex_m = player.apex if player != null else float(raw_ball_data.get("Apex", 0.0))
+			ball_data["Apex"] = "%.1f" % (apex_m * 3.28084)
+			var side_distance = (player.get_side_distance() if player != null else float(raw_ball_data.get("SideDistance", 0.0))) * m2yd
+			var side_text := ""
+			if abs(side_distance) < 0.05:
+				side_text = "0.0"
+			else:
+				side_text = ("R" if side_distance >= 0 else "L") + ("%.1f" % abs(side_distance))
+			ball_data["Offline"] = side_text
 		else:
-			ball_data["Distance"] = prev_data.get("Distance", "---")
-		var carry_val = player.carry
-		if carry_val <= 0 and raw_ball_data.has("CarryDistance"):
-			carry_val = raw_ball_data.get("CarryDistance", 0.0) as float
-		ball_data["Carry"] = "%.1f" % carry_val
-		ball_data["Apex"] = "%.1f" % player.apex
-		var side_distance = player.get_side_distance()
-		var side_text := "R"
-		if side_distance < 0:
-			side_text = "L"
-		side_text += ("%.1f" % abs(side_distance))
-		ball_data["Offline"] = side_text
+			ball_data["Distance"] = "---"
+			ball_data["Carry"] = "---"
+			ball_data["Apex"] = "---"
+			ball_data["Offline"] = "---"
+	else:
 		ball_data["Speed"] = "%.1f" % (raw_speed_mph * 0.44704)
+		if player != null or has_saved_data:
+			var dist_m = player.get_distance() if player != null else float(raw_ball_data.get("TotalDistance", 0.0))
+			ball_data["Distance"] = "%.1f" % dist_m
+			var carry_val = player.carry if player != null else 0.0
+			if carry_val <= 0:
+				if raw_ball_data.has("CarryDistance"):
+					carry_val = raw_ball_data.get("CarryDistance", 0.0) as float
+				elif not is_final_rest:
+					carry_val = dist_m
+			ball_data["Carry"] = "%.1f" % carry_val
+			var apex_m = player.apex if player != null else float(raw_ball_data.get("Apex", 0.0))
+			ball_data["Apex"] = "%.1f" % apex_m
+			var side_distance = player.get_side_distance() if player != null else float(raw_ball_data.get("SideDistance", 0.0))
+			var side_text := ""
+			if abs(side_distance) < 0.05:
+				side_text = "0.0"
+			else:
+				side_text = ("R" if side_distance >= 0 else "L") + ("%.1f" % abs(side_distance))
+			ball_data["Offline"] = side_text
+		else:
+			ball_data["Distance"] = "---"
+			ball_data["Carry"] = "---"
+			ball_data["Apex"] = "---"
+			ball_data["Offline"] = "---"
 	
 	ball_data["BackSpin"] = str(int(backspin))
 	ball_data["SideSpin"] = str(int(sidespin))
@@ -87,7 +112,8 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 	if raw_ball_data.has("DescentAngle"):
 		descent_deg = float(raw_ball_data.get("DescentAngle", 0.0))
 	elif raw_vla > 0.0:
-		descent_deg = clampf(raw_vla * 1.45 + (player.apex * 0.15), 15.0, 60.0)
+		var curr_apex = player.apex if player != null else float(raw_ball_data.get("Apex", 0.0))
+		descent_deg = clampf(raw_vla * 1.45 + (curr_apex * 0.15), 15.0, 60.0)
 	ball_data["DescentAngle"] = "%.1f" % descent_deg
 
 	# --- 3. Club Delivery Metrics ---
@@ -152,7 +178,7 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 
 	# Dynamic Loft
 	var dynamic_loft := 0.0
-	if raw_ball_data.has("DynamicLoft"):
+	if raw_ball_data.has("DynamicLoft") and float(raw_ball_data.get("DynamicLoft", 0.0)) > 0.01:
 		dynamic_loft = float(raw_ball_data.get("DynamicLoft", 0.0))
 	else:
 		dynamic_loft = max(8.0, raw_vla * 0.85 + 2.0)
@@ -185,5 +211,36 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 		ball_data["ClubSpeed"] = "%.1f" % (club_speed_mph * 0.44704)
 	
 	ball_data["SmashFactor"] = "%.2f" % smash_factor
+
+	# Club identification
+	if raw_ball_data.has("Club") and not str(raw_ball_data["Club"]).is_empty():
+		ball_data["Club"] = str(raw_ball_data["Club"])
+	elif raw_ball_data.has("club") and not str(raw_ball_data["club"]).is_empty():
+		ball_data["Club"] = str(raw_ball_data["club"])
+	elif player != null and player.get("ball") != null and "current_selected_club" in player.ball and not str(player.ball.current_selected_club).is_empty():
+		ball_data["Club"] = str(player.ball.current_selected_club)
+	elif player != null and player.has_method("_get_selected_club"):
+		ball_data["Club"] = str(player._get_selected_club())
+	elif prev_data.has("Club") and not str(prev_data["Club"]).is_empty():
+		ball_data["Club"] = str(prev_data["Club"])
+
+	# Lie and tee status
+	if raw_ball_data.has("is_tee"):
+		ball_data["is_tee"] = bool(raw_ball_data["is_tee"])
+	elif player != null and player.get("ball") != null and "lie_type" in player.ball:
+		ball_data["is_tee"] = (str(player.ball.lie_type).to_lower() == "teebox")
+	elif prev_data.has("is_tee"):
+		ball_data["is_tee"] = bool(prev_data["is_tee"])
+	else:
+		ball_data["is_tee"] = false
+
+	if raw_ball_data.has("lie_type"):
+		ball_data["lie_type"] = str(raw_ball_data["lie_type"])
+	elif player != null and player.get("ball") != null and "lie_type" in player.ball:
+		ball_data["lie_type"] = str(player.ball.lie_type)
+	elif prev_data.has("lie_type"):
+		ball_data["lie_type"] = str(prev_data["lie_type"])
+	else:
+		ball_data["lie_type"] = "teebox" if ball_data.get("is_tee", false) else "fairway"
 
 	return ball_data

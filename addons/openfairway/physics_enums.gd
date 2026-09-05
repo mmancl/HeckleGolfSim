@@ -11,5 +11,6 @@ enum SurfaceType {
     FAIRWAY_SOFT, # Medium rollout 
     ROUGH, # Slow rollout
     FIRM, # Hardpan / cart-path style
-    GREEN # Putting green (spin check / possible spinback)
+    GREEN, # Putting green (spin check / possible spinback)
+    BUNKER # Sand bunker (low bounce, heavy drag, quick stop)
 }

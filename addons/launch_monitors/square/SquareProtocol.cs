@@ -5,6 +5,14 @@ namespace LaunchMonitors.Square;
 
 public static class SquareProtocol
 {
+    public const byte StatusNone = 0x00;
+    public const byte StatusIdle = 0x01;
+    public const byte StatusInit = 0x02;
+    public const byte StatusDetect = 0x03;
+    public const byte StatusReady = 0x04;
+    public const byte StatusShot = 0x05;
+    public const byte StatusDone = 0x06;
+
     public static bool IsSensorPacket(ReadOnlySpan<byte> data)
     {
         return data.Length >= 17 && data[0] == 0x11 && data[1] == 0x01;
@@ -13,6 +21,23 @@ public static class SquareProtocol
     public static bool IsShotPacket(ReadOnlySpan<byte> data)
     {
         return data.Length >= 17 && data[0] == 0x11 && data[1] == 0x02;
+    }
+
+    public static bool IsStatusPacket(ReadOnlySpan<byte> data)
+    {
+        return data.Length >= 3 && data[0] == 0x11 && data[1] == 0x03;
+    }
+
+    public static bool TryParseStatus(ReadOnlySpan<byte> data, out byte statusCode)
+    {
+        statusCode = 0;
+        if (!IsStatusPacket(data))
+        {
+            return false;
+        }
+
+        statusCode = data[2];
+        return true;
     }
 
     public static bool TryParseSensor(ReadOnlySpan<byte> data, out SquareSensorData sensor)

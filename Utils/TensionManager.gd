@@ -74,6 +74,7 @@ func _setup_visuals() -> void:
 	else:
 		push_warning("[TensionManager] Could not load heartbeat_vignette.gdshader")
 
+	vignette_rect.visible = false
 	canvas_layer.add_child(vignette_rect)
 
 func _setup_audio() -> void:
@@ -404,10 +405,14 @@ func _process(delta: float) -> void:
 				sfx_player.stop()
 
 	# Update 4-corner tunnel vision vignette
-	if vignette_material != null:
-		vignette_material.set_shader_parameter("intensity", current_intensity)
-		vignette_material.set_shader_parameter("pulse", current_pulse)
-		vignette_material.set_shader_parameter("closeness", current_closeness)
+	if vignette_rect != null:
+		var should_show_vignette = tension_active or current_intensity > 0.001
+		if vignette_rect.visible != should_show_vignette:
+			vignette_rect.visible = should_show_vignette
+		if should_show_vignette and vignette_material != null:
+			vignette_material.set_shader_parameter("intensity", current_intensity)
+			vignette_material.set_shader_parameter("pulse", current_pulse)
+			vignette_material.set_shader_parameter("closeness", current_closeness)
 
 	var cam: Camera3D = target_camera
 	if cam == null or not is_instance_valid(cam):

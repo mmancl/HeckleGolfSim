@@ -83,14 +83,14 @@ func _ready() -> void:
 	
 	var aim_btn = Button.new()
 	aim_btn.text = "🎯 Hit Aim Distance"
-	aim_btn.custom_minimum_size = Vector2(250, 40)
+	aim_btn.custom_minimum_size = Vector2(260, 50)
 	_apply_material_button_style(aim_btn, Color(0.6, 0.2, 0.6, 0.85))
 	aim_btn.pressed.connect(_on_hit_aim_distance)
 	_vbox.add_child(aim_btn)
 	
 	_close_btn = Button.new()
 	_close_btn.text = "Close"
-	_close_btn.custom_minimum_size = Vector2(250, 40)
+	_close_btn.custom_minimum_size = Vector2(260, 50)
 	_apply_material_button_style(_close_btn, Color(0.4, 0.4, 0.4, 0.85))
 	_close_btn.pressed.connect(func(): visible = false)
 	_vbox.add_child(_close_btn)
@@ -98,7 +98,7 @@ func _ready() -> void:
 func _add_distance_button(label: String, distance_yards: float) -> void:
 	var btn = Button.new()
 	btn.text = label
-	btn.custom_minimum_size = Vector2(250, 40)
+	btn.custom_minimum_size = Vector2(260, 50)
 	_apply_material_button_style(btn, Color(0.24, 0.46, 0.72, 0.85))
 	btn.pressed.connect(func(): _inject_shot_for_distance(distance_yards))
 	_vbox.add_child(btn)
@@ -218,6 +218,7 @@ func _apply_material_button_style(btn: Button, bg_color: Color):
 	btn.add_theme_color_override("font_color", Color.WHITE)
 	btn.add_theme_color_override("font_hover_color", Color.WHITE)
 	btn.add_theme_color_override("font_pressed_color", Color.WHITE)
+	btn.add_theme_font_size_override("font_size", 16)
 
 
 func _get_selected_club() -> String:

@@ -3,6 +3,9 @@ extends Node
 signal active_player_changed(player: Dictionary)
 signal hole_completed(scores: Array)
 signal game_over(scores: Array)
+signal gimme_awarded(player: Dictionary, extra_strokes: int)
+
+var last_gimme_strokes: int = 0
 
 var players: Array[Dictionary] = []
 var active_player_index: int = 0
@@ -12,7 +15,7 @@ var hole_info: Dictionary = {}
 var par_scores: Dictionary = {} # par per hole
 var practice_mode_active: bool = false
 var selected_course_length: String = "Full 18"
-var game_mode: String = "Standard" # Standard, Scramble, 2v2 Scramble, Skins
+var game_mode: String = "Standard" # Standard, Scramble, 2v2 Scramble, Skins, Closest to Pin
 var team_assignments: Dictionary = {} # Team name -> Array of player names
 
 # Game mode specific runtime state
@@ -22,6 +25,7 @@ var skins_won: Dictionary = {} # player_name -> int
 var carryover_skins: int = 0
 var carryover_eligible_players: Array = [] # player names eligible for carryover
 var hole_skins_results: Dictionary = {} # hole_id -> Dictionary
+var hole_ctp_results: Dictionary = {} # hole_id -> Dictionary (winners, min_dist_yds, player_dists)
 
 # History and Save State
 var current_match_id: String = ""
@@ -32,6 +36,8 @@ var current_club: String = "Dr"
 var is_finished: bool = false
 var unix_time: float = 0.0
 var formatted_date: String = ""
+var last_shot_player_index: int = -1
+var last_shot_info: Dictionary = {}
 
 func _ready() -> void:
 	if has_node("/root/EventBus"):
@@ -66,8 +72,10 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 	carryover_skins = 0
 	carryover_eligible_players.clear()
 	hole_skins_results.clear()
+	hole_ctp_results.clear()
 	scramble_best_pos = Vector3.ZERO
 	team_best_pos.clear()
+	clear_last_shot()
 
 	# Default 2v2 Scramble teams if not provided
 	if game_mode == "2v2 Scramble" and team_assignments.is_empty():
@@ -95,10 +103,16 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 			if p_team.is_empty():
 				p_team = "Team 1" if i < 2 else "Team 2"
 
+		var reg = get_registered_player(p_name)
+		var p_email = config.get("email", reg.get("email", ""))
+		var p_avatar = config.get("avatar", reg.get("avatar", ""))
+
 		var p := {
 			"name": p_name,
 			"tee": config.get("tee", "Blue"),
 			"team": p_team,
+			"email": p_email,
+			"avatar": p_avatar,
 			"strokes": 0,
 			"total_strokes": 0,
 			"last_hole_score": 0,
@@ -115,10 +129,12 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 			"mulligan_history": {},
 			"last_shot_tracer_points": [],
 			"last_aim_target_pos": Vector3.ZERO,
-			"last_aim_yaw_offset_deg": 0.0
+			"last_aim_yaw_offset_deg": 0.0,
+			"last_shot_distance_yards": -1.0,
+			"last_starting_pos": Vector3.ZERO
 		}
 		players.append(p)
-		register_player(p_name)
+		register_player(p_name, p_email, p_avatar)
 		skins_won[p_name] = 0
 		
 	course_title = config_data.get("Title", "")
@@ -168,18 +184,40 @@ func start_hole() -> void:
 		# Evaluate round achievements for all active players
 		if has_node("/root/AchievementManager") and not practice_mode_active:
 			var ach_mgr = get_node("/root/AchievementManager")
-			var min_strokes = 99999
-			for p in players:
-				if p.get("active", true) and p.get("total_strokes", 0) > 0:
-					if p["total_strokes"] < min_strokes:
-						min_strokes = p["total_strokes"]
-			for p in players:
-				if p.get("active", true) and p.get("total_strokes", 0) > 0:
-					var p_name = p.get("name", "")
-					var is_winner = (p["total_strokes"] == min_strokes)
-					var p_stats = calculate_player_stats(p_name)
-					var total_wins = p_stats.get("wins", 0)
-					ach_mgr.check_round_achievements(p_name, p["total_strokes"], hole_ids.size(), is_winner, total_wins)
+			if game_mode == "Closest to Pin":
+				var max_pts = -1
+				for p in players:
+					if p.get("active", true):
+						var pts = 0
+						for h_id in hole_ids:
+							if p["hole_scores"].get(h_id) != null:
+								pts += int(p["hole_scores"][h_id])
+						if pts > max_pts:
+							max_pts = pts
+				for p in players:
+					if p.get("active", true):
+						var p_name = p.get("name", "")
+						var pts = 0
+						for h_id in hole_ids:
+							if p["hole_scores"].get(h_id) != null:
+								pts += int(p["hole_scores"][h_id])
+						var is_winner = (pts == max_pts and max_pts > 0)
+						var p_stats = calculate_player_stats(p_name)
+						var total_wins = p_stats.get("wins", 0)
+						ach_mgr.check_round_achievements(p_name, p["total_strokes"], hole_ids.size(), is_winner, total_wins)
+			else:
+				var min_strokes = 99999
+				for p in players:
+					if p.get("active", true) and p.get("total_strokes", 0) > 0:
+						if p["total_strokes"] < min_strokes:
+							min_strokes = p["total_strokes"]
+				for p in players:
+					if p.get("active", true) and p.get("total_strokes", 0) > 0:
+						var p_name = p.get("name", "")
+						var is_winner = (p["total_strokes"] == min_strokes)
+						var p_stats = calculate_player_stats(p_name)
+						var total_wins = p_stats.get("wins", 0)
+						ach_mgr.check_round_achievements(p_name, p["total_strokes"], hole_ids.size(), is_winner, total_wins)
 
 		emit_signal("game_over", players)
 		return
@@ -206,9 +244,13 @@ func start_hole() -> void:
 		var is_driver = true
 		var offset_y = 0.059435
 		p["position"] = Vector3(tee_pos[0], offset_y, tee_pos[1])
+		p["last_starting_pos"] = p["position"]
 		p["shot_history"].clear()
 		p["last_aim_target_pos"] = Vector3.ZERO
 		p["last_aim_yaw_offset_deg"] = 0.0
+		p["last_shot_distance_yards"] = -1.0
+
+	clear_last_shot()
 
 	# Determine honors (Tee-off order)
 	if current_hole_index == 0:
@@ -221,14 +263,18 @@ func start_hole() -> void:
 			return false
 		)
 	else:
-		# Honors: Lowest score on previous hole tees off first. If tied, keep order. Inactive players go to the bottom.
+		# Honors: Lowest score on previous hole tees off first (highest in Closest to Pin). If tied, keep order. Inactive players go to the bottom.
 		players.sort_custom(func(a, b):
 			var a_active = a.get("active", true)
 			var b_active = b.get("active", true)
 			if a_active != b_active:
 				return a_active
-			if a["last_hole_score"] != b["last_hole_score"]:
-				return a["last_hole_score"] < b["last_hole_score"]
+			if game_mode == "Closest to Pin":
+				if a["last_hole_score"] != b["last_hole_score"]:
+					return a["last_hole_score"] > b["last_hole_score"]
+			else:
+				if a["last_hole_score"] != b["last_hole_score"]:
+					return a["last_hole_score"] < b["last_hole_score"]
 			return false
 		)
 		
@@ -248,9 +294,88 @@ func get_active_player() -> Dictionary:
 		return {}
 	return players[active_player_index]
 
+func get_last_shot_player() -> Dictionary:
+	if last_shot_player_index >= 0 and last_shot_player_index < players.size():
+		return players[last_shot_player_index]
+	return {}
+
+func is_active_player_holed_out() -> bool:
+	if players.is_empty():
+		return false
+	var active_p = get_active_player()
+	if active_p.is_empty():
+		return false
+	return bool(active_p.get("holed_out", false))
+
+func is_current_hole_completed() -> bool:
+	if players.is_empty():
+		return false
+	var active_ps = players.filter(func(p): return p.get("active", true))
+	if active_ps.is_empty():
+		return true
+	return active_ps.all(func(p): return bool(p.get("holed_out", false)))
+
+func get_mulligan_target_player_index() -> int:
+	# If a shot was recorded on the current hole, that player is the mulligan target
+	if last_shot_player_index >= 0 and last_shot_player_index < players.size():
+		var hole_id = hole_ids[current_hole_index] if not hole_ids.is_empty() else ""
+		if not last_shot_info.is_empty():
+			if last_shot_info.get("hole_id", "") == hole_id:
+				return last_shot_player_index
+		else:
+			return last_shot_player_index
+	return active_player_index
+
+func clear_last_shot() -> void:
+	last_shot_player_index = -1
+	last_shot_info.clear()
+
+func can_mulligan() -> bool:
+	if players.is_empty():
+		return false
+	var hole_id = hole_ids[current_hole_index] if not hole_ids.is_empty() else ""
+	# 1. If we have a recorded last shot on this hole
+	if last_shot_player_index >= 0 and last_shot_player_index < players.size():
+		if not last_shot_info.is_empty() and last_shot_info.get("hole_id", "") == hole_id:
+			return true
+	# 2. Check if target player or active player has matching mulligan history to restore
+	var target_idx = get_mulligan_target_player_index()
+	var target_p = players[target_idx] if target_idx >= 0 and target_idx < players.size() else get_active_player()
+	if not target_p.is_empty():
+		if target_p.has("mulligan_history") and typeof(target_p["mulligan_history"]) == TYPE_DICTIONARY:
+			if target_p["mulligan_history"].has(hole_id) and not target_p["mulligan_history"][hole_id].is_empty():
+				return true
+		# 3. Allow if target player has taken at least 1 stroke on this hole
+		if target_p.get("strokes", 0) > 0:
+			return true
+	return false
+
 func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> void:
+	last_gimme_strokes = 0
 	var active_player = get_active_player()
 	var prev_lie = active_player.get("lie_type", "")
+	var prev_reduction = active_player.get("shot_reduction", 0.0)
+	var holed_out_before = active_player.get("holed_out", false)
+
+	var player_node = get_tree().root.find_child("Player", true, false)
+	var start_pos: Vector3 = active_player.get("position", final_position)
+	if player_node != null and player_node.get("_last_starting_pos") != null:
+		var last_start = player_node.get("_last_starting_pos")
+		if typeof(last_start) == TYPE_VECTOR3 and not (last_start as Vector3).is_zero_approx():
+			start_pos = last_start
+
+	active_player["last_starting_pos"] = start_pos
+
+	var ground_dist_yds: float = Vector2(start_pos.x, start_pos.z).distance_to(Vector2(final_position.x, final_position.z)) * 1.09361
+	var raw_total_yds: float = (raw_shot_data.get("TotalDistance", 0.0) as float) * 1.09361
+	if is_nan(raw_total_yds) or raw_total_yds < 0.0:
+		raw_total_yds = 0.0
+	if is_nan(ground_dist_yds) or ground_dist_yds < 0.0:
+		ground_dist_yds = 0.0
+	var shot_dist_yds: float = max(raw_total_yds, ground_dist_yds)
+	active_player["last_shot_distance_yards"] = shot_dist_yds
+	print("[MultiplayerManager] Shot recorded for %s: dist = %.1f yds (raw: %.1f yds, ground: %.1f yds)" % [active_player.get("name", "Player"), shot_dist_yds, raw_total_yds, ground_dist_yds])
+
 	active_player["strokes"] += 1
 	active_player["total_strokes"] += 1
 	active_player["position"] = final_position
@@ -258,7 +383,6 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 
 	# Record the tracer points of the shot that just ended
 	var tracer_pts = []
-	var player_node = get_tree().root.find_child("Player", true, false)
 	var last_aim_target = Vector3.ZERO
 	var last_aim_yaw = 0.0
 	if player_node != null:
@@ -272,6 +396,8 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 	active_player["last_shot_tracer_points"] = tracer_pts
 	active_player["last_aim_target_pos"] = last_aim_target
 	active_player["last_aim_yaw_offset_deg"] = last_aim_yaw
+
+	var stat_entry = {}
 
 	if not hole_ids.is_empty():
 		var hole_id: String = hole_ids[current_hole_index]
@@ -304,7 +430,7 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 				side_spin = total_spin * sin(deg_to_rad(spin_axis))
 				
 		var shot_num = active_player["strokes"]
-		var stat_entry = {
+		stat_entry = {
 			"shot_num": shot_num,
 			"club": current_club,
 			"speed_mph": raw_shot_data.get("Speed", 0.0) as float,
@@ -402,6 +528,27 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 		_handle_scramble_shot(active_player)
 	elif game_mode == "2v2 Scramble" and not hole_ids.is_empty():
 		_handle_2v2_scramble_shot(active_player)
+
+	last_shot_player_index = active_player_index
+	last_shot_info = {
+		"player_index": active_player_index,
+		"player_name": active_player.get("name", ""),
+		"hole_index": current_hole_index,
+		"hole_id": hole_ids[current_hole_index] if not hole_ids.is_empty() else "",
+		"start_pos": start_pos,
+		"end_pos": final_position,
+		"club": current_club,
+		"lie_type": prev_lie,
+		"shot_reduction": prev_reduction,
+		"last_shot_penalty": active_player.get("last_shot_penalty", 0),
+		"aim_target_pos": last_aim_target,
+		"aim_yaw_offset_deg": last_aim_yaw,
+		"tracer_points": tracer_pts,
+		"holed_out_after": active_player.get("holed_out", false),
+		"holed_out_before": holed_out_before,
+		"stat_entry": stat_entry,
+		"raw_shot_data": raw_shot_data.duplicate()
+	}
 					
 	save_current_match()
 
@@ -491,6 +638,10 @@ func _handle_2v2_scramble_shot(active_player: Dictionary) -> void:
 		print("[MultiplayerManager] 2v2 Scramble best shot for %s (stroke %d) selected at %s (Player: %s)." % [team_name, current_stroke, str(closest_pos), best_p_name])
 
 func select_next_player() -> void:
+	if game_mode == "Closest to Pin":
+		_select_next_player_ctp()
+		return
+
 	var remaining_players = players.filter(func(p): return p.get("active", true) and not p["holed_out"])
 	
 	if remaining_players.is_empty():
@@ -513,55 +664,62 @@ func select_next_player() -> void:
 		emit_signal("hole_completed", players)
 		return
 		
-	# Check if all players have taken their first shot (tee shot)
-	var any_no_shot = players.any(func(p): return p.get("active", true) and p["strokes"] == 0)
-	
-	if any_no_shot:
-		for i in range(players.size()):
-			if players[i].get("active", true) and players[i]["strokes"] == 0:
-				active_player_index = i
-				emit_signal("active_player_changed", get_active_player())
-				return
-				
-	# Away player hits first (filtered by lowest strokes taken so far on this hole)
-	var min_strokes = 9999
-	for p in remaining_players:
-		if p["strokes"] < min_strokes:
-			min_strokes = p["strokes"]
-			
-	var min_stroke_players = remaining_players.filter(func(p): return p["strokes"] == min_strokes)
-	
-	var hole_id: String = hole_ids[current_hole_index]
-	var current_hole = hole_info[hole_id]
-	var hole_loc = current_hole.get("Hole Location", [0.0, 0.0])
-	var target_pin = Vector3(hole_loc[0], 0.0, hole_loc[1])
-	
+	# Scramble modes: all players on a team/group take their shot for the current stroke before advancing
+	if game_mode in ["Scramble", "2v2 Scramble"]:
+		var min_strokes = 9999
+		for p in remaining_players:
+			if p["strokes"] < min_strokes:
+				min_strokes = p["strokes"]
+		var min_stroke_players = remaining_players.filter(func(p): return p["strokes"] == min_strokes)
+		if not min_stroke_players.is_empty():
+			var next_player = min_stroke_players[0]
+			active_player_index = players.find(next_player)
+			emit_signal("active_player_changed", get_active_player())
+			print("[MultiplayerManager] Scramble next player: %s" % get_active_player()["name"])
+			return
+
+	# Exception: If the player who just hit had their shot go 20 yards or less, let them hit again rather than switching players
 	var just_hit_player = get_active_player()
+	var custom_enabled = GlobalSettings.range_settings.custom_next_player.value
+	if custom_enabled and not just_hit_player.is_empty() and (just_hit_player in remaining_players) and just_hit_player.get("strokes", 0) > 0 and just_hit_player.get("last_shot_penalty", 0) == 0:
+		var last_dist: float = float(just_hit_player.get("last_shot_distance_yards", -1.0))
+		if last_dist >= 0.0 and last_dist <= 20.0:
+			print("[MultiplayerManager] Player %s hit <= 20 yards (%.1f yds). Allowing repeat hit!" % [just_hit_player["name"], last_dist])
+			active_player_index = players.find(just_hit_player)
+			emit_signal("active_player_changed", get_active_player())
+			return
+
+	# Check if all players have taken their first shot (tee shot)
+	var tee_players = remaining_players.filter(func(p): return p.get("strokes", 0) == 0)
+	if not tee_players.is_empty():
+		var next_player = tee_players[0]
+		active_player_index = players.find(next_player)
+		emit_signal("active_player_changed", get_active_player())
+		print("[MultiplayerManager] Next to tee off: %s" % get_active_player()["name"])
+		return
+
+	# Furthest away from the hole hits
+	var target_pin := Vector3.ZERO
+	if not hole_ids.is_empty() and current_hole_index < hole_ids.size():
+		var hole_id: String = hole_ids[current_hole_index]
+		var current_hole = hole_info.get(hole_id, {})
+		var hole_loc = current_hole.get("Hole Location", [0.0, 0.0])
+		target_pin = Vector3(hole_loc[0], 0.0, hole_loc[1])
+
 	var furthest_player = null
 	var max_dist := -1.0
-	
-	for p in min_stroke_players:
+
+	for p in remaining_players:
 		var flat_pos := Vector3(p["position"].x, 0.0, p["position"].z)
 		var dist = flat_pos.distance_to(target_pin)
 		if dist > max_dist:
 			max_dist = dist
 			furthest_player = p
-			
-	var next_player = furthest_player
-	if furthest_player != null and not just_hit_player.is_empty() and just_hit_player != furthest_player:
-		var custom_enabled = GlobalSettings.range_settings.custom_next_player.value
-		if custom_enabled and (just_hit_player in min_stroke_players):
-			var just_hit_flat := Vector3(just_hit_player["position"].x, 0.0, just_hit_player["position"].z)
-			var furthest_flat := Vector3(furthest_player["position"].x, 0.0, furthest_player["position"].z)
-			var dist_between_yards = just_hit_flat.distance_to(furthest_flat) * 1.09361
-			if dist_between_yards <= 10.0:
-				next_player = just_hit_player
-				print("[MultiplayerManager] Custom turn order: %s active." % just_hit_player["name"])
-			
-	if next_player != null:
-		active_player_index = players.find(next_player)
+
+	if furthest_player != null:
+		active_player_index = players.find(furthest_player)
 		emit_signal("active_player_changed", get_active_player())
-		print("[MultiplayerManager] Next to play: %s" % get_active_player()["name"])
+		print("[MultiplayerManager] Next to play (furthest from hole: %.1f yds): %s" % [max_dist * 1.09361, get_active_player()["name"]])
 
 func _evaluate_skins_for_hole(hole_id: String) -> void:
 	var active_ps = players.filter(func(p): return p.get("active", true))
@@ -638,16 +796,95 @@ func _evaluate_skins_for_hole(hole_id: String) -> void:
 		}
 		print("[Skins] Hole %s tied. Carryover pot now: %d skin(s)" % [hole_id, carryover_skins])
 
+func _select_next_player_ctp() -> void:
+	var hole_id: String = hole_ids[current_hole_index] if not hole_ids.is_empty() else ""
+	var unplayed_players = players.filter(func(p): return p.get("active", true) and p.get("strokes", 0) == 0)
+	
+	if not unplayed_players.is_empty():
+		for i in range(players.size()):
+			if players[i].get("active", true) and players[i].get("strokes", 0) == 0:
+				active_player_index = i
+				emit_signal("active_player_changed", get_active_player())
+				print("[MultiplayerManager] Closest to Pin next player: %s" % get_active_player()["name"])
+				return
+
+	# All active players have taken their shot on this hole. Evaluate Closest to Pin!
+	if not hole_id.is_empty():
+		_evaluate_closest_to_pin_for_hole(hole_id)
+	else:
+		for p in players:
+			p["holed_out"] = true
+
+	save_current_match()
+	emit_signal("hole_completed", players)
+
+func _evaluate_closest_to_pin_for_hole(hole_id: String) -> void:
+	var active_ps = players.filter(func(p): return p.get("active", true))
+	if active_ps.is_empty():
+		return
+
+	var current_hole = hole_info.get(hole_id, {})
+	var hole_loc = current_hole.get("Hole Location", [0.0, 0.0])
+	var target_pin = Vector3(hole_loc[0], 0.0, hole_loc[1])
+
+	var min_dist: float = INF
+	var player_dists: Dictionary = {}
+
+	for p in active_ps:
+		var flat_pos = Vector3(p["position"].x, 0.0, p["position"].z)
+		var dist = flat_pos.distance_to(target_pin)
+		# Penalty strokes (e.g. water hazard) add 1000m so dry balls beat penalty balls
+		if p.get("last_shot_penalty", 0) > 0:
+			dist += 1000.0
+		player_dists[p["name"]] = dist
+		if dist < min_dist:
+			min_dist = dist
+
+	var winners: Array = []
+	for p in active_ps:
+		var d = player_dists.get(p["name"], INF)
+		if abs(d - min_dist) < 0.005:
+			winners.append(p)
+
+	var winner_names: Array = []
+	for w in winners:
+		winner_names.append(w["name"])
+
+	for p in players:
+		if p.get("active", true):
+			p["holed_out"] = true
+			if p in winners:
+				p["last_hole_score"] = 1
+				p["hole_scores"][hole_id] = 1
+			else:
+				p["last_hole_score"] = 0
+				p["hole_scores"][hole_id] = 0
+		else:
+			p["holed_out"] = true
+			p["last_hole_score"] = 0
+			p["hole_scores"][hole_id] = null
+
+	var display_dist = (min_dist if min_dist < 1000.0 else min_dist - 1000.0) * 1.09361
+	hole_ctp_results[hole_id] = {
+		"winners": winner_names,
+		"min_dist_yds": display_dist,
+		"player_dists": player_dists
+	}
+	print("[Closest to Pin] Hole %s complete. Winner(s): %s (distance: %.2f yds)" % [hole_id, str(winner_names), display_dist])
+
 func advance_hole() -> void:
 	current_hole_index += 1
 	start_hole()
 
 func _apply_gimme(active_player, extra_strokes: int, hole_id: String) -> void:
+	last_gimme_strokes = extra_strokes
+	active_player["last_gimme_strokes"] = extra_strokes
 	active_player["strokes"] += extra_strokes
 	active_player["total_strokes"] += extra_strokes
 	active_player["hole_scores"][hole_id] = active_player["strokes"]
 	active_player["holed_out"] = true
 	print("[MultiplayerManager] Player %s holed out via +%d stroke(s) gimme! Score: %d" % [active_player["name"], extra_strokes, active_player["strokes"]])
+	emit_signal("gimme_awarded", active_player, extra_strokes)
 	save_current_match()
 	
 	var par = 4
@@ -660,8 +897,58 @@ func _apply_gimme(active_player, extra_strokes: int, hole_id: String) -> void:
 		get_node("/root/AnnouncerEngine").call("AnnounceHoleScore", active_player["name"], active_player["strokes"], par)
 		
 	if has_node("/root/AchievementManager") and not practice_mode_active:
-		# Putting achievements require sinking the putt into the cup, so gimmes cannot earn them
+		# Birdie, eagle, hole-in-one, and putting achievements require sinking the ball into the cup; gimmes cannot earn them
 		get_node("/root/AchievementManager").check_hole_achievements(active_player.get("name", ""), par, active_player["strokes"], active_player.get("lies_in_hole", []), 0.0, false)
+
+func concede_hole() -> void:
+	if practice_mode_active or players.is_empty():
+		return
+		
+	var active_player = get_active_player()
+	if active_player.is_empty() or active_player.get("holed_out", false):
+		return
+		
+	var hole_idx = clamp(current_hole_index, 0, hole_ids.size() - 1) if not hole_ids.is_empty() else 0
+	var hole_id = hole_ids[hole_idx] if not hole_ids.is_empty() else ""
+	
+	active_player["holed_out"] = true
+	if not hole_id.is_empty():
+		active_player["hole_scores"][hole_id] = active_player["strokes"]
+	active_player["last_hole_score"] = active_player["strokes"]
+	
+	print("[MultiplayerManager] Player %s conceded/forfeited hole %s at %d strokes (counted as in)!" % [active_player.get("name", "Player"), hole_id, active_player["strokes"]])
+	
+	if game_mode == "Scramble" and not hole_id.is_empty():
+		var active_ps = players.filter(func(p): return p.get("active", true))
+		var group_score = active_player["strokes"]
+		for p in active_ps:
+			p["holed_out"] = true
+			p["strokes"] = group_score
+			p["hole_scores"][hole_id] = group_score
+			p["last_hole_score"] = group_score
+	elif game_mode == "2v2 Scramble" and not hole_id.is_empty():
+		var team_name = active_player.get("team", "Team A")
+		var team_ps = players.filter(func(p): return p.get("active", true) and p.get("team", "") == team_name)
+		var team_score = active_player["strokes"]
+		for p in team_ps:
+			p["holed_out"] = true
+			p["strokes"] = team_score
+			p["hole_scores"][hole_id] = team_score
+			p["last_hole_score"] = team_score
+			
+	save_current_match()
+	
+	var par = 4
+	if not hole_id.is_empty() and hole_info.has(hole_id):
+		par = hole_info[hole_id].get("Par", 4)
+	if has_node("/root/AnnouncerEngine"):
+		var announcer = get_node("/root/AnnouncerEngine")
+		if announcer.has_method("SpeakForfeitHeckle"):
+			announcer.call("SpeakForfeitHeckle")
+		elif announcer.has_method("AnnounceHoleScore"):
+			announcer.call("AnnounceHoleScore", active_player["name"], active_player["strokes"], par)
+			
+	select_next_player()
 
 
 func add_new_player(player_name: String, tee_color: String) -> void:
@@ -683,7 +970,8 @@ func add_new_player(player_name: String, tee_color: String) -> void:
 		"mulligan_history": {},
 		"last_shot_tracer_points": [],
 		"last_aim_target_pos": Vector3.ZERO,
-		"last_aim_yaw_offset_deg": 0.0
+		"last_aim_yaw_offset_deg": 0.0,
+		"last_shot_distance_yards": -1.0
 	}
 	
 	# Mark all previous holes as "-" (null)
@@ -798,7 +1086,8 @@ func save_current_match() -> void:
 		"skins_won": skins_won,
 		"carryover_skins": carryover_skins,
 		"carryover_eligible_players": carryover_eligible_players,
-		"hole_skins_results": hole_skins_results
+		"hole_skins_results": hole_skins_results,
+		"hole_ctp_results": hole_ctp_results
 	}
 	
 	f.store_string(JSON.stringify(data, "\t", false))
@@ -824,6 +1113,7 @@ func resume_match(match_data: Dictionary) -> void:
 	carryover_skins = match_data.get("carryover_skins", 0)
 	carryover_eligible_players = match_data.get("carryover_eligible_players", [])
 	hole_skins_results = match_data.get("hole_skins_results", {})
+	hole_ctp_results = match_data.get("hole_ctp_results", {})
 	
 	# Load config so we have hole info, par scores, etc.
 	var config_file = FileAccess.open(config_path, FileAccess.READ)
@@ -1038,6 +1328,7 @@ func _deserialize_players(serialized_array: Array) -> Array[Dictionary]:
 					mulligan_hist_deserialized[hole_key] = deserialized_list
 			dup["mulligan_history"] = mulligan_hist_deserialized
 			
+		dup["last_shot_distance_yards"] = float(dup.get("last_shot_distance_yards", -1.0))
 		deserialized.append(dup)
 	return deserialized
 
@@ -1092,6 +1383,19 @@ func _get_hole_pars() -> Dictionary:
 # --- Persistent Player Registry ---
 const REGISTRY_PATH = "user://players_registry.json"
 
+const AVAILABLE_AVATARS: Array[Dictionary] = [
+	{"id": "avatar_1", "name": "The Classic", "path": "res://assets/images/avatars/avatar_1.svg"},
+	{"id": "avatar_2", "name": "The Pro", "path": "res://assets/images/avatars/avatar_2.svg"},
+	{"id": "avatar_3", "name": "Golden Bear", "path": "res://assets/images/avatars/avatar_3.svg"},
+	{"id": "avatar_4", "name": "The Gator", "path": "res://assets/images/avatars/avatar_4.svg"},
+	{"id": "avatar_5", "name": "Eagle Eye", "path": "res://assets/images/avatars/avatar_5.svg"},
+	{"id": "avatar_6", "name": "The Tiger", "path": "res://assets/images/avatars/avatar_6.svg"},
+	{"id": "avatar_7", "name": "Robo Golfer", "path": "res://assets/images/avatars/avatar_7.svg"},
+	{"id": "avatar_8", "name": "Fox Caddie", "path": "res://assets/images/avatars/avatar_8.svg"},
+	{"id": "avatar_9", "name": "Miami Flamingo", "path": "res://assets/images/avatars/avatar_9.svg"},
+	{"id": "avatar_10", "name": "The Heckler", "path": "res://assets/images/avatars/avatar_10.svg"},
+]
+
 func get_registered_players() -> Array[Dictionary]:
 	if not FileAccess.file_exists(REGISTRY_PATH):
 		return []
@@ -1113,16 +1417,52 @@ func save_registered_players(players_list: Array) -> void:
 	if file != null:
 		file.store_string(JSON.stringify(players_list, "\t"))
 
-func register_player(player_name: String) -> void:
+func get_registered_player(player_name: String) -> Dictionary:
+	var registered = get_registered_players()
+	for p in registered:
+		if p.get("name", "").to_lower() == player_name.to_lower():
+			return p
+	return {}
+
+func update_player_profile(player_name: String, email: String, avatar: String) -> bool:
+	var registered = get_registered_players()
+	for p in registered:
+		if p.get("name", "").to_lower() == player_name.to_lower():
+			p["email"] = email.strip_edges()
+			p["avatar"] = avatar.strip_edges()
+			save_registered_players(registered)
+			return true
+	return false
+
+func get_player_email(player_name: String) -> String:
+	var p = get_registered_player(player_name)
+	return p.get("email", "")
+
+func get_player_avatar(player_name: String) -> String:
+	var p = get_registered_player(player_name)
+	return p.get("avatar", "")
+
+func register_player(player_name: String, email: String = "", avatar: String = "") -> void:
 	if player_name.is_empty():
 		return
 	var registered = get_registered_players()
 	for p in registered:
 		if p.get("name", "").to_lower() == player_name.to_lower():
+			var changed = false
+			if not email.is_empty() and p.get("email", "") != email:
+				p["email"] = email.strip_edges()
+				changed = true
+			if not avatar.is_empty() and p.get("avatar", "") != avatar:
+				p["avatar"] = avatar.strip_edges()
+				changed = true
+			if changed:
+				save_registered_players(registered)
 			return # Already exists
 	
 	var new_player = {
 		"name": player_name,
+		"email": email.strip_edges(),
+		"avatar": avatar.strip_edges(),
 		"created_at": Time.get_unix_time_from_system()
 	}
 	registered.append(new_player)
@@ -1169,7 +1509,26 @@ func load_global_club_stats() -> Dictionary:
 	var err = json.parse(file.get_as_text())
 	if err == OK:
 		if typeof(json.data) == TYPE_DICTIONARY:
-			return json.data
+			var stats: Dictionary = json.data
+			var modified := false
+			for p in stats.keys():
+				if typeof(stats[p]) != TYPE_DICTIONARY:
+					continue
+				for clb in stats[p].keys():
+					if typeof(stats[p][clb]) != TYPE_ARRAY:
+						continue
+					for entry in stats[p][clb]:
+						if typeof(entry) == TYPE_DICTIONARY and entry.has("SideDistance"):
+							var sd = absf(float(entry["SideDistance"]))
+							var td = absf(float(entry.get("TotalDistance", entry.get("CarryDistance", 0.0))))
+							# If SideDistance was poisoned by legacy world Z bug (> 100m or > TotalDistance * 1.2)
+							if sd > 100.0 or (td > 15.0 and sd > td * 1.2):
+								entry["SideDistance"] = 0.0
+								modified = true
+			if modified:
+				save_global_club_stats(stats)
+				print("[MultiplayerManager] Repaired legacy corrupted SideDistance entries in player_club_stats.json")
+			return stats
 	return {}
 
 func save_global_club_stats(stats: Dictionary) -> void:
@@ -1206,6 +1565,162 @@ func remove_last_global_shot(player_name: String, club_name: String) -> void:
 		if not stats[player_name][club_name].is_empty():
 			stats[player_name][club_name].pop_back()
 			save_global_club_stats(stats)
+
+func clear_player_club_shot_data(player_name: String, club_name: String) -> void:
+	if player_name.is_empty() or club_name.is_empty():
+		return
+	var stats = load_global_club_stats()
+	if stats.has(player_name) and stats[player_name].has(club_name):
+		stats[player_name].erase(club_name)
+		save_global_club_stats(stats)
+		print("[MultiplayerManager] Cleared shot data for player: %s, club: %s" % [player_name, club_name])
+
+const STANDARD_CLUBS: Array[String] = [
+	"Dr", "3w", "5w", "2H", "3H", "4H", "1i", "2i", "3i", "4i",
+	"5i", "6i", "7i", "8i", "9i", "Pw", "Gw", "Sw", "Lw", "Pt"
+]
+
+const CLUB_FULL_NAMES: Dictionary = {
+	"Dr": "Driver",
+	"3w": "3 Wood",
+	"5w": "5 Wood",
+	"2H": "2 Hybrid",
+	"3H": "3 Hybrid",
+	"4H": "4 Hybrid",
+	"1i": "1 Iron",
+	"2i": "2 Iron",
+	"3i": "3 Iron",
+	"4i": "4 Iron",
+	"5i": "5 Iron",
+	"6i": "6 Iron",
+	"7i": "7 Iron",
+	"8i": "8 Iron",
+	"9i": "9 Iron",
+	"Pw": "Pitching Wedge",
+	"Gw": "Gap Wedge",
+	"Sw": "Sand Wedge",
+	"Lw": "Lob Wedge",
+	"Pt": "Putter"
+}
+
+static func get_club_display_name(club_code: String) -> String:
+	if CLUB_FULL_NAMES.has(club_code):
+		return "%s (%s)" % [CLUB_FULL_NAMES[club_code], club_code]
+	return club_code
+
+func get_player_club_stats(player_name: String) -> Dictionary:
+	var stats = load_global_club_stats()
+	return stats.get(player_name, {})
+
+func calculate_player_club_averages(player_name: String) -> Dictionary:
+	var result = {}
+	var player_club_stats = get_player_club_stats(player_name)
+	
+	var clubs_to_eval = STANDARD_CLUBS.duplicate()
+	for c in player_club_stats.keys():
+		if not clubs_to_eval.has(c):
+			clubs_to_eval.append(c)
+			
+	for club in clubs_to_eval:
+		var shots: Array = player_club_stats.get(club, [])
+		var shot_count = shots.size()
+		if shot_count == 0:
+			result[club] = {
+				"club": club,
+				"display_name": get_club_display_name(club),
+				"shot_count": 0,
+				"avg_carry_m": 0.0,
+				"avg_total_m": 0.0,
+				"avg_speed_mph": 0.0,
+				"avg_spin_rpm": 0.0,
+				"avg_offline_m": 0.0,
+				"avg_target_diff_m": 0.0,
+				"has_data": false,
+				"shots": []
+			}
+			continue
+			
+		var sum_carry := 0.0
+		var sum_total := 0.0
+		var sum_speed := 0.0
+		var sum_spin := 0.0
+		var sum_offline := 0.0
+		var sum_target_diff := 0.0
+		var valid_target_diff_count := 0
+		
+		for shot in shots:
+			var carry_dist = float(shot.get("CarryDistance", 0.0))
+			var total_dist = float(shot.get("TotalDistance", 0.0))
+			if total_dist <= 0.0:
+				total_dist = carry_dist
+			if carry_dist <= 0.0:
+				carry_dist = total_dist
+				
+			sum_carry += carry_dist
+			sum_total += total_dist
+			sum_speed += float(shot.get("Speed", 0.0))
+			sum_spin += float(shot.get("TotalSpin", 0.0))
+			
+			var s_dist = absf(float(shot.get("SideDistance", 0.0)))
+			if s_dist > 100.0 or (total_dist > 15.0 and s_dist > total_dist * 1.2):
+				s_dist = 0.0
+			sum_offline += s_dist
+			
+			var target_dist = float(shot.get("TargetDistance", 0.0))
+			if target_dist > 0.0:
+				sum_target_diff += (total_dist - target_dist)
+				valid_target_diff_count += 1
+				
+		var cnt = float(shot_count)
+		result[club] = {
+			"club": club,
+			"display_name": get_club_display_name(club),
+			"shot_count": shot_count,
+			"avg_carry_m": sum_carry / cnt,
+			"avg_total_m": sum_total / cnt,
+			"avg_speed_mph": sum_speed / cnt,
+			"avg_spin_rpm": sum_spin / cnt,
+			"avg_offline_m": sum_offline / cnt,
+			"avg_target_diff_m": (sum_target_diff / valid_target_diff_count) if valid_target_diff_count > 0 else 0.0,
+			"has_data": true,
+			"shots": shots
+		}
+		
+	return result
+
+func format_player_club_stats_summary(player_name: String) -> String:
+	var avgs = calculate_player_club_averages(player_name)
+	var has_any := false
+	for clb in avgs:
+		if avgs[clb]["has_data"]:
+			has_any = true
+			break
+	if not has_any:
+		return "No club shot history recorded yet.\n"
+		
+	var out = "PLAYER CLUB STATISTICS (HISTORICAL AVERAGES):\n"
+	out += "========================================================================================\n"
+	out += "%-16s | %-6s | %-12s | %-12s | %-10s | %-9s | %-12s\n" % ["Club", "Shots", "Avg Total", "Avg Carry", "Avg Speed", "Avg Spin", "Avg Offline"]
+	out += "----------------------------------------------------------------------------------------\n"
+	
+	for clb in avgs:
+		var c_data = avgs[clb]
+		if not c_data["has_data"]:
+			continue
+		var total_yds = c_data["avg_total_m"] * 1.09361
+		var carry_yds = c_data["avg_carry_m"] * 1.09361
+		var offline_yds = c_data["avg_offline_m"] * 1.09361
+		out += "%-16s | %-6d | %-9.1f yds | %-9.1f yds | %-6.1f mph | %-5.0f rpm | %-9.1f yds\n" % [
+			c_data["display_name"],
+			c_data["shot_count"],
+			total_yds,
+			carry_yds,
+			c_data["avg_speed_mph"],
+			c_data["avg_spin_rpm"],
+			offline_yds
+		]
+	out += "========================================================================================\n\n"
+	return out
 
 func calculate_player_stats(player_name: String) -> Dictionary:
 	var stats = {
@@ -1253,24 +1768,54 @@ func calculate_player_stats(player_name: String) -> Dictionary:
 									if target_player != null:
 										stats["matches_played"] += 1
 										if active_players.size() > 1:
-											var min_score = 99999
-											var min_players = []
-											for p in active_players:
-												var score = int(p.get("total_strokes", 0))
-												if score < min_score:
-													min_score = score
-													min_players = [p]
-												elif score == min_score:
-													min_players.append(p)
-													
-											var my_score = int(target_player.get("total_strokes", 0))
-											if my_score == min_score:
-												if min_players.size() == 1:
-													stats["wins"] += 1
+											var match_mode = json.get("game_mode", "Standard")
+											if match_mode == "Closest to Pin":
+												var max_pts = -1
+												var max_players = []
+												for p in active_players:
+													var pts = 0
+													var h_scores = p.get("hole_scores", {})
+													for h_id in h_scores:
+														if h_scores[h_id] != null:
+															pts += int(h_scores[h_id])
+													if pts > max_pts:
+														max_pts = pts
+														max_players = [p]
+													elif pts == max_pts:
+														max_players.append(p)
+														
+												var my_pts = 0
+												var my_scores = target_player.get("hole_scores", {})
+												for h_id in my_scores:
+													if my_scores[h_id] != null:
+														my_pts += int(my_scores[h_id])
+														
+												if my_pts == max_pts and max_pts > 0:
+													if max_players.size() == 1:
+														stats["wins"] += 1
+													else:
+														stats["ties"] += 1
 												else:
-													stats["ties"] += 1
+													stats["losses"] += 1
 											else:
-												stats["losses"] += 1
+												var min_score = 99999
+												var min_players = []
+												for p in active_players:
+													var score = int(p.get("total_strokes", 0))
+													if score < min_score:
+														min_score = score
+														min_players = [p]
+													elif score == min_score:
+														min_players.append(p)
+														
+												var my_score = int(target_player.get("total_strokes", 0))
+												if my_score == min_score:
+													if min_players.size() == 1:
+														stats["wins"] += 1
+													else:
+														stats["ties"] += 1
+												else:
+													stats["losses"] += 1
 										else:
 											stats["single_player_completed"] += 1
 											

@@ -1,9 +1,9 @@
 class_name MobilePerformance
 
-## Returns true if running on mobile operating systems (Android or iOS)
+## Returns true if running on mobile operating systems (Android or iOS) or mobile feature profile
 static func is_mobile() -> bool:
 	var os_name = OS.get_name()
-	return os_name == "Android" or os_name == "iOS"
+	return os_name == "Android" or os_name == "iOS" or OS.has_feature("mobile")
 
 ## Call this after Sky3D / WorldEnvironment is set up and in the scene tree
 static func optimize_sky3d(sky3d: Node) -> void:
@@ -39,8 +39,23 @@ static func optimize_sun_light(sun: DirectionalLight3D) -> void:
 	if not is_mobile() or sun == null:
 		return
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	sun.directional_shadow_max_distance = 200.0
+	sun.directional_shadow_max_distance = 150.0
 	sun.directional_shadow_split_1 = 0.1
+	sun.directional_shadow_blend_splits = false
+
+## Optimizes any 3D scene (DirectionalLights, Sky, WorldEnvironment) for mobile
+static func optimize_scene(scene_root: Node) -> void:
+	if not is_mobile() or scene_root == null:
+		return
+	var stack: Array[Node] = [scene_root]
+	while not stack.is_empty():
+		var n = stack.pop_back()
+		if n is DirectionalLight3D:
+			optimize_sun_light(n)
+		elif n is WorldEnvironment and n.environment != null:
+			optimize_environment(n.environment)
+		for child in n.get_children():
+			stack.append(child)
 
 ## Optimize generic Environment for mobile
 static func optimize_environment(env: Environment) -> void:

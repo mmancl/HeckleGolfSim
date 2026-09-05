@@ -5,7 +5,7 @@ var range_units := Setting.new(PhysicsEnums.Units.IMPERIAL)
 var camera_follow_mode := Setting.new(true)
 var shot_injector_enabled := Setting.new(false)
 var auto_ball_reset := Setting.new(false)
-var ball_reset_timer := Setting.new(3.0, 1.0, 15.0)
+var ball_reset_timer := Setting.new(1.5, 0.0, 15.0)
 var temperature := Setting.new(75, -40, 120)
 var altitude := Setting.new(0.0, -1000.0, 10000.0)
 var surface_type := Setting.new(PhysicsEnums.SurfaceType.FAIRWAY)
@@ -32,6 +32,7 @@ var green_speed := Setting.new(10.0, 1.0, 50.0)
 var phone_cam_url := Setting.new("")
 var use_phone_stream := Setting.new(false)
 var tension_effects_enabled := Setting.new(true)
+var shot_analysis_enabled := Setting.new(false)
 var displayed_stats := Setting.new(StatDefinitions.DEFAULT_ENABLED_STAT_IDS.duplicate())
 
 func _init():
@@ -67,6 +68,7 @@ func _init():
 		"phone_cam_url": phone_cam_url,
 		"use_phone_stream": use_phone_stream,
 		"tension_effects_enabled": tension_effects_enabled,
+		"shot_analysis_enabled": shot_analysis_enabled,
 		"displayed_stats": displayed_stats,
 	})
 

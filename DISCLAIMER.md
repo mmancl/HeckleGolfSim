@@ -62,7 +62,15 @@ Heckle Golf Simulator utilizes open-source components under permissive licenses:
 
 ---
 
-## 7. Physical Safety & Health Warning
+## 7. Privacy & Local Data Storage
+- **100% Local Storage**: All user profiles, handicaps, player names, optional email addresses, and shot statistics are stored strictly on your local device.
+- **No Cloud Database or Remote Telemetry**: Heckle Golf Simulator does not operate external database servers or track user data remotely.
+- **User-Controlled Email Export**: When exporting scorecards or session data, the Application generates a local file (`.csv` / `.eml`) and requests the operating system to open your default email client. No emails are transmitted in the background, and users retain complete control over sending and recipient selection.
+- For complete details, see our [Privacy Policy](file:///c:/Users/micha/Repositories/HeckleGolfSim/PRIVACY.md).
+
+---
+
+## 8. Physical Safety & Health Warning
 Golf simulation involves swinging real physical golf clubs and striking golf balls at high velocities:
 - **Always verify surrounding clearances**: Ensure adequate ceiling height, side clearance, and depth in your simulator enclosure.
 - **Impact protection**: Use proper, tested golf impact screens, netting, and enclosure padding. Ensure no ricochet path exists toward humans, pets, windows, or electronics.
@@ -71,12 +79,12 @@ Golf simulation involves swinging real physical golf clubs and striking golf bal
 
 ---
 
-## 8. Disclaimer of Warranties & Limitation of Liability
+## 9. Disclaimer of Warranties & Limitation of Liability
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ---
 
-## 9. Intellectual Property Inquiries & Contact
+## 10. Intellectual Property Inquiries & Contact
 Heckle Golf Simulator is committed to full compliance with all open-source licenses and respectful treatment of intellectual property rights. 
 
 If you are a copyright or trademark owner with any questions, licensing inquiries, or feedback regarding materials in this repository, please open an issue or start a discussion on our [GitHub repository](https://github.com/mmancl/HeckleGolfSim/issues) so that we can promptly review and address your communication in good faith.

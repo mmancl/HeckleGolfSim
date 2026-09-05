@@ -10,6 +10,9 @@ extends CanvasLayer
 var _queue: Array = []
 var _is_showing: bool = false
 
+func is_showing_achievement() -> bool:
+	return _is_showing or not _queue.is_empty() or (popup_control != null and is_instance_valid(popup_control) and popup_control.modulate.a > 0.05 and popup_control.offset_top > OFFSCREEN_TOP + 10.0)
+
 # Layout constants for high-contrast, enlarged popup window
 const OFFSCREEN_TOP: float = -170.0
 const OFFSCREEN_BOTTOM: float = -26.0

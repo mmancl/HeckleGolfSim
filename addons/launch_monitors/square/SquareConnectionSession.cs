@@ -19,13 +19,16 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
     private readonly Action<string> _logInfo;
     private readonly Action<string> _logError;
     private Timer? _heartbeatTimer;
+    private Timer? _watchdogTimer;
     private byte _sequence;
     private string? _lastPayload;
     private string _clubCode = SquareCommandBuilder.DriverClubCode;
     private int _handedness;
     private bool _isConnected;
     private bool _isDetectBallActive;
+    private bool _isReady;
     private DateTime _lastSensorPacketTime = DateTime.MinValue;
+    private DateTime _lastRearmAttemptTime = DateTime.MinValue;
 
     public SquareConnectionSession(
         IBluetoothGattClient bluetoothClient,
@@ -102,6 +105,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
             await _delayAsync(_options.ConnectionReadyDelay, cancellationToken);
             await SetReadyAsync(cancellationToken);
             StartHeartbeat();
+            StartWatchdog();
             _logInfo("Connection sequence complete.");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -193,6 +197,8 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         _bluetoothClient.DeviceDiscovered -= OnDeviceDiscovered;
         _bluetoothClient.CharacteristicValueChanged -= OnCharacteristicValueChanged;
         _bluetoothClient.Disconnected -= OnBluetoothDisconnected;
+        _watchdogTimer?.Dispose();
+        _watchdogTimer = null;
         await DisconnectAsync();
         await _bluetoothClient.DisposeAsync();
         _connectionLock.Dispose();
@@ -274,10 +280,14 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
     {
         _heartbeatTimer?.Dispose();
         _heartbeatTimer = null;
+        _watchdogTimer?.Dispose();
+        _watchdogTimer = null;
         _lastPayload = null;
         _isConnected = false;
         _isDetectBallActive = false;
+        _isReady = false;
         _lastSensorPacketTime = DateTime.MinValue;
+        _lastRearmAttemptTime = DateTime.MinValue;
         await _bluetoothClient.DisconnectAsync(cancellationToken);
     }
 
@@ -289,6 +299,53 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         }
 
         _heartbeatTimer = new Timer(OnHeartbeatTimer, null, _options.HeartbeatInterval, _options.HeartbeatInterval);
+    }
+
+    private void StartWatchdog()
+    {
+        _watchdogTimer?.Dispose();
+        if (_options.WatchdogInterval <= TimeSpan.Zero || _options.WatchdogInterval == Timeout.InfiniteTimeSpan)
+        {
+            return;
+        }
+
+        _watchdogTimer = new Timer(OnWatchdogTimer, null, _options.WatchdogInterval, _options.WatchdogInterval);
+    }
+
+    private void OnWatchdogTimer(object? state)
+    {
+        if (!_isConnected)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+
+        // 1. Check for stale sensor packets while marked ready:
+        // If the hardware timed out/went idle while unattended, the optical stream halts.
+        // Drop the ready state so the UI and game never freeze in "Ball Ready".
+        if (_isReady && _lastSensorPacketTime != DateTime.MinValue && (now - _lastSensorPacketTime) > _options.SensorPacketTimeout)
+        {
+            _logInfo($"Sensor stream timed out ({(now - _lastSensorPacketTime).TotalSeconds:F1}s since last packet). Resetting ready state.");
+            EmitReady(false);
+            SensorDataReceived?.Invoke(new SquareSensorData(false, false, 0, 0, 0));
+        }
+
+        // 2. Auto-rearm if in active detect mode and sensor has gone idle/silent:
+        // When golfer is addressing ball or talking, hardware powers down camera after timeout.
+        // Send DetectBall to seamlessly wake the camera back up so the user does not need to disconnect/reconnect.
+        if (_isDetectBallActive && !_isReady && _lastSensorPacketTime != DateTime.MinValue && (now - _lastSensorPacketTime) > TimeSpan.FromSeconds(6))
+        {
+            if ((now - _lastRearmAttemptTime) > TimeSpan.FromSeconds(8))
+            {
+                _lastRearmAttemptTime = now;
+                _logInfo("Auto-rearming launch monitor detect mode after sensor silence...");
+                _ = RunAsync(async () =>
+                {
+                    await SetReadyAsync();
+                });
+            }
+        }
     }
 
     private void OnHeartbeatTimer(object? state)
@@ -349,6 +406,29 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
 
     private async Task HandleNotificationAsync(byte[] data)
     {
+        if (SquareProtocol.TryParseStatus(data, out var statusCode))
+        {
+            _logInfo($"Square status packet received: 0x{statusCode:X2}");
+            if (statusCode == SquareProtocol.StatusIdle || statusCode == SquareProtocol.StatusNone)
+            {
+                _logInfo("Square reported Idle/Standby status. Resetting ready state.");
+                EmitReady(false);
+                SensorDataReceived?.Invoke(new SquareSensorData(false, false, 0, 0, 0));
+
+                if (_isDetectBallActive && _isConnected)
+                {
+                    _logInfo("Auto-rearming launch monitor detect mode after hardware reported idle.");
+                    await _delayAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+                    await SetReadyAsync();
+                }
+            }
+            else if (statusCode == SquareProtocol.StatusReady)
+            {
+                EmitStatus("Ready");
+            }
+            return;
+        }
+
         if (SquareProtocol.TryParseSensor(data, out var sensor))
         {
             _lastSensorPacketTime = DateTime.UtcNow;
@@ -425,6 +505,12 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
 
     private void EmitReady(bool ready)
     {
+        if (_isReady == ready)
+        {
+            return;
+        }
+
+        _isReady = ready;
         ReadyChanged?.Invoke(ready);
     }
 

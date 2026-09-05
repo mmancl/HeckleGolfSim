@@ -226,7 +226,7 @@ theme_override_constants/separation = 10
 
 [node name="AttrTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/AttributionsCard/AttrVBox"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.75, 0.35, 1)
+theme_override_colors/font_color = Color(0.98, 0.88, 0.55, 1)
 theme_override_font_sizes/font_size = 18
 text = "📜 Built With, Addons & Asset Attributions"
 
@@ -260,7 +260,7 @@ theme_override_constants/separation = 10
 
 [node name="HardwareTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/HardwareCard/HardwareVBox"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.45, 0.45, 1)
+theme_override_colors/font_color = Color(1.0, 0.65, 0.65, 1)
 theme_override_font_sizes/font_size = 18
 text = "📡 Hardware Compatibility & Trademark Disclaimers"
 
@@ -336,7 +336,7 @@ theme_override_constants/separation = 10
 
 [node name="SafetyTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/SafetyCard/SafetyVBox"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.65, 0.25, 1)
+theme_override_colors/font_color = Color(1.0, 0.78, 0.45, 1)
 theme_override_font_sizes/font_size = 18
 text = "⚠️ Physical Safety & Disclaimer of Warranties"
 
@@ -349,6 +349,32 @@ text = "• [b]Physical Simulator Safety Warning[/b]: Golf simulation involves s
 
 • [b]Disclaimer of Warranties (AS-IS)[/b]:
 THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."
+fit_content = true
+
+[node name="PrivacyCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card_section")
+
+[node name="PrivacyVBox" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/PrivacyCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="PrivacyTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/PrivacyCard/PrivacyVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.85, 0.7, 1)
+theme_override_font_sizes/font_size = 18
+text = "🔒 Privacy & Local Data Storage"
+
+[node name="PrivacyText" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/PrivacyCard/PrivacyVBox"]
+layout_mode = 2
+theme_override_colors/default_color = Color(0.9, 0.93, 0.96, 1)
+theme_override_font_sizes/normal_font_size = 14
+bbcode_enabled = true
+text = "• [b]100% Local Device Storage[/b]: Heckle Golf Simulator values player privacy. All player profiles, handicaps, optional email addresses, and shot statistics are stored strictly on your local device.
+
+• [b]No Cloud Servers or Tracking[/b]: The simulator does not operate cloud databases or tracking servers. We do not collect, transmit, sell, or rent your personal information to third parties.
+
+• [b]User-Controlled Email Export[/b]: When you choose to export scorecards or shot stats via email, the application prepares a local file and opens your operating system's default email client. No emails are sent automatically in the background, and you retain full control over whether to send the draft and who receives it."
 fit_content = true
 
 [node name="ContactCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]
@@ -386,7 +412,7 @@ theme_override_constants/separation = 12
 
 [node name="DonateTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox/DonationsCard/DonateVBox"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.5, 0.5, 1)
+theme_override_colors/font_color = Color(1.0, 0.65, 0.65, 1)
 theme_override_font_sizes/font_size = 18
 text = "☕ Support the Developer"
 

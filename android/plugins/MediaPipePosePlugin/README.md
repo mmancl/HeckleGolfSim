@@ -53,15 +53,17 @@ Copy the built library from the Gradle output path to the root plugin directory:
 
 **Windows (PowerShell):**
 ```powershell
+Copy-Item 'android/plugins/MediaPipePosePlugin/build/outputs/aar/MediaPipePosePlugin-release.aar' 'android/plugins/MediaPipePosePlugin.aar' -Force
 Copy-Item 'android/plugins/MediaPipePosePlugin/build/outputs/aar/MediaPipePosePlugin-release.aar' 'android/plugins/MediaPipePosePlugin/MediaPipePosePlugin.aar' -Force
 ```
 
 **Linux / macOS:**
 ```bash
+cp android/plugins/MediaPipePosePlugin/build/outputs/aar/MediaPipePosePlugin-release.aar android/plugins/MediaPipePosePlugin.aar
 cp android/plugins/MediaPipePosePlugin/build/outputs/aar/MediaPipePosePlugin-release.aar android/plugins/MediaPipePosePlugin/MediaPipePosePlugin.aar
 ```
 
-> ⚠️ **Verification:** Verify that `MediaPipePosePlugin.aar` is approximately **~5 MB** in size. If it is only ~4.5 KB, the model file was not bundled into the AAR.
+> ⚠️ **Verification:** Verify that `android/plugins/MediaPipePosePlugin.aar` is approximately **~5 MB** in size. If it is only ~4.5 KB, the model file was not bundled into the AAR.
 
 ---
 

@@ -12,7 +12,9 @@ internal sealed record SquareConnectionOptions(
     TimeSpan ServiceDiscoveryRetryDelay,
     TimeSpan ConnectionClubDelay,
     TimeSpan ConnectionReadyDelay,
-    TimeSpan HeartbeatInterval)
+    TimeSpan HeartbeatInterval,
+    TimeSpan SensorPacketTimeout,
+    TimeSpan WatchdogInterval)
 {
     public static SquareConnectionOptions Default { get; } = new(
         DeviceNamePrefix: "SquareGolf",
@@ -24,5 +26,7 @@ internal sealed record SquareConnectionOptions(
         ServiceDiscoveryRetryDelay: TimeSpan.FromSeconds(1),
         ConnectionClubDelay: TimeSpan.FromSeconds(2),
         ConnectionReadyDelay: TimeSpan.FromSeconds(3),
-        HeartbeatInterval: TimeSpan.FromSeconds(5));
+        HeartbeatInterval: TimeSpan.FromSeconds(5),
+        SensorPacketTimeout: TimeSpan.FromMilliseconds(2500),
+        WatchdogInterval: TimeSpan.FromSeconds(1));
 }

@@ -163,8 +163,10 @@ theme_override_constants/separation = 8
 
 [node name="Label" type="Label" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer"]
 layout_mode = 2
+tooltip_text = "Delay after the ball stops rolling before resetting the ball or switching to the next player's shot."
+mouse_filter = 1
 theme_override_font_sizes/font_size = 19
-text = "Ball Reset Timer"
+text = "Shot Reset / Turn Delay"
 vertical_alignment = 1
 
 [node name="Control3" type="Control" parent="MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/BallResetTimer"]

@@ -198,6 +198,12 @@ func _setup_popup_ui() -> void:
 		_popup_instance = ach_popup_scene.instantiate()
 		add_child(_popup_instance)
 
+func is_showing_achievement() -> bool:
+	if _popup_instance != null and is_instance_valid(_popup_instance):
+		if _popup_instance.has_method("is_showing_achievement"):
+			return bool(_popup_instance.call("is_showing_achievement"))
+	return false
+
 func _load_data() -> Dictionary:
 	if not FileAccess.file_exists(SAVE_PATH):
 		return {}
@@ -261,23 +267,29 @@ func unlock_achievement(player_name: String, ach_id: String) -> bool:
 
 # --- Evaluation Helpers ---
 
-func check_hole_achievements(player_name: String, hole_par: int, strokes: int, lies_in_hole: Array = [], putt_dist_yards: float = 0.0, holed_in_cup: bool = true) -> void:
+func check_hole_achievements(player_name: String, hole_par: int, strokes: int, lies_in_hole: Array = [], putt_dist_yards: float = 0.0, holed_in_cup: bool = false) -> void:
 	if player_name.is_empty() or strokes <= 0:
 		return
 		
-	# Hole-in-One
-	if strokes == 1:
+	# Hole-in-One (must go into the actual cup, never from a gimme)
+	if holed_in_cup and strokes == 1:
 		unlock_achievement(player_name, "hole_in_one")
 		
 	var diff = strokes - hole_par
 	if diff == 0:
 		unlock_achievement(player_name, "first_par")
 	elif diff == -1:
-		unlock_achievement(player_name, "first_birdie")
+		# Birdie requires ball entering the actual cup, no gimmes
+		if holed_in_cup:
+			unlock_achievement(player_name, "first_birdie")
 	elif diff == -2:
-		unlock_achievement(player_name, "first_eagle")
+		# Eagle requires ball entering the actual cup, no gimmes
+		if holed_in_cup:
+			unlock_achievement(player_name, "first_eagle")
 	elif diff <= -3:
-		unlock_achievement(player_name, "first_albatross")
+		# Albatross / Double Eagle requires ball entering the actual cup, no gimmes
+		if holed_in_cup:
+			unlock_achievement(player_name, "first_albatross")
 		
 	# Long putt (if holed out with putt >= 10 yards / 30 feet directly into cup, never from gimme range)
 	if holed_in_cup and putt_dist_yards >= 10.0 and lies_in_hole.size() > 0 and lies_in_hole[-1] == "green":

@@ -73,7 +73,7 @@ theme_override_constants/separation = 4
 
 [node name="HeaderLabel" type="Label" parent="PopupControl/PanelContainer/MarginContainer/HBoxContainer/VBoxContainer"]
 layout_mode = 2
-theme_override_colors/font_color = Color(1, 0.82, 0.25, 1)
+theme_override_colors/font_color = Color(1, 0.88, 0.4, 1)
 theme_override_font_sizes/font_size = 14
 text = "🏆 ACHIEVEMENT UNLOCKED"
 

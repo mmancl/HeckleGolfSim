@@ -12,15 +12,24 @@ func _ready() -> void:
 
 
 func set_label(l: String):
+	if label == l and has_node("VBoxContainer/Label") and $VBoxContainer/Label.text == l:
+		return
 	label = l
-	$VBoxContainer/Label.text = l
+	if has_node("VBoxContainer/Label"):
+		$VBoxContainer/Label.text = l
 
 
 func set_data(value: String):
+	if data == value and has_node("VBoxContainer/Data") and $VBoxContainer/Data.text == value:
+		return
 	data = value
-	$VBoxContainer/Data.text = value
+	if has_node("VBoxContainer/Data"):
+		$VBoxContainer/Data.text = value
 
 
 func set_units(u: String):
+	if units == u and has_node("VBoxContainer/Units") and $VBoxContainer/Units.text == u:
+		return
 	units = u
-	$VBoxContainer/Units.text = units
+	if has_node("VBoxContainer/Units"):
+		$VBoxContainer/Units.text = units

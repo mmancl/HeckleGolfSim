@@ -82,9 +82,10 @@ Multiplayer Course Play is governed by `MultiplayerManager.gd` which implements 
 
 ### 4.1 Play Order Rules
 - **Tee-off Order (First Hole)**: Sequentially by player entry order.
-- **Away Player Hits First**: Once all players have teed off, their horizontal distance to the hole pin is calculated. The player whose ball is furthest away becomes the active player and takes the next shot.
+- **Away Player Hits First**: Once all players have teed off, the player whose ball is furthest away from the hole pin becomes the active player and takes the next shot.
+- **Repeat Shot Exception (<= 20 Yards)**: If the active player hits a shot that travels 20 yards or less (and they have not holed out), they hit again immediately rather than switching players.
 - **Honors (Next Hole)**: On subsequent holes, the player with the lowest score on the previous hole tees off first. Tied players maintain their relative order from the previous hole.
-- **Hole Completion**: Players hole out when their ball enters the cup (distance to pin $< 0.15$ meters). The hole is complete when all players have holed out.
+- **Hole Completion**: Players hole out when their ball enters the cup (distance to pin $< 0.12$ meters) or within configured gimme range. The hole is complete when all players have holed out.
 
 ---
 

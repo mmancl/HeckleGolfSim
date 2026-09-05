@@ -147,7 +147,7 @@ func _on_download_pressed() -> void:
 	else:
 		if notice_panel != null:
 			notice_panel.visible = false
-		status_label.add_theme_color_override("font_color", Color(1.0, 0.45, 0.45, 1.0))
+		status_label.add_theme_color_override("font_color", Color(1.0, 0.65, 0.65, 1.0))
 		var msg = ""
 		if _loader.has_method("GetGenerationMessage"):
 			msg = _loader.GetGenerationMessage()

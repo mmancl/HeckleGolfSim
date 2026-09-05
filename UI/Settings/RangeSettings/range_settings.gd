@@ -271,7 +271,7 @@ func _ready() -> void:
 	turn_label.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
 	gameplay_vbox.add_child(turn_label)
 	
-	var custom_next_player_toggle = _create_toggle_setting_row("Custom Next Player to Hit", "custom_next_player")
+	var custom_next_player_toggle = _create_toggle_setting_row("Repeat Shot if <= 20 Yards", "custom_next_player")
 	gameplay_vbox.add_child(custom_next_player_toggle)
 
 	var golf_clap_toggle = _create_toggle_setting_row("Golf Clap Audio", "golf_clap_enabled")
@@ -288,6 +288,9 @@ func _ready() -> void:
 
 	var suspense_toggle = _create_toggle_setting_row("Course Play Suspense (Heartbeat & Tunnel Vision)", "tension_effects_enabled")
 	gameplay_vbox.add_child(suspense_toggle)
+
+	var shot_analysis_toggle = _create_toggle_setting_row("Shot Analysis Suggestions", "shot_analysis_enabled")
+	gameplay_vbox.add_child(shot_analysis_toggle)
 
 	var gs_sep = HSeparator.new()
 	gameplay_vbox.add_child(gs_sep)
@@ -1328,7 +1331,7 @@ func _update_stats_count_label() -> void:
 	var max_count := StatDefinitions.MAX_DISPLAYED_STATS
 	_stats_count_label.text = "Active: %d / %d (Max %d)" % [active_count, max_count, max_count]
 	if active_count >= max_count:
-		_stats_count_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.3))
+		_stats_count_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.45))
 	else:
 		_stats_count_label.add_theme_color_override("font_color", Color(0.4, 0.9, 0.6))
 
@@ -1426,7 +1429,7 @@ func _show_stat_limit_popup() -> void:
 	var title := Label.new()
 	title.text = "⚠️ Maximum Display Limit Reached"
 	title.add_theme_font_size_override("font_size", 22)
-	title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
+	title.add_theme_color_override("font_color", Color(1.0, 0.9, 0.55))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(title)
 	

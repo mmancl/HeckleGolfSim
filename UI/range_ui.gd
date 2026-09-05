@@ -19,6 +19,7 @@ var _last_shot_data: Dictionary = {}
 var _averages_panel: PanelContainer = null
 var _right_panel: VBoxContainer = null
 var _home_btn: Button = null
+var _exit_confirm_dialog: Control = null
 var _hide_helpers_btn: Button = null
 var _stats_btn: Button = null
 var _map_btn: Button = null
@@ -40,6 +41,7 @@ var _use_phone_stream: bool:
 var _http_req: HTTPRequest = null
 var _phone_cam_poll_timer: Timer = null
 var _swing_frame_buffer: SwingFrameBuffer = null
+var _saved_swing_frames: Array[Dictionary] = []
 
 
 # Called when the node enters the scene tree for the first time.
@@ -102,14 +104,14 @@ func _ready() -> void:
 		settings_btn.tooltip_text = "Settings"
 		settings_btn.icon = load("res://Utils/Settings/Gear.png")
 		settings_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		settings_btn.custom_minimum_size = Vector2(56, 56)
+		settings_btn.custom_minimum_size = Vector2(64, 64)
 		apply_circular_button_style(settings_btn, Color(0.15, 0.15, 0.15, 0.85))
 		settings_btn.anchor_left = 1.0
 		settings_btn.anchor_right = 1.0
-		settings_btn.offset_left = -80
-		settings_btn.offset_top = 24
+		settings_btn.offset_left = -88
+		settings_btn.offset_top = 20
 		settings_btn.offset_right = -24
-		settings_btn.offset_bottom = 80
+		settings_btn.offset_bottom = 84
 		settings_btn.pressed.connect(_on_toggle_settings_requested)
 		$OverlayLayer.add_child(settings_btn)
 
@@ -121,15 +123,15 @@ func _ready() -> void:
 		if ResourceLoader.exists("res://assets/images/icons/home.svg"):
 			home_btn.icon = load("res://assets/images/icons/home.svg")
 		home_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		home_btn.custom_minimum_size = Vector2(56, 56)
+		home_btn.custom_minimum_size = Vector2(64, 64)
 		apply_circular_button_style(home_btn, Color(0.15, 0.15, 0.15, 0.85))
 		home_btn.anchor_left = 1.0
 		home_btn.anchor_right = 1.0
-		home_btn.offset_left = -168
-		home_btn.offset_top = 24
-		home_btn.offset_right = -112
-		home_btn.offset_bottom = 80
-		home_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn"))
+		home_btn.offset_left = -184
+		home_btn.offset_top = 20
+		home_btn.offset_right = -120
+		home_btn.offset_bottom = 84
+		home_btn.pressed.connect(_on_home_button_pressed)
 		$OverlayLayer.add_child(home_btn)
 		_home_btn = home_btn
 
@@ -141,14 +143,14 @@ func _ready() -> void:
 		if ResourceLoader.exists("res://assets/images/icons/helpers.svg"):
 			hide_helpers_btn.icon = load("res://assets/images/icons/helpers.svg")
 		hide_helpers_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		hide_helpers_btn.custom_minimum_size = Vector2(56, 56)
+		hide_helpers_btn.custom_minimum_size = Vector2(64, 64)
 		apply_circular_button_style(hide_helpers_btn, Color(0.15, 0.15, 0.15, 0.85))
 		hide_helpers_btn.anchor_left = 1.0
 		hide_helpers_btn.anchor_right = 1.0
-		hide_helpers_btn.offset_left = -256
-		hide_helpers_btn.offset_top = 24
-		hide_helpers_btn.offset_right = -200
-		hide_helpers_btn.offset_bottom = 80
+		hide_helpers_btn.offset_left = -280
+		hide_helpers_btn.offset_top = 20
+		hide_helpers_btn.offset_right = -216
+		hide_helpers_btn.offset_bottom = 84
 		$OverlayLayer.add_child(hide_helpers_btn)
 		_hide_helpers_btn = hide_helpers_btn
 
@@ -159,8 +161,8 @@ func _ready() -> void:
 		right_panel.anchor_right = 1.0
 		right_panel.anchor_top = 0.0
 		right_panel.anchor_bottom = 1.0
-		right_panel.offset_left = -256
-		right_panel.offset_top = 152
+		right_panel.offset_left = -280
+		right_panel.offset_top = 166
 		right_panel.offset_right = -24
 		right_panel.offset_bottom = -96
 		right_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
@@ -293,6 +295,29 @@ func _ready() -> void:
 		)
 		toggles_container.add_child(golfer_cam_btn)
 
+		# Shot Analysis Toggle Button
+		var shot_analysis_btn = Button.new()
+		shot_analysis_btn.name = "ShotAnalysisButton"
+		var is_analysis_on = is_shot_analysis_enabled()
+		shot_analysis_btn.text = "📊 Shot Analysis: ON" if is_analysis_on else "📊 Shot Analysis: OFF"
+		shot_analysis_btn.tooltip_text = "Toggle Shot Suggestions & Flaw Analysis"
+		shot_analysis_btn.custom_minimum_size = Vector2(180, 56)
+		var initial_analysis_color = Color(0.15, 0.55, 0.75, 0.85) if is_analysis_on else Color(0.25, 0.35, 0.45, 0.85)
+		apply_material_button_style(shot_analysis_btn, initial_analysis_color)
+		shot_analysis_btn.pressed.connect(func():
+			var new_val = not is_shot_analysis_enabled()
+			set_shot_analysis_enabled(new_val)
+			if has_node("/root/GlobalSettings"):
+				GlobalSettings.save_settings()
+			if new_val:
+				shot_analysis_btn.text = "📊 Shot Analysis: ON"
+				apply_material_button_style(shot_analysis_btn, Color(0.15, 0.55, 0.75, 0.85))
+			else:
+				shot_analysis_btn.text = "📊 Shot Analysis: OFF"
+				apply_material_button_style(shot_analysis_btn, Color(0.25, 0.35, 0.45, 0.85))
+		)
+		toggles_container.add_child(shot_analysis_btn)
+
 		# Position ClubSelector directly underneath SettingsButton and HideHelpersButton
 		var club_sel = get_node_or_null("GridCanvas/ClubSelector")
 		if club_sel != null:
@@ -301,12 +326,12 @@ func _ready() -> void:
 			club_sel.anchor_right = 1.0
 			club_sel.anchor_top = 0.0
 			club_sel.anchor_bottom = 0.0
-			club_sel.offset_left = -256
-			club_sel.offset_top = 92
+			club_sel.offset_left = -280
+			club_sel.offset_top = 96
 			club_sel.offset_right = -24
-			club_sel.offset_bottom = 144
+			club_sel.offset_bottom = 152
 			club_sel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-			club_sel.custom_minimum_size = Vector2(232, 48)
+			club_sel.custom_minimum_size = Vector2(256, 56)
 			club_sel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 
 		# Dedicated Stats Button (Icon Only) - Bottom-Left Corner
@@ -317,15 +342,15 @@ func _ready() -> void:
 		if ResourceLoader.exists("res://assets/images/icons/stats.svg"):
 			stats_btn.icon = load("res://assets/images/icons/stats.svg")
 		stats_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		stats_btn.custom_minimum_size = Vector2(56, 56)
+		stats_btn.custom_minimum_size = Vector2(64, 64)
 		apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85)) # Blue
 		stats_btn.anchor_left = 0.0
 		stats_btn.anchor_right = 0.0
 		stats_btn.anchor_top = 1.0
 		stats_btn.anchor_bottom = 1.0
 		stats_btn.offset_left = 30
-		stats_btn.offset_top = -80
-		stats_btn.offset_right = 86
+		stats_btn.offset_top = -88
+		stats_btn.offset_right = 94
 		stats_btn.offset_bottom = -24
 		stats_btn.pressed.connect(func():
 			toggle_stats_visibility()
@@ -345,14 +370,14 @@ func _ready() -> void:
 		if ResourceLoader.exists("res://assets/images/icons/golf_course.svg"):
 			map_btn.icon = load("res://assets/images/icons/golf_course.svg")
 		map_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		map_btn.custom_minimum_size = Vector2(56, 56)
+		map_btn.custom_minimum_size = Vector2(64, 64)
 		apply_circular_button_style(map_btn, Color(0.18, 0.45, 0.25, 0.85)) # Forest green
 		map_btn.anchor_left = 1.0
 		map_btn.anchor_right = 1.0
 		map_btn.anchor_top = 1.0
 		map_btn.anchor_bottom = 1.0
-		map_btn.offset_left = -86
-		map_btn.offset_top = -80
+		map_btn.offset_left = -94
+		map_btn.offset_top = -88
 		map_btn.offset_right = -30
 		map_btn.offset_bottom = -24
 		map_btn.pressed.connect(func():
@@ -400,7 +425,7 @@ func _process(_delta: float) -> void:
 				_update_camera_feed(true)
 
 
-func set_data(data: Dictionary) -> void:
+func set_data(data: Dictionary, is_final_rest: bool = false) -> void:
 	_last_shot_data = data.duplicate()
 	var is_imperial: bool = GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL if has_node("/root/GlobalSettings") else true
 
@@ -424,18 +449,40 @@ func set_data(data: Dictionary) -> void:
 			if child.has_method("set_data"):
 				child.call("set_data", str(val))
 	
-	if is_golfer_camera_visible():
-		trigger_swing_replay_modal(data)
+	# Only pop up shot analysis / swing replay at the END of the shot when the ball has settled
+	if is_final_rest:
+		if is_golfer_camera_visible() or is_shot_analysis_enabled():
+			trigger_swing_replay_modal(data)
+
+
+func on_ball_hit() -> void:
+	if is_golfer_camera_visible() and _swing_frame_buffer != null:
+		# Continue capturing for 1.2s to capture impact and follow-through, then save snapshot
+		get_tree().create_timer(1.2).timeout.connect(func():
+			if _swing_frame_buffer != null:
+				_saved_swing_frames = _swing_frame_buffer.get_captured_frames()
+		)
 
 
 func trigger_swing_replay_modal(data: Dictionary) -> void:
-	if not is_golfer_camera_visible():
+	var cam_active: bool = is_golfer_camera_visible()
+	var analysis_active: bool = is_shot_analysis_enabled()
+	if not cam_active and not analysis_active:
 		return
 
-	# Ignore reset payloads or shots without actual launch/distance data
-	var dist_val = data.get("Distance", 0)
-	var speed_val = data.get("Speed", 0)
-	if str(dist_val) == "---" or str(speed_val) == "---" or (float(speed_val) == 0.0 and float(dist_val) == 0.0):
+	# Strictly ensure the shot has completed and the ball has come to a rest
+	var p_node = get_parent().get_node_or_null("Player") if get_parent() != null else null
+	if p_node != null and p_node.get("ball") != null:
+		var ball = p_node.ball
+		if "state" in ball and ball.state != PhysicsEnums.BallState.REST:
+			return
+
+	# Only display after the ball flight happens and the ball comes to a rest (requires final Distance or Carry)
+	var dist_str = str(data.get("Distance", data.get("Carry", data.get("TotalDistance", "---"))))
+	var speed_str = str(data.get("Speed", data.get("BallSpeed", "---")))
+	if dist_str == "---" or speed_str == "---":
+		return
+	if float(speed_str) <= 0.0 or float(dist_str) <= 0.0:
 		return
 
 	# Do not overwrite if replay modal is already open
@@ -449,9 +496,43 @@ func trigger_swing_replay_modal(data: Dictionary) -> void:
 		modal.name = "SwingReplayModal"
 		$OverlayLayer.add_child(modal)
 		var recorded_frames: Array[Dictionary] = []
-		if _swing_frame_buffer != null:
-			recorded_frames = _swing_frame_buffer.get_captured_frames()
-		modal.setup_modal(data, recorded_frames)
+		var is_suggestions_only: bool = not cam_active and analysis_active
+		if not is_suggestions_only:
+			if not _saved_swing_frames.is_empty():
+				recorded_frames = _saved_swing_frames.duplicate()
+				_saved_swing_frames.clear()
+			elif _swing_frame_buffer != null:
+				recorded_frames = _swing_frame_buffer.get_captured_frames()
+		
+		var modal_data: Dictionary = data.duplicate()
+		var player_node = get_parent().get_node_or_null("Player") if get_parent() != null else null
+		if not modal_data.has("Club") or str(modal_data["Club"]).is_empty():
+			var club_sel = find_child("ClubSelector", true, false)
+			if club_sel != null and "current_club" in club_sel and club_sel.current_club != null and not club_sel.current_club.text.is_empty():
+				modal_data["Club"] = club_sel.current_club.text
+			elif get_parent() != null and get_parent().has_method("_get_selected_club"):
+				modal_data["Club"] = get_parent()._get_selected_club()
+			elif player_node != null:
+				if player_node.get("ball") != null and "current_selected_club" in player_node.ball:
+					modal_data["Club"] = player_node.ball.current_selected_club
+
+		if not modal_data.has("is_tee") or not modal_data.has("lie_type"):
+			if player_node != null and player_node.get("ball") != null and "lie_type" in player_node.ball:
+				var ball_lie = str(player_node.ball.lie_type)
+				if not modal_data.has("lie_type"):
+					modal_data["lie_type"] = ball_lie
+				if not modal_data.has("is_tee"):
+					modal_data["is_tee"] = (ball_lie.to_lower() == "teebox")
+			else:
+				if not modal_data.has("is_tee"):
+					modal_data["is_tee"] = (str(modal_data.get("lie_type", "")).to_lower() == "teebox")
+				if not modal_data.has("lie_type"):
+					modal_data["lie_type"] = "teebox" if modal_data.get("is_tee", false) else "fairway"
+
+		modal.setup_modal(modal_data, recorded_frames, is_suggestions_only)
+		modal.closed.connect(func():
+			_saved_swing_frames.clear()
+		)
 
 
 func _format_angle(value) -> String:
@@ -532,7 +613,7 @@ func _setup_averages_ui() -> void:
 	_averages_panel.name = "AveragesPanel"
 	_averages_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_averages_panel.size_flags_vertical = Control.SIZE_SHRINK_END
-	_averages_panel.custom_minimum_size = Vector2(0, 48)
+	_averages_panel.custom_minimum_size = Vector2(0, 52)
 	
 	var panel_style = StyleBoxFlat.new()
 	panel_style.bg_color = Color(0.12, 0.15, 0.18, 0.85)
@@ -554,31 +635,37 @@ func _setup_averages_ui() -> void:
 	_avg_carry = Label.new()
 	_avg_carry.text = "Avg Carry: ---"
 	_avg_carry.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_avg_carry.add_theme_font_size_override("font_size", 15)
 	averages_hbox.add_child(_avg_carry)
 	
 	_avg_speed = Label.new()
 	_avg_speed.text = "Avg Speed: ---"
 	_avg_speed.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_avg_speed.add_theme_font_size_override("font_size", 15)
 	averages_hbox.add_child(_avg_speed)
 	
 	_avg_spin = Label.new()
 	_avg_spin.text = "Avg Spin: ---"
 	_avg_spin.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_avg_spin.add_theme_font_size_override("font_size", 15)
 	averages_hbox.add_child(_avg_spin)
 	
 	_avg_offline = Label.new()
 	_avg_offline.text = "Avg Offline: ---"
 	_avg_offline.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_avg_offline.add_theme_font_size_override("font_size", 15)
 	averages_hbox.add_child(_avg_offline)
 	
 	_avg_target_diff = Label.new()
 	_avg_target_diff.text = "Avg +/- Target: ---"
 	_avg_target_diff.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_avg_target_diff.add_theme_font_size_override("font_size", 15)
 	averages_hbox.add_child(_avg_target_diff)
 	
 	var view_prev_btn = Button.new()
 	view_prev_btn.text = "View Previous Shot"
-	view_prev_btn.custom_minimum_size = Vector2(160, 36)
+	view_prev_btn.custom_minimum_size = Vector2(180, 48)
+	view_prev_btn.add_theme_font_size_override("font_size", 15)
 	apply_material_button_style(view_prev_btn, Color(0.25, 0.35, 0.45, 0.85))
 	view_prev_btn.pressed.connect(_on_view_prev_shot_pressed)
 	averages_hbox.add_child(view_prev_btn)
@@ -750,7 +837,10 @@ func apply_material_button_style(btn: Button, bg_color: Color):
 	btn.add_theme_color_override("font_color", Color.WHITE)
 	btn.add_theme_color_override("font_hover_color", Color.WHITE)
 	btn.add_theme_color_override("font_pressed_color", Color.WHITE)
-	btn.add_theme_font_size_override("font_size", 16)
+	if not btn.has_theme_font_size_override("font_size"):
+		btn.add_theme_font_size_override("font_size", 16)
+	if btn.custom_minimum_size.y < 48:
+		btn.custom_minimum_size.y = 48
 
 
 func apply_circular_button_style(btn: Button, bg_color: Color):
@@ -774,6 +864,134 @@ func apply_circular_button_style(btn: Button, bg_color: Color):
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_pressed)
+
+
+func _on_home_button_pressed() -> void:
+	var is_practice = false
+	if has_node("/root/MultiplayerManager") and get_node("/root/MultiplayerManager").practice_mode_active:
+		is_practice = true
+	var parent = get_parent()
+	if parent != null and parent.get("practice_mode_active") == true:
+		is_practice = true
+	var has_players = has_node("/root/MultiplayerManager") and not get_node("/root/MultiplayerManager").players.is_empty()
+
+	if is_practice or has_players:
+		_show_exit_confirm_dialog()
+	else:
+		SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")
+
+
+func _show_exit_confirm_dialog() -> void:
+	if _exit_confirm_dialog != null:
+		_exit_confirm_dialog.visible = true
+		return
+
+	_exit_confirm_dialog = Control.new()
+	_exit_confirm_dialog.name = "ExitConfirmDialog"
+	_exit_confirm_dialog.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_exit_confirm_dialog.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_exit_confirm_dialog.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_exit_confirm_dialog.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var exit_backdrop = ColorRect.new()
+	exit_backdrop.name = "Backdrop"
+	exit_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	exit_backdrop.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	exit_backdrop.grow_vertical = Control.GROW_DIRECTION_BOTH
+	exit_backdrop.color = Color(0.0, 0.0, 0.0, 0.65)
+	exit_backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	exit_backdrop.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+			_exit_confirm_dialog.visible = false
+	)
+	_exit_confirm_dialog.add_child(exit_backdrop)
+
+	var exit_panel = PanelContainer.new()
+	exit_panel.name = "ExitDialogPanel"
+	exit_panel.anchor_left = 0.5
+	exit_panel.anchor_right = 0.5
+	exit_panel.anchor_top = 0.5
+	exit_panel.anchor_bottom = 0.5
+	exit_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	exit_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	exit_panel.offset_left = -250
+	exit_panel.offset_right = 250
+	exit_panel.offset_top = -115
+	exit_panel.offset_bottom = 115
+
+	var exit_style = StyleBoxFlat.new()
+	exit_style.bg_color = Color(0.08, 0.08, 0.08, 0.95)
+	exit_style.border_width_left = 2
+	exit_style.border_width_top = 2
+	exit_style.border_width_right = 2
+	exit_style.border_width_bottom = 2
+	exit_style.border_color = Color(0.35, 0.35, 0.35, 0.8)
+	exit_style.corner_radius_top_left = 12
+	exit_style.corner_radius_top_right = 12
+	exit_style.corner_radius_bottom_left = 12
+	exit_style.corner_radius_bottom_right = 12
+	exit_style.content_margin_left = 28
+	exit_style.content_margin_top = 24
+	exit_style.content_margin_right = 28
+	exit_style.content_margin_bottom = 24
+	exit_panel.add_theme_stylebox_override("panel", exit_style)
+
+	var exit_content_vbox = VBoxContainer.new()
+	exit_content_vbox.add_theme_constant_override("separation", 20)
+
+	var exit_title_lbl = Label.new()
+	exit_title_lbl.text = "Exit Match"
+	exit_title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	exit_title_lbl.add_theme_font_size_override("font_size", 28)
+	exit_title_lbl.add_theme_color_override("font_color", Color(0.95, 0.45, 0.4, 1.0))
+	exit_title_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	exit_title_lbl.add_theme_constant_override("outline_size", 4)
+	exit_content_vbox.add_child(exit_title_lbl)
+
+	var exit_msg_lbl = Label.new()
+	exit_msg_lbl.text = "Are you sure you want to stop the match and return to the home screen?"
+	exit_msg_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	exit_msg_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	exit_msg_lbl.custom_minimum_size = Vector2(400, 0)
+	exit_msg_lbl.add_theme_font_size_override("font_size", 20)
+	exit_msg_lbl.add_theme_color_override("font_color", Color.WHITE)
+	exit_msg_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	exit_msg_lbl.add_theme_constant_override("outline_size", 4)
+	exit_content_vbox.add_child(exit_msg_lbl)
+
+	var exit_btn_hbox = HBoxContainer.new()
+	exit_btn_hbox.add_theme_constant_override("separation", 24)
+	exit_btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+
+	var exit_yes_btn = Button.new()
+	exit_yes_btn.name = "YesButton"
+	exit_yes_btn.text = "Yes"
+	exit_yes_btn.custom_minimum_size = Vector2(140, 50)
+	apply_material_button_style(exit_yes_btn, Color(0.65, 0.22, 0.22, 0.85))
+	exit_yes_btn.pressed.connect(func():
+		_exit_confirm_dialog.visible = false
+		if has_node("/root/MultiplayerManager"):
+			var mp = get_node("/root/MultiplayerManager")
+			mp.players.clear()
+			mp.practice_mode_active = false
+		SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")
+	)
+	exit_btn_hbox.add_child(exit_yes_btn)
+
+	var exit_no_btn = Button.new()
+	exit_no_btn.name = "NoButton"
+	exit_no_btn.text = "No"
+	exit_no_btn.custom_minimum_size = Vector2(140, 50)
+	apply_material_button_style(exit_no_btn, Color(0.24, 0.46, 0.72, 0.85))
+	exit_no_btn.pressed.connect(func():
+		_exit_confirm_dialog.visible = false
+	)
+	exit_btn_hbox.add_child(exit_no_btn)
+
+	exit_content_vbox.add_child(exit_btn_hbox)
+	exit_panel.add_child(exit_content_vbox)
+	_exit_confirm_dialog.add_child(exit_panel)
+	$OverlayLayer.add_child(_exit_confirm_dialog)
 
 
 func update_map_button_text(is_aerial: bool) -> void:
@@ -852,7 +1070,7 @@ func _setup_golfer_camera_ui() -> void:
 	var header_setup_btn = Button.new()
 	header_setup_btn.name = "HeaderSetupButton"
 	header_setup_btn.text = "⚙️ Setup"
-	header_setup_btn.custom_minimum_size = Vector2(80, 32)
+	header_setup_btn.custom_minimum_size = Vector2(88, 48)
 	apply_material_button_style(header_setup_btn, Color(0.2, 0.45, 0.65, 0.9))
 	header_setup_btn.pressed.connect(_open_camera_setup_dialog)
 	header.add_child(header_setup_btn)
@@ -860,15 +1078,15 @@ func _setup_golfer_camera_ui() -> void:
 	_camera_flip_btn = Button.new()
 	_camera_flip_btn.name = "FlipCameraButton"
 	_camera_flip_btn.text = "🔄 Flip"
-	_camera_flip_btn.custom_minimum_size = Vector2(72, 32)
+	_camera_flip_btn.custom_minimum_size = Vector2(80, 48)
 	apply_material_button_style(_camera_flip_btn, Color(0.2, 0.4, 0.6, 0.9))
 	_camera_flip_btn.pressed.connect(_on_flip_camera_pressed)
 	header.add_child(_camera_flip_btn)
 	
 	var status_dot = Label.new()
 	status_dot.text = "🔴 LIVE"
-	status_dot.add_theme_font_size_override("font_size", 12)
-	status_dot.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
+	status_dot.add_theme_font_size_override("font_size", 14)
+	status_dot.add_theme_color_override("font_color", Color(1.0, 0.42, 0.42))
 	header.add_child(status_dot)
 	
 	main_vbox.add_child(header)
@@ -965,6 +1183,21 @@ func set_golfer_camera_visible(enabled: bool) -> void:
 
 func is_golfer_camera_visible() -> bool:
 	return _golfer_cam_panel.visible if _golfer_cam_panel != null else false
+
+
+func is_shot_analysis_enabled() -> bool:
+	if has_node("/root/GlobalSettings"):
+		return GlobalSettings.range_settings.shot_analysis_enabled.value
+	return false
+
+
+func set_shot_analysis_enabled(enabled: bool) -> void:
+	if has_node("/root/GlobalSettings"):
+		GlobalSettings.range_settings.shot_analysis_enabled.value = enabled
+	var btn = find_child("ShotAnalysisButton", true, false)
+	if btn is Button:
+		btn.text = "📊 Shot Analysis: ON" if enabled else "📊 Shot Analysis: OFF"
+		apply_material_button_style(btn, Color(0.15, 0.55, 0.75, 0.85) if enabled else Color(0.25, 0.35, 0.45, 0.85))
 
 
 

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Soft drop shadow -->
+  <circle cx="12" cy="12.5" r="11" fill="#000000" opacity="0.45"/>
+  <!-- High contrast dark outer rim -->
+  <circle cx="12" cy="12" r="10.5" fill="#FFFFFF" stroke="#111111" stroke-width="1.4"/>
+  <!-- 3D shaded golf ball surface -->
+  <circle cx="12" cy="12" r="9.5" fill="#F8FAFC"/>
+  <!-- Shadow crescent on bottom-right -->
+  <path d="M 12 2.5 A 9.5 9.5 0 0 1 21.5 12 A 9.5 9.5 0 0 1 12 21.5 A 9.5 9.5 0 0 0 12 2.5" fill="#B0BEC5" opacity="0.4"/>
+  <!-- Soft specular highlight on top-left -->
+  <circle cx="9" cy="8.5" r="4.5" fill="#FFFFFF" opacity="0.85"/>
+  <!-- Dimple pattern -->
+  <g fill="#90A4AE" opacity="0.75">
+    <circle cx="12" cy="12" r="1.1"/>
+    <circle cx="8.5" cy="11" r="0.95"/>
+    <circle cx="15.5" cy="11" r="0.95"/>
+    <circle cx="10.5" cy="7.8" r="0.9"/>
+    <circle cx="13.5" cy="7.8" r="0.9"/>
+    <circle cx="10.5" cy="15.2" r="0.9"/>
+    <circle cx="13.5" cy="15.2" r="0.9"/>
+    <circle cx="6.5" cy="12" r="0.85"/>
+    <circle cx="17.5" cy="12" r="0.85"/>
+    <circle cx="12" cy="5.8" r="0.85"/>
+    <circle cx="12" cy="17.8" r="0.85"/>
+    <circle cx="7.8" cy="8" r="0.8"/>
+    <circle cx="16.2" cy="8" r="0.8"/>
+    <circle cx="7.8" cy="15" r="0.8"/>
+    <circle cx="16.2" cy="15" r="0.8"/>
+  </g>
+</svg>

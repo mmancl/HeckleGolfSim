@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg5" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2C3E50"/>
+      <stop offset="100%" stop-color="#1A252F"/>
+    </linearGradient>
+    <filter id="glow5" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <circle cx="64" cy="64" r="60" fill="url(#bg5)" stroke="#F1C40F" stroke-width="4" filter="url(#glow5)"/>
+  <!-- Feathered Chest / Collar -->
+  <path d="M36 116 C36 92 48 86 64 86 C80 86 92 92 92 116 Z" fill="#34495E"/>
+  <path d="M64 86 L56 100 L64 96 L72 100 Z" fill="#E67E22"/>
+  <!-- White Eagle Head -->
+  <path d="M40 60 C40 38 52 32 64 32 C76 32 88 38 88 60 C88 78 78 86 64 86 C50 86 40 78 40 60 Z" fill="#FFFFFF"/>
+  <path d="M40 70 L48 84 L54 78 L64 86 L74 78 L80 84 L88 70 Z" fill="#EAEDED"/>
+  <!-- Sharp Eyes -->
+  <polygon points="46,54 58,52 54,58" fill="#F39C12"/>
+  <polygon points="82,54 70,52 74,58" fill="#F39C12"/>
+  <circle cx="53" cy="54" r="2.5" fill="#17202A"/>
+  <circle cx="75" cy="54" r="2.5" fill="#17202A"/>
+  <circle cx="54" cy="53" r="0.8" fill="#FFF"/>
+  <circle cx="76" cy="53" r="0.8" fill="#FFF"/>
+  <!-- Golden Hooked Beak -->
+  <path d="M54 58 Q64 56 74 58 L70 72 Q64 84 58 72 Z" fill="#F39C12"/>
+  <path d="M58 72 Q64 84 70 72 L64 78 Z" fill="#D68910"/>
+  <!-- Visor -->
+  <path d="M36 46 C44 40 84 40 92 46 C84 52 44 52 36 46 Z" fill="#E74C3C"/>
+  <rect x="56" y="38" width="16" height="6" rx="2" fill="#C0392B"/>
+  <circle cx="64" cy="41" r="2" fill="#FFF"/>
+</svg>

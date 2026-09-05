@@ -31,6 +31,13 @@ const COLOR_TEXT_WHITE = Color(0.96, 0.98, 1.0)
 const COLOR_TEXT_MUTED = Color(0.70, 0.76, 0.84)
 const COLOR_TEXT_DIM = Color(0.50, 0.56, 0.64)
 
+# High-contrast, mobile-readable semantic text tokens
+const COLOR_TEXT_GOLD = Color(1.0, 0.85, 0.38)       # Warm rich gold for scorecard totals, winner highlights
+const COLOR_TEXT_WARNING = Color(1.0, 0.82, 0.32)    # High-contrast warm amber for warnings / alerts
+const COLOR_TEXT_DANGER = Color(1.0, 0.42, 0.42)     # High-luminance coral red (clearly readable on dark backgrounds)
+const COLOR_TEXT_SUCCESS = Color(0.35, 0.95, 0.55)   # Vibrant mint green for under-par and ready states
+const COLOR_TEXT_ACCENT = Color(0.35, 0.82, 1.0)     # Crisp vivid cyan for section titles and headers
+
 # --- Helper Methods for Button Styling ---
 
 static func apply_primary_button_style(btn: Button, corner_radius: int = 8) -> void:
@@ -150,6 +157,10 @@ static func _apply_button_styles(btn: Button, style_normal: StyleBoxFlat, style_
 	btn.add_theme_color_override("font_pressed_color", text_color)
 	if btn.custom_minimum_size.y < 48:
 		btn.custom_minimum_size.y = 48
+	if not btn.has_theme_font_size_override("font_size"):
+		btn.add_theme_font_size_override("font_size", 16)
+	elif btn.get_theme_font_size("font_size") < 15:
+		btn.add_theme_font_size_override("font_size", 16)
 
 static func _create_stylebox(bg: Color, border: Color, corner_radius: int, border_width: int, m_left: int, m_top: int, m_right: int, m_bottom: int) -> StyleBoxFlat:
 	var style = StyleBoxFlat.new()

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2D5A27"/>
+      <stop offset="100%" stop-color="#143311"/>
+    </linearGradient>
+    <linearGradient id="cap1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#A68058"/>
+      <stop offset="100%" stop-color="#6B4F32"/>
+    </linearGradient>
+    <filter id="glow1" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <circle cx="64" cy="64" r="60" fill="url(#bg1)" stroke="#D4AF37" stroke-width="4" filter="url(#glow1)"/>
+  <circle cx="64" cy="64" r="54" fill="none" stroke="#D4AF37" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>
+  <!-- Body/Collar -->
+  <path d="M34 116 C34 94 48 88 64 88 C80 88 94 94 94 116 Z" fill="#ECE7DE"/>
+  <path d="M56 88 L64 102 L72 88 Z" fill="#A68058"/>
+  <polygon points="64,98 60,114 68,114" fill="#D4AF37"/>
+  <!-- Head -->
+  <ellipse cx="64" cy="66" rx="20" ry="22" fill="#FFDFC4"/>
+  <!-- Ears -->
+  <circle cx="44" cy="66" r="5" fill="#F0CCA8"/>
+  <circle cx="84" cy="66" r="5" fill="#F0CCA8"/>
+  <!-- Eyes -->
+  <ellipse cx="56" cy="63" rx="2.5" ry="3" fill="#2C3E50"/>
+  <ellipse cx="72" cy="63" rx="2.5" ry="3" fill="#2C3E50"/>
+  <circle cx="57" cy="62" r="0.8" fill="#FFF"/>
+  <circle cx="73" cy="62" r="0.8" fill="#FFF"/>
+  <!-- Mustache -->
+  <path d="M64 74 C58 70 48 73 46 78 C52 79 58 77 64 76 C70 77 76 79 82 78 C80 73 70 70 64 74 Z" fill="#6B4F32"/>
+  <!-- Classic Tweed Flat Cap -->
+  <path d="M36 54 C38 34 64 28 88 38 C96 42 98 48 94 56 C82 54 48 50 36 54 Z" fill="url(#cap1)"/>
+  <path d="M34 54 C46 51 86 52 96 56 C90 60 78 61 34 55 Z" fill="#4E3620"/>
+  <!-- Cap Button -->
+  <circle cx="64" cy="35" r="3.5" fill="#4E3620"/>
+  <!-- Golf Tee in Mouth -->
+  <line x1="68" y1="77" x2="82" y2="83" stroke="#FFF" stroke-width="2.5" stroke-linecap="round"/>
+  <polygon points="81,81 85,82 82,85" fill="#E74C3C"/>
+</svg>

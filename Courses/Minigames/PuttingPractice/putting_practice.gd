@@ -52,9 +52,13 @@ var dist_25_val_lbl = null
 var banner_lbl = null
 var grid_toggle_btn = null
 var music_toggle_btn = null
+var stats_btn = null
+var grid_canvas = null
 var hud_layer: CanvasLayer = null
 var hud_control: Control = null
 var _settings_layer: CanvasLayer = null
+var raw_ball_data: Dictionary = {}
+var display_data: Dictionary = {}
 
 func _ready() -> void:
 	name = "PuttingPractice"
@@ -407,7 +411,7 @@ func _generate_trees() -> void:
 		if scene:
 			var tree_inst = scene.instantiate()
 			tree_inst.name = "Tree_%d" % spawned
-			tree_inst.position = Vector3(tx, ty, tz)
+			tree_inst.position = Vector3(tx, ty - 0.15, tz)
 			
 			var s = rng.randf_range(2.2, 4.2)
 			tree_inst.scale = Vector3(s, s, s)
@@ -729,7 +733,7 @@ void vertex() {
 	float segment_phase = float(INSTANCE_ID / 2) * 0.25;
 	
 	// Speed scales dynamically with slope so steeper slopes flow faster, but subtle slopes remain clearly active
-	float move_speed = 0.4 + clamp(slope_val * 35.0, 0.0, 2.6);
+	float move_speed = 0.08 + clamp(slope_val * 7.0, 0.0, 0.52);
 	float progress = fract(TIME * move_speed * time_scale + phase_offset + segment_phase);
 	
 	vec4 world_offset = vec4(displacement * progress, 0.0);
@@ -1092,6 +1096,9 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	# Connect to the player's launch monitor shot handler
 	player._on_tcp_client_hit_ball(data)
 
+	raw_ball_data = data.duplicate()
+	_update_stats_display(false)
+
 	# Show the banner
 	var speed_mph = data.get("Speed", 0.0)
 	_show_banner("Putt Hit (Launch Monitor)! Speed: %.1f mph" % speed_mph)
@@ -1119,6 +1126,8 @@ func _physics_process(delta: float) -> void:
 func _on_ball_rest(_shot_data: Dictionary) -> void:
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
+	raw_ball_data = _shot_data.duplicate()
+	_update_stats_display(true)
 	var final_pos = player.ball.global_position
 	var target_hole = last_putt_target_hole
 	
@@ -1157,7 +1166,8 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 	
 	# Always reset player back to the starting spot after hitting
 	var current_shot_id = shot_counter
-	await get_tree().create_timer(2.5).timeout
+	var reset_delay = maxf(0.5, GlobalSettings.range_settings.ball_reset_timer.value)
+	await get_tree().create_timer(reset_delay).timeout
 	if is_inside_tree() and player != null and player.ball != null:
 		if shot_counter == current_shot_id and player.ball.state == PhysicsEnums.BallState.REST:
 			_reset_ball_position()
@@ -1223,18 +1233,53 @@ func _setup_ui() -> void:
 	within_5_val_lbl = _create_stat_column(score_hbox, "WITHIN 5 FT")
 	made_val_lbl = _create_stat_column(score_hbox, "MADE PUTTS")
 	
-	# --- LEFT FLOATING TARGET SELECTION PANEL ---
+	# --- TARGET SELECTION PANEL (RIGHT SIDE) ---
 	var target_panel = PanelContainer.new()
-	target_panel.custom_minimum_size = Vector2(210, 390)
-	target_panel.anchor_left = 0.0
+	target_panel.custom_minimum_size = Vector2(230, 470)
+	target_panel.anchor_left = 1.0
+	target_panel.anchor_right = 1.0
 	target_panel.anchor_top = 0.5
 	target_panel.anchor_bottom = 0.5
+	target_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	target_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
-	target_panel.offset_left = 20
-	target_panel.offset_top = -195
-	target_panel.offset_bottom = 195
+	target_panel.offset_left = -250
+	target_panel.offset_right = -20
+	target_panel.offset_top = -235
+	target_panel.offset_bottom = 235
 	hud_control.add_child(target_panel)
 	target_panel.add_theme_stylebox_override("panel", glass_style)
+
+	# --- SHOT STATS GRID CANVAS (LEFT SIDE) ---
+	var grid_canvas_script = load("res://UI/grid_canvas.gd")
+	if grid_canvas_script != null:
+		grid_canvas = Control.new()
+		grid_canvas.name = "GridCanvas"
+		grid_canvas.set_script(grid_canvas_script)
+		grid_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hud_control.add_child(grid_canvas)
+
+	# --- STATS TOGGLE BUTTON (BOTTOM-LEFT CORNER) ---
+	stats_btn = Button.new()
+	stats_btn.name = "StatsButton"
+	stats_btn.text = ""
+	stats_btn.tooltip_text = "Toggle Stats (Show/Hide)"
+	if ResourceLoader.exists("res://assets/images/icons/stats.svg"):
+		stats_btn.icon = load("res://assets/images/icons/stats.svg")
+	stats_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stats_btn.custom_minimum_size = Vector2(64, 64)
+	_apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85))
+	stats_btn.anchor_left = 0.0
+	stats_btn.anchor_right = 0.0
+	stats_btn.anchor_top = 1.0
+	stats_btn.anchor_bottom = 1.0
+	stats_btn.offset_left = 30
+	stats_btn.offset_top = -88
+	stats_btn.offset_right = 94
+	stats_btn.offset_bottom = -24
+	stats_btn.pressed.connect(func():
+		_toggle_stats_visibility()
+	)
+	hud_control.add_child(stats_btn)
 	
 	var target_margin = MarginContainer.new()
 	target_margin.add_theme_constant_override("margin_left", 12)
@@ -1250,7 +1295,7 @@ func _setup_ui() -> void:
 	var t_title = Label.new()
 	t_title.text = "SELECT HOLE"
 	t_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	t_title.add_theme_font_size_override("font_size", 13)
+	t_title.add_theme_font_size_override("font_size", 16)
 	t_title.add_theme_color_override("font_color", Color(0.0, 0.8, 1.0))
 	target_vbox.add_child(t_title)
 	
@@ -1259,8 +1304,8 @@ func _setup_ui() -> void:
 	for i in range(holes.size()):
 		var btn = Button.new()
 		btn.text = "Hole %d (%d ft)" % [i + 1, hole_data[i]["dist_ft"]]
-		btn.custom_minimum_size = Vector2(0, 32)
-		btn.add_theme_font_size_override("font_size", 12)
+		btn.custom_minimum_size = Vector2(0, 50)
+		btn.add_theme_font_size_override("font_size", 16)
 		_apply_btn_style(btn, Color(0.12, 0.20, 0.28), Color(0.18, 0.30, 0.42))
 		btn.pressed.connect(func(idx=i): _select_hole(idx))
 		target_vbox.add_child(btn)
@@ -1276,24 +1321,24 @@ func _setup_ui() -> void:
 	banner_lbl.anchor_bottom = 0.25
 	banner_lbl.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	banner_lbl.add_theme_font_size_override("font_size", 20)
-	banner_lbl.add_theme_color_override("font_color", Color(1, 1, 0.5, 1.0))
-	banner_lbl.add_theme_constant_override("outline_size", 3)
-	banner_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	banner_lbl.add_theme_color_override("font_color", Color(0.96, 0.98, 1.0))
+	banner_lbl.add_theme_constant_override("outline_size", 4)
+	banner_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	hud_control.add_child(banner_lbl)
 	
 	# --- BOTTOM CONTROLS PANEL ---
 	var ctrl_panel = PanelContainer.new()
-	ctrl_panel.custom_minimum_size = Vector2(460, 70)
+	ctrl_panel.custom_minimum_size = Vector2(500, 76)
 	ctrl_panel.anchor_left = 0.5
 	ctrl_panel.anchor_right = 0.5
 	ctrl_panel.anchor_top = 1.0
 	ctrl_panel.anchor_bottom = 1.0
 	ctrl_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	ctrl_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	ctrl_panel.offset_left = -230
-	ctrl_panel.offset_right = 230
-	ctrl_panel.offset_top = -90
-	ctrl_panel.offset_bottom = -20
+	ctrl_panel.offset_left = -250
+	ctrl_panel.offset_right = 250
+	ctrl_panel.offset_top = -94
+	ctrl_panel.offset_bottom = -18
 	hud_control.add_child(ctrl_panel)
 	ctrl_panel.add_theme_stylebox_override("panel", glass_style)
 	
@@ -1311,7 +1356,8 @@ func _setup_ui() -> void:
 	grid_toggle_btn = Button.new()
 	grid_toggle_btn.name = "GridToggleButton"
 	grid_toggle_btn.text = "📊 Grid: OFF"
-	grid_toggle_btn.custom_minimum_size = Vector2(110, 44)
+	grid_toggle_btn.custom_minimum_size = Vector2(130, 52)
+	grid_toggle_btn.add_theme_font_size_override("font_size", 16)
 	_apply_btn_style(grid_toggle_btn, Color(0.25, 0.25, 0.25), Color(0.35, 0.35, 0.35))
 	grid_toggle_btn.pressed.connect(_toggle_green_grid)
 	ctrl_hbox.add_child(grid_toggle_btn)
@@ -1319,7 +1365,8 @@ func _setup_ui() -> void:
 	# 2. Reset Button
 	var reset_btn = Button.new()
 	reset_btn.text = "RESET (R)"
-	reset_btn.custom_minimum_size = Vector2(100, 44)
+	reset_btn.custom_minimum_size = Vector2(120, 52)
+	reset_btn.add_theme_font_size_override("font_size", 16)
 	_apply_btn_style(reset_btn, Color(0.48, 0.28, 0.18), Color(0.32, 0.18, 0.12))
 	reset_btn.pressed.connect(_reset_ball_position)
 	ctrl_hbox.add_child(reset_btn)
@@ -1330,7 +1377,7 @@ func _setup_ui() -> void:
 	music_toggle_btn.text = ""
 	music_toggle_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	music_toggle_btn.expand_icon = true
-	music_toggle_btn.custom_minimum_size = Vector2(44, 44)
+	music_toggle_btn.custom_minimum_size = Vector2(52, 52)
 	music_toggle_btn.pressed.connect(_toggle_music)
 	ctrl_hbox.add_child(music_toggle_btn)
 	
@@ -1340,7 +1387,7 @@ func _setup_ui() -> void:
 	settings_btn.text = ""
 	settings_btn.icon = load("res://Utils/Settings/Gear.png")
 	settings_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	settings_btn.custom_minimum_size = Vector2(44, 44)
+	settings_btn.custom_minimum_size = Vector2(52, 52)
 	_apply_btn_style(settings_btn, Color(0.18, 0.34, 0.50), Color(0.24, 0.44, 0.65))
 	settings_btn.pressed.connect(_on_settings_pressed)
 	ctrl_hbox.add_child(settings_btn)
@@ -1348,7 +1395,8 @@ func _setup_ui() -> void:
 	# 5. Exit Button
 	var exit_btn = Button.new()
 	exit_btn.text = "EXIT"
-	exit_btn.custom_minimum_size = Vector2(80, 44)
+	exit_btn.custom_minimum_size = Vector2(96, 52)
+	exit_btn.add_theme_font_size_override("font_size", 16)
 	_apply_btn_style(exit_btn, Color(0.36, 0.16, 0.16), Color(0.24, 0.12, 0.12))
 	exit_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn"))
 	ctrl_hbox.add_child(exit_btn)
@@ -1388,7 +1436,7 @@ func _create_stat_column(parent: HBoxContainer, title: String) -> Label:
 	var title_lbl = Label.new()
 	title_lbl.text = title
 	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_lbl.add_theme_font_size_override("font_size", 12)
+	title_lbl.add_theme_font_size_override("font_size", 14)
 	title_lbl.add_theme_color_override("font_color", Color(0.65, 0.7, 0.8))
 	col.add_child(title_lbl)
 	
@@ -1449,6 +1497,77 @@ func _apply_btn_style(btn: Button, norm_color: Color, hov_color: Color) -> void:
 	btn.add_theme_stylebox_override("pressed", style_hover)
 	btn.add_theme_stylebox_override("focus", style_normal)
 	btn.add_theme_color_override("font_color", Color.WHITE)
+	if btn.custom_minimum_size.y < 48:
+		btn.custom_minimum_size.y = 48
+	if not btn.has_theme_font_size_override("font_size"):
+		btn.add_theme_font_size_override("font_size", 16)
+	elif btn.get_theme_font_size("font_size") < 15:
+		btn.add_theme_font_size_override("font_size", 16)
+
+func _apply_circular_button_style(btn: Button, bg_color: Color) -> void:
+	var style_normal = StyleBoxFlat.new()
+	style_normal.bg_color = bg_color
+	style_normal.corner_radius_top_left = 32
+	style_normal.corner_radius_top_right = 32
+	style_normal.corner_radius_bottom_left = 32
+	style_normal.corner_radius_bottom_right = 32
+	style_normal.border_width_left = 2
+	style_normal.border_width_top = 2
+	style_normal.border_width_right = 2
+	style_normal.border_width_bottom = 2
+	style_normal.border_color = bg_color.lightened(0.25)
+	
+	var style_hover = style_normal.duplicate()
+	style_hover.bg_color = bg_color.lightened(0.15)
+	style_hover.border_color = Color(1.0, 1.0, 1.0, 0.5)
+
+	btn.add_theme_stylebox_override("normal", style_normal)
+	btn.add_theme_stylebox_override("hover", style_hover)
+	btn.add_theme_stylebox_override("pressed", style_hover)
+	btn.add_theme_stylebox_override("focus", style_normal)
+
+func is_stats_visible() -> bool:
+	if grid_canvas == null:
+		return true
+	var dist_panel = grid_canvas.get_node_or_null("Distance")
+	return dist_panel.visible if dist_panel != null else grid_canvas.visible
+
+func _toggle_stats_visibility() -> void:
+	var show_stats = not is_stats_visible()
+	if grid_canvas != null:
+		for child in grid_canvas.get_children():
+			if child.name != "ClubSelector":
+				child.visible = show_stats
+	if stats_btn != null:
+		if show_stats:
+			_apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85))
+		else:
+			_apply_circular_button_style(stats_btn, Color(0.15, 0.15, 0.15, 0.85))
+
+func _update_stats_display(is_final_rest: bool = true) -> void:
+	if grid_canvas == null or player == null:
+		return
+	var units = GlobalSettings.range_settings.range_units.value if has_node("/root/GlobalSettings") else PhysicsEnums.Units.IMPERIAL
+	display_data = ShotFormatter.format_ball_display(raw_ball_data, player, units, is_final_rest, display_data)
+	var is_imperial: bool = (units == PhysicsEnums.Units.IMPERIAL)
+	
+	for child in grid_canvas.get_children():
+		if child.name == "ClubSelector":
+			continue
+		var stat_id = child.name
+		var stat_def = StatDefinitions.get_stat_by_id(stat_id)
+		if stat_def.is_empty():
+			continue
+		var u_str: String = str(stat_def.get("units_imperial" if is_imperial else "units_metric", ""))
+		if child.has_method("set_units"):
+			child.call("set_units", u_str)
+		var val = display_data.get(stat_id, "---")
+		if stat_id == "VLA" or stat_id == "HLA":
+			if val != "---":
+				var float_val = float(val)
+				val = "%.1f°" % float_val
+		if child.has_method("set_data"):
+			child.call("set_data", str(val))
 
 func _on_settings_pressed() -> void:
 	if _settings_layer != null and is_instance_valid(_settings_layer):

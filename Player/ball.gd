@@ -34,10 +34,12 @@ var _sfx_sand_thud = preload("res://assets/audio/sfx/sand.mp3")
 var _sfx_bounce_fairway = preload("res://assets/audio/sfx/fairway_maybe.mp3")
 var _sfx_bounce_green = preload("res://assets/audio/sfx/fairway_maybe.mp3")
 var _sfx_rough_thump = preload("res://assets/audio/sfx/rough.mp3")
+var _sfx_cup_drop = preload("res://assets/audio/sfx/cup_drop.mp3")
 
 # SFX players
 var _sfx_player: AudioStreamPlayer = null
 var _leaves_player: AudioStreamPlayer = null
+var _cup_player: AudioStreamPlayer = null
 var _detection_area: Area3D = null
 
 # C# addon instances
@@ -63,6 +65,12 @@ var lie_type: String = "fairway"
 var is_falling_in_hole := false
 var falling_target_hole := Vector3.ZERO
 var falling_time := 0.0
+var flight_time := 0.0
+
+# Cached world colliders
+var _cached_terrain_static: CollisionObject3D = null
+var _cached_rough_static: CollisionObject3D = null
+var _terrain_cache_searched: bool = false
 
 
 # Surface parameters (base values from C# Surface addon, then multiplied below).
@@ -91,7 +99,10 @@ var _lift_scale := 1.0
 var shot_start_pos := Vector3.ZERO
 var shot_start_pos_global := Vector3.ZERO
 var shot_was_in_sand := false
+var shot_was_from_teebox := false
+var shot_hit_other_ground := false
 var shot_dir := Vector3(1.0, 0.0, 0.0)  # Normalized horizontal direction
+var target_dir := Vector3(1.0, 0.0, 0.0)  # Normalized target aim direction (horizontal)
 var aim_yaw_offset_deg := 0.0  # Camera/world rotation offset applied at launch
 var launch_spin_rpm := 0.0  # Stored for bounce calculations
 var rollout_impact_spin_rpm := 0.0  # Spin on first impact; used for rollout friction
@@ -134,6 +145,12 @@ func _ready() -> void:
 	_leaves_player.name = "BallLeavesPlayer"
 	_leaves_player.stream = _sfx_leaf_rustle
 	add_child(_leaves_player)
+
+	# Create ball cup drop SFX player
+	_cup_player = AudioStreamPlayer.new()
+	_cup_player.name = "BallCupPlayer"
+	_cup_player.stream = _sfx_cup_drop
+	add_child(_cup_player)
 
 
 
@@ -413,15 +430,18 @@ func _apply_surface_params() -> void:
 	if typeof(params_variant) == TYPE_DICTIONARY:
 		surface_params = params_variant
 	else:
-		surface_params = {"u_k": 0.30, "u_kr": 0.03, "nu_g": 0.0010, "theta_c": 0.25}
+		if is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER:
+			surface_params = {"u_k": 0.95, "u_kr": 0.42, "nu_g": 0.020, "theta_c": 0.45}
+		else:
+			surface_params = {"u_k": 0.30, "u_kr": 0.03, "nu_g": 0.0010, "theta_c": 0.25}
 	_kinetic_friction = float(surface_params.get("u_k", 0.30)) * _kinetic_mult
 	_rolling_friction = float(surface_params.get("u_kr", 0.03)) * _rolling_mult
 	
 	# Determine green speed scaling exponent based on surface type
 	var green_speed = float(GlobalSettings.range_settings.green_speed.value)
 	var exponent := 0.0
-	if is_in_sand:
-		exponent = 0.05
+	if is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER:
+		exponent = 0.0
 	elif surface_type == PhysicsEnums.SurfaceType.GREEN:
 		exponent = 0.70
 	elif surface_type == PhysicsEnums.SurfaceType.FAIRWAY or surface_type == PhysicsEnums.SurfaceType.FAIRWAY_SOFT:
@@ -447,10 +467,38 @@ func _apply_surface_params() -> void:
 		])
 
 
+func get_target_dir() -> Vector3:
+	if target_dir.length_squared() > 0.001:
+		return target_dir
+	return Vector3.RIGHT.rotated(Vector3.UP, deg_to_rad(aim_yaw_offset_deg)).normalized()
+
+
+func get_target_right() -> Vector3:
+	return get_target_dir().cross(Vector3.UP).normalized()
+
+
+func get_downrange_meters() -> float:
+	if shot_start_pos_global.is_zero_approx():
+		return 0.0
+	var delta: Vector3 = global_position - shot_start_pos_global
+	var delta_h := Vector3(delta.x, 0.0, delta.z)
+	return delta_h.dot(get_target_dir())
+
+
 func get_downrange_yards() -> float:
-	var delta: Vector3 = position - shot_start_pos
-	var meters: float = delta.dot(shot_dir)
-	return meters * 1.09361
+	return get_downrange_meters() * 1.09361
+
+
+func get_side_distance_meters() -> float:
+	if shot_start_pos_global.is_zero_approx():
+		return 0.0
+	var delta: Vector3 = global_position - shot_start_pos_global
+	var delta_h := Vector3(delta.x, 0.0, delta.z)
+	return delta_h.dot(get_target_right())
+
+
+func get_side_distance_yards() -> float:
+	return get_side_distance_meters() * 1.09361
 
 
 func _process(_delta: float) -> void:
@@ -493,6 +541,8 @@ func _physics_process(delta: float) -> void:
 						falling_time = 0.0
 						velocity = Vector3.ZERO
 						omega = Vector3.ZERO
+						if _cup_player != null and not _skipping_flight:
+							_cup_player.play()
 
 	if is_falling_in_hole:
 		falling_time += delta
@@ -505,6 +555,11 @@ func _physics_process(delta: float) -> void:
 			is_falling_in_hole = false
 			_enter_rest_state()
 		return
+
+	if state == PhysicsEnums.BallState.FLIGHT:
+		flight_time += delta
+	else:
+		flight_time = 0.0
 
 	if state != PhysicsEnums.BallState.FLIGHT or on_ground:
 		_update_surface_from_underneath()
@@ -521,6 +576,7 @@ func _physics_process(delta: float) -> void:
 		_set_openfairway_property(params, &"critical_angle", &"CriticalAngle", _critical_angle)
 		_set_openfairway_property(params, &"surface_type", &"SurfaceType", surface_type)
 		_set_openfairway_property(params, &"slope_force_scale", &"SlopeForceScale", slope_force_scale)
+		_set_openfairway_property(params, &"is_in_sand", &"IsInSand", is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER)
 
 	# Calculate forces and torques using BallPhysics
 	var total_force = _call_openfairway_method(_physics, &"calculate_forces", &"CalculateForces", [velocity, omega, was_on_ground, params])
@@ -615,7 +671,8 @@ func _check_out_of_bounds() -> bool:
 func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, prev_velocity: Vector3) -> void:
 	if collision:
 		var collider = collision.get_collider()
-		if collider != null and collider.has_meta("is_water") and bool(collider.get_meta("is_water")):
+		var is_water_hit = collider != null and ((collider.has_meta("is_water") and bool(collider.get_meta("is_water"))) or collider.name.to_lower().contains("water"))
+		if is_water_hit:
 			is_in_water = true
 			water_collider = collider
 			velocity = Vector3.ZERO
@@ -635,14 +692,36 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 			floor_normal = normal
 			var prev_normal_velocity := prev_velocity.dot(normal)
 
-			# Ignore ground collision depenetration on launch/ascent while in FLIGHT state
-			if state == PhysicsEnums.BallState.FLIGHT and prev_normal_velocity >= -0.1:
+			# Ignore ground collision depenetration on launch/ascent while in FLIGHT state.
+			# For low-speed chip/pitch shots off turf, fringe collars, or uphill lies,
+			# allow ground depenetration during initial launch (first 0.25s or while ascending)
+			# rather than prematurely killing vertical loft into a ground rollout.
+			var is_launch_ascent := state == PhysicsEnums.BallState.FLIGHT and (
+				flight_time < 0.25
+				or velocity.y > 0.05
+				or prev_velocity.y > 0.05
+				or prev_normal_velocity >= -0.15
+			)
+			if is_launch_ascent and prev_normal_velocity > -3.5:
 				on_ground = false
-				global_position += normal * (COLLISION_SAFE_MARGIN * 2.0 + 0.002)
+				global_position += normal * (COLLISION_SAFE_MARGIN * 2.0 + 0.004)
 				var remainder := collision.get_remainder()
 				if remainder.length_squared() > 0.000001:
 					move_and_collide(remainder, false, COLLISION_SAFE_MARGIN)
 				return
+
+			# Track if ball hit other ground outside the tee box
+			if shot_was_from_teebox:
+				var hit_dist = global_position.distance_to(shot_start_pos_global)
+				var cname = collider.name.to_lower() if collider != null else ""
+				if hit_dist > 3.0:
+					shot_hit_other_ground = true
+				elif cname.contains("fairway") or cname.contains("green") or cname.contains("rough") or cname.contains("bunker") or cname.contains("sand"):
+					shot_hit_other_ground = true
+				elif not cname.contains("tee") and hit_dist > 1.5:
+					shot_hit_other_ground = true
+			else:
+				shot_hit_other_ground = true
 
 			var is_landing := (state == PhysicsEnums.BallState.FLIGHT) or prev_normal_velocity < -0.5
 
@@ -657,6 +736,7 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 					_set_openfairway_property(params, &"grass_viscosity", &"GrassViscosity", _grass_viscosity)
 					_set_openfairway_property(params, &"critical_angle", &"CriticalAngle", _critical_angle)
 					_set_openfairway_property(params, &"surface_type", &"SurfaceType", surface_type)
+					_set_openfairway_property(params, &"is_in_sand", &"IsInSand", is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER)
 
 				if state == PhysicsEnums.BallState.FLIGHT:
 					_print_impact_debug()
@@ -683,17 +763,30 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 				omega = _get_openfairway_property(bounce_result, &"new_omega", &"NewOmega", omega)
 				state = int(_get_openfairway_property(bounce_result, &"new_state", &"NewState", state))
 
-				# Slightly scale the height of the bounce (normal component of velocity) based on green speed
-				var green_speed : float = float(GlobalSettings.range_settings.green_speed.value)
-				var bounce_sensitivity : float = 0.0025
-				var bounce_mult : float = 1.0 + (green_speed - 10.0) * bounce_sensitivity
-				var bounce_normal_vel := velocity.dot(normal)
-				if bounce_normal_vel > 0.0:
-					velocity = velocity - bounce_normal_vel * normal + (bounce_normal_vel * bounce_mult) * normal
+				var is_sand_surface = is_in_sand or (surface_type == PhysicsEnums.SurfaceType.BUNKER)
+				if is_sand_surface:
+					# Sand heavily deadens bounce height into a muffled pop (max normal vel 0.6 m/s)
+					var normal_comp := velocity.dot(normal)
+					if normal_comp > 0.6:
+						velocity = velocity - (normal_comp - 0.6) * normal
+					# Sand absorbs tangential momentum and immediately scrubs spin
+					var tangent_vel := velocity - normal * velocity.dot(normal)
+					if tangent_vel.length() > prev_velocity.length() * 0.25:
+						velocity = (velocity.dot(normal) * normal) + (tangent_vel.normalized() * (prev_velocity.length() * 0.20))
+					omega *= 0.15
+				else:
+					# Slightly scale the height of the bounce (normal component of velocity) based on green speed
+					var green_speed : float = float(GlobalSettings.range_settings.green_speed.value)
+					var bounce_sensitivity : float = 0.0025
+					var bounce_mult : float = 1.0 + (green_speed - 10.0) * bounce_sensitivity
+					var bounce_normal_vel := velocity.dot(normal)
+					if bounce_normal_vel > 0.0:
+						velocity = velocity - bounce_normal_vel * normal + (bounce_normal_vel * bounce_mult) * normal
 
 				print("  Velocity after bounce: ", velocity, " (%.2f m/s)" % velocity.length())
 				var normal_velocity := velocity.dot(normal)
-				if absf(normal_velocity) < 0.5 and state == PhysicsEnums.BallState.ROLLOUT:
+				var grounding_threshold := 1.2 if is_sand_surface else 0.5
+				if absf(normal_velocity) < grounding_threshold and state == PhysicsEnums.BallState.ROLLOUT:
 					on_ground = true
 					velocity = _remove_velocity_along_normal(velocity, normal)
 					print("  -> Ball grounded, continuing roll at %.2f m/s" % velocity.length())
@@ -864,14 +957,20 @@ func reset() -> void:
 	launch_spin_rpm = 0.0
 	rollout_impact_spin_rpm = 0.0
 	is_putt = false
-	shot_start_pos = Vector3.ZERO
-	shot_start_pos_global = Vector3.ZERO
+	shot_start_pos = spawn_position
+	shot_start_pos_global = spawn_position
+	target_dir = Vector3.RIGHT
 	shot_was_in_sand = false
+	shot_was_from_teebox = false
+	shot_hit_other_ground = false
 	_surface_zone_stack.clear()
 	if lie_type == "teebox" or lie_type == "fairway":
 		set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
-	elif lie_type == "rough" or lie_type == "sand":
+	elif lie_type == "rough":
 		set_surface(PhysicsEnums.SurfaceType.ROUGH)
+	elif lie_type == "sand":
+		set_surface(PhysicsEnums.SurfaceType.BUNKER)
+		is_in_sand = true
 	elif lie_type == "green":
 		set_surface(PhysicsEnums.SurfaceType.GREEN)
 	else:
@@ -879,12 +978,38 @@ func reset() -> void:
 	state = PhysicsEnums.BallState.REST
 	on_ground = false
 	is_in_water = false
-	is_in_sand = false
+	if lie_type != "sand":
+		is_in_sand = false
 	water_collider = null
 	is_falling_in_hole = false
 	falling_target_hole = Vector3.ZERO
 	falling_time = 0.0
 	_update_tee_elevation()
+
+
+func _check_is_on_teebox() -> bool:
+	if lie_type == "teebox":
+		return true
+	var p_node = get_parent()
+	if p_node != null and p_node.get("current_lie_type") == "teebox":
+		return true
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and not mp_mgr.players.is_empty():
+		var ap = mp_mgr.get_active_player()
+		if ap != null:
+			if ap.get("lie_type") == "teebox" or ap.get("strokes", 0) == 0:
+				return true
+	var course = get_tree().current_scene
+	if course != null:
+		if course.has_method("get_distance_to_nearest_teebox"):
+			if course.call("get_distance_to_nearest_teebox", global_position) <= 2.0:
+				return true
+		if "practice_start_pos" in course and typeof(course.practice_start_pos) == TYPE_VECTOR3:
+			if not course.practice_start_pos.is_zero_approx() and global_position.distance_to(course.practice_start_pos) < 2.5:
+				return true
+		if "shot_count" in course and course.shot_count == 0:
+			return true
+	return false
 
 
 func hit() -> void:
@@ -927,6 +1052,9 @@ func hit_from_data(data: Dictionary) -> void:
 	is_falling_in_hole = false
 	falling_target_hole = Vector3.ZERO
 	falling_time = 0.0
+	flight_time = 0.0
+	shot_hit_other_ground = false
+	shot_was_from_teebox = _check_is_on_teebox()
 	
 	var speed_mph: float = float(data.get("Speed", 0.0))
 	
@@ -973,8 +1101,11 @@ func hit_from_data(data: Dictionary) -> void:
 	var is_teebox := (lie_type == "teebox")
 
 	# Putt determination logic:
-	# Driver shots, teebox shots, and full swings (> 45 mph) are strictly never putts.
+	# Driver shots, teebox shots, full swings (> 45 mph), and any shot launched with loft (VLA >= 5.5 deg)
+	# are strictly never putts.
 	if is_driver or is_teebox or speed_mph > 45.0:
+		is_putt = false
+	elif vla_deg >= 5.5:
 		is_putt = false
 	elif is_putter:
 		is_putt = true
@@ -1053,7 +1184,7 @@ func hit_from_data(data: Dictionary) -> void:
 		elif lie_type == "rough":
 			set_surface(PhysicsEnums.SurfaceType.ROUGH)
 		elif lie_type == "sand":
-			set_surface(PhysicsEnums.SurfaceType.ROUGH)
+			set_surface(PhysicsEnums.SurfaceType.BUNKER)
 		else:
 			set_surface(int(GlobalSettings.range_settings.surface_type.value))
 		if _tee_mesh != null:
@@ -1088,11 +1219,11 @@ func hit_from_data(data: Dictionary) -> void:
 				# Teebox shot: Driver is teed up 1.5 inches above ground; other clubs rest right on grass
 				target_launch_y = ground_y + (TEED_CENTER_HEIGHT if is_driver else GROUND_CENTER_HEIGHT)
 			else:
-				target_launch_y = ground_y + GROUND_CENTER_HEIGHT + 0.002
+				target_launch_y = ground_y + GROUND_CENTER_HEIGHT + 0.005
 			if global_position.y < target_launch_y:
 				global_position.y = target_launch_y
-		elif global_position.y < (GROUND_CENTER_HEIGHT + 0.002):
-			global_position.y = GROUND_CENTER_HEIGHT + 0.002
+		elif global_position.y < (GROUND_CENTER_HEIGHT + 0.005):
+			global_position.y = GROUND_CENTER_HEIGHT + 0.005
 
 	if params != null:
 		_set_openfairway_property(params, &"initial_launch_angle_deg", &"InitialLaunchAngleDeg", vla_deg)
@@ -1100,6 +1231,7 @@ func hit_from_data(data: Dictionary) -> void:
 	velocity = launch_velocity
 	omega = launch_omega
 	shot_dir = launch_direction
+	target_dir = Vector3.RIGHT.rotated(Vector3.UP, deg_to_rad(aim_yaw_offset_deg)).normalized()
 
 	shot_start_pos = position
 	shot_start_pos_global = global_position
@@ -1193,18 +1325,18 @@ func _update_surface_from_collider(collider: Object) -> void:
 	water_collider = null
 
 	var name_lower = collider.name.to_lower()
-	var is_sand = (collider.has_meta("is_sand") and bool(collider.get_meta("is_sand"))) or name_lower.contains("bunker") or name_lower.contains("sand")
-	var is_green = name_lower.contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == 4)
+	var is_sand = (collider.has_meta("is_sand") and bool(collider.get_meta("is_sand"))) or name_lower.contains("bunker") or name_lower.contains("sand") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.BUNKER)
+	var is_green = name_lower.contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.GREEN)
 	var is_tee = name_lower.contains("tee")
-	var is_fairway = name_lower.contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == 0)
-	var is_rough = name_lower.contains("rough") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == 2)
+	var is_fairway = name_lower.contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.FAIRWAY)
+	var is_rough = name_lower.contains("rough") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.ROUGH)
 
 	var changed_sand = (is_in_sand != is_sand)
 	is_in_sand = is_sand
 
 	if is_sand:
 		lie_type = "sand"
-		set_surface(PhysicsEnums.SurfaceType.ROUGH)
+		set_surface(PhysicsEnums.SurfaceType.BUNKER)
 		if changed_sand:
 			_apply_surface_params()
 	elif is_green:
@@ -1232,13 +1364,16 @@ func _update_surface_from_collider(collider: Object) -> void:
 		if collider.has_meta("surface_type"):
 			var st = int(collider.get_meta("surface_type"))
 			set_surface(st)
-			if name_lower.contains("green") or st == 4:
+			if name_lower.contains("green") or st == PhysicsEnums.SurfaceType.GREEN:
 				lie_type = "green"
+			elif st == PhysicsEnums.SurfaceType.BUNKER:
+				lie_type = "sand"
+				is_in_sand = true
 			elif name_lower.contains("tee"):
 				lie_type = "teebox"
-			elif name_lower.contains("fairway") or st == 0:
+			elif name_lower.contains("fairway") or st == PhysicsEnums.SurfaceType.FAIRWAY:
 				lie_type = "fairway"
-			elif name_lower.contains("rough") or st == 2:
+			elif name_lower.contains("rough") or st == PhysicsEnums.SurfaceType.ROUGH:
 				lie_type = "rough"
 			else:
 				lie_type = "rough"
@@ -1272,20 +1407,20 @@ func _update_surface_from_underneath() -> void:
 	
 	# Exclude TerrainStatic and RoughStatic from initial search if possible
 	# to prioritize hitting specific surface colliders first.
-	var terrain_static = null
-	var rough_static = null
-	var curr = get_parent()
-	while curr != null:
-		if terrain_static == null:
-			terrain_static = curr.get_node_or_null("TerrainStatic")
-		if rough_static == null:
-			rough_static = curr.get_node_or_null("RoughStatic")
-		curr = curr.get_parent()
+	if not _terrain_cache_searched:
+		_terrain_cache_searched = true
+		var curr = get_parent()
+		while curr != null:
+			if _cached_terrain_static == null:
+				_cached_terrain_static = curr.get_node_or_null("TerrainStatic") as CollisionObject3D
+			if _cached_rough_static == null:
+				_cached_rough_static = curr.get_node_or_null("RoughStatic") as CollisionObject3D
+			curr = curr.get_parent()
 		
-	if terrain_static:
-		query.exclude.append(terrain_static.get_rid())
-	if rough_static:
-		query.exclude.append(rough_static.get_rid())
+	if is_instance_valid(_cached_terrain_static):
+		query.exclude.append(_cached_terrain_static.get_rid())
+	if is_instance_valid(_cached_rough_static):
+		query.exclude.append(_cached_rough_static.get_rid())
 		
 	# Collect all colliders hit at this point
 	var hit_colliders: Array = []
@@ -1323,19 +1458,19 @@ func _update_surface_from_underneath() -> void:
 		if collider.has_meta("is_water") and bool(collider.get_meta("is_water")):
 			priority = 6
 		# 2. Check for sand
-		elif (collider.has_meta("is_sand") and bool(collider.get_meta("is_sand"))) or collider.name.to_lower().contains("bunker") or collider.name.to_lower().contains("sand"):
+		elif (collider.has_meta("is_sand") and bool(collider.get_meta("is_sand"))) or collider.name.to_lower().contains("bunker") or collider.name.to_lower().contains("sand") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.BUNKER):
 			priority = 5
 		# 3. Check for green
-		elif collider.name.to_lower().contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == 4):
+		elif collider.name.to_lower().contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.GREEN):
 			priority = 4
 		# 4. Check for tee
 		elif collider.name.to_lower().contains("tee"):
 			priority = 3
 		# 5. Check for fairway
-		elif collider.name.to_lower().contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == 0):
+		elif collider.name.to_lower().contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.FAIRWAY):
 			priority = 2
 		# 6. Check for rough
-		elif collider.name.to_lower().contains("rough") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == 2):
+		elif collider.name.to_lower().contains("rough") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.ROUGH):
 			priority = 1
 		else:
 			# Unknown/default priority

@@ -98,24 +98,27 @@ func _ready() -> void:
 func _setup_scorecard_overlay() -> void:
 	scorecard_overlay = ColorRect.new()
 	scorecard_overlay.visible = false
-	scorecard_overlay.color = Color(0.0, 0.0, 0.0, 0.75)
+	scorecard_overlay.color = Color(0.0, 0.0, 0.0, 0.8)
 	scorecard_overlay.anchor_left = 0.0
 	scorecard_overlay.anchor_right = 1.0
 	scorecard_overlay.anchor_top = 0.0
 	scorecard_overlay.anchor_bottom = 1.0
 	add_child(scorecard_overlay)
 	
-	var center = CenterContainer.new()
-	center.anchor_left = 0.0
-	center.anchor_right = 1.0
-	center.anchor_top = 0.0
-	center.anchor_bottom = 1.0
-	scorecard_overlay.add_child(center)
-	
 	var card_panel = PanelContainer.new()
-	card_panel.custom_minimum_size = Vector2(1400, 600)
+	card_panel.name = "CardPanel"
+	card_panel.anchor_left = 0.02
+	card_panel.anchor_right = 0.98
+	card_panel.anchor_top = 0.03
+	card_panel.anchor_bottom = 0.97
+	card_panel.offset_left = 0
+	card_panel.offset_right = 0
+	card_panel.offset_top = 0
+	card_panel.offset_bottom = 0
+	card_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	card_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	ThemeManager.apply_modal_style(card_panel, 12)
-	center.add_child(card_panel)
+	scorecard_overlay.add_child(card_panel)
 
 func _load_history() -> Array:
 	var matches = []
@@ -212,7 +215,7 @@ func _render_history_list() -> void:
 			status_lbl.add_theme_color_override("font_color", Color(0.3, 0.8, 0.3))
 		else:
 			status_lbl.text = "[In Progress]"
-			status_lbl.add_theme_color_override("font_color", Color(0.9, 0.8, 0.2))
+			status_lbl.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
 		status_lbl.add_theme_font_size_override("font_size", 16)
 		title_hbox.add_child(status_lbl)
 		
@@ -285,12 +288,18 @@ func _confirm_delete_match() -> void:
 
 func _show_scorecard(match_data: Dictionary) -> void:
 	# Clear scorecard panel container children except background/structure
-	var card_panel = scorecard_overlay.get_child(0).get_child(0) as PanelContainer
+	var card_panel = scorecard_overlay.get_node_or_null("CardPanel") as PanelContainer
+	if card_panel == null and scorecard_overlay.get_child_count() > 0:
+		card_panel = scorecard_overlay.get_child(0) as PanelContainer
+	if card_panel == null:
+		return
+		
 	for child in card_panel.get_children():
 		child.queue_free()
 		
 	var card_vbox = VBoxContainer.new()
-	card_vbox.add_theme_constant_override("separation", 20)
+	card_vbox.add_theme_constant_override("separation", 16)
+	card_vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
 	card_panel.add_child(card_vbox)
 	
 	# Header title
@@ -300,14 +309,16 @@ func _show_scorecard(match_data: Dictionary) -> void:
 	var g_mode = match_data.get("game_mode", "Standard")
 	var title_lbl = Label.new()
 	title_lbl.text = "Scorecard - %s [%s Mode]" % [match_data.get("course_title", "Course"), g_mode]
-	title_lbl.add_theme_font_size_override("font_size", 26)
-	title_lbl.add_theme_color_override("font_color", Color.WHITE)
+	title_lbl.add_theme_font_size_override("font_size", 28)
+	title_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.38))
+	title_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	title_lbl.add_theme_constant_override("outline_size", 4)
 	head_hbox.add_child(title_lbl)
 	
 	var date_lbl = Label.new()
 	date_lbl.text = "Played on: %s" % match_data.get("formatted_date", "Date")
-	date_lbl.add_theme_font_size_override("font_size", 14)
-	date_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	date_lbl.add_theme_font_size_override("font_size", 16)
+	date_lbl.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
 	date_lbl.size_flags_vertical = Control.SIZE_SHRINK_END
 	date_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	date_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -317,12 +328,16 @@ func _show_scorecard(match_data: Dictionary) -> void:
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	ThemeManager.apply_scroll_container_style(scroll, 28)
 	card_vbox.add_child(scroll)
 	
 	var grid = GridContainer.new()
-	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	grid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	grid.add_theme_constant_override("h_separation", 2)
+	grid.add_theme_constant_override("v_separation", 2)
 	scroll.add_child(grid)
 	
 	# Populate Grid
@@ -343,6 +358,8 @@ func _show_scorecard(match_data: Dictionary) -> void:
 	scorecard_overlay.visible = true
 
 func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> void:
+	var g_mode = match_data.get("game_mode", "Standard")
+	var is_ctp_mode = (g_mode == "Closest to Pin")
 	# Parse hole config to get par values
 	var hole_pars = {}
 	var hole_dists = {}
@@ -401,22 +418,25 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 	
 	grid.columns = columns.size()
 	
-	var header_bg = Color(0.12, 0.16, 0.24, 0.95)
-	var par_bg = Color(0.18, 0.24, 0.35, 0.8)
-	var dist_bg = Color(0.15, 0.20, 0.30, 0.8)
+	var header_bg = Color(0.10, 0.14, 0.22, 0.96)
+	var par_bg = Color(0.16, 0.22, 0.34, 0.88)
+	var dist_bg = Color(0.13, 0.18, 0.28, 0.88)
 	
 	# Cell addition helper
-	var add_cell = func(parent_grid: GridContainer, text: String, bg: Color, is_header: bool = false, fg: Color = Color.WHITE):
+	var add_cell = func(parent_grid: GridContainer, text: String, bg: Color, is_header: bool = false, fg: Color = Color.WHITE, font_size: int = 16):
 		var cell = PanelContainer.new()
+		cell.custom_minimum_size = Vector2(48, 38)
+		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cell.size_flags_vertical = Control.SIZE_FILL
 		var style = StyleBoxFlat.new()
 		style.bg_color = bg
 		style.border_width_right = 1
 		style.border_width_bottom = 1
-		style.border_color = Color(0.3, 0.3, 0.3, 0.3)
-		style.content_margin_left = 10
-		style.content_margin_right = 10
-		style.content_margin_top = 8
-		style.content_margin_bottom = 8
+		style.border_color = Color(0.3, 0.35, 0.45, 0.35)
+		style.content_margin_left = 6
+		style.content_margin_right = 6
+		style.content_margin_top = 4
+		style.content_margin_bottom = 4
 		cell.add_theme_stylebox_override("panel", style)
 		
 		var label = Label.new()
@@ -424,68 +444,71 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		label.add_theme_color_override("font_color", fg)
+		label.add_theme_font_size_override("font_size", font_size)
 		if is_header:
-			label.add_theme_font_size_override("font_size", 16)
-		else:
-			label.add_theme_font_size_override("font_size", 15)
+			label.add_theme_color_override("font_outline_color", Color.BLACK)
+			label.add_theme_constant_override("outline_size", 3)
 		cell.add_child(label)
 		parent_grid.add_child(cell)
 		return cell
 
 	# 1. HEADER ROW
 	for col in columns:
-		add_cell.call(grid, col, header_bg, true)
+		add_cell.call(grid, col, header_bg, true, Color.WHITE, 16)
 		
 	# 2. DISTANCE ROW (Yards)
-	add_cell.call(grid, "Yds (%s)" % tee_color, dist_bg, false, Color(0.8, 0.8, 0.8))
+	add_cell.call(grid, "Yds (%s)" % tee_color, dist_bg, false, Color(0.8, 0.8, 0.8), 15)
 	var front_dist_sum = 0
 	for h_id in front_holes:
 		var d = hole_dists.get(h_id, 0)
 		front_dist_sum += d
-		add_cell.call(grid, str(d) if d > 0 else "-", dist_bg, false, Color(0.8, 0.8, 0.8))
+		add_cell.call(grid, str(d) if d > 0 else "-", dist_bg, false, Color(0.8, 0.8, 0.8), 15)
 	if num_holes > 9:
-		add_cell.call(grid, str(front_dist_sum), dist_bg, false, Color(0.9, 0.9, 0.9))
+		add_cell.call(grid, str(front_dist_sum), dist_bg, false, Color(0.9, 0.9, 0.9), 15)
 		var back_dist_sum = 0
 		for h_id in back_holes:
 			var d = hole_dists.get(h_id, 0)
 			back_dist_sum += d
-			add_cell.call(grid, str(d) if d > 0 else "-", dist_bg, false, Color(0.8, 0.8, 0.8))
-		add_cell.call(grid, str(back_dist_sum), dist_bg, false, Color(0.9, 0.9, 0.9))
-		add_cell.call(grid, str(front_dist_sum + back_dist_sum), dist_bg, false, Color.YELLOW)
+			add_cell.call(grid, str(d) if d > 0 else "-", dist_bg, false, Color(0.8, 0.8, 0.8), 15)
+		add_cell.call(grid, str(back_dist_sum), dist_bg, false, Color(0.9, 0.9, 0.9), 15)
+		add_cell.call(grid, str(front_dist_sum + back_dist_sum), dist_bg, false, Color(1.0, 0.85, 0.38), 15)
 	else:
-		add_cell.call(grid, str(front_dist_sum), dist_bg, false, Color.YELLOW)
+		add_cell.call(grid, str(front_dist_sum), dist_bg, false, Color(1.0, 0.85, 0.38), 15)
 
 	# 3. PAR ROW
-	add_cell.call(grid, "Par", par_bg, false, Color(0.8, 0.8, 0.8))
+	add_cell.call(grid, "Par", par_bg, false, Color(0.8, 0.8, 0.8), 15)
 	var front_par_sum = 0
 	for h_id in front_holes:
 		var p_val = hole_pars.get(h_id, 4)
 		front_par_sum += p_val
-		add_cell.call(grid, str(p_val), par_bg, false, Color(0.8, 0.8, 0.8))
+		add_cell.call(grid, str(p_val), par_bg, false, Color(0.8, 0.8, 0.8), 15)
 	if num_holes > 9:
-		add_cell.call(grid, str(front_par_sum), par_bg, false, Color(0.9, 0.9, 0.9))
+		add_cell.call(grid, str(front_par_sum), par_bg, false, Color(0.9, 0.9, 0.9), 15)
 		var back_par_sum = 0
 		for h_id in back_holes:
 			var p_val = hole_pars.get(h_id, 4)
 			back_par_sum += p_val
-			add_cell.call(grid, str(p_val), par_bg, false, Color(0.8, 0.8, 0.8))
-		add_cell.call(grid, str(back_par_sum), par_bg, false, Color(0.9, 0.9, 0.9))
-		add_cell.call(grid, str(front_par_sum + back_par_sum), par_bg, false, Color.YELLOW)
+			add_cell.call(grid, str(p_val), par_bg, false, Color(0.8, 0.8, 0.8), 15)
+		add_cell.call(grid, str(back_par_sum), par_bg, false, Color(0.9, 0.9, 0.9), 15)
+		add_cell.call(grid, str(front_par_sum + back_par_sum), par_bg, false, Color(1.0, 0.85, 0.38), 15)
 	else:
-		add_cell.call(grid, str(front_par_sum), par_bg, false, Color.YELLOW)
+		add_cell.call(grid, str(front_par_sum), par_bg, false, Color(1.0, 0.85, 0.38), 15)
 
 	# 4. PLAYER ROWS
 	for p_idx in range(players_list.size()):
 		var p = players_list[p_idx]
-		var row_bg = Color(0.1, 0.12, 0.18, 0.9) if p_idx % 2 == 0 else Color(0.06, 0.08, 0.12, 0.9)
+		var row_bg = Color(0.14, 0.16, 0.20, 0.94) if p_idx % 2 == 0 else Color(0.09, 0.11, 0.14, 0.94)
 		
 		# Name cell with Email button!
 		var name_cell = PanelContainer.new()
+		name_cell.custom_minimum_size = Vector2(180, 38)
+		name_cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_cell.size_flags_vertical = Control.SIZE_FILL
 		var cell_style = StyleBoxFlat.new()
 		cell_style.bg_color = row_bg
 		cell_style.border_width_right = 1
 		cell_style.border_width_bottom = 1
-		cell_style.border_color = Color(0.3, 0.3, 0.3, 0.3)
+		cell_style.border_color = Color(0.3, 0.35, 0.45, 0.35)
 		cell_style.content_margin_left = 8
 		cell_style.content_margin_right = 8
 		cell_style.content_margin_top = 4
@@ -495,24 +518,58 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		
 		var name_hbox = HBoxContainer.new()
 		name_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		name_hbox.add_theme_constant_override("separation", 10)
+		name_hbox.add_theme_constant_override("separation", 8)
 		name_cell.add_child(name_hbox)
 		
+		var p_name = p.get("name", "Player")
+		var avatar_path = p.get("avatar", "")
+		if avatar_path.is_empty():
+			avatar_path = MultiplayerManager.get_player_avatar(p_name)
+		
+		if not avatar_path.is_empty() and ResourceLoader.exists(avatar_path):
+			var av_rect = TextureRect.new()
+			av_rect.texture = load(avatar_path)
+			av_rect.custom_minimum_size = Vector2(24, 24)
+			av_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			av_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			av_rect.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			name_hbox.add_child(av_rect)
+		else:
+			var badge = PanelContainer.new()
+			badge.custom_minimum_size = Vector2(24, 24)
+			badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			var badge_style = StyleBoxFlat.new()
+			var p_color = MultiplayerManager.player_colors[p_idx % MultiplayerManager.player_colors.size()]
+			badge_style.bg_color = p_color
+			badge_style.corner_radius_top_left = 12
+			badge_style.corner_radius_top_right = 12
+			badge_style.corner_radius_bottom_left = 12
+			badge_style.corner_radius_bottom_right = 12
+			badge.add_theme_stylebox_override("panel", badge_style)
+			var badge_lbl = Label.new()
+			badge_lbl.text = p_name.substr(0, 1).to_upper()
+			badge_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			badge_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			badge_lbl.add_theme_font_size_override("font_size", 12)
+			badge.add_child(badge_lbl)
+			name_hbox.add_child(badge)
+		
 		var name_lbl = Label.new()
-		name_lbl.text = "%s (%s)" % [p.get("name", "Player"), p.get("tee", "Blue")]
+		name_lbl.text = "%s (%s)" % [p_name, p.get("tee", "Blue")]
 		var name_fg = Color.WHITE
 		if not p.get("active", true):
 			name_lbl.text += " (Out)"
 			name_fg = Color(0.6, 0.6, 0.6)
 		name_lbl.add_theme_color_override("font_color", name_fg)
-		name_lbl.add_theme_font_size_override("font_size", 13)
+		name_lbl.add_theme_font_size_override("font_size", 15)
+		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		name_hbox.add_child(name_lbl)
 		
 		# Email stats button next to player name
 		var email_btn = Button.new()
-		email_btn.text = "✉ Email"
-		email_btn.custom_minimum_size = Vector2(90, 48)
-		email_btn.add_theme_font_size_override("font_size", 14)
+		email_btn.text = "✉"
+		email_btn.custom_minimum_size = Vector2(30, 30)
+		email_btn.add_theme_font_size_override("font_size", 13)
 		apply_button_style(email_btn, Color(0.18, 0.45, 0.30, 0.9)) # Emerald Green
 		email_btn.pressed.connect(func():
 			_email_player_stats(p, match_data)
@@ -528,12 +585,19 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 			var score_fg = Color.WHITE
 			if s != null:
 				display_s = str(s)
-				front_sum += s
-				var par = hole_pars.get(h_id, 4)
-				if s < par:
-					score_fg = Color(0.5, 1.0, 0.5) # Under par (Green)
-				elif s > par:
-					score_fg = Color(1.0, 0.5, 0.5) # Over par (Red)
+				front_sum += int(s)
+				if is_ctp_mode:
+					if int(s) == 1:
+						display_s = "1 ⛳"
+						score_fg = Color(1.0, 0.85, 0.35)
+					else:
+						score_fg = Color(0.7, 0.7, 0.7)
+				else:
+					var par = hole_pars.get(h_id, 4)
+					if s < par:
+						score_fg = Color(0.35, 0.95, 0.55) # Under par (Green)
+					elif s > par:
+						score_fg = Color(1.0, 0.42, 0.42) # Over par (Coral Red)
 			add_cell.call(grid, display_s, row_bg, false, score_fg)
 			
 		if num_holes > 9:
@@ -547,19 +611,32 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 				var score_fg = Color.WHITE
 				if s != null:
 					display_s = str(s)
-					back_sum += s
-					var par = hole_pars.get(h_id, 4)
-					if s < par:
-						score_fg = Color(0.5, 1.0, 0.5)
-					elif s > par:
-						score_fg = Color(1.0, 0.5, 0.5)
+					back_sum += int(s)
+					if is_ctp_mode:
+						if int(s) == 1:
+							display_s = "1 ⛳"
+							score_fg = Color(1.0, 0.85, 0.35)
+						else:
+							score_fg = Color(0.7, 0.7, 0.7)
+					else:
+						var par = hole_pars.get(h_id, 4)
+						if s < par:
+							score_fg = Color(0.35, 0.95, 0.55)
+						elif s > par:
+							score_fg = Color(1.0, 0.42, 0.42)
 				add_cell.call(grid, display_s, row_bg, false, score_fg)
 				
 			add_cell.call(grid, str(back_sum) if back_sum > 0 else "-", row_bg, false, Color(0.9, 0.9, 0.9))
 			var total = front_sum + back_sum
-			add_cell.call(grid, str(total) if total > 0 else "-", row_bg, false, Color.YELLOW)
+			var tot_str = str(total) if total > 0 else "-"
+			if is_ctp_mode:
+				tot_str = "%d pts" % total
+			add_cell.call(grid, tot_str, row_bg, false, Color(1.0, 0.85, 0.38))
 		else:
-			add_cell.call(grid, str(front_sum) if front_sum > 0 else "-", row_bg, false, Color.YELLOW)
+			var tot_str = str(front_sum) if front_sum > 0 else "-"
+			if is_ctp_mode:
+				tot_str = "%d pts" % front_sum
+			add_cell.call(grid, tot_str, row_bg, false, Color(1.0, 0.85, 0.38))
 
 func _email_player_stats(player: Dictionary, match_data: Dictionary) -> void:
 	var course_title = match_data.get("course_title", "Unknown Course")
@@ -568,18 +645,6 @@ func _email_player_stats(player: Dictionary, match_data: Dictionary) -> void:
 	var tee = player.get("tee", "Blue")
 	
 	var subject = "Heckle Golf Simulator stats: %s - %s (%s)" % [player_name, course_title, date_str]
-	
-	# Build email body
-	var body = ""
-	body += "HECKLE GOLF SIMULATOR ROUND STATS\n"
-	body += "=================================\n"
-	body += "Player: %s (%s Tee)\n" % [player_name, tee]
-	body += "Course: %s\n" % course_title
-	body += "Date: %s\n" % date_str
-	body += "Total Strokes: %d\n\n" % player.get("total_strokes", 0)
-	
-	body += "HOLE-BY-HOLE SCORES:\n"
-	body += "--------------------\n"
 	
 	# Load hole pars and distances
 	var pars = {}
@@ -605,7 +670,18 @@ func _email_player_stats(player: Dictionary, match_data: Dictionary) -> void:
 	if hole_ids_list.is_empty():
 		hole_ids_list = hole_scores.keys()
 		hole_ids_list.sort()
+
+	# Build concise, high-level email summary
+	var body = ""
+	body += "HECKLE GOLF SIMULATOR ROUND STATS\n"
+	body += "=================================\n"
+	body += "Player: %s (%s Tee)\n" % [player_name, tee]
+	body += "Course: %s\n" % course_title
+	body += "Date: %s\n" % date_str
+	body += "Total Strokes: %d\n\n" % player.get("total_strokes", 0)
 	
+	body += "HOLE-BY-HOLE SCORES:\n"
+	body += "--------------------\n"
 	for h_id in hole_ids_list:
 		var score = hole_scores.get(h_id)
 		var score_str = "-"
@@ -613,94 +689,19 @@ func _email_player_stats(player: Dictionary, match_data: Dictionary) -> void:
 			score_str = str(score)
 		var par_val = pars.get(h_id, 4)
 		body += "Hole %s (Par %d): %s\n" % [h_id, par_val, score_str]
-		
-	body += "\nDETAILED SHOT-BY-SHOT STATISTICS:\n"
-	body += "---------------------------------\n"
-	
-	var shot_stats = player.get("shot_stats", {})
-	var has_stats = false
-	if typeof(shot_stats) == TYPE_DICTIONARY:
-		for h_id in shot_stats:
-			if typeof(shot_stats[h_id]) == TYPE_ARRAY and not shot_stats[h_id].is_empty():
-				has_stats = true
-				break
-	elif typeof(shot_stats) == TYPE_ARRAY:
-		has_stats = not shot_stats.is_empty()
 
-	if not has_stats:
-		body += "No detailed shot statistics available.\n"
-	else:
-		if typeof(shot_stats) == TYPE_DICTIONARY:
-			for h_id in hole_ids_list:
-				var dist_val = 0
-				if distances.has(h_id) and distances[h_id].has(tee):
-					dist_val = distances[h_id][tee]
-				var par_val = pars.get(h_id, 4)
-				var score_val = hole_scores.get(h_id)
-				var score_str = str(score_val) if score_val != null else "-"
-				
-				body += "\nHole %s (Par %d, %d Yds) - Score: %s\n" % [h_id, par_val, dist_val, score_str]
-				
-				var shots = shot_stats.get(h_id, [])
-				if shots.is_empty():
-					body += "  No shot data recorded for this hole.\n"
-				else:
-					for i in range(shots.size()):
-						var shot = shots[i]
-						var shot_num = i + 1
-						var club = shot.get("club", "Unknown")
-						if club == "": club = "Unknown"
-						
-						var carry = "%.1f yds" % shot.get("carry_yds", 0.0)
-						var total = "%.1f yds" % shot.get("total_yds", 0.0)
-						var speed = "%.1f mph" % shot.get("speed_mph", 0.0)
-						var vla = "%.1f deg" % shot.get("vla_deg", 0.0)
-						var hla = "%.1f deg" % shot.get("hla_deg", 0.0)
-						var tot_spin = "%d rpm" % int(shot.get("total_spin_rpm", 0.0))
-						var back_spin = "%d rpm" % int(shot.get("back_spin_rpm", 0.0))
-						var side_spin = "%d rpm" % int(shot.get("side_spin_rpm", 0.0))
-						var spin_axis = "%.1f deg" % shot.get("spin_axis_deg", 0.0)
-						var apex = "%.1f ft" % shot.get("apex_ft", 0.0)
-						
-						var offline_val = shot.get("offline_yds", 0.0)
-						var offline_dir = "R" if offline_val >= 0 else "L"
-						var offline = "%s%.1f yds" % [offline_dir, abs(offline_val)]
-						
-						body += "  Shot %d (Club: %s):\n" % [shot_num, club]
-						body += "    Carry: %s | Total: %s | Speed: %s | Apex: %s | Offline: %s\n" % [carry, total, speed, apex, offline]
-						body += "    Launch Angle: %s (HLA: %s) | Spin: %s (Back: %s, Side: %s, Axis: %s)\n" % [vla, hla, tot_spin, back_spin, side_spin, spin_axis]
-		
-		elif typeof(shot_stats) == TYPE_ARRAY:
-			var current_hole = ""
-			for shot in shot_stats:
-				if typeof(shot) != TYPE_DICTIONARY:
-					continue
-				var h_id = shot.get("hole_id", "")
-				if h_id != current_hole:
-					current_hole = h_id
-					var par_val = pars.get(h_id, 4)
-					var score_val = hole_scores.get(h_id, "-")
-					body += "\nHole %s (Par %d, Score: %s):\n" % [h_id, par_val, str(score_val) if score_val != null else "-"]
-					
-				var stroke = shot.get("stroke", shot.get("shot_num", 1))
-				var club = shot.get("club", "Dr")
-				var carry = "%.1f yds" % shot.get("carry_yds", shot.get("raw_data", {}).get("CarryDistance", 0.0) * 1.09361)
-				var total = "%.1f yds" % shot.get("total_yds", shot.get("raw_data", {}).get("TotalDistance", 0.0) * 1.09361)
-				var speed = "%.1f mph" % shot.get("speed_mph", shot.get("raw_data", {}).get("Speed", 0.0))
-				var vla = "%.1f deg" % shot.get("vla_deg", shot.get("raw_data", {}).get("VLA", 0.0))
-				var hla = "%.1f deg" % shot.get("hla_deg", shot.get("raw_data", {}).get("HLA", 0.0))
-				var tot_spin = "%d rpm" % int(shot.get("total_spin_rpm", shot.get("raw_data", {}).get("TotalSpin", 0.0)))
-				var back_spin = "%d rpm" % int(shot.get("back_spin_rpm", shot.get("raw_data", {}).get("BackSpin", 0.0)))
-				var side_spin = "%d rpm" % int(shot.get("side_spin_rpm", shot.get("raw_data", {}).get("SideSpin", 0.0)))
-				var spin_axis = "%.1f deg" % shot.get("spin_axis_deg", shot.get("raw_data", {}).get("SpinAxis", 0.0))
-				var apex = "%.1f ft" % shot.get("apex_ft", shot.get("raw_data", {}).get("Apex", 0.0) * 3.28084)
-				var offline_val = shot.get("offline_yds", shot.get("raw_data", {}).get("SideDistance", 0.0) * 1.09361)
-				var offline_dir = "R" if offline_val >= 0 else "L"
-				var offline = "%s%.1f yds" % [offline_dir, abs(offline_val)]
-				
-				body += "  Shot %d (Club: %s):\n" % [stroke, club]
-				body += "    Carry: %s | Total: %s | Speed: %s | Apex: %s | Offline: %s\n" % [carry, total, speed, apex, offline]
-				body += "    Launch Angle: %s (HLA: %s) | Spin: %s (Back: %s, Side: %s, Axis: %s)\n" % [vla, hla, tot_spin, back_spin, side_spin, spin_axis]
+	# Build match data dictionary for CSV exporter
+	var export_match_data = match_data.duplicate()
+	export_match_data["pars"] = pars
+	export_match_data["distances"] = distances
+	export_match_data["hole_ids"] = hole_ids_list
+	
+	# Generate golf data CSV
+	var csv_content = GolfDataExporter.generate_round_csv(player, export_match_data)
+	var safe_player = GolfDataExporter.sanitize_filename(player_name)
+	var safe_course = GolfDataExporter.sanitize_filename(course_title)
+	var safe_date = GolfDataExporter.sanitize_filename(date_str)
+	var attachment_basename = "%s_%s_%s_golf_data" % [safe_player, safe_course, safe_date]
 
 	# Load and append historical averages by club
 	var stats_path = "user://player_club_stats.json"
@@ -737,7 +738,11 @@ func _email_player_stats(player: Dictionary, match_data: Dictionary) -> void:
 							sum_carry += float(shot.get("CarryDistance", 0.0))
 							sum_speed += float(shot.get("Speed", 0.0))
 							sum_spin += float(shot.get("TotalSpin", 0.0))
-							sum_offline += absf(float(shot.get("SideDistance", 0.0)))
+							var s_dist = absf(float(shot.get("SideDistance", 0.0)))
+							var t_dist = absf(float(shot.get("TotalDistance", shot.get("CarryDistance", 0.0))))
+							if s_dist > 100.0 or (t_dist > 15.0 and s_dist > t_dist * 1.2):
+								s_dist = 0.0
+							sum_offline += s_dist
 							
 							var target_dist = float(shot.get("TargetDistance", 0.0))
 							var total_dist = float(shot.get("TotalDistance", 0.0))
@@ -774,9 +779,12 @@ func _email_player_stats(player: Dictionary, match_data: Dictionary) -> void:
 		
 	body += MultiplayerManager.format_player_swing_issues_summary(player_name)
 	
-	var mailto_url = "mailto:?subject=%s&body=%s" % [subject.uri_encode(), body.uri_encode()]
-	OS.shell_open(mailto_url)
-	print("[HistoryMenu] Opened email client for %s" % player_name)
+	var to_email = player.get("email", "")
+	if to_email.is_empty():
+		to_email = MultiplayerManager.get_player_email(player_name)
+
+	GolfDataExporter.export_and_email(to_email, subject, body, attachment_basename, csv_content)
+	print("[HistoryMenu] Opened email client with attached CSV for %s" % player_name)
 
 func apply_button_style(btn: Button, bg_color: Color) -> void:
 	var style_normal = StyleBoxFlat.new()
@@ -800,4 +808,7 @@ func apply_button_style(btn: Button, bg_color: Color) -> void:
 	
 	btn.add_theme_color_override("font_color", Color.WHITE)
 	btn.add_theme_color_override("font_hover_color", Color(0.9, 0.9, 0.9))
-	btn.add_theme_font_size_override("font_size", 14)
+	if not btn.has_theme_font_size_override("font_size"):
+		btn.add_theme_font_size_override("font_size", 16)
+	if btn.custom_minimum_size.y < 48:
+		btn.custom_minimum_size.y = 48

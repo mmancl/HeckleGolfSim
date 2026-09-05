@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg8" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#234E36"/>
+      <stop offset="100%" stop-color="#122B1D"/>
+    </linearGradient>
+    <filter id="glow8" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <circle cx="64" cy="64" r="60" fill="url(#bg8)" stroke="#E67E22" stroke-width="4" filter="url(#glow8)"/>
+  <!-- Fox Ears -->
+  <polygon points="36,48 46,24 58,44" fill="#D35400"/>
+  <polygon points="40,46 47,30 54,44" fill="#FFFFFF"/>
+  <polygon points="92,48 82,24 70,44" fill="#D35400"/>
+  <polygon points="88,46 81,30 74,44" fill="#FFFFFF"/>
+  <!-- Head & Cheeks -->
+  <polygon points="40,54 64,88 88,54" fill="#D35400"/>
+  <ellipse cx="64" cy="62" rx="26" ry="20" fill="#D35400"/>
+  <!-- White Cheeks -->
+  <polygon points="38,62 48,74 64,84 56,66" fill="#FFFFFF"/>
+  <polygon points="90,62 80,74 64,84 72,66" fill="#FFFFFF"/>
+  <!-- Black Nose -->
+  <circle cx="64" cy="85" r="3.5" fill="#1C2833"/>
+  <!-- Eyes -->
+  <ellipse cx="52" cy="58" rx="3.5" ry="5" fill="#1C2833"/>
+  <ellipse cx="76" cy="58" rx="3.5" ry="5" fill="#1C2833"/>
+  <circle cx="53" cy="56" r="1.5" fill="#FFF"/>
+  <circle cx="77" cy="56" r="1.5" fill="#FFF"/>
+  <!-- Newsboy Golf Cap tilted -->
+  <path d="M38 46 C44 32 80 34 88 44 C82 50 42 48 38 46 Z" fill="#27AE60"/>
+  <circle cx="62" cy="34" r="3" fill="#1E8449"/>
+  <path d="M36 46 Q64 48 90 42" stroke="#1E8449" stroke-width="2.5" fill="none"/>
+  <!-- Caddie Vest -->
+  <path d="M36 116 C36 94 48 90 64 90 C80 90 92 94 92 116 Z" fill="#F4D03F"/>
+  <polygon points="64,90 58,104 70,104" fill="#27AE60"/>
+</svg>

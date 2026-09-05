@@ -13,13 +13,13 @@ public sealed class BounceProfile
     public float CorKillThreshold { get; init; } = 2.0f;
 
     // --- Tangential retention (first bounce from flight) ---
-    public float FlightTangentialRetentionBase { get; init; } = 0.55f;
+    public float FlightTangentialRetentionBase { get; init; } = 0.60f;
     public float FlightSpinFactorMin { get; init; } = 0.40f;
     public float FlightSpinFactorDivisor { get; init; } = 8000.0f;
 
     // --- Tangential retention (rollout bounces) ---
-    public float RolloutLowSpinRetention { get; init; } = 0.85f;
-    public float RolloutHighSpinRetention { get; init; } = 0.70f;
+    public float RolloutLowSpinRetention { get; init; } = 0.865f;
+    public float RolloutHighSpinRetention { get; init; } = 0.725f;
     public float RolloutSpinRatioThreshold { get; init; } = 0.20f;
 
     // --- Spin COR reduction ---
@@ -45,4 +45,25 @@ public sealed class BounceProfile
     public string Version { get; init; } = "1.0";
 
     public static BounceProfile Default { get; } = new();
+
+    public static BounceProfile Bunker { get; } = new()
+    {
+        Name = "Bunker",
+        Version = "1.0",
+        CorBaseA = 0.08f,
+        CorBaseB = -0.003f,
+        CorBaseC = 0.00004f,
+        CorHighSpeedCap = 0.05f,
+        CorHighSpeedThreshold = 15.0f,
+        CorKillThreshold = 3.5f,
+        FlightTangentialRetentionBase = 0.18f,
+        FlightSpinFactorMin = 0.20f,
+        FlightSpinFactorDivisor = 4000.0f,
+        RolloutLowSpinRetention = 0.30f,
+        RolloutHighSpinRetention = 0.20f,
+        RolloutSpinRatioThreshold = 0.20f,
+        RolloutBounceCorKillThreshold = 6.0f,
+        RolloutBounceCorScale = 0.15f,
+        PennerLowEnergyThreshold = 30.0f
+    };
 }

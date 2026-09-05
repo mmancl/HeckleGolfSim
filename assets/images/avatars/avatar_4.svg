@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#145A32"/>
+      <stop offset="100%" stop-color="#0E3A20"/>
+    </linearGradient>
+    <filter id="glow4" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <circle cx="64" cy="64" r="60" fill="url(#bg4)" stroke="#2ECC71" stroke-width="4" filter="url(#glow4)"/>
+  <!-- Gator Body -->
+  <path d="M34 116 C34 94 48 88 64 88 C80 88 94 94 94 116 Z" fill="#E74C3C"/>
+  <polygon points="64,88 56,104 72,104" fill="#C0392B"/>
+  <!-- Gator Head & Long Snout -->
+  <path d="M42 54 C42 40 86 40 86 54 C86 70 82 82 64 84 C46 82 42 70 42 54 Z" fill="#27AE60"/>
+  <path d="M36 68 C36 60 92 60 92 68 C92 78 80 84 64 85 C48 84 36 78 36 68 Z" fill="#2ECC71"/>
+  <!-- Nostrils -->
+  <circle cx="58" cy="66" r="2" fill="#1E8449"/>
+  <circle cx="70" cy="66" r="2" fill="#1E8449"/>
+  <!-- Eyes -->
+  <circle cx="50" cy="46" r="8" fill="#F4D03F"/>
+  <circle cx="78" cy="46" r="8" fill="#F4D03F"/>
+  <ellipse cx="50" cy="46" rx="2" ry="6" fill="#145A32"/>
+  <ellipse cx="78" cy="46" rx="2" ry="6" fill="#145A32"/>
+  <!-- Backward Golf Cap -->
+  <path d="M40 44 C44 30 84 30 88 44 C80 40 48 40 40 44 Z" fill="#2980B9"/>
+  <ellipse cx="64" cy="42" rx="14" ry="4" fill="#1F618D"/>
+  <circle cx="64" cy="33" r="3" fill="#F39C12"/>
+  <!-- Toothy Grin -->
+  <path d="M42 74 Q64 80 86 74" fill="none" stroke="#145A32" stroke-width="2"/>
+  <polygon points="46,74 49,78 52,74" fill="#FFF"/>
+  <polygon points="56,75 59,79 62,75" fill="#FFF"/>
+  <polygon points="66,75 69,79 72,75" fill="#FFF"/>
+  <polygon points="76,74 79,78 82,74" fill="#FFF"/>
+</svg>

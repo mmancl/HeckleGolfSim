@@ -19,7 +19,9 @@ import os
 import signal
 import sys
 import threading
+import time
 import urllib.parse
+
 
 # ─── Model download ─────────────────────────────────────────────────────────────
 
@@ -106,6 +108,49 @@ def parse_landmarks(result) -> dict:
     return landmarks
 
 
+# ─── Process Watchdog ─────────────────────────────────────────────────────────
+
+def is_pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return True
+    if os.name == "nt":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1000 | 0x00100000, False, pid)
+            if not handle:
+                return False
+            exit_code = ctypes.c_ulong()
+            kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            kernel32.CloseHandle(handle)
+            return exit_code.value == 259
+        except Exception:
+            return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+
+def start_parent_watchdog(parent_pid: int):
+    if parent_pid <= 0:
+        return
+
+    def _watch():
+        print(f"[PoseServer] Watchdog started for parent PID {parent_pid}")
+        while True:
+            time.sleep(2.0)
+            if not is_pid_alive(parent_pid):
+                print(f"[PoseServer] Parent process {parent_pid} terminated. Auto-shutting down...")
+                camera_mgr.close()
+                os._exit(0)
+
+    t = threading.Thread(target=_watch, daemon=True)
+    t.start()
+
+
 # ─── Camera Manager ─────────────────────────────────────────────────────────────
 
 class CameraManager:
@@ -116,18 +161,17 @@ class CameraManager:
 
     def scan_cameras(self) -> list:
         cams = []
-        # Test indices 0..4
-        for i in range(5):
-            cap = None
-            if os.name == 'nt':
-                cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
-            if cap is None or not cap.isOpened():
-                cap = cv2.VideoCapture(i)
+        # Check indices 0..3 using standard VideoCapture (fast MSMF on Windows)
+        for i in range(4):
+            cap = cv2.VideoCapture(i)
             if cap.isOpened():
                 ret, _ = cap.read()
                 if ret:
                     cams.append({"index": i, "name": f"System Camera {i}"})
                 cap.release()
+            else:
+                if i >= 1 and len(cams) == 0:
+                    break
         return cams
 
     def select_camera(self, index: int) -> bool:
@@ -142,12 +186,7 @@ class CameraManager:
             if index < 0:
                 return True
 
-            cap = None
-            if os.name == 'nt':
-                cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
-            if cap is None or not cap.isOpened():
-                cap = cv2.VideoCapture(index)
-
+            cap = cv2.VideoCapture(index)
             if cap is not None and cap.isOpened():
                 self.cap = cap
                 self.active_index = index
@@ -157,7 +196,7 @@ class CameraManager:
                 print(f"[PoseServer] Failed to open system camera {index}")
                 return False
 
-    def capture_and_process(self) -> dict:
+    def capture_and_process(self, detect: bool = False) -> dict:
         with self.lock:
             if self.cap is None or not self.cap.isOpened():
                 return {"detected": False, "landmarks": {}, "image_base64": "", "error": "No active camera"}
@@ -173,12 +212,15 @@ class CameraManager:
                 new_h = int(h * (640.0 / w))
                 frame = cv2.resize(frame, (new_w, new_h))
 
-            # Run MediaPipe PoseLandmarker
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            result = detector.detect(mp_image)
-            landmarks = parse_landmarks(result)
-            detected = len(landmarks) > 0
+            landmarks = {}
+            detected = False
+            if detect:
+                # Run MediaPipe PoseLandmarker only when explicitly requested
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                result = detector.detect(mp_image)
+                landmarks = parse_landmarks(result)
+                detected = len(landmarks) > 0
 
             # Encode frame to JPEG and base64
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 75]
@@ -258,7 +300,8 @@ class PoseHandler(http.server.BaseHTTPRequestHandler):
             ok = camera_mgr.select_camera(idx)
             self._send(200, {"status": "ok" if ok else "error", "index": camera_mgr.active_index})
         elif path == "/camera/capture" or path == "/camera/frame":
-            res = camera_mgr.capture_and_process()
+            detect = query.get("detect", ["0"])[0] in ("1", "true", "True")
+            res = camera_mgr.capture_and_process(detect=detect)
             self._send(200, res)
         else:
             self._send(404, {"error": "not found"})
@@ -281,34 +324,49 @@ class PoseHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
+        try:
+            self.wfile.flush()
+        except Exception:
+            pass
 
     def log_message(self, fmt, *args):
         pass
 
 
 def main():
-    server = http.server.HTTPServer(("127.0.0.1", PORT), PoseHandler)
+    import argparse
+    parser = argparse.ArgumentParser(description="MediaPipe Pose & Camera Server")
+    parser.add_argument("--parent-pid", type=int, default=0, help="Parent process ID to monitor")
+    args, _ = parser.parse_known_args()
+
+    if args.parent_pid > 0:
+        start_parent_watchdog(args.parent_pid)
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), PoseHandler)
+    server.daemon_threads = True
     server.timeout = 1.0
 
     def _shutdown(sig, frame):
-        print("\n[PoseServer] Shutting down...")
+        print("\n[PoseServer] Shutting down...", flush=True)
         camera_mgr.close()
         threading.Thread(target=server.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
 
-    print(f"[PoseServer] Listening on http://127.0.0.1:{PORT}")
-    print("[PoseServer] Endpoints: GET /cameras | POST /camera/select | GET /camera/capture | POST /pose | GET /health")
+    print(f"[PoseServer] Listening on http://127.0.0.1:{PORT}", flush=True)
+    print("[PoseServer] Endpoints: GET /cameras | POST /camera/select | GET /camera/capture | POST /pose | GET /health", flush=True)
     try:
         server.serve_forever()
     finally:
         camera_mgr.close()
         server.server_close()
-        print("[PoseServer] Stopped.")
+        print("[PoseServer] Stopped.", flush=True)
 
 
 if __name__ == "__main__":
     main()
+

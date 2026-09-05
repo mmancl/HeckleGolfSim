@@ -8,9 +8,7 @@ var yellow : Color = Color(1.0, 0.9, 0.0, 1.0)
 var line_width : float = 0.08
 var material : StandardMaterial3D = StandardMaterial3D.new()
 
-
 var _mesh_dirty: bool = true
-var _last_camera_pos: Vector3 = Vector3(999999, 999999, 999999)
 
 
 func _ready():
@@ -22,39 +20,34 @@ func _ready():
 	material.albedo_color = Color(1.0, 1.0, 1.0, 1.0)
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	material.disable_receive_shadows = true
 	material.no_depth_test = false
 
-func _process(_delta):
-	var camera := get_viewport().get_camera_3d()
-	if camera != null:
-		var cam_pos = camera.global_position
-		if cam_pos.distance_squared_to(_last_camera_pos) > 0.5:
-			_mesh_dirty = true
-			_last_camera_pos = cam_pos
+
+func _process(_delta: float) -> void:
 	if _mesh_dirty:
 		draw()
 		_mesh_dirty = false
+
 
 func setColor(a):
 	color = a
 	dark_red = a
 	_mesh_dirty = true
 
+
 func draw():
 	mesh.clear_surfaces()
 	if points.size() >= 2:
 		create_ribbon_mesh()
+
 
 func create_ribbon_mesh():
 	var vertices := PackedVector3Array()
 	var uvs := PackedVector2Array()
 	var colors := PackedColorArray()
 	var indices := PackedInt32Array()
-
-	var camera := get_viewport().get_camera_3d()
-	if camera == null:
-		return
 
 	# Find peak (highest Y value)
 	var peak_index := 0
@@ -64,39 +57,67 @@ func create_ribbon_mesh():
 			max_y = points[i].y
 			peak_index = i
 
-	# Create ribbon vertices
+	# Build 3D cross-ribbon geometry (horizontal + vertical intersecting ribbons).
+	# This guarantees the trail has full thickness and visibility from any camera angle
+	# (behind the tee, follow camera, side view, or aerial/overhead) without edge-on vanishing.
+	var prev_right := Vector3.ZERO
+	var prev_up := Vector3.ZERO
+	var half_width : float = line_width * 0.5
+
 	for i in range(points.size()):
 		var point : Vector3 = points[i]
 
-		# Get direction to camera for billboarding
-		var to_camera : Vector3 = (camera.global_position - point).normalized()
-
-		# Get forward direction along the path
-		var forward : Vector3 = Vector3.ZERO
-		if i < points.size() - 1:
+		# Get tangent / forward direction along path using central difference when possible
+		var forward := Vector3.ZERO
+		if i < points.size() - 1 and i > 0:
+			forward = (points[i + 1] - points[i - 1]).normalized()
+		elif i < points.size() - 1:
 			forward = (points[i + 1] - point).normalized()
 		elif i > 0:
 			forward = (point - points[i - 1]).normalized()
 		else:
 			forward = Vector3.FORWARD
+		if forward.length_squared() < 0.0001:
+			forward = Vector3.FORWARD
 
-		# Create perpendicular vector for ribbon width
-		var right : Vector3 = to_camera.cross(forward).normalized()
-		if right.length() < 0.01:
-			right = Vector3.RIGHT
+		# Horizontal perpendicular vector
+		var world_up := Vector3.UP
+		var right := forward.cross(world_up)
+		if right.length_squared() < 0.001:
+			right = Vector3.RIGHT if absf(forward.dot(Vector3.RIGHT)) < 0.9 else Vector3.FORWARD
+		else:
+			right = right.normalized()
+
+		if prev_right.length_squared() > 0.01 and right.dot(prev_right) < 0.0:
+			right = -right
+		prev_right = right
+
+		# Vertical perpendicular vector
+		var up := right.cross(forward)
+		if up.length_squared() < 0.001:
+			up = world_up
+		else:
+			up = up.normalized()
+
+		if prev_up.length_squared() > 0.01 and up.dot(prev_up) < 0.0:
+			up = -up
+		prev_up = up
 
 		# Fade out towards the end
 		var alpha : float = 1.0
 		var points_from_end : int = points.size() - 1 - i
-		if points_from_end < 3:  # Fade out at the end
+		if points_from_end < 3:
 			alpha = float(points_from_end + 1) / 4.0
 
-		# Create two vertices for this point (left and right of center)
-		var half_width : float = line_width * 0.5
+		# Create 4 vertices per point (2 for horizontal ribbon, 2 for vertical ribbon)
 		vertices.append(point - right * half_width)
 		vertices.append(point + right * half_width)
+		vertices.append(point - up * half_width)
+		vertices.append(point + up * half_width)
 
 		var t := float(i) / float(points.size() - 1)
+		uvs.append(Vector2(0, t))
+		uvs.append(Vector2(1, t))
 		uvs.append(Vector2(0, t))
 		uvs.append(Vector2(1, t))
 
@@ -126,22 +147,33 @@ func create_ribbon_mesh():
 			else:
 				point_color = yellow
 
-		# Apply brightness scale (mimicking the original 1.5x total multiplier from emission)
+		# Apply brightness scale (mimicking emission boost)
 		var vertex_color := Color(point_color.r * 1.5, point_color.g * 1.5, point_color.b * 1.5, alpha)
+		colors.append(vertex_color)
+		colors.append(vertex_color)
 		colors.append(vertex_color)
 		colors.append(vertex_color)
 
 		# Create triangles connecting to previous segment
 		if i > 0:
-			var base := i * 2
-			# First triangle
+			var base := i * 4
+			# Ribbon 1 (horizontal)
 			indices.append(base)
-			indices.append(base - 2)
-			indices.append(base - 1)
-			# Second triangle
-			indices.append(base - 1)
+			indices.append(base - 4)
+			indices.append(base - 3)
+
+			indices.append(base - 3)
 			indices.append(base + 1)
 			indices.append(base)
+
+			# Ribbon 2 (vertical)
+			indices.append(base + 2)
+			indices.append(base - 2)
+			indices.append(base - 1)
+
+			indices.append(base - 1)
+			indices.append(base + 3)
+			indices.append(base + 2)
 
 	# Create the mesh
 	var arrays := []
@@ -154,12 +186,16 @@ func create_ribbon_mesh():
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	mesh.surface_set_material(0, material)
 
+
 func add_point(point: Vector3):
-	#points.append(points[-1])
+	if points.size() > 0 and points[-1].distance_squared_to(point) < 0.0001:
+		return
 	points.append(point)
 	_mesh_dirty = true
+
 
 func clear_points():
 	points = []
 	mesh.clear_surfaces()
 	_mesh_dirty = false
+

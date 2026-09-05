@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg7" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1A1A2E"/>
+      <stop offset="100%" stop-color="#16213E"/>
+    </linearGradient>
+    <linearGradient id="glowvis" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00FFF0"/>
+      <stop offset="50%" stop-color="#0088FF"/>
+      <stop offset="100%" stop-color="#00FFF0"/>
+    </linearGradient>
+    <filter id="glow7" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#00FFF0" flood-opacity="0.8"/>
+    </filter>
+  </defs>
+  <circle cx="64" cy="64" r="60" fill="url(#bg7)" stroke="#00FFF0" stroke-width="4"/>
+  <!-- Antenna -->
+  <line x1="64" y1="36" x2="64" y2="24" stroke="#95A5A6" stroke-width="3"/>
+  <circle cx="64" cy="22" r="4" fill="#00FFF0" filter="url(#glow7)"/>
+  <!-- Robot Body / Armor -->
+  <path d="M32 118 C32 94 48 88 64 88 C80 88 96 94 96 118 Z" fill="#34495E"/>
+  <rect x="56" y="94" width="16" height="24" rx="3" fill="#1ABC9C"/>
+  <circle cx="64" cy="106" r="4" fill="#00FFF0"/>
+  <!-- Robot Head -->
+  <rect x="38" y="36" width="52" height="48" rx="14" fill="#BDC3C7" stroke="#7F8C8D" stroke-width="2"/>
+  <!-- Ears / Bolts -->
+  <rect x="32" y="52" width="6" height="14" rx="2" fill="#7F8C8D"/>
+  <rect x="90" y="52" width="6" height="14" rx="2" fill="#7F8C8D"/>
+  <!-- Cyber Visor -->
+  <rect x="42" y="48" width="44" height="16" rx="4" fill="#111"/>
+  <rect x="44" y="50" width="40" height="12" rx="3" fill="url(#glowvis)" filter="url(#glow7)"/>
+  <line x1="48" y1="56" x2="80" y2="56" stroke="#FFF" stroke-width="1.5" opacity="0.8"/>
+  <!-- Speaker Mouth -->
+  <rect x="52" y="70" width="24" height="6" rx="3" fill="#2C3E50"/>
+  <line x1="56" y1="73" x2="72" y2="73" stroke="#00FFF0" stroke-width="1.5" stroke-dasharray="2 2"/>
+</svg>

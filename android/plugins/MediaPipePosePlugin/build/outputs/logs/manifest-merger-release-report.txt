@@ -1,20 +1,35 @@
 -- Merging decision tree log ---
 manifest
-ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:2:1-11:12
-INJECTED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:2:1-11:12
+ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:2:1-14:12
+INJECTED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:2:1-14:12
 	package
-		ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:3:5-59
 		INJECTED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml
 	xmlns:android
 		ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:2:11-69
-application
-ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:5:5-9:19
-meta-data#org.godotengine.plugin.v2.MediaPipePosePlugin
-ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:6:9-8:96
-	android:value
-		ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:8:13-93
+uses-permission#android.permission.CAMERA
+ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:4:5-65
 	android:name
-		ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:7:13-73
+		ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:4:22-62
+uses-feature#android.hardware.camera
+ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:5:5-85
+	android:required
+		ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:5:58-82
+	android:name
+		ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:5:19-57
+uses-feature#android.hardware.camera.autofocus
+ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:6:5-95
+	android:required
+		ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:6:68-92
+	android:name
+		ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:6:19-67
+application
+ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:8:5-12:19
+meta-data#org.godotengine.plugin.v2.MediaPipePosePlugin
+ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:9:9-11:96
+	android:value
+		ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:11:13-93
+	android:name
+		ADDED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:10:13-73
 uses-sdk
 INJECTED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml

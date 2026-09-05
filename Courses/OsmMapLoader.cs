@@ -97,8 +97,10 @@ public partial class OsmMapLoader : Node
         var bbox = CalculateBBoxFromOsmJson(osmJson, lat, lon);
         if (bbox != null)
         {
+            bool isMobilePlatform = OS.GetName() == "Android" || OS.GetName() == "iOS";
+            int satRes = isMobilePlatform ? 1024 : 2048;
             EmitSignal(SignalName.DownloadProgress, "Downloading satellite imagery...");
-            satImageBytes = await DownloadSatelliteImageAsync(bbox.LonMin, bbox.LatMin, bbox.LonMax, bbox.LatMax, 2048, 2048);
+            satImageBytes = await DownloadSatelliteImageAsync(bbox.LonMin, bbox.LatMin, bbox.LonMax, bbox.LatMax, satRes, satRes);
             
             EmitSignal(SignalName.DownloadProgress, "Downloading terrain elevation data...");
             await DownloadElevationDataAsync(bbox, globalCourseDir);
@@ -186,6 +188,7 @@ public partial class OsmMapLoader : Node
         string jsonPath = $"{courseDir}/course.json";
         string globalJsonPath = ProjectSettings.GlobalizePath(jsonPath);
         string globalCourseDir = Path.GetDirectoryName(globalJsonPath) ?? "";
+        bool isMobilePlatform = OS.GetName() == "Android" || OS.GetName() == "iOS";
 
         Image? satImage = null;
         if (satImageBytes != null && satImageBytes.Length > 0)
@@ -696,6 +699,7 @@ public partial class OsmMapLoader : Node
                     {
                         "green" => 4,
                         "fairway" => 0,
+                        "bunker" => 5,
                         _ => 2
                     };
 
@@ -952,8 +956,8 @@ public partial class OsmMapLoader : Node
                 int satWidth = satImage.GetWidth();
                 int satHeight = satImage.GetHeight();
                 var candidatePoints = new List<Vector2>();
-                float spacing = 6.5f; // Grid spacing in meters (increased from 3.5f)
-                float minDistanceBetweenTrees = 8.5f; // Minimum distance to keep trees apart (increased from 3.0f)
+                float spacing = isMobilePlatform ? 10.0f : 6.5f; // Grid spacing in meters (increased on mobile)
+                float minDistanceBetweenTrees = isMobilePlatform ? 9.5f : 8.5f; // Minimum distance to keep trees apart
 
                 var gridPoints = new List<Vector2>();
                 for (float rx = courseMinX; rx <= courseMaxX; rx += spacing)
@@ -1043,7 +1047,7 @@ public partial class OsmMapLoader : Node
 
                 GD.Print($"{LogPrefix} Found {candidatePoints.Count} tree candidate locations from satellite imagery.");
 
-                int maxSatelliteTrees = 1500; // Capped at 1500 down from 10000
+                int maxSatelliteTrees = isMobilePlatform ? 500 : 1500; // Capped at 500 on mobile, 1500 on desktop
                 var selectedPoints = new List<Vector2>();
                 if (candidatePoints.Count > maxSatelliteTrees)
                 {
@@ -1093,7 +1097,7 @@ public partial class OsmMapLoader : Node
                     float width = maxX - minX;
                     float height = maxY - minY;
                     float area = width * height;
-                    int targetForestTrees = Mathf.Clamp((int)(area / 180f), 5, 80);
+                    int targetForestTrees = Mathf.Clamp((int)(area / (isMobilePlatform ? 360f : 180f)), 3, isMobilePlatform ? 30 : 80);
 
                     var fRnd = new Random((int)(minX * 100f) ^ (int)(minY * 100f));
                     int forestSpawned = 0;
@@ -1124,7 +1128,9 @@ public partial class OsmMapLoader : Node
             }
 
             // Guaranteed procedural tree placement fallback if tree count is too low or satellite scan yielded few/no trees
-            int targetTreeCount = Math.Max(120, Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 28);
+            int targetTreeCount = isMobilePlatform
+                ? Math.Clamp(Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 16, 60, 400)
+                : Math.Max(120, Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 28);
             if (placedTreePositions.Count < targetTreeCount)
             {
                 GD.Print($"{LogPrefix} Tree count ({placedTreePositions.Count}) is below target ({targetTreeCount}). Generating procedural tree placement fallback...");
@@ -1267,8 +1273,10 @@ public partial class OsmMapLoader : Node
                 GD.Print($"{LogPrefix} Procedural tree placement completed. Total trees: {placedTreePositions.Count}.");
             }
 
-            int subdivisionsX = Mathf.Clamp((int)Math.Ceiling(courseWidth / 2.0f), 100, 1000);
-            int subdivisionsZ = Mathf.Clamp((int)Math.Ceiling(courseDepth / 2.0f), 100, 1000);
+            float cellSize = isMobilePlatform ? 6.5f : 3.0f;
+            int maxSubdiv = isMobilePlatform ? 200 : 400;
+            int subdivisionsX = Mathf.Clamp((int)Math.Ceiling(courseWidth / cellSize), 40, maxSubdiv);
+            int subdivisionsZ = Mathf.Clamp((int)Math.Ceiling(courseDepth / cellSize), 40, maxSubdiv);
 
             EmitSignal(SignalName.DownloadProgress, "Generating 3D terrain and surface blend maps...");
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
@@ -1293,7 +1301,7 @@ public partial class OsmMapLoader : Node
                 GD.Print($"{LogPrefix} Placing bushes clustered around trees...");
                 var bushRnd = new Random(99);
                 int bushCount = 0;
-                int maxBushes = 1200;
+                int maxBushes = isMobilePlatform ? 200 : 1200;
                 var placedBushPositions = new List<Vector2>();
 
                 var treeIndices = Enumerable.Range(0, placedTreePositions.Count).OrderBy(x => bushRnd.Next()).ToList();
@@ -1731,22 +1739,33 @@ public partial class OsmMapLoader : Node
 
             // Procedurally spawn rock decorations around water hazards
             InitializeRockAssets();
-            if (_rockMeshes != null)
+            if (_rockMeshes != null && _rockMeshes.Length > 0)
             {
                 var rand = new Random(42);
+                float minStep = isMobilePlatform ? 3.0f : 1.0f;
+                float stepJitter = isMobilePlatform ? 1.0f : 0.4f;
+                int maxRocks = isMobilePlatform ? 300 : 1200;
+                int spawnedRocks = 0;
+
                 foreach (var waterPoly in waterPolygons)
                 {
+                    if (spawnedRocks >= maxRocks) break;
+
                     int numPoints = waterPoly.Length;
                     for (int i = 0; i < numPoints; i++)
                     {
+                        if (spawnedRocks >= maxRocks) break;
+
                         Vector2 p1 = waterPoly[i];
                         Vector2 p2 = waterPoly[(i + 1) % numPoints];
                         float segmentLength = p1.DistanceTo(p2);
                         
-                        // Spawn a rock every 1.0 to 1.4 meters to cover the full perimeter with no gaps
-                        float step = 1.0f + (float)rand.NextDouble() * 0.4f;
+                        // Spawn a rock every minStep to minStep+stepJitter meters
+                        float step = minStep + (float)rand.NextDouble() * stepJitter;
                         for (float d = 0f; d < segmentLength; d += step)
                         {
+                            if (spawnedRocks >= maxRocks) break;
+
                             float t = d / segmentLength;
                             Vector2 pos2d = p1.Lerp(p2, t);
                             
@@ -1775,9 +1794,11 @@ public partial class OsmMapLoader : Node
                             float spawnY = Math.Max(terrainY, baseHeight - 0.2f);
                             Vector3 rockPos = new Vector3(rockX, spawnY + 0.1f, rockZ);
                             SpawnRockAt(rootNode, rockPos, rockScale, rotY, rockMesh);
+                            spawnedRocks++;
                         }
                     }
                 }
+                GD.Print($"{LogPrefix} Placed {spawnedRocks} rock decorations around water hazards.");
             }
 
             var madeUpDetails = new List<string>();
@@ -1798,6 +1819,11 @@ public partial class OsmMapLoader : Node
             {
                 _generationMessage = $"Successfully generated course: {courseName}!";
             }
+
+            EmitSignal(SignalName.DownloadProgress, "Generating aerial hole overviews...");
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+
+            await GenerateAerialPreviewsAsync(rootNode, courseDir, globalCourseDir, holeInfo, isMobilePlatform);
 
             // Add Player Node structure & TCP Server & Range UI to scene so it's a complete course scene!
             // We can load them from their res:// paths to keep scene compatible
@@ -1920,8 +1946,6 @@ public partial class OsmMapLoader : Node
             skyMaterial.SetShaderParameter("stars_scintillation", 0.75f);
             skyMaterial.SetShaderParameter("stars_scintillation_speed", 0.01f);
             skyMaterial.SetShaderParameter("noise_tex", GD.Load<Texture2D>("res://addons/sky_3d/assets/textures/noise.jpg"));
-
-            bool isMobilePlatform = OS.GetName() == "Android" || OS.GetName() == "iOS";
 
             // Clouds
             skyMaterial.SetShaderParameter("clouds_visible", !isMobilePlatform);
@@ -2104,10 +2128,8 @@ public partial class OsmMapLoader : Node
             string configJson = JsonSerializer.Serialize(courseConfig, options);
             File.WriteAllText(globalJsonPath, configJson);
 
-            EmitSignal(SignalName.DownloadProgress, "Generating aerial hole overviews...");
-            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-
-            await GenerateAerialPreviewsAsync(rootNode, courseDir, globalCourseDir, holeInfo);
+            // Free the course node tree from memory now that it has been saved to disk
+            rootNode.QueueFree();
 
             GD.Print($"{LogPrefix} Course '{courseName}' generated successfully.");
             return true;
@@ -2123,25 +2145,47 @@ public partial class OsmMapLoader : Node
         }
     }
 
-    private async Task GenerateAerialPreviewsAsync(Node3D rootNode, string courseDir, string globalCourseDir, Dictionary<string, HoleConfig> holeInfo)
+    private async Task GenerateAerialPreviewsAsync(Node3D rootNode, string courseDir, string globalCourseDir, Dictionary<string, HoleConfig> holeInfo, bool isMobilePlatform)
     {
+        SubViewport? subViewport = null;
         try
         {
             GD.Print($"{LogPrefix} Generating top-down aerial snapshots for course and holes...");
-            var subViewport = new SubViewport();
-            subViewport.Size = new Vector2I(1024, 1024);
+            int vpSize = isMobilePlatform ? 512 : 1024;
+            subViewport = new SubViewport();
+            subViewport.Size = new Vector2I(vpSize, vpSize);
             subViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Always;
             subViewport.OwnWorld3D = true;
             subViewport.World3D = new World3D();
+
+            var env = new Godot.Environment
+            {
+                BackgroundMode = Godot.Environment.BGMode.Color,
+                BackgroundColor = new Color(0.18f, 0.32f, 0.15f),
+                AmbientLightSource = Godot.Environment.AmbientSource.Color,
+                AmbientLightColor = new Color(0.95f, 0.95f, 0.95f),
+                AmbientLightEnergy = 0.85f
+            };
+            var worldEnv = new WorldEnvironment { Environment = env };
+            subViewport.AddChild(worldEnv);
+
+            var topSun = new DirectionalLight3D
+            {
+                LightEnergy = 1.0f,
+                Transform = new Transform3D(
+                    new Basis(new Vector3(1f, 0f, 0f), Mathf.DegToRad(-65f)) *
+                    new Basis(new Vector3(0f, 1f, 0f), Mathf.DegToRad(35f)),
+                    new Vector3(0, 200, 0)
+                )
+            };
+            subViewport.AddChild(topSun);
 
             var tempCam = new Camera3D();
             tempCam.Projection = Camera3D.ProjectionType.Orthogonal;
             subViewport.AddChild(tempCam);
 
-            var courseInstance = rootNode.Duplicate() as Node3D;
-            if (courseInstance == null) return;
-            subViewport.AddChild(courseInstance);
-
+            // Attach rootNode directly before gameplay scripts/nodes were added to avoid scene duplication
+            subViewport.AddChild(rootNode);
             AddChild(subViewport);
 
             // 1. Full Course Aerial View
@@ -2182,6 +2226,7 @@ public partial class OsmMapLoader : Node
                 center
             );
 
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
             var courseImg = subViewport.GetTexture().GetImage();
             if (courseImg != null)
@@ -2236,6 +2281,7 @@ public partial class OsmMapLoader : Node
                     new Vector3(basePos.X, 150f, basePos.Z)
                 );
 
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
                 await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
                 var holeImg = subViewport.GetTexture().GetImage();
                 if (holeImg != null)
@@ -2245,13 +2291,25 @@ public partial class OsmMapLoader : Node
                     GD.Print($"{LogPrefix} Saved aerial snapshot for Hole {i + 1}: {holeImgPath}");
                 }
             }
-
-            RemoveChild(subViewport);
-            subViewport.QueueFree();
         }
         catch (Exception ex)
         {
             GD.PrintErr($"{LogPrefix} Exception during aerial preview generation: {ex}");
+        }
+        finally
+        {
+            if (subViewport != null)
+            {
+                if (rootNode.GetParent() == subViewport)
+                {
+                    subViewport.RemoveChild(rootNode);
+                }
+                if (subViewport.GetParent() == this)
+                {
+                    RemoveChild(subViewport);
+                }
+                subViewport.QueueFree();
+            }
         }
     }
 
@@ -3378,139 +3436,155 @@ public partial class OsmMapLoader : Node
         colShape.Owner = root;
     }
 
+    private static readonly string[] TreePaths = new string[]
+    {
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-1-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-2-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-3-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-4-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-1-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-2-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-3-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-4-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-1-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-2-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-3-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-4-staticbody.tscn"
+    };
+
+    private static readonly string[] BushPaths = new string[]
+    {
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/bush-01-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/bush-02-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/bush-03-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/bush-04-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/bush-05-staticbody.tscn"
+    };
+
+    private List<PackedScene>? _cachedTreeScenes;
+    private List<PackedScene>? _cachedBushScenes;
+
+    private void EnsurePlantScenesLoaded()
+    {
+        if (_cachedTreeScenes == null)
+        {
+            _cachedTreeScenes = new List<PackedScene>();
+            foreach (var path in TreePaths)
+            {
+                var s = GD.Load<PackedScene>(path);
+                if (s != null) _cachedTreeScenes.Add(s);
+            }
+        }
+        if (_cachedBushScenes == null)
+        {
+            _cachedBushScenes = new List<PackedScene>();
+            foreach (var path in BushPaths)
+            {
+                var s = GD.Load<PackedScene>(path);
+                if (s != null) _cachedBushScenes.Add(s);
+            }
+        }
+    }
+
     private void AddTreeAt(Node3D root, Vector3 position)
     {
+        EnsurePlantScenesLoaded();
+        if (_cachedTreeScenes == null || _cachedTreeScenes.Count == 0) return;
+
         // Seed Random deterministically using position hash so same tree always has same size
         int posHash = (int)(position.X * 1000f) ^ (int)(position.Z * 1000f);
         var random = new Random(posHash);
-        
-        string[] treePaths = new string[]
-        {
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-1-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-2-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-3-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-4-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-1-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-2-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-3-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-4-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-1-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-2-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-3-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-4-staticbody.tscn"
-        };
-        
-        int treeIndex = random.Next(treePaths.Length);
+        int treeIndex = random.Next(_cachedTreeScenes.Count);
         
         try
         {
-            var treeScene = GD.Load<PackedScene>(treePaths[treeIndex]);
-            if (treeScene != null)
-            {
-                var treeInstance = treeScene.Instantiate<Node3D>();
-                treeInstance.Name = $"Tree_{position.X:F1}_{position.Z:F1}";
-                treeInstance.Position = position;
-                
-                // Random scale between 2.5 and 5.0 to make trees much larger
-                float scaleVal = 2.5f + (float)random.NextDouble() * 2.5f;
-                treeInstance.Scale = new Vector3(scaleVal, scaleVal, scaleVal);
-                
-                // Apply a random Y rotation for organic variety
-                float rotationY = (float)(random.NextDouble() * Math.PI * 2.0);
-                treeInstance.Rotation = new Vector3(0f, rotationY, 0f);
-                
-                root.AddChild(treeInstance);
-                treeInstance.Owner = root;
+            var treeScene = _cachedTreeScenes[treeIndex];
+            var treeInstance = treeScene.Instantiate<Node3D>();
+            treeInstance.Name = $"Tree_{position.X:F1}_{position.Z:F1}";
+            // Slightly sink tree base into ground to bed roots naturally on sloped terrain
+            treeInstance.Position = new Vector3(position.X, position.Y - 0.15f, position.Z);
+            
+            // Random scale between 2.5 and 5.0 to make trees much larger
+            float scaleVal = 2.5f + (float)random.NextDouble() * 2.5f;
+            treeInstance.Scale = new Vector3(scaleVal, scaleVal, scaleVal);
+            
+            // Apply a random Y rotation for organic variety
+            float rotationY = (float)(random.NextDouble() * Math.PI * 2.0);
+            treeInstance.Rotation = new Vector3(0f, rotationY, 0f);
+            
+            root.AddChild(treeInstance);
+            treeInstance.Owner = root;
 
-                // Shrink and reposition the trunk collision shape so it doesn't extend into foliage
-                foreach (Node child in treeInstance.GetChildren())
+            // Shrink and reposition the trunk collision shape so it doesn't extend into foliage
+            foreach (Node child in treeInstance.GetChildren())
+            {
+                if (child is CollisionShape3D colShapeNode)
                 {
-                    if (child is CollisionShape3D colShapeNode)
+                    if (colShapeNode.Shape is CapsuleShape3D capsule)
                     {
-                        if (colShapeNode.Shape is CapsuleShape3D capsule)
-                        {
-                            var newCapsule = (CapsuleShape3D)capsule.Duplicate();
-                            newCapsule.Radius = 0.15f;
-                            newCapsule.Height = 1.0f;
-                            colShapeNode.Shape = newCapsule;
-                            
-                            colShapeNode.Transform = new Transform3D(Basis.Identity, new Vector3(0f, 0.5f, 0f));
-                        }
+                        var newCapsule = (CapsuleShape3D)capsule.Duplicate();
+                        newCapsule.Radius = 0.15f;
+                        newCapsule.Height = 1.0f;
+                        colShapeNode.Shape = newCapsule;
+                        
+                        colShapeNode.Transform = new Transform3D(Basis.Identity, new Vector3(0f, 0.5f, 0f));
                     }
                 }
-
-                // Create leaves/canopy Area3D to detect ball passing through
-                var canopyArea = new Area3D();
-                canopyArea.Name = "CanopyArea";
-                canopyArea.SetMeta("is_canopy", true);
-
-                var canopyShape = new CollisionShape3D();
-                var sphereShape = new SphereShape3D();
-                sphereShape.Radius = 1.8f;
-                canopyShape.Shape = sphereShape;
-                canopyShape.Position = new Vector3(0f, 3.8f, 0f);
-
-                canopyArea.AddChild(canopyShape);
-                treeInstance.AddChild(canopyArea);
-
-                canopyArea.Owner = root;
-                canopyShape.Owner = root;
             }
-            else
-            {
-                GD.PrintErr($"{LogPrefix} Failed to load tree scene: {treePaths[treeIndex]}");
-            }
+
+            // Create leaves/canopy Area3D to detect ball passing through
+            var canopyArea = new Area3D();
+            canopyArea.Name = "CanopyArea";
+            canopyArea.SetMeta("is_canopy", true);
+
+            var canopyShape = new CollisionShape3D();
+            var sphereShape = new SphereShape3D();
+            sphereShape.Radius = 1.8f;
+            canopyShape.Shape = sphereShape;
+            canopyShape.Position = new Vector3(0f, 3.8f, 0f);
+
+            canopyArea.AddChild(canopyShape);
+            treeInstance.AddChild(canopyArea);
+
+            canopyArea.Owner = root;
+            canopyShape.Owner = root;
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"{LogPrefix} Exception loading tree scene: {ex}");
+            GD.PrintErr($"{LogPrefix} Exception instantiating tree scene: {ex}");
         }
     }
 
     private void AddBushAt(Node3D root, Vector3 position)
     {
+        EnsurePlantScenesLoaded();
+        if (_cachedBushScenes == null || _cachedBushScenes.Count == 0) return;
+
         int posHash = (int)(position.X * 1000f) ^ (int)(position.Z * 1000f);
         var random = new Random(posHash);
-        
-        string[] bushPaths = new string[]
-        {
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/bush-01-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/bush-02-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/bush-03-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/bush-04-staticbody.tscn",
-            "res://addons/shapespark-low-poly-exterior-plants/bodies/bush-05-staticbody.tscn"
-        };
-        
-        int bushIndex = random.Next(bushPaths.Length);
+        int bushIndex = random.Next(_cachedBushScenes.Count);
         
         try
         {
-            var bushScene = GD.Load<PackedScene>(bushPaths[bushIndex]);
-            if (bushScene != null)
-            {
-                var bushInstance = bushScene.Instantiate<Node3D>();
-                bushInstance.Name = $"Bush_{position.X:F1}_{position.Z:F1}";
-                bushInstance.Position = position;
-                
-                // Random scale between 1.0 and 2.2 for varied bush sizes
-                float scaleVal = 1.0f + (float)random.NextDouble() * 1.2f;
-                bushInstance.Scale = new Vector3(scaleVal, scaleVal, scaleVal);
-                
-                // Apply a random Y rotation for organic variety
-                float rotationY = (float)(random.NextDouble() * Math.PI * 2.0);
-                bushInstance.Rotation = new Vector3(0f, rotationY, 0f);
-                
-                root.AddChild(bushInstance);
-                bushInstance.Owner = root;
-            }
-            else
-            {
-                GD.PrintErr($"{LogPrefix} Failed to load bush scene: {bushPaths[bushIndex]}");
-            }
+            var bushScene = _cachedBushScenes[bushIndex];
+            var bushInstance = bushScene.Instantiate<Node3D>();
+            bushInstance.Name = $"Bush_{position.X:F1}_{position.Z:F1}";
+            bushInstance.Position = position;
+            
+            // Random scale between 1.0 and 2.2 for varied bush sizes
+            float scaleVal = 1.0f + (float)random.NextDouble() * 1.2f;
+            bushInstance.Scale = new Vector3(scaleVal, scaleVal, scaleVal);
+            
+            // Apply a random Y rotation for organic variety
+            float rotationY = (float)(random.NextDouble() * Math.PI * 2.0);
+            bushInstance.Rotation = new Vector3(0f, rotationY, 0f);
+            
+            root.AddChild(bushInstance);
+            bushInstance.Owner = root;
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"{LogPrefix} Exception loading bush scene: {ex}");
+            GD.PrintErr($"{LogPrefix} Exception instantiating bush scene: {ex}");
         }
     }
 
@@ -4263,7 +4337,7 @@ public partial class OsmMapLoader : Node
     private void CreateGolfSurfaceMesh(Node3D rootNode, Vector2[] uniquePoints, string golfType, string idSuffix, List<ExclusionPolygon> exclusionPolygons)
     {
         exclusionPolygons.Add(new ExclusionPolygon(uniquePoints, golfType, this));
-        int surfaceTypeValue = golfType == "green" ? 4 : (golfType == "bunker" ? 2 : 0);
+        int surfaceTypeValue = golfType == "green" ? 4 : (golfType == "bunker" ? 5 : 0);
 
         var staticBody = new StaticBody3D { Name = $"{golfType}_Static_{idSuffix}" };
         staticBody.SetMeta("surface_type", surfaceTypeValue);
@@ -4486,7 +4560,8 @@ public partial class OsmMapLoader : Node
     /// </summary>
     private ImageTexture GenerateSplatMap(float minX, float maxX, float minZ, float maxZ, List<ExclusionPolygon> exclusions, List<Vector2> treePositions)
     {
-        int texSize = 2048;
+        bool isMobile = OS.GetName() == "Android" || OS.GetName() == "iOS";
+        int texSize = isMobile ? 1024 : 2048;
         byte[] pixelData = new byte[texSize * texSize * 4];
 
         float worldWidth = maxX - minX;
@@ -4627,7 +4702,8 @@ public partial class OsmMapLoader : Node
     /// </summary>
     private ImageTexture GenerateTerrainAOMap(float minX, float maxX, float minZ, float maxZ, List<ExclusionPolygon> exclusions)
     {
-        int texSize = 1024;
+        bool isMobile = OS.GetName() == "Android" || OS.GetName() == "iOS";
+        int texSize = isMobile ? 512 : 1024;
         byte[] pixelData = new byte[texSize * texSize];
 
         float worldWidth = maxX - minX;

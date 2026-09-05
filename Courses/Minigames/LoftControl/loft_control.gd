@@ -12,6 +12,24 @@ var shot_reset_token: int = 0
 var last_shot_data: Dictionary = {}
 var is_victory: bool = false
 var viewing_wall_cam: bool = false
+var shot_in_progress: bool = false
+
+# Tic-Tac-Toe mode state
+var tic_tac_toe_mode: bool = false
+var board_marks: Array[String] = ["", "", "", "", "", "", "", "", ""]
+var current_turn_symbol: String = "X"
+var player_x_name: String = "Player 1"
+var player_o_name: String = "Player 2"
+var winner_symbol: String = ""
+var is_draw: bool = false
+var winning_line: Array[int] = []
+var symbol_3d_nodes: Array = []
+
+const WIN_COMBOS = [
+	[0, 1, 2], [3, 4, 5], [6, 7, 8], # Horizontal rows
+	[0, 3, 6], [1, 4, 7], [2, 5, 8], # Vertical columns
+	[0, 4, 8], [2, 4, 6]             # Diagonals
+]
 
 # Camera tracking
 var camera: Camera3D = null
@@ -66,6 +84,9 @@ var frame_mat_steel: StandardMaterial3D
 var frame_mat_concrete: StandardMaterial3D
 var turf_mat: StandardMaterial3D
 var fairway_mat: StandardMaterial3D
+var x_symbol_mat: StandardMaterial3D
+var o_symbol_mat: StandardMaterial3D
+var win_symbol_mat: StandardMaterial3D
 
 # UI References
 var hud_layer: CanvasLayer = null
@@ -74,9 +95,17 @@ var panes_cleared_lbl: Label = null
 var attempts_lbl: Label = null
 var accuracy_lbl: Label = null
 var last_shot_lbl: Label = null
+var stat_columns: Array[Dictionary] = []
+var matrix_title_lbl: Label = null
+var mode_toggle_btn: Button = null
+var game_over_panel: PanelContainer = null
 var music_toggle_btn: Button = null
 var cam_toggle_btn: Button = null
+var stats_btn: Button = null
+var grid_canvas: Control = null
 var _settings_layer: CanvasLayer = null
+var raw_ball_data: Dictionary = {}
+var display_data: Dictionary = {}
 
 # Audio
 var sfx_shatter_player: AudioStreamPlayer = null
@@ -87,6 +116,7 @@ var _shatter_stream: AudioStreamWAV = null
 
 func _ready() -> void:
 	name = "LoftControl"
+	_init_player_names()
 	
 	# 1. Initialize Audio Streams
 	_init_audio_streams()
@@ -265,6 +295,46 @@ func _init_materials() -> void:
 	else:
 		fairway_mat.albedo_color = Color(0.22, 0.58, 0.26)
 	fairway_mat.roughness = 0.92
+	
+	# Tic-Tac-Toe X Symbol: Luminous Electric Cyan
+	x_symbol_mat = StandardMaterial3D.new()
+	x_symbol_mat.albedo_color = Color(0.15, 0.85, 1.0, 0.95)
+	x_symbol_mat.roughness = 0.15
+	x_symbol_mat.metallic = 0.85
+	x_symbol_mat.emission_enabled = true
+	x_symbol_mat.emission = Color(0.15, 0.85, 1.0)
+	x_symbol_mat.emission_energy_multiplier = 1.6
+	
+	# Tic-Tac-Toe O Symbol: Luminous Radiant Gold
+	o_symbol_mat = StandardMaterial3D.new()
+	o_symbol_mat.albedo_color = Color(1.0, 0.70, 0.15, 0.95)
+	o_symbol_mat.roughness = 0.15
+	o_symbol_mat.metallic = 0.85
+	o_symbol_mat.emission_enabled = true
+	o_symbol_mat.emission = Color(1.0, 0.70, 0.15)
+	o_symbol_mat.emission_energy_multiplier = 1.6
+	
+	# Winning 3-in-a-row Highlight: Brilliant Neon Lime
+	win_symbol_mat = StandardMaterial3D.new()
+	win_symbol_mat.albedo_color = Color(0.25, 1.0, 0.45, 0.95)
+	win_symbol_mat.roughness = 0.1
+	win_symbol_mat.metallic = 0.6
+	win_symbol_mat.emission_enabled = true
+	win_symbol_mat.emission = Color(0.25, 1.0, 0.45)
+	win_symbol_mat.emission_energy_multiplier = 2.8
+
+
+func _init_player_names() -> void:
+	player_x_name = "Player 1"
+	player_o_name = "Player 2"
+	if has_node("/root/MultiplayerManager"):
+		var mp = get_node("/root/MultiplayerManager")
+		if mp.players.size() >= 2:
+			player_x_name = mp.players[0].get("name", "Player 1")
+			player_o_name = mp.players[1].get("name", "Player 2")
+		elif mp.players.size() == 1:
+			player_x_name = mp.players[0].get("name", "Player 1")
+			player_o_name = "Player 2"
 
 
 # ==============================================================================
@@ -463,6 +533,9 @@ func _setup_glass_wall_and_panes() -> void:
 	pane_nodes.clear()
 	pane_mesh_instances.clear()
 	pane_areas.clear()
+	symbol_3d_nodes.clear()
+	for i in range(9):
+		symbol_3d_nodes.append(null)
 	
 	# Total width: 3 columns x 8.5m + 4 mullions/pillars x 0.8m = 28.7m wide (Z from -14.4 to +14.4)
 	# Total height: 3 rows x 8.5m + 4 mullions/beams x 0.8m = 28.7m tall (Y from 0.8 to 29.5)
@@ -560,6 +633,94 @@ func _create_glass_pane_node(idx: int, py: float, pz: float) -> Node3D:
 	return pane_root
 
 
+func _spawn_3d_symbol(idx: int, symbol: String) -> void:
+	if idx < 0 or idx >= pane_nodes.size() or pane_nodes[idx] == null:
+		return
+		
+	# Clear previous symbol instance at this index if present
+	if idx < symbol_3d_nodes.size() and symbol_3d_nodes[idx] != null and is_instance_valid(symbol_3d_nodes[idx]):
+		symbol_3d_nodes[idx].queue_free()
+		symbol_3d_nodes[idx] = null
+		
+	var pane_root = pane_nodes[idx]
+	var symbol_node = Node3D.new()
+	symbol_node.name = "Symbol3D_%d_%s" % [idx, symbol]
+	symbol_node.position = Vector3(-0.08, 0.0, 0.0) # Position slightly in front of pane toward tee
+	
+	if symbol == "X":
+		var bar1 = MeshInstance3D.new()
+		bar1.name = "X_Bar1"
+		var box1 = BoxMesh.new()
+		box1.size = Vector3(0.35, 7.2, 0.85)
+		bar1.mesh = box1
+		bar1.material_override = x_symbol_mat
+		bar1.transform.basis = Basis(Vector3.RIGHT, deg_to_rad(45))
+		symbol_node.add_child(bar1)
+		
+		var bar2 = MeshInstance3D.new()
+		bar2.name = "X_Bar2"
+		var box2 = BoxMesh.new()
+		box2.size = Vector3(0.35, 7.2, 0.85)
+		bar2.mesh = box2
+		bar2.material_override = x_symbol_mat
+		bar2.transform.basis = Basis(Vector3.RIGHT, deg_to_rad(-45))
+		symbol_node.add_child(bar2)
+	elif symbol == "O":
+		var ring = MeshInstance3D.new()
+		ring.name = "O_Ring"
+		var torus = TorusMesh.new()
+		torus.inner_radius = 2.2
+		torus.outer_radius = 3.2
+		torus.rings = 36
+		torus.ring_segments = 12
+		ring.mesh = torus
+		ring.material_override = o_symbol_mat
+		# Torus default orientation is in X-Z plane; rotate 90 degrees around Z axis so its normal points along X towards tee
+		ring.transform.basis = Basis(Vector3(0, 0, 1), deg_to_rad(90))
+		symbol_node.add_child(ring)
+		
+	pane_root.add_child(symbol_node)
+	if idx < symbol_3d_nodes.size():
+		symbol_3d_nodes[idx] = symbol_node
+
+
+func _highlight_winning_symbols() -> void:
+	for idx in winning_line:
+		if idx >= 0 and idx < symbol_3d_nodes.size() and symbol_3d_nodes[idx] != null:
+			for child in symbol_3d_nodes[idx].get_children():
+				if child is MeshInstance3D:
+					child.material_override = win_symbol_mat
+
+
+func _check_tic_tac_toe_game_over() -> bool:
+	for combo in WIN_COMBOS:
+		var s0 = board_marks[combo[0]]
+		if s0 != "" and s0 == board_marks[combo[1]] and s0 == board_marks[combo[2]]:
+			winner_symbol = s0
+			winning_line = combo.duplicate()
+			_highlight_winning_symbols()
+			_trigger_victory()
+			var win_player_name = player_x_name if winner_symbol == "X" else player_o_name
+			_show_game_over_banner(
+				"🎉 %s (%s) WINS!" % [win_player_name.to_upper(), winner_symbol],
+				"3 In A Row! Magnificent loft control!",
+				Color(0.2, 0.95, 0.4)
+			)
+			return true
+			
+	# Check for Draw / Cat's game
+	if not board_marks.has(""):
+		is_draw = true
+		_show_game_over_banner(
+			"🤝 CAT'S GAME - DRAW!",
+			"All 9 glass panes claimed without 3 in a row.",
+			Color(1.0, 0.75, 0.2)
+		)
+		return true
+		
+	return false
+
+
 func _create_concrete_pillar(pos: Vector3, size: Vector3) -> StaticBody3D:
 	var sb = StaticBody3D.new()
 	sb.position = pos
@@ -644,6 +805,7 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	shot_counter += 1
 	attempts_count += 1
 	shot_reset_token += 1
+	shot_in_progress = true
 	var this_shot = shot_reset_token
 	prev_ball_pos = player.ball.global_position
 	
@@ -652,6 +814,8 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 		_update_camera_to_tee()
 		
 	player._on_tcp_client_hit_ball(data)
+	raw_ball_data = data.duplicate()
+	_update_stats_display(false)
 	_update_hud()
 	
 	# Maximum safety timeout: automatically resets ball to tee after 5.0 seconds if not already reset
@@ -763,6 +927,10 @@ func _check_wall_intersection(p0: Vector3, p1: Vector3, vel: Vector3) -> void:
 		if not panes_broken[hit_pane_idx]:
 			# SHATTER UNBROKEN GLASS PANE!
 			_shatter_pane(hit_pane_idx, impact_pos, vel)
+		else:
+			# Ball hit an already broken pane - reset after 2.0s so turn alternates
+			var this_shot = shot_reset_token
+			_schedule_auto_reset(this_shot, 2.0)
 	else:
 		# Check if hit solid outer frame or missed completely
 		if impact_y >= 0.0 and impact_y <= 31.0 and absf(impact_z) <= 15.0:
@@ -792,12 +960,18 @@ func _shatter_pane(idx: int, impact_pos: Vector3, vel: Vector3) -> void:
 	# 3. Spawn 3D exploding glass shard debris
 	_spawn_glass_shards(impact_pos, vel)
 	
-	# 4. Update HUD Matrix & Scoreboard
+	# 4. In Tic-Tac-Toe mode, place symbol & check win/draw
+	if tic_tac_toe_mode:
+		board_marks[idx] = current_turn_symbol
+		_spawn_3d_symbol(idx, current_turn_symbol)
+		_check_tic_tac_toe_game_over()
+	else:
+		# 5. Check Victory Condition in Standard Mode (All 9 Panes Broken!)
+		if broken_count >= 9:
+			_trigger_victory()
+			
+	# 6. Update HUD Matrix & Scoreboard
 	_update_hud()
-	
-	# 5. Check Victory Condition (All 9 Panes Broken!)
-	if broken_count >= 9:
-		_trigger_victory()
 		
 	# Automatically reset ball to tee box after 2.0 seconds
 	var this_shot = shot_reset_token
@@ -882,7 +1056,8 @@ func _trigger_victory() -> void:
 func _on_ball_rest(_data: Dictionary) -> void:
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
-		
+	raw_ball_data = _data.duplicate()
+	_update_stats_display(true)
 	_update_hud()
 	
 	# Auto reset ball to tee box after 1.8 seconds
@@ -900,9 +1075,23 @@ func _reset_game() -> void:
 	is_victory = false
 	broken_count = 0
 	attempts_count = 0
+	shot_in_progress = false
+	winner_symbol = ""
+	is_draw = false
+	winning_line.clear()
+	current_turn_symbol = "X"
+	_hide_game_over_banner()
+	_init_player_names()
 	
+	# Clear 3D symbols
+	for i in range(symbol_3d_nodes.size()):
+		if symbol_3d_nodes[i] != null and is_instance_valid(symbol_3d_nodes[i]):
+			symbol_3d_nodes[i].queue_free()
+			symbol_3d_nodes[i] = null
+			
 	for i in range(panes_broken.size()):
 		panes_broken[i] = false
+		board_marks[i] = ""
 		
 		# Restore visual glass mesh
 		if i < pane_mesh_instances.size() and pane_mesh_instances[i] != null:
@@ -915,6 +1104,12 @@ func _reset_game() -> void:
 func _reset_ball_only() -> void:
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
+		
+	if shot_in_progress:
+		shot_in_progress = false
+		if tic_tac_toe_mode and winner_symbol.is_empty() and not is_draw:
+			current_turn_symbol = "O" if current_turn_symbol == "X" else "X"
+			
 	if player and player.ball:
 		var start_pos = Vector3(0.0, 0.05, 0.0)
 		player.global_position = start_pos
@@ -925,6 +1120,112 @@ func _reset_ball_only() -> void:
 		prev_ball_pos = start_pos
 		if not viewing_wall_cam:
 			_update_camera_to_tee()
+			
+	_update_hud()
+
+
+func _toggle_tic_tac_toe_mode() -> void:
+	tic_tac_toe_mode = not tic_tac_toe_mode
+	_hide_game_over_banner()
+	if mode_toggle_btn != null:
+		if tic_tac_toe_mode:
+			mode_toggle_btn.text = "❌⭕ Tic-Tac-Toe: ON"
+			_apply_btn_style(mode_toggle_btn, Color(0.18, 0.45, 0.65), Color(0.25, 0.58, 0.82))
+		else:
+			mode_toggle_btn.text = "❌⭕ Tic-Tac-Toe: OFF"
+			_apply_btn_style(mode_toggle_btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
+	_reset_game()
+
+
+func _show_game_over_banner(title: String, subtitle: String, theme_color: Color) -> void:
+	if game_over_panel != null and is_instance_valid(game_over_panel):
+		game_over_panel.queue_free()
+		
+	game_over_panel = PanelContainer.new()
+	game_over_panel.name = "GameOverBanner"
+	game_over_panel.custom_minimum_size = Vector2(580, 210)
+	game_over_panel.anchor_left = 0.5
+	game_over_panel.anchor_right = 0.5
+	game_over_panel.anchor_top = 0.5
+	game_over_panel.anchor_bottom = 0.5
+	game_over_panel.offset_left = -290
+	game_over_panel.offset_right = 290
+	game_over_panel.offset_top = -105
+	game_over_panel.offset_bottom = 105
+	
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.03, 0.07, 0.12, 0.94)
+	style.border_width_left = 3
+	style.border_width_top = 3
+	style.border_width_right = 3
+	style.border_width_bottom = 3
+	style.border_color = theme_color
+	style.corner_radius_top_left = 14
+	style.corner_radius_top_right = 14
+	style.corner_radius_bottom_right = 14
+	style.corner_radius_bottom_left = 14
+	style.shadow_color = Color(0, 0, 0, 0.6)
+	style.shadow_size = 12
+	game_over_panel.add_theme_stylebox_override("panel", style)
+	
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 24)
+	margin.add_theme_constant_override("margin_right", 24)
+	margin.add_theme_constant_override("margin_top", 20)
+	margin.add_theme_constant_override("margin_bottom", 20)
+	game_over_panel.add_child(margin)
+	
+	var vbox = VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 10)
+	margin.add_child(vbox)
+	
+	var t_lbl = Label.new()
+	t_lbl.text = title
+	t_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t_lbl.add_theme_font_size_override("font_size", 26)
+	t_lbl.add_theme_color_override("font_color", theme_color)
+	vbox.add_child(t_lbl)
+	
+	var sub_lbl = Label.new()
+	sub_lbl.text = subtitle
+	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub_lbl.add_theme_font_size_override("font_size", 16)
+	sub_lbl.add_theme_color_override("font_color", Color(0.85, 0.9, 0.95))
+	vbox.add_child(sub_lbl)
+	
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_hbox.add_theme_constant_override("separation", 16)
+	vbox.add_child(btn_hbox)
+	
+	var play_again_btn = Button.new()
+	play_again_btn.text = "🔄 Play Again (R)"
+	play_again_btn.custom_minimum_size = Vector2(160, 46)
+	play_again_btn.add_theme_font_size_override("font_size", 15)
+	_apply_btn_style(play_again_btn, Color(0.18, 0.44, 0.30), Color(0.24, 0.58, 0.40))
+	play_again_btn.pressed.connect(func():
+		_hide_game_over_banner()
+		_reset_game()
+	)
+	btn_hbox.add_child(play_again_btn)
+	
+	var close_btn = Button.new()
+	close_btn.text = "Dismiss"
+	close_btn.custom_minimum_size = Vector2(110, 46)
+	close_btn.add_theme_font_size_override("font_size", 15)
+	_apply_btn_style(close_btn, Color(0.24, 0.30, 0.40), Color(0.32, 0.40, 0.52))
+	close_btn.pressed.connect(_hide_game_over_banner)
+	btn_hbox.add_child(close_btn)
+	
+	if hud_control != null:
+		hud_control.add_child(game_over_panel)
+
+
+func _hide_game_over_banner() -> void:
+	if game_over_panel != null and is_instance_valid(game_over_panel):
+		game_over_panel.queue_free()
+		game_over_panel = null
 
 
 # ==============================================================================
@@ -980,6 +1281,7 @@ func _setup_ui() -> void:
 	score_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	score_margin.add_child(score_hbox)
 	
+	stat_columns.clear()
 	panes_cleared_lbl = _create_stat_column(score_hbox, "PANES CLEARED", "0 / 9")
 	panes_cleared_lbl.add_theme_color_override("font_color", Color(0.2, 0.9, 1.0))
 	
@@ -987,17 +1289,52 @@ func _setup_ui() -> void:
 	accuracy_lbl = _create_stat_column(score_hbox, "ACCURACY", "0.0%")
 	last_shot_lbl = _create_stat_column(score_hbox, "LAST TARGET", "None")
 	
-	# --- 2. LEFT 3x3 LIVE MATRIX HUD CARD ---
+	# --- 2. 3x3 LIVE MATRIX HUD CARD (RIGHT SIDE) ---
 	var matrix_panel = PanelContainer.new()
 	matrix_panel.custom_minimum_size = Vector2(250, 290)
-	matrix_panel.anchor_left = 0.0
+	matrix_panel.anchor_left = 1.0
+	matrix_panel.anchor_right = 1.0
 	matrix_panel.anchor_top = 0.5
 	matrix_panel.anchor_bottom = 0.5
-	matrix_panel.offset_left = 24
+	matrix_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	matrix_panel.offset_left = -274
+	matrix_panel.offset_right = -24
 	matrix_panel.offset_top = -145
 	matrix_panel.offset_bottom = 145
 	hud_control.add_child(matrix_panel)
 	matrix_panel.add_theme_stylebox_override("panel", glass_style)
+
+	# --- SHOT STATS GRID CANVAS (LEFT SIDE) ---
+	var grid_canvas_script = load("res://UI/grid_canvas.gd")
+	if grid_canvas_script != null:
+		grid_canvas = Control.new()
+		grid_canvas.name = "GridCanvas"
+		grid_canvas.set_script(grid_canvas_script)
+		grid_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hud_control.add_child(grid_canvas)
+
+	# --- STATS TOGGLE BUTTON (BOTTOM-LEFT CORNER) ---
+	stats_btn = Button.new()
+	stats_btn.name = "StatsButton"
+	stats_btn.text = ""
+	stats_btn.tooltip_text = "Toggle Stats (Show/Hide)"
+	if ResourceLoader.exists("res://assets/images/icons/stats.svg"):
+		stats_btn.icon = load("res://assets/images/icons/stats.svg")
+	stats_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stats_btn.custom_minimum_size = Vector2(56, 56)
+	_apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85))
+	stats_btn.anchor_left = 0.0
+	stats_btn.anchor_right = 0.0
+	stats_btn.anchor_top = 1.0
+	stats_btn.anchor_bottom = 1.0
+	stats_btn.offset_left = 30
+	stats_btn.offset_top = -80
+	stats_btn.offset_right = 86
+	stats_btn.offset_bottom = -24
+	stats_btn.pressed.connect(func():
+		_toggle_stats_visibility()
+	)
+	hud_control.add_child(stats_btn)
 	
 	var matrix_margin = MarginContainer.new()
 	matrix_margin.add_theme_constant_override("margin_left", 14)
@@ -1010,12 +1347,12 @@ func _setup_ui() -> void:
 	matrix_vbox.add_theme_constant_override("separation", 8)
 	matrix_margin.add_child(matrix_vbox)
 	
-	var m_title = Label.new()
-	m_title.text = "3x3 GLASS TARGETS"
-	m_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	m_title.add_theme_font_size_override("font_size", 13)
-	m_title.add_theme_color_override("font_color", Color(0.0, 0.8, 1.0))
-	matrix_vbox.add_child(m_title)
+	matrix_title_lbl = Label.new()
+	matrix_title_lbl.text = "3x3 GLASS TARGETS"
+	matrix_title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	matrix_title_lbl.add_theme_font_size_override("font_size", 16)
+	matrix_title_lbl.add_theme_color_override("font_color", Color(0.0, 0.8, 1.0))
+	matrix_vbox.add_child(matrix_title_lbl)
 	
 	# GridContainer with 3 columns for 9 buttons
 	var grid_cont = GridContainer.new()
@@ -1029,24 +1366,24 @@ func _setup_ui() -> void:
 	for i in range(9):
 		var btn = Button.new()
 		btn.text = short_names[i]
-		btn.custom_minimum_size = Vector2(68, 64)
-		btn.add_theme_font_size_override("font_size", 13)
-		_apply_matrix_btn_style(btn, false)
+		btn.custom_minimum_size = Vector2(78, 68)
+		btn.add_theme_font_size_override("font_size", 16)
+		_apply_matrix_btn_style(btn, i)
 		btn.tooltip_text = "[%d] %s (%s)" % [i + 1, PANE_NAMES[i], PANE_DESCS[i]]
 		grid_cont.add_child(btn)
 		hud_matrix_buttons.append(btn)
 		
 	# --- 3. BOTTOM CONTROLS PANEL ---
 	var ctrl_panel = PanelContainer.new()
-	ctrl_panel.custom_minimum_size = Vector2(500, 68)
+	ctrl_panel.custom_minimum_size = Vector2(780, 76)
 	ctrl_panel.anchor_left = 0.5
 	ctrl_panel.anchor_right = 0.5
 	ctrl_panel.anchor_top = 1.0
 	ctrl_panel.anchor_bottom = 1.0
-	ctrl_panel.offset_left = -250
-	ctrl_panel.offset_right = 250
-	ctrl_panel.offset_top = -88
-	ctrl_panel.offset_bottom = -20
+	ctrl_panel.offset_left = -390
+	ctrl_panel.offset_right = 390
+	ctrl_panel.offset_top = -94
+	ctrl_panel.offset_bottom = -18
 	hud_control.add_child(ctrl_panel)
 	ctrl_panel.add_theme_stylebox_override("panel", glass_style)
 	
@@ -1060,47 +1397,59 @@ func _setup_ui() -> void:
 	ctrl_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	ctrl_margin.add_child(ctrl_hbox)
 	
-	# 1. Reset Button
+	# 1. Mode Toggle Button (Standard vs Tic-Tac-Toe)
+	mode_toggle_btn = Button.new()
+	mode_toggle_btn.text = "❌⭕ Tic-Tac-Toe: OFF"
+	mode_toggle_btn.custom_minimum_size = Vector2(190, 52)
+	mode_toggle_btn.add_theme_font_size_override("font_size", 16)
+	_apply_btn_style(mode_toggle_btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
+	mode_toggle_btn.pressed.connect(_toggle_tic_tac_toe_mode)
+	ctrl_hbox.add_child(mode_toggle_btn)
+	
+	# 2. Reset Button
 	var reset_btn = Button.new()
 	reset_btn.text = "🔄 RESET (R)"
-	reset_btn.custom_minimum_size = Vector2(130, 42)
+	reset_btn.custom_minimum_size = Vector2(140, 52)
+	reset_btn.add_theme_font_size_override("font_size", 16)
 	_apply_btn_style(reset_btn, Color(0.55, 0.22, 0.15), Color(0.70, 0.30, 0.20))
 	reset_btn.pressed.connect(_reset_game)
 	ctrl_hbox.add_child(reset_btn)
 	
-	# 2. Camera Toggle Button
+	# 3. Camera Toggle Button
 	cam_toggle_btn = Button.new()
 	cam_toggle_btn.text = "🎥 Wall Cam (C)"
-	cam_toggle_btn.custom_minimum_size = Vector2(135, 42)
+	cam_toggle_btn.custom_minimum_size = Vector2(145, 52)
+	cam_toggle_btn.add_theme_font_size_override("font_size", 16)
 	_apply_btn_style(cam_toggle_btn, Color(0.18, 0.34, 0.50), Color(0.24, 0.44, 0.65))
 	cam_toggle_btn.pressed.connect(_toggle_camera_view)
 	ctrl_hbox.add_child(cam_toggle_btn)
 	
-	# 3. Music Toggle Button
+	# 4. Music Toggle Button
 	music_toggle_btn = Button.new()
 	music_toggle_btn.name = "MusicToggleButton"
 	music_toggle_btn.text = ""
 	music_toggle_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	music_toggle_btn.expand_icon = true
-	music_toggle_btn.custom_minimum_size = Vector2(42, 42)
+	music_toggle_btn.custom_minimum_size = Vector2(52, 52)
 	music_toggle_btn.pressed.connect(_toggle_music)
 	ctrl_hbox.add_child(music_toggle_btn)
 	
-	# 4. Settings Button
+	# 5. Settings Button
 	var settings_btn = Button.new()
 	settings_btn.name = "SettingsButton"
 	settings_btn.text = ""
 	settings_btn.icon = load("res://Utils/Settings/Gear.png")
 	settings_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	settings_btn.custom_minimum_size = Vector2(42, 42)
+	settings_btn.custom_minimum_size = Vector2(52, 52)
 	_apply_btn_style(settings_btn, Color(0.18, 0.34, 0.50), Color(0.24, 0.44, 0.65))
 	settings_btn.pressed.connect(_on_settings_pressed)
 	ctrl_hbox.add_child(settings_btn)
 	
-	# 5. Exit Button
+	# 6. Exit Button
 	var exit_btn = Button.new()
 	exit_btn.text = "EXIT"
-	exit_btn.custom_minimum_size = Vector2(74, 42)
+	exit_btn.custom_minimum_size = Vector2(96, 52)
+	exit_btn.add_theme_font_size_override("font_size", 16)
 	_apply_btn_style(exit_btn, Color(0.36, 0.16, 0.16), Color(0.48, 0.20, 0.20))
 	exit_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MiniGamesMenu/minigames_menu.tscn"))
 	ctrl_hbox.add_child(exit_btn)
@@ -1119,39 +1468,97 @@ func _create_stat_column(parent: HBoxContainer, title: String, default_val: Stri
 	var title_lbl = Label.new()
 	title_lbl.text = title
 	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_lbl.add_theme_font_size_override("font_size", 12)
+	title_lbl.add_theme_font_size_override("font_size", 14)
 	title_lbl.add_theme_color_override("font_color", Color(0.65, 0.7, 0.8))
 	col.add_child(title_lbl)
 	
 	var val_lbl = Label.new()
 	val_lbl.text = default_val
 	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	val_lbl.add_theme_font_size_override("font_size", 26)
+	val_lbl.add_theme_font_size_override("font_size", 24)
 	val_lbl.add_theme_color_override("font_color", Color.WHITE)
 	val_lbl.add_theme_constant_override("outline_size", 2)
 	val_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
 	col.add_child(val_lbl)
+	stat_columns.append({"title_lbl": title_lbl, "val_lbl": val_lbl})
 	return val_lbl
 
 
 func _update_hud() -> void:
-	if panes_cleared_lbl:
-		panes_cleared_lbl.text = "%d / 9" % broken_count
-	if attempts_lbl:
-		attempts_lbl.text = str(attempts_count)
-	if accuracy_lbl:
-		var acc = (float(broken_count) / float(attempts_count) * 100.0) if attempts_count > 0 else 0.0
-		accuracy_lbl.text = "%.1f%%" % acc
-	if last_shot_lbl and not last_shot_data.is_empty():
-		last_shot_lbl.text = str(last_shot_data.get("TargetHit", "None"))
+	if stat_columns.size() >= 4:
+		if tic_tac_toe_mode:
+			# Column 0: Current Turn
+			stat_columns[0]["title_lbl"].text = "CURRENT TURN"
+			if winner_symbol != "":
+				var win_name = player_x_name if winner_symbol == "X" else player_o_name
+				stat_columns[0]["val_lbl"].text = "🏆 %s (%s)" % [win_name, winner_symbol]
+				stat_columns[0]["val_lbl"].add_theme_color_override("font_color", Color(0.3, 1.0, 0.5))
+			elif is_draw:
+				stat_columns[0]["val_lbl"].text = "DRAW"
+				stat_columns[0]["val_lbl"].add_theme_color_override("font_color", Color(1.0, 0.75, 0.2))
+			elif current_turn_symbol == "X":
+				stat_columns[0]["val_lbl"].text = "%s (X)" % player_x_name
+				stat_columns[0]["val_lbl"].add_theme_color_override("font_color", Color(0.2, 0.9, 1.0))
+			else:
+				stat_columns[0]["val_lbl"].text = "%s (O)" % player_o_name
+				stat_columns[0]["val_lbl"].add_theme_color_override("font_color", Color(1.0, 0.75, 0.25))
+				
+			# Column 1: Game Status
+			stat_columns[1]["title_lbl"].text = "GAME STATUS"
+			if winner_symbol != "":
+				stat_columns[1]["val_lbl"].text = "%s WON!" % winner_symbol
+				stat_columns[1]["val_lbl"].add_theme_color_override("font_color", Color(0.3, 1.0, 0.5))
+			elif is_draw:
+				stat_columns[1]["val_lbl"].text = "CAT'S GAME"
+				stat_columns[1]["val_lbl"].add_theme_color_override("font_color", Color(1.0, 0.75, 0.2))
+			else:
+				stat_columns[1]["val_lbl"].text = "IN PLAY"
+				stat_columns[1]["val_lbl"].add_theme_color_override("font_color", Color.WHITE)
+				
+			# Column 2: Board Score
+			stat_columns[2]["title_lbl"].text = "GRID MARKS"
+			var x_cnt = board_marks.count("X")
+			var o_cnt = board_marks.count("O")
+			stat_columns[2]["val_lbl"].text = "X: %d  |  O: %d" % [x_cnt, o_cnt]
+			stat_columns[2]["val_lbl"].add_theme_color_override("font_color", Color(0.9, 0.95, 1.0))
+			
+			# Column 3: Attempts
+			stat_columns[3]["title_lbl"].text = "TOTAL SHOTS"
+			stat_columns[3]["val_lbl"].text = str(attempts_count)
+			stat_columns[3]["val_lbl"].add_theme_color_override("font_color", Color.WHITE)
+		else:
+			stat_columns[0]["title_lbl"].text = "PANES CLEARED"
+			stat_columns[0]["val_lbl"].text = "%d / 9" % broken_count
+			stat_columns[0]["val_lbl"].add_theme_color_override("font_color", Color(0.2, 0.9, 1.0))
+			
+			stat_columns[1]["title_lbl"].text = "TOTAL ATTEMPTS"
+			stat_columns[1]["val_lbl"].text = str(attempts_count)
+			stat_columns[1]["val_lbl"].add_theme_color_override("font_color", Color.WHITE)
+			
+			stat_columns[2]["title_lbl"].text = "ACCURACY"
+			var acc = (float(broken_count) / float(attempts_count) * 100.0) if attempts_count > 0 else 0.0
+			stat_columns[2]["val_lbl"].text = "%.1f%%" % acc
+			stat_columns[2]["val_lbl"].add_theme_color_override("font_color", Color.WHITE)
+			
+			stat_columns[3]["title_lbl"].text = "LAST TARGET"
+			stat_columns[3]["val_lbl"].text = str(last_shot_data.get("TargetHit", "None")) if not last_shot_data.is_empty() else "None"
+			stat_columns[3]["val_lbl"].add_theme_color_override("font_color", Color.WHITE)
+			
+	if matrix_title_lbl:
+		if tic_tac_toe_mode:
+			matrix_title_lbl.text = "❌⭕ TIC-TAC-TOE"
+			matrix_title_lbl.add_theme_color_override("font_color", Color(1.0, 0.8, 0.2))
+		else:
+			matrix_title_lbl.text = "3x3 GLASS TARGETS"
+			matrix_title_lbl.add_theme_color_override("font_color", Color(0.0, 0.8, 1.0))
 		
 	# Update 3x3 Matrix Buttons
 	for i in range(hud_matrix_buttons.size()):
-		var is_broken = panes_broken[i]
-		_apply_matrix_btn_style(hud_matrix_buttons[i], is_broken)
+		_apply_matrix_btn_style(hud_matrix_buttons[i], i)
 
 
-func _apply_matrix_btn_style(btn: Button, is_broken: bool) -> void:
+func _apply_matrix_btn_style(btn: Button, idx: int) -> void:
+	var is_broken = panes_broken[idx] if idx < panes_broken.size() else false
 	var style = StyleBoxFlat.new()
 	style.corner_radius_top_left = 6
 	style.corner_radius_top_right = 6
@@ -1162,19 +1569,48 @@ func _apply_matrix_btn_style(btn: Button, is_broken: bool) -> void:
 	style.border_width_right = 2
 	style.border_width_bottom = 2
 	
-	if is_broken:
-		style.bg_color = Color(0.12, 0.45, 0.22, 0.9)
-		style.border_color = Color(0.3, 0.9, 0.45)
-		btn.add_theme_color_override("font_color", Color(0.6, 1.0, 0.7))
-		btn.text = "💥"
+	if tic_tac_toe_mode:
+		var mark = board_marks[idx] if idx < board_marks.size() else ""
+		if winning_line.has(idx):
+			# Winning line highlight!
+			style.bg_color = Color(0.15, 0.55, 0.25, 0.95)
+			style.border_color = Color(0.35, 1.0, 0.55)
+			style.border_width_left = 3
+			style.border_width_top = 3
+			style.border_width_right = 3
+			style.border_width_bottom = 3
+			btn.add_theme_color_override("font_color", Color(1.0, 1.0, 0.6))
+			btn.text = "★ " + mark + " ★"
+		elif mark == "X":
+			style.bg_color = Color(0.08, 0.25, 0.42, 0.92)
+			style.border_color = Color(0.20, 0.85, 1.0)
+			btn.add_theme_color_override("font_color", Color(0.30, 0.90, 1.0))
+			btn.text = "X"
+		elif mark == "O":
+			style.bg_color = Color(0.38, 0.22, 0.08, 0.92)
+			style.border_color = Color(1.0, 0.75, 0.20)
+			btn.add_theme_color_override("font_color", Color(1.0, 0.82, 0.35))
+			btn.text = "O"
+		else:
+			style.bg_color = Color(0.10, 0.22, 0.35, 0.85)
+			style.border_color = Color(0.25, 0.65, 0.95, 0.6)
+			btn.add_theme_color_override("font_color", Color(0.8, 0.95, 1.0))
+			var short_names = ["1 TL", "2 TM", "3 TR", "4 ML", "5 MM", "6 MR", "7 BL", "8 BM", "9 BR"]
+			if idx >= 0 and idx < short_names.size():
+				btn.text = short_names[idx]
 	else:
-		style.bg_color = Color(0.10, 0.22, 0.35, 0.85)
-		style.border_color = Color(0.25, 0.65, 0.95, 0.6)
-		btn.add_theme_color_override("font_color", Color(0.8, 0.95, 1.0))
-		var short_names = ["1 TL", "2 TM", "3 TR", "4 ML", "5 MM", "6 MR", "7 BL", "8 BM", "9 BR"]
-		var idx = hud_matrix_buttons.find(btn)
-		if idx >= 0 and idx < short_names.size():
-			btn.text = short_names[idx]
+		if is_broken:
+			style.bg_color = Color(0.12, 0.45, 0.22, 0.9)
+			style.border_color = Color(0.3, 0.9, 0.45)
+			btn.add_theme_color_override("font_color", Color(0.6, 1.0, 0.7))
+			btn.text = "💥"
+		else:
+			style.bg_color = Color(0.10, 0.22, 0.35, 0.85)
+			style.border_color = Color(0.25, 0.65, 0.95, 0.6)
+			btn.add_theme_color_override("font_color", Color(0.8, 0.95, 1.0))
+			var short_names = ["1 TL", "2 TM", "3 TR", "4 ML", "5 MM", "6 MR", "7 BL", "8 BM", "9 BR"]
+			if idx >= 0 and idx < short_names.size():
+				btn.text = short_names[idx]
 			
 	btn.add_theme_stylebox_override("normal", style)
 	btn.add_theme_stylebox_override("hover", style)
@@ -1212,6 +1648,81 @@ func _apply_btn_style(btn: Button, norm_color: Color, hov_color: Color) -> void:
 	btn.add_theme_stylebox_override("pressed", style_hover)
 	btn.add_theme_stylebox_override("focus", style_normal)
 	btn.add_theme_color_override("font_color", Color.WHITE)
+	if btn.custom_minimum_size.y < 48:
+		btn.custom_minimum_size.y = 48
+	if not btn.has_theme_font_size_override("font_size"):
+		btn.add_theme_font_size_override("font_size", 16)
+	elif btn.get_theme_font_size("font_size") < 15:
+		btn.add_theme_font_size_override("font_size", 16)
+
+
+func _apply_circular_button_style(btn: Button, bg_color: Color) -> void:
+	var style_normal = StyleBoxFlat.new()
+	style_normal.bg_color = bg_color
+	style_normal.corner_radius_top_left = 28
+	style_normal.corner_radius_top_right = 28
+	style_normal.corner_radius_bottom_left = 28
+	style_normal.corner_radius_bottom_right = 28
+	style_normal.border_width_left = 2
+	style_normal.border_width_top = 2
+	style_normal.border_width_right = 2
+	style_normal.border_width_bottom = 2
+	style_normal.border_color = bg_color.lightened(0.25)
+	
+	var style_hover = style_normal.duplicate()
+	style_hover.bg_color = bg_color.lightened(0.15)
+	style_hover.border_color = Color(1.0, 1.0, 1.0, 0.5)
+
+	btn.add_theme_stylebox_override("normal", style_normal)
+	btn.add_theme_stylebox_override("hover", style_hover)
+	btn.add_theme_stylebox_override("pressed", style_hover)
+	btn.add_theme_stylebox_override("focus", style_normal)
+
+
+func is_stats_visible() -> bool:
+	if grid_canvas == null:
+		return true
+	var dist_panel = grid_canvas.get_node_or_null("Distance")
+	return dist_panel.visible if dist_panel != null else grid_canvas.visible
+
+
+func _toggle_stats_visibility() -> void:
+	var show_stats = not is_stats_visible()
+	if grid_canvas != null:
+		for child in grid_canvas.get_children():
+			if child.name != "ClubSelector":
+				child.visible = show_stats
+	if stats_btn != null:
+		if show_stats:
+			_apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85))
+		else:
+			_apply_circular_button_style(stats_btn, Color(0.15, 0.15, 0.15, 0.85))
+
+
+func _update_stats_display(is_final_rest: bool = true) -> void:
+	if grid_canvas == null or player == null:
+		return
+	var units = GlobalSettings.range_settings.range_units.value if has_node("/root/GlobalSettings") else PhysicsEnums.Units.IMPERIAL
+	display_data = ShotFormatter.format_ball_display(raw_ball_data, player, units, is_final_rest, display_data)
+	var is_imperial: bool = (units == PhysicsEnums.Units.IMPERIAL)
+	
+	for child in grid_canvas.get_children():
+		if child.name == "ClubSelector":
+			continue
+		var stat_id = child.name
+		var stat_def = StatDefinitions.get_stat_by_id(stat_id)
+		if stat_def.is_empty():
+			continue
+		var u_str: String = str(stat_def.get("units_imperial" if is_imperial else "units_metric", ""))
+		if child.has_method("set_units"):
+			child.call("set_units", u_str)
+		var val = display_data.get(stat_id, "---")
+		if stat_id == "VLA" or stat_id == "HLA":
+			if val != "---":
+				var float_val = float(val)
+				val = "%.1f°" % float_val
+		if child.has_method("set_data"):
+			child.call("set_data", str(val))
 
 
 func _toggle_music() -> void:

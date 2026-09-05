@@ -59,7 +59,11 @@ var draw_tab_btn: Button = null
 var fade_tab_btn: Button = null
 var target_buttons: Array[Button] = []
 var music_toggle_btn: Button = null
+var stats_btn: Button = null
+var grid_canvas: Control = null
 var _settings_layer: CanvasLayer = null
+var raw_ball_data: Dictionary = {}
+var display_data: Dictionary = {}
 
 # On-screen Target Zone Indicator HUD references
 var zone_indicator_panel: PanelContainer = null
@@ -1100,6 +1104,8 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 		TensionManager.stop_tension()
 
 	player._on_tcp_client_hit_ball(data)
+	raw_ball_data = data.duplicate()
+	_update_stats_display(false)
 
 	var speed_mph = data.get("Speed", 0.0)
 	var cur_data = target_data[selected_target_index]
@@ -1158,6 +1164,8 @@ func _physics_process(delta: float) -> void:
 # ========================================
 
 func _on_ball_rest(_shot_data: Dictionary) -> void:
+	raw_ball_data = _shot_data.duplicate()
+	_update_stats_display(true)
 	if not is_shot_in_progress or is_resetting:
 		return
 	is_resetting = true
@@ -1344,7 +1352,7 @@ func _setup_ui() -> void:
 	var att_sub = Label.new()
 	att_sub.text = "ATTEMPTS"
 	att_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	att_sub.add_theme_font_size_override("font_size", 12)
+	att_sub.add_theme_font_size_override("font_size", 14)
 	att_sub.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
 	att_col.add_child(att_sub)
 	attempts_lbl = Label.new()
@@ -1362,7 +1370,7 @@ func _setup_ui() -> void:
 	var h_sub = Label.new()
 	h_sub.text = "HITS"
 	h_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	h_sub.add_theme_font_size_override("font_size", 12)
+	h_sub.add_theme_font_size_override("font_size", 14)
 	h_sub.add_theme_color_override("font_color", Color(0.2, 0.85, 0.35))
 	hits_col.add_child(h_sub)
 	hits_lbl = Label.new()
@@ -1380,8 +1388,8 @@ func _setup_ui() -> void:
 	var acc_sub = Label.new()
 	acc_sub.text = "ACCURACY"
 	acc_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	acc_sub.add_theme_font_size_override("font_size", 12)
-	acc_sub.add_theme_color_override("font_color", Color(0.95, 0.75, 0.15))
+	acc_sub.add_theme_font_size_override("font_size", 14)
+	acc_sub.add_theme_color_override("font_color", Color(1.0, 0.85, 0.35))
 	acc_col.add_child(acc_sub)
 	accuracy_lbl = Label.new()
 	accuracy_lbl.text = "0%"
@@ -1398,7 +1406,7 @@ func _setup_ui() -> void:
 	var tot_sub = Label.new()
 	tot_sub.text = "TOTAL HITS"
 	tot_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	tot_sub.add_theme_font_size_override("font_size", 12)
+	tot_sub.add_theme_font_size_override("font_size", 14)
 	tot_sub.add_theme_color_override("font_color", Color(0.6, 0.85, 1.0))
 	tot_col.add_child(tot_sub)
 	total_hits_lbl = Label.new()
@@ -1410,39 +1418,28 @@ func _setup_ui() -> void:
 	
 	# --- 1b. ON-SCREEN TARGET ZONE INDICATOR PANEL ---
 	zone_indicator_panel = PanelContainer.new()
-	zone_indicator_panel.custom_minimum_size = Vector2(840, 84)
+	zone_indicator_panel.custom_minimum_size = Vector2(860, 80)
 	zone_indicator_panel.anchor_left = 0.5
 	zone_indicator_panel.anchor_right = 0.5
 	zone_indicator_panel.anchor_top = 0.0
 	zone_indicator_panel.anchor_bottom = 0.0
 	zone_indicator_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	zone_indicator_panel.offset_left = -420
-	zone_indicator_panel.offset_right = 420
+	zone_indicator_panel.offset_left = -430
+	zone_indicator_panel.offset_right = 430
 	zone_indicator_panel.offset_top = 118
-	zone_indicator_panel.offset_bottom = 202
-	
-	var zone_glass = StyleBoxFlat.new()
-	zone_glass.bg_color = Color(0.02, 0.06, 0.10, 0.92)
-	zone_glass.border_width_left = 2
-	zone_glass.border_width_top = 2
-	zone_glass.border_width_right = 2
-	zone_glass.border_width_bottom = 2
-	zone_glass.border_color = Color(0.15, 0.75, 1.0, 0.8)
-	zone_glass.corner_radius_top_left = 8
-	zone_glass.corner_radius_top_right = 8
-	zone_glass.corner_radius_bottom_right = 8
-	zone_glass.corner_radius_bottom_left = 8
-	zone_indicator_panel.add_theme_stylebox_override("panel", zone_glass)
+	zone_indicator_panel.offset_bottom = 200
 	hud_control.add_child(zone_indicator_panel)
+	zone_indicator_panel.add_theme_stylebox_override("panel", glass_style)
 	
 	var zone_margin = MarginContainer.new()
 	zone_margin.add_theme_constant_override("margin_left", 16)
 	zone_margin.add_theme_constant_override("margin_right", 16)
-	zone_margin.add_theme_constant_override("margin_top", 6)
-	zone_margin.add_theme_constant_override("margin_bottom", 6)
+	zone_margin.add_theme_constant_override("margin_top", 8)
+	zone_margin.add_theme_constant_override("margin_bottom", 8)
 	zone_indicator_panel.add_child(zone_margin)
 	
 	var zone_vbox = VBoxContainer.new()
+	zone_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	zone_vbox.add_theme_constant_override("separation", 3)
 	zone_margin.add_child(zone_vbox)
 	
@@ -1452,7 +1449,7 @@ func _setup_ui() -> void:
 	
 	zone_target_lbl = Label.new()
 	zone_target_lbl.text = "🎯 TARGET ZONE: 150 YD DRAW"
-	zone_target_lbl.add_theme_font_size_override("font_size", 15)
+	zone_target_lbl.add_theme_font_size_override("font_size", 16)
 	zone_target_lbl.add_theme_color_override("font_color", Color(0.15, 0.85, 1.0))
 	zone_top_hbox.add_child(zone_target_lbl)
 	
@@ -1464,36 +1461,71 @@ func _setup_ui() -> void:
 	
 	zone_bounds_lbl = Label.new()
 	zone_bounds_lbl.text = "📍 HIT ZONE: 125-175 YD WALLS (≥10 FT IN FROM CLEARWAY)"
-	zone_bounds_lbl.add_theme_font_size_override("font_size", 15)
-	zone_bounds_lbl.add_theme_color_override("font_color", Color(1.0, 0.92, 0.35))
+	zone_bounds_lbl.add_theme_font_size_override("font_size", 16)
+	zone_bounds_lbl.add_theme_color_override("font_color", Color(0.96, 0.98, 1.0))
 	zone_top_hbox.add_child(zone_bounds_lbl)
 	
 	zone_lane_graphic_lbl = Label.new()
 	zone_lane_graphic_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	zone_lane_graphic_lbl.text = "[ 🚧 WALL 125 YD ]   ━━━ ↺ HOOK LEFT (≥10 FT IN) ━━━▶   [ 🎯 150 YD ZONE ]   ◀━━━   [ 🚧 WALL 175 YD ]"
-	zone_lane_graphic_lbl.add_theme_font_size_override("font_size", 13)
+	zone_lane_graphic_lbl.add_theme_font_size_override("font_size", 14)
 	zone_lane_graphic_lbl.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0))
 	zone_vbox.add_child(zone_lane_graphic_lbl)
 	
 	zone_instruction_lbl = Label.new()
 	zone_instruction_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	zone_instruction_lbl.text = "Launch through center gate, shape LEFT ≥10 ft past wall start between the 125 & 175 YD walls!"
-	zone_instruction_lbl.add_theme_font_size_override("font_size", 12)
+	zone_instruction_lbl.add_theme_font_size_override("font_size", 14)
 	zone_instruction_lbl.add_theme_color_override("font_color", Color(0.65, 0.8, 0.95))
 	zone_vbox.add_child(zone_instruction_lbl)
 	
-	# --- 2. LEFT TARGET SELECTOR PANEL ---
+	# --- 2. TARGET SELECTOR PANEL (RIGHT SIDE) ---
 	var sel_panel = PanelContainer.new()
-	sel_panel.custom_minimum_size = Vector2(230, 440)
-	sel_panel.anchor_left = 0.0
+	sel_panel.custom_minimum_size = Vector2(250, 480)
+	sel_panel.anchor_left = 1.0
+	sel_panel.anchor_right = 1.0
 	sel_panel.anchor_top = 0.5
 	sel_panel.anchor_bottom = 0.5
+	sel_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	sel_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
-	sel_panel.offset_left = 24
-	sel_panel.offset_top = -220
-	sel_panel.offset_bottom = 220
+	sel_panel.offset_left = -270
+	sel_panel.offset_right = -20
+	sel_panel.offset_top = -240
+	sel_panel.offset_bottom = 240
 	sel_panel.add_theme_stylebox_override("panel", glass_style)
 	hud_control.add_child(sel_panel)
+
+	# --- SHOT STATS GRID CANVAS (LEFT SIDE) ---
+	var grid_canvas_script = load("res://UI/grid_canvas.gd")
+	if grid_canvas_script != null:
+		grid_canvas = Control.new()
+		grid_canvas.name = "GridCanvas"
+		grid_canvas.set_script(grid_canvas_script)
+		grid_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hud_control.add_child(grid_canvas)
+
+	# --- STATS TOGGLE BUTTON (BOTTOM-LEFT CORNER) ---
+	stats_btn = Button.new()
+	stats_btn.name = "StatsButton"
+	stats_btn.text = ""
+	stats_btn.tooltip_text = "Toggle Stats (Show/Hide)"
+	if ResourceLoader.exists("res://assets/images/icons/stats.svg"):
+		stats_btn.icon = load("res://assets/images/icons/stats.svg")
+	stats_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stats_btn.custom_minimum_size = Vector2(64, 64)
+	_apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85))
+	stats_btn.anchor_left = 0.0
+	stats_btn.anchor_right = 0.0
+	stats_btn.anchor_top = 1.0
+	stats_btn.anchor_bottom = 1.0
+	stats_btn.offset_left = 30
+	stats_btn.offset_top = -88
+	stats_btn.offset_right = 94
+	stats_btn.offset_bottom = -24
+	stats_btn.pressed.connect(func():
+		_toggle_stats_visibility()
+	)
+	hud_control.add_child(stats_btn)
 	
 	var sel_margin = MarginContainer.new()
 	sel_margin.add_theme_constant_override("margin_left", 14)
@@ -1509,7 +1541,7 @@ func _setup_ui() -> void:
 	var sel_title = Label.new()
 	sel_title.text = "🎯 SHAPE TARGET"
 	sel_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sel_title.add_theme_font_size_override("font_size", 14)
+	sel_title.add_theme_font_size_override("font_size", 16)
 	sel_title.add_theme_color_override("font_color", Color(0.0, 0.85, 1.0))
 	sel_vbox.add_child(sel_title)
 	
@@ -1521,14 +1553,16 @@ func _setup_ui() -> void:
 	draw_tab_btn = Button.new()
 	draw_tab_btn.text = "DRAW ↺"
 	draw_tab_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	draw_tab_btn.custom_minimum_size = Vector2(0, 32)
+	draw_tab_btn.custom_minimum_size = Vector2(0, 50)
+	draw_tab_btn.add_theme_font_size_override("font_size", 16)
 	draw_tab_btn.pressed.connect(func(): _switch_side("draw"))
 	tabs_hbox.add_child(draw_tab_btn)
 	
 	fade_tab_btn = Button.new()
 	fade_tab_btn.text = "FADE ↻"
 	fade_tab_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	fade_tab_btn.custom_minimum_size = Vector2(0, 32)
+	fade_tab_btn.custom_minimum_size = Vector2(0, 50)
+	fade_tab_btn.add_theme_font_size_override("font_size", 16)
 	fade_tab_btn.pressed.connect(func(): _switch_side("fade"))
 	tabs_hbox.add_child(fade_tab_btn)
 	
@@ -1536,8 +1570,8 @@ func _setup_ui() -> void:
 	target_buttons.clear()
 	for i in range(target_distances_yards.size()):
 		var btn = Button.new()
-		btn.custom_minimum_size = Vector2(0, 38)
-		btn.add_theme_font_size_override("font_size", 13)
+		btn.custom_minimum_size = Vector2(0, 50)
+		btn.add_theme_font_size_override("font_size", 16)
 		btn.pressed.connect(func(dist_i = i):
 			var idx = dist_i if selected_side == "draw" else (6 + dist_i)
 			_select_target(idx)
@@ -1549,8 +1583,8 @@ func _setup_ui() -> void:
 	var tip_lbl = Label.new()
 	tip_lbl.text = "Tab: Switch Side | 1-6: Distance"
 	tip_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	tip_lbl.add_theme_font_size_override("font_size", 11)
-	tip_lbl.add_theme_color_override("font_color", Color(0.6, 0.65, 0.7))
+	tip_lbl.add_theme_font_size_override("font_size", 13)
+	tip_lbl.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
 	sel_vbox.add_child(tip_lbl)
 	
 	# --- 3. DYNAMIC BANNER ---
@@ -1567,24 +1601,24 @@ func _setup_ui() -> void:
 	banner_lbl.offset_top = 210
 	banner_lbl.offset_bottom = 244
 	banner_lbl.add_theme_font_size_override("font_size", 18)
-	banner_lbl.add_theme_color_override("font_color", Color(1, 1, 0.5, 1.0))
-	banner_lbl.add_theme_constant_override("outline_size", 4)
-	banner_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	banner_lbl.add_theme_color_override("font_color", Color(0.96, 0.98, 1.0, 1.0))
+	banner_lbl.add_theme_constant_override("outline_size", 5)
+	banner_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.95))
 	hud_control.add_child(banner_lbl)
 	
 	# --- 4. BOTTOM CONTROLS PANEL ---
 	var ctrl_panel = PanelContainer.new()
-	ctrl_panel.custom_minimum_size = Vector2(360, 68)
+	ctrl_panel.custom_minimum_size = Vector2(420, 76)
 	ctrl_panel.anchor_left = 0.5
 	ctrl_panel.anchor_right = 0.5
 	ctrl_panel.anchor_top = 1.0
 	ctrl_panel.anchor_bottom = 1.0
 	ctrl_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	ctrl_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	ctrl_panel.offset_left = -180
-	ctrl_panel.offset_right = 180
-	ctrl_panel.offset_top = -88
-	ctrl_panel.offset_bottom = -20
+	ctrl_panel.offset_left = -210
+	ctrl_panel.offset_right = 210
+	ctrl_panel.offset_top = -94
+	ctrl_panel.offset_bottom = -18
 	ctrl_panel.add_theme_stylebox_override("panel", glass_style)
 	hud_control.add_child(ctrl_panel)
 	
@@ -1600,7 +1634,7 @@ func _setup_ui() -> void:
 	
 	var reset_btn = Button.new()
 	reset_btn.text = "RESET (R)"
-	reset_btn.custom_minimum_size = Vector2(100, 42)
+	reset_btn.custom_minimum_size = Vector2(120, 52)
 	_apply_btn_style(reset_btn, Color(0.48, 0.28, 0.18), Color(0.32, 0.18, 0.12))
 	reset_btn.pressed.connect(_reset_ball_position)
 	ctrl_hbox.add_child(reset_btn)
@@ -1610,7 +1644,7 @@ func _setup_ui() -> void:
 	music_toggle_btn.text = ""
 	music_toggle_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	music_toggle_btn.expand_icon = true
-	music_toggle_btn.custom_minimum_size = Vector2(42, 42)
+	music_toggle_btn.custom_minimum_size = Vector2(52, 52)
 	music_toggle_btn.pressed.connect(_toggle_music)
 	ctrl_hbox.add_child(music_toggle_btn)
 	
@@ -1619,14 +1653,14 @@ func _setup_ui() -> void:
 	settings_btn.text = ""
 	settings_btn.icon = load("res://Utils/Settings/Gear.png")
 	settings_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	settings_btn.custom_minimum_size = Vector2(42, 42)
+	settings_btn.custom_minimum_size = Vector2(52, 52)
 	_apply_btn_style(settings_btn, Color(0.18, 0.34, 0.50), Color(0.24, 0.44, 0.65))
 	settings_btn.pressed.connect(_on_settings_pressed)
 	ctrl_hbox.add_child(settings_btn)
 	
 	var exit_btn = Button.new()
 	exit_btn.text = "EXIT"
-	exit_btn.custom_minimum_size = Vector2(80, 42)
+	exit_btn.custom_minimum_size = Vector2(96, 52)
 	_apply_btn_style(exit_btn, Color(0.36, 0.16, 0.16), Color(0.24, 0.12, 0.12))
 	exit_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MiniGamesMenu/minigames_menu.tscn"))
 	ctrl_hbox.add_child(exit_btn)
@@ -1776,6 +1810,75 @@ func _apply_btn_style(btn: Button, norm_color: Color, hov_color: Color) -> void:
 	btn.add_theme_stylebox_override("pressed", style_hov)
 	btn.add_theme_stylebox_override("focus", style_norm)
 	btn.add_theme_color_override("font_color", Color.WHITE)
+	if btn.custom_minimum_size.y < 48:
+		btn.custom_minimum_size.y = 48
+	if not btn.has_theme_font_size_override("font_size"):
+		btn.add_theme_font_size_override("font_size", 16)
+
+func _apply_circular_button_style(btn: Button, bg_color: Color) -> void:
+	var style_normal = StyleBoxFlat.new()
+	style_normal.bg_color = bg_color
+	style_normal.corner_radius_top_left = 32
+	style_normal.corner_radius_top_right = 32
+	style_normal.corner_radius_bottom_left = 32
+	style_normal.corner_radius_bottom_right = 32
+	style_normal.border_width_left = 2
+	style_normal.border_width_top = 2
+	style_normal.border_width_right = 2
+	style_normal.border_width_bottom = 2
+	style_normal.border_color = bg_color.lightened(0.25)
+	
+	var style_hover = style_normal.duplicate()
+	style_hover.bg_color = bg_color.lightened(0.15)
+	style_hover.border_color = Color(1.0, 1.0, 1.0, 0.5)
+
+	btn.add_theme_stylebox_override("normal", style_normal)
+	btn.add_theme_stylebox_override("hover", style_hover)
+	btn.add_theme_stylebox_override("pressed", style_hover)
+	btn.add_theme_stylebox_override("focus", style_normal)
+
+func is_stats_visible() -> bool:
+	if grid_canvas == null:
+		return true
+	var dist_panel = grid_canvas.get_node_or_null("Distance")
+	return dist_panel.visible if dist_panel != null else grid_canvas.visible
+
+func _toggle_stats_visibility() -> void:
+	var show_stats = not is_stats_visible()
+	if grid_canvas != null:
+		for child in grid_canvas.get_children():
+			if child.name != "ClubSelector":
+				child.visible = show_stats
+	if stats_btn != null:
+		if show_stats:
+			_apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85))
+		else:
+			_apply_circular_button_style(stats_btn, Color(0.15, 0.15, 0.15, 0.85))
+
+func _update_stats_display(is_final_rest: bool = true) -> void:
+	if grid_canvas == null or player == null:
+		return
+	var units = GlobalSettings.range_settings.range_units.value if has_node("/root/GlobalSettings") else PhysicsEnums.Units.IMPERIAL
+	display_data = ShotFormatter.format_ball_display(raw_ball_data, player, units, is_final_rest, display_data)
+	var is_imperial: bool = (units == PhysicsEnums.Units.IMPERIAL)
+	
+	for child in grid_canvas.get_children():
+		if child.name == "ClubSelector":
+			continue
+		var stat_id = child.name
+		var stat_def = StatDefinitions.get_stat_by_id(stat_id)
+		if stat_def.is_empty():
+			continue
+		var u_str: String = str(stat_def.get("units_imperial" if is_imperial else "units_metric", ""))
+		if child.has_method("set_units"):
+			child.call("set_units", u_str)
+		var val = display_data.get(stat_id, "---")
+		if stat_id == "VLA" or stat_id == "HLA":
+			if val != "---":
+				var float_val = float(val)
+				val = "%.1f°" % float_val
+		if child.has_method("set_data"):
+			child.call("set_data", str(val))
 
 # ========================================
 # SETTINGS MODAL

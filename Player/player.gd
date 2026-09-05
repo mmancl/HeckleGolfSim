@@ -3,7 +3,7 @@ extends Node3D
 var track_points : bool = false
 # TODO: move trail stuff into trail script
 var trail_timer : float = 0.0
-var trail_resolution : float = 0.1
+var trail_resolution : float = 0.033
 var apex := 0.0
 var carry := 0.0
 var side_distance := 0.0
@@ -143,12 +143,14 @@ func _process(_delta: float) -> void:
 		track_points = false
 		create_new_tracer()
 		print("[player.gd] Hitting ball manually! ball.aim_yaw_offset_deg = ", ball.aim_yaw_offset_deg)
-		ball.call_deferred("hit")
+		ball.hit()
 		if current_tracer != null:
 			current_tracer.add_point(ball.position)
 		track_points = true
 		trail_timer = 0.0
 		emit_signal("manual_hit")
+		if has_node("/root/LaunchMonitorManager"):
+			get_node("/root/LaunchMonitorManager").call("notify_shot_started")
 	if Input.is_action_just_pressed("reset"):
 		ball.call_deferred("reset")
 		apex = 0.0
@@ -156,25 +158,30 @@ func _process(_delta: float) -> void:
 		side_distance = 0.0
 		track_points = false
 		clear_tracers()
+		if has_node("/root/LaunchMonitorManager"):
+			get_node("/root/LaunchMonitorManager").call("notify_ball_at_rest")
 
 
 func _physics_process(delta: float) -> void:
-	if track_points and current_tracer != null:
-		apex = max(apex, ball.position.y)
-		side_distance = ball.position.z
+	if track_points and ball != null:
+		var current_height = maxf(0.0, ball.global_position.y - ball.shot_start_pos_global.y)
+		apex = maxf(apex, current_height)
+		side_distance = ball.get_side_distance_meters()
 		if ball.state == PhysicsEnums.BallState.FLIGHT:
-			carry = ball.get_downrange_yards() / 1.09361  # Convert yards back to meters for consistency
-		trail_timer += delta
-		if trail_timer >= trail_resolution:
-			current_tracer.add_point(ball.position)
-			trail_timer = 0.0
+			carry = ball.get_downrange_meters()
+		if current_tracer != null:
+			trail_timer += delta
+			if trail_timer >= trail_resolution:
+				current_tracer.add_point(ball.position)
+				trail_timer = 0.0
 
-func get_distance() -> int:
+func get_distance() -> float:
 	# Returns the downrange distance in meters
-	return int(ball.get_downrange_yards() / 1.09361)
+	return ball.get_downrange_meters() if ball != null else 0.0
 	
-func get_side_distance() -> int:
-	return int(ball.position.z)
+func get_side_distance() -> float:
+	# Returns the lateral deviation (offline) in meters
+	return ball.get_side_distance_meters() if ball != null else 0.0
 
 func validate_data(data: Dictionary) -> bool:
 	# TODO: implement data validation
@@ -191,6 +198,8 @@ func reset_ball():
 	carry = 0.0
 	side_distance = 0.0
 	reset_shot_data()
+	if has_node("/root/LaunchMonitorManager"):
+		get_node("/root/LaunchMonitorManager").call("notify_ball_at_rest")
 		
 
 func reset_shot_data() -> void:
@@ -199,6 +208,8 @@ func reset_shot_data() -> void:
 
 func _on_ball_rest() -> void:
 	track_points = false
+	if has_node("/root/LaunchMonitorManager"):
+		get_node("/root/LaunchMonitorManager").call("notify_ball_at_rest")
 	
 	# If we are in a dynamic course play scene, save the ball's resting position as its new spawn_position!
 	var parent_scene = get_parent()
@@ -209,10 +220,10 @@ func _on_ball_rest() -> void:
 				ball.spawn_position = ball.global_position
 				print("[player.gd] Dynamic course detected. Updated ball.spawn_position to: ", ball.spawn_position)
 
-	shot_data["TotalDistance"] = int(ball.get_downrange_yards() / 1.09361)  # Downrange distance in meters
-	shot_data["CarryDistance"] = int(carry)
-	shot_data["Apex"] = int(apex)
-	shot_data["SideDistance"] = int(side_distance)
+	shot_data["TotalDistance"] = ball.get_downrange_meters() if ball != null else 0.0  # Downrange distance in meters
+	shot_data["CarryDistance"] = carry
+	shot_data["Apex"] = apex
+	shot_data["SideDistance"] = side_distance
 	emit_signal("rest", shot_data)
 	
 	clear_tracers()
@@ -255,11 +266,13 @@ func _on_tcp_client_hit_ball(data: Dictionary) -> void:
 	side_distance = 0.0
 	create_new_tracer()
 	print("[player.gd] Hitting ball from TCP! ball.aim_yaw_offset_deg = ", ball.aim_yaw_offset_deg)
-	ball.call_deferred("hit_from_data", data)
+	ball.hit_from_data(data)
 	if current_tracer != null:
-		current_tracer.add_point(Vector3(0.0, 0.05, 0.0))
+		current_tracer.add_point(ball.position)
 	track_points = true
 	trail_timer = 0.0
+	if has_node("/root/LaunchMonitorManager"):
+		get_node("/root/LaunchMonitorManager").call("notify_shot_started")
 
 
 func _on_range_ui_hit_shot(data: Variant) -> void:
@@ -288,11 +301,13 @@ func _on_range_ui_hit_shot(data: Variant) -> void:
 	carry = 0.0
 	side_distance = 0.0
 	create_new_tracer()
-	ball.call_deferred("hit_from_data", data)
+	ball.hit_from_data(data)
 	if current_tracer != null:
-		current_tracer.add_point(Vector3(0.0, 0.05, 0.0))
+		current_tracer.add_point(ball.position)
 	track_points = true
 	trail_timer = 0.0
+	if has_node("/root/LaunchMonitorManager"):
+		get_node("/root/LaunchMonitorManager").call("notify_shot_started")
 	
 
 func _on_range_ui_set_env(data: Variant) -> void:
@@ -330,10 +345,11 @@ func skip_to_rest() -> void:
 		
 		# Run player tracking step
 		if track_points and current_tracer != null:
-			apex = max(apex, ball.position.y)
-			side_distance = ball.position.z
+			var current_height = maxf(0.0, ball.global_position.y - ball.shot_start_pos_global.y)
+			apex = maxf(apex, current_height)
+			side_distance = ball.get_side_distance_meters()
 			if ball.state == PhysicsEnums.BallState.FLIGHT:
-				carry = ball.get_downrange_yards() / 1.09361
+				carry = ball.get_downrange_meters()
 			trail_timer += step_delta
 			if trail_timer >= trail_resolution:
 				current_tracer.add_point(ball.position)

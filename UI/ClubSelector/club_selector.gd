@@ -54,7 +54,7 @@ func _input(event: InputEvent) -> void:
 func _create_club_display_button() -> void:
 	club_button = Button.new()
 	club_button.text = "🏌 Club: " + clubs[0]
-	club_button.custom_minimum_size = Vector2(232, 48)
+	club_button.custom_minimum_size = Vector2(256, 56)
 	club_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	club_button.theme = _create_display_button_theme()
 	club_button.pressed.connect(_on_display_button_pressed)
@@ -68,7 +68,7 @@ func _create_club_buttons() -> void:
 	for i in range(clubs.size()):
 		var button = Button.new()
 		button.text = clubs[i]
-		button.custom_minimum_size = Vector2(52, 52)
+		button.custom_minimum_size = Vector2(58, 58)
 		button.theme = button_theme
 		button.pressed.connect(_on_club_button_pressed.bindv([button]))
 		grid_container.add_child(button)
@@ -76,7 +76,7 @@ func _create_club_buttons() -> void:
 
 func _create_club_button_theme() -> Theme:
 	var button_theme = Theme.new()
-	button_theme.set_font_size("font_size", "Button", 16)
+	button_theme.set_font_size("font_size", "Button", 18)
 
 	var normal_style = _create_button_style(BUTTON_BG_NORMAL)
 	button_theme.set_stylebox("normal", "Button", normal_style)
@@ -132,7 +132,7 @@ func _toggle_grid_visibility() -> void:
 	grid_container.visible = not grid_container.visible
 	var wrapper = get_node_or_null("MarginContainer/VBoxContainer/DropdownWrapper")
 	if wrapper != null:
-		wrapper.custom_minimum_size.y = 300 if grid_container.visible else 0
+		wrapper.custom_minimum_size.y = 330 if grid_container.visible else 0
 
 
 func _on_display_button_pressed() -> void:

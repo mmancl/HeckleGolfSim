@@ -227,7 +227,7 @@ func _on_scan_pressed() -> void:
 		_launch_monitor.start_scan()
 		scan_button.text = "🔄 Scanning..."
 		status_label.text = "Status: Scanning for devices..."
-		status_label.add_theme_color_override("font_color", Color(0.95, 0.8, 0.3))
+		status_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
 
 
 func _on_connect_pressed() -> void:
@@ -302,7 +302,7 @@ func _update_status_display() -> void:
 			continue_button.text = "Continue to Main Menu ➔"
 		"Scanning":
 			status_label.text = "Status: Scanning for devices..."
-			status_label.add_theme_color_override("font_color", Color(0.95, 0.8, 0.3))
+			status_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
 			scan_button.text = "🔄 Scanning..."
 		"Connecting":
 			status_label.text = "Status: Connecting..."
@@ -313,7 +313,7 @@ func _update_status_display() -> void:
 			continue_button.text = "Continue to Main Menu"
 		_:
 			status_label.text = "Status: %s" % current_status
-			status_label.add_theme_color_override("font_color", Color(0.95, 0.5, 0.5))
+			status_label.add_theme_color_override("font_color", Color(1.0, 0.42, 0.42))
 
 	if battery_label != null:
 		if int(_launch_monitor.battery_level) >= 0:
@@ -335,7 +335,7 @@ func _on_status_changed(_status: String) -> void:
 func _on_error_occurred(message: String) -> void:
 	if status_label != null:
 		status_label.text = "Status: %s" % message
-		status_label.add_theme_color_override("font_color", Color(0.95, 0.5, 0.5))
+		status_label.add_theme_color_override("font_color", Color(1.0, 0.42, 0.42))
 
 
 func _on_battery_changed(_level: int) -> void:

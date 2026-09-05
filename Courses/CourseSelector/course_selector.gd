@@ -60,8 +60,8 @@ func _ready() -> void:
 		
 		var dl_btn = Button.new()
 		dl_btn.text = "Search & Download Course"
-		dl_btn.custom_minimum_size = Vector2(260, 42)
-		dl_btn.add_theme_font_size_override("font_size", 16)
+		dl_btn.custom_minimum_size = Vector2(280, 56)
+		dl_btn.add_theme_font_size_override("font_size", 20)
 		ThemeManager.apply_secondary_button_style(dl_btn)
 		download_hbox.add_child(dl_btn)
 		
@@ -77,8 +77,8 @@ func _ready() -> void:
 		
 		var delete_btn = Button.new()
 		delete_btn.text = "Delete Selected Course"
-		delete_btn.custom_minimum_size = Vector2(220, 42)
-		delete_btn.add_theme_font_size_override("font_size", 16)
+		delete_btn.custom_minimum_size = Vector2(240, 56)
+		delete_btn.add_theme_font_size_override("font_size", 20)
 		ThemeManager.apply_danger_button_style(delete_btn)
 		download_hbox.add_child(delete_btn)
 		delete_btn.pressed.connect(_on_delete_course_pressed)
@@ -99,16 +99,16 @@ func _ready() -> void:
 		
 		_preview_button = Button.new()
 		_preview_button.text = "Preview Course"
-		_preview_button.custom_minimum_size = Vector2(200, 46)
-		_preview_button.add_theme_font_size_override("font_size", 18)
+		_preview_button.custom_minimum_size = Vector2(240, 60)
+		_preview_button.add_theme_font_size_override("font_size", 22)
 		ThemeManager.apply_secondary_button_style(_preview_button)
 		_preview_button.disabled = true
 		_preview_button.pressed.connect(_on_preview_pressed)
 		
 		_play_button = Button.new()
 		_play_button.text = "Play Course"
-		_play_button.custom_minimum_size = Vector2(200, 46)
-		_play_button.add_theme_font_size_override("font_size", 18)
+		_play_button.custom_minimum_size = Vector2(240, 60)
+		_play_button.add_theme_font_size_override("font_size", 22)
 		ThemeManager.apply_primary_button_style(_play_button)
 		_play_button.disabled = true
 		_play_button.pressed.connect(_on_play_pressed)
