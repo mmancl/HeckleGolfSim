@@ -40,6 +40,7 @@ var hole_data = [
 	{"dist_ft": 50, "angle_deg": 50.0, "desc": "Long Distance Lag"},
 ]
 var holes = []
+var cup_radius: float = 0.108
 var hole_buttons = []
 var shot_counter: int = 0
 
@@ -55,6 +56,10 @@ var grid_toggle_btn = null
 var music_toggle_btn = null
 var stats_btn = null
 var mode_toggle_btn: Button = null
+var green_speed_btn: Button = null
+var green_speed_popup: PanelContainer = null
+var green_speed_slider: HSlider = null
+var green_speed_val_lbl: Label = null
 var game_over_panel: PanelContainer = null
 var grid_canvas = null
 var hud_layer: CanvasLayer = null
@@ -81,6 +86,7 @@ const P2_COLOR = Color(1.0, 0.75, 0.25) # Radiant Amber/Gold
 
 func _ready() -> void:
 	name = "PuttingPractice"
+	GlobalSettings.is_putting_minigame = true
 	_init_player_names()
 	
 	sfx_applause_player = AudioStreamPlayer.new()
@@ -137,6 +143,10 @@ func _ready() -> void:
 	if tcp_server != null and tcp_server.has_signal("HitBall"):
 		if not tcp_server.HitBall.is_connected(_on_launch_monitor_hit_ball):
 			tcp_server.HitBall.connect(_on_launch_monitor_hit_ball)
+
+
+func _exit_tree() -> void:
+	GlobalSettings.is_putting_minigame = false
 
 
 func _init_player_names() -> void:
@@ -267,9 +277,8 @@ func _setup_environment() -> void:
 # ----------------- PROCEDURAL TERRAIN -----------------
 
 func get_height(x: float, z: float) -> float:
-	var z_clamped = clamp(z, green_min_z, green_max_z)
-	var base_slope = - (z_clamped / 15.24) * 0.15
-	var undulation = 0.035 * sin(x * 0.35) + 0.03 * cos(z * 0.28 + 0.6) + 0.015 * sin(x * 0.22 - z * 0.25)
+	var base_slope = 0.0
+	var undulation = 0.025 * sin(x * 0.28) + 0.020 * sin(z * 0.22) + 0.010 * sin(x * 0.18 - z * 0.18)
 	var dist_from_center = Vector2(x, z).length()
 	var outer_mound = 0.0
 	if dist_from_center > 21.0:
@@ -920,6 +929,8 @@ func _setup_player() -> void:
 	
 	# Initialize spawn position
 	player.ball.spawn_position = start_pos
+	player.ball.lie_type = "green"
+	player.ball.set_surface(PhysicsEnums.SurfaceType.GREEN)
 	player.ball.reset()
 
 # ----------------- TARGET HOLES -----------------
@@ -1180,7 +1191,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.keycode == KEY_H or event.keycode == KEY_SPACE:
 			if player and player.ball and player.ball.state == PhysicsEnums.BallState.REST:
 				var target_dist_ft = hole_data[selected_hole_index]["dist_ft"]
-				var sim_speed = sqrt(target_dist_ft) * 1.063
+				var cur_speed = GlobalSettings.get_effective_green_speed()
+				var speed_factor = 1.0634 * pow(10.0 / cur_speed, 0.35)
+				var sim_speed = sqrt(target_dist_ft) * speed_factor
 				var test_data = {
 					"Speed": sim_speed,
 					"VLA": 0.0,
@@ -1269,9 +1282,12 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 	var end_dist_meters = final_pos.distance_to(target_hole)
 	var end_dist_meters_2d = Vector2(final_pos.x, final_pos.z).distance_to(Vector2(target_hole.x, target_hole.z))
 	
-	# Made into hole check (cup lip / 2D radius or < 0.06m or cup drop)
+	# Made into hole check (cup lip / 2D radius <= cup_radius or cup drop)
 	var made = false
-	if end_dist_meters < 0.06 or end_dist_meters_2d < 0.07 or (player.ball and player.ball.is_falling_in_hole):
+	var ball_holed = false
+	if player.ball != null:
+		ball_holed = bool(player.ball.get("is_falling_in_hole")) or bool(player.ball.get("holed_out_this_shot"))
+	if ball_holed or end_dist_meters <= cup_radius or end_dist_meters_2d <= cup_radius:
 		made = true
 
 	if pvp_mode:
@@ -1496,15 +1512,15 @@ func _setup_ui() -> void:
 	
 	# --- BOTTOM CONTROLS PANEL ---
 	var ctrl_panel = PanelContainer.new()
-	ctrl_panel.custom_minimum_size = Vector2(660, 76)
+	ctrl_panel.custom_minimum_size = Vector2(850, 76)
 	ctrl_panel.anchor_left = 0.5
 	ctrl_panel.anchor_right = 0.5
 	ctrl_panel.anchor_top = 1.0
 	ctrl_panel.anchor_bottom = 1.0
 	ctrl_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	ctrl_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	ctrl_panel.offset_left = -330
-	ctrl_panel.offset_right = 330
+	ctrl_panel.offset_left = -425
+	ctrl_panel.offset_right = 425
 	ctrl_panel.offset_top = -94
 	ctrl_panel.offset_bottom = -18
 	hud_control.add_child(ctrl_panel)
@@ -1553,7 +1569,17 @@ func _setup_ui() -> void:
 	)
 	ctrl_hbox.add_child(reset_btn)
 
-	# 3. Music Toggle Button
+	# 3. Green Speed Button
+	green_speed_btn = Button.new()
+	green_speed_btn.name = "GreenSpeedButton"
+	green_speed_btn.custom_minimum_size = Vector2(150, 52)
+	green_speed_btn.add_theme_font_size_override("font_size", 15)
+	_apply_btn_style(green_speed_btn, Color(0.18, 0.35, 0.25), Color(0.24, 0.48, 0.35))
+	_update_green_speed_button_label()
+	green_speed_btn.pressed.connect(_toggle_green_speed_popup)
+	ctrl_hbox.add_child(green_speed_btn)
+
+	# 4. Music Toggle Button
 	music_toggle_btn = Button.new()
 	music_toggle_btn.name = "MusicToggleButton"
 	music_toggle_btn.text = ""
@@ -1563,7 +1589,7 @@ func _setup_ui() -> void:
 	music_toggle_btn.pressed.connect(_toggle_music)
 	ctrl_hbox.add_child(music_toggle_btn)
 	
-	# 4. Settings Button
+	# 5. Settings Button
 	var settings_btn = Button.new()
 	settings_btn.name = "SettingsButton"
 	settings_btn.text = ""
@@ -1574,7 +1600,7 @@ func _setup_ui() -> void:
 	settings_btn.pressed.connect(_on_settings_pressed)
 	ctrl_hbox.add_child(settings_btn)
 
-	# 5. Exit Button
+	# 6. Exit Button
 	var exit_btn = Button.new()
 	exit_btn.text = "EXIT"
 	exit_btn.custom_minimum_size = Vector2(96, 52)
@@ -1587,7 +1613,16 @@ func _setup_ui() -> void:
 	_update_hud()
 	_update_grid_button_state()
 	_update_music_button_state()
+	_update_green_speed_button_label()
 	GlobalSettings.range_settings.minigame_music_enabled.setting_changed.connect(func(_val): _update_music_button_state())
+	GlobalSettings.range_settings.putting_green_speed.setting_changed.connect(func(val):
+		_update_green_speed_button_label()
+		if green_speed_val_lbl != null and is_instance_valid(green_speed_val_lbl):
+			green_speed_val_lbl.text = "%.1f" % val
+		if green_speed_slider != null and is_instance_valid(green_speed_slider):
+			if not is_equal_approx(green_speed_slider.value, val):
+				green_speed_slider.value = val
+	)
 
 func _toggle_music() -> void:
 	var current = GlobalSettings.range_settings.minigame_music_enabled.value
@@ -1928,9 +1963,152 @@ func _update_stats_display(is_final_rest: bool = true) -> void:
 		if child.has_method("set_data"):
 			child.call("set_data", str(val))
 
+func _update_green_speed_button_label() -> void:
+	if green_speed_btn != null and is_instance_valid(green_speed_btn):
+		var spd = GlobalSettings.range_settings.putting_green_speed.value
+		green_speed_btn.text = "🟢 Speed: %.1f" % spd
+
+func _toggle_green_speed_popup() -> void:
+	if green_speed_popup != null and is_instance_valid(green_speed_popup):
+		green_speed_popup.queue_free()
+		green_speed_popup = null
+		return
+
+	green_speed_popup = PanelContainer.new()
+	green_speed_popup.name = "GreenSpeedPopup"
+	green_speed_popup.custom_minimum_size = Vector2(340, 180)
+	green_speed_popup.anchor_left = 0.5
+	green_speed_popup.anchor_right = 0.5
+	green_speed_popup.anchor_top = 1.0
+	green_speed_popup.anchor_bottom = 1.0
+	green_speed_popup.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	green_speed_popup.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	# Position centered horizontally directly above the bottom control panel
+	green_speed_popup.offset_left = -170
+	green_speed_popup.offset_right = 170
+	green_speed_popup.offset_top = -290
+	green_speed_popup.offset_bottom = -102
+	
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.09, 0.14, 0.95)
+	style.border_width_left = 2
+	style.border_width_top = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.border_color = Color(0.24, 0.55, 0.40, 0.9)
+	style.corner_radius_top_left = 12
+	style.corner_radius_top_right = 12
+	style.corner_radius_bottom_right = 12
+	style.corner_radius_bottom_left = 12
+	green_speed_popup.add_theme_stylebox_override("panel", style)
+	
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	green_speed_popup.add_child(margin)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+	margin.add_child(vbox)
+	
+	# Header HBox: Title and Close button
+	var top_hbox = HBoxContainer.new()
+	vbox.add_child(top_hbox)
+	
+	var title = Label.new()
+	title.text = "GREEN SPEED (STIMP)"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.add_theme_font_size_override("font_size", 15)
+	title.add_theme_color_override("font_color", Color(0.35, 0.85, 0.55))
+	top_hbox.add_child(title)
+	
+	var close_btn = Button.new()
+	close_btn.text = "✕"
+	close_btn.custom_minimum_size = Vector2(28, 28)
+	close_btn.flat = true
+	close_btn.pressed.connect(func():
+		if green_speed_popup != null and is_instance_valid(green_speed_popup):
+			green_speed_popup.queue_free()
+			green_speed_popup = null
+	)
+	top_hbox.add_child(close_btn)
+	
+	# Slider Row: Slider and numeric readout
+	var cur_val = GlobalSettings.range_settings.putting_green_speed.value
+	var slider_hbox = HBoxContainer.new()
+	slider_hbox.add_theme_constant_override("separation", 10)
+	vbox.add_child(slider_hbox)
+	
+	green_speed_slider = HSlider.new()
+	green_speed_slider.min_value = 4.0
+	green_speed_slider.max_value = 20.0
+	green_speed_slider.step = 0.5
+	green_speed_slider.value = cur_val
+	green_speed_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	green_speed_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	slider_hbox.add_child(green_speed_slider)
+	
+	green_speed_val_lbl = Label.new()
+	green_speed_val_lbl.text = "%.1f" % cur_val
+	green_speed_val_lbl.custom_minimum_size = Vector2(45, 0)
+	green_speed_val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	green_speed_val_lbl.add_theme_font_size_override("font_size", 16)
+	slider_hbox.add_child(green_speed_val_lbl)
+	
+	green_speed_slider.value_changed.connect(func(v: float):
+		GlobalSettings.range_settings.putting_green_speed.set_value(v)
+		if green_speed_val_lbl != null and is_instance_valid(green_speed_val_lbl):
+			green_speed_val_lbl.text = "%.1f" % v
+		_update_green_speed_button_label()
+	)
+	
+	# Preset buttons row
+	var presets_hbox = HBoxContainer.new()
+	presets_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	presets_hbox.add_theme_constant_override("separation", 8)
+	vbox.add_child(presets_hbox)
+	
+	var presets = [
+		{"label": "8.0 Slow", "val": 8.0},
+		{"label": "10.0 Std", "val": 10.0},
+		{"label": "12.0 Fast", "val": 12.0},
+		{"label": "14.0 Tour", "val": 14.0},
+	]
+	for p in presets:
+		var p_btn = Button.new()
+		p_btn.text = p["label"]
+		p_btn.custom_minimum_size = Vector2(68, 34)
+		p_btn.add_theme_font_size_override("font_size", 12)
+		_apply_btn_style(p_btn, Color(0.14, 0.22, 0.28), Color(0.20, 0.32, 0.40))
+		var v_val: float = p["val"]
+		p_btn.pressed.connect(func():
+			GlobalSettings.range_settings.putting_green_speed.set_value(v_val)
+			if green_speed_slider != null and is_instance_valid(green_speed_slider):
+				green_speed_slider.value = v_val
+			if green_speed_val_lbl != null and is_instance_valid(green_speed_val_lbl):
+				green_speed_val_lbl.text = "%.1f" % v_val
+			_update_green_speed_button_label()
+		)
+		presets_hbox.add_child(p_btn)
+		
+	var hint_lbl = Label.new()
+	hint_lbl.text = "Course Play standard green speed is 10.0"
+	hint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint_lbl.add_theme_font_size_override("font_size", 11)
+	hint_lbl.add_theme_color_override("font_color", Color(0.65, 0.75, 0.85, 0.7))
+	vbox.add_child(hint_lbl)
+	
+	hud_control.add_child(green_speed_popup)
+
 func _on_settings_pressed() -> void:
 	if _settings_layer != null and is_instance_valid(_settings_layer):
 		return
+
+	if green_speed_popup != null and is_instance_valid(green_speed_popup):
+		green_speed_popup.queue_free()
+		green_speed_popup = null
 
 	var settings_scene = load("res://UI/Settings/RangeSettings/range_settings.tscn")
 	if settings_scene == null:
@@ -1993,3 +2171,4 @@ func _close_settings() -> void:
 	# Restore gameplay HUD visuals
 	if hud_layer != null and is_instance_valid(hud_layer):
 		hud_layer.visible = true
+	_update_green_speed_button_label()

@@ -317,6 +317,29 @@ func is_minigames_gameplay_screen() -> bool:
 		or full_id.contains("chipping") or full_id.contains("/minigames/")
 
 
+func is_putting_minigame_screen() -> bool:
+	if is_putting_minigame:
+		return true
+	var scene := _get_active_scene()
+	if scene == null:
+		return false
+	var scene_name := str(scene.name).to_lower()
+	var script: Script = scene.get_script()
+	var script_path := str(script.resource_path).to_lower() if script != null else ""
+	var file_path := str(scene.scene_file_path).to_lower() if "scene_file_path" in scene else ""
+	var full_id := (scene_name + " " + script_path + " " + file_path).to_lower()
+	return full_id.contains("putting_practice") or full_id.contains("puttingpractice")
+
+
+func get_effective_green_speed() -> float:
+	if is_putting_minigame_screen():
+		if range_settings != null and "putting_green_speed" in range_settings:
+			return float(range_settings.putting_green_speed.value)
+	if range_settings != null and "green_speed" in range_settings:
+		return float(range_settings.green_speed.value)
+	return 10.0
+
+
 func is_minigames_scene() -> bool:
 	return is_minigames_menu_screen() or is_minigames_gameplay_screen()
 

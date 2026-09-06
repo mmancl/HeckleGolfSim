@@ -523,8 +523,12 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 		
 		var dist_to_pin = final_position.distance_to(target_pin)
 		
-		# Cup has a regulation radius of ~0.054m. If ball stopped inside cup or is marked holed out, player holed out.
-		if active_player.get("holed_out", false) or dist_to_pin < 0.06:
+		# If ball holed out or stopped inside cup, player holed out.
+		var ball_holed = false
+		if player_node != null and player_node.get("ball") != null:
+			var ball_node = player_node.get("ball")
+			ball_holed = bool(ball_node.get("is_falling_in_hole")) or bool(ball_node.get("holed_out_this_shot"))
+		if active_player.get("holed_out", false) or ball_holed or dist_to_pin <= 0.12:
 			active_player["holed_out"] = true
 			print("[MultiplayerManager] Player %s holed out! Score: %d" % [active_player["name"], active_player["strokes"]])
 			if active_player["strokes"] <= par:

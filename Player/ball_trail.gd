@@ -1,8 +1,8 @@
 extends MeshInstance3D
 
-const MIN_ANCHOR_DISTANCE : float = 0.65
-const MIN_ANCHOR_DISTANCE_SQ : float = 0.4225  # 0.65 * 0.65
-const MAX_POINTS : int = 1500
+const MIN_ANCHOR_DISTANCE : float = 1.25
+const MIN_ANCHOR_DISTANCE_SQ : float = 1.5625  # 1.25 * 1.25
+const MAX_POINTS : int = 600
 
 var points : Array = []
 var color : Color = Color(0.6, 0.0, 0.0, 1.0)  # Darker red
@@ -12,14 +12,14 @@ var yellow : Color = Color(1.0, 0.9, 0.0, 1.0)
 var line_width : float = 0.08
 var material : StandardMaterial3D = StandardMaterial3D.new()
 
-var _mesh_dirty: bool = true
+var _mesh_dirty: bool = false
 var peak_index : int = 0
 var max_peak_y : float = -999999.0
 var is_active : bool = false
 
 
 func _ready():
-	mesh = ImmediateMesh.new()
+	mesh = ArrayMesh.new()
 	material_override = material
 
 	# Setup material with subtle glow using vertex colors
@@ -46,20 +46,20 @@ func setColor(a):
 
 
 func draw():
-	var imm := mesh as ImmediateMesh
-	if imm == null:
+	var arr_mesh := mesh as ArrayMesh
+	if arr_mesh == null:
 		return
-	imm.clear_surfaces()
+	arr_mesh.clear_surfaces()
 	if points.size() >= 2:
 		create_ribbon_mesh()
 
 
-func _get_point_color(i: int, total_points: int, peak_index: int) -> Color:
+func _get_point_color(i: int, total_points: int, peak_idx: int) -> Color:
 	var point_color : Color
-	if i <= peak_index:
+	if i <= peak_idx:
 		var factor := 0.0
-		if peak_index > 0:
-			factor = float(i) / float(peak_index)
+		if peak_idx > 0:
+			factor = float(i) / float(peak_idx)
 		if factor <= 0.5:
 			point_color = dark_red
 		else:
@@ -67,9 +67,9 @@ func _get_point_color(i: int, total_points: int, peak_index: int) -> Color:
 			point_color = dark_red.lerp(orange, sub_factor)
 	else:
 		var factor := 0.0
-		var denom := float(total_points - 1 - peak_index)
+		var denom := float(total_points - 1 - peak_idx)
 		if denom > 0.0:
-			factor = float(i - peak_index) / denom
+			factor = float(i - peak_idx) / denom
 		if factor <= 0.5:
 			var sub_factor := factor / 0.5
 			point_color = orange.lerp(yellow, sub_factor)
@@ -85,8 +85,8 @@ func _get_point_color(i: int, total_points: int, peak_index: int) -> Color:
 
 
 func create_ribbon_mesh():
-	var imm := mesh as ImmediateMesh
-	if imm == null or points.size() < 2:
+	var arr_mesh := mesh as ArrayMesh
+	if arr_mesh == null or points.size() < 2:
 		return
 
 	var total_points := points.size()
@@ -94,21 +94,24 @@ func create_ribbon_mesh():
 	var prev_right := Vector3.ZERO
 	var prev_up := Vector3.ZERO
 
-	# Previous frame vertex data for connecting triangle strips
-	var prev_h_left := Vector3.ZERO
-	var prev_h_right := Vector3.ZERO
-	var prev_v_bot := Vector3.ZERO
-	var prev_v_top := Vector3.ZERO
-	var prev_uv_l := Vector2.ZERO
-	var prev_uv_r := Vector2.ZERO
-	var prev_col := Color.WHITE
+	var num_verts := total_points * 4
+	var num_indices := (total_points - 1) * 12
 
-	imm.surface_begin(Mesh.PRIMITIVE_TRIANGLES, material)
+	var verts := PackedVector3Array()
+	verts.resize(num_verts)
+	var colors := PackedColorArray()
+	colors.resize(num_verts)
+	var uvs := PackedVector2Array()
+	uvs.resize(num_verts)
+	var indices := PackedInt32Array()
+	indices.resize(num_indices)
+
+	var idx_ptr := 0
 
 	for i in range(total_points):
 		var point : Vector3 = points[i]
 
-		# Get tangent / forward direction along path using central difference
+		# Tangent / forward direction along path using central difference
 		var forward := Vector3.ZERO
 		if i < total_points - 1 and i > 0:
 			forward = (points[i + 1] - points[i - 1]).normalized()
@@ -145,77 +148,57 @@ func create_ribbon_mesh():
 		prev_up = up
 
 		var t := float(i) / float(total_points - 1)
-		var curr_uv_l := Vector2(0.0, t)
-		var curr_uv_r := Vector2(1.0, t)
 		var curr_col := _get_point_color(i, total_points, peak_index)
 
-		var curr_h_left := point - right * half_width
-		var curr_h_right := point + right * half_width
-		var curr_v_bot := point - up * half_width
-		var curr_v_top := point + up * half_width
+		var base_vert := i * 4
+		# 0: Horizontal Left, 1: Horizontal Right, 2: Vertical Bottom, 3: Vertical Top
+		verts[base_vert + 0] = point - right * half_width
+		verts[base_vert + 1] = point + right * half_width
+		verts[base_vert + 2] = point - up * half_width
+		verts[base_vert + 3] = point + up * half_width
+
+		colors[base_vert + 0] = curr_col
+		colors[base_vert + 1] = curr_col
+		colors[base_vert + 2] = curr_col
+		colors[base_vert + 3] = curr_col
+
+		uvs[base_vert + 0] = Vector2(0.0, t)
+		uvs[base_vert + 1] = Vector2(1.0, t)
+		uvs[base_vert + 2] = Vector2(0.0, t)
+		uvs[base_vert + 3] = Vector2(1.0, t)
 
 		if i > 0:
-			# Ribbon 1 (Horizontal) - Triangle 1
-			imm.surface_set_color(curr_col)
-			imm.surface_set_uv(curr_uv_l)
-			imm.surface_add_vertex(curr_h_left)
+			var prev_base := (i - 1) * 4
+			var curr_base := base_vert
 
-			imm.surface_set_color(prev_col)
-			imm.surface_set_uv(prev_uv_l)
-			imm.surface_add_vertex(prev_h_left)
+			# Ribbon 1 (Horizontal)
+			indices[idx_ptr + 0] = curr_base + 0
+			indices[idx_ptr + 1] = prev_base + 0
+			indices[idx_ptr + 2] = prev_base + 1
 
-			imm.surface_set_color(prev_col)
-			imm.surface_set_uv(prev_uv_r)
-			imm.surface_add_vertex(prev_h_right)
+			indices[idx_ptr + 3] = prev_base + 1
+			indices[idx_ptr + 4] = curr_base + 1
+			indices[idx_ptr + 5] = curr_base + 0
 
-			# Ribbon 1 (Horizontal) - Triangle 2
-			imm.surface_set_color(prev_col)
-			imm.surface_set_uv(prev_uv_r)
-			imm.surface_add_vertex(prev_h_right)
+			# Ribbon 2 (Vertical)
+			indices[idx_ptr + 6] = curr_base + 2
+			indices[idx_ptr + 7] = prev_base + 2
+			indices[idx_ptr + 8] = prev_base + 3
 
-			imm.surface_set_color(curr_col)
-			imm.surface_set_uv(curr_uv_r)
-			imm.surface_add_vertex(curr_h_right)
+			indices[idx_ptr + 9] = prev_base + 3
+			indices[idx_ptr + 10] = curr_base + 3
+			indices[idx_ptr + 11] = curr_base + 2
 
-			imm.surface_set_color(curr_col)
-			imm.surface_set_uv(curr_uv_l)
-			imm.surface_add_vertex(curr_h_left)
+			idx_ptr += 12
 
-			# Ribbon 2 (Vertical) - Triangle 3
-			imm.surface_set_color(curr_col)
-			imm.surface_set_uv(curr_uv_l)
-			imm.surface_add_vertex(curr_v_bot)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = indices
 
-			imm.surface_set_color(prev_col)
-			imm.surface_set_uv(prev_uv_l)
-			imm.surface_add_vertex(prev_v_bot)
-
-			imm.surface_set_color(prev_col)
-			imm.surface_set_uv(prev_uv_r)
-			imm.surface_add_vertex(prev_v_top)
-
-			# Ribbon 2 (Vertical) - Triangle 4
-			imm.surface_set_color(prev_col)
-			imm.surface_set_uv(prev_uv_r)
-			imm.surface_add_vertex(prev_v_top)
-
-			imm.surface_set_color(curr_col)
-			imm.surface_set_uv(curr_uv_r)
-			imm.surface_add_vertex(curr_v_top)
-
-			imm.surface_set_color(curr_col)
-			imm.surface_set_uv(curr_uv_l)
-			imm.surface_add_vertex(curr_v_bot)
-
-		prev_h_left = curr_h_left
-		prev_h_right = curr_h_right
-		prev_v_bot = curr_v_bot
-		prev_v_top = curr_v_top
-		prev_uv_l = curr_uv_l
-		prev_uv_r = curr_uv_r
-		prev_col = curr_col
-
-	imm.surface_end()
+	arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 
 
 func start_trail(start_pos: Vector3) -> void:
@@ -277,9 +260,10 @@ func clear_points() -> void:
 	max_peak_y = -999999.0
 	is_active = false
 	if mesh != null:
-		var imm := mesh as ImmediateMesh
-		if imm != null:
-			imm.clear_surfaces()
+		var arr_mesh := mesh as ArrayMesh
+		if arr_mesh != null:
+			arr_mesh.clear_surfaces()
 	_mesh_dirty = false
+
 
 

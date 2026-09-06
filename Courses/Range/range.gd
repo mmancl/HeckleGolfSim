@@ -73,6 +73,7 @@ var current_hole_location: Vector3 = Vector3.ZERO:
 		if current_hole_location != val:
 			current_hole_location = val
 			call_deferred("_generate_green_grid_and_heatmap")
+var cup_radius: float = 0.108
 var current_hole_name: String = "Hole 1"
 var current_hole_par: int = 4
 var current_hole_tee_dist_yards: int = 0
@@ -1808,9 +1809,17 @@ func set_camera_follow_mode(value) -> void:
 	if value and has_node("Player") and $Player.ball != null and _shot_active:
 		camera.follow_mode = PhantomCamera3D.FollowMode.SIMPLE
 		var player = $Player
-		var target_node = player.ball
+		var target_node = player.get_camera_target() if player.has_method("get_camera_target") else player.ball
 		camera.follow_target = target_node
 		
+		# Ensure PhantomCameraHost runs in IDLE mode (_process) to follow the interpolated target smoothly
+		var pcam_host = get_node_or_null("Camera3D/PhantomCameraHost")
+		if pcam_host != null:
+			pcam_host.interpolation_mode = 1  # InterpolationMode.IDLE
+		var cam_3d = get_node_or_null("Camera3D")
+		if cam_3d != null:
+			cam_3d.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+
 		# Keep camera follow aligned with the player's aim angle down the fairway/range
 		# Using aim_yaw_offset_deg prevents the follow camera from jumping sideways/off-center due to HLA
 		var yaw_rad = deg_to_rad(player.ball.aim_yaw_offset_deg)
@@ -2266,19 +2275,33 @@ func _spawn_flag_pin() -> void:
 	flag.rotation = Vector3(0, 0, -PI/2)
 	pin.add_child(flag)
 	
-	# Cup / hole circle on ground: small flat dark cylinder to look like a hole
+	# Cup / hole circle on ground: realistic golf cup (white cup liner/rim with dark interior)
+	var cup_white = MeshInstance3D.new()
+	cup_white.name = "CupWhite"
+	var white_mesh = CylinderMesh.new()
+	white_mesh.top_radius = cup_radius
+	white_mesh.bottom_radius = cup_radius
+	white_mesh.height = 0.003
+	cup_white.mesh = white_mesh
+	var white_mat = StandardMaterial3D.new()
+	white_mat.albedo_color = Color(0.95, 0.95, 0.95)
+	white_mat.roughness = 0.5
+	cup_white.material_override = white_mat
+	cup_white.position = Vector3(0, 0.0012, 0)
+	pin.add_child(cup_white)
+
 	var cup = MeshInstance3D.new()
 	cup.name = "Cup"
 	var cup_mesh = CylinderMesh.new()
-	cup_mesh.top_radius = 0.12 # Larger radius for a bigger cup
-	cup_mesh.bottom_radius = 0.12
-	cup_mesh.height = 0.002
+	cup_mesh.top_radius = 0.095
+	cup_mesh.bottom_radius = 0.095
+	cup_mesh.height = 0.0035
 	cup.mesh = cup_mesh
 	var cup_mat = StandardMaterial3D.new()
-	cup_mat.albedo_color = Color(0.15, 0.15, 0.15) # Dark grey/black to look like a hole depth
+	cup_mat.albedo_color = Color(0.12, 0.12, 0.12)
 	cup_mat.roughness = 1.0
 	cup.material_override = cup_mat
-	cup.position = Vector3(0, 0.001, 0)
+	cup.position = Vector3(0, 0.0016, 0)
 	pin.add_child(cup)
 	
 	print("[CoursePlay] FlagPin and PinMarker spawned at: ", current_hole_location)

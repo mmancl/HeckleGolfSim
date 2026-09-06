@@ -289,8 +289,11 @@ func _ready() -> void:
 	var gs_sep = HSeparator.new()
 	gameplay_vbox.add_child(gs_sep)
 	
-	var green_speed_row = _create_slider_setting_row("Green Speed", "green_speed", 1.0, 50.0, 1.0)
+	var green_speed_row = _create_slider_setting_row("Green Speed (Courses)", "green_speed", 1.0, 50.0, 1.0)
 	gameplay_vbox.add_child(green_speed_row)
+
+	var putting_green_speed_row = _create_slider_setting_row("Putting Minigame Green Speed", "putting_green_speed", 1.0, 50.0, 1.0)
+	gameplay_vbox.add_child(putting_green_speed_row)
 
 
 	# Create and insert camera configuration settings rows in the Camera tab
@@ -1265,7 +1268,7 @@ func _create_slider_setting_row(label_prefix: String, setting_name: String, min_
 	var label := Label.new()
 	label.text = "%s: %.0f" % [label_prefix, setting.value]
 	label.add_theme_font_size_override("font_size", 19)
-	label.custom_minimum_size = Vector2(200, 0)
+	label.custom_minimum_size = Vector2(300, 0)
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(label)
 	

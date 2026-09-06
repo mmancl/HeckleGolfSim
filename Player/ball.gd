@@ -64,6 +64,7 @@ var lie_type: String = "fairway"
 var is_falling_in_hole := false
 var falling_target_hole := Vector3.ZERO
 var falling_time := 0.0
+var holed_out_this_shot := false
 var flight_time := 0.0
 var _cached_target_hole := Vector3.ZERO
 
@@ -406,6 +407,8 @@ func _connect_settings() -> void:
 	GlobalSettings.range_settings.range_units.setting_changed.connect(_on_environment_changed)
 	GlobalSettings.range_settings.surface_type.setting_changed.connect(_on_surface_type_changed)
 	GlobalSettings.range_settings.green_speed.setting_changed.connect(_on_green_speed_changed)
+	if "putting_green_speed" in GlobalSettings.range_settings:
+		GlobalSettings.range_settings.putting_green_speed.setting_changed.connect(_on_green_speed_changed)
 	
 	if has_node("/root/EventBus"):
 		var eb = get_node("/root/EventBus")
@@ -546,7 +549,7 @@ func _apply_surface_params() -> void:
 	_rolling_friction = float(surface_params.get("u_kr", 0.03)) * _rolling_mult
 	
 	# Determine green speed scaling exponent based on surface type
-	var green_speed = float(GlobalSettings.range_settings.green_speed.value)
+	var green_speed = float(GlobalSettings.get_effective_green_speed())
 	var exponent := 0.0
 	if is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER:
 		exponent = 0.0
@@ -627,45 +630,96 @@ func _physics_process(delta: float) -> void:
 	# Live proximity check for suspense (Course Play only)
 	var target_hole_live = _cached_target_hole
 	if target_hole_live.is_zero_approx():
-		target_hole_live = get_target_hole_position()
+		target_hole_live = _get_active_hole_position(global_position)
 		_cached_target_hole = target_hole_live
 
 	if has_node("/root/TensionManager") and not target_hole_live.is_zero_approx() and TensionManager.is_course_play_active():
 		var start_p = shot_start_pos_global if not shot_start_pos_global.is_zero_approx() else (position if not position.is_zero_approx() else spawn_position)
 		TensionManager.check_ball_proximity(global_position, target_hole_live, is_putt, start_p, shot_was_in_sand)
 
-	# Check if we should fall into the hole
+	# Check hole and rim physics interaction
 	if not is_falling_in_hole:
-		var target_hole = target_hole_live
-		
+		var target_hole = _get_active_hole_position(global_position)
+		if target_hole.is_zero_approx():
+			target_hole = target_hole_live
+
 		if target_hole != null and not target_hole.is_zero_approx():
 			var ball_pos = global_position
-			var dist_2d = Vector2(ball_pos.x, ball_pos.z).distance_to(Vector2(target_hole.x, target_hole.z))
+			var hole_diff_2d = Vector2(target_hole.x - ball_pos.x, target_hole.z - ball_pos.z)
+			var dist_2d = hole_diff_2d.length()
 			var vertical_diff = ball_pos.y - target_hole.y
-			# Only drop if the ball is close to the ground/green height
-			if vertical_diff > -0.05 and vertical_diff < 0.15:
-				var cup_radius := 0.054 # Regulation 4.25" cup radius (0.054m)
-				var speed = velocity.length()
-				if dist_2d <= 0.065:
-					# Drop in if rolling at realistic entry speeds for cup position:
-					# - Dead-center entry (dist < 2.5cm): drops in up to 2.0 m/s (~4.5 mph)
-					# - Inside regulation lip (dist <= 5.4cm): drops in up to 1.4 m/s (~3.1 mph)
-					# - Outer lip edge (dist <= 6.5cm): lips in for slow speeds under 0.3 m/s (~0.67 mph)
-					if (dist_2d < 0.025 and speed < 2.0) or (dist_2d <= cup_radius and speed < 1.4) or (dist_2d <= 0.065 and speed < 0.3):
-						is_falling_in_hole = true
-						falling_target_hole = target_hole
-						falling_time = 0.0
-						velocity = Vector3.ZERO
-						omega = Vector3.ZERO
-						if _cup_player != null and not _skipping_flight:
-							_cup_player.play()
+
+			# Elevation check: ball must be rolling near green surface
+			if vertical_diff > -0.10 and vertical_diff < 0.25:
+				var scene_cup_radius = _get_cup_radius()
+				var lip_radius = scene_cup_radius + _ball_radius
+
+				if dist_2d <= lip_radius:
+					var speed_total = velocity.length()
+					var is_ground_roll = on_ground or is_putt or state == PhysicsEnums.BallState.ROLLOUT or speed_total < 8.0
+
+					if is_ground_roll and dist_2d > 0.0001:
+						var inward_dir_2d = hole_diff_2d / dist_2d
+						var penetration = clampf((lip_radius - dist_2d) / lip_radius, 0.0, 1.0)
+
+						# Sinking into cup conditions:
+						# - Center hit: falls in up to 2.8 m/s (~6.3 mph)
+						# - Inner cup (< 85% cup radius): falls in up to 2.1 m/s (~4.7 mph)
+						# - Outer lip-in: falls in up to 0.95 m/s (~2.1 mph)
+						# - Low speed anywhere on lip: drops in if speed < 0.35 m/s
+						var can_fall = false
+						if dist_2d < scene_cup_radius * 0.45 and speed_total < 2.8:
+							can_fall = true
+						elif dist_2d < scene_cup_radius * 0.85 and speed_total < 2.1:
+							can_fall = true
+						elif dist_2d <= lip_radius and speed_total < 0.95:
+							can_fall = true
+						elif speed_total < 0.35:
+							can_fall = true
+
+						if can_fall:
+							is_falling_in_hole = true
+							holed_out_this_shot = true
+							falling_target_hole = target_hole
+							falling_time = 0.0
+							velocity = Vector3.ZERO
+							omega = Vector3.ZERO
+							if _cup_player != null and not _skipping_flight:
+								_cup_player.play()
+						else:
+							# Rim / lip interaction:
+							# Inward gravitational pull towards the cup center:
+							# - If ball is on left of hole, inward_dir_2d points right -> veers right
+							# - If ball is on right of hole, inward_dir_2d points left -> veers left
+							var inward_accel = lerpf(3.5, 9.5, penetration)
+							var inward_delta_v = inward_dir_2d * (inward_accel * delta)
+							velocity.x += inward_delta_v.x
+							velocity.z += inward_delta_v.y
+
+							# Rim drag / friction on the lip edge
+							var drag_factor = 1.0 - clampf((1.8 * penetration + 0.5) * delta, 0.0, 0.25)
+							velocity.x *= drag_factor
+							velocity.z *= drag_factor
+
+							# Visual dip into the rim depression
+							if _ball_mesh != null:
+								var dip_depth = clampf(penetration * 0.02, 0.0, 0.02)
+								_ball_mesh.position.y = -dip_depth
+				else:
+					# Restore mesh Y offset when rolling away from the lip
+					if _ball_mesh != null and _ball_mesh.position.y < -0.001:
+						_ball_mesh.position.y = lerpf(_ball_mesh.position.y, 0.0, delta * 15.0)
+			else:
+				if _ball_mesh != null and _ball_mesh.position.y < -0.001:
+					_ball_mesh.position.y = lerpf(_ball_mesh.position.y, 0.0, delta * 15.0)
 
 	if is_falling_in_hole:
 		falling_time += delta
-		# Lerp position towards target hole center (XZ) and below ground level (Y)
 		var target_pos = Vector3(falling_target_hole.x, falling_target_hole.y - 0.08, falling_target_hole.z)
 		global_position = global_position.lerp(target_pos, delta * 12.0)
-		
+		if _ball_mesh != null:
+			_ball_mesh.position.y = 0.0
+
 		if global_position.distance_to(target_pos) < 0.01 or falling_time > 0.5:
 			global_position = target_pos
 			is_falling_in_hole = false
@@ -940,7 +994,7 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 					omega *= 0.15
 				else:
 					# Slightly scale the height of the bounce (normal component of velocity) based on green speed
-					var green_speed : float = float(GlobalSettings.range_settings.green_speed.value)
+					var green_speed : float = float(GlobalSettings.get_effective_green_speed())
 					var bounce_sensitivity : float = 0.0025
 					var bounce_mult : float = 1.0 + (green_speed - 10.0) * bounce_sensitivity
 					var bounce_normal_vel := velocity.dot(normal)
@@ -1094,19 +1148,62 @@ func _print_impact_debug() -> void:
 	print("  Normal: ", floor_normal)
 
 
-func get_target_hole_position() -> Vector3:
-	var target_hole := Vector3.ZERO
+func _get_cup_radius() -> float:
 	var player_parent = get_parent()
 	if player_parent != null:
 		var parent_scene = player_parent.get_parent()
-		if parent_scene != null:
-			if "current_hole_location" in parent_scene and not parent_scene.current_hole_location.is_zero_approx():
-				target_hole = parent_scene.current_hole_location
-			elif "holes" in parent_scene and "selected_hole_index" in parent_scene and not parent_scene.holes.is_empty():
-				target_hole = parent_scene.holes[parent_scene.selected_hole_index]
-			elif "island_positions" in parent_scene and "selected_island_index" in parent_scene and not parent_scene.island_positions.is_empty():
-				target_hole = parent_scene.island_positions[parent_scene.selected_island_index]
-	return target_hole
+		if parent_scene != null and "cup_radius" in parent_scene:
+			var r: float = float(parent_scene.cup_radius)
+			if r > 0.01:
+				return r
+	return 0.108
+
+
+func get_target_hole_position() -> Vector3:
+	return _get_active_hole_position(global_position)
+
+
+func _get_active_hole_position(ball_pos: Vector3 = Vector3.ZERO) -> Vector3:
+	var player_parent = get_parent()
+	if player_parent == null:
+		return Vector3.ZERO
+	var parent_scene = player_parent.get_parent()
+	if parent_scene == null:
+		return Vector3.ZERO
+
+	# 1. Single-hole course play / range position
+	if "current_hole_location" in parent_scene and not parent_scene.current_hole_location.is_zero_approx():
+		return parent_scene.current_hole_location
+
+	# 2. Multi-hole greens (e.g. Putting Practice with 8 holes)
+	if "holes" in parent_scene and not parent_scene.holes.is_empty():
+		var holes_arr: Array = parent_scene.holes
+		# If a ball position is provided, find the closest hole within reasonable range (15m)
+		if not ball_pos.is_zero_approx() and holes_arr.size() > 1:
+			var closest_hole: Vector3 = Vector3.ZERO
+			var min_dist: float = 999999.0
+			for h in holes_arr:
+				if h is Vector3:
+					var d = Vector2(ball_pos.x, ball_pos.z).distance_to(Vector2(h.x, h.z))
+					if d < min_dist:
+						min_dist = d
+						closest_hole = h
+			if min_dist < 15.0:
+				return closest_hole
+
+		if "selected_hole_index" in parent_scene and parent_scene.selected_hole_index >= 0 and parent_scene.selected_hole_index < holes_arr.size():
+			return holes_arr[parent_scene.selected_hole_index]
+		return holes_arr[0]
+
+	# 3. Island positions (Chipping minigame)
+	if "island_positions" in parent_scene and "selected_island_index" in parent_scene and not parent_scene.island_positions.is_empty():
+		var islands_arr: Array = parent_scene.island_positions
+		var idx: int = parent_scene.selected_island_index
+		if idx >= 0 and idx < islands_arr.size():
+			return islands_arr[idx]
+		return islands_arr[0]
+
+	return Vector3.ZERO
 
 
 func _enter_rest_state() -> void:
@@ -1161,6 +1258,9 @@ func reset() -> void:
 	is_falling_in_hole = false
 	falling_target_hole = Vector3.ZERO
 	falling_time = 0.0
+	holed_out_this_shot = false
+	if _ball_mesh != null:
+		_ball_mesh.position.y = 0.0
 	prev_physics_pos = global_position
 	curr_physics_pos = global_position
 	_physics_pos_initialized = true
@@ -1259,6 +1359,9 @@ func hit_from_data(data: Dictionary) -> void:
 	is_falling_in_hole = false
 	falling_target_hole = Vector3.ZERO
 	falling_time = 0.0
+	holed_out_this_shot = false
+	if _ball_mesh != null:
+		_ball_mesh.position.y = 0.0
 	flight_time = 0.0
 	shot_hit_other_ground = false
 	shot_was_from_teebox = _check_is_on_teebox()

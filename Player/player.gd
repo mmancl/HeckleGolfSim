@@ -21,6 +21,7 @@ var current_tracer : MeshInstance3D = null
 var BallTrailScript = preload("res://Player/ball_trail.gd")
 
 var ball : GolfBall = null
+var camera_target : Node3D = null
 
 # Tree occlusion variables
 var _cached_trees: Array[Node3D] = []
@@ -42,6 +43,11 @@ func _ready() -> void:
 	ball = GolfBall.new()
 	add_child(ball)
 	ball.rest.connect(_on_ball_rest)
+	
+	camera_target = Node3D.new()
+	camera_target.name = "CameraTarget"
+	add_child(camera_target)
+	camera_target.global_position = ball.global_position
 	
 	trail_resolution = 0.10
 	
@@ -152,6 +158,11 @@ func _process(_delta: float) -> void:
 		if not tracers.is_empty():
 			clear_tracers()
 
+	if ball != null and is_instance_valid(ball):
+		var target_pos = ball.get_interpolated_position() if ball.has_method("get_interpolated_position") else ball.global_position
+		if camera_target != null and is_instance_valid(camera_target):
+			camera_target.global_position = target_pos
+
 	if track_points and ball != null and current_tracer != null and is_instance_valid(current_tracer):
 		var ball_pos = to_local(ball.get_interpolated_position()) if ball.has_method("get_interpolated_position") else ball.position
 		current_tracer.update_trail(ball_pos)
@@ -193,6 +204,8 @@ func _physics_process(_delta: float) -> void:
 			carry = ball.get_downrange_meters()
 
 func get_camera_target() -> Node3D:
+	if camera_target != null and is_instance_valid(camera_target):
+		return camera_target
 	return ball
 
 func get_distance() -> float:
@@ -213,6 +226,8 @@ func validate_data(data: Dictionary) -> bool:
 
 func reset_ball():
 	ball.reset()
+	if camera_target != null and is_instance_valid(camera_target):
+		camera_target.global_position = ball.global_position
 	clear_tracers()
 	apex = 0.0
 	carry = 0.0
@@ -342,6 +357,8 @@ func mulligan() -> void:
 	reset_shot_data()
 	ball.spawn_position = _last_starting_pos
 	ball.reset()
+	if camera_target != null and is_instance_valid(camera_target):
+		camera_target.global_position = ball.global_position
 	clear_tracers()
 	apex = 0.0
 	carry = 0.0

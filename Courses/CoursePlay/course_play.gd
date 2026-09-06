@@ -18,6 +18,8 @@ var _last_hud_strokes: int = -1
 var _last_hud_player_name: String = ""
 var _last_hud_hole_index: int = -1
 
+const ScorecardBadge = preload("res://UI/scorecard_badge.gd")
+
 @onready var hud_scorecard = Panel.new()
 @onready var scorecard_grid = GridContainer.new()
 var _scorecard_action_btn: Button = null
@@ -1982,7 +1984,14 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			# Move camera target to focus on the active ball
 			var camera = course_instance.get_node_or_null("PhantomCamera3D")
 			if camera != null:
-				camera.follow_target = active_ball
+				var cam_target = player_node_ref.get_camera_target() if player_node_ref != null and player_node_ref.has_method("get_camera_target") else active_ball
+				camera.follow_target = cam_target
+				var pcam_host = course_instance.get_node_or_null("Camera3D/PhantomCameraHost")
+				if pcam_host != null:
+					pcam_host.interpolation_mode = 1  # InterpolationMode.IDLE
+				var cam_3d = course_instance.get_node_or_null("Camera3D")
+				if cam_3d != null:
+					cam_3d.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 				
 			# Automatically aim at the pin and position/rotate the camera behind the ball
 			if course_instance != null:
@@ -3501,6 +3510,37 @@ func _populate_scorecard(action_type: String) -> void:
 		cell.add_child(label)
 		scorecard_grid.add_child(cell)
 
+	# Helper for score cells with golfer lingo badges (circles for under par, squares for over par)
+	var add_score_cell = func(text: String, par: int, bg: Color, is_active: bool = false, is_ctp: bool = false, font_size: int = 17):
+		var cell = PanelContainer.new()
+		cell.custom_minimum_size = Vector2(48, 38)
+		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cell.size_flags_vertical = Control.SIZE_FILL
+		
+		var style = StyleBoxFlat.new()
+		if is_active:
+			style.bg_color = bg.lerp(Color(0.20, 0.42, 0.68, 0.95), 0.35)
+			style.border_width_left = 1
+			style.border_width_top = 1
+			style.border_width_right = 1
+			style.border_width_bottom = 1
+			style.border_color = Color(0.35, 0.72, 1.0, 0.85)
+		else:
+			style.bg_color = bg
+			style.border_width_right = 1
+			style.border_width_bottom = 1
+			style.border_color = Color(0.3, 0.35, 0.45, 0.35)
+			
+		style.content_margin_left = 6
+		style.content_margin_right = 6
+		style.content_margin_top = 4
+		style.content_margin_bottom = 4
+		cell.add_theme_stylebox_override("panel", style)
+		
+		var widget = ScorecardBadge.create_score_widget(text, par, is_ctp, font_size)
+		cell.add_child(widget)
+		scorecard_grid.add_child(cell)
+
 	# --- 1. HEADER ROW ---
 	for col in columns:
 		var is_act = (col.is_valid_int() and int(col) == active_hole_num)
@@ -3727,35 +3767,20 @@ func _populate_scorecard(action_type: String) -> void:
 					display_score = str(s)
 					front_score_sum += s
 			
-			var score_fg = Color.WHITE
+			var hole = MultiplayerManager.hole_info.get(hole_id, {})
+			var par = hole.get("Par", 4)
 			if display_score != "-" and display_score != "*":
-				if is_ctp_mode:
-					if display_score == "1":
-						display_score = "1 ⛳"
-						score_fg = Color(1.0, 0.85, 0.35)
-					else:
-						score_fg = Color(0.6, 0.6, 0.6)
-				else:
-					var hole = MultiplayerManager.hole_info.get(hole_id, {})
-					var par = hole.get("Par", 4)
-					var score_val = int(display_score.rstrip("*"))
-					if score_val < par:
-						score_fg = Color(0.35, 0.95, 0.55)
-					elif score_val > par:
-						score_fg = Color(1.0, 0.42, 0.42)
-
-					if is_skins_mode:
-						var h_res = MultiplayerManager.hole_skins_results.get(hole_id, {})
-						if not h_res.is_empty():
-							if h_res.get("winner", "") == p["name"]:
-								display_score += " 🏆"
-								score_fg = Color(1.0, 0.85, 0.35)
-							elif h_res.get("winner", "") == "Tie":
-								display_score += " (C)"
+				if is_skins_mode:
+					var h_res = MultiplayerManager.hole_skins_results.get(hole_id, {})
+					if not h_res.is_empty():
+						if h_res.get("winner", "") == p["name"]:
+							display_score += " 🏆"
+						elif h_res.get("winner", "") == "Tie":
+							display_score += " (C)"
 								
 			if render_front:
 				var is_act = ((i + 1) == active_hole_num)
-				add_cell.call(display_score, row_bg, false, score_fg, 17, is_act)
+				add_score_cell.call(display_score, par, row_bg, is_act, is_ctp_mode, 17)
 			
 		if render_front and (num_holes > 9 or _scorecard_view_tab == "Front 9"):
 			add_cell.call(str(front_score_sum) if front_score_sum > 0 else "-", row_bg, false, Color(1.0, 0.85, 0.38), 17)
@@ -3786,35 +3811,20 @@ func _populate_scorecard(action_type: String) -> void:
 						display_score = str(s)
 						back_score_sum += s
 						
-				var score_fg = Color.WHITE
+				var hole = MultiplayerManager.hole_info.get(hole_id, {})
+				var par = hole.get("Par", 4)
 				if display_score != "-" and display_score != "*":
-					if is_ctp_mode:
-						if display_score == "1":
-							display_score = "1 ⛳"
-							score_fg = Color(1.0, 0.85, 0.35)
-						else:
-							score_fg = Color(0.6, 0.6, 0.6)
-					else:
-						var hole = MultiplayerManager.hole_info.get(hole_id, {})
-						var par = hole.get("Par", 4)
-						var score_val = int(display_score.rstrip("*"))
-						if score_val < par:
-							score_fg = Color(0.35, 0.95, 0.55)
-						elif score_val > par:
-							score_fg = Color(1.0, 0.42, 0.42)
-						
-						if is_skins_mode:
-							var h_res = MultiplayerManager.hole_skins_results.get(hole_id, {})
-							if not h_res.is_empty():
-								if h_res.get("winner", "") == p["name"]:
-									display_score += " 🏆"
-									score_fg = Color(1.0, 0.85, 0.35)
-								elif h_res.get("winner", "") == "Tie":
-									display_score += " (C)"
+					if is_skins_mode:
+						var h_res = MultiplayerManager.hole_skins_results.get(hole_id, {})
+						if not h_res.is_empty():
+							if h_res.get("winner", "") == p["name"]:
+								display_score += " 🏆"
+							elif h_res.get("winner", "") == "Tie":
+								display_score += " (C)"
 									
 				if render_back:
 					var is_act = ((10 + i) == active_hole_num)
-					add_cell.call(display_score, row_bg, false, score_fg, 17, is_act)
+					add_score_cell.call(display_score, par, row_bg, is_act, is_ctp_mode, 17)
 					
 			if render_back:
 				add_cell.call(str(back_score_sum) if back_score_sum > 0 else "-", row_bg, false, Color(1.0, 0.85, 0.38), 17)

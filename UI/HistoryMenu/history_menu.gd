@@ -1,5 +1,7 @@
 extends Control
 
+const ScorecardBadge = preload("res://UI/scorecard_badge.gd")
+
 @onready var matches_list_vbox = VBoxContainer.new()
 @onready var delete_confirm_dialog = ConfirmationDialog.new()
 
@@ -454,6 +456,28 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		parent_grid.add_child(cell)
 		return cell
 
+	# Score cell addition helper with golfer lingo badges
+	var add_score_cell = func(parent_grid: GridContainer, text: String, par: int, bg: Color, is_ctp: bool = false, font_size: int = 16):
+		var cell = PanelContainer.new()
+		cell.custom_minimum_size = Vector2(48, 38)
+		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cell.size_flags_vertical = Control.SIZE_FILL
+		var style = StyleBoxFlat.new()
+		style.bg_color = bg
+		style.border_width_right = 1
+		style.border_width_bottom = 1
+		style.border_color = Color(0.3, 0.35, 0.45, 0.35)
+		style.content_margin_left = 6
+		style.content_margin_right = 6
+		style.content_margin_top = 4
+		style.content_margin_bottom = 4
+		cell.add_theme_stylebox_override("panel", style)
+		
+		var widget = ScorecardBadge.create_score_widget(text, par, is_ctp, font_size)
+		cell.add_child(widget)
+		parent_grid.add_child(cell)
+		return cell
+
 	# 1. HEADER ROW
 	for col in columns:
 		add_cell.call(grid, col, header_bg, true, Color.WHITE, 16)
@@ -584,23 +608,11 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		for h_id in front_holes:
 			var s = hole_scores.get(h_id)
 			var display_s = "-"
-			var score_fg = Color.WHITE
+			var par = hole_pars.get(h_id, 4)
 			if s != null:
 				display_s = str(s)
 				front_sum += int(s)
-				if is_ctp_mode:
-					if int(s) == 1:
-						display_s = "1 ⛳"
-						score_fg = Color(1.0, 0.85, 0.35)
-					else:
-						score_fg = Color(0.7, 0.7, 0.7)
-				else:
-					var par = hole_pars.get(h_id, 4)
-					if s < par:
-						score_fg = Color(0.35, 0.95, 0.55) # Under par (Green)
-					elif s > par:
-						score_fg = Color(1.0, 0.42, 0.42) # Over par (Coral Red)
-			add_cell.call(grid, display_s, row_bg, false, score_fg)
+			add_score_cell.call(grid, display_s, par, row_bg, is_ctp_mode, 16)
 			
 		if num_holes > 9:
 			add_cell.call(grid, str(front_sum) if front_sum > 0 else "-", row_bg, false, Color(0.9, 0.9, 0.9))
@@ -610,23 +622,11 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 			for h_id in back_holes:
 				var s = hole_scores.get(h_id)
 				var display_s = "-"
-				var score_fg = Color.WHITE
+				var par = hole_pars.get(h_id, 4)
 				if s != null:
 					display_s = str(s)
 					back_sum += int(s)
-					if is_ctp_mode:
-						if int(s) == 1:
-							display_s = "1 ⛳"
-							score_fg = Color(1.0, 0.85, 0.35)
-						else:
-							score_fg = Color(0.7, 0.7, 0.7)
-					else:
-						var par = hole_pars.get(h_id, 4)
-						if s < par:
-							score_fg = Color(0.35, 0.95, 0.55)
-						elif s > par:
-							score_fg = Color(1.0, 0.42, 0.42)
-				add_cell.call(grid, display_s, row_bg, false, score_fg)
+				add_score_cell.call(grid, display_s, par, row_bg, is_ctp_mode, 16)
 				
 			add_cell.call(grid, str(back_sum) if back_sum > 0 else "-", row_bg, false, Color(0.9, 0.9, 0.9))
 			var total = front_sum + back_sum
