@@ -138,16 +138,16 @@ func _ready() -> void:
 	
 	new_player_input.placeholder_text = "New Player Name"
 	new_player_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	new_player_input.custom_minimum_size = Vector2(0, 44)
-	new_player_input.add_theme_font_size_override("font_size", 16)
+	new_player_input.custom_minimum_size = Vector2(0, 50)
+	new_player_input.add_theme_font_size_override("font_size", 18)
 	ThemeManager.apply_input_style(new_player_input)
 	new_player_input.text_submitted.connect(func(_t): _on_register_pressed())
 	reg_section.add_child(new_player_input)
 
 	new_player_email_input.placeholder_text = "Optional Email Address"
 	new_player_email_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	new_player_email_input.custom_minimum_size = Vector2(0, 44)
-	new_player_email_input.add_theme_font_size_override("font_size", 16)
+	new_player_email_input.custom_minimum_size = Vector2(0, 50)
+	new_player_email_input.add_theme_font_size_override("font_size", 18)
 	ThemeManager.apply_input_style(new_player_email_input)
 	new_player_email_input.text_submitted.connect(func(_t): _on_register_pressed())
 	reg_section.add_child(new_player_email_input)
@@ -158,8 +158,8 @@ func _ready() -> void:
 
 	avatar_preview_btn.text = "Avatar: None"
 	avatar_preview_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	avatar_preview_btn.custom_minimum_size = Vector2(0, 44)
-	avatar_preview_btn.add_theme_font_size_override("font_size", 15)
+	avatar_preview_btn.custom_minimum_size = Vector2(0, 50)
+	avatar_preview_btn.add_theme_font_size_override("font_size", 17)
 	ThemeManager.apply_secondary_button_style(avatar_preview_btn)
 	avatar_preview_btn.pressed.connect(func():
 		_open_avatar_picker(new_player_avatar_path, func(chosen):
@@ -171,8 +171,8 @@ func _ready() -> void:
 	
 	var register_btn = Button.new()
 	register_btn.text = "Register"
-	register_btn.custom_minimum_size = Vector2(100, 44)
-	register_btn.add_theme_font_size_override("font_size", 16)
+	register_btn.custom_minimum_size = Vector2(120, 50)
+	register_btn.add_theme_font_size_override("font_size", 18)
 	ThemeManager.apply_primary_button_style(register_btn)
 	register_btn.pressed.connect(_on_register_pressed)
 	reg_btn_hbox.add_child(register_btn)
@@ -186,28 +186,33 @@ func _ready() -> void:
 	# Dialog Setup
 	delete_confirm_dialog.title = "Delete Player permanently"
 	delete_confirm_dialog.dialog_text = "Are you sure you want to permanently delete this player profile? This will also wipe their club averages statistics, and cannot be undone."
-	delete_confirm_dialog.min_size = Vector2(400, 150)
+	delete_confirm_dialog.min_size = Vector2(480, 180)
+	ThemeManager.apply_dialog_style(delete_confirm_dialog)
 	delete_confirm_dialog.confirmed.connect(_confirm_delete_player)
 	add_child(delete_confirm_dialog)
 	
 	clear_confirm_dialog.title = "Clear All Ball History"
 	clear_confirm_dialog.dialog_text = "Are you sure you want to clear this player's entire ball history across all clubs? This resets all their club average carries, speed, spin, and target diff statistics, and cannot be undone."
-	clear_confirm_dialog.min_size = Vector2(440, 150)
+	clear_confirm_dialog.min_size = Vector2(500, 180)
+	ThemeManager.apply_dialog_style(clear_confirm_dialog)
 	clear_confirm_dialog.confirmed.connect(_confirm_clear_history)
 	add_child(clear_confirm_dialog)
 	
 	clear_club_confirm_dialog.title = "Clear Club Shot Data"
-	clear_club_confirm_dialog.min_size = Vector2(440, 160)
+	clear_club_confirm_dialog.min_size = Vector2(500, 180)
+	ThemeManager.apply_dialog_style(clear_club_confirm_dialog)
 	clear_club_confirm_dialog.confirmed.connect(_confirm_clear_club_shot_data)
 	add_child(clear_club_confirm_dialog)
 	
 	alert_dialog.title = "Alert"
-	alert_dialog.min_size = Vector2(300, 120)
+	alert_dialog.min_size = Vector2(380, 160)
+	ThemeManager.apply_dialog_style(alert_dialog)
 	add_child(alert_dialog)
 
 	# Avatar Picker Dialog
 	avatar_picker_dialog.title = "Select Player Avatar"
-	avatar_picker_dialog.min_size = Vector2(580, 500)
+	avatar_picker_dialog.min_size = Vector2(620, 540)
+	ThemeManager.apply_dialog_style(avatar_picker_dialog, Vector2(160, 52), 18)
 	avatar_picker_dialog.confirmed.connect(_on_avatar_picker_confirmed)
 	avatar_picker_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	avatar_picker_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -217,7 +222,8 @@ func _ready() -> void:
 	
 	# Edit Profile Dialog
 	edit_profile_dialog.title = "Edit Player Profile"
-	edit_profile_dialog.min_size = Vector2(520, 360)
+	edit_profile_dialog.min_size = Vector2(580, 420)
+	ThemeManager.apply_dialog_style(edit_profile_dialog, Vector2(160, 52), 18)
 	edit_profile_dialog.confirmed.connect(_on_edit_profile_confirmed)
 	edit_profile_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	edit_profile_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -485,8 +491,8 @@ func _open_edit_profile_dialog(player_name: String) -> void:
 	email_sec.add_child(email_title)
 	
 	edit_profile_email_input.placeholder_text = "e.g. golfer@example.com"
-	edit_profile_email_input.custom_minimum_size = Vector2(0, 44)
-	edit_profile_email_input.add_theme_font_size_override("font_size", 16)
+	edit_profile_email_input.custom_minimum_size = Vector2(0, 50)
+	edit_profile_email_input.add_theme_font_size_override("font_size", 18)
 	ThemeManager.apply_input_style(edit_profile_email_input)
 	if edit_profile_email_input.get_parent() != null:
 		edit_profile_email_input.get_parent().remove_child(edit_profile_email_input)
@@ -499,7 +505,7 @@ func _open_edit_profile_dialog(player_name: String) -> void:
 	
 	var av_title = Label.new()
 	av_title.text = "In-Game Avatar (replaces colored letter circle):"
-	av_title.add_theme_font_size_override("font_size", 14)
+	av_title.add_theme_font_size_override("font_size", 15)
 	av_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
 	av_sec.add_child(av_title)
 	
@@ -514,8 +520,8 @@ func _open_edit_profile_dialog(player_name: String) -> void:
 	
 	var change_av_btn = Button.new()
 	change_av_btn.text = "Select Avatar..."
-	change_av_btn.custom_minimum_size = Vector2(150, 44)
-	change_av_btn.add_theme_font_size_override("font_size", 15)
+	change_av_btn.custom_minimum_size = Vector2(160, 50)
+	change_av_btn.add_theme_font_size_override("font_size", 17)
 	ThemeManager.apply_primary_button_style(change_av_btn)
 	change_av_btn.pressed.connect(func():
 		_open_avatar_picker(edit_profile_avatar_path, func(chosen):
@@ -527,8 +533,8 @@ func _open_edit_profile_dialog(player_name: String) -> void:
 	
 	var remove_av_btn = Button.new()
 	remove_av_btn.text = "Remove Avatar"
-	remove_av_btn.custom_minimum_size = Vector2(140, 44)
-	remove_av_btn.add_theme_font_size_override("font_size", 15)
+	remove_av_btn.custom_minimum_size = Vector2(150, 50)
+	remove_av_btn.add_theme_font_size_override("font_size", 17)
 	ThemeManager.apply_secondary_button_style(remove_av_btn)
 	remove_av_btn.pressed.connect(func():
 		edit_profile_avatar_path = ""
@@ -711,8 +717,8 @@ func _render_player_profile(player_name: String) -> void:
 
 	var edit_profile_btn = Button.new()
 	edit_profile_btn.text = "✏️ Edit Profile"
-	edit_profile_btn.custom_minimum_size = Vector2(150, 46)
-	edit_profile_btn.add_theme_font_size_override("font_size", 16)
+	edit_profile_btn.custom_minimum_size = Vector2(160, 50)
+	edit_profile_btn.add_theme_font_size_override("font_size", 17)
 	ThemeManager.apply_secondary_button_style(edit_profile_btn, 6)
 	edit_profile_btn.pressed.connect(func(): _open_edit_profile_dialog(player_name))
 	header_hbox.add_child(edit_profile_btn)
@@ -1028,24 +1034,24 @@ func _render_player_profile(player_name: String) -> void:
 
 	var email_report_btn = Button.new()
 	email_report_btn.text = "✉ Email Profile Report"
-	email_report_btn.custom_minimum_size = Vector2(200, 48)
-	email_report_btn.add_theme_font_size_override("font_size", 15)
+	email_report_btn.custom_minimum_size = Vector2(210, 52)
+	email_report_btn.add_theme_font_size_override("font_size", 16)
 	ThemeManager.apply_primary_button_style(email_report_btn, 6)
 	email_report_btn.pressed.connect(func(): _email_player_profile_report(player_name))
 	actions_hbox.add_child(email_report_btn)
 	
 	var clear_btn = Button.new()
 	clear_btn.text = "🧹 Clear All Ball History"
-	clear_btn.custom_minimum_size = Vector2(200, 48)
-	clear_btn.add_theme_font_size_override("font_size", 15)
+	clear_btn.custom_minimum_size = Vector2(210, 52)
+	clear_btn.add_theme_font_size_override("font_size", 16)
 	ThemeManager.apply_secondary_button_style(clear_btn, 6)
 	clear_btn.pressed.connect(func(): clear_confirm_dialog.popup_centered())
 	actions_hbox.add_child(clear_btn)
 	
 	var delete_btn = Button.new()
 	delete_btn.text = "❌ Delete Profile permanently"
-	delete_btn.custom_minimum_size = Vector2(240, 48)
-	delete_btn.add_theme_font_size_override("font_size", 15)
+	delete_btn.custom_minimum_size = Vector2(250, 52)
+	delete_btn.add_theme_font_size_override("font_size", 16)
 	ThemeManager.apply_danger_button_style(delete_btn, 6)
 	delete_btn.pressed.connect(func(): delete_confirm_dialog.popup_centered())
 	actions_hbox.add_child(delete_btn)
@@ -1298,8 +1304,8 @@ func _build_club_distances_tab(player_name: String) -> VBoxContainer:
 
 		var reset_btn = Button.new()
 		reset_btn.text = "🗑 Reset"
-		reset_btn.custom_minimum_size = Vector2(105, 36)
-		reset_btn.add_theme_font_size_override("font_size", 13)
+		reset_btn.custom_minimum_size = Vector2(110, 44)
+		reset_btn.add_theme_font_size_override("font_size", 15)
 
 		if has_shots:
 			ThemeManager.apply_danger_button_style(reset_btn, 6)

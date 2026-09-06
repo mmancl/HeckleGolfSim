@@ -28,6 +28,12 @@ var mode_closest_btn: Button
 var mode_desc_lbl: Label
 var team_assignments: Dictionary = {}
 
+var selected_turn_order: String = "Stay Up"
+var turn_stay_up_btn: Button
+var turn_classic_btn: Button
+var turn_full_hole_btn: Button
+var turn_desc_lbl: Label
+
 func _ready() -> void:
 	# Build the setup screen dynamically
 	name = "CoursePlaySetup"
@@ -117,8 +123,7 @@ func _ready() -> void:
 	add_row.add_theme_constant_override("separation", 10)
 	
 	var player_select_opt = OptionButton.new()
-	player_select_opt.custom_minimum_size = Vector2(250, 56)
-	player_select_opt.add_theme_font_size_override("font_size", 24)
+	ThemeManager.apply_option_button_style(player_select_opt, 22, Vector2(250, 56))
 	add_row.add_child(player_select_opt)
 	
 	var name_input = LineEdit.new()
@@ -153,8 +158,7 @@ func _ready() -> void:
 	tee_opt.add_item("Red", 1)
 	tee_opt.add_item("White", 2)
 	tee_opt.add_item("Black", 3)
-	tee_opt.custom_minimum_size = Vector2(150, 56)
-	tee_opt.add_theme_font_size_override("font_size", 24)
+	ThemeManager.apply_option_button_style(tee_opt, 22, Vector2(160, 56))
 	add_row.add_child(tee_opt)
 	
 	var add_btn = Button.new()
@@ -215,6 +219,9 @@ func _ready() -> void:
 	var length_selector = _create_length_selector()
 	right_vbox.add_child(length_selector)
 	
+	var turn_order_selector = _create_turn_order_selector()
+	right_vbox.add_child(turn_order_selector)
+	
 	course_list.item_selected.connect(func(idx):
 		_update_start_button()
 		_update_course_length_options(idx)
@@ -255,7 +262,8 @@ func _ready() -> void:
 	delete_confirm_dialog = ConfirmationDialog.new()
 	delete_confirm_dialog.title = "Confirm Delete"
 	delete_confirm_dialog.dialog_text = "Are you sure you want to delete this course?"
-	delete_confirm_dialog.min_size = Vector2(400, 150)
+	delete_confirm_dialog.min_size = Vector2(480, 180)
+	ThemeManager.apply_dialog_style(delete_confirm_dialog)
 	add_child(delete_confirm_dialog)
 	
 	preview_button.text = "Preview Course"
@@ -325,11 +333,20 @@ func _add_player_ui(p_name: String, tee: String) -> void:
 	name_lbl.add_theme_font_size_override("font_size", 24)
 	row.add_child(name_lbl)
 	
-	var tee_lbl = Label.new()
-	tee_lbl.text = "Tee: " + tee
-	tee_lbl.custom_minimum_size = Vector2(160, 0)
-	tee_lbl.add_theme_font_size_override("font_size", 24)
-	row.add_child(tee_lbl)
+	var player_tee_opt = OptionButton.new()
+	player_tee_opt.add_item("Blue", 0)
+	player_tee_opt.add_item("Red", 1)
+	player_tee_opt.add_item("White", 2)
+	player_tee_opt.add_item("Black", 3)
+	for t_idx in range(player_tee_opt.item_count):
+		if player_tee_opt.get_item_text(t_idx).to_lower() == tee.to_lower():
+			player_tee_opt.selected = t_idx
+			break
+	ThemeManager.apply_option_button_style(player_tee_opt, 20, Vector2(160, 52))
+	player_tee_opt.item_selected.connect(func(sel_idx):
+		player_data["tee"] = player_tee_opt.get_item_text(sel_idx)
+	)
+	row.add_child(player_tee_opt)
 	
 	var remove_btn = Button.new()
 	remove_btn.text = "Remove"
@@ -557,7 +574,9 @@ func _on_start_pressed() -> void:
 		return
 		
 	# Setup MultiplayerManager
-	get_node("/root/MultiplayerManager").setup_game(players_to_add, parsed, scene_path, config_path, selected_length, selected_game_mode, team_assignments)
+	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.turn_order_mode != null:
+		GlobalSettings.range_settings.turn_order_mode.set_value(selected_turn_order)
+	get_node("/root/MultiplayerManager").setup_game(players_to_add, parsed, scene_path, config_path, selected_length, selected_game_mode, team_assignments, selected_turn_order)
 	get_node("/root/MultiplayerManager").start_hole()
 	
 	# Load course
@@ -726,6 +745,93 @@ func _create_length_selector() -> PanelContainer:
 
 	_select_length("Full 18") # Default selection
 	return panel
+
+
+func _create_turn_order_selector() -> PanelContainer:
+	var panel = PanelContainer.new()
+	var panel_style = StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.1, 0.15, 0.2, 0.4)
+	panel_style.border_width_left = 1
+	panel_style.border_width_right = 1
+	panel_style.border_width_top = 1
+	panel_style.border_width_bottom = 1
+	panel_style.border_color = Color(0.3, 0.4, 0.5, 0.3)
+	panel_style.corner_radius_top_left = 8
+	panel_style.corner_radius_top_right = 8
+	panel_style.corner_radius_bottom_left = 8
+	panel_style.corner_radius_bottom_right = 8
+	panel_style.content_margin_left = 12
+	panel_style.content_margin_right = 12
+	panel_style.content_margin_top = 8
+	panel_style.content_margin_bottom = 8
+	panel.add_theme_stylebox_override("panel", panel_style)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 8)
+	panel.add_child(vbox)
+
+	var hbox = HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 15)
+	vbox.add_child(hbox)
+
+	var lbl = Label.new()
+	lbl.text = "Turn Order:"
+	lbl.add_theme_font_size_override("font_size", 24)
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hbox.add_child(lbl)
+
+	var seg_hbox = HBoxContainer.new()
+	seg_hbox.add_theme_constant_override("separation", 0)
+	hbox.add_child(seg_hbox)
+
+	turn_stay_up_btn = Button.new()
+	turn_stay_up_btn.text = "Stay Up"
+	turn_stay_up_btn.custom_minimum_size = Vector2(120, 48)
+	turn_stay_up_btn.add_theme_font_size_override("font_size", 18)
+	seg_hbox.add_child(turn_stay_up_btn)
+
+	turn_classic_btn = Button.new()
+	turn_classic_btn.text = "Classic"
+	turn_classic_btn.custom_minimum_size = Vector2(120, 48)
+	turn_classic_btn.add_theme_font_size_override("font_size", 18)
+	seg_hbox.add_child(turn_classic_btn)
+
+	turn_full_hole_btn = Button.new()
+	turn_full_hole_btn.text = "Full Hole"
+	turn_full_hole_btn.custom_minimum_size = Vector2(130, 48)
+	turn_full_hole_btn.add_theme_font_size_override("font_size", 18)
+	seg_hbox.add_child(turn_full_hole_btn)
+
+	turn_desc_lbl = Label.new()
+	turn_desc_lbl.add_theme_font_size_override("font_size", 16)
+	turn_desc_lbl.add_theme_color_override("font_color", Color(0.8, 0.85, 0.9))
+	turn_desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(turn_desc_lbl)
+
+	turn_stay_up_btn.pressed.connect(func(): _select_turn_order("Stay Up"))
+	turn_classic_btn.pressed.connect(func(): _select_turn_order("Classic"))
+	turn_full_hole_btn.pressed.connect(func(): _select_turn_order("Full Hole"))
+
+	var initial_mode = "Stay Up"
+	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.turn_order_mode != null:
+		initial_mode = GlobalSettings.range_settings.turn_order_mode.value
+	_select_turn_order(initial_mode)
+	return panel
+
+
+func _select_turn_order(mode_name: String) -> void:
+	selected_turn_order = mode_name
+	_style_seg_button(turn_stay_up_btn, "left", selected_turn_order == "Stay Up")
+	_style_seg_button(turn_classic_btn, "middle", selected_turn_order == "Classic")
+	_style_seg_button(turn_full_hole_btn, "right", selected_turn_order == "Full Hole")
+
+	match selected_turn_order:
+		"Stay Up":
+			turn_desc_lbl.text = "Stay Up (Default): All players tee off first. The furthest player hits next and stays up to hit again if still furthest or <= 20 yards."
+		"Classic":
+			turn_desc_lbl.text = "Classic: Whichever player is currently furthest from the pin always hits next."
+		"Full Hole":
+			turn_desc_lbl.text = "Full Hole: The player with honors plays their entire hole from tee to cup, followed by the next player."
 
 
 func _style_seg_button(btn: Button, position: String, active: bool) -> void:

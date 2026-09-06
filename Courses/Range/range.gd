@@ -301,6 +301,7 @@ func _generate_ground_terrain() -> void:
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.mesh = mesh
 	mesh_instance.name = "DynamicGround"
+	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mesh_instance)
 	
 	var static_body := StaticBody3D.new()
@@ -385,8 +386,12 @@ func _ready() -> void:
 		if not launch_monitor.hit_ball.is_connected(_on_launch_monitor_hit_ball):
 			launch_monitor.hit_ball.connect(_on_launch_monitor_hit_ball)
 	var is_practice_mode_primed: bool = GlobalSettings.practice_mode_primed
-	if is_practice_mode_primed:
+	var is_multiplayer_game = has_node("/root/MultiplayerManager") and get_node("/root/MultiplayerManager").players.size() > 1
+	if is_practice_mode_primed and not is_multiplayer_game:
 		practice_mode_active = true
+		GlobalSettings.practice_mode_primed = false
+	else:
+		practice_mode_active = false
 		GlobalSettings.practice_mode_primed = false
 	if has_node("Camera3D"):
 		$Camera3D.cull_mask = $Camera3D.cull_mask & ~2
@@ -1211,10 +1216,11 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 
 
 func _process(delta: float) -> void:
-	# Live stats update during ball flight and rollout (~20 Hz for silky real-time stats without CPU spike)
+	# Live stats update during ball flight and rollout (~10 Hz on mobile, ~20 Hz on desktop)
 	if has_node("Player") and $Player.ball != null and ($Player.get_ball_state() != PhysicsEnums.BallState.REST or _shot_active):
 		_live_stats_timer += delta
-		if _live_stats_timer >= 0.05:
+		var stats_interval = 0.10 if MobilePerformance.is_mobile() else 0.05
+		if _live_stats_timer >= stats_interval:
 			_live_stats_timer = 0.0
 			_update_ball_display(false)
 
@@ -1450,6 +1456,7 @@ func _on_golf_ball_rest(_ball_data) -> void:
 					active_player["last_starting_pos"] = recovery_pos
 		else:
 			# 1. Find closest point on water polygon boundary
+			var found_drop_point = false
 			var water_col = ball.water_collider
 			if water_col != null and water_col.has_meta("water_points"):
 				var poly_points = water_col.get_meta("water_points")
@@ -1466,6 +1473,24 @@ func _on_golf_ball_rest(_ball_data) -> void:
 					var rec_pos_2d = closest_pt_2d + away_dir * 0.3048 # 1 ft away
 					var h = get_height(rec_pos_2d.x, rec_pos_2d.y)
 					recovery_pos = Vector3(rec_pos_2d.x, h + GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET, rec_pos_2d.y)
+					found_drop_point = true
+			if not found_drop_point:
+				if not ball.shot_start_pos_global.is_zero_approx():
+					recovery_pos = ball.shot_start_pos_global
+				elif $Player != null and not $Player._last_starting_pos.is_zero_approx():
+					recovery_pos = $Player._last_starting_pos
+				elif not practice_start_pos.is_zero_approx():
+					recovery_pos = practice_start_pos
+			
+			ball.lie_type = "rough"
+			ball.set_surface(PhysicsEnums.SurfaceType.ROUGH)
+			if has_node("/root/MultiplayerManager") and not get_node("/root/MultiplayerManager").players.is_empty():
+				var mp_mgr = get_node("/root/MultiplayerManager")
+				var active_player = mp_mgr.get_active_player()
+				if active_player != null:
+					active_player["lie_type"] = "rough"
+					active_player["position"] = recovery_pos
+					active_player["last_starting_pos"] = recovery_pos
 		
 		# 2. Update ball position and spawn position
 		ball.global_position = recovery_pos
@@ -1477,13 +1502,22 @@ func _on_golf_ball_rest(_ball_data) -> void:
 		if has_node("/root/MultiplayerManager") and not get_node("/root/MultiplayerManager").players.is_empty():
 			var mp_mgr = get_node("/root/MultiplayerManager")
 			var active_player = mp_mgr.get_active_player()
-			active_player["strokes"] += 1
-			active_player["total_strokes"] += 1
+			if not mp_mgr.game_mode in ["Scramble", "2v2 Scramble"]:
+				active_player["strokes"] += 1
+				active_player["total_strokes"] += 1
+				print("[range.gd] Water hazard penalty applied: +1 stroke to %s" % active_player["name"])
+			else:
+				print("[range.gd] Scramble water hazard: marked penalty on shot, team stroke deferred")
 			active_player["last_shot_penalty"] = 1
-			print("[range.gd] Water hazard penalty applied: +1 stroke to %s" % active_player["name"])
 		else:
 			shot_count += 1
 			print("[range.gd] Water hazard penalty applied: +1 shot count (now %d)" % shot_count)
+	else:
+		if has_node("/root/MultiplayerManager") and not get_node("/root/MultiplayerManager").players.is_empty():
+			var mp_mgr = get_node("/root/MultiplayerManager")
+			var active_player = mp_mgr.get_active_player()
+			if active_player != null:
+				active_player["last_shot_penalty"] = 0
 
 	if is_dynamic_course and not practice_mode_active:
 		$Player.ball.spawn_position = ball_pos
@@ -1499,7 +1533,7 @@ func _on_golf_ball_rest(_ball_data) -> void:
 
 	# Record multiplayer shot
 	if has_node("/root/MultiplayerManager") and not get_node("/root/MultiplayerManager").players.is_empty():
-		get_node("/root/MultiplayerManager").record_shot($Player.ball.position, raw_ball_data)
+		get_node("/root/MultiplayerManager").record_shot(ball_pos, raw_ball_data)
 
 	if is_dynamic_course:
 		if practice_mode_active:
@@ -1774,16 +1808,16 @@ func set_camera_follow_mode(value) -> void:
 	if value and has_node("Player") and $Player.ball != null and _shot_active:
 		camera.follow_mode = PhantomCamera3D.FollowMode.SIMPLE
 		var player = $Player
-		camera.follow_target = player.ball
+		var target_node = player.ball
+		camera.follow_target = target_node
 		
 		# Keep camera follow aligned with the player's aim angle down the fairway/range
 		# Using aim_yaw_offset_deg prevents the follow camera from jumping sideways/off-center due to HLA
 		var yaw_rad = deg_to_rad(player.ball.aim_yaw_offset_deg)
 		_last_travel_yaw = yaw_rad
 		
-		# Uniform responsive damping so the camera tracks smoothly without skewing
-		camera.follow_damping = true
-		camera.follow_damping_value = Vector3(0.12, 0.12, 0.12)
+		# Rigid follow locked to physics ball (Godot built-in 3D physics interpolation handles camera and ball in unison)
+		camera.follow_damping = false
 		
 		# Check if putting to determine camera configuration
 		if player.ball.is_putt:
@@ -1814,8 +1848,9 @@ func set_camera_follow_mode(value) -> void:
 		
 		# Rotate camera to look directly at the ball with slight elevation for better course framing
 		camera.look_at_mode = PhantomCamera3D.LookAtMode.SIMPLE
-		camera.look_at_target = player.ball
+		camera.look_at_target = target_node
 		camera.look_at_offset = Vector3(0.0, 0.25, 0.0)
+		camera.look_at_damping = false
 	else:
 		_putt_close_view_triggered = false
 		_chip_close_view_triggered = false
@@ -1824,6 +1859,7 @@ func set_camera_follow_mode(value) -> void:
 		camera.follow_mode = PhantomCamera3D.FollowMode.NONE
 		camera.look_at_mode = PhantomCamera3D.LookAtMode.NONE
 		camera.look_at_offset = Vector3.ZERO
+		camera.look_at_damping = false
 		update_camera_fov(GlobalSettings.range_settings.camera_fov.value)
 
 func reset_camera_to_start() -> void:
@@ -2542,8 +2578,28 @@ func is_ball_on_green() -> bool:
 	return false
 
 
+func is_ball_on_fringe() -> bool:
+	if has_node("Player") and $Player.ball != null:
+		var ball = $Player.ball
+		var lie = str(ball.get("lie_type")).to_lower()
+		var p_lie = str($Player.get("current_lie_type")).to_lower()
+		if lie == "fringe" or p_lie == "fringe":
+			return true
+		if has_method("get_distance_to_nearest_green"):
+			var d_green: float = get_distance_to_nearest_green(ball.global_position)
+			if d_green > 0.001 and d_green <= 2.5:
+				return true
+		if has_node("/root/MultiplayerManager"):
+			var mp = get_node("/root/MultiplayerManager")
+			if not mp.players.is_empty():
+				var ap = mp.get_active_player()
+				if ap.get("lie_type", "").to_lower() == "fringe":
+					return true
+	return false
+
+
 func get_camera_target_look(target_pos: Vector3, origin_pos: Vector3, is_on_green: bool = false) -> Vector3:
-	var is_putting = is_on_green or (_get_current_club().to_lower() in ["pt", "putt", "putter"])
+	var is_putting = is_on_green or is_ball_on_fringe() or (_get_current_club().to_lower() in ["pt", "putt", "putter"])
 	if is_putting:
 		if not target_pos.is_zero_approx():
 			var dist = origin_pos.distance_to(target_pos)
@@ -2580,7 +2636,7 @@ func get_camera_local_offset(override_is_on_green: Variant = null) -> Vector3:
 	if override_is_on_green != null:
 		is_on_green = bool(override_is_on_green)
 	else:
-		is_on_green = is_ball_on_green() or (_get_current_club().to_lower() in ["pt", "putt", "putter"])
+		is_on_green = is_ball_on_green() or is_ball_on_fringe() or (_get_current_club().to_lower() in ["pt", "putt", "putter"])
 		
 	if is_on_green:
 		return Vector3(-1.05, 0.6, 0)
@@ -2619,6 +2675,8 @@ func update_camera_fov(value: float) -> void:
 
 
 func update_camera_far(value: float) -> void:
+	if MobilePerformance.is_mobile():
+		value = minf(value, 400.0)
 	if has_node("PhantomCamera3D") and $PhantomCamera3D.camera_3d_resource != null:
 		$PhantomCamera3D.camera_3d_resource.far = value
 	if has_node("Camera3D"):
@@ -2943,8 +3001,8 @@ func update_auto_club(force_auto: bool = false) -> void:
 				else:
 					is_in_teebox = (shot_count == 0)
 		
-		# Rule 1: Green check - ONLY select putter when actually on green
-		if is_on_green:
+		# Rule 1: Green & Fringe check - select putter when on green or on fringe near the green
+		if is_on_green or (is_ball_on_fringe() and dist_yards <= 35):
 			selected_club = "Pt"
 		# Rule 2: Teebox driver check
 		elif is_in_teebox and dist_yards > 200:
@@ -3346,6 +3404,27 @@ func _on_active_player_changed(_player: Dictionary) -> void:
 	_update_averages()
 	update_auto_club(is_tee)
 
+	# If MultiplayerController (course_play.gd) is present, it handles ball positioning, resetting, lie detection, aim angle, and camera setup.
+	var is_course_play = has_node("MultiplayerController") or get_node_or_null("MultiplayerController") != null or (get_parent() != null and get_parent().name == "CoursePlay")
+	if is_course_play:
+		return
+
+	if has_node("Player") and $Player.ball != null and not _player.is_empty():
+		var p_pos = _player.get("position", Vector3.ZERO)
+		if typeof(p_pos) == TYPE_VECTOR3 and not (p_pos as Vector3).is_zero_approx():
+			$Player.ball.spawn_position = p_pos
+			$Player.ball.lie_type = _player.get("lie_type", "teebox" if is_tee else "fairway")
+			$Player.reset_ball()
+			if $Player.get("_last_starting_pos") != null:
+				$Player._last_starting_pos = _player.get("last_starting_pos", p_pos)
+			update_current_lie_and_reduction()
+
+			var target_pos = current_hole_location if not current_hole_location.is_zero_approx() else aim_target_pos
+			if not target_pos.is_zero_approx():
+				var diff = target_pos - p_pos
+				var angle_rad = atan2(diff.z, diff.x)
+				$Player.ball.aim_yaw_offset_deg = rad_to_deg(-angle_rad)
+
 
 func _on_player_changed(_dir: String, _player_name: String) -> void:
 	if not practice_mode_active:
@@ -3676,10 +3755,15 @@ func update_current_lie_and_reduction() -> void:
 	_update_aim_distance_label_text()
 		
 	# If in course play, update HUD
+	var mp_ctrl = get_node_or_null("MultiplayerController")
 	var parent = get_parent()
-	if parent != null and parent.has_method("_on_active_player_changed"):
-		var active_p = mp_mgr.get_active_player() if (mp_mgr != null and not mp_mgr.players.is_empty()) else {}
-		if not active_p.is_empty():
+	var active_p = mp_mgr.get_active_player() if (mp_mgr != null and not mp_mgr.players.is_empty()) else {}
+	if not active_p.is_empty():
+		if mp_ctrl != null and mp_ctrl.has_method("_update_top_hud"):
+			mp_ctrl.call("_update_top_hud", active_p)
+		elif parent != null and parent.has_method("_update_top_hud"):
+			parent.call("_update_top_hud", active_p)
+		elif parent != null and parent.has_method("_on_active_player_changed"):
 			parent.call("_on_active_player_changed", active_p)
 
 

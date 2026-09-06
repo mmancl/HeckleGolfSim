@@ -651,6 +651,7 @@ func _detect_current_gameplay_screen() -> ScreenLayout:
 	# Chipping Minigame, Putting Practice, Shape Practice, Loft Control -> TOP_LEFT
 	if full_id.contains("chipping") or scene_name.contains("chipping") \
 		or full_id.contains("putting") or scene_name.contains("putting") \
+		or full_id.contains("putt") or scene_name.contains("putt") \
 		or full_id.contains("shape") or scene_name.contains("shape") \
 		or full_id.contains("loft") or scene_name.contains("loft"):
 		return ScreenLayout.TOP_LEFT
@@ -972,6 +973,13 @@ func _is_gimme_banner_showing(scene: Node) -> bool:
 
 
 func _is_hole_or_player_finished(scene: Node) -> bool:
+	# Only CoursePlay has multiplayer hole/match completion states that should hide the ready HUD
+	var scene_name := str(scene.name).to_lower() if scene != null else ""
+	var script: Script = scene.get_script() if scene != null else null
+	var script_path := str(script.resource_path).to_lower() if script != null else ""
+	if not scene_name.contains("course_play") and not scene_name.contains("courseplay") and not script_path.contains("course_play") and not script_path.contains("courseplay"):
+		return false
+
 	if has_node("/root/MultiplayerManager"):
 		var mp_mgr = get_node("/root/MultiplayerManager")
 		if mp_mgr != null and is_instance_valid(mp_mgr):

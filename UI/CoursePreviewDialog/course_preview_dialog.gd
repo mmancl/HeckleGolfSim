@@ -46,6 +46,7 @@ func _ready() -> void:
 	ThemeManager.apply_secondary_button_style(full_course_btn, 6)
 	ThemeManager.apply_secondary_button_style(prev_hole_btn, 6)
 	ThemeManager.apply_secondary_button_style(next_hole_btn, 6)
+	ThemeManager.apply_option_button_style(hole_option_btn, 18, Vector2(250, 48))
 	ThemeManager.apply_secondary_button_style(mode_toggle_btn, 6)
 	ThemeManager.apply_nav_button_style(zoom_in_btn, 6)
 	ThemeManager.apply_nav_button_style(zoom_out_btn, 6)

@@ -59,6 +59,9 @@ Heckle Golf Simulator utilizes open-source components under permissive licenses:
 - **Terrain3D**: MIT License by Cory Petkovsek, Roope Palmroos, and Contributors.
 - **Phantom Camera**: MIT License by Marcus Skov.
 - **PBR Textures & Low-Poly Foliage**: Textures sourced from [ambientCG.com](https://ambientcg.com/) and Shapespark low-poly exterior plants, dedicated to the public domain under [Creative Commons CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).
+- **Music & Soundtracks**: Minigame sound loop tracks: Music from #Uppbeat (free for Creators!):
+  - *8beatz* (by 21 On The Block): [https://uppbeat.io/t/21-on-the-block/8beatz](https://uppbeat.io/t/21-on-the-block/8beatz)
+  - *Boogie* (by Pecan Pie): [https://uppbeat.io/t/pecan-pie/boogie](https://uppbeat.io/t/pecan-pie/boogie)
 
 ---
 

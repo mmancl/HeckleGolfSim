@@ -70,6 +70,11 @@ var active_ball: Node = null
 var mulligan_confirm_dialog: PanelContainer = null
 var forfeit_confirm_dialog: PanelContainer = null
 var exit_confirm_dialog: Control = null
+var add_player_prompt_dialog: PanelContainer = null
+var resume_player_prompt_dialog: PanelContainer = null
+var catch_up_banner: PanelContainer = null
+var catch_up_lbl: Label = null
+var catch_up_skip_btn: Button = null
 var _hud_elements_visible: bool = true
 
 var _was_helpers_visible_before_aerial: bool = false
@@ -89,6 +94,9 @@ func _ready() -> void:
 	MultiplayerManager.hole_completed.connect(_on_hole_completed)
 	MultiplayerManager.game_over.connect(_on_game_over)
 	MultiplayerManager.gimme_awarded.connect(_on_gimme_awarded)
+	MultiplayerManager.catch_up_mode_changed.connect(func(_active, _name, _c, _t):
+		_update_catch_up_hud()
+	)
 	
 	if get_parent() != null and get_parent() != get_tree().get_root() and get_parent().name != "CourseManager":
 		course_instance = get_parent()
@@ -409,6 +417,120 @@ func _setup_hud() -> void:
 	g_vbox.add_child(gimme_sub_lbl)
 	
 	canvas.add_child(gimme_banner)
+	
+	# Catch-Up HUD Banner (Bottom Center above stats bar)
+	catch_up_banner = PanelContainer.new()
+	catch_up_banner.name = "CatchUpBanner"
+	catch_up_banner.visible = false
+	catch_up_banner.anchor_left = 0.5
+	catch_up_banner.anchor_right = 0.5
+	catch_up_banner.anchor_top = 1.0
+	catch_up_banner.anchor_bottom = 1.0
+	catch_up_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	catch_up_banner.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	catch_up_banner.offset_left = -300
+	catch_up_banner.offset_right = 300
+	catch_up_banner.offset_top = -148
+	catch_up_banner.offset_bottom = -94
+	
+	var cu_style = StyleBoxFlat.new()
+	cu_style.bg_color = Color(0.08, 0.12, 0.20, 0.95)
+	cu_style.border_width_left = 2
+	cu_style.border_width_top = 2
+	cu_style.border_width_right = 2
+	cu_style.border_width_bottom = 2
+	cu_style.border_color = Color(0.35, 0.75, 1.0, 0.95)
+	cu_style.corner_radius_top_left = 12
+	cu_style.corner_radius_top_right = 12
+	cu_style.corner_radius_bottom_right = 12
+	cu_style.corner_radius_bottom_left = 12
+	cu_style.content_margin_left = 16
+	cu_style.content_margin_right = 16
+	cu_style.content_margin_top = 8
+	cu_style.content_margin_bottom = 8
+	cu_style.shadow_color = Color(0, 0, 0, 0.6)
+	cu_style.shadow_size = 8
+	catch_up_banner.add_theme_stylebox_override("panel", cu_style)
+	
+	var cu_hbox = HBoxContainer.new()
+	cu_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	cu_hbox.add_theme_constant_override("separation", 16)
+	catch_up_banner.add_child(cu_hbox)
+	
+	catch_up_lbl = Label.new()
+	catch_up_lbl.name = "CatchUpLabel"
+	catch_up_lbl.text = "⛳ Solo Catch-Up in Progress"
+	catch_up_lbl.add_theme_font_size_override("font_size", 16)
+	catch_up_lbl.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0))
+	catch_up_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cu_hbox.add_child(catch_up_lbl)
+	
+	catch_up_skip_btn = Button.new()
+	catch_up_skip_btn.name = "CatchUpSkipBtn"
+	catch_up_skip_btn.text = "⏩ Skip to Group"
+	catch_up_skip_btn.custom_minimum_size = Vector2(145, 36)
+	apply_material_button_style(catch_up_skip_btn, Color(0.68, 0.25, 0.25, 0.9))
+	catch_up_skip_btn.pressed.connect(func():
+		MultiplayerManager.skip_catch_up()
+		_update_catch_up_hud()
+	)
+	cu_hbox.add_child(catch_up_skip_btn)
+	canvas.add_child(catch_up_banner)
+
+	# Add Player Mid-Game Prompt Dialog
+	add_player_prompt_dialog = PanelContainer.new()
+	add_player_prompt_dialog.name = "AddPlayerPromptDialog"
+	add_player_prompt_dialog.visible = false
+	add_player_prompt_dialog.anchor_left = 0.5
+	add_player_prompt_dialog.anchor_right = 0.5
+	add_player_prompt_dialog.anchor_top = 0.5
+	add_player_prompt_dialog.anchor_bottom = 0.5
+	add_player_prompt_dialog.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	add_player_prompt_dialog.grow_vertical = Control.GROW_DIRECTION_BOTH
+	add_player_prompt_dialog.offset_left = -290
+	add_player_prompt_dialog.offset_right = 290
+	add_player_prompt_dialog.offset_top = -140
+	add_player_prompt_dialog.offset_bottom = 140
+	
+	var ap_style = StyleBoxFlat.new()
+	ap_style.bg_color = Color(0.08, 0.10, 0.15, 0.98)
+	ap_style.border_width_left = 2
+	ap_style.border_width_top = 2
+	ap_style.border_width_right = 2
+	ap_style.border_width_bottom = 2
+	ap_style.border_color = Color(0.24, 0.46, 0.72, 0.9)
+	ap_style.corner_radius_top_left = 16
+	ap_style.corner_radius_top_right = 16
+	ap_style.corner_radius_bottom_left = 16
+	ap_style.corner_radius_bottom_right = 16
+	ap_style.content_margin_left = 24
+	ap_style.content_margin_right = 24
+	ap_style.content_margin_top = 20
+	ap_style.content_margin_bottom = 20
+	ap_style.shadow_color = Color(0, 0, 0, 0.75)
+	ap_style.shadow_size = 14
+	add_player_prompt_dialog.add_theme_stylebox_override("panel", ap_style)
+	canvas.add_child(add_player_prompt_dialog)
+
+	# Resume Player Prompt Dialog
+	resume_player_prompt_dialog = PanelContainer.new()
+	resume_player_prompt_dialog.name = "ResumePlayerPromptDialog"
+	resume_player_prompt_dialog.visible = false
+	resume_player_prompt_dialog.anchor_left = 0.5
+	resume_player_prompt_dialog.anchor_right = 0.5
+	resume_player_prompt_dialog.anchor_top = 0.5
+	resume_player_prompt_dialog.anchor_bottom = 0.5
+	resume_player_prompt_dialog.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	resume_player_prompt_dialog.grow_vertical = Control.GROW_DIRECTION_BOTH
+	resume_player_prompt_dialog.offset_left = -290
+	resume_player_prompt_dialog.offset_right = 290
+	resume_player_prompt_dialog.offset_top = -140
+	resume_player_prompt_dialog.offset_bottom = 140
+	
+	var rp_style = ap_style.duplicate()
+	rp_style.border_color = Color(1.0, 0.82, 0.35, 0.9)
+	resume_player_prompt_dialog.add_theme_stylebox_override("panel", rp_style)
+	canvas.add_child(resume_player_prompt_dialog)
 	
 	var margin = MarginContainer.new()
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -964,18 +1086,19 @@ func _setup_hud() -> void:
 	stats_btn.name = "StatsButton"
 	stats_btn.text = ""
 	stats_btn.tooltip_text = "Toggle Stats (Show/Hide)"
+	stats_btn.expand_icon = true
 	if ResourceLoader.exists("res://assets/images/icons/stats.svg"):
 		stats_btn.icon = load("res://assets/images/icons/stats.svg")
 	stats_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	stats_btn.custom_minimum_size = Vector2(64, 64)
+	stats_btn.custom_minimum_size = Vector2(80, 80)
 	apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85)) # Blue
 	stats_btn.anchor_left = 0.0
 	stats_btn.anchor_right = 0.0
 	stats_btn.anchor_top = 1.0
 	stats_btn.anchor_bottom = 1.0
 	stats_btn.offset_left = 30
-	stats_btn.offset_top = -88
-	stats_btn.offset_right = 94
+	stats_btn.offset_top = -104
+	stats_btn.offset_right = 110
 	stats_btn.offset_bottom = -24
 	stats_btn.pressed.connect(func():
 		if range_ui != null:
@@ -992,18 +1115,19 @@ func _setup_hud() -> void:
 	grid_btn.name = "GreenGridToggleButton"
 	grid_btn.text = ""
 	grid_btn.tooltip_text = "Toggle Slope Grid (Show/Hide)"
+	grid_btn.expand_icon = true
 	if ResourceLoader.exists("res://assets/images/icons/slope_grid.svg"):
 		grid_btn.icon = load("res://assets/images/icons/slope_grid.svg")
 	grid_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	grid_btn.custom_minimum_size = Vector2(64, 64)
+	grid_btn.custom_minimum_size = Vector2(80, 80)
 	apply_circular_button_style(grid_btn, Color(0.15, 0.15, 0.15, 0.85)) # Gray (off) by default
 	grid_btn.anchor_left = 0.0
 	grid_btn.anchor_right = 0.0
 	grid_btn.anchor_top = 1.0
 	grid_btn.anchor_bottom = 1.0
-	grid_btn.offset_left = 126   # 94 (stats right) + 32px gap
-	grid_btn.offset_top = -88
-	grid_btn.offset_right = 190 # 126 + 64 button width
+	grid_btn.offset_left = 130   # 110 (stats right) + 20px gap
+	grid_btn.offset_top = -104
+	grid_btn.offset_right = 210 # 130 + 80 button width
 	grid_btn.offset_bottom = -24
 	grid_btn.pressed.connect(func():
 		if course_instance != null and course_instance.get("show_green_grid") != null:
@@ -1017,17 +1141,18 @@ func _setup_hud() -> void:
 	map_btn.name = "MapButton"
 	map_btn.text = ""
 	map_btn.tooltip_text = "Toggle Map View"
+	map_btn.expand_icon = true
 	if ResourceLoader.exists("res://assets/images/icons/golf_course.svg"):
 		map_btn.icon = load("res://assets/images/icons/golf_course.svg")
 	map_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	map_btn.custom_minimum_size = Vector2(64, 64)
+	map_btn.custom_minimum_size = Vector2(80, 80)
 	apply_circular_button_style(map_btn, Color(0.18, 0.45, 0.25, 0.85)) # Forest green
 	map_btn.anchor_left = 1.0
 	map_btn.anchor_right = 1.0
 	map_btn.anchor_top = 1.0
 	map_btn.anchor_bottom = 1.0
-	map_btn.offset_left = -94
-	map_btn.offset_top = -88
+	map_btn.offset_left = -110
+	map_btn.offset_top = -104
 	map_btn.offset_right = -30
 	map_btn.offset_bottom = -24
 	map_btn.pressed.connect(func():
@@ -1041,18 +1166,19 @@ func _setup_hud() -> void:
 	mulligan_btn.name = "MulliganButton"
 	mulligan_btn.text = ""
 	mulligan_btn.tooltip_text = "Mulligan (Undo Shot)"
+	mulligan_btn.expand_icon = true
 	if ResourceLoader.exists("res://assets/images/icons/mulligan.svg"):
 		mulligan_btn.icon = load("res://assets/images/icons/mulligan.svg")
 	mulligan_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	mulligan_btn.custom_minimum_size = Vector2(64, 64)
+	mulligan_btn.custom_minimum_size = Vector2(80, 80)
 	apply_circular_button_style(mulligan_btn, Color(0.24, 0.46, 0.72, 0.85))
 	mulligan_btn.anchor_left = 1.0
 	mulligan_btn.anchor_right = 1.0
 	mulligan_btn.anchor_top = 1.0
 	mulligan_btn.anchor_bottom = 1.0
-	mulligan_btn.offset_left = -190  # -126 - 64 button width
-	mulligan_btn.offset_top = -88
-	mulligan_btn.offset_right = -126 # -94 (map left) - 32px gap
+	mulligan_btn.offset_left = -210  # -130 - 80 button width
+	mulligan_btn.offset_top = -104
+	mulligan_btn.offset_right = -130 # -110 (map left) - 20px gap
 	mulligan_btn.offset_bottom = -24
 	mulligan_btn.pressed.connect(_on_mulligan_pressed)
 	mulligan_btn.visible = is_match_play
@@ -1063,23 +1189,24 @@ func _setup_hud() -> void:
 	forfeit_btn.name = "ForfeitButton"
 	forfeit_btn.text = ""
 	forfeit_btn.tooltip_text = "White Flag (Concede Hole)"
+	forfeit_btn.expand_icon = true
 	if ResourceLoader.exists("res://assets/images/icons/white_flag.svg"):
 		var icon_tex = load("res://assets/images/icons/white_flag.svg")
 		if icon_tex != null:
 			forfeit_btn.icon = icon_tex
 	if forfeit_btn.icon == null:
 		forfeit_btn.text = "🏳"
-		forfeit_btn.add_theme_font_size_override("font_size", 28)
+		forfeit_btn.add_theme_font_size_override("font_size", 34)
 	forfeit_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	forfeit_btn.custom_minimum_size = Vector2(64, 64)
+	forfeit_btn.custom_minimum_size = Vector2(80, 80)
 	apply_circular_button_style(forfeit_btn, Color(0.68, 0.22, 0.22, 0.88))
 	forfeit_btn.anchor_left = 1.0
 	forfeit_btn.anchor_right = 1.0
 	forfeit_btn.anchor_top = 1.0
 	forfeit_btn.anchor_bottom = 1.0
-	forfeit_btn.offset_left = -286  # -222 - 64 button width
-	forfeit_btn.offset_top = -88
-	forfeit_btn.offset_right = -222 # -190 (mulligan left) - 32px gap
+	forfeit_btn.offset_left = -310  # -230 - 80 button width
+	forfeit_btn.offset_top = -104
+	forfeit_btn.offset_right = -230 # -210 (mulligan left) - 20px gap
 	forfeit_btn.offset_bottom = -24
 	forfeit_btn.pressed.connect(_on_forfeit_pressed)
 	forfeit_btn.visible = false
@@ -1414,10 +1541,10 @@ func _setup_hud() -> void:
 	hud_manage_players.anchor_right = 0.5
 	hud_manage_players.anchor_top = 0.5
 	hud_manage_players.anchor_bottom = 0.5
-	hud_manage_players.offset_left = -300
-	hud_manage_players.offset_right = 300
-	hud_manage_players.offset_top = -250
-	hud_manage_players.offset_bottom = 250
+	hud_manage_players.offset_left = -370
+	hud_manage_players.offset_right = 370
+	hud_manage_players.offset_top = -260
+	hud_manage_players.offset_bottom = 260
 	
 	var manage_style = StyleBoxFlat.new()
 	manage_style.bg_color = Color(0.08, 0.1, 0.15, 0.95)
@@ -1526,16 +1653,15 @@ func _setup_hud() -> void:
 			p_name = select_opt.get_item_text(select_opt.selected)
 			
 		var tee_color = tee_opt.get_item_text(tee_opt.selected)
-		
-		MultiplayerManager.add_new_player(p_name, tee_color)
-		
-		# Register player globally so they persist
-		MultiplayerManager.register_player(p_name)
-		
 		name_input.clear()
-		_refresh_manage_players_dropdown()
-		_populate_manage_players()
-		_populate_scorecard("toggle")
+		
+		if MultiplayerManager.current_hole_index > 0:
+			_show_add_player_dialog(p_name, tee_color)
+		else:
+			MultiplayerManager.add_new_player_with_mode(p_name, tee_color, "current_hole")
+			_refresh_manage_players_dropdown()
+			_populate_manage_players()
+			_populate_scorecard("toggle")
 	)
 	
 	# Close button
@@ -1830,14 +1956,15 @@ func _on_active_player_changed(player: Dictionary) -> void:
 
 	if active_ball != null:
 		var is_practice = course_instance != null and course_instance.get("practice_mode_active")
+		var is_multiplayer = MultiplayerManager.players.size() > 1
 		var should_initialize = true
-		if is_practice and player.get("strokes", 0) > 0:
+		if is_practice and not is_multiplayer and player.get("strokes", 0) > 0:
 			should_initialize = false
 			
 		if should_initialize:
 			# Teleport the ball to this player's current resting position
 			active_ball.spawn_position = player["position"]
-			active_ball.lie_type = player.get("lie_type", "teebox")
+			active_ball.lie_type = player.get("lie_type", "teebox" if player.get("strokes", 0) == 0 else "fairway")
 			active_ball.reset()
 			
 			# Recalculate lie immediately after teleporting/resetting
@@ -1846,6 +1973,8 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			var player_node_ref = course_instance.get_node_or_null("Player") if course_instance != null else null
 			if player_node_ref != null:
 				player_node_ref.current_lie_type = active_ball.lie_type
+				if player_node_ref.get("_last_starting_pos") != null:
+					player_node_ref._last_starting_pos = player.get("last_starting_pos", player["position"])
 			
 			if course_instance != null and course_instance.has_method("update_auto_club"):
 				course_instance.call("update_auto_club", true)
@@ -1878,9 +2007,12 @@ func _on_active_player_changed(player: Dictionary) -> void:
 						var is_on_green = false
 						if active_ball != null:
 							var lie = str(active_ball.get("lie_type")).to_lower()
-							is_on_green = (lie == "green")
-							if not is_on_green and course_instance != null and course_instance.has_method("is_ball_on_green"):
-								is_on_green = course_instance.call("is_ball_on_green")
+							is_on_green = (lie in ["green", "fringe"])
+							if not is_on_green and course_instance != null:
+								if course_instance.has_method("is_ball_on_green"):
+									is_on_green = course_instance.call("is_ball_on_green")
+								if not is_on_green and course_instance.has_method("is_ball_on_fringe"):
+									is_on_green = course_instance.call("is_ball_on_fringe")
 						var cam_dist = GlobalSettings.range_settings.camera_distance.value
 						var cam_height = GlobalSettings.range_settings.camera_height.value
 						var local_offset = Vector3(-1.05, 0.6, 0) if is_on_green else Vector3(-cam_dist, cam_height, 0)
@@ -2863,12 +2995,15 @@ func _update_minimap() -> void:
 			var is_on_green = false
 			if ball != null:
 				var lie = str(ball.get("lie_type")).to_lower()
-				is_on_green = (lie == "green")
-			if not is_on_green and course_instance != null and course_instance.has_method("is_ball_on_green"):
-				is_on_green = course_instance.call("is_ball_on_green")
+				is_on_green = (lie in ["green", "fringe"])
+			if not is_on_green and course_instance != null:
+				if course_instance.has_method("is_ball_on_green"):
+					is_on_green = course_instance.call("is_ball_on_green")
+				if not is_on_green and course_instance.has_method("is_ball_on_fringe"):
+					is_on_green = course_instance.call("is_ball_on_fringe")
 			if not is_on_green and MultiplayerManager.players.size() > 0:
 				var ap = MultiplayerManager.get_active_player()
-				if ap.get("lie_type", "").to_lower() == "green":
+				if ap.get("lie_type", "").to_lower() in ["green", "fringe"]:
 					is_on_green = true
 
 			if is_on_green:
@@ -2999,21 +3134,21 @@ const MINIMAP_BALL_SVG: String = """<svg xmlns="http://www.w3.org/2000/svg" view
   <circle cx="9" cy="8.5" r="4.5" fill="#FFFFFF" opacity="0.85"/>
   <!-- Dimple pattern -->
   <g fill="#90A4AE" opacity="0.75">
-    <circle cx="12" cy="12" r="1.1"/>
-    <circle cx="8.5" cy="11" r="0.95"/>
-    <circle cx="15.5" cy="11" r="0.95"/>
-    <circle cx="10.5" cy="7.8" r="0.9"/>
-    <circle cx="13.5" cy="7.8" r="0.9"/>
-    <circle cx="10.5" cy="15.2" r="0.9"/>
-    <circle cx="13.5" cy="15.2" r="0.9"/>
-    <circle cx="6.5" cy="12" r="0.85"/>
-    <circle cx="17.5" cy="12" r="0.85"/>
-    <circle cx="12" cy="5.8" r="0.85"/>
-    <circle cx="12" cy="17.8" r="0.85"/>
-    <circle cx="7.8" cy="8" r="0.8"/>
-    <circle cx="16.2" cy="8" r="0.8"/>
-    <circle cx="7.8" cy="15" r="0.8"/>
-    <circle cx="16.2" cy="15" r="0.8"/>
+	<circle cx="12" cy="12" r="1.1"/>
+	<circle cx="8.5" cy="11" r="0.95"/>
+	<circle cx="15.5" cy="11" r="0.95"/>
+	<circle cx="10.5" cy="7.8" r="0.9"/>
+	<circle cx="13.5" cy="7.8" r="0.9"/>
+	<circle cx="10.5" cy="15.2" r="0.9"/>
+	<circle cx="13.5" cy="15.2" r="0.9"/>
+	<circle cx="6.5" cy="12" r="0.85"/>
+	<circle cx="17.5" cy="12" r="0.85"/>
+	<circle cx="12" cy="5.8" r="0.85"/>
+	<circle cx="12" cy="17.8" r="0.85"/>
+	<circle cx="7.8" cy="8" r="0.8"/>
+	<circle cx="16.2" cy="8" r="0.8"/>
+	<circle cx="7.8" cy="15" r="0.8"/>
+	<circle cx="16.2" cy="15" r="0.8"/>
   </g>
 </svg>"""
 
@@ -3115,16 +3250,18 @@ func apply_material_button_style(btn: Button, bg_color: Color):
 
 
 func apply_circular_button_style(btn: Button, bg_color: Color):
+	var radius = int(btn.custom_minimum_size.y / 2.0) if btn.custom_minimum_size.y > 0 else 32
+	var margin = int(btn.custom_minimum_size.y * 0.18) if btn.custom_minimum_size.y > 0 else 10
 	var style_normal = StyleBoxFlat.new()
 	style_normal.bg_color = bg_color
-	style_normal.corner_radius_top_left = 32 # Half of 64 height
-	style_normal.corner_radius_top_right = 32
-	style_normal.corner_radius_bottom_left = 32
-	style_normal.corner_radius_bottom_right = 32
-	style_normal.content_margin_left = 10
-	style_normal.content_margin_right = 10
-	style_normal.content_margin_top = 10
-	style_normal.content_margin_bottom = 10
+	style_normal.corner_radius_top_left = radius
+	style_normal.corner_radius_top_right = radius
+	style_normal.corner_radius_bottom_left = radius
+	style_normal.corner_radius_bottom_right = radius
+	style_normal.content_margin_left = margin
+	style_normal.content_margin_right = margin
+	style_normal.content_margin_top = margin
+	style_normal.content_margin_bottom = margin
 
 	var style_hover = style_normal.duplicate()
 	style_hover.bg_color = bg_color.lightened(0.15)
@@ -3711,11 +3848,17 @@ func _populate_scorecard(action_type: String) -> void:
 	elif action_type == "hole_completed":
 		var is_final_hole = (MultiplayerManager.current_hole_index >= MultiplayerManager.hole_ids.size() - 1)
 		if action_btn != null:
-			action_btn.text = "Finish Round" if is_final_hole else "Next Hole"
+			if MultiplayerManager.is_in_catch_up:
+				if MultiplayerManager.current_hole_index + 1 < MultiplayerManager.catch_up_saved_group_hole_index:
+					action_btn.text = "Next Missed Hole (Hole %d)" % (MultiplayerManager.current_hole_index + 2)
+				else:
+					action_btn.text = "Rejoin Group (Hole %d)" % (MultiplayerManager.catch_up_saved_group_hole_index + 1)
+			else:
+				action_btn.text = "Finish Round" if is_final_hole else "Next Hole"
 			action_btn.pressed.connect(func():
 				_on_scorecard_advance()
 			)
-		_start_scorecard_countdown(5.0)
+		_start_scorecard_countdown(3.5 if MultiplayerManager.is_in_catch_up else 5.0)
 	elif action_type == "game_over":
 		_stop_scorecard_countdown()
 		if action_btn != null:
@@ -3781,7 +3924,12 @@ func _update_scorecard_countdown_display() -> void:
 		secs = 1
 	var is_final_hole = (MultiplayerManager.current_hole_index >= MultiplayerManager.hole_ids.size() - 1)
 	if _scorecard_countdown_lbl != null:
-		if is_final_hole:
+		if MultiplayerManager.is_in_catch_up:
+			if MultiplayerManager.current_hole_index + 1 < MultiplayerManager.catch_up_saved_group_hole_index:
+				_scorecard_countdown_lbl.text = "Next missed hole in %ds..." % secs
+			else:
+				_scorecard_countdown_lbl.text = "Rejoining group in %ds..." % secs
+		elif is_final_hole:
 			_scorecard_countdown_lbl.text = "Finishing round in %ds..." % secs
 		else:
 			_scorecard_countdown_lbl.text = "Next hole in %ds..." % secs
@@ -3831,6 +3979,13 @@ func _set_other_elements_visible(is_visible: bool) -> void:
 		forfeit_btn.visible = is_visible and is_match_play and p_strokes >= 10 and not p_holed
 	if not is_visible and forfeit_confirm_dialog != null and forfeit_confirm_dialog.visible:
 		forfeit_confirm_dialog.visible = false
+	if not is_visible:
+		if add_player_prompt_dialog != null and add_player_prompt_dialog.visible:
+			add_player_prompt_dialog.visible = false
+		if resume_player_prompt_dialog != null and resume_player_prompt_dialog.visible:
+			resume_player_prompt_dialog.visible = false
+	if catch_up_banner != null:
+		catch_up_banner.visible = is_visible and MultiplayerManager.is_in_catch_up
 	if club_selector_node != null:
 		club_selector_node.visible = is_visible
 
@@ -3838,6 +3993,10 @@ func _set_other_elements_visible(is_visible: bool) -> void:
 func _on_manage_players_toggle_pressed() -> void:
 	if forfeit_confirm_dialog != null and forfeit_confirm_dialog.visible:
 		forfeit_confirm_dialog.visible = false
+	if add_player_prompt_dialog != null and add_player_prompt_dialog.visible:
+		add_player_prompt_dialog.visible = false
+	if resume_player_prompt_dialog != null and resume_player_prompt_dialog.visible:
+		resume_player_prompt_dialog.visible = false
 	if hud_scorecard.visible:
 		_stop_scorecard_countdown()
 		hud_scorecard.visible = false
@@ -3889,15 +4048,56 @@ func _populate_manage_players() -> void:
 		row.add_theme_constant_override("separation", 15)
 		
 		var name_lbl = Label.new()
-		var active_str = "" if p.get("active", true) else " (Out)"
-		name_lbl.text = "%s (%s)%s" % [p["name"], p["tee"], active_str]
+		var status_str = ""
+		if not p.get("active", true):
+			status_str = " (Out)"
+		elif p.get("paused", false):
+			status_str = " (⏸️ Paused)"
+		elif MultiplayerManager.is_in_catch_up and MultiplayerManager.catch_up_player_name == p["name"]:
+			status_str = " (⛳ Catching up)"
+		name_lbl.text = "%s (%s)%s" % [p["name"], p["tee"], status_str]
 		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if not p.get("active", true):
 			name_lbl.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		elif p.get("paused", false):
+			name_lbl.add_theme_color_override("font_color", Color(1.0, 0.82, 0.35))
+		elif MultiplayerManager.is_in_catch_up and MultiplayerManager.catch_up_player_name == p["name"]:
+			name_lbl.add_theme_color_override("font_color", Color(0.35, 0.85, 1.0))
 		row.add_child(name_lbl)
 		
+		# Pause / Resume Button
+		if p.get("active", true):
+			var pause_btn = Button.new()
+			pause_btn.custom_minimum_size = Vector2(105, 44)
+			if p.get("paused", false):
+				pause_btn.text = "▶ Resume"
+				apply_material_button_style(pause_btn, Color(0.2, 0.6, 0.5, 0.9))
+				pause_btn.pressed.connect(func():
+					var saved = p.get("saved_paused_state", {})
+					var paused_hole_idx = saved.get("hole_index", MultiplayerManager.current_hole_index)
+					if paused_hole_idx == MultiplayerManager.current_hole_index:
+						MultiplayerManager.resume_player(i, "same_hole")
+						hud_manage_players.visible = false
+						_set_other_elements_visible(true)
+						_populate_manage_players()
+						_populate_scorecard("toggle")
+					else:
+						hud_manage_players.visible = false
+						_show_resume_player_dialog(i, p, paused_hole_idx)
+				)
+			else:
+				pause_btn.text = "⏸ Pause"
+				apply_material_button_style(pause_btn, Color(0.85, 0.55, 0.15, 0.9))
+				pause_btn.disabled = MultiplayerManager.is_in_catch_up
+				pause_btn.pressed.connect(func():
+					MultiplayerManager.pause_player(i)
+					_populate_manage_players()
+					_populate_scorecard("toggle")
+				)
+			row.add_child(pause_btn)
+		
 		var toggle_btn = Button.new()
-		toggle_btn.custom_minimum_size = Vector2(110, 44)
+		toggle_btn.custom_minimum_size = Vector2(100, 44)
 		if p.get("active", true):
 			toggle_btn.text = "Remove"
 			apply_material_button_style(toggle_btn, Color(0.56, 0.22, 0.22, 0.85)) # Red
@@ -3917,6 +4117,168 @@ func _populate_manage_players() -> void:
 			)
 		row.add_child(toggle_btn)
 		list_node.add_child(row)
+
+
+func _show_add_player_dialog(p_name: String, tee_color: String) -> void:
+	if add_player_prompt_dialog == null:
+		return
+		
+	hud_manage_players.visible = false
+	for child in add_player_prompt_dialog.get_children():
+		add_player_prompt_dialog.remove_child(child)
+		child.queue_free()
+		
+	var cur_hole_num = MultiplayerManager.current_hole_index + 1
+	var missed_cnt = MultiplayerManager.current_hole_index
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	
+	var title = Label.new()
+	title.text = "Add Player Mid-Game: %s" % p_name
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", Color(0.35, 0.75, 1.0))
+	vbox.add_child(title)
+	
+	var msg = Label.new()
+	msg.text = "The group is currently on Hole %d.\nHow would you like %s to join?" % [cur_hole_num, p_name]
+	msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	msg.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(msg)
+	
+	var join_cur_btn = Button.new()
+	join_cur_btn.text = "⛳ Put on Hole %d (Dashes on Holes 1-%d)" % [cur_hole_num, missed_cnt]
+	join_cur_btn.custom_minimum_size = Vector2(0, 48)
+	apply_material_button_style(join_cur_btn, Color(0.24, 0.46, 0.72, 0.9))
+	join_cur_btn.pressed.connect(func():
+		add_player_prompt_dialog.visible = false
+		hud_manage_players.visible = false
+		_set_other_elements_visible(true)
+		MultiplayerManager.add_new_player_with_mode(p_name, tee_color, "current_hole")
+		_refresh_manage_players_dropdown()
+		_populate_manage_players()
+		_populate_scorecard("toggle")
+	)
+	vbox.add_child(join_cur_btn)
+	
+	var play_missed_btn = Button.new()
+	play_missed_btn.text = "🏌️ Play Missed Holes (Holes 1-%d Solo Catch-Up)" % missed_cnt
+	play_missed_btn.custom_minimum_size = Vector2(0, 48)
+	apply_material_button_style(play_missed_btn, Color(0.25, 0.65, 0.35, 0.9))
+	play_missed_btn.pressed.connect(func():
+		add_player_prompt_dialog.visible = false
+		hud_manage_players.visible = false
+		_set_other_elements_visible(true)
+		MultiplayerManager.add_new_player_with_mode(p_name, tee_color, "catch_up")
+		_refresh_manage_players_dropdown()
+		_populate_manage_players()
+		_populate_scorecard("toggle")
+		_update_catch_up_hud()
+	)
+	vbox.add_child(play_missed_btn)
+	
+	var cancel_btn = Button.new()
+	cancel_btn.text = "Cancel"
+	cancel_btn.custom_minimum_size = Vector2(120, 40)
+	cancel_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	apply_material_button_style(cancel_btn, Color(0.45, 0.45, 0.48, 0.85))
+	cancel_btn.pressed.connect(func():
+		add_player_prompt_dialog.visible = false
+		hud_manage_players.visible = true
+	)
+	vbox.add_child(cancel_btn)
+	
+	add_player_prompt_dialog.add_child(vbox)
+	add_player_prompt_dialog.visible = true
+
+
+func _show_resume_player_dialog(idx: int, p: Dictionary, paused_hole_idx: int) -> void:
+	if resume_player_prompt_dialog == null:
+		return
+		
+	hud_manage_players.visible = false
+	for child in resume_player_prompt_dialog.get_children():
+		resume_player_prompt_dialog.remove_child(child)
+		child.queue_free()
+		
+	var cur_hole_num = MultiplayerManager.current_hole_index + 1
+	var paused_hole_num = paused_hole_idx + 1
+	var p_name = p.get("name", "Player")
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	
+	var title = Label.new()
+	title.text = "Resume: %s" % p_name
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", Color(1.0, 0.82, 0.35))
+	vbox.add_child(title)
+	
+	var msg = Label.new()
+	msg.text = "The group is on Hole %d, but %s paused on Hole %d.\nHow would you like to resume?" % [cur_hole_num, p_name, paused_hole_num]
+	msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	msg.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(msg)
+	
+	var catch_up_btn = Button.new()
+	catch_up_btn.text = "🏌️ Continue Where Left Off (Play Missed Holes Solo)"
+	catch_up_btn.custom_minimum_size = Vector2(0, 48)
+	apply_material_button_style(catch_up_btn, Color(0.25, 0.65, 0.35, 0.9))
+	catch_up_btn.pressed.connect(func():
+		resume_player_prompt_dialog.visible = false
+		hud_manage_players.visible = false
+		_set_other_elements_visible(true)
+		MultiplayerManager.resume_player(idx, "catch_up")
+		_populate_manage_players()
+		_populate_scorecard("toggle")
+		_update_catch_up_hud()
+	)
+	vbox.add_child(catch_up_btn)
+	
+	var skip_btn = Button.new()
+	skip_btn.text = "⛳ Skip to Hole %d (Dashes on Missed Holes)" % cur_hole_num
+	skip_btn.custom_minimum_size = Vector2(0, 48)
+	apply_material_button_style(skip_btn, Color(0.24, 0.46, 0.72, 0.9))
+	skip_btn.pressed.connect(func():
+		resume_player_prompt_dialog.visible = false
+		hud_manage_players.visible = false
+		_set_other_elements_visible(true)
+		MultiplayerManager.resume_player(idx, "current_hole")
+		_populate_manage_players()
+		_populate_scorecard("toggle")
+	)
+	vbox.add_child(skip_btn)
+	
+	var cancel_btn = Button.new()
+	cancel_btn.text = "Cancel"
+	cancel_btn.custom_minimum_size = Vector2(120, 40)
+	cancel_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	apply_material_button_style(cancel_btn, Color(0.45, 0.45, 0.48, 0.85))
+	cancel_btn.pressed.connect(func():
+		resume_player_prompt_dialog.visible = false
+		hud_manage_players.visible = true
+	)
+	vbox.add_child(cancel_btn)
+	
+	resume_player_prompt_dialog.add_child(vbox)
+	resume_player_prompt_dialog.visible = true
+
+
+func _update_catch_up_hud() -> void:
+	if catch_up_banner == null:
+		return
+	if MultiplayerManager.is_in_catch_up:
+		catch_up_banner.visible = _hud_elements_visible
+		if catch_up_lbl != null:
+			catch_up_lbl.text = "⛳ Solo Catch-Up: %s on Hole %d (Group on Hole %d)" % [
+				MultiplayerManager.catch_up_player_name,
+				MultiplayerManager.current_hole_index + 1,
+				MultiplayerManager.catch_up_saved_group_hole_index + 1
+			]
+	else:
+		catch_up_banner.visible = false
 
 
 func _email_player_stats(p: Dictionary) -> void:
@@ -4436,8 +4798,8 @@ func _draw_ball_overlays(overlay: Control) -> void:
 	if MultiplayerManager.is_finished:
 		return
 		
-	# Skip if scorecard, players list, camera setup dialog, replay modal, exit confirm dialog, or forfeit dialog is open
-	if hud_scorecard.visible or hud_manage_players.visible or hud_overview.visible or (exit_confirm_dialog != null and exit_confirm_dialog.visible) or (forfeit_confirm_dialog != null and forfeit_confirm_dialog.visible):
+	# Skip if scorecard, players list, camera setup dialog, replay modal, exit confirm dialog, forfeit dialog, or prompt dialogs are open
+	if hud_scorecard.visible or hud_manage_players.visible or hud_overview.visible or (exit_confirm_dialog != null and exit_confirm_dialog.visible) or (forfeit_confirm_dialog != null and forfeit_confirm_dialog.visible) or (add_player_prompt_dialog != null and add_player_prompt_dialog.visible) or (resume_player_prompt_dialog != null and resume_player_prompt_dialog.visible):
 		return
 	var root = get_tree().root
 	if root.find_child("CameraSetupDialog", true, false) != null or root.find_child("SwingReplayModal", true, false) != null:
@@ -4527,7 +4889,7 @@ func _draw_ball_overlays(overlay: Control) -> void:
 	# Draw other players' balls
 	for i in range(MultiplayerManager.players.size()):
 		var p = MultiplayerManager.players[i]
-		if p.get("holed_out", false) or not p.get("active", true):
+		if p.get("holed_out", false) or not p.get("active", true) or p.get("paused", false):
 			continue
 			
 		# Do not show circle for the current player

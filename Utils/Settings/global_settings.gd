@@ -199,6 +199,9 @@ func _process(delta: float) -> void:
 		update_audio_state()
 
 
+var _minigame_tracks: Array[AudioStream] = []
+var _minigame_track_index: int = 0
+
 func _setup_audio_players() -> void:
 	if _ambient_player == null:
 		_ambient_player = AudioStreamPlayer.new()
@@ -241,18 +244,24 @@ func _setup_audio_players() -> void:
 		_minigames_music_player.name = "MinigamesMusicPlayer"
 		add_child(_minigames_music_player)
 		
-		var path = "res://assets/audio/minigames_music.mp3"
-		if ResourceLoader.exists(path):
-			var stream = load(path)
-			if stream:
-				if "loop" in stream:
-					stream.loop = true
-				_minigames_music_player.stream = stream
-				_minigames_music_player.volume_db = -22.0
-				_minigames_music_player.finished.connect(func():
-					if _should_play_minigame_music():
-						_minigames_music_player.play()
-				)
+		var track_paths = [
+			"res://assets/audio/minigames_music.mp3",
+			"res://assets/audio/boogie_pecan_pie.mp3"
+		]
+		_minigame_tracks.clear()
+		for t_path in track_paths:
+			if ResourceLoader.exists(t_path):
+				var stream = load(t_path)
+				if stream:
+					if "loop" in stream:
+						stream.loop = false
+					_minigame_tracks.append(stream)
+		
+		if not _minigame_tracks.is_empty():
+			_minigame_track_index = 0
+			_minigames_music_player.stream = _minigame_tracks[0]
+			_minigames_music_player.volume_db = -22.0
+			_minigames_music_player.finished.connect(_on_minigames_music_finished)
 				
 	range_settings.ambient_sound_enabled.setting_changed.connect(func(_val): update_audio_state())
 	range_settings.menu_music_enabled.setting_changed.connect(func(_val): update_audio_state())
@@ -353,6 +362,15 @@ func _should_play_minigame_music() -> bool:
 	if not range_settings.minigame_music_enabled.value:
 		return false
 	return is_minigames_scene()
+
+
+func _on_minigames_music_finished() -> void:
+	if _minigame_tracks.is_empty():
+		return
+	_minigame_track_index = (_minigame_track_index + 1) % _minigame_tracks.size()
+	_minigames_music_player.stream = _minigame_tracks[_minigame_track_index]
+	if _should_play_minigame_music():
+		_minigames_music_player.play()
 
 
 func update_audio_state() -> void:

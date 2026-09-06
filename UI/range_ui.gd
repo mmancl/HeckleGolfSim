@@ -435,12 +435,16 @@ func set_data(data: Dictionary, is_final_rest: bool = false) -> void:
 			if child.name == "ClubSelector":
 				continue
 			var stat_id = child.name
+			# During in-flight live updates, only update dynamic flight metrics
+			if not is_final_rest and not (stat_id in ["Distance", "Carry", "Offline", "Apex", "DescentAngle", "HangTime"]):
+				continue
+
 			var stat_def = StatDefinitions.get_stat_by_id(stat_id)
 			if stat_def.is_empty():
 				continue
 
-			var u_str: String = str(stat_def.get("units_imperial" if is_imperial else "units_metric", ""))
-			if child.has_method("set_units"):
+			if is_final_rest and child.has_method("set_units"):
+				var u_str: String = str(stat_def.get("units_imperial" if is_imperial else "units_metric", ""))
 				child.call("set_units", u_str)
 
 			var val = data.get(stat_id, "---")

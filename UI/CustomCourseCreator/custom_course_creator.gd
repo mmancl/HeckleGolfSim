@@ -50,6 +50,8 @@ func _ready() -> void:
 	ThemeManager.apply_danger_button_style(remove_hole_btn, 6)
 	ThemeManager.apply_danger_button_style(clear_holes_btn, 6)
 	ThemeManager.apply_secondary_button_style(mode_toggle_btn, 6)
+	ThemeManager.apply_option_button_style(course_opt, 18, Vector2(220, 48))
+	ThemeManager.apply_option_button_style(hole_opt, 18, Vector2(180, 48))
 	ThemeManager.apply_input_style(title_input)
 
 	done_btn.pressed.connect(_on_done_pressed)

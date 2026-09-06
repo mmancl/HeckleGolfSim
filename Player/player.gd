@@ -24,9 +24,12 @@ var ball : GolfBall = null
 
 # Tree occlusion variables
 var _cached_trees: Array[Node3D] = []
-var _last_tree_cache_time: float = 0.0
 var _has_scanned_trees: bool = false
 var _trees_restored_for_flight: bool = false
+var _tree_occlusion_timer: float = 0.0
+var _last_camera_pos: Vector3 = Vector3.INF
+var _last_ball_pos: Vector3 = Vector3.INF
+var _cached_selected_club: String = ""
 
 signal good_data
 signal bad_data
@@ -40,9 +43,19 @@ func _ready() -> void:
 	add_child(ball)
 	ball.rest.connect(_on_ball_rest)
 	
+	trail_resolution = 0.10
+	
 	# Set initial value and connect to setting changes
 	max_tracers = GlobalSettings.range_settings.shot_tracer_count.value
 	GlobalSettings.range_settings.shot_tracer_count.setting_changed.connect(_on_tracer_count_changed)
+
+	if has_node("/root/EventBus"):
+		var eb = get_node("/root/EventBus")
+		if eb.has_signal("club_selected") and not eb.is_connected("club_selected", Callable(self, "_on_club_selected")):
+			eb.connect("club_selected", Callable(self, "_on_club_selected"))
+
+func _on_club_selected(club_name: String) -> void:
+	_cached_selected_club = club_name
 
 func _on_tracer_count_changed(value) -> void:
 	max_tracers = value
@@ -61,18 +74,24 @@ func _find_node_by_name(node: Node, target_name: String) -> Node:
 	return null
 
 func _get_selected_club() -> String:
+	if _cached_selected_club != "":
+		return _cached_selected_club
 	if not is_inside_tree():
 		return ""
-	var root = get_tree().root
-	var club_selector = _find_node_by_name(root, "ClubSelector")
-	if club_selector and club_selector.current_club:
-		return club_selector.current_club.text
+	var current_scene = get_tree().current_scene
+	if current_scene != null:
+		var club_selector = current_scene.find_child("ClubSelector", true, false)
+		if club_selector and club_selector.current_club:
+			_cached_selected_club = club_selector.current_club.text
+			return _cached_selected_club
 	return ""
 
 func _is_putting_on_green() -> bool:
 	var is_on_green = false
 	if ball != null:
-		is_on_green = (str(ball.lie_type) == "green" or str(current_lie_type) == "green")
+		var b_lie = str(ball.lie_type).to_lower()
+		var p_lie = str(current_lie_type).to_lower()
+		is_on_green = (b_lie in ["green", "fringe"] or p_lie in ["green", "fringe"])
 	
 	var is_putting = false
 	if is_on_green:
@@ -127,12 +146,15 @@ func clear_tracers() -> void:
 	tracers.clear()
 	current_tracer = null
 
-# Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(_delta: float) -> void:
 	_handle_tree_occlusion()
 	if _is_putting_on_green():
 		if not tracers.is_empty():
 			clear_tracers()
+
+	if track_points and ball != null and current_tracer != null and is_instance_valid(current_tracer):
+		var ball_pos = to_local(ball.get_interpolated_position()) if ball.has_method("get_interpolated_position") else ball.position
+		current_tracer.update_trail(ball_pos)
 
 	if Input.is_action_just_pressed("hit"):
 		_last_starting_pos = ball.global_position
@@ -145,7 +167,7 @@ func _process(_delta: float) -> void:
 		print("[player.gd] Hitting ball manually! ball.aim_yaw_offset_deg = ", ball.aim_yaw_offset_deg)
 		ball.hit()
 		if current_tracer != null:
-			current_tracer.add_point(ball.position)
+			current_tracer.start_trail(ball.position)
 		track_points = true
 		trail_timer = 0.0
 		emit_signal("manual_hit")
@@ -162,18 +184,16 @@ func _process(_delta: float) -> void:
 			get_node("/root/LaunchMonitorManager").call("notify_ball_at_rest")
 
 
-func _physics_process(delta: float) -> void:
+func _physics_process(_delta: float) -> void:
 	if track_points and ball != null:
 		var current_height = maxf(0.0, ball.global_position.y - ball.shot_start_pos_global.y)
 		apex = maxf(apex, current_height)
 		side_distance = ball.get_side_distance_meters()
 		if ball.state == PhysicsEnums.BallState.FLIGHT:
 			carry = ball.get_downrange_meters()
-		if current_tracer != null:
-			trail_timer += delta
-			if trail_timer >= trail_resolution:
-				current_tracer.add_point(ball.position)
-				trail_timer = 0.0
+
+func get_camera_target() -> Node3D:
+	return ball
 
 func get_distance() -> float:
 	# Returns the downrange distance in meters
@@ -226,7 +246,11 @@ func _on_ball_rest() -> void:
 	shot_data["SideDistance"] = side_distance
 	emit_signal("rest", shot_data)
 	
-	clear_tracers()
+	if current_tracer != null and is_instance_valid(current_tracer):
+		current_tracer.finalize_trail()
+
+	if max_tracers == 0:
+		clear_tracers()
 
 
 func get_ball_state():
@@ -268,7 +292,7 @@ func _on_tcp_client_hit_ball(data: Dictionary) -> void:
 	print("[player.gd] Hitting ball from TCP! ball.aim_yaw_offset_deg = ", ball.aim_yaw_offset_deg)
 	ball.hit_from_data(data)
 	if current_tracer != null:
-		current_tracer.add_point(ball.position)
+		current_tracer.start_trail(ball.position)
 	track_points = true
 	trail_timer = 0.0
 	if has_node("/root/LaunchMonitorManager"):
@@ -303,7 +327,7 @@ func _on_range_ui_hit_shot(data: Variant) -> void:
 	create_new_tracer()
 	ball.hit_from_data(data)
 	if current_tracer != null:
-		current_tracer.add_point(ball.position)
+		current_tracer.start_trail(ball.position)
 	track_points = true
 	trail_timer = 0.0
 	if has_node("/root/LaunchMonitorManager"):
@@ -344,22 +368,21 @@ func skip_to_rest() -> void:
 		ball._physics_process(step_delta)
 		
 		# Run player tracking step
-		if track_points and current_tracer != null:
+		if track_points:
 			var current_height = maxf(0.0, ball.global_position.y - ball.shot_start_pos_global.y)
 			apex = maxf(apex, current_height)
 			side_distance = ball.get_side_distance_meters()
 			if ball.state == PhysicsEnums.BallState.FLIGHT:
 				carry = ball.get_downrange_meters()
-			trail_timer += step_delta
-			if trail_timer >= trail_resolution:
-				current_tracer.add_point(ball.position)
-				trail_timer = 0.0
+			if current_tracer != null and is_instance_valid(current_tracer):
+				current_tracer.update_trail(ball.position)
 		
 		tick += 1
 		
-	# Ensure the last point is added to the tracer if it exists
-	if current_tracer != null:
-		current_tracer.add_point(ball.position)
+	# Ensure the last point is finalized on the tracer
+	if current_tracer != null and is_instance_valid(current_tracer):
+		current_tracer.update_trail(ball.position)
+		current_tracer.finalize_trail()
 		
 	# Reset skipping flag
 	ball.set("_skipping_flight", false)
@@ -380,16 +403,35 @@ func _is_tree_node(node: Node) -> bool:
 
 func _update_cached_trees() -> void:
 	_cached_trees.clear()
-	var root = get_tree().root
-	_find_trees_recursive(root, _cached_trees)
+	var course_scene = get_parent()
+	if course_scene == null and is_inside_tree():
+		course_scene = get_tree().current_scene
+	if course_scene == null:
+		return
+
+	# Range scene has no trees
+	if course_scene.name == "Range" or (course_scene.scene_file_path != "" and course_scene.scene_file_path.ends_with("range.tscn")):
+		return
+
+	# Fast search: Check for TreesFolder first
+	var trees_folder = course_scene.find_child("TreesFolder", true, false)
+	if trees_folder != null:
+		for child in trees_folder.get_children():
+			if child is Node3D:
+				_cached_trees.append(child)
+	else:
+		_find_trees_recursive(course_scene, _cached_trees, 0, 4)
+
 	if not _cached_trees.is_empty():
 		print("[player.gd] Cached %d trees for camera obstruction check." % _cached_trees.size())
 
-func _find_trees_recursive(node: Node, out_list: Array[Node3D]) -> void:
+func _find_trees_recursive(node: Node, out_list: Array[Node3D], depth: int = 0, max_depth: int = 4) -> void:
+	if depth > max_depth:
+		return
 	if _is_tree_node(node):
 		out_list.append(node)
 	for child in node.get_children():
-		_find_trees_recursive(child, out_list)
+		_find_trees_recursive(child, out_list, depth + 1, max_depth)
 
 func _restore_all_trees_visibility() -> void:
 	for tree in _cached_trees:
@@ -403,7 +445,7 @@ func _handle_tree_occlusion() -> void:
 	if ball == null or not is_instance_valid(ball):
 		return
 
-	# Only check tree occlusion when the ball is at rest
+	# Strictly ignore tree occlusion while ball is in motion/flight
 	if ball.state != PhysicsEnums.BallState.REST:
 		if not _trees_restored_for_flight:
 			_restore_all_trees_visibility()
@@ -412,12 +454,14 @@ func _handle_tree_occlusion() -> void:
 
 	_trees_restored_for_flight = false
 
-	# Periodically update tree cache (every 2 seconds)
-	var time_now = Time.get_ticks_msec() / 1000.0
-	if not _has_scanned_trees or (time_now - _last_tree_cache_time) > 2.0:
+	# Scan tree cache ONCE upon first rest/ready, never rescan in a loop
+	if not _has_scanned_trees:
 		_has_scanned_trees = true
-		_last_tree_cache_time = time_now
 		_update_cached_trees()
+
+	# If this scene has no trees (e.g. driving range or bare course), skip completely
+	if _cached_trees.is_empty():
+		return
 
 	var camera = get_viewport().get_camera_3d()
 	if camera == null or not is_instance_valid(camera) or camera.name == "MinimapCamera":
@@ -426,6 +470,16 @@ func _handle_tree_occlusion() -> void:
 
 	var camera_pos = camera.global_position
 	var ball_pos = ball.global_position
+
+	# Only recheck occlusion if camera or ball moved or at low frequency (1 Hz)
+	var time_now = Time.get_ticks_msec() / 1000.0
+	var pos_changed = camera_pos.distance_squared_to(_last_camera_pos) > 0.05 or ball_pos.distance_squared_to(_last_ball_pos) > 0.05
+	if not pos_changed and (time_now - _tree_occlusion_timer) < 1.0:
+		return
+
+	_tree_occlusion_timer = time_now
+	_last_camera_pos = camera_pos
+	_last_ball_pos = ball_pos
 
 	var A = Vector2(camera_pos.x, camera_pos.z)
 	var B = Vector2(ball_pos.x, ball_pos.z)

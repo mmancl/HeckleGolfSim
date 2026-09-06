@@ -9,7 +9,10 @@
 param(
     [string]$KeystorePath = "release.keystore",
     [string]$Alias = "hecklegolf",
-    [int]$ValidityDays = 10000
+    [string]$Password = "",
+    [string]$DName = "CN=Heckle Golf Simulator, OU=HeckleGolf, O=HeckleGolf, L=Unknown, ST=Unknown, C=US",
+    [int]$ValidityDays = 10000,
+    [switch]$Force
 )
 
 Write-Host "=======================================================" -ForegroundColor Cyan
@@ -33,10 +36,12 @@ if (-not $found) {
 
 if (Test-Path $KeystorePath) {
     Write-Host "[WARNING] Keystore '$KeystorePath' already exists." -ForegroundColor Yellow
-    $confirm = Read-Host "Do you want to overwrite it? (y/N)"
-    if ($confirm -ne 'y' -and $confirm -ne 'Y') {
-        Write-Host "Cancelled." -ForegroundColor Yellow
-        exit 0
+    if (-not $Force) {
+        $confirm = Read-Host "Do you want to overwrite it? (y/N)"
+        if ($confirm -ne 'y' -and $confirm -ne 'Y') {
+            Write-Host "Cancelled." -ForegroundColor Yellow
+            exit 0
+        }
     }
     Remove-Item -Force $KeystorePath
 }
@@ -45,10 +50,14 @@ Write-Host "Generating release keystore: $KeystorePath" -ForegroundColor Green
 Write-Host "Key Alias: $Alias" -ForegroundColor Green
 Write-Host "Validity: $ValidityDays days" -ForegroundColor Green
 Write-Host ""
-Write-Host "Please enter your keystore password and certificate details when prompted below:" -ForegroundColor Yellow
-Write-Host ""
 
-& $keytoolCmd -genkeypair -v -keystore $KeystorePath -alias $Alias -keyalg RSA -keysize 2048 -validity $ValidityDays
+if ($Password) {
+    & $keytoolCmd -genkeypair -v -keystore $KeystorePath -alias $Alias -keyalg RSA -keysize 2048 -validity $ValidityDays -storepass $Password -keypass $Password -dname $DName
+} else {
+    Write-Host "Please enter your keystore password and certificate details when prompted below:" -ForegroundColor Yellow
+    Write-Host ""
+    & $keytoolCmd -genkeypair -v -keystore $KeystorePath -alias $Alias -keyalg RSA -keysize 2048 -validity $ValidityDays
+}
 
 if ($LASTEXITCODE -eq 0) {
     $fullPath = (Get-Item $KeystorePath).FullName

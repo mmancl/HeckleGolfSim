@@ -4,7 +4,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.2.2'
+        classpath 'com.android.tools.build:gradle:8.6.1'
     }
 }
 
@@ -16,12 +16,12 @@ repositories {
 }
 
 android {
-    compileSdk 34
+    compileSdk 36
     namespace 'org.godotengine.plugin.android.mediapipepose'
     
     defaultConfig {
         minSdk 24
-        targetSdk 34
+        targetSdk 36
         versionCode 1
         versionName "1.0"
     }

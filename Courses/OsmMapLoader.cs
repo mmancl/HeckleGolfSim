@@ -956,8 +956,8 @@ public partial class OsmMapLoader : Node
                 int satWidth = satImage.GetWidth();
                 int satHeight = satImage.GetHeight();
                 var candidatePoints = new List<Vector2>();
-                float spacing = isMobilePlatform ? 10.0f : 6.5f; // Grid spacing in meters (increased on mobile)
-                float minDistanceBetweenTrees = isMobilePlatform ? 9.5f : 8.5f; // Minimum distance to keep trees apart
+                float spacing = isMobilePlatform ? 8.0f : 6.5f; // Grid spacing in meters
+                float minDistanceBetweenTrees = 8.5f; // Minimum distance to keep trees apart
 
                 var gridPoints = new List<Vector2>();
                 for (float rx = courseMinX; rx <= courseMaxX; rx += spacing)
@@ -1047,7 +1047,7 @@ public partial class OsmMapLoader : Node
 
                 GD.Print($"{LogPrefix} Found {candidatePoints.Count} tree candidate locations from satellite imagery.");
 
-                int maxSatelliteTrees = isMobilePlatform ? 500 : 1500; // Capped at 500 on mobile, 1500 on desktop
+                int maxSatelliteTrees = isMobilePlatform ? 1000 : 1500; // Capped at 1000 on mobile, 1500 on desktop
                 var selectedPoints = new List<Vector2>();
                 if (candidatePoints.Count > maxSatelliteTrees)
                 {
@@ -1097,7 +1097,7 @@ public partial class OsmMapLoader : Node
                     float width = maxX - minX;
                     float height = maxY - minY;
                     float area = width * height;
-                    int targetForestTrees = Mathf.Clamp((int)(area / (isMobilePlatform ? 360f : 180f)), 3, isMobilePlatform ? 30 : 80);
+                    int targetForestTrees = Mathf.Clamp((int)(area / (isMobilePlatform ? 250f : 180f)), 3, isMobilePlatform ? 60 : 80);
 
                     var fRnd = new Random((int)(minX * 100f) ^ (int)(minY * 100f));
                     int forestSpawned = 0;
@@ -1129,7 +1129,7 @@ public partial class OsmMapLoader : Node
 
             // Guaranteed procedural tree placement fallback if tree count is too low or satellite scan yielded few/no trees
             int targetTreeCount = isMobilePlatform
-                ? Math.Clamp(Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 16, 60, 400)
+                ? Math.Clamp(Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 24, 100, 1000)
                 : Math.Max(120, Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 28);
             if (placedTreePositions.Count < targetTreeCount)
             {
@@ -1295,13 +1295,13 @@ public partial class OsmMapLoader : Node
             }
             GD.Print($"{LogPrefix} Placed {placedTreePositions.Count} trees total.");
 
-            // Spawn random bushes clustered around a subset of trees
+            // Spawn random bushes clustered around a subset of trees (capped at 100 on mobile)
             if (placedTreePositions.Count > 0)
             {
                 GD.Print($"{LogPrefix} Placing bushes clustered around trees...");
                 var bushRnd = new Random(99);
                 int bushCount = 0;
-                int maxBushes = isMobilePlatform ? 200 : 1200;
+                int maxBushes = isMobilePlatform ? 100 : 1200;
                 var placedBushPositions = new List<Vector2>();
 
                 var treeIndices = Enumerable.Range(0, placedTreePositions.Count).OrderBy(x => bushRnd.Next()).ToList();
@@ -1737,68 +1737,71 @@ public partial class OsmMapLoader : Node
                 }
             }
 
-            // Procedurally spawn rock decorations around water hazards
-            InitializeRockAssets();
-            if (_rockMeshes != null && _rockMeshes.Length > 0)
+            // Procedurally spawn rock decorations around water hazards (skipped on mobile for performance)
+            if (!isMobilePlatform)
             {
-                var rand = new Random(42);
-                float minStep = isMobilePlatform ? 3.0f : 1.0f;
-                float stepJitter = isMobilePlatform ? 1.0f : 0.4f;
-                int maxRocks = isMobilePlatform ? 300 : 1200;
-                int spawnedRocks = 0;
-
-                foreach (var waterPoly in waterPolygons)
+                InitializeRockAssets();
+                if (_rockMeshes != null && _rockMeshes.Length > 0)
                 {
-                    if (spawnedRocks >= maxRocks) break;
+                    var rand = new Random(42);
+                    float minStep = 1.0f;
+                    float stepJitter = 0.4f;
+                    int maxRocks = 1200;
+                    int spawnedRocks = 0;
 
-                    int numPoints = waterPoly.Length;
-                    for (int i = 0; i < numPoints; i++)
+                    foreach (var waterPoly in waterPolygons)
                     {
                         if (spawnedRocks >= maxRocks) break;
 
-                        Vector2 p1 = waterPoly[i];
-                        Vector2 p2 = waterPoly[(i + 1) % numPoints];
-                        float segmentLength = p1.DistanceTo(p2);
-                        
-                        // Spawn a rock every minStep to minStep+stepJitter meters
-                        float step = minStep + (float)rand.NextDouble() * stepJitter;
-                        for (float d = 0f; d < segmentLength; d += step)
+                        int numPoints = waterPoly.Length;
+                        for (int i = 0; i < numPoints; i++)
                         {
                             if (spawnedRocks >= maxRocks) break;
 
-                            float t = d / segmentLength;
-                            Vector2 pos2d = p1.Lerp(p2, t);
+                            Vector2 p1 = waterPoly[i];
+                            Vector2 p2 = waterPoly[(i + 1) % numPoints];
+                            float segmentLength = p1.DistanceTo(p2);
                             
-                            Vector2 dir = (p2 - p1).Normalized();
-                            Vector2 perp = new Vector2(-dir.Y, dir.X);
-                            
-                            // Jitter offset: -0.2m to +0.2m (keep aligned to water perimeter)
-                            float jitter = -0.2f + (float)rand.NextDouble() * 0.4f;
-                            Vector2 rockPos2d = pos2d + perp * jitter;
-                            
-                            float rockX = rockPos2d.X;
-                            float rockZ = rockPos2d.Y;
-                            float terrainY = GetHeightWithFeatures(rockX, rockZ, exclusionPolygons);
-                            
-                            // Scale variety (various sizes to look natural)
-                            float rScaleX = 0.8f + (float)rand.NextDouble() * 1.2f;
-                            float rScaleY = 0.5f + (float)rand.NextDouble() * 0.8f;
-                            float rScaleZ = 0.8f + (float)rand.NextDouble() * 1.2f;
-                            Vector3 rockScale = new Vector3(rScaleX, rScaleY, rScaleZ);
-                            
-                            float rotY = (float)(rand.NextDouble() * Math.PI * 2.0);
-                            var rockMesh = _rockMeshes[rand.Next(_rockMeshes.Length)];
-                            
-                            // Sit rock on terrain, keeping it above the depressed water level
-                            float baseHeight = GetHeight(rockX, rockZ);
-                            float spawnY = Math.Max(terrainY, baseHeight - 0.2f);
-                            Vector3 rockPos = new Vector3(rockX, spawnY + 0.1f, rockZ);
-                            SpawnRockAt(rootNode, rockPos, rockScale, rotY, rockMesh);
-                            spawnedRocks++;
+                            // Spawn a rock every 1.0 to 1.4 meters to cover the full perimeter with no gaps
+                            float step = minStep + (float)rand.NextDouble() * stepJitter;
+                            for (float d = 0f; d < segmentLength; d += step)
+                            {
+                                if (spawnedRocks >= maxRocks) break;
+
+                                float t = d / segmentLength;
+                                Vector2 pos2d = p1.Lerp(p2, t);
+                                
+                                Vector2 dir = (p2 - p1).Normalized();
+                                Vector2 perp = new Vector2(-dir.Y, dir.X);
+                                
+                                // Jitter offset: -0.2m to +0.2m (keep aligned to water perimeter)
+                                float jitter = -0.2f + (float)rand.NextDouble() * 0.4f;
+                                Vector2 rockPos2d = pos2d + perp * jitter;
+                                
+                                float rockX = rockPos2d.X;
+                                float rockZ = rockPos2d.Y;
+                                float terrainY = GetHeightWithFeatures(rockX, rockZ, exclusionPolygons);
+                                
+                                // Scale variety (various sizes to look natural)
+                                float rScaleX = 0.8f + (float)rand.NextDouble() * 1.2f;
+                                float rScaleY = 0.5f + (float)rand.NextDouble() * 0.8f;
+                                float rScaleZ = 0.8f + (float)rand.NextDouble() * 1.2f;
+                                Vector3 rockScale = new Vector3(rScaleX, rScaleY, rScaleZ);
+                                
+                                float rotY = (float)(rand.NextDouble() * Math.PI * 2.0);
+                                var rockMesh = _rockMeshes[rand.Next(_rockMeshes.Length)];
+                                
+                                // Sit rock on terrain, keeping it above the depressed water level
+                                float baseHeight = GetHeight(rockX, rockZ);
+                                float spawnY = Math.Max(terrainY, baseHeight - 0.2f);
+                                Vector3 rockPos = new Vector3(rockX, spawnY + 0.1f, rockZ);
+                                SpawnRockAt(rootNode, rockPos, rockScale, rotY, rockMesh);
+                                spawnedRocks++;
+                            }
                         }
                     }
+                    GD.Print($"{LogPrefix} Placed {spawnedRocks} rock decorations around water hazards.");
                 }
-                GD.Print($"{LogPrefix} Placed {spawnedRocks} rock decorations around water hazards.");
             }
 
             var madeUpDetails = new List<string>();

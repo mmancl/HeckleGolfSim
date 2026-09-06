@@ -44,6 +44,7 @@ var hole_buttons = []
 var shot_counter: int = 0
 
 # UI elements
+var stat_columns: Array[Dictionary] = []
 var attempts_val_lbl = null
 var within_10_val_lbl = null
 var within_5_val_lbl = null
@@ -53,19 +54,46 @@ var banner_lbl = null
 var grid_toggle_btn = null
 var music_toggle_btn = null
 var stats_btn = null
+var mode_toggle_btn: Button = null
+var game_over_panel: PanelContainer = null
 var grid_canvas = null
 var hud_layer: CanvasLayer = null
 var hud_control: Control = null
 var _settings_layer: CanvasLayer = null
 var raw_ball_data: Dictionary = {}
 var display_data: Dictionary = {}
+var sfx_applause_player: AudioStreamPlayer = null
+
+# PvP Mode State
+var pvp_mode: bool = false
+var active_player_index: int = 0 # 0: Player 1, 1: Player 2
+var p1_name: String = "Player 1"
+var p2_name: String = "Player 2"
+var p1_completed: Array[bool] = [false, false, false, false, false, false, false, false]
+var p2_completed: Array[bool] = [false, false, false, false, false, false, false, false]
+var p1_shots: int = 0
+var p2_shots: int = 0
+var pvp_winner: int = -1 # -1: in play, 0: p1, 1: p2
+var shot_in_progress: bool = false
+
+const P1_COLOR = Color(0.2, 0.9, 1.0) # Neon Cyan
+const P2_COLOR = Color(1.0, 0.75, 0.25) # Radiant Amber/Gold
 
 func _ready() -> void:
 	name = "PuttingPractice"
+	_init_player_names()
+	
+	sfx_applause_player = AudioStreamPlayer.new()
+	sfx_applause_player.name = "ApplausePlayer"
+	if ResourceLoader.exists("res://assets/audio/golf_clap.mp3"):
+		sfx_applause_player.stream = load("res://assets/audio/golf_clap.mp3")
+	sfx_applause_player.volume_db = 3.0
+	add_child(sfx_applause_player)
 	
 	# 1. Environment Setup
 	_setup_environment()
-	
+
+
 	# 2. Generate Kidney-Bean Green & Rough Terrain
 	_generate_green_and_rough_terrain()
 	_generate_green_grid_and_heatmap()
@@ -94,6 +122,10 @@ func _ready() -> void:
 		var launch_monitor = get_node("/root/LaunchMonitorManager")
 		if not launch_monitor.hit_ball.is_connected(_on_launch_monitor_hit_ball):
 			launch_monitor.hit_ball.connect(_on_launch_monitor_hit_ball)
+		if launch_monitor.has_method("_update_hud_display"):
+			launch_monitor.call("_update_hud_display")
+		if launch_monitor.has_method("notify_ball_at_rest"):
+			launch_monitor.call("notify_ball_at_rest")
 			
 	var tcp_server = get_node_or_null("TCPServer")
 	if tcp_server == null:
@@ -105,6 +137,60 @@ func _ready() -> void:
 	if tcp_server != null and tcp_server.has_signal("HitBall"):
 		if not tcp_server.HitBall.is_connected(_on_launch_monitor_hit_ball):
 			tcp_server.HitBall.connect(_on_launch_monitor_hit_ball)
+
+
+func _init_player_names() -> void:
+	p1_name = "Player 1"
+	p2_name = "Player 2"
+	if has_node("/root/MultiplayerManager"):
+		var mp = get_node("/root/MultiplayerManager")
+		if mp.players.size() >= 2:
+			p1_name = mp.players[0].get("name", "Player 1")
+			p2_name = mp.players[1].get("name", "Player 2")
+		elif mp.players.size() == 1:
+			p1_name = mp.players[0].get("name", "Player 1")
+			p2_name = "Player 2"
+
+
+func _toggle_pvp_mode() -> void:
+	pvp_mode = not pvp_mode
+	_hide_game_over_banner()
+	if mode_toggle_btn != null:
+		if pvp_mode:
+			mode_toggle_btn.text = "⚔️ PvP Mode: ON"
+			_apply_btn_style(mode_toggle_btn, Color(0.18, 0.45, 0.65), Color(0.25, 0.58, 0.82))
+		else:
+			mode_toggle_btn.text = "⚔️ PvP Mode: OFF"
+			_apply_btn_style(mode_toggle_btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
+	_reset_game()
+
+
+func _reset_game() -> void:
+	_init_player_names()
+	_hide_game_over_banner()
+	shot_in_progress = false
+	active_player_index = 0
+	pvp_winner = -1
+	p1_shots = 0
+	p2_shots = 0
+	stats_attempts = 0
+	stats_within_10 = 0
+	stats_within_5 = 0
+	stats_made = 0
+	stats_attempts_25_plus = 0
+	for i in range(8):
+		p1_completed[i] = false
+		p2_completed[i] = false
+	_select_hole(0, true)
+	_update_hud()
+
+
+func _get_next_uncompleted_hole(player_idx: int) -> int:
+	var completed = p1_completed if player_idx == 0 else p2_completed
+	for i in range(completed.size()):
+		if not completed[i]:
+			return i
+	return selected_hole_index
 
 # ----------------- ENVIRONMENT SETUP -----------------
 
@@ -219,7 +305,7 @@ func _generate_green_and_rough_terrain() -> void:
 	var mat_green = StandardMaterial3D.new()
 	mat_green.albedo_texture = load("res://Courses/Environments/grass-green/albedo.png")
 	mat_green.roughness = 0.95
-	mat_green.specular = 0.1
+	mat_green.metallic_specular = 0.1
 	st_green.set_material(mat_green)
 	
 	var st_rough = SurfaceTool.new()
@@ -227,7 +313,7 @@ func _generate_green_and_rough_terrain() -> void:
 	var mat_rough = StandardMaterial3D.new()
 	mat_rough.albedo_texture = load("res://Courses/Environments/grass-rough/albedo.png")
 	mat_rough.roughness = 0.95
-	mat_rough.specular = 0.05
+	mat_rough.metallic_specular = 0.05
 	st_rough.set_material(mat_rough)
 	
 	var min_grid = -24.0
@@ -889,7 +975,7 @@ func _setup_holes() -> void:
 		
 		add_child(cup_root)
 
-func _select_hole(index: int) -> void:
+func _select_hole(index: int, reset_ball: bool = true) -> void:
 	if index < 0 or index >= holes.size():
 		return
 	selected_hole_index = index
@@ -897,24 +983,43 @@ func _select_hole(index: int) -> void:
 	# Draw/Reposition flagpole
 	_spawn_flagpole(holes[index])
 	
-	# Always reset ball to starting position aiming towards the selected hole
-	_reset_ball_position()
+	if reset_ball:
+		_reset_ball_position()
+	else:
+		_update_aim_and_camera()
+		_update_hole_button_labels()
 	
-	_show_banner("Target Hole %d (%d ft) Selected! Hit with Launch Monitor." % [index + 1, hole_data[index]["dist_ft"]])
+	if pvp_mode:
+		var cur_name = p1_name if active_player_index == 0 else p2_name
+		_show_banner("🎯 %s's Target: Hole %d (%d ft)" % [cur_name, index + 1, hole_data[index]["dist_ft"]])
+	else:
+		_show_banner("Target Hole %d (%d ft) Selected! Hit with Launch Monitor." % [index + 1, hole_data[index]["dist_ft"]])
 	
 	# Update active button visuals & distances
 	_update_hole_button_labels()
+	_update_hud()
 
 func _update_hole_button_labels() -> void:
 	for i in range(holes.size()):
 		if i < hole_buttons.size():
 			var dist_ft = hole_data[i]["dist_ft"]
-			if i == selected_hole_index:
-				hole_buttons[i].text = "Hole %d (%d ft) ▶" % [i + 1, dist_ft]
-				hole_buttons[i].add_theme_color_override("font_color", Color(0.0, 0.8, 1.0))
+			if pvp_mode:
+				var p1_mark = "✓" if p1_completed[i] else "○"
+				var p2_mark = "✓" if p2_completed[i] else "○"
+				var prefix = "▶ " if i == selected_hole_index else "  "
+				hole_buttons[i].text = "%s%d ft [%s|%s]" % [prefix, dist_ft, p1_mark, p2_mark]
+				if i == selected_hole_index:
+					var active_col = P1_COLOR if active_player_index == 0 else P2_COLOR
+					hole_buttons[i].add_theme_color_override("font_color", active_col)
+				else:
+					hole_buttons[i].remove_theme_color_override("font_color")
 			else:
-				hole_buttons[i].text = "Hole %d (%d ft)" % [i + 1, dist_ft]
-				hole_buttons[i].remove_theme_color_override("font_color")
+				if i == selected_hole_index:
+					hole_buttons[i].text = "Hole %d (%d ft) ▶" % [i + 1, dist_ft]
+					hole_buttons[i].add_theme_color_override("font_color", Color(0.0, 0.8, 1.0))
+				else:
+					hole_buttons[i].text = "Hole %d (%d ft)" % [i + 1, dist_ft]
+					hole_buttons[i].remove_theme_color_override("font_color")
 
 func _spawn_flagpole(pos: Vector3) -> void:
 	if has_node("FlagPin"):
@@ -945,10 +1050,11 @@ func _spawn_flagpole(pos: Vector3) -> void:
 	flag_mesh.size = Vector3(0.4, 0.3, 0.02)
 	flag.mesh = flag_mesh
 	
+	var flag_col = (P1_COLOR if active_player_index == 0 else P2_COLOR) if pvp_mode else Color(1.0, 0.1, 0.1)
 	var flag_mat = StandardMaterial3D.new()
-	flag_mat.albedo_color = Color(1.0, 0.1, 0.1) # Bright red
+	flag_mat.albedo_color = flag_col
 	flag_mat.emission_enabled = true
-	flag_mat.emission = Color(1.0, 0.1, 0.1)
+	flag_mat.emission = flag_col
 	flag.material_override = flag_mat
 	flag.position = Vector3(0.2, 1.85, 0.0)
 	flag.rotation = Vector3(0.0, 0.0, -PI/2)
@@ -962,8 +1068,9 @@ func _spawn_flagpole(pos: Vector3) -> void:
 	ring_mesh.height = 0.001
 	ring.mesh = ring_mesh
 	
+	var ring_col = (P1_COLOR if active_player_index == 0 else P2_COLOR) if pvp_mode else Color(0.0, 0.8, 1.0)
 	var ring_mat = StandardMaterial3D.new()
-	ring_mat.albedo_color = Color(0.0, 0.8, 1.0, 0.5) # Translucent cyan
+	ring_mat.albedo_color = Color(ring_col.r, ring_col.g, ring_col.b, 0.5)
 	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	ring.material_override = ring_mat
 	ring.position = Vector3(0.0, 0.0005, 0.0)
@@ -993,6 +1100,11 @@ func _teleport_ball(pos: Vector3) -> void:
 	# Recompute camera and orientation
 	_update_aim_and_camera()
 	_update_hole_button_labels()
+	
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("notify_ball_at_rest"):
+			lm.notify_ball_at_rest()
 
 func _update_aim_and_camera() -> void:
 	if selected_hole_index < 0 or selected_hole_index >= holes.size():
@@ -1054,18 +1166,21 @@ func _unhandled_input(event: InputEvent) -> void:
 							
 					# Selection within 4 meters of any hole
 					if closest_idx >= 0 and min_dist <= 4.0:
-						_select_hole(closest_idx)
+						_select_hole(closest_idx, true)
 						
 	# Keyboard R (reset), G (grid), H/Space (test hit)
 	if event is InputEventKey and event.pressed:
 		if event.keycode == KEY_R:
-			_reset_ball_position()
+			if pvp_mode:
+				_reset_game()
+			else:
+				_reset_ball_position()
 		elif event.keycode == KEY_G:
 			_toggle_green_grid()
 		elif event.keycode == KEY_H or event.keycode == KEY_SPACE:
 			if player and player.ball and player.ball.state == PhysicsEnums.BallState.REST:
 				var target_dist_ft = hole_data[selected_hole_index]["dist_ft"]
-				var sim_speed = sqrt(target_dist_ft) * 1.85
+				var sim_speed = sqrt(target_dist_ft) * 1.063
 				var test_data = {
 					"Speed": sim_speed,
 					"VLA": 0.0,
@@ -1087,8 +1202,17 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
+	if has_node("/root/LaunchMonitorManager"):
+		get_node("/root/LaunchMonitorManager").call("notify_shot_started")
 
 	shot_counter += 1
+	shot_in_progress = true
+	if pvp_mode:
+		if active_player_index == 0:
+			p1_shots += 1
+		else:
+			p2_shots += 1
+
 	last_putt_start_pos = player.ball.global_position
 	if selected_hole_index >= 0 and selected_hole_index < holes.size():
 		last_putt_target_hole = holes[selected_hole_index]
@@ -1098,10 +1222,15 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 
 	raw_ball_data = data.duplicate()
 	_update_stats_display(false)
+	_update_hud()
 
 	# Show the banner
 	var speed_mph = data.get("Speed", 0.0)
-	_show_banner("Putt Hit (Launch Monitor)! Speed: %.1f mph" % speed_mph)
+	if pvp_mode:
+		var cur_name = p1_name if active_player_index == 0 else p2_name
+		_show_banner("%s Putt Hit! Speed: %.1f mph" % [cur_name, speed_mph])
+	else:
+		_show_banner("Putt Hit (Launch Monitor)! Speed: %.1f mph" % speed_mph)
 
 # ----------------- DYNAMIC CUP-ENTRY & CAMERA FOLLOW -----------------
 
@@ -1126,6 +1255,10 @@ func _physics_process(delta: float) -> void:
 func _on_ball_rest(_shot_data: Dictionary) -> void:
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("notify_ball_at_rest"):
+			lm.notify_ball_at_rest()
 	raw_ball_data = _shot_data.duplicate()
 	_update_stats_display(true)
 	var final_pos = player.ball.global_position
@@ -1134,42 +1267,77 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 	var start_dist_feet = last_putt_start_pos.distance_to(target_hole) * 3.28084
 	var end_dist_feet = final_pos.distance_to(target_hole) * 3.28084
 	var end_dist_meters = final_pos.distance_to(target_hole)
+	var end_dist_meters_2d = Vector2(final_pos.x, final_pos.z).distance_to(Vector2(target_hole.x, target_hole.z))
 	
-	# 1. Attempts
-	stats_attempts += 1
-	
-	# 2. 25+ Foot Putt
-	if start_dist_feet >= 24.5:
-		stats_attempts_25_plus += 1
-		
-	# 3. Made into hole
+	# Made into hole check (cup lip / 2D radius or < 0.06m or cup drop)
 	var made = false
-	if end_dist_meters < 0.13:
+	if end_dist_meters < 0.06 or end_dist_meters_2d < 0.07 or (player.ball and player.ball.is_falling_in_hole):
 		made = true
-		stats_made += 1
-		GlobalSettings.play_golf_clap()
-		_show_banner("HOLED OUT! AMAZING PUTT! (%.0f ft)" % start_dist_feet)
+
+	if pvp_mode:
+		var cur_completed = p1_completed if active_player_index == 0 else p2_completed
+		var cur_name = p1_name if active_player_index == 0 else p2_name
+		var target_dist_ft = hole_data[selected_hole_index]["dist_ft"]
+		
+		if made:
+			cur_completed[selected_hole_index] = true
+			var count = cur_completed.count(true)
+			if sfx_applause_player:
+				sfx_applause_player.play()
+			GlobalSettings.play_golf_clap()
+			_show_banner("⛳ HOLED OUT! %s drained the %d ft putt! (%d/8)" % [cur_name, target_dist_ft, count])
+			if count >= 8:
+				pvp_winner = active_player_index
+				_trigger_victory(cur_name)
+				_update_hud()
+				_update_hole_button_labels()
+				return
+		else:
+			_show_banner("%s ended %.1f ft from cup (Target: %d ft)" % [cur_name, end_dist_feet, target_dist_ft])
 	else:
-		_show_banner("Ended %.1f ft from cup (Target: %.0f ft)" % [end_dist_feet, start_dist_feet])
+		# 1. Attempts
+		stats_attempts += 1
 		
-	# 4. Within 5 feet
-	if end_dist_feet <= 5.0 or made:
-		stats_within_5 += 1
-		
-	# 5. Within 10 feet
-	if end_dist_feet <= 10.0 or made:
-		stats_within_10 += 1
+		# 2. 25+ Foot Putt
+		if start_dist_feet >= 24.5:
+			stats_attempts_25_plus += 1
+			
+		# 3. Made into hole
+		if made:
+			stats_made += 1
+			if sfx_applause_player:
+				sfx_applause_player.play()
+			GlobalSettings.play_golf_clap()
+			_show_banner("HOLED OUT! AMAZING PUTT! (%.0f ft)" % start_dist_feet)
+		else:
+			_show_banner("Ended %.1f ft from cup (Target: %.0f ft)" % [end_dist_feet, start_dist_feet])
+			
+		# 4. Within 5 feet
+		if end_dist_feet <= 5.0 or made:
+			stats_within_5 += 1
+			
+		# 5. Within 10 feet
+		if end_dist_feet <= 10.0 or made:
+			stats_within_10 += 1
 		
 	# Update Stats Labels & Button Labels
 	_update_hud()
 	_update_hole_button_labels()
 	
-	# Always reset player back to the starting spot after hitting
+	# Reset player back to starting spot after hitting (or alternate turn in PvP)
 	var current_shot_id = shot_counter
 	var reset_delay = maxf(0.5, GlobalSettings.range_settings.ball_reset_timer.value)
 	await get_tree().create_timer(reset_delay).timeout
 	if is_inside_tree() and player != null and player.ball != null:
 		if shot_counter == current_shot_id and player.ball.state == PhysicsEnums.BallState.REST:
+			if pvp_mode and pvp_winner == -1:
+				if shot_in_progress:
+					shot_in_progress = false
+					active_player_index = 1 - active_player_index
+					var next_hole = _get_next_uncompleted_hole(active_player_index)
+					_select_hole(next_hole, false)
+					var next_name = p1_name if active_player_index == 0 else p2_name
+					_show_banner("🎯 %s's Turn! Target: Hole %d (%d ft)" % [next_name, next_hole + 1, hole_data[next_hole]["dist_ft"]])
 			_reset_ball_position()
 
 # ----------------- GUI SETUP -----------------
@@ -1328,15 +1496,15 @@ func _setup_ui() -> void:
 	
 	# --- BOTTOM CONTROLS PANEL ---
 	var ctrl_panel = PanelContainer.new()
-	ctrl_panel.custom_minimum_size = Vector2(500, 76)
+	ctrl_panel.custom_minimum_size = Vector2(660, 76)
 	ctrl_panel.anchor_left = 0.5
 	ctrl_panel.anchor_right = 0.5
 	ctrl_panel.anchor_top = 1.0
 	ctrl_panel.anchor_bottom = 1.0
 	ctrl_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	ctrl_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	ctrl_panel.offset_left = -250
-	ctrl_panel.offset_right = 250
+	ctrl_panel.offset_left = -330
+	ctrl_panel.offset_right = 330
 	ctrl_panel.offset_top = -94
 	ctrl_panel.offset_bottom = -18
 	hud_control.add_child(ctrl_panel)
@@ -1352,6 +1520,15 @@ func _setup_ui() -> void:
 	ctrl_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	ctrl_margin.add_child(ctrl_hbox)
 	
+	# Mode Toggle Button (Standard vs PvP)
+	mode_toggle_btn = Button.new()
+	mode_toggle_btn.text = "⚔️ PvP Mode: OFF"
+	mode_toggle_btn.custom_minimum_size = Vector2(165, 52)
+	mode_toggle_btn.add_theme_font_size_override("font_size", 15)
+	_apply_btn_style(mode_toggle_btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
+	mode_toggle_btn.pressed.connect(_toggle_pvp_mode)
+	ctrl_hbox.add_child(mode_toggle_btn)
+	
 	# 1. Slope Grid Toggle Button
 	grid_toggle_btn = Button.new()
 	grid_toggle_btn.name = "GridToggleButton"
@@ -1365,10 +1542,15 @@ func _setup_ui() -> void:
 	# 2. Reset Button
 	var reset_btn = Button.new()
 	reset_btn.text = "RESET (R)"
-	reset_btn.custom_minimum_size = Vector2(120, 52)
+	reset_btn.custom_minimum_size = Vector2(110, 52)
 	reset_btn.add_theme_font_size_override("font_size", 16)
 	_apply_btn_style(reset_btn, Color(0.48, 0.28, 0.18), Color(0.32, 0.18, 0.12))
-	reset_btn.pressed.connect(_reset_ball_position)
+	reset_btn.pressed.connect(func():
+		if pvp_mode:
+			_reset_game()
+		else:
+			_reset_ball_position()
+	)
 	ctrl_hbox.add_child(reset_btn)
 
 	# 3. Music Toggle Button
@@ -1449,19 +1631,196 @@ func _create_stat_column(parent: HBoxContainer, title: String) -> Label:
 	val_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
 	col.add_child(val_lbl)
 	
+	stat_columns.append({"title": title_lbl, "val": val_lbl})
 	return val_lbl
 
 func _update_hud() -> void:
-	if attempts_val_lbl:
-		attempts_val_lbl.text = str(stats_attempts)
-	if dist_25_val_lbl:
-		dist_25_val_lbl.text = str(stats_attempts_25_plus)
-	if within_10_val_lbl:
-		within_10_val_lbl.text = str(stats_within_10)
-	if within_5_val_lbl:
-		within_5_val_lbl.text = str(stats_within_5)
-	if made_val_lbl:
-		made_val_lbl.text = str(stats_made)
+	if stat_columns.size() >= 5:
+		if pvp_mode:
+			var p1_count = p1_completed.count(true)
+			var p2_count = p2_completed.count(true)
+			
+			# Column 0: Current Turn
+			stat_columns[0]["title"].text = "CURRENT TURN"
+			if pvp_winner != -1:
+				var win_name = p1_name if pvp_winner == 0 else p2_name
+				stat_columns[0]["val"].text = "🏆 %s WINS!" % win_name
+				stat_columns[0]["val"].add_theme_color_override("font_color", Color(0.3, 1.0, 0.5))
+			else:
+				var cur_name = p1_name if active_player_index == 0 else p2_name
+				stat_columns[0]["val"].text = "%s (P%d)" % [cur_name, active_player_index + 1]
+				stat_columns[0]["val"].add_theme_color_override("font_color", P1_COLOR if active_player_index == 0 else P2_COLOR)
+				
+			# Column 1: Putts Made
+			stat_columns[1]["title"].text = "PUTTS MADE"
+			stat_columns[1]["val"].text = "P1: %d/8 | P2: %d/8" % [p1_count, p2_count]
+			stat_columns[1]["val"].add_theme_color_override("font_color", Color.WHITE)
+			
+			# Column 2: Match Status
+			stat_columns[2]["title"].text = "MATCH STATUS"
+			var diff = p1_count - p2_count
+			if pvp_winner != -1:
+				stat_columns[2]["val"].text = "WINNER!"
+				stat_columns[2]["val"].add_theme_color_override("font_color", Color(0.3, 1.0, 0.5))
+			elif diff > 0:
+				stat_columns[2]["val"].text = "P1 +%d" % diff
+				stat_columns[2]["val"].add_theme_color_override("font_color", P1_COLOR)
+			elif diff < 0:
+				stat_columns[2]["val"].text = "P2 +%d" % -diff
+				stat_columns[2]["val"].add_theme_color_override("font_color", P2_COLOR)
+			else:
+				stat_columns[2]["val"].text = "TIED"
+				stat_columns[2]["val"].add_theme_color_override("font_color", Color(1.0, 0.9, 0.4))
+				
+			# Column 3: Total Shots
+			stat_columns[3]["title"].text = "TOTAL SHOTS"
+			stat_columns[3]["val"].text = "P1: %d | P2: %d" % [p1_shots, p2_shots]
+			stat_columns[3]["val"].add_theme_color_override("font_color", Color.WHITE)
+			
+			# Column 4: Target Distance
+			stat_columns[4]["title"].text = "TARGET DIST"
+			stat_columns[4]["val"].text = "%d FT" % hole_data[selected_hole_index]["dist_ft"]
+			stat_columns[4]["val"].add_theme_color_override("font_color", Color(0.5, 0.85, 1.0))
+		else:
+			stat_columns[0]["title"].text = "ATTEMPTS"
+			stat_columns[0]["val"].text = str(stats_attempts)
+			stat_columns[0]["val"].add_theme_color_override("font_color", Color.WHITE)
+			
+			stat_columns[1]["title"].text = "25+ FT PUTTS"
+			stat_columns[1]["val"].text = str(stats_attempts_25_plus)
+			stat_columns[1]["val"].add_theme_color_override("font_color", Color.WHITE)
+			
+			stat_columns[2]["title"].text = "WITHIN 10 FT"
+			stat_columns[2]["val"].text = str(stats_within_10)
+			stat_columns[2]["val"].add_theme_color_override("font_color", Color.WHITE)
+			
+			stat_columns[3]["title"].text = "WITHIN 5 FT"
+			stat_columns[3]["val"].text = str(stats_within_5)
+			stat_columns[3]["val"].add_theme_color_override("font_color", Color.WHITE)
+			
+			stat_columns[4]["title"].text = "MADE PUTTS"
+			stat_columns[4]["val"].text = str(stats_made)
+			stat_columns[4]["val"].add_theme_color_override("font_color", Color.WHITE)
+	else:
+		if attempts_val_lbl:
+			attempts_val_lbl.text = str(stats_attempts)
+		if dist_25_val_lbl:
+			dist_25_val_lbl.text = str(stats_attempts_25_plus)
+		if within_10_val_lbl:
+			within_10_val_lbl.text = str(stats_within_10)
+		if within_5_val_lbl:
+			within_5_val_lbl.text = str(stats_within_5)
+		if made_val_lbl:
+			made_val_lbl.text = str(stats_made)
+
+func _trigger_victory(winner_name: String) -> void:
+	if sfx_applause_player:
+		sfx_applause_player.play()
+	GlobalSettings.play_golf_clap()
+	var win_color = P1_COLOR if pvp_winner == 0 else P2_COLOR
+	_show_game_over_banner(
+		"🎉 %s WINS!" % winner_name.to_upper(),
+		"First golfer to drain a putt at all 8 distances!",
+		win_color
+	)
+
+func _show_game_over_banner(title: String, subtitle: String, theme_color: Color) -> void:
+	_hide_game_over_banner()
+		
+	game_over_panel = PanelContainer.new()
+	game_over_panel.name = "GameOverBanner"
+	game_over_panel.custom_minimum_size = Vector2(620, 240)
+	game_over_panel.anchor_left = 0.5
+	game_over_panel.anchor_right = 0.5
+	game_over_panel.anchor_top = 0.5
+	game_over_panel.anchor_bottom = 0.5
+	game_over_panel.offset_left = -310
+	game_over_panel.offset_right = 310
+	game_over_panel.offset_top = -120
+	game_over_panel.offset_bottom = 120
+	
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.03, 0.07, 0.12, 0.95)
+	style.border_width_left = 3
+	style.border_width_top = 3
+	style.border_width_right = 3
+	style.border_width_bottom = 3
+	style.border_color = theme_color
+	style.corner_radius_top_left = 14
+	style.corner_radius_top_right = 14
+	style.corner_radius_bottom_right = 14
+	style.corner_radius_bottom_left = 14
+	style.shadow_color = Color(0, 0, 0, 0.6)
+	style.shadow_size = 12
+	game_over_panel.add_theme_stylebox_override("panel", style)
+	
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 28)
+	margin.add_theme_constant_override("margin_right", 28)
+	margin.add_theme_constant_override("margin_top", 24)
+	margin.add_theme_constant_override("margin_bottom", 24)
+	game_over_panel.add_child(margin)
+	
+	var vbox = VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 12)
+	margin.add_child(vbox)
+	
+	var t_lbl = Label.new()
+	t_lbl.text = title
+	t_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t_lbl.add_theme_font_size_override("font_size", 28)
+	t_lbl.add_theme_color_override("font_color", theme_color)
+	vbox.add_child(t_lbl)
+	
+	var sub_lbl = Label.new()
+	sub_lbl.text = subtitle
+	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub_lbl.add_theme_font_size_override("font_size", 16)
+	sub_lbl.add_theme_color_override("font_color", Color(0.85, 0.9, 0.95))
+	vbox.add_child(sub_lbl)
+
+	var stats_lbl = Label.new()
+	stats_lbl.text = "%s: %d/8 putts in %d shots\n%s: %d/8 putts in %d shots" % [
+		p1_name, p1_completed.count(true), p1_shots,
+		p2_name, p2_completed.count(true), p2_shots
+	]
+	stats_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stats_lbl.add_theme_font_size_override("font_size", 15)
+	stats_lbl.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0))
+	vbox.add_child(stats_lbl)
+	
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_hbox.add_theme_constant_override("separation", 16)
+	vbox.add_child(btn_hbox)
+	
+	var play_again_btn = Button.new()
+	play_again_btn.text = "🔄 Play Again (R)"
+	play_again_btn.custom_minimum_size = Vector2(160, 46)
+	play_again_btn.add_theme_font_size_override("font_size", 15)
+	_apply_btn_style(play_again_btn, Color(0.18, 0.44, 0.30), Color(0.24, 0.58, 0.40))
+	play_again_btn.pressed.connect(func():
+		_hide_game_over_banner()
+		_reset_game()
+	)
+	btn_hbox.add_child(play_again_btn)
+	
+	var close_btn = Button.new()
+	close_btn.text = "Dismiss"
+	close_btn.custom_minimum_size = Vector2(110, 46)
+	close_btn.add_theme_font_size_override("font_size", 15)
+	_apply_btn_style(close_btn, Color(0.24, 0.30, 0.40), Color(0.32, 0.40, 0.52))
+	close_btn.pressed.connect(_hide_game_over_banner)
+	btn_hbox.add_child(close_btn)
+	
+	if hud_control != null:
+		hud_control.add_child(game_over_panel)
+
+func _hide_game_over_banner() -> void:
+	if game_over_panel != null and is_instance_valid(game_over_panel):
+		game_over_panel.queue_free()
+		game_over_panel = null
 
 func _show_banner(text: String) -> void:
 	if banner_lbl:

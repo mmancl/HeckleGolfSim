@@ -98,7 +98,7 @@ func _ready() -> void:
 	# --- TILE 1: Putting Practice ---
 	var putting_tile = _create_minigame_tile(
 		"Putting Practice",
-		"Practice your short game on a large, undulating green with 8 target holes (5, 10, 15, 20, 25, 30, 40, 50 ft) and automatic reset after each putt.",
+		"Practice your short game on a large, undulating green with 8 target holes (5, 10, 15, 20, 25, 30, 40, 50 ft). Includes single-player & 2-player turn-based PvP putting race!",
 		"res://assets/images/menu/putting.jpg",
 		func(): SceneManager.change_scene("res://Courses/Minigames/PuttingPractice/putting_practice.tscn")
 	)
@@ -107,7 +107,7 @@ func _ready() -> void:
 	# --- TILE 2: Chipping Practice ---
 	var chipping_tile = _create_minigame_tile(
 		"Chipping Practice",
-		"Chip onto 7 custom-crafted floating island golf course greens (25, 50, 75, 100, 125, 150, 200 yards) complete with wood retaining walls, sandtraps, and boat docks!",
+		"Chip onto 7 custom floating island greens (25 to 200 yds) with retaining walls, sandtraps, and docks. Includes single-player & 2-player turn-based PvP island battle!",
 		"res://assets/images/menu/chipping.jpg",
 		func(): SceneManager.change_scene("res://Courses/Minigames/Chipping/chipping.tscn")
 	)

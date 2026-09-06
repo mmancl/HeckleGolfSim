@@ -35,6 +35,12 @@ var _heartbeat_stream: AudioStream = null
 var target_camera: Camera3D = null
 var base_camera_fov: float = 55.0
 
+# Scene-level caching for is_course_play_active
+var _cached_scene_ref: WeakRef = null
+var _cached_is_course_play: bool = false
+var _cached_practice_mode: bool = false
+var _cached_players_empty: bool = true
+
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_setup_visuals()
@@ -164,12 +170,11 @@ func is_course_play_active() -> bool:
 			return false
 
 	# 2. MultiplayerManager checks (Course Play requires active round without practice mode)
-	if has_node("/root/MultiplayerManager"):
-		var mp = get_node("/root/MultiplayerManager")
-		if mp.practice_mode_active:
-			return false
-		if mp.players.is_empty():
-			return false
+	var mp = get_node_or_null("/root/MultiplayerManager")
+	var players_empty = (mp != null and mp.players.is_empty())
+	var mp_practice = (mp != null and mp.practice_mode_active)
+	if mp_practice or (players_empty and not (get_tree() != null and get_tree().current_scene != null and get_tree().current_scene.has_node("CoursePlay"))):
+		return false
 
 	# 3. Active Scene checks
 	var tree = get_tree()
@@ -179,8 +184,18 @@ func is_course_play_active() -> bool:
 	if current_scene == null:
 		return false
 
-	# Check practice mode on current scene
-	if current_scene.get("practice_mode_active") == true:
+	var practice_mode = (current_scene.get("practice_mode_active") == true)
+
+	if _cached_scene_ref != null and _cached_scene_ref.get_ref() == current_scene \
+		and _cached_practice_mode == practice_mode and _cached_players_empty == players_empty:
+		return _cached_is_course_play
+
+	_cached_scene_ref = weakref(current_scene)
+	_cached_practice_mode = practice_mode
+	_cached_players_empty = players_empty
+
+	if practice_mode:
+		_cached_is_course_play = false
 		return false
 
 	var scene_name = str(current_scene.name).to_lower()
@@ -198,22 +213,27 @@ func is_course_play_active() -> bool:
 		or full_id.contains("analytics") or full_id.contains("history") \
 		or full_id.contains("custom_course_creator") or full_id.contains("osm_download") \
 		or full_id.contains("course_preview"):
+		_cached_is_course_play = false
 		return false
 
 	# Exclude all Minigames
 	if full_id.contains("chipping") or full_id.contains("putting") \
 		or full_id.contains("loft_control") or full_id.contains("shape_practice") \
 		or full_id.contains("minigame") or full_id.contains("minigames"):
+		_cached_is_course_play = false
 		return false
 
 	# Exclude standalone Driving Range
 	if (scene_name == "range" or scene_path.ends_with("range.tscn")) and not current_scene.has_node("CoursePlay"):
+		_cached_is_course_play = false
 		return false
 
 	# Must have CoursePlay node or be a course scene with active hole play
 	if current_scene.has_node("CoursePlay") or scene_name == "courseplay" or full_id.contains("course_play") or full_id.contains("usercourses") or scene_name.contains("course"):
+		_cached_is_course_play = true
 		return true
 
+	_cached_is_course_play = false
 	return false
 
 # ---------------- SUSPENSE ELIGIBILITY ----------------

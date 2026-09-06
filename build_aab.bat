@@ -16,12 +16,12 @@ if not exist "%ANDROID_BUILD_DIR%\gradlew.bat" (
     exit /b 1
 )
 
-echo Building Android App Bundle (AAB) for Mono/.NET Release...
-echo Working directory: %ANDROID_BUILD_DIR%
-echo.
+if not exist "%ANDROID_BUILD_DIR%\assetPackInstallTime\src\main\assets" (
+    mkdir "%ANDROID_BUILD_DIR%\assetPackInstallTime\src\main\assets" >nul 2>&1
+)
 
 cd /d "%ANDROID_BUILD_DIR%"
-call gradlew.bat bundleMonoRelease
+call gradlew.bat bundleMonoRelease -Pexport_package_name=com.hecklegolf.simulator -Pexport_version_name=0.31.1 -Pexport_version_code=2 -Pexport_version_min_sdk=30 -Pexport_version_target_sdk=36 -Pexport_format=aab -Pexport_edition=mono -Pexport_build_type=release
 set BUILD_STATUS=%errorlevel%
 cd /d "%SCRIPT_DIR%"
 

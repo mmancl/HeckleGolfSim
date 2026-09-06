@@ -24,6 +24,7 @@ var gimme_range_1_distance := Setting.new(5.0, 0.5, 20.0)
 var gimme_range_2_enabled := Setting.new(false)
 var gimme_range_2_distance := Setting.new(25.0, 0.5, 30.0)
 var custom_next_player := Setting.new(true)
+var turn_order_mode := Setting.new("Stay Up")
 var golf_clap_enabled := Setting.new(true)
 var ambient_sound_enabled := Setting.new(true)
 var menu_music_enabled := Setting.new(true)
@@ -60,6 +61,7 @@ func _init():
 		"gimme_range_2_enabled": gimme_range_2_enabled,
 		"gimme_range_2_distance": gimme_range_2_distance,
 		"custom_next_player": custom_next_player,
+		"turn_order_mode": turn_order_mode,
 		"golf_clap_enabled": golf_clap_enabled,
 		"ambient_sound_enabled": ambient_sound_enabled,
 		"menu_music_enabled": menu_music_enabled,

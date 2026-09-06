@@ -362,6 +362,9 @@ Join the official **Heckle Golf Simulator Discord** to connect with fellow golfe
 - **Course Geometries & Open Data**: Course layouts and vector geography © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL 1.0); elevation data from USGS 3DEP and AWS Terrain Tiles.
 - **PBR Textures & Models**: Materials from [ambientCG.com](https://ambientcg.com/) and Shapespark exterior plants under Creative Commons CC0 1.0 Universal (Public Domain).
 - **Announcer Audio**: Original comedic commentary produced for Heckle Golf Sim as an artistic homage to classic PS2-era arcade golf games.
+- **Music & Soundtracks**: Minigame sound loop tracks: Music from #Uppbeat (free for Creators!):
+  - *8beatz* (by 21 On The Block): [https://uppbeat.io/t/21-on-the-block/8beatz](https://uppbeat.io/t/21-on-the-block/8beatz)
+  - *Boogie* (by Pecan Pie): [https://uppbeat.io/t/pecan-pie/boogie](https://uppbeat.io/t/pecan-pie/boogie)
 - **Hardware Non-Affiliation**: Heckle Golf Simulator is an independent open-source project and is **not affiliated with, endorsed by, or sponsored by Square Golf (SquareGolf Co., Ltd.), GSPro (FlightPath Golf LLC), Garmin Ltd., PiTrac, or any launch monitor manufacturer.** All trademarks are property of their respective owners and used under nominative fair use for technical compatibility.
 
 For complete legal notices, safety warnings, and trademark terms, see [DISCLAIMER.md](DISCLAIMER.md).

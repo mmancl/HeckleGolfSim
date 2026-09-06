@@ -167,16 +167,7 @@ func _create_tab_style(bg_color: Color, border_color: Color) -> StyleBoxFlat:
 func _setup_touch_option_button(opt: OptionButton) -> void:
 	if opt == null:
 		return
-	opt.custom_minimum_size = Vector2(220, 50)
-	opt.add_theme_font_size_override("font_size", 17)
-	ThemeManager.apply_secondary_button_style(opt, 8)
-	
-	var popup = opt.get_popup()
-	if popup != null:
-		popup.add_theme_font_size_override("font_size", 17)
-		popup.add_theme_constant_override("item_start_padding", 18)
-		popup.add_theme_constant_override("item_end_padding", 18)
-		popup.add_theme_constant_override("v_separation", 12)
+	ThemeManager.apply_option_button_style(opt, 18, Vector2(220, 52))
 
 
 func _setup_other_devices_dropdown() -> void:

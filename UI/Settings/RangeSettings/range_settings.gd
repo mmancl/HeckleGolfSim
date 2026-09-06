@@ -106,16 +106,7 @@ func _enhance_spinbox_with_stepper(spin_box: SpinBox, step: float) -> void:
 func _setup_touch_option_button(opt: OptionButton) -> void:
 	if opt == null:
 		return
-	opt.custom_minimum_size = Vector2(220, 52)
-	opt.add_theme_font_size_override("font_size", 18)
-	ThemeManager.apply_secondary_button_style(opt, 8)
-	
-	var popup = opt.get_popup()
-	if popup != null:
-		popup.add_theme_font_size_override("font_size", 18)
-		popup.add_theme_constant_override("item_start_padding", 20)
-		popup.add_theme_constant_override("item_end_padding", 20)
-		popup.add_theme_constant_override("v_separation", 14)
+	ThemeManager.apply_option_button_style(opt, 18, Vector2(220, 52))
 
 
 func _create_tab_style(bg_color: Color, border_color: Color) -> StyleBoxFlat:
@@ -270,6 +261,9 @@ func _ready() -> void:
 	turn_label.add_theme_font_size_override("font_size", 22)
 	turn_label.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
 	gameplay_vbox.add_child(turn_label)
+	
+	var turn_order_row = _create_option_setting_row("Turn Order Mode", "turn_order_mode", ["Stay Up", "Classic", "Full Hole"])
+	gameplay_vbox.add_child(turn_order_row)
 	
 	var custom_next_player_toggle = _create_toggle_setting_row("Repeat Shot if <= 20 Yards", "custom_next_player")
 	gameplay_vbox.add_child(custom_next_player_toggle)
@@ -1211,6 +1205,52 @@ func _create_toggle_setting_row(label_text: String, setting_name: String) -> HBo
 	)
 	row.add_child(check)
 	
+	return row
+
+
+func _create_option_setting_row(label_text: String, setting_name: String, options: Array[String]) -> HBoxContainer:
+	var row = HBoxContainer.new()
+	row.name = label_text.replace(" ", "")
+	row.custom_minimum_size = Vector2(0, 52)
+
+	var label = Label.new()
+	label.text = label_text
+	label.add_theme_font_size_override("font_size", 19)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(label)
+
+	var opt = OptionButton.new()
+	for i in range(options.size()):
+		opt.add_item(options[i], i)
+	_setup_touch_option_button(opt)
+
+	var setting: Setting = GlobalSettings.range_settings.settings.get(setting_name, null)
+	var active_val = ""
+	if has_node("/root/MultiplayerManager"):
+		var mp_mgr = get_node("/root/MultiplayerManager")
+		if "turn_order_mode" in mp_mgr and not str(mp_mgr.turn_order_mode).is_empty():
+			active_val = str(mp_mgr.turn_order_mode)
+	if active_val.is_empty() and setting != null:
+		active_val = str(setting.value)
+
+	for i in range(options.size()):
+		if options[i] == active_val:
+			opt.selected = i
+			break
+
+	opt.item_selected.connect(func(index: int):
+		var val = options[index]
+		if setting != null:
+			setting.set_value(val)
+		if has_node("/root/MultiplayerManager"):
+			var mp_mgr = get_node("/root/MultiplayerManager")
+			mp_mgr.turn_order_mode = val
+			if mp_mgr.has_method("save_current_match"):
+				mp_mgr.save_current_match()
+	)
+	row.add_child(opt)
+
 	return row
 
 

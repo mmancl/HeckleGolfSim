@@ -1,0 +1,34 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="org.godotengine.plugin.android.mediapipepose" >
+4
+5    <uses-sdk android:minSdkVersion="24" />
+6
+7    <uses-permission android:name="android.permission.CAMERA" />
+7-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:4:5-65
+7-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:4:22-62
+8
+9    <uses-feature
+9-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:5:5-85
+10        android:name="android.hardware.camera"
+10-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:5:19-57
+11        android:required="false" />
+11-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:5:58-82
+12    <uses-feature
+12-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:6:5-95
+13        android:name="android.hardware.camera.autofocus"
+13-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:6:19-67
+14        android:required="false" />
+14-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:6:68-92
+15
+16    <application>
+16-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:8:5-12:19
+17        <meta-data
+17-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:9:9-11:96
+18            android:name="org.godotengine.plugin.v2.MediaPipePosePlugin"
+18-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:10:13-73
+19            android:value="org.godotengine.plugin.android.mediapipepose.MediaPipePosePlugin" />
+19-->C:\Users\micha\Repositories\HeckleGolfSim\android\plugins\MediaPipePosePlugin\src\main\AndroidManifest.xml:11:13-93
+20    </application>
+21
+22</manifest>

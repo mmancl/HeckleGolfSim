@@ -86,6 +86,8 @@ func _ready() -> void:
 	# Deletion Confirmation Dialog
 	delete_confirm_dialog.title = "Delete Match"
 	delete_confirm_dialog.dialog_text = "Are you sure you want to delete this match from history?"
+	delete_confirm_dialog.min_size = Vector2(480, 180)
+	ThemeManager.apply_dialog_style(delete_confirm_dialog)
 	delete_confirm_dialog.confirmed.connect(_confirm_delete_match)
 	add_child(delete_confirm_dialog)
 	

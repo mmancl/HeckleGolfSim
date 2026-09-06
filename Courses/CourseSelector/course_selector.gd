@@ -192,7 +192,8 @@ func _on_delete_course_pressed() -> void:
 	var confirm = ConfirmationDialog.new()
 	confirm.title = "Delete Course"
 	confirm.dialog_text = "Delete course \"%s\"?\n\nThis will permanently remove all files in:\n%s" % [course_title, course_dir]
-	confirm.min_size = Vector2(450, 200)
+	confirm.min_size = Vector2(480, 200)
+	ThemeManager.apply_dialog_style(confirm)
 	confirm.confirmed.connect(func():
 		_delete_course_dir(course_dir)
 		_status_label.text = "Deleted course: %s" % course_title

@@ -247,7 +247,9 @@ text = "Heckle Golf Simulator is built using outstanding open-source technologie
 • [b]Terrain3D[/b] ([url=https://github.com/CoryPetkovsek/godot-terrain3d]github.com/CoryPetkovsek/godot-terrain3d[/url]) - High-performance editable terrain system by Cory Petkovsek, Roope Palmroos, and Contributors (MIT License).
 • [b]Phantom Camera[/b] ([url=https://github.com/ramok/phantom-camera]github.com/ramok/phantom-camera[/url]) - Dynamic camera controls by Marcus Skov (MIT License).
 • [b]PBR Textures & 3D Foliage[/b] - Materials sourced from [url=https://ambientcg.com/]ambientCG.com[/url] and Shapespark low-poly plants, dedicated to the public domain under [url=https://creativecommons.org/publicdomain/zero/1.0/]Creative Commons CC0 1.0 Universal[/url].
-• [b]OpenStreetMap Geodata[/b] ([url=https://www.openstreetmap.org/]openstreetmap.org[/url]) - Real-world course layouts and terrain vectors © [url=https://www.openstreetmap.org/copyright]OpenStreetMap contributors[/url] (Open Database License ODbL 1.0)."
+• [b]Music & Soundtracks[/b] - Minigame music: Music from #Uppbeat (free for Creators!):
+  — [i]8beatz[/i] (by 21 On The Block): [url=https://uppbeat.io/t/21-on-the-block/8beatz]https://uppbeat.io/t/21-on-the-block/8beatz[/url]
+  — [i]Boogie[/i] (by Pecan Pie): [url=https://uppbeat.io/t/pecan-pie/boogie]https://uppbeat.io/t/pecan-pie/boogie[/url]"
 fit_content = true
 
 [node name="HardwareCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/ScrollContainer/ScrollVBox"]

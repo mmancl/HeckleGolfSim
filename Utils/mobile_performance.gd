@@ -38,9 +38,8 @@ static func optimize_sky3d(sky3d: Node) -> void:
 static func optimize_sun_light(sun: DirectionalLight3D) -> void:
 	if not is_mobile() or sun == null:
 		return
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	sun.directional_shadow_max_distance = 150.0
-	sun.directional_shadow_split_1 = 0.1
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	sun.directional_shadow_max_distance = 250.0
 	sun.directional_shadow_blend_splits = false
 
 ## Optimizes any 3D scene (DirectionalLights, Sky, WorldEnvironment) for mobile
@@ -54,6 +53,10 @@ static func optimize_scene(scene_root: Node) -> void:
 			optimize_sun_light(n)
 		elif n is WorldEnvironment and n.environment != null:
 			optimize_environment(n.environment)
+		elif n is MeshInstance3D:
+			var n_lower = n.name.to_lower()
+			if n_lower.contains("ground") or n_lower.contains("terrain") or n_lower.contains("fairway") or n_lower.contains("green") or n_lower.contains("fringe") or n_lower.contains("rough"):
+				n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		for child in n.get_children():
 			stack.append(child)
 
@@ -70,6 +73,9 @@ static func apply_global_render_settings(tree: SceneTree = null) -> void:
 	if not is_mobile():
 		return
 	
+	# Allow mobile displays to render at their native refresh rate (60/90/120Hz)
+	# Physics interpolation smoothly bridges 60Hz physics across arbitrary display refresh rates.
+	
 	# Reduce soft shadow quality project-wide
 	RenderingServer.directional_soft_shadow_filter_set_quality(
 		RenderingServer.SHADOW_QUALITY_SOFT_LOW
@@ -77,7 +83,7 @@ static func apply_global_render_settings(tree: SceneTree = null) -> void:
 	
 	# Reduce 3D render resolution if root viewport is accessible
 	if tree != null and tree.root != null:
-		tree.root.scaling_3d_scale = 0.75
+		tree.root.scaling_3d_scale = 0.8
 		tree.root.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 
 ## Helpers for Parallax Turf shaders
