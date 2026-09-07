@@ -34,7 +34,7 @@ jobs:
           path: |
             ~/Godot
             ~/Library/Application Support/Godot/export_templates
-          key: godot-4.7-mono-macos-templates
+          key: godot-4.7-mono-macos-universal-v1
 
       - name: Download Godot 4.7 Mono & Templates
         if: steps.cache-godot.outputs.cache-hit != 'true'
@@ -42,8 +42,8 @@ jobs:
           mkdir -p ~/Godot
           mkdir -p "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono"
 
-          # Download Godot Mono for macOS
-          curl -L -o ~/Godot/godot_mono.zip "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_macos.zip"
+          # Download Godot Mono for macOS (universal binary)
+          curl -L -o ~/Godot/godot_mono.zip "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_macos.universal.zip"
           unzip -q ~/Godot/godot_mono.zip -d ~/Godot/
           
           # Download Mono export templates
@@ -54,10 +54,8 @@ jobs:
 
       - name: Locate Godot Executable
         run: |
-          GODOT_BIN=$(find ~/Godot -name "Godot" -type f -perm +111 | head -n 1)
-          if [ -z "$GODOT_BIN" ]; then
-            GODOT_BIN=$(find ~/Godot -name "godot" -type f -perm +111 | head -n 1)
-          fi
+          GODOT_BIN=$(find ~/Godot -name "Godot" -type f | head -n 1)
+          chmod +x "$GODOT_BIN"
           echo "GODOT_BIN=$GODOT_BIN" >> $GITHUB_ENV
           echo "Found Godot at $GODOT_BIN"
 
