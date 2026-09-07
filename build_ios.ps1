@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Builds the iOS application package (.ipa) for Heckle Golf Simulator.
 .DESCRIPTION
@@ -89,6 +89,17 @@ if ($LASTEXITCODE -ne 0) {
     throw "GitHub CLI is not logged in. Please run 'gh auth login' first."
 }
 
+# Resolve repository slug (e.g. mmancl/HeckleGolfSim)
+$remoteUrl = & git remote get-url origin 2>&1
+$repoSlug = "mmancl/HeckleGolfSim"
+if ($remoteUrl -match 'github\.com[:/]([^/]+/[^/.]+)') {
+    $repoSlug = $matches[1] -replace '\.git$', ''
+}
+Write-Host "Repository:     $repoSlug" -ForegroundColor Gray
+
+# Ensure default remote is set in gh configuration
+& gh repo set-default $repoSlug 2>&1 | Out-Null
+
 # Check for uncommitted or unpushed changes
 $workflowFile = ".github/workflows/build_ios.yml"
 $gitStatus = & git status --porcelain
@@ -118,9 +129,9 @@ if ($gitStatus) {
 
 Write-Host ""
 Write-Host "[1/3] Triggering macOS Cloud Runner on GitHub..." -ForegroundColor Green
-& gh workflow run "build_ios.yml" --ref main
+& gh workflow run "build_ios.yml" --repo $repoSlug --ref main
 if ($LASTEXITCODE -ne 0) {
-    throw "Failed to trigger GitHub Actions workflow build_ios.yml."
+    throw "Failed to trigger GitHub Actions workflow build_ios.yml on repo $repoSlug."
 }
 
 Write-Host "[2/3] Waiting for macOS runner to start..." -ForegroundColor Yellow
@@ -130,7 +141,7 @@ Start-Sleep -Seconds 6
 $runId = ""
 $attempts = 0
 while (-not $runId -and $attempts -lt 10) {
-    $runId = & gh run list --workflow=build_ios.yml --limit 1 --json databaseId --jq ".[0].databaseId"
+    $runId = & gh run list --repo $repoSlug --workflow=build_ios.yml --limit 1 --json databaseId --jq ".[0].databaseId"
     if (-not $runId) {
         Start-Sleep -Seconds 3
         $attempts++
@@ -144,11 +155,11 @@ if (-not $runId) {
 Write-Host "Active Cloud Mac Run ID: $runId" -ForegroundColor Cyan
 Write-Host "Watching cloud macOS build and Xcode compilation live..." -ForegroundColor Yellow
 Write-Host "-------------------------------------------------------" -ForegroundColor Gray
-& gh run watch $runId
+& gh run watch $runId --repo $repoSlug
 
-$runStatus = & gh run view $runId --json conclusion --jq ".conclusion"
+$runStatus = & gh run view $runId --repo $repoSlug --json conclusion --jq ".conclusion"
 if ($runStatus -ne "success") {
-    throw "GitHub Actions iOS build failed with status: $runStatus. Check 'gh run view $runId --log' for details."
+    throw "GitHub Actions iOS build failed with status: $runStatus. Check 'gh run view $runId --repo $repoSlug --log' for details."
 }
 
 Write-Host "-------------------------------------------------------" -ForegroundColor Gray
@@ -159,7 +170,7 @@ if (Test-Path $tempDownload) { Remove-Item $tempDownload -Recurse -Force }
 New-Item -ItemType Directory -Path $tempDownload -Force | Out-Null
 
 try {
-    & gh run download $runId -n "HeckleGolfSim-iOS-IPA" -D $tempDownload
+    & gh run download $runId --repo $repoSlug -n "HeckleGolfSim-iOS-IPA" -D $tempDownload
     
     $downloadedIpa = Get-ChildItem -Path $tempDownload -Filter "*.ipa" -Recurse | Select-Object -First 1
     if (-not $downloadedIpa) {
