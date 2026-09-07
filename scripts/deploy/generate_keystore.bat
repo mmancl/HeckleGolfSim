@@ -6,7 +6,8 @@ echo   Heckle Golf Simulator - Release Keystore Generator
 echo =======================================================
 echo.
 
-set KEYSTORE_FILE=release.keystore
+set REPO_ROOT=%~dp0..\..
+set KEYSTORE_FILE=%REPO_ROOT%\release.keystore
 set KEY_ALIAS=hecklegolf
 set VALIDITY_DAYS=10000
 

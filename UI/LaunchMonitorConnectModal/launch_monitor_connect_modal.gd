@@ -67,8 +67,8 @@ const OTHER_DEVICE_GUIDES = {
 	},
 	"shot_injector": {
 		"name": "Built-in Python Shot Injector (inject_shot.py)",
-		"bridge": "inject_shot.py (Included with Simulator)",
-		"text": "[b]Utility:[/b] [color=#64b5f6]inject_shot.py[/color] (in project root)\n[b]Protocol:[/b] GSPro Open Connect v1 over TCP\n[b]Destination Host / Port:[/b] [color=#81c784]127.0.0.1 : 49152[/color]\n\n[b]Step-by-Step Instructions:[/b]\n1. Open Heckle Golf Simulator and go to [b]Range[/b] or start any [b]Course[/b].\n2. Open a terminal or command prompt in the HeckleGolfSim directory.\n3. Run: [code]python inject_shot.py[/code]\n4. Pick a preset shot (Driver bomb, approach wedge, slice, hook, duff, putt) or type 9 for custom numbers.\n5. The shot will immediately launch in-game so you can test ball flight, camera angles, and announcer roasts without hardware!"
+		"bridge": "inject_shot.py (in scripts/tools/)",
+		"text": "[b]Utility:[/b] [color=#64b5f6]scripts/tools/inject_shot.py[/color]\n[b]Protocol:[/b] GSPro Open Connect v1 over TCP\n[b]Destination Host / Port:[/b] [color=#81c784]127.0.0.1 : 49152[/color]\n\n[b]Step-by-Step Instructions:[/b]\n1. Open Heckle Golf Simulator and go to [b]Range[/b] or start any [b]Course[/b].\n2. Open a terminal or command prompt in the HeckleGolfSim directory.\n3. Run: [code]python scripts/tools/inject_shot.py[/code]\n4. Pick a preset shot (Driver bomb, approach wedge, slice, hook, duff, putt) or type 9 for custom numbers.\n5. The shot will immediately launch in-game so you can test ball flight, camera angles, and announcer roasts without hardware!"
 	}
 }
 

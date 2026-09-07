@@ -16,7 +16,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$RepoRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+$RepoRoot = if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "..\..\project.godot"))) { (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path } else { (Get-Location).Path }
 $AndroidBuildDir = Join-Path $RepoRoot "android\build"
 
 Write-Host "==================================================" -ForegroundColor Cyan

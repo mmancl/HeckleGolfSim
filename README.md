@@ -251,8 +251,8 @@ Example GSPro Open Connect v1 message used for socket testing (`assets/data/driv
 
 ### Testing & Shot Injection Utilities
 - **In-Game Shot Injector**: Access the built-in injector UI (`UI/shot_injector.gd`) to test shots without physical hardware.
-- **Python Shot Injector**: Run `python inject_shot.py` to send customizable test shot payloads to port 49152.
-- **PowerShell Script**: Run `.\inject_shot.ps1` for rapid Windows socket testing.
+- **Python Shot Injector**: Run `python scripts/tools/inject_shot.py` to send customizable test shot payloads to port 49152.
+- **PowerShell Script**: Run `.\scripts\tools\inject_shot.ps1` for rapid Windows socket testing.
 
 ---
 
@@ -278,7 +278,7 @@ Example GSPro Open Connect v1 message used for socket testing (`assets/data/driv
 Before exporting standalone builds, the official Godot 4.7 Mono export templates must be installed. A dedicated setup script is provided:
 
 ```powershell
-.\install_export_templates.ps1
+.\scripts\build\install_export_templates.ps1
 ```
 This automatically verifies your templates and downloads official Godot 4.7 Mono templates for Windows, macOS, iOS, and Linux directly into `%APPDATA%\Godot\export_templates\4.7.stable.mono`.
 
@@ -289,10 +289,10 @@ To export and package a standalone Windows release:
 
 ```powershell
 # Build and automatically package into a distributable ZIP in dist/
-.\build_windows.ps1
+.\scripts\build\build_windows.ps1
 
 # Clean previous build artifacts first
-.\build_windows.ps1 -Clean
+.\scripts\build\build_windows.ps1 -Clean
 ```
 
 - **Output:** `dist/HeckleGolfSim-Windows-v<VERSION>.zip`
@@ -305,7 +305,7 @@ To export and package a standalone Windows release:
 To export and package a macOS Universal App bundle (Apple Silicon M1/M2/M3/M4 & Intel):
 
 ```powershell
-.\build_mac.ps1
+.\scripts\build\build_mac.ps1
 ```
 
 - **Output:** `dist/HeckleGolfSim-macOS-v<VERSION>.zip`
@@ -320,7 +320,7 @@ Godot 4 with C# (.NET) uses NativeAOT runtime compilation for iOS. Because of Ap
 #### 1-Command iOS Build:
 ```powershell
 # From Windows (automatically syncs to GitHub, builds on Apple Silicon cloud runner, and downloads HeckleGolfSim.ipa into dist/):
-.\build_ios.ps1
+.\scripts\build\build_ios.ps1
 ```
 
 - **Output:** `dist/HeckleGolfSim.ipa`
@@ -329,12 +329,12 @@ Godot 4 with C# (.NET) uses NativeAOT runtime compilation for iOS. Because of Ap
 #### Building on a Physical Mac:
 If you are directly on a macOS computer:
 ```bash
-chmod +x build_ios.sh
-./build_ios.sh
+chmod +x scripts/build/build_ios.sh
+./scripts/build/build_ios.sh
 ```
 Or via PowerShell:
 ```powershell
-pwsh ./build_ios.ps1
+pwsh ./scripts/build/build_ios.ps1
 ```
 
 ---

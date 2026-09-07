@@ -21,8 +21,9 @@ MODEL_URL = (
 MODEL_FILENAME = "pose_landmarker_full.task"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SERVER_DIR = os.path.join(SCRIPT_DIR, "UI", "GolferCamera", "mediapipe_server")
-ANDROID_ASSETS_DIR = os.path.join(SCRIPT_DIR, "android", "build", "src", "main", "assets")
+REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
+SERVER_DIR = os.path.join(REPO_ROOT, "UI", "GolferCamera", "mediapipe_server")
+ANDROID_ASSETS_DIR = os.path.join(REPO_ROOT, "android", "build", "src", "main", "assets")
 
 
 def download_model(dest_path: str) -> None:

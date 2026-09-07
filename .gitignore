@@ -43,7 +43,7 @@ __pycache__/
 *.apks
 
 # Deployment guides (private)
-DEPLOYMENT.md
+docs/DEPLOYMENT.md
 PLAY_STORE_DEPLOYMENT.md
 *DEPLOYMENT.md
 

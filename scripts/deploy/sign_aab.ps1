@@ -30,17 +30,23 @@ Write-Host ""
 
 $scriptDir = $PSScriptRoot
 if (-not $scriptDir) { $scriptDir = (Get-Location).Path }
+$RepoRoot = if (Test-Path (Join-Path $scriptDir "..\..\project.godot")) { (Resolve-Path (Join-Path $scriptDir "..\..")).Path } else { $scriptDir }
 
 # Resolve AAB Path
-$resolvedAabPath = if ([System.IO.Path]::IsPathRooted($AabPath)) { $AabPath } else { Join-Path $scriptDir $AabPath }
+$resolvedAabPath = if ([System.IO.Path]::IsPathRooted($AabPath)) {
+    $AabPath
+} else {
+    $distAab = Join-Path $RepoRoot "dist\$AabPath"
+    if (Test-Path $distAab) { $distAab } else { Join-Path $RepoRoot $AabPath }
+}
 if (-not (Test-Path $resolvedAabPath)) {
     Write-Host "[ERROR] AAB file not found at: $resolvedAabPath" -ForegroundColor Red
-    Write-Host "Please build the AAB first using .\build_aab.ps1" -ForegroundColor Yellow
+    Write-Host "Please build the AAB first using ..\build\build_aab.ps1" -ForegroundColor Yellow
     exit 1
 }
 
 # Resolve Keystore Path
-$resolvedKeystorePath = if ([System.IO.Path]::IsPathRooted($KeystorePath)) { $KeystorePath } else { Join-Path $scriptDir $KeystorePath }
+$resolvedKeystorePath = if ([System.IO.Path]::IsPathRooted($KeystorePath)) { $KeystorePath } else { Join-Path $RepoRoot $KeystorePath }
 if (-not (Test-Path $resolvedKeystorePath)) {
     # Check ~/.android/debug.keystore as fallback notice
     Write-Host "[WARNING] Keystore not found at: $resolvedKeystorePath" -ForegroundColor Yellow

@@ -32,6 +32,12 @@ if (-not $found) {
         Write-Host "Please ensure OpenJDK 17+ is installed and keytool is in your PATH." -ForegroundColor Yellow
         exit 1
     }
+$scriptDir = $PSScriptRoot
+if (-not $scriptDir) { $scriptDir = (Get-Location).Path }
+$RepoRoot = if (Test-Path (Join-Path $scriptDir "..\..\project.godot")) { (Resolve-Path (Join-Path $scriptDir "..\..")).Path } else { $scriptDir }
+
+if (-not [System.IO.Path]::IsPathRooted($KeystorePath)) {
+    $KeystorePath = Join-Path $RepoRoot $KeystorePath
 }
 
 if (Test-Path $KeystorePath) {
