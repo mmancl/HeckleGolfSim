@@ -48,5 +48,6 @@ PLAY_STORE_DEPLOYMENT.md
 *DEPLOYMENT.md
 
 # Build and distribution artifacts
-build/
+/build/
+!scripts/build/
 dist/

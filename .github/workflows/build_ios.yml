@@ -6,7 +6,7 @@ on:
       version:
         description: 'Build version (e.g. 0.35.0)'
         required: false
-        default: '0.35.0'
+        default: '0.35.2'
   push:
     tags:
       - 'ios-v*'
@@ -65,17 +65,34 @@ jobs:
 
       - name: Export iOS Preset via Godot
         run: |
+          mkdir -p ios_export
           mkdir -p dist
           "$GODOT_BIN" --headless --import || true
-          "$GODOT_BIN" --headless --export-release "iOS" dist/HeckleGolfSim-iOS.zip
+          "$GODOT_BIN" --headless --export-release "iOS" ios_export/HeckleGolfSim.ipa
 
       - name: Build and Package Unsigned .ipa
         run: |
-          mkdir -p ios_xcode_project
-          unzip -q dist/HeckleGolfSim-iOS.zip -d ios_xcode_project
-          
-          XCODEPROJ=$(find ios_xcode_project -name "*.xcodeproj" -maxdepth 2 | head -n 1)
+          echo "=== Locating Xcode Project ==="
+          XCODEPROJ=$(find ios_export -name "*.xcodeproj" -maxdepth 2 | head -n 1)
+          if [ -z "$XCODEPROJ" ]; then
+            echo "Looking in root workspace..."
+            XCODEPROJ=$(find . -name "*.xcodeproj" -not -path "*/build_output/*" | head -n 1)
+          fi
+          if [ -z "$XCODEPROJ" ]; then
+            echo "ERROR: Could not find any .xcodeproj directory!"
+            ls -la ios_export/
+            exit 1
+          fi
           echo "Found Xcode project at: $XCODEPROJ"
+          
+          # Patch project.pbxproj to guarantee manual unsigned build with no code signing conflicts
+          if [ -f "$XCODEPROJ/project.pbxproj" ]; then
+            echo "Patching project.pbxproj for manual unsigned build..."
+            sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' "$XCODEPROJ/project.pbxproj" || true
+            sed -i '' 's/CODE_SIGNING_ALLOWED = YES;/CODE_SIGNING_ALLOWED = NO;/g' "$XCODEPROJ/project.pbxproj" || true
+            sed -i '' 's/CODE_SIGN_IDENTITY = ".*";/CODE_SIGN_IDENTITY = "";/g' "$XCODEPROJ/project.pbxproj" || true
+          fi
+
           SCHEME_NAME=$(xcodebuild -list -project "$XCODEPROJ" | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' | head -n 1 | xargs)
           if [ -z "$SCHEME_NAME" ]; then
             SCHEME_NAME="Heckle Golf"
@@ -84,33 +101,27 @@ jobs:
 
           mkdir -p build_output/Payload
           
-          if xcodebuild -project "$XCODEPROJ" \
+          echo "Building iOS binary via xcodebuild..."
+          xcodebuild -project "$XCODEPROJ" \
             -scheme "$SCHEME_NAME" \
             -configuration Release \
+            -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            -archivePath build_output/HeckleGolfSim.xcarchive \
+            -derivedDataPath build_output/derived \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            archive; then
-            cp -r build_output/HeckleGolfSim.xcarchive/Products/Applications/*.app build_output/Payload/
-          else
-            echo "Archive step skipped, compiling app binary directly..."
-            xcodebuild -project "$XCODEPROJ" \
-              -scheme "$SCHEME_NAME" \
-              -configuration Release \
-              -destination 'generic/platform=iOS' \
-              -derivedDataPath build_output/derived \
-              CODE_SIGN_STYLE=Manual \
-              CODE_SIGNING_ALLOWED=NO \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGN_IDENTITY="" \
-              build
-            APP_DIR=$(find build_output/derived -name "*.app" -type d | head -n 1)
-            cp -r "$APP_DIR" build_output/Payload/
-          fi
+            build
 
+          APP_DIR=$(find build_output/derived -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_DIR" ]; then
+            echo "ERROR: .app directory not found in build_output/derived"
+            exit 1
+          fi
+          echo "Found compiled app at: $APP_DIR"
+
+          cp -r "$APP_DIR" build_output/Payload/
           cd build_output
           zip -qr ../dist/HeckleGolfSim.ipa Payload
           cd ..
@@ -125,6 +136,8 @@ jobs:
 
       - name: Upload iOS Xcode Project (Backup)
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: HeckleGolfSim-iOS-XcodeProject
-          path: dist/HeckleGolfSim-iOS.zip
+          path: ios_export/
+          if-no-files-found: ignore
