@@ -36,6 +36,11 @@ An open-source, full-featured golf simulator and practice suite built with the G
   - [Prerequisites](#prerequisites)
   - [Clone & Import](#clone--import)
   - [Running the Project](#running-the-project)
+  - [Installing Export Templates](#installing-export-templates)
+  - [Building Windows Executable (.exe)](#building-windows-executable-exe)
+  - [Building macOS Application (.app in .zip)](#building-macos-application-app-in-zip)
+  - [Building iPhone / iOS App](#building-iphone--ios-app)
+  - [Building & Testing Android Release Builds](#building--testing-android-release-builds)
   - [Android Wireless Debugging](#android-wireless-debugging)
   - [Android MediaPipe Pose Plugin Rebuild](#android-mediapipe-pose-plugin-rebuild)
 - [Controls](#controls)
@@ -269,6 +274,71 @@ Example GSPro Open Connect v1 message used for socket testing (`assets/data/driv
 - Press **F5** or the Play button in Godot to run the main menu.
 - If testing locally, use keyboard shortcut `H` to simulate a hit or `R` to reset the ball.
 
+### Installing Export Templates
+Before exporting standalone builds, the official Godot 4.7 Mono export templates must be installed. A dedicated setup script is provided:
+
+```powershell
+.\install_export_templates.ps1
+```
+This automatically verifies your templates and downloads official Godot 4.7 Mono templates for Windows, macOS, iOS, and Linux directly into `%APPDATA%\Godot\export_templates\4.7.stable.mono`.
+
+---
+
+### Building Windows Executable (.exe)
+To export and package a standalone Windows release:
+
+```powershell
+# Build and automatically package into a distributable ZIP in dist/
+.\build_windows.ps1
+
+# Clean previous build artifacts first
+.\build_windows.ps1 -Clean
+```
+
+- **Output:** `dist/HeckleGolfSim-Windows-v<VERSION>.zip`
+- **Contents:** `HeckleGolfSim.exe`, `HeckleGolfSim.pck`, `libterrain` DLLs, and the .NET C# runtime assemblies folder.
+- **Distribution:** Upload this `.zip` file directly to Google Drive. Users extract the folder and double-click `HeckleGolfSim.exe` to run.
+
+---
+
+### Building macOS Application (.app in .zip)
+To export and package a macOS Universal App bundle (Apple Silicon M1/M2/M3/M4 & Intel):
+
+```powershell
+.\build_mac.ps1
+```
+
+- **Output:** `dist/HeckleGolfSim-macOS-v<VERSION>.zip`
+- **Contents:** A complete `Heckle Golf Simulator.app` bundle containing all game data, native libraries, and .NET runtime dependencies.
+- **Distribution:** Upload this `.zip` to Google Drive. Mac users unzip and drag the app into `/Applications`.
+
+---
+
+### Building iPhone / iOS App
+Godot 4 with C# (.NET) uses NativeAOT runtime compilation for iOS. Because of Apple platform constraints, compiling the native iOS binary requires Apple's toolchain (macOS with Xcode). We provide multiple streamlined pathways:
+
+#### 1-Command iOS Build:
+```powershell
+# From Windows (automatically syncs to GitHub, builds on Apple Silicon cloud runner, and downloads HeckleGolfSim.ipa into dist/):
+.\build_ios.ps1
+```
+
+- **Output:** `dist/HeckleGolfSim.ipa`
+- **What it does:** Uses GitHub's authenticated cloud macOS environment with Xcode and Apple iOS SDK pre-installed to compile the C# solution, export the Godot iOS project, compile the Mach-O binary via `xcodebuild`, package the `Payload` directory into an unsigned `.ipa`, and automatically place it in your local `dist/` directory ready for Google Drive.
+
+#### Building on a Physical Mac:
+If you are directly on a macOS computer:
+```bash
+chmod +x build_ios.sh
+./build_ios.sh
+```
+Or via PowerShell:
+```powershell
+pwsh ./build_ios.ps1
+```
+
+---
+
 ### Android Wireless Debugging
 If you want to deploy and debug directly to an Android device over Wi-Fi, Godot requires you to pair and connect the device via ADB first:
 
@@ -284,6 +354,88 @@ If you want to deploy and debug directly to an Android device over Wi-Fi, Godot 
    ```bash
    adb connect <IP_ADDRESS>:<PORT>
    ```
+6. List all connected devices to verify their status and get their device identifiers:
+   ```bash
+   adb devices -l
+   ```
+
+### Building & Testing Android Release Builds (with R8 Optimization)
+
+> [!NOTE]
+> **APK vs. AAB Format**:
+> - **`.apk` (Android Package)**: Used for direct device testing and sideloading via ADB. Android phones natively install `.apk` files directly.
+> - **`.aab` (Android App Bundle)**: Used for uploading to **Google Play Store**. Android devices cannot install `.aab` files directly via standard `adb install`. Google Play generates device-optimized APKs from the `.aab`.
+
+By default, Godot's one-click Remote Deploy runs the **Debug** build variant. To test the optimized **Release** build (with R8 code shrinking, resource shrinking, and ProGuard keep rules enabled) on your physical Android device:
+
+#### Option A: Direct Command Line Build & ADB Install (Recommended for Pre-Release Testing)
+Run the Gradle assemble task directly from your terminal and push the release APK to your connected device:
+
+- **Standard Build (APK):**
+  ```powershell
+  cd android\build
+  .\gradlew.bat assembleStandardRelease
+  adb install -r build\outputs\apk\standard\release\android_release.apk
+  ```
+
+- **Mono Build (C# / .NET APK):**
+  ```powershell
+  cd android\build
+  .\gradlew.bat assembleMonoRelease
+  adb install -r build\outputs\apk\mono\release\android_monoRelease.apk
+  ```
+
+#### Deploying to a Specific Device
+If multiple Android devices or emulators are connected, list all connected devices to find the target device serial number or IP:
+```powershell
+adb devices -l
+```
+Use the `-s` option to deploy the APK directly to your chosen device:
+```powershell
+# Deploy Standard Release to a specific device
+adb -s <DEVICE_ID> install -r build\outputs\apk\standard\release\android_standardRelease.apk
+
+# Deploy Mono Release to a specific device
+adb -s <DEVICE_ID> install -r build\outputs\apk\mono\release\android_monoRelease.apk
+```
+*Example:* `adb -s 192.168.1.100:5555 install -r build\outputs\apk\standard\release\android_standardRelease.apk`
+
+#### Option B: Building Android App Bundle (.aab) for Google Play Store
+When preparing your release for Google Play Console publishing:
+
+- **Standard Build (AAB):**
+  ```powershell
+  cd android\build
+  .\gradlew.bat bundleStandardRelease
+  # Output: build/outputs/bundle/standardRelease/build-standard-release.aab
+  ```
+
+- **Mono Build (C# / .NET AAB):**
+  ```powershell
+  cd android\build
+  .\gradlew.bat bundleMonoRelease
+  # Output: build/outputs/bundle/monoRelease/build-mono-release.aab
+  ```
+
+#### Testing AAB Bundles Locally with bundletool
+To test an `.aab` file directly on a physical phone before uploading to Google Play:
+1. Build the release AAB bundle: `.\gradlew.bat bundleStandardRelease`
+2. Run the included `install-aab` helper script:
+   ```powershell
+   cd android\build
+   .\install-aab.ps1
+   # Or via Command Prompt: install-aab.bat
+   ```
+   *(To target a specific connected device: `.\install-aab.ps1 -DeviceId <DEVICE_ID>`).*
+
+#### Option C: Exporting from Godot 4 Editor
+1. In Godot, go to **Project → Export...** and select the **Android** preset.
+2. Click **Export Project...** at the bottom of the window.
+3. In the file save dialog, **uncheck "Export With Debug"**.
+4. Set the filename to `.apk` for direct device testing (or `.aab` for Google Play upload) and click **Save**.
+5. If exported as APK, install via ADB: `adb install -r HeckleGolf_Release.apk` (or `adb -s <DEVICE_ID> install -r HeckleGolf_Release.apk`).
+
+*Note: If an error occurs during pre-release testing, R8 obfuscation mappings can be retraced using `android/build/build/outputs/mapping/standardRelease/mapping.txt`.*
 
 ### Android MediaPipe Pose Plugin Rebuild
 To rebuild the native Android GPU MediaPipe pose detection plugin (`MediaPipePosePlugin.aar`):

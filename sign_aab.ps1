@@ -88,6 +88,24 @@ Write-Host "Keystore:       $resolvedKeystorePath" -ForegroundColor Gray
 Write-Host "Key Alias:      $Alias" -ForegroundColor Gray
 Write-Host ""
 
+# Strip any existing signatures so Google Play does not reject the bundle for having multiple certificate chains
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [System.IO.Compression.ZipFile]::Open($resolvedAabPath, [System.IO.Compression.ZipArchiveMode]::Update)
+$existingSigs = @($zip.Entries | Where-Object { 
+    $_.FullName -like "META-INF/*.SF" -or 
+    $_.FullName -like "META-INF/*.RSA" -or 
+    $_.FullName -like "META-INF/*.DSA" -or 
+    $_.FullName -like "META-INF/*.EC" 
+})
+if ($existingSigs.Count -gt 0) {
+    Write-Host "Clearing $($existingSigs.Count) existing signature file(s) to guarantee a single certificate chain..." -ForegroundColor Yellow
+    foreach ($sigEntry in $existingSigs) {
+        $sigEntry.Delete()
+    }
+}
+$zip.Dispose()
+
 # Sign with jarsigner
 & $jarsignerCmd -sigalg SHA256withRSA -digestalg SHA-256 -keystore $resolvedKeystorePath -storepass $Password $resolvedAabPath $Alias
 

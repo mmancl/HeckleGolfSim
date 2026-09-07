@@ -1,0 +1,115 @@
+name: Build iOS Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Build version (e.g. 0.35.0)'
+        required: false
+        default: '0.35.0'
+  push:
+    tags:
+      - 'ios-v*'
+
+jobs:
+  build-ios:
+    name: Export iOS Project & Package
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Cache Godot & Export Templates
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Godot
+            ~/Library/Application Support/Godot/export_templates
+          key: godot-4.7-mono-macos-templates
+
+      - name: Download Godot 4.7 Mono & Templates
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/Godot
+          mkdir -p "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono"
+
+          # Download Godot Mono for macOS
+          curl -L -o ~/Godot/godot_mono.zip "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_macos.zip"
+          unzip -q ~/Godot/godot_mono.zip -d ~/Godot/
+          
+          # Download Mono export templates
+          curl -L -o ~/Godot/templates.tpz "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_export_templates.tpz"
+          unzip -q ~/Godot/templates.tpz -d ~/Godot/templates_extracted
+          cp -r ~/Godot/templates_extracted/templates/* "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono/"
+          rm -rf ~/Godot/templates_extracted ~/Godot/templates.tpz
+
+      - name: Locate Godot Executable
+        run: |
+          GODOT_BIN=$(find ~/Godot -name "Godot" -type f -perm +111 | head -n 1)
+          if [ -z "$GODOT_BIN" ]; then
+            GODOT_BIN=$(find ~/Godot -name "godot" -type f -perm +111 | head -n 1)
+          fi
+          echo "GODOT_BIN=$GODOT_BIN" >> $GITHUB_ENV
+          echo "Found Godot at $GODOT_BIN"
+
+      - name: Build C# Solution
+        run: |
+          dotnet build OpenShotGolf.csproj -c Release
+
+      - name: Export iOS Preset via Godot
+        run: |
+          mkdir -p dist
+          "$GODOT_BIN" --headless --export-release "iOS" dist/HeckleGolfSim-iOS.zip
+
+      - name: Build and Package Unsigned .ipa
+        run: |
+          mkdir -p ios_xcode_project
+          unzip -q dist/HeckleGolfSim-iOS.zip -d ios_xcode_project
+          
+          XCODEPROJ=$(find ios_xcode_project -name "*.xcodeproj" -maxdepth 2 | head -n 1)
+          echo "Found Xcode project at: $XCODEPROJ"
+          SCHEME_NAME=$(xcodebuild -list -project "$XCODEPROJ" | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' | head -n 1 | xargs)
+          if [ -z "$SCHEME_NAME" ]; then
+            SCHEME_NAME="Heckle Golf"
+          fi
+          echo "Using scheme: $SCHEME_NAME"
+
+          mkdir -p build_output
+          xcodebuild -project "$XCODEPROJ" \
+            -scheme "$SCHEME_NAME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build_output/HeckleGolfSim.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+
+          mkdir -p build_output/Payload
+          cp -r build_output/HeckleGolfSim.xcarchive/Products/Applications/*.app build_output/Payload/
+          cd build_output
+          zip -qr ../dist/HeckleGolfSim.ipa Payload
+          cd ..
+          echo "IPA successfully created at dist/HeckleGolfSim.ipa"
+          ls -lh dist/HeckleGolfSim.ipa
+
+      - name: Upload Finished HeckleGolfSim.ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeckleGolfSim-iOS-IPA
+          path: dist/HeckleGolfSim.ipa
+
+      - name: Upload iOS Xcode Project (Backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeckleGolfSim-iOS-XcodeProject
+          path: dist/HeckleGolfSim-iOS.zip

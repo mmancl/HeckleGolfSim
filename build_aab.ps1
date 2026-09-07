@@ -108,54 +108,78 @@ Write-Host "Package ID:     $PackageName" -ForegroundColor Green
 Write-Host "Version:        $VersionName (code: $VersionCode)" -ForegroundColor Green
 Write-Host ""
 
-Push-Location $androidBuildDir
-try {
-    & .\gradlew.bat @gradleArgs
-    $buildSuccess = ($LASTEXITCODE -eq 0)
-} finally {
-    Pop-Location
+# Clean up stale debug command line arguments (_cl_) so Godot release engine doesn't abort
+$StaleCl = Join-Path $androidBuildDir "src\main\assets\_cl_"
+if (Test-Path $StaleCl) {
+    Remove-Item -Path $StaleCl -Force -ErrorAction SilentlyContinue
 }
 
-if ($buildSuccess) {
-    $bundleSource = Join-Path $androidBuildDir "build\outputs\bundle\monoRelease\build-mono-release.aab"
-    $destination = Join-Path $scriptDir $OutputPath
-    
-    if (Test-Path $bundleSource) {
-        Copy-Item -Path $bundleSource -Destination $destination -Force
-        $fileItem = Get-Item $destination
-        $sizeMB = [math]::Round($fileItem.Length / 1MB, 2)
-        
-        Write-Host ""
-        Write-Host "=======================================================" -ForegroundColor Green
-        Write-Host "[SUCCESS] AAB Bundle generated successfully!" -ForegroundColor Green
-        Write-Host "  Output: $destination" -ForegroundColor White
-        Write-Host "  Size:   $sizeMB MB" -ForegroundColor White
-        Write-Host "=======================================================" -ForegroundColor Green
-        Write-Host ""
+$destination = Join-Path $scriptDir $OutputPath
 
-        # If keystore exists but wasn't signed during Gradle build, offer sign_aab.ps1
-        if ($resolvedKeystore -and (Test-Path $resolvedKeystore) -and -not $KeystorePassword) {
-            Write-Host "To sign with your keystore ('$resolvedKeystore'), run:" -ForegroundColor Cyan
-            Write-Host "  .\sign_aab.ps1" -ForegroundColor White
-            Write-Host ""
-        } elseif (-not $resolvedKeystore) {
-            Write-Host "Signing Notice for Google Play:" -ForegroundColor Yellow
-            Write-Host "  Google Play requires bundles to be signed." -ForegroundColor White
-            Write-Host "  1. Generate a keystore: .\generate_keystore.ps1" -ForegroundColor White
-            Write-Host "  2. Sign the bundle:     .\sign_aab.ps1" -ForegroundColor White
-            Write-Host ""
-        }
-        
-        Write-Host "Google Play Upload Instructions:" -ForegroundColor Cyan
-        Write-Host "1. Navigate to Google Play Console (https://play.google.com/console)." -ForegroundColor White
-        Write-Host "2. Go to Testing -> Closed testing (or Internal testing)." -ForegroundColor White
-        Write-Host "3. Create a new release and upload '$destination'." -ForegroundColor White
-        Write-Host "4. Complete content rating, data safety, and rollout the release!" -ForegroundColor White
-    } else {
-        Write-Host "[WARNING] Build succeeded, but bundle was not found at: $bundleSource" -ForegroundColor Yellow
+# Locate Godot 4.7 Mono CLI
+$KnownGodotPaths = @(
+    "C:\Users\micha\Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe",
+    (Get-Command "godot" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
+)
+$GodotExe = $KnownGodotPaths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+
+if ($GodotExe) {
+    Write-Host "Compiling C# .NET solution & exporting Release AAB via Godot..." -ForegroundColor Green
+    $UserDotnet = Join-Path $env:USERPROFILE ".dotnet"
+    if (Test-Path $UserDotnet) {
+        $env:PATH = "$UserDotnet;$env:PATH"
     }
+    $ExportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--export-release", "Android", $destination) -Wait -NoNewWindow -PassThru
+    $buildSuccess = ($ExportProc.ExitCode -eq 0 -and (Test-Path $destination))
+} else {
+    Push-Location $androidBuildDir
+    try {
+        & .\gradlew.bat @gradleArgs
+        $buildSuccess = ($LASTEXITCODE -eq 0)
+    } finally {
+        Pop-Location
+    }
+
+    if ($buildSuccess) {
+        $bundleSource = Join-Path $androidBuildDir "build\outputs\bundle\monoRelease\build-mono-release.aab"
+        if (Test-Path $bundleSource) {
+            Copy-Item -Path $bundleSource -Destination $destination -Force
+        }
+    }
+}
+
+if ($buildSuccess -and (Test-Path $destination)) {
+    $fileItem = Get-Item $destination
+    $sizeMB = [math]::Round($fileItem.Length / 1MB, 2)
+        
+    Write-Host ""
+    Write-Host "=======================================================" -ForegroundColor Green
+    Write-Host "[SUCCESS] AAB Bundle generated successfully!" -ForegroundColor Green
+    Write-Host "  Output: $destination" -ForegroundColor White
+    Write-Host "  Size:   $sizeMB MB" -ForegroundColor White
+    Write-Host "=======================================================" -ForegroundColor Green
+    Write-Host ""
+
+    # If keystore exists but wasn't signed during Gradle build, offer sign_aab.ps1
+    if ($resolvedKeystore -and (Test-Path $resolvedKeystore) -and -not $KeystorePassword) {
+        Write-Host "To sign with your keystore ('$resolvedKeystore'), run:" -ForegroundColor Cyan
+        Write-Host "  .\sign_aab.ps1" -ForegroundColor White
+        Write-Host ""
+    } elseif (-not $resolvedKeystore) {
+        Write-Host "Signing Notice for Google Play:" -ForegroundColor Yellow
+        Write-Host "  Google Play requires bundles to be signed." -ForegroundColor White
+        Write-Host "  1. Generate a keystore: .\generate_keystore.ps1" -ForegroundColor White
+        Write-Host "  2. Sign the bundle:     .\sign_aab.ps1" -ForegroundColor White
+        Write-Host ""
+    }
+        
+    Write-Host "Google Play Upload Instructions:" -ForegroundColor Cyan
+    Write-Host "1. Navigate to Google Play Console (https://play.google.com/console)." -ForegroundColor White
+    Write-Host "2. Go to Testing -> Closed testing (or Internal testing)." -ForegroundColor White
+    Write-Host "3. Create a new release and upload '$destination'." -ForegroundColor White
+    Write-Host "4. Complete content rating, data safety, and rollout the release!" -ForegroundColor White
 } else {
     Write-Host ""
-    Write-Host "[ERROR] Gradle bundle build failed." -ForegroundColor Red
+    Write-Host "[ERROR] AAB bundle build failed." -ForegroundColor Red
     exit 1
 }

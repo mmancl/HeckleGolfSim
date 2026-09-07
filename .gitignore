@@ -40,8 +40,13 @@ __pycache__/
 *.jks
 *.aab
 *.apk
+*.apks
 
 # Deployment guides (private)
 DEPLOYMENT.md
 PLAY_STORE_DEPLOYMENT.md
 *DEPLOYMENT.md
+
+# Build and distribution artifacts
+build/
+dist/
