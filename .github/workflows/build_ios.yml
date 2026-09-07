@@ -66,6 +66,7 @@ jobs:
       - name: Export iOS Preset via Godot
         run: |
           mkdir -p dist
+          "$GODOT_BIN" --headless --import || true
           "$GODOT_BIN" --headless --export-release "iOS" dist/HeckleGolfSim-iOS.zip
 
       - name: Build and Package Unsigned .ipa

@@ -18,8 +18,8 @@ config/name="Heckle Golf Simulator"
 config/version="0.35.1"
 run/main_scene="uid://dgyd437dgyv0y"
 config/features=PackedStringArray("4.7", "C#", "Mobile")
-boot_splash/image="uid://cjp4o151j14xr"
-config/icon="uid://bcv0yjfm7ggro"
+boot_splash/image="res://assets/images/heckle_splash.png"
+config/icon="res://icon.png"
 
 [autoload]
 
