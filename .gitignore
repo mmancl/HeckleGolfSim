@@ -1,6 +1,20 @@
 # Godot 4+ specific ignores
 .godot/
-/android/build/
+/android/build/*
+!/android/build/src/
+!/android/build/config.gradle
+/android/build/src/*
+!/android/build/src/main/
+/android/build/src/main/*
+!/android/build/src/main/java/
+/android/build/src/main/java/*
+!/android/build/src/main/java/com/
+/android/build/src/main/java/com/*
+!/android/build/src/main/java/com/godot/
+/android/build/src/main/java/com/godot/*
+!/android/build/src/main/java/com/godot/game/
+/android/build/src/main/java/com/godot/game/*
+!/android/build/src/main/java/com/godot/game/GodotBleHelper.java
 !/android/plugins/
 # Godot-specific ignores
 .import/

@@ -31,6 +31,7 @@ Write-Host ""
 $scriptDir = $PSScriptRoot
 if (-not $scriptDir) { $scriptDir = (Get-Location).Path }
 $RepoRoot = if (Test-Path (Join-Path $scriptDir "..\..\project.godot")) { (Resolve-Path (Join-Path $scriptDir "..\..")).Path } else { $scriptDir }
+Set-Location $RepoRoot
 
 # Resolve AAB Path
 $resolvedAabPath = if ([System.IO.Path]::IsPathRooted($AabPath)) {

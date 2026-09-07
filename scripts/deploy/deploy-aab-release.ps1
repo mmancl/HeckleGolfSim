@@ -17,6 +17,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "..\..\project.godot"))) { (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path } else { (Get-Location).Path }
+Set-Location $RepoRoot
 $AndroidBuildDir = Join-Path $RepoRoot "android\build"
 $BundleTool = Join-Path $AndroidBuildDir "bundletool.jar"
 
@@ -36,40 +37,104 @@ if (Test-Path $StaleCl) {
     Remove-Item -Path $StaleCl -Force -ErrorAction SilentlyContinue
 }
 
-# Step 1: Locate Godot 4.7 Mono and export the Release AAB
+# Step 1: Parse versioning and SDK configurations
+$PackageName = "com.hecklegolf.simulator"
+$VersionName = "0.35.6"
+$VersionCode = 7
+$targetSdk = "36"
+$minSdk = "30"
+
+$projectGodotPath = Join-Path $RepoRoot "project.godot"
+if (Test-Path $projectGodotPath) {
+    $godotContent = Get-Content $projectGodotPath -Raw
+    if ($godotContent -match 'config/version="([^"]+)"') {
+        $VersionName = $matches[1]
+    }
+}
+
+$exportPresetsPath = Join-Path $RepoRoot "export_presets.cfg"
+if (Test-Path $exportPresetsPath) {
+    $presetsContent = Get-Content $exportPresetsPath -Raw
+    if ($presetsContent -match 'version/code=(\d+)') {
+        $VersionCode = [int]$matches[1]
+    }
+    if ($presetsContent -match 'gradle_build/target_sdk="?(\d+)"?') {
+        $targetSdk = $matches[1]
+    }
+    if ([int]$targetSdk -lt 36) {
+        $targetSdk = "36"
+    }
+    if ($presetsContent -match 'gradle_build/min_sdk="?(\d+)"?') {
+        $minSdk = $matches[1]
+    }
+    if ($presetsContent -match 'package/unique_name="([^"]+)"') {
+        $PackageName = $matches[1]
+    }
+}
+
+# Step 1b: Compile R8-Optimized Release AAB Bundle via Godot CLI / Gradle
+$distDir = Join-Path $RepoRoot "dist"
+if (-not (Test-Path $distDir)) { New-Item -ItemType Directory -Path $distDir -Force | Out-Null }
+$AabFullPath = Join-Path $distDir "HeckleGolfSim.aab"
+$TaskName = if ($Edition -eq "mono") { "bundleMonoRelease" } else { "bundleStandardRelease" }
+$AabRelativePath = if ($Edition -eq "mono") {
+    "build\outputs\bundle\monoRelease\build-mono-release.aab"
+} else {
+    "build\outputs\bundle\standardRelease\build-standard-release.aab"
+}
+$GradleAabPath = Join-Path $AndroidBuildDir $AabRelativePath
+
 $KnownGodotPaths = @(
     "C:\Users\micha\Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe",
     (Get-Command "godot" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
 )
 $GodotExe = $KnownGodotPaths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 
-$AabFullPath = Join-Path $RepoRoot "HeckleGolfSim.aab"
-
+$buildSuccess = $false
 if ($GodotExe) {
-    Write-Host "[1/3] Compiling C# .NET solution & exporting Release AAB via Godot..." -ForegroundColor Green
+    Write-Host "[1/3] Compiling C# .NET solution & exporting Release AAB via Godot CLI..." -ForegroundColor Green
+    Write-Host "      Package: $PackageName | Version: $VersionName (code: $VersionCode)" -ForegroundColor Gray
     $UserDotnet = Join-Path $env:USERPROFILE ".dotnet"
     if (Test-Path $UserDotnet) {
+        $env:DOTNET_ROOT = $UserDotnet
         $env:PATH = "$UserDotnet;$env:PATH"
     }
-    $ExportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--export-release", "Android", $AabFullPath) -Wait -NoNewWindow -PassThru
-    if ($ExportProc.ExitCode -ne 0 -or -not (Test-Path $AabFullPath)) {
-        throw "Godot release export failed with exit code $($ExportProc.ExitCode)"
+    $ExportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "Android", $AabFullPath) -WorkingDirectory $RepoRoot -Wait -NoNewWindow -PassThru
+    $buildSuccess = ($ExportProc.ExitCode -eq 0 -and (Test-Path $AabFullPath))
+    if (-not $buildSuccess) {
+        Write-Host "Godot CLI export exited with code $($ExportProc.ExitCode); compiling directly via Gradle..." -ForegroundColor Yellow
     }
-} else {
+}
+
+if (-not $buildSuccess) {
     Write-Host "[1/3] Compiling R8-Optimized Release AAB Bundle via Gradle ($TaskName)..." -ForegroundColor Green
-    $TaskName = if ($Edition -eq "mono") { "bundleMonoRelease" } else { "bundleStandardRelease" }
-    $AabRelativePath = if ($Edition -eq "mono") {
-        "build\outputs\bundle\monoRelease\build-mono-release.aab"
-    } else {
-        "build\outputs\bundle\standardRelease\build-standard-release.aab"
+    Write-Host "      Package: $PackageName | Version: $VersionName (code: $VersionCode)" -ForegroundColor Gray
+    $UserDotnet = Join-Path $env:USERPROFILE ".dotnet"
+    if (Test-Path $UserDotnet) {
+        $env:DOTNET_ROOT = $UserDotnet
+        $env:PATH = "$UserDotnet;$env:PATH"
     }
-    $AabFullPath = Join-Path $AndroidBuildDir $AabRelativePath
+
+    $gradleArgs = @(
+        $TaskName,
+        "-Pexport_package_name=$PackageName",
+        "-Pexport_version_name=$VersionName",
+        "-Pexport_version_code=$VersionCode",
+        "-Pexport_version_min_sdk=$minSdk",
+        "-Pexport_version_target_sdk=$targetSdk",
+        "-Pexport_format=aab",
+        "-Pexport_edition=$Edition",
+        "-Pexport_build_type=release"
+    )
 
     Push-Location $AndroidBuildDir
     try {
-        & .\gradlew.bat $TaskName
+        & .\gradlew.bat @gradleArgs
         if ($LASTEXITCODE -ne 0) {
             throw "Gradle build failed with exit code $LASTEXITCODE"
+        }
+        if (Test-Path $GradleAabPath) {
+            Copy-Item -Path $GradleAabPath -Destination $AabFullPath -Force
         }
     } finally {
         Pop-Location
@@ -80,6 +145,17 @@ if (-not (Test-Path $AabFullPath)) {
     Write-Error "AAB output file not found at $AabFullPath"
 }
 Write-Host "[OK] AAB compiled successfully: $AabFullPath" -ForegroundColor Green
+
+# Resolve target ADB device upfront
+$ConnectedDevices = @(& adb devices 2>$null | Select-String -Pattern "\tdevice$")
+if (-not $DeviceId -and $ConnectedDevices.Count -gt 0) {
+    $DeviceId = ($ConnectedDevices[0].Line -split "\t")[0]
+    if ($ConnectedDevices.Count -gt 1) {
+        Write-Host "[NOTICE] Multiple devices connected ($($ConnectedDevices.Count) devices). Automatically targeting: $DeviceId" -ForegroundColor Yellow
+    } else {
+        Write-Host "[NOTICE] Connected device detected: $DeviceId" -ForegroundColor Gray
+    }
+}
 
 # Step 2: Generate APKS set using bundletool
 $ApksOutputDir = Join-Path $AndroidBuildDir "build\outputs\bundle"
@@ -105,7 +181,7 @@ if (Test-Path $Keystore) {
     )
 }
 if ($DeviceId) {
-    $BuildApksArgs += @("--device-id=$DeviceId")
+    $BuildApksArgs += @("--connected-device", "--device-id=$DeviceId")
 }
 
 $proc = Start-Process -FilePath "java" -ArgumentList $BuildApksArgs -Wait -NoNewWindow -PassThru
@@ -114,16 +190,11 @@ if ($proc.ExitCode -ne 0 -or -not (Test-Path $ApksOutput)) {
 }
 Write-Host "[OK] APKS set generated successfully: $ApksOutput" -ForegroundColor Green
 
-# Step 3: Check connected ADB devices and install
-$ConnectedDevices = & adb devices | Select-String -Pattern "\tdevice$"
-if ($ConnectedDevices.Count -gt 0 -or $DeviceId) {
-    Write-Host "[3/3] Deploying AAB APK set to Android device via bundletool..." -ForegroundColor Green
+# Step 3: Deploy to connected Android device
+if ($DeviceId) {
+    Write-Host "[3/3] Deploying AAB APK set to Android device via bundletool ($DeviceId)..." -ForegroundColor Green
     
-    $InstallApksArgs = @("-jar", $BundleTool, "install-apks", "--apks=$ApksOutput", "--allow-downgrade", "--allow-test-only")
-    if ($DeviceId) {
-        $InstallApksArgs += @("--device-id=$DeviceId")
-    }
-
+    $InstallApksArgs = @("-jar", $BundleTool, "install-apks", "--apks=$ApksOutput", "--allow-downgrade", "--allow-test-only", "--device-id=$DeviceId")
     $installProc = Start-Process -FilePath "java" -ArgumentList $InstallApksArgs -Wait -NoNewWindow -PassThru
 
     if ($installProc.ExitCode -eq 0) {

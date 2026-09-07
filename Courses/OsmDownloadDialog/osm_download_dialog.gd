@@ -44,8 +44,7 @@ func _ready() -> void:
 		add_child(_loader)
 		if _loader.has_signal("DownloadProgress"):
 			_loader.DownloadProgress.connect(func(msg: String):
-				if _download_in_progress and is_instance_valid(self):
-					status_label.text = msg
+				call_deferred("_update_progress_status", msg)
 			)
 	else:
 		status_label.text = "Error: Failed to load OsmMapLoader.cs script."
@@ -182,3 +181,8 @@ func _set_ui_disabled(disabled: bool) -> void:
 	results_list.auto_height = false # Keep styling
 	# Disable individual items in list during loading if needed, or mouse filtering
 	results_list.mouse_filter = Control.MOUSE_FILTER_IGNORE if disabled else Control.MOUSE_FILTER_PASS
+
+
+func _update_progress_status(msg: String) -> void:
+	if _download_in_progress and is_instance_valid(self):
+		status_label.text = msg

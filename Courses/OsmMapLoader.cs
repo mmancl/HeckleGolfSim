@@ -41,6 +41,30 @@ public partial class OsmMapLoader : Node
     [Signal]
     public delegate void DownloadProgressEventHandler(string statusMessage);
 
+    private record GolfSearchResult(string Name, double Lat, double Lon, string Location);
+
+    private void ReportProgress(string message)
+    {
+        Callable.From(() =>
+        {
+            if (IsInstanceValid(this))
+            {
+                EmitSignal(SignalName.DownloadProgress, message);
+            }
+        }).CallDeferred();
+    }
+
+    private void EmitCourseGenerated(bool success)
+    {
+        Callable.From(() =>
+        {
+            if (IsInstanceValid(this))
+            {
+                EmitSignal(SignalName.CourseGenerated, success);
+            }
+        }).CallDeferred();
+    }
+
     private string _generationMessage = "";
     private ElevationMap? _currentElevationMap;
     private double _refLat;
@@ -70,7 +94,7 @@ public partial class OsmMapLoader : Node
         string globalTscnPath = ProjectSettings.GlobalizePath(tscnPath);
         string globalJsonPath = ProjectSettings.GlobalizePath(jsonPath);
 
-        EmitSignal(SignalName.DownloadProgress, $"Connecting to OpenStreetMap for '{courseName}'...");
+        ReportProgress($"Connecting to OpenStreetMap for '{courseName}'...");
         string osmJson = await DownloadOsmDataAsync(lat, lon, courseName);
         if (string.IsNullOrEmpty(osmJson))
         {
@@ -89,7 +113,7 @@ public partial class OsmMapLoader : Node
             {
                 _generationMessage = "Error: Course download timed out or failed. Please retry the download, and if it continues to fail, please log a bug.";
             }
-            EmitSignal(SignalName.CourseGenerated, false);
+            EmitCourseGenerated(false);
             return;
         }
 
@@ -99,10 +123,10 @@ public partial class OsmMapLoader : Node
         {
             bool isMobilePlatform = OS.GetName() == "Android" || OS.GetName() == "iOS";
             int satRes = isMobilePlatform ? 1024 : 2048;
-            EmitSignal(SignalName.DownloadProgress, "Downloading satellite imagery...");
+            ReportProgress("Downloading satellite imagery...");
             satImageBytes = await DownloadSatelliteImageAsync(bbox.LonMin, bbox.LatMin, bbox.LonMax, bbox.LatMax, satRes, satRes);
             
-            EmitSignal(SignalName.DownloadProgress, "Downloading terrain elevation data...");
+            ReportProgress("Downloading terrain elevation data...");
             await DownloadElevationDataAsync(bbox, globalCourseDir);
         }
         else
@@ -116,7 +140,7 @@ public partial class OsmMapLoader : Node
     public async void GenerateCourseDeferred(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes)
     {
         bool success = await GenerateCourseFromDataAsync(jsonString, courseName, lat, lon, satImageBytes);
-        EmitSignal(SignalName.CourseGenerated, success);
+        EmitCourseGenerated(success);
     }
 
     private async Task<string> DownloadOsmDataAsync(double lat, double lon, string courseName)
@@ -167,7 +191,7 @@ public partial class OsmMapLoader : Node
             if (attempt < maxAttempts)
             {
                 _generationMessage = $"Overpass server busy, retrying query (attempt {attempt + 1}/{maxAttempts})...";
-                EmitSignal(SignalName.DownloadProgress, _generationMessage);
+                ReportProgress(_generationMessage);
                 await Task.Delay(2000);
             }
         }
@@ -179,7 +203,7 @@ public partial class OsmMapLoader : Node
     private async Task<bool> GenerateCourseFromDataAsync(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes)
     {
         _generationMessage = "";
-        EmitSignal(SignalName.DownloadProgress, "Parsing course layout and golf features...");
+        ReportProgress("Parsing course layout and golf features...");
         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
         string safeName = string.Concat(courseName.Split(Path.GetInvalidFileNameChars())).Replace(" ", "_");
@@ -949,7 +973,7 @@ public partial class OsmMapLoader : Node
             // Scan satellite imagery for additional trees
             if (satImage != null)
             {
-                EmitSignal(SignalName.DownloadProgress, "Scanning foliage from satellite imagery...");
+                ReportProgress("Scanning foliage from satellite imagery...");
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
                 GD.Print($"{LogPrefix} Scanning satellite imagery for tree positions...");
@@ -1278,13 +1302,13 @@ public partial class OsmMapLoader : Node
             int subdivisionsX = Mathf.Clamp((int)Math.Ceiling(courseWidth / cellSize), 40, maxSubdiv);
             int subdivisionsZ = Mathf.Clamp((int)Math.Ceiling(courseDepth / cellSize), 40, maxSubdiv);
 
-            EmitSignal(SignalName.DownloadProgress, "Generating 3D terrain and surface blend maps...");
+            ReportProgress("Generating 3D terrain and surface blend maps...");
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
             // Generate unified terrain with mulch mapped around all tree positions!
             await CreateUnifiedTerrainAsync(courseMinX, courseMaxX, courseMinZ, courseMaxZ, subdivisionsX, subdivisionsZ, rootNode, exclusionPolygons, placedTreePositions);
 
-            EmitSignal(SignalName.DownloadProgress, "Placing trees, greens, and course objects...");
+            ReportProgress("Placing trees, greens, and course objects...");
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
             // Spawn all trees (OSM + satellite selected)
@@ -1823,7 +1847,7 @@ public partial class OsmMapLoader : Node
                 _generationMessage = $"Successfully generated course: {courseName}!";
             }
 
-            EmitSignal(SignalName.DownloadProgress, "Generating aerial hole overviews...");
+            ReportProgress("Generating aerial hole overviews...");
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
             await GenerateAerialPreviewsAsync(rootNode, courseDir, globalCourseDir, holeInfo, isMobilePlatform);
@@ -2097,7 +2121,7 @@ public partial class OsmMapLoader : Node
             // Set main scene script
             rootNode.SetScript(GD.Load<Script>("res://Courses/Range/range.gd"));
 
-            EmitSignal(SignalName.DownloadProgress, "Saving 3D course files...");
+            ReportProgress("Saving 3D course files...");
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
             GD.Print($"{LogPrefix} Saving Canned Course files to: {courseDir}...");
@@ -2318,13 +2342,41 @@ public partial class OsmMapLoader : Node
 
     public async void SearchGolfCourses(string queryText)
     {
-        var results = await SearchGolfCoursesInternalAsync(queryText);
-        EmitSignal(SignalName.SearchCompleted, results);
+        try
+        {
+            var rawResults = await Task.Run(() => SearchGolfCoursesInternalAsync(queryText));
+            Callable.From(() =>
+            {
+                if (!IsInstanceValid(this)) return;
+                var godotResults = new Godot.Collections.Array();
+                foreach (var item in rawResults)
+                {
+                    var dict = new Godot.Collections.Dictionary();
+                    dict["name"] = item.Name;
+                    dict["lat"] = item.Lat;
+                    dict["lon"] = item.Lon;
+                    dict["location"] = item.Location;
+                    godotResults.Add(dict);
+                }
+                EmitSignal(SignalName.SearchCompleted, godotResults);
+            }).CallDeferred();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Exception in SearchGolfCourses: {ex.Message}");
+            Callable.From(() =>
+            {
+                if (IsInstanceValid(this))
+                {
+                    EmitSignal(SignalName.SearchCompleted, new Godot.Collections.Array());
+                }
+            }).CallDeferred();
+        }
     }
 
-    private async Task<Godot.Collections.Array> SearchGolfCoursesInternalAsync(string queryText)
+    private async Task<List<GolfSearchResult>> SearchGolfCoursesInternalAsync(string queryText)
     {
-        var results = new Godot.Collections.Array();
+        var results = new List<GolfSearchResult>();
         if (string.IsNullOrWhiteSpace(queryText))
         {
             return results;
@@ -2407,13 +2459,7 @@ public partial class OsmMapLoader : Node
                     }
                 }
 
-                var dict = new Godot.Collections.Dictionary();
-                dict["name"] = name;
-                dict["lat"] = lat;
-                dict["lon"] = lon;
-                dict["location"] = location;
-
-                results.Add(dict);
+                results.Add(new GolfSearchResult(name, lat, lon, location));
             }
         }
         catch (Exception ex)
@@ -4561,7 +4607,7 @@ public partial class OsmMapLoader : Node
     /// Generates a splat map texture encoding surface types for the terrain.
     /// R = green, G = fairway/tee, B = bunker, A = mulch. Rough = where all channels are 0.
     /// </summary>
-    private ImageTexture GenerateSplatMap(float minX, float maxX, float minZ, float maxZ, List<ExclusionPolygon> exclusions, List<Vector2> treePositions)
+    private Image GenerateSplatMap(float minX, float maxX, float minZ, float maxZ, List<ExclusionPolygon> exclusions, List<Vector2> treePositions)
     {
         bool isMobile = OS.GetName() == "Android" || OS.GetName() == "iOS";
         int texSize = isMobile ? 1024 : 2048;
@@ -4696,14 +4742,14 @@ public partial class OsmMapLoader : Node
         }
 
         var image = Image.CreateFromData(texSize, texSize, false, Image.Format.Rgba8, pixelData);
-        return ImageTexture.CreateFromImage(image);
+        return image;
     }
 
     /// <summary>
     /// Generates a macro ambient occlusion map from course elevation data.
     /// Darkens swales, bunker bowls, and recessed contours while keeping ridges and plateaus bright.
     /// </summary>
-    private ImageTexture GenerateTerrainAOMap(float minX, float maxX, float minZ, float maxZ, List<ExclusionPolygon> exclusions)
+    private Image GenerateTerrainAOMap(float minX, float maxX, float minZ, float maxZ, List<ExclusionPolygon> exclusions)
     {
         bool isMobile = OS.GetName() == "Android" || OS.GetName() == "iOS";
         int texSize = isMobile ? 512 : 1024;
@@ -4742,7 +4788,7 @@ public partial class OsmMapLoader : Node
         });
 
         var image = Image.CreateFromData(texSize, texSize, false, Image.Format.L8, pixelData);
-        return ImageTexture.CreateFromImage(image);
+        return image;
     }
 
     /// <summary>
@@ -4756,13 +4802,15 @@ public partial class OsmMapLoader : Node
 
         // Generate the splat map texture in background thread
         GD.Print($"{LogPrefix} Generating splat map...");
-        var splatMap = await Task.Run(() => GenerateSplatMap(minX, maxX, minZ, maxZ, exclusions, treePositions));
+        var splatImage = await Task.Run(() => GenerateSplatMap(minX, maxX, minZ, maxZ, exclusions, treePositions));
         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        var splatMap = ImageTexture.CreateFromImage(splatImage);
 
         // Generate macro terrain ambient occlusion map in background thread
         GD.Print($"{LogPrefix} Generating terrain macro AO map...");
-        var terrainAoMap = await Task.Run(() => GenerateTerrainAOMap(minX, maxX, minZ, maxZ, exclusions));
+        var terrainAoImage = await Task.Run(() => GenerateTerrainAOMap(minX, maxX, minZ, maxZ, exclusions));
         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        var terrainAoMap = ImageTexture.CreateFromImage(terrainAoImage);
 
         var arrayMesh = new ArrayMesh();
         int numVertices = (subdivisionsX + 1) * (subdivisionsZ + 1);

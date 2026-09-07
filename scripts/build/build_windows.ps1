@@ -33,6 +33,7 @@ Write-Host "=======================================================" -Foreground
 Write-Host ""
 
 $RepoRoot = if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "..\..\project.godot"))) { (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path } else { (Get-Location).Path }
+Set-Location $RepoRoot
 
 # 1. Resolve Version
 $Version = "0.35.0"
@@ -104,7 +105,7 @@ $TargetExe = Join-Path $StagingRoot "HeckleGolfSim.exe"
 
 Write-Host ""
 Write-Host "[1/2] Exporting Windows Desktop release via Godot..." -ForegroundColor Green
-& $GodotExe --headless --export-release "Windows Desktop" $TargetExe
+& $GodotExe --headless --path $RepoRoot --export-release "Windows Desktop" $TargetExe
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $TargetExe)) {
     throw "Godot export failed with exit code $LASTEXITCODE"
 }

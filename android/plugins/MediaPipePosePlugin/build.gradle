@@ -16,12 +16,12 @@ repositories {
 }
 
 android {
-    compileSdk 36
+    compileSdk 34
     namespace 'org.godotengine.plugin.android.mediapipepose'
     
     defaultConfig {
         minSdk 24
-        targetSdk 36
+        targetSdk 34
         versionCode 1
         versionName "1.0"
 

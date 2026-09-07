@@ -26,6 +26,7 @@ Write-Host ""
 $scriptDir = $PSScriptRoot
 if (-not $scriptDir) { $scriptDir = (Get-Location).Path }
 $RepoRoot = if (Test-Path (Join-Path $scriptDir "..\..\project.godot")) { (Resolve-Path (Join-Path $scriptDir "..\..")).Path } else { $scriptDir }
+Set-Location $RepoRoot
 $androidBuildDir = Join-Path $RepoRoot "android\build"
 $gradlewCmd = Join-Path $androidBuildDir "gradlew.bat"
 
@@ -54,6 +55,9 @@ if (Test-Path $exportPresetsPath) {
     }
     if ($presetsContent -match 'gradle_build/target_sdk="?(\d+)"?') {
         $targetSdk = $matches[1]
+    }
+    if ([int]$targetSdk -lt 36) {
+        $targetSdk = "36"
     }
     if ($presetsContent -match 'gradle_build/min_sdk="?(\d+)"?') {
         $minSdk = $matches[1]
@@ -115,7 +119,13 @@ if (Test-Path $StaleCl) {
     Remove-Item -Path $StaleCl -Force -ErrorAction SilentlyContinue
 }
 
-$destination = Join-Path $scriptDir $OutputPath
+$destination = if ([System.IO.Path]::IsPathRooted($OutputPath)) {
+    $OutputPath
+} else {
+    $distDir = Join-Path $RepoRoot "dist"
+    if (-not (Test-Path $distDir)) { New-Item -ItemType Directory -Path $distDir -Force | Out-Null }
+    Join-Path $distDir $OutputPath
+}
 
 # Locate Godot 4.7 Mono CLI
 $KnownGodotPaths = @(
@@ -124,15 +134,22 @@ $KnownGodotPaths = @(
 )
 $GodotExe = $KnownGodotPaths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 
+$buildSuccess = $false
 if ($GodotExe) {
     Write-Host "Compiling C# .NET solution & exporting Release AAB via Godot..." -ForegroundColor Green
     $UserDotnet = Join-Path $env:USERPROFILE ".dotnet"
     if (Test-Path $UserDotnet) {
+        $env:DOTNET_ROOT = $UserDotnet
         $env:PATH = "$UserDotnet;$env:PATH"
     }
-    $ExportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--export-release", "Android", $destination) -Wait -NoNewWindow -PassThru
+    $ExportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "Android", $destination) -WorkingDirectory $RepoRoot -Wait -NoNewWindow -PassThru
     $buildSuccess = ($ExportProc.ExitCode -eq 0 -and (Test-Path $destination))
-} else {
+    if (-not $buildSuccess) {
+        Write-Host "Godot CLI export exited with code $($ExportProc.ExitCode); compiling directly via Gradle..." -ForegroundColor Yellow
+    }
+}
+
+if (-not $buildSuccess) {
     Push-Location $androidBuildDir
     try {
         & .\gradlew.bat @gradleArgs
@@ -164,13 +181,13 @@ if ($buildSuccess -and (Test-Path $destination)) {
     # If keystore exists but wasn't signed during Gradle build, offer sign_aab.ps1
     if ($resolvedKeystore -and (Test-Path $resolvedKeystore) -and -not $KeystorePassword) {
         Write-Host "To sign with your keystore ('$resolvedKeystore'), run:" -ForegroundColor Cyan
-        Write-Host "  .\sign_aab.ps1" -ForegroundColor White
+        Write-Host "  .\scripts\deploy\sign_aab.ps1" -ForegroundColor White
         Write-Host ""
     } elseif (-not $resolvedKeystore) {
         Write-Host "Signing Notice for Google Play:" -ForegroundColor Yellow
         Write-Host "  Google Play requires bundles to be signed." -ForegroundColor White
-        Write-Host "  1. Generate a keystore: .\generate_keystore.ps1" -ForegroundColor White
-        Write-Host "  2. Sign the bundle:     .\sign_aab.ps1" -ForegroundColor White
+        Write-Host "  1. Generate a keystore: .\scripts\deploy\generate_keystore.ps1" -ForegroundColor White
+        Write-Host "  2. Sign the bundle:     .\scripts\deploy\sign_aab.ps1" -ForegroundColor White
         Write-Host ""
     }
         

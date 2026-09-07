@@ -57,7 +57,7 @@ if %errorlevel% equ 0 (
     echo 1. Open Godot -^> Project -^> Export...
     echo 2. Select the "Android" preset.
     echo 3. In the right panel, scroll down to the "Keystore" section:
-    echo      - Release: %CD%\%KEYSTORE_FILE%
+    echo      - Release: %KEYSTORE_FILE%
     echo      - Release User: %KEY_ALIAS%
     echo      - Release Password: ^<your password^>
     echo 4. Click "Export Project" and save as HeckleGolfSim.aab

@@ -66,7 +66,7 @@ fi
 mkdir -p dist
 OUTPUT_ZIP="dist/HeckleGolfSim-iOS-v${VERSION}.zip"
 echo "Exporting iOS preset to $OUTPUT_ZIP..."
-"$GODOT_BIN" --headless --export-release "iOS" "$OUTPUT_ZIP"
+"$GODOT_BIN" --headless --path "$REPO_ROOT" --export-release "iOS" "$OUTPUT_ZIP"
 
 echo "Export complete: $OUTPUT_ZIP"
 
@@ -99,8 +99,8 @@ if command -v xcodebuild &>/dev/null; then
     mkdir -p "$TMP_XCODE_DIR/Payload"
     cp -r "$ARCHIVE_DIR/Products/Applications/"*.app "$TMP_XCODE_DIR/Payload/"
     cd "$TMP_XCODE_DIR"
-    zip -qr "$SCRIPT_DIR/$IPA_OUTPUT" Payload
-    cd "$SCRIPT_DIR"
+    zip -qr "$REPO_ROOT/$IPA_OUTPUT" Payload
+    cd "$REPO_ROOT"
     rm -rf "$TMP_XCODE_DIR"
     
     echo "======================================================="

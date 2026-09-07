@@ -22,13 +22,14 @@ if not exist "%ANDROID_BUILD_DIR%\assetPackInstallTime\src\main\assets" (
 )
 
 cd /d "%ANDROID_BUILD_DIR%"
-call gradlew.bat bundleMonoRelease -Pexport_package_name=com.hecklegolf.simulator -Pexport_version_name=0.31.1 -Pexport_version_code=2 -Pexport_version_min_sdk=30 -Pexport_version_target_sdk=36 -Pexport_format=aab -Pexport_edition=mono -Pexport_build_type=release
+call gradlew.bat bundleMonoRelease -Pexport_package_name=com.hecklegolf.simulator -Pexport_version_name=0.35.8 -Pexport_version_code=7 -Pexport_version_min_sdk=30 -Pexport_version_target_sdk=36 -Pexport_format=aab -Pexport_edition=mono -Pexport_build_type=release
 set BUILD_STATUS=%errorlevel%
 cd /d "%SCRIPT_DIR%"
 
 if %BUILD_STATUS% equ 0 (
     set BUNDLE_SRC=%ANDROID_BUILD_DIR%\build\outputs\bundle\monoRelease\build-mono-release.aab
     if exist "!BUNDLE_SRC!" (
+        if not exist "%REPO_ROOT%\dist" mkdir "%REPO_ROOT%\dist" >nul 2>&1
         copy /y "!BUNDLE_SRC!" "%OUTPUT_AAB%" >nul
         echo.
         echo =======================================================

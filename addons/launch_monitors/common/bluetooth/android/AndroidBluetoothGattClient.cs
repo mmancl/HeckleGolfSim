@@ -219,8 +219,8 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
             throw new InvalidOperationException($"Could not find device with ID: {deviceId}");
         }
         
-        _connectTcs = new TaskCompletionSource<bool>();
-        _servicesTcs = new TaskCompletionSource<bool>();
+        _connectTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _servicesTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         
         _gattListener = new AndroidGattListener(this);
         var proxy = JavaClassWrapper.CreateProxy(_gattListener, new string[] { "com.godot.game.GodotBleHelper$GattListener" });
@@ -247,7 +247,7 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
             throw new InvalidOperationException("Could not obtain Android Application Context for connectGatt.");
         }
         
-        _bluetoothGatt = device.Call("connectGatt", context, false, _gattCallback).As<JavaObject>();
+        _bluetoothGatt = helperClass.Call("connectGatt", device, context, _gattCallback).As<JavaObject>();
         if (_bluetoothGatt == null)
         {
             throw new InvalidOperationException("Failed to initiate connectGatt.");
@@ -274,7 +274,7 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
             }
         }
         
-        _bluetoothGatt.Call("discoverServices");
+        helperClass.Call("discoverServices", _bluetoothGatt);
         using (var servicesTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
             servicesTimeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
@@ -304,8 +304,16 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
         {
             try
             {
-                _bluetoothGatt.Call("disconnect");
-                _bluetoothGatt.Call("close");
+                var helperClass = JavaClassWrapper.Wrap("com.godot.game.GodotBleHelper");
+                if (helperClass != null)
+                {
+                    helperClass.Call("disconnectGatt", _bluetoothGatt);
+                }
+                else
+                {
+                    _bluetoothGatt.Call("disconnect");
+                    _bluetoothGatt.Call("close");
+                }
             }
             catch (Exception ex)
             {
@@ -334,7 +342,14 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
 
         if (wasConnected)
         {
-            Disconnected?.Invoke();
+            try
+            {
+                Disconnected?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{LogPrefix} Exception in Disconnected event handler: {ex.Message}");
+            }
         }
         return Task.CompletedTask;
     }
@@ -352,16 +367,21 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
             throw new InvalidOperationException("Not connected to GATT server.");
         }
         
-        var characteristic = GetCharacteristic(characteristicUuid);
-        if (characteristic == null)
+        var helperClass = JavaClassWrapper.Wrap("com.godot.game.GodotBleHelper");
+        if (helperClass == null)
         {
-            throw new InvalidOperationException($"Characteristic {characteristicUuid} not found.");
+            throw new InvalidOperationException("GodotBleHelper class not found.");
         }
-        
-        var tcs = new TaskCompletionSource<byte[]>();
+
+        var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
         _readTcsMap[characteristicUuid] = tcs;
         
-        _bluetoothGatt.Call("readCharacteristic", characteristic);
+        var initiated = helperClass.Call("readCharacteristic", _bluetoothGatt, characteristicUuid.ToString()).As<bool>();
+        if (!initiated)
+        {
+            _readTcsMap.TryRemove(characteristicUuid, out _);
+            throw new InvalidOperationException($"Failed to initiate read on characteristic: {characteristicUuid}");
+        }
         
         using (cancellationToken.Register(() => tcs.TrySetCanceled()))
         {
@@ -376,48 +396,23 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
             throw new InvalidOperationException("Not connected to GATT server.");
         }
         
-        var characteristic = GetCharacteristic(characteristicUuid);
-        if (characteristic == null)
+        var helperClass = JavaClassWrapper.Wrap("com.godot.game.GodotBleHelper");
+        if (helperClass == null)
         {
-            throw new InvalidOperationException($"Characteristic {characteristicUuid} not found.");
+            throw new InvalidOperationException("GodotBleHelper class not found.");
         }
-        
-        _bluetoothGatt.Call("setCharacteristicNotification", characteristic, true);
-        
-        var clientConfigDescriptorUuid = Guid.Parse("00002902-0000-1000-8000-00805f9b34fb");
-        var uuidClass = JavaClassWrapper.Wrap("java.util.UUID");
-        var descriptor = characteristic.Call("getDescriptor", uuidClass.Call("fromString", clientConfigDescriptorUuid.ToString())).As<JavaObject>();
-        if (descriptor != null)
+
+        var success = helperClass.Call("subscribeCharacteristic", _bluetoothGatt, characteristicUuid.ToString()).As<bool>();
+        if (!success)
         {
-            byte[] enableNotificationValue = new byte[] { 0x01, 0x00 };
-            bool wrote = false;
-            try
-            {
-                // Try Android 13+ (API 33+) writeDescriptor(descriptor, value) overload first
-                _bluetoothGatt.Call("writeDescriptor", descriptor, enableNotificationValue);
-                wrote = true;
-            }
-            catch (Exception ex)
-            {
-                GD.Print($"{LogPrefix} writeDescriptor(descriptor, value) overload not available, using fallback: {ex.Message}");
-            }
-
-            if (!wrote)
-            {
-                try
-                {
-                    descriptor.Call("setValue", enableNotificationValue);
-                    _bluetoothGatt.Call("writeDescriptor", descriptor);
-                }
-                catch (Exception ex)
-                {
-                    GD.PrintErr($"{LogPrefix} Fallback writeDescriptor failed: {ex.Message}");
-                }
-            }
-
+            GD.PrintErr($"{LogPrefix} Failed to subscribe to characteristic: {characteristicUuid}");
+        }
+        else
+        {
             GD.Print($"{LogPrefix} Subscribed and enabled notifications for characteristic: {characteristicUuid}");
-            await Task.Delay(250, cancellationToken);
         }
+        
+        await Task.Delay(250, cancellationToken);
     }
     
     public async Task WriteCharacteristicAsync(Guid characteristicUuid, byte[] value, BluetoothWriteMode writeMode, CancellationToken cancellationToken)
@@ -427,23 +422,25 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
             throw new InvalidOperationException("Not connected to GATT server.");
         }
         
-        var characteristic = GetCharacteristic(characteristicUuid);
-        if (characteristic == null)
+        var helperClass = JavaClassWrapper.Wrap("com.godot.game.GodotBleHelper");
+        if (helperClass == null)
         {
-            throw new InvalidOperationException($"Characteristic {characteristicUuid} not found.");
+            throw new InvalidOperationException("GodotBleHelper class not found.");
         }
-        
-        characteristic.Call("setValue", value);
-        
+
         int writeType = writeMode == BluetoothWriteMode.WithoutResponse ? 1 : 2;
-        characteristic.Call("setWriteType", writeType);
         
         if (writeMode == BluetoothWriteMode.WithResponse)
         {
-            var tcs = new TaskCompletionSource<bool>();
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _writeTcsMap[characteristicUuid] = tcs;
             
-            _bluetoothGatt.Call("writeCharacteristic", characteristic);
+            var initiated = helperClass.Call("writeCharacteristic", _bluetoothGatt, characteristicUuid.ToString(), value, writeType).As<bool>();
+            if (!initiated)
+            {
+                _writeTcsMap.TryRemove(characteristicUuid, out _);
+                throw new InvalidOperationException($"Failed to initiate write on characteristic: {characteristicUuid}");
+            }
             
             using (cancellationToken.Register(() => tcs.TrySetCanceled()))
             {
@@ -452,46 +449,21 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
         }
         else
         {
-            _bluetoothGatt.Call("writeCharacteristic", characteristic);
+            helperClass.Call("writeCharacteristic", _bluetoothGatt, characteristicUuid.ToString(), value, writeType);
             await Task.Delay(50, cancellationToken);
         }
     }
     
-    private JavaObject? GetCharacteristic(Guid uuid)
-    {
-        if (_bluetoothGatt == null) return null;
-        
-        var services = _bluetoothGatt.Call("getServices").As<JavaObject>();
-        if (services == null) return null;
-        
-        int servicesCount = (int)services.Call("size");
-        for (int i = 0; i < servicesCount; i++)
-        {
-            var service = services.Call("get", i).As<JavaObject>();
-            if (service == null) continue;
-            
-            var characteristics = service.Call("getCharacteristics").As<JavaObject>();
-            if (characteristics == null) continue;
-            
-            int charCount = (int)characteristics.Call("size");
-            for (int j = 0; j < charCount; j++)
-            {
-                var characteristic = characteristics.Call("get", j).As<JavaObject>();
-                if (characteristic == null) continue;
-                
-                var charUuidStr = characteristic.Call("getUuid").As<JavaObject>().Call("toString").As<string>();
-                if (Guid.TryParse(charUuidStr, out var charUuid) && charUuid == uuid)
-                {
-                    return characteristic;
-                }
-            }
-        }
-        return null;
-    }
-    
     internal void OnDeviceDiscovered(string deviceId, string name, int rssi)
     {
-        DeviceDiscovered?.Invoke(new BluetoothDevice(deviceId, name, rssi));
+        try
+        {
+            DeviceDiscovered?.Invoke(new BluetoothDevice(deviceId, name, rssi));
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Error in DeviceDiscovered event handler: {ex.Message}");
+        }
     }
     
     internal void OnConnectionStateChange(int status, int newState)
@@ -508,7 +480,14 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
             {
                 GD.Print($"{LogPrefix} Disconnected from GATT server.");
                 _connectTcs?.TrySetResult(false);
-                Disconnected?.Invoke();
+                try
+                {
+                    Disconnected?.Invoke();
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"{LogPrefix} Error in Disconnected event handler: {ex.Message}");
+                }
             }
         }
         else
@@ -520,7 +499,14 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
             }
             if (newState == 0)
             {
-                Disconnected?.Invoke();
+                try
+                {
+                    Disconnected?.Invoke();
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"{LogPrefix} Error in Disconnected event handler: {ex.Message}");
+                }
             }
         }
     }
@@ -573,7 +559,14 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
     {
         if (Guid.TryParse(uuidStr, out var uuid))
         {
-            CharacteristicValueChanged?.Invoke(new BluetoothCharacteristicValue(uuid, value));
+            try
+            {
+                CharacteristicValueChanged?.Invoke(new BluetoothCharacteristicValue(uuid, value));
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{LogPrefix} Error in CharacteristicValueChanged event handler: {ex.Message}");
+            }
         }
     }
     

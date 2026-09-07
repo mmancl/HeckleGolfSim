@@ -28,6 +28,7 @@ Write-Host "=======================================================" -Foreground
 Write-Host ""
 
 $RepoRoot = if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "..\..\project.godot"))) { (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path } else { (Get-Location).Path }
+Set-Location $RepoRoot
 
 # 1. Resolve Version
 $Version = "0.35.0"
@@ -97,7 +98,7 @@ if ($Clean -and (Test-Path $ZipOutput)) {
 
 Write-Host ""
 Write-Host "[1/1] Exporting macOS Universal App (.app) via Godot..." -ForegroundColor Green
-& $GodotExe --headless --export-release "macOS" $ZipOutput
+& $GodotExe --headless --path $RepoRoot --export-release "macOS" $ZipOutput
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $ZipOutput)) {
     throw "Godot export failed with exit code $LASTEXITCODE"
 }

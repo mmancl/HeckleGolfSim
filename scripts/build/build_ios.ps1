@@ -32,6 +32,7 @@ Write-Host "=======================================================" -Foreground
 Write-Host ""
 
 $RepoRoot = if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "..\..\project.godot"))) { (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path } else { (Get-Location).Path }
+Set-Location $RepoRoot
 
 # 1. Resolve Version
 $Version = "0.35.2"
