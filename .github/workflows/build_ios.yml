@@ -82,19 +82,35 @@ jobs:
           fi
           echo "Using scheme: $SCHEME_NAME"
 
-          mkdir -p build_output
-          xcodebuild -project "$XCODEPROJ" \
+          mkdir -p build_output/Payload
+          
+          if xcodebuild -project "$XCODEPROJ" \
             -scheme "$SCHEME_NAME" \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath build_output/HeckleGolfSim.xcarchive \
+            CODE_SIGN_STYLE=Manual \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            archive
+            archive; then
+            cp -r build_output/HeckleGolfSim.xcarchive/Products/Applications/*.app build_output/Payload/
+          else
+            echo "Archive step skipped, compiling app binary directly..."
+            xcodebuild -project "$XCODEPROJ" \
+              -scheme "$SCHEME_NAME" \
+              -configuration Release \
+              -destination 'generic/platform=iOS' \
+              -derivedDataPath build_output/derived \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGN_IDENTITY="" \
+              build
+            APP_DIR=$(find build_output/derived -name "*.app" -type d | head -n 1)
+            cp -r "$APP_DIR" build_output/Payload/
+          fi
 
-          mkdir -p build_output/Payload
-          cp -r build_output/HeckleGolfSim.xcarchive/Products/Applications/*.app build_output/Payload/
           cd build_output
           zip -qr ../dist/HeckleGolfSim.ipa Payload
           cd ..
