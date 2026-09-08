@@ -1,0 +1,114 @@
+{
+  "title": "Heckle Golf Simulator Commercial",
+  "default_model": "veo-3.1-generate-preview",
+  "fallback_model": "veo-2.0-generate-001",
+  "aspect_ratio": "16:9",
+  "default_duration_seconds": 5,
+  "scenes": [
+    {
+      "id": "01_splash_intro",
+      "enabled": true,
+      "title": "Splash & Brand Intro",
+      "image": "heckle_splash.png",
+      "fallback_image": "icon.png",
+      "prompt": "Cinematic commercial intro for Heckle Golf Simulator. High production value camera push-in towards the Heckle Golf Simulator logo with volumetric lighting rays, polished golden glow, clean modern studio lighting, 4k ultra-realistic commercial presentation.",
+      "duration_seconds": 5
+    },
+    {
+      "id": "02_main_menu",
+      "enabled": true,
+      "title": "Main Menu Hub",
+      "image": "main_menu.png",
+      "prompt": "Smooth slow-motion cinematic camera glide over the sleek video game main menu interface. Subtle holographic ambient glow, crisp UI elements, welcoming clubhouse ambiance in the background, ultra-sharp 4k game UI showcase.",
+      "duration_seconds": 5
+    },
+    {
+      "id": "03_range_practice",
+      "enabled": true,
+      "title": "Driving Range & Shot Analytics",
+      "image": "range_practice.png",
+      "prompt": "Dynamic broadcast sports camera tracking across the driving range practice facility. Bright sunny morning, launch monitor shot trajectory tracer arcing gracefully into the distance with real-time ball speed and spin data overlays, photorealistic turf grass, 4k golf commercial.",
+      "duration_seconds": 5
+    },
+    {
+      "id": "04_download_courses",
+      "enabled": true,
+      "title": "Course Downloads & Community Tracks",
+      "image": "download_courses.png",
+      "prompt": "Smooth elegant zoom and pan across the course selection and download menu. Showcasing global course downloads, community courses, infinite golf tracks, modern digital touchscreen aesthetic, crisp 4k commercial showcase.",
+      "duration_seconds": 5
+    },
+    {
+      "id": "05_course_play_tee",
+      "enabled": true,
+      "title": "Course Play - Tee Off",
+      "image": "course_play_1.png",
+      "prompt": "Breathtaking cinematic tee box view overlooking a championship golf course hole. Gentle breeze rustling trees, realistic sunlight glinting off the fairway, pristine golf ball on tee ready for launch, television broadcast golf camera, 4k 60fps cinematic.",
+      "duration_seconds": 5
+    },
+    {
+      "id": "06_course_play_approach",
+      "enabled": true,
+      "title": "Course Play - Approach & Hazards",
+      "image": "course_play_2.png",
+      "prompt": "Dramatic low-angle camera push across the lush green fairway towards the pin. Deep sand bunkers, clear water hazard reflections, vivid green grass textures, championship tournament atmosphere, 4k cinematic sports capture.",
+      "duration_seconds": 5
+    },
+    {
+      "id": "07_course_play_map",
+      "enabled": true,
+      "title": "Course Play - Tactical GPS Map",
+      "image": "course_play_map.png",
+      "prompt": "High-tech smooth tactical zoom into the overhead GPS hole map. Distance rings and hole trajectory graphic shimmering subtly, showcasing strategic course management and intelligent shot planning, sleek 4k UI animation.",
+      "duration_seconds": 5
+    },
+    {
+      "id": "08_course_play_putting",
+      "enabled": true,
+      "title": "Course Play - Putting Green & Contours",
+      "image": "course_play_putting.png",
+      "prompt": "Cinematic low-angle camera glide across the putting green. Glowing slope contour grid lines and break markers undulating across the undulating green towards the flagstick, hyper-realistic grass blade detail, masterclass putting precision, 4k.",
+      "duration_seconds": 5
+    },
+    {
+      "id": "09_match_history",
+      "enabled": true,
+      "title": "Match History & Seamless Resume",
+      "image": "match_history.png",
+      "prompt": "Sleek UI camera pan across saved match histories and digital scorecards. Smoothly highlighting round progress, score breakdown, and instant one-tap resume game functionality, clean professional dashboard, 4k.",
+      "duration_seconds": 5
+    },
+    {
+      "id": "10_player_profile",
+      "enabled": true,
+      "title": "Player Profile & Smart Analytics",
+      "image": "player_profile.png",
+      "prompt": "Futuristic yet clean sports analytics UI presentation. Smooth camera movement highlighting player handicap, club yardage averages, AI shot recommendations and swing improvements, concluding with highlight on sending performance reports to email, 4k commercial showcase.",
+      "duration_seconds": 5
+    },
+    {
+      "id": "11_mini_game_menu",
+      "enabled": true,
+      "title": "Mini-Games Hub",
+      "image": "mini_game_menu.png",
+      "prompt": "Fun, vibrant, and energetic camera pan over the mini-games arcade menu. Cheerful lighting, exciting party game icons, casual competition for friends and family, dynamic motion graphics, 4k.",
+      "duration_seconds": 5
+    },
+    {
+      "id": "12_mini_game_chipping",
+      "enabled": true,
+      "title": "Mini-Game - Chipping Challenge",
+      "image": "mini_game_chipping.png",
+      "prompt": "High-energy arcade action view of the chipping mini-game. Glowing target rings, floating multiplier islands, satisfying point counters, arcade sports game fun, vibrant colors, 4k cinematic.",
+      "duration_seconds": 5
+    },
+    {
+      "id": "13_mini_game_putting_outro",
+      "enabled": true,
+      "title": "Mini-Game - Putting & Commercial Outro",
+      "image": "mini_game_putting.png",
+      "prompt": "Exciting climax shot of the putting challenge mini-game with colorful target barriers and victory fireworks in the background, transitioning into a bold cinematic final outro title card: Heckle Golf Simulator - Play Now! 4k cinematic.",
+      "duration_seconds": 5
+    }
+  ]
+}
