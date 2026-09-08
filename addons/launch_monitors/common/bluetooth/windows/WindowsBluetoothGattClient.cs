@@ -16,6 +16,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
     private static bool AttemptWindowsPairing => false;
 
     private readonly Dictionary<Guid, GattCharacteristic> _characteristics = [];
+    private readonly List<GattDeviceService> _services = [];
     private readonly HashSet<Guid> _subscribedCharacteristicUuids = [];
     private DeviceWatcher? _deviceWatcher;
     private BluetoothLEAdvertisementWatcher? _advertisementWatcher;
@@ -128,6 +129,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
 
         _subscribedCharacteristicUuids.Clear();
         _characteristics.Clear();
+        ClearServices();
         _session?.Dispose();
         _session = null;
         _device?.Dispose();
@@ -242,60 +244,72 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
 
     private async Task LoadCharacteristicsAsync(BluetoothConnectionOptions options)
     {
-        _characteristics.Clear();
-
-        foreach (var uuid in options.RequiredCharacteristicUuids)
-        {
-            var characteristic = await GetCharacteristicAsync(uuid, required: true);
-            if (characteristic is not null)
-            {
-                _characteristics[uuid] = characteristic;
-            }
-        }
-
-        foreach (var uuid in options.OptionalCharacteristicUuids)
-        {
-            var characteristic = await GetCharacteristicAsync(uuid, required: false);
-            if (characteristic is not null)
-            {
-                _characteristics[uuid] = characteristic;
-            }
-        }
-    }
-
-    private async Task<GattCharacteristic?> GetCharacteristicAsync(Guid uuid, bool required)
-    {
         if (_device is null)
         {
-            return null;
+            throw new InvalidOperationException("Cannot load characteristics because Bluetooth device is not connected.");
         }
+
+        _characteristics.Clear();
+        ClearServices();
 
         var servicesResult = await GetGattServicesWithRetryAsync(_device);
         if (servicesResult.Status != GattCommunicationStatus.Success)
         {
-            if (required)
-            {
-                throw new InvalidOperationException($"Bluetooth service discovery returned {servicesResult.Status}.");
-            }
-
-            return null;
+            throw new InvalidOperationException($"Bluetooth service discovery returned {servicesResult.Status}.");
         }
 
-        foreach (var service in servicesResult.Services)
+        _services.AddRange(servicesResult.Services);
+
+        foreach (var service in _services)
         {
-            var characteristicsResult = await service.GetCharacteristicsForUuidAsync(uuid, BluetoothCacheMode.Uncached);
-            if (characteristicsResult.Status == GattCommunicationStatus.Success && characteristicsResult.Characteristics.Count > 0)
+            var characteristics = await GetCharacteristicsWithFallbackAsync(service);
+            foreach (var characteristic in characteristics)
             {
-                return characteristicsResult.Characteristics[0];
+                _characteristics.TryAdd(characteristic.Uuid, characteristic);
             }
         }
 
-        if (required)
+        foreach (var uuid in options.RequiredCharacteristicUuids)
         {
-            throw new InvalidOperationException($"Missing Bluetooth characteristic {uuid}.");
+            if (!_characteristics.ContainsKey(uuid))
+            {
+                throw new InvalidOperationException($"Missing Bluetooth characteristic {uuid}.");
+            }
+        }
+    }
+
+    private static async Task<IReadOnlyList<GattCharacteristic>> GetCharacteristicsWithFallbackAsync(GattDeviceService service)
+    {
+        try
+        {
+            var result = await service.GetCharacteristicsAsync(BluetoothCacheMode.Cached);
+            if (result.Status == GattCommunicationStatus.Success && result.Characteristics.Count > 0)
+            {
+                return result.Characteristics;
+            }
+
+            var uncachedResult = await service.GetCharacteristicsAsync(BluetoothCacheMode.Uncached);
+            if (uncachedResult.Status == GattCommunicationStatus.Success)
+            {
+                return uncachedResult.Characteristics;
+            }
+
+            return result.Status == GattCommunicationStatus.Success ? result.Characteristics : uncachedResult.Characteristics;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void ClearServices()
+    {
+        foreach (var service in _services)
+        {
+            service.Dispose();
         }
 
-        return null;
+        _services.Clear();
     }
 
     private async Task<GattDeviceServicesResult> GetGattServicesWithRetryAsync(BluetoothLEDevice device)
