@@ -110,11 +110,15 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
             return;
         }
 
-        await _connectionLock.WaitAsync(cancellationToken);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(20));
+        var timeoutToken = timeoutCts.Token;
+
+        await _connectionLock.WaitAsync(timeoutToken);
         try
         {
-            await StopScanAsync(cancellationToken);
-            await DisconnectCoreAsync(cancellationToken);
+            await StopScanAsync(timeoutToken);
+            await DisconnectCoreAsync(timeoutToken);
             EmitStatus("Connecting");
 
             var connOptions = new BluetoothConnectionOptions(
@@ -132,18 +136,18 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
                 ServiceDiscoveryMaxAttempts: 4,
                 ServiceDiscoveryRetryDelay: TimeSpan.FromMilliseconds(700));
 
-            await _bluetoothClient.ConnectAsync(deviceId, connOptions, cancellationToken);
+            await _bluetoothClient.ConnectAsync(deviceId, connOptions, timeoutToken);
             _isConnected = true;
 
-            await ReadDeviceInfoAsync(cancellationToken);
-            await SubscribeToNotificationsAsync(cancellationToken);
+            await ReadDeviceInfoAsync(timeoutToken);
+            await SubscribeToNotificationsAsync(timeoutToken);
 
             _protoRequestCounter = 0;
             _isInitializing = true;
             try
             {
                 _logInfo("Starting Garmin R10 handshake...");
-                var handshakeSuccess = await PerformHandshakeAsync(cancellationToken);
+                var handshakeSuccess = await PerformHandshakeAsync(timeoutToken);
                 if (!handshakeSuccess)
                 {
                     throw new InvalidOperationException("Failed to complete Garmin R10 handshake protocol.");
@@ -152,11 +156,11 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
                 _logInfo("Handshake complete. Initializing device services...");
 
                 // 1. Wake device
-                await WakeDeviceAsync(cancellationToken);
-                await Task.Delay(300, cancellationToken);
+                await WakeDeviceAsync(timeoutToken);
+                await Task.Delay(300, timeoutToken);
 
                 // 2. Request device status
-                var initialState = await RequestStatusAsync(cancellationToken);
+                var initialState = await RequestStatusAsync(timeoutToken);
 
                 // If device is in InterferenceTest, wait for it to settle
                 if (initialState == StateType.InterferenceTest)
@@ -164,8 +168,8 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
                     _logInfo("Device is in InterferenceTest. Waiting for test to complete...");
                     for (int i = 0; i < 12; i++)
                     {
-                        await Task.Delay(500, cancellationToken);
-                        var st = await RequestStatusAsync(cancellationToken);
+                        await Task.Delay(500, timeoutToken);
+                        var st = await RequestStatusAsync(timeoutToken);
                         if (st != StateType.InterferenceTest)
                         {
                             _logInfo($"InterferenceTest completed. State: {st}");
@@ -175,7 +179,7 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
                 }
 
                 // 3. Subscribe to launch monitor radar alerts (with retry)
-                var subscribed = await SubscribeToAlertsAsync(cancellationToken);
+                var subscribed = await SubscribeToAlertsAsync(timeoutToken);
                 if (!subscribed)
                 {
                     throw new InvalidOperationException("Failed to subscribe to Garmin R10 radar alerts. Shot tracking will not function.");
@@ -183,19 +187,19 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
 
                 if (_options.CalibrateTiltOnConnect)
                 {
-                    await StartTiltCalibrationAsync(cancellationToken);
+                    await StartTiltCalibrationAsync(timeoutToken);
                 }
 
                 // 4. Complete initialization and ensure device is active (Waiting)
                 _isInitializing = false;
 
-                var finalState = await RequestStatusAsync(cancellationToken);
+                var finalState = await RequestStatusAsync(timeoutToken);
                 if (finalState == StateType.Standby)
                 {
                     _logInfo("Device in Standby at end of setup. Sending WakeUp call...");
-                    await WakeDeviceAsync(cancellationToken);
-                    await Task.Delay(300, cancellationToken);
-                    await RequestStatusAsync(cancellationToken);
+                    await WakeDeviceAsync(timeoutToken);
+                    await Task.Delay(300, timeoutToken);
+                    await RequestStatusAsync(timeoutToken);
                 }
             }
             finally

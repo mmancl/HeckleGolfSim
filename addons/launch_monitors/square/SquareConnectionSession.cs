@@ -86,24 +86,28 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
             return;
         }
 
-        await _connectionLock.WaitAsync(cancellationToken);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(20));
+        var timeoutToken = timeoutCts.Token;
+
+        await _connectionLock.WaitAsync(timeoutToken);
         try
         {
-            await StopScanAsync(cancellationToken);
-            await DisconnectCoreAsync(cancellationToken);
+            await StopScanAsync(timeoutToken);
+            await DisconnectCoreAsync(timeoutToken);
             EmitStatus("Connecting");
 
-            await _bluetoothClient.ConnectAsync(deviceId, CreateBluetoothConnectionOptions(), cancellationToken);
+            await _bluetoothClient.ConnectAsync(deviceId, CreateBluetoothConnectionOptions(), timeoutToken);
             _isConnected = true;
 
-            await ReadDeviceInfoAsync(cancellationToken);
-            await SubscribeToNotificationsAsync(cancellationToken);
+            await ReadDeviceInfoAsync(timeoutToken);
+            await SubscribeToNotificationsAsync(timeoutToken);
             EmitStatus("Connected");
-            await WriteCommandAsync(SquareCommandBuilder.Heartbeat(NextSequence()), cancellationToken);
-            await _delayAsync(_options.ConnectionClubDelay, cancellationToken);
-            await WriteCommandAsync(SquareCommandBuilder.Club(NextSequence(), _clubCode, _handedness), cancellationToken);
-            await _delayAsync(_options.ConnectionReadyDelay, cancellationToken);
-            await SetReadyAsync(cancellationToken);
+            await WriteCommandAsync(SquareCommandBuilder.Heartbeat(NextSequence()), timeoutToken);
+            await _delayAsync(_options.ConnectionClubDelay, timeoutToken);
+            await WriteCommandAsync(SquareCommandBuilder.Club(NextSequence(), _clubCode, _handedness), timeoutToken);
+            await _delayAsync(_options.ConnectionReadyDelay, timeoutToken);
+            await SetReadyAsync(timeoutToken);
             StartHeartbeat();
             StartWatchdog();
             _logInfo("Connection sequence complete.");

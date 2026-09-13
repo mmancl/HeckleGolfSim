@@ -57,6 +57,9 @@ var _linux_auto_connect_active := false
 var _linux_auto_connect_target_address := ""
 var _linux_auto_connect_timer: Timer = null
 var _auto_reconnect_timer: Timer = null
+const MAX_AUTO_RECONNECT_ATTEMPTS := 5
+var _auto_reconnect_attempts := 0
+var _current_club_name := ""
 var _ready_audio_player: AudioStreamPlayer = null
 var _ready_hud: CanvasLayer = null
 var _is_manual_connect := false
@@ -221,6 +224,8 @@ func stop_scan() -> void:
 
 func connect_to_device(device_id: String, is_auto: bool = false) -> void:
 	_is_manual_connect = not is_auto
+	if _is_manual_connect:
+		_auto_reconnect_attempts = 0
 	_cancel_linux_auto_connect_scan()
 	stop_scan()
 	_debug_log("connect_to_device requested for %s (auto=%s)" % [device_id, str(is_auto)])
@@ -279,6 +284,7 @@ func connect_to_device(device_id: String, is_auto: bool = false) -> void:
 func disconnect_device() -> void:
 	_cancel_linux_auto_connect_scan()
 	_cancel_auto_reconnect()
+	_auto_reconnect_attempts = 0
 	settings["enabled"] = false
 	_save_settings()
 	_debug_log("disconnect_device requested")
@@ -549,6 +555,8 @@ func _on_square_status_changed(value: String) -> void:
 		_schedule_auto_reconnect()
 	elif value == "Connected" or value == "Connecting" or value == "Ready":
 		_cancel_auto_reconnect()
+		if value == "Connected":
+			_auto_reconnect_attempts = 0
 
 
 func _on_garmin_status_changed(value: String) -> void:
@@ -557,6 +565,8 @@ func _on_garmin_status_changed(value: String) -> void:
 		_schedule_auto_reconnect()
 	elif value == "Connected" or value == "Connecting" or value == "Ready":
 		_cancel_auto_reconnect()
+		if value == "Connected":
+			_auto_reconnect_attempts = 0
 
 
 func _on_garmin_error_occurred(message: String) -> void:
@@ -595,7 +605,7 @@ func _on_garmin_ready_changed(value: bool) -> void:
 
 func _on_garmin_shot_received(data: Dictionary) -> void:
 	_debug_log("Garmin shot received with %d fields" % data.size())
-	FoamBallBoost.apply_boost(data)
+	FoamBallBoost.apply_boost(data, _current_club_name)
 	notify_shot_started()
 	emit_signal("hit_ball", data)
 	_update_hud_display()
@@ -603,13 +613,21 @@ func _on_garmin_shot_received(data: Dictionary) -> void:
 
 func _schedule_auto_reconnect() -> void:
 	_cancel_auto_reconnect()
+	if _auto_reconnect_attempts >= MAX_AUTO_RECONNECT_ATTEMPTS:
+		_debug_log("Max auto-reconnect attempts (%d) reached. Stopping auto-reconnect." % MAX_AUTO_RECONNECT_ATTEMPTS)
+		return
+	_auto_reconnect_attempts += 1
+	var delays := [3.0, 5.0, 8.0, 12.0, 18.0]
+	var delay: float = delays[mini(_auto_reconnect_attempts - 1, delays.size() - 1)]
 	_auto_reconnect_timer = Timer.new()
 	_auto_reconnect_timer.one_shot = true
-	_auto_reconnect_timer.wait_time = 3.0
+	_auto_reconnect_timer.wait_time = delay
 	_auto_reconnect_timer.timeout.connect(_on_auto_reconnect_timeout)
 	add_child(_auto_reconnect_timer)
 	_auto_reconnect_timer.start()
-	_debug_log("Auto-reconnect scheduled in 3 seconds.")
+	_debug_log("Auto-reconnect attempt %d/%d scheduled in %.1f seconds." % [
+		_auto_reconnect_attempts, MAX_AUTO_RECONNECT_ATTEMPTS, delay
+	])
 
 
 func _on_auto_reconnect_timeout() -> void:
@@ -684,7 +702,7 @@ func _on_square_sensor_data_received(pos_x: int, pos_y: int, pos_z: int, ready: 
 
 func _on_square_shot_received(data: Dictionary) -> void:
 	_debug_log("shot received with %d fields" % data.size())
-	FoamBallBoost.apply_boost(data)
+	FoamBallBoost.apply_boost(data, _current_club_name)
 	notify_shot_started()
 	emit_signal("hit_ball", data)
 	_update_hud_display()
@@ -851,6 +869,7 @@ func _is_square_device_name(name: String) -> bool:
 
 
 func _on_club_selected(club_name: String) -> void:
+	_current_club_name = club_name
 	var code := _map_in_game_club_to_square_code(club_name)
 	_debug_log("In-game club changed to %s (code: %s)" % [club_name, code])
 	set_club_code(code)

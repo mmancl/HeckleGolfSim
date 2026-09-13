@@ -169,11 +169,24 @@ public partial class BounceCalculator : RefCounted
         }
         else if (newTangentSpeed < 0.0f)
         {
-            velTangent = -velTangent.Normalized() * Mathf.Abs(newTangentSpeed);
+            if (velTangent.LengthSquared() > 0.0001f)
+            {
+                velTangent = -velTangent.Normalized() * Mathf.Abs(newTangentSpeed);
+            }
+            else
+            {
+                // Ball landed nearly vertically; derive spinback direction from ground normal cross spin axis
+                Vector3 spinDirection = normal.Cross(omegaTangent);
+                velTangent = spinDirection.LengthSquared() > 0.0001f
+                    ? spinDirection.Normalized() * Mathf.Abs(newTangentSpeed)
+                    : Vector3.Zero;
+            }
         }
         else
         {
-            velTangent = velTangent.LimitLength(newTangentSpeed);
+            velTangent = velTangent.LengthSquared() > 0.0001f
+                ? velTangent.LimitLength(newTangentSpeed)
+                : Vector3.Zero;
         }
 
         if (currentState == PhysicsEnums.BallState.Flight)
@@ -185,11 +198,15 @@ public partial class BounceCalculator : RefCounted
             }
             else if (newTangentSpeed < 0.0f)
             {
-                omegaTangent = -omegaTangent.Normalized() * newOmegaTangent;
+                omegaTangent = omegaTangent.LengthSquared() > 0.0001f
+                    ? -omegaTangent.Normalized() * newOmegaTangent
+                    : Vector3.Zero;
             }
             else
             {
-                omegaTangent = omegaTangent.LimitLength(newOmegaTangent);
+                omegaTangent = omegaTangent.LengthSquared() > 0.0001f
+                    ? omegaTangent.LimitLength(newOmegaTangent)
+                    : Vector3.Zero;
             }
         }
         else
@@ -197,8 +214,9 @@ public partial class BounceCalculator : RefCounted
             if (newTangentSpeed > 0.05f)
             {
                 float existingSpinMag = omegaTangent.Length();
-                Vector3 tangentDir = velTangent.Length() > 0.01f ? velTangent.Normalized() : Vector3.Right;
-                Vector3 rollingAxis = normal.Cross(tangentDir).Normalized();
+                Vector3 tangentDir = velTangent.LengthSquared() > 0.0001f ? velTangent.Normalized() : Vector3.Right;
+                Vector3 crossDir = normal.Cross(tangentDir);
+                Vector3 rollingAxis = crossDir.LengthSquared() > 0.0001f ? crossDir.Normalized() : Vector3.Forward;
 
                 if (existingSpinMag > 0.05f)
                 {
@@ -292,6 +310,18 @@ public partial class BounceCalculator : RefCounted
 
         Vector3 newOmega = omegaNormal + omegaTangent;
         Vector3 newVelocity = velNormal + velTangent;
+
+        if (!float.IsFinite(newVelocity.X) || !float.IsFinite(newVelocity.Y) || !float.IsFinite(newVelocity.Z))
+        {
+            PhysicsLogger.Error("BounceCalculator: Non-finite bounce velocity calculated; resetting to zero.");
+            newVelocity = Vector3.Zero;
+        }
+
+        if (!float.IsFinite(newOmega.X) || !float.IsFinite(newOmega.Y) || !float.IsFinite(newOmega.Z))
+        {
+            PhysicsLogger.Error("BounceCalculator: Non-finite bounce omega calculated; resetting to zero.");
+            newOmega = Vector3.Zero;
+        }
 
         return new BounceResult(newVelocity, newOmega, newState);
     }

@@ -86,20 +86,24 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
     public async Task ConnectAsync(string deviceId, BluetoothConnectionOptions options, CancellationToken cancellationToken)
     {
         _connectionOptions = options;
-        await StopScanAsync(cancellationToken);
-        await DisconnectAsync(cancellationToken);
+        await StopScanAsync(cancellationToken).ConfigureAwait(false);
+        await DisconnectAsync(cancellationToken).ConfigureAwait(false);
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
+        var token = timeoutCts.Token;
 
         _isDisconnecting = false;
-        _device = await OpenDeviceWithRetryAsync(deviceId, cancellationToken);
+        _device = await OpenDeviceWithRetryAsync(deviceId, token).ConfigureAwait(false);
         if (_device is null)
         {
             throw new TimeoutException("The selected Bluetooth device is not ready yet. Wait a moment and try connecting again.");
         }
 
-        await PairIfNeededAsync(_device);
+        await PairIfNeededAsync(_device).ConfigureAwait(false);
         try
         {
-            _session = await GattSession.FromDeviceIdAsync(_device.BluetoothDeviceId);
+            _session = await GattSession.FromDeviceIdAsync(_device.BluetoothDeviceId).AsTask(token).ConfigureAwait(false);
             if (_session is not null)
             {
                 _session.MaintainConnection = true;
@@ -110,7 +114,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         {
             // GattSession is optional on Windows
         }
-        await LoadCharacteristicsAsync(options);
+        await LoadCharacteristicsAsync(options, token).ConfigureAwait(false);
 
         _isConnected = true;
     }
@@ -157,7 +161,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
     public async Task<byte[]> ReadCharacteristicAsync(Guid characteristicUuid, CancellationToken cancellationToken)
     {
         return _characteristics.TryGetValue(characteristicUuid, out var characteristic)
-            ? await ReadBytesAsync(characteristic)
+            ? await ReadBytesAsync(characteristic, cancellationToken).ConfigureAwait(false)
             : [];
     }
 
@@ -180,7 +184,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
 
         try
         {
-            var status = await characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(descriptorValue);
+            var status = await characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(descriptorValue).AsTask(cancellationToken).ConfigureAwait(false);
             if (status != GattCommunicationStatus.Success)
             {
                 throw new InvalidOperationException($"Bluetooth notification setup returned {status}.");
@@ -226,7 +230,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
 
         var result = await characteristic.WriteValueWithResultAsync(
             writer.DetachBuffer(),
-            writeOption);
+            writeOption).AsTask(cancellationToken).ConfigureAwait(false);
 
         if (result.Status != GattCommunicationStatus.Success)
         {
@@ -240,14 +244,14 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         await DisconnectAsync(CancellationToken.None);
     }
 
-    private async Task<BluetoothLEDevice?> OpenDeviceAsync(string deviceId)
+    private async Task<BluetoothLEDevice?> OpenDeviceAsync(string deviceId, CancellationToken cancellationToken)
     {
         if (ulong.TryParse(deviceId, out var address))
         {
-            return await BluetoothLEDevice.FromBluetoothAddressAsync(address);
+            return await BluetoothLEDevice.FromBluetoothAddressAsync(address).AsTask(cancellationToken).ConfigureAwait(false);
         }
 
-        return await BluetoothLEDevice.FromIdAsync(deviceId);
+        return await BluetoothLEDevice.FromIdAsync(deviceId).AsTask(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<BluetoothLEDevice?> OpenDeviceWithRetryAsync(string deviceId, CancellationToken cancellationToken)
@@ -257,7 +261,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var device = await OpenDeviceAsync(deviceId);
+            var device = await OpenDeviceAsync(deviceId, cancellationToken).ConfigureAwait(false);
             if (device is not null)
             {
                 return device;
@@ -265,7 +269,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
 
             if (attempt < attempts)
             {
-                await Task.Delay(_connectionOptions.ServiceDiscoveryRetryDelay, cancellationToken);
+                await Task.Delay(_connectionOptions.ServiceDiscoveryRetryDelay, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -306,7 +310,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         }
     }
 
-    private async Task LoadCharacteristicsAsync(BluetoothConnectionOptions options)
+    private async Task LoadCharacteristicsAsync(BluetoothConnectionOptions options, CancellationToken cancellationToken)
     {
         if (_device is null)
         {
@@ -316,7 +320,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         _characteristics.Clear();
         ClearServices();
 
-        var servicesResult = await GetGattServicesWithRetryAsync(_device);
+        var servicesResult = await GetGattServicesWithRetryAsync(_device, cancellationToken).ConfigureAwait(false);
         if (servicesResult.Status != GattCommunicationStatus.Success)
         {
             throw new InvalidOperationException($"Bluetooth service discovery returned {servicesResult.Status}.");
@@ -326,7 +330,8 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
 
         foreach (var service in _services)
         {
-            var characteristics = await GetCharacteristicsWithFallbackAsync(service);
+            cancellationToken.ThrowIfCancellationRequested();
+            var characteristics = await GetCharacteristicsWithFallbackAsync(service, cancellationToken).ConfigureAwait(false);
             foreach (var characteristic in characteristics)
             {
                 _characteristics.TryAdd(characteristic.Uuid, characteristic);
@@ -342,17 +347,17 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         }
     }
 
-    private static async Task<IReadOnlyList<GattCharacteristic>> GetCharacteristicsWithFallbackAsync(GattDeviceService service)
+    private static async Task<IReadOnlyList<GattCharacteristic>> GetCharacteristicsWithFallbackAsync(GattDeviceService service, CancellationToken cancellationToken)
     {
         try
         {
-            var result = await service.GetCharacteristicsAsync(BluetoothCacheMode.Cached);
+            var result = await service.GetCharacteristicsAsync(BluetoothCacheMode.Cached).AsTask(cancellationToken).ConfigureAwait(false);
             if (result.Status == GattCommunicationStatus.Success && result.Characteristics.Count > 0)
             {
                 return result.Characteristics;
             }
 
-            var uncachedResult = await service.GetCharacteristicsAsync(BluetoothCacheMode.Uncached);
+            var uncachedResult = await service.GetCharacteristicsAsync(BluetoothCacheMode.Uncached).AsTask(cancellationToken).ConfigureAwait(false);
             if (uncachedResult.Status == GattCommunicationStatus.Success)
             {
                 return uncachedResult.Characteristics;
@@ -376,14 +381,15 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         _services.Clear();
     }
 
-    private async Task<GattDeviceServicesResult> GetGattServicesWithRetryAsync(BluetoothLEDevice device)
+    private async Task<GattDeviceServicesResult> GetGattServicesWithRetryAsync(BluetoothLEDevice device, CancellationToken cancellationToken)
     {
         GattDeviceServicesResult? lastResult = null;
 
         for (var attempt = 1; attempt <= _connectionOptions.ServiceDiscoveryMaxAttempts; attempt++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var cacheMode = attempt == 1 ? BluetoothCacheMode.Cached : BluetoothCacheMode.Uncached;
-            var result = await device.GetGattServicesAsync(cacheMode);
+            var result = await device.GetGattServicesAsync(cacheMode).AsTask(cancellationToken).ConfigureAwait(false);
             if (result.Status == GattCommunicationStatus.Success)
             {
                 return result;
@@ -392,16 +398,16 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
             lastResult = result;
             if (attempt < _connectionOptions.ServiceDiscoveryMaxAttempts)
             {
-                await Task.Delay(_connectionOptions.ServiceDiscoveryRetryDelay);
+                await Task.Delay(_connectionOptions.ServiceDiscoveryRetryDelay, cancellationToken).ConfigureAwait(false);
             }
         }
 
         return lastResult!;
     }
 
-    private static async Task<byte[]> ReadBytesAsync(GattCharacteristic characteristic)
+    private static async Task<byte[]> ReadBytesAsync(GattCharacteristic characteristic, CancellationToken cancellationToken)
     {
-        var result = await characteristic.ReadValueAsync(BluetoothCacheMode.Uncached);
+        var result = await characteristic.ReadValueAsync(BluetoothCacheMode.Uncached).AsTask(cancellationToken).ConfigureAwait(false);
         if (result.Status != GattCommunicationStatus.Success)
         {
             return [];

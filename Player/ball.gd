@@ -395,12 +395,12 @@ func _is_collider_tree(collider: Object) -> bool:
 	if collider.has_meta("is_tree"):
 		return bool(collider.get_meta("is_tree"))
 	var c_name := String(collider.name)
-	if c_name.containsn("tree") or c_name.containsn("trunk"):
+	if c_name.containsn("tree") or c_name.containsn("trunk") or c_name.containsn("branch") or c_name.containsn("foliage") or c_name.containsn("canopy"):
 		return true
 	var parent := (collider as Node).get_parent() if collider is Node else null
 	if parent != null:
 		var p_name := String(parent.name)
-		if p_name.containsn("tree") or p_name.containsn("trunk"):
+		if p_name.containsn("tree") or p_name.containsn("trunk") or p_name.containsn("branch") or p_name.containsn("foliage") or p_name.containsn("canopy"):
 			return true
 	return false
 
@@ -667,7 +667,7 @@ func _physics_process(delta: float) -> void:
 	if has_node("/root/TensionManager") and not target_hole_live.is_zero_approx() and TensionManager.is_course_play_active():
 		var start_p = shot_start_pos_global if not shot_start_pos_global.is_zero_approx() else (position if not position.is_zero_approx() else spawn_position)
 		var is_airborne = (state == PhysicsEnums.BallState.FLIGHT)
-		TensionManager.check_ball_proximity(global_position, target_hole_live, is_putt, start_p, shot_was_in_sand, is_airborne, velocity)
+		TensionManager.check_ball_proximity(global_position, target_hole_live, is_putt, start_p, shot_was_in_sand, is_airborne, velocity, hit_tree_this_shot)
 
 	# Check hole and rim physics interaction
 	if not is_falling_in_hole:
@@ -813,6 +813,8 @@ func _physics_process(delta: float) -> void:
 				_hit_leaves_this_shot = true
 				hit_tree_this_shot = true
 				print("[ball.gd] Hitting tree leaves! Reducing velocity.")
+				if has_node("/root/TensionManager"):
+					get_node("/root/TensionManager").on_tree_hit()
 				if has_node("/root/AnnouncerEngine") and not _skipping_flight:
 					get_node("/root/AnnouncerEngine").call("SpeakTreeHeckle")
 		else:
@@ -943,6 +945,10 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 		if is_ground_norm:
 			floor_normal = normal
 			var prev_normal_velocity := prev_velocity.dot(normal)
+			if collider != null and _is_collider_tree(collider):
+				hit_tree_this_shot = true
+				if has_node("/root/TensionManager"):
+					get_node("/root/TensionManager").on_tree_hit()
 
 			# Ignore ground collision depenetration on launch/ascent while in FLIGHT state.
 			# For low-speed chip/pitch shots off turf, fringe collars, or uphill lies,
@@ -1084,6 +1090,8 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 					hit_tree_this_shot = true
 					if has_node("/root/AnnouncerEngine") and not _skipping_flight:
 						get_node("/root/AnnouncerEngine").call("SpeakTreeHeckle")
+				if has_node("/root/TensionManager"):
+					get_node("/root/TensionManager").on_tree_hit()
 
 			# Damped reflection off vertical surfaces (walls, barriers, trees, etc.)
 			velocity = velocity.bounce(normal) * 0.35

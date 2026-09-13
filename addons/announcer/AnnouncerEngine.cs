@@ -433,9 +433,9 @@ public partial class AnnouncerEngine : Node
         _shotHadCommentary = false; // Reset per-shot commentary tracking
         _ballHitTree = false; // Reset per-shot tree collision tracking
 
-        float speedMph = shotData.TryGetValue("Speed", out var speedVal) ? (float)speedVal : 0.0f;
-        float vla = shotData.TryGetValue("VLA", out var vlaVal) ? (float)vlaVal : 0.0f;
-        string shotType = shotData.TryGetValue("ShotType", out var typeVal) ? (string)typeVal : "";
+        float speedMph = GetFloatSafe(shotData, "Speed");
+        float vla = GetFloatSafe(shotData, "VLA");
+        string shotType = GetStringSafe(shotData, "ShotType");
 
         bool isPutt = shotType.Equals("putt", StringComparison.OrdinalIgnoreCase);
 
@@ -480,11 +480,11 @@ public partial class AnnouncerEngine : Node
             return;
         }
 
-        float speedMph = shotData.TryGetValue("Speed", out var speedVal) ? (float)speedVal : 0.0f;
-        float totalDistYards = shotData.TryGetValue("TotalDistance", out var distVal) ? (float)distVal * 1.09361f : 0.0f;
-        float offlineYards = shotData.TryGetValue("SideDistance", out var sideVal) ? (float)sideVal * 1.09361f : 0.0f;
-        float targetDistYards = shotData.TryGetValue("TargetDistance", out var targetVal) ? (float)targetVal * 1.09361f : 0.0f;
-        string shotType = shotData.TryGetValue("ShotType", out var typeVal) ? (string)typeVal : "";
+        float speedMph = GetFloatSafe(shotData, "Speed");
+        float totalDistYards = GetFloatSafe(shotData, "TotalDistance") * 1.09361f;
+        float offlineYards = GetFloatSafe(shotData, "SideDistance") * 1.09361f;
+        float targetDistYards = GetFloatSafe(shotData, "TargetDistance") * 1.09361f;
+        string shotType = GetStringSafe(shotData, "ShotType");
 
         bool isPutt = shotType.Equals("putt", StringComparison.OrdinalIgnoreCase);
 
@@ -665,5 +665,26 @@ public partial class AnnouncerEngine : Node
             if (PraiseEnabled)
                 PlayCategoryGuarded("under_par", isHeckle: false, guaranteed: true);
         }
+    }
+
+    private static float GetFloatSafe(Dictionary dict, string key, float defaultValue = 0.0f)
+    {
+        if (dict.TryGetValue(key, out var val))
+        {
+            if (val.VariantType == Variant.Type.Float || val.VariantType == Variant.Type.Int)
+            {
+                return (float)val;
+            }
+        }
+        return defaultValue;
+    }
+
+    private static string GetStringSafe(Dictionary dict, string key, string defaultValue = "")
+    {
+        if (dict.TryGetValue(key, out var val) && val.VariantType != Variant.Type.Nil)
+        {
+            return val.AsString() ?? defaultValue;
+        }
+        return defaultValue;
     }
 }

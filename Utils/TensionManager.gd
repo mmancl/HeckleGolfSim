@@ -8,8 +8,9 @@ signal tension_stopped()
 
 const PUTT_THRESHOLD_METERS := 3.048   # 10 feet in meters (10.0 * 0.3048)
 const CHIP_THRESHOLD_METERS := 7.62    # 25 feet in meters (25.0 * 0.3048)
-const PUTT_MIN_SUSPENSE_DISTANCE_METERS := 12.192  # 40 feet in meters (40.0 * 0.3048)
-const CHIP_MIN_SUSPENSE_DISTANCE_METERS := 30.48   # 100 feet in meters (100.0 * 0.3048)
+const PUTT_MIN_SUSPENSE_DISTANCE_METERS := 1.8288  # 6 feet in meters (don't trigger on trivial tap-ins)
+const CHIP_MIN_SUSPENSE_DISTANCE_METERS := 4.572   # 15 feet in meters (don't trigger on trivial fringe tap-ins)
+const MAX_PROJECTED_LANDING_DISTANCE_METERS := 18.288 # 20 yards in meters (20.0 * 0.9144)
 const PAST_HOLE_THRESHOLD_METERS := 0.3048         # 1 foot past the hole in meters (1.0 * 0.3048)
 const CYCLE_DURATION := 0.80          # ~75 BPM double-thump heartbeat cycle
 
@@ -25,6 +26,7 @@ var _scheduled_mode: String = ""
 var _closest_dist_reached: float = 9999.0
 var _has_entered_suspense_zone: bool = false
 var _shot_suspense_locked_out: bool = false
+var _tree_hit_this_shot: bool = false
 var _suspense_predicted_close: bool = false
 var _predicted_ending_dist: float = 0.0
 
@@ -169,10 +171,11 @@ func is_active() -> bool:
 
 func is_course_play_active() -> bool:
 	# 1. Global Settings minigame and menu checks
-	if has_node("/root/GlobalSettings"):
-		if GlobalSettings.is_minigames_scene() or GlobalSettings.is_chipping_minigame or GlobalSettings.is_putting_minigame:
+	var gs = get_node_or_null("/root/GlobalSettings")
+	if gs != null:
+		if gs.is_minigames_scene() or gs.is_chipping_minigame or gs.is_putting_minigame:
 			return false
-		if GlobalSettings.is_menu_screen():
+		if gs.is_menu_screen():
 			return false
 
 	# 2. MultiplayerManager checks (Course Play requires active round without practice mode)
@@ -245,7 +248,7 @@ func is_course_play_active() -> bool:
 # ---------------- SUSPENSE ELIGIBILITY ----------------
 
 func is_shot_eligible_for_suspense(start_pos: Vector3, target_pos: Vector3, is_putt: bool, is_sand: bool = false) -> bool:
-	if not is_course_play_active():
+	if not is_course_play_active() or _shot_suspense_locked_out or _tree_hit_this_shot:
 		return false
 	if target_pos.is_zero_approx():
 		return false
@@ -258,7 +261,7 @@ func is_shot_eligible_for_suspense(start_pos: Vector3, target_pos: Vector3, is_p
 # ---------------- TRAJECTORY PREDICTION ----------------
 
 func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool, target_pos: Vector3, is_sand: bool = false) -> Dictionary:
-	if not is_course_play_active():
+	if not is_course_play_active() or _shot_suspense_locked_out or _tree_hit_this_shot:
 		return {"will_enter_zone": false, "min_dist": 999.0, "ending_dist": 999.0}
 	if target_pos.is_zero_approx():
 		return {"will_enter_zone": false, "min_dist": 999.0, "ending_dist": 999.0}
@@ -273,7 +276,9 @@ func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool
 	var min_dist_2d = 9999.0
 	var dt = 0.025
 	var holed_out = false
+	var did_land = false
 	var landing_dist_from_start = 0.0
+	var landing_dist_to_hole = 9999.0
 
 	if is_putt:
 		sim_vel.y = 0.0
@@ -311,15 +316,20 @@ func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool
 
 			if not on_ground:
 				sim_pos += sim_vel * dt
+				# Aerodynamic drag deceleration
+				var speed = sim_vel.length()
+				var drag = 0.0042 * speed * speed
+				sim_vel -= sim_vel.normalized() * (drag * dt)
 				sim_vel.y -= 9.81 * dt
-				sim_vel.x *= (1.0 - 0.035 * dt)
-				sim_vel.z *= (1.0 - 0.035 * dt)
 
 				# Ball only contacts the turf when descending and at or below interpolated ground
 				if sim_vel.y <= 0.0 and sim_pos.y <= local_ground_y:
 					sim_pos.y = local_ground_y
 					on_ground = true
+					did_land = true
 					landing_dist_from_start = dist_from_start
+					var landing_pos_2d = Vector2(sim_pos.x, sim_pos.z)
+					landing_dist_to_hole = landing_pos_2d.distance_to(target_2d)
 					sim_vel.y = absf(sim_vel.y) * 0.20
 					sim_vel.x *= 0.52
 					sim_vel.z *= 0.52
@@ -338,7 +348,8 @@ func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool
 				if flat_speed < 0.05:
 					break
 				sim_pos += sim_vel * dt
-				var new_flat_speed = max(0.0, flat_speed - 0.55 * dt)
+				# Realistic turf rolling friction deceleration
+				var new_flat_speed = max(0.0, flat_speed - 1.8 * dt)
 				var dir_2d = Vector2(sim_vel.x, sim_vel.z).normalized()
 				sim_vel.x = dir_2d.x * new_flat_speed
 				sim_vel.z = dir_2d.y * new_flat_speed
@@ -363,14 +374,15 @@ func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool
 			if est_roll >= (total_target_dist - PUTT_THRESHOLD_METERS) and est_roll <= (total_target_dist + 5.0):
 				will_enter = true
 	else:
-		# Chip prediction:
-		# Ensure the ball flight doesn't carry 6+ feet (1.8m) past the hole in the air
-		var total_target_dist = Vector2(start_pos.x, start_pos.z).distance_to(target_2d)
-		var carry_past_hole = landing_dist_from_start > (total_target_dist + 1.8)
-
-		# If the flight or rollout enters within the 25 ft threshold, or ends near the hole, or holes out:
-		if not carry_past_hole and (min_dist_2d <= CHIP_THRESHOLD_METERS or ending_dist_2d <= (CHIP_THRESHOLD_METERS + 2.0) or holed_out):
-			will_enter = true
+		# Airborne shot prediction (chips, pitches, approach shots):
+		# The ball MUST be projected to land at least within 20 yards (18.288m) of the hole to trigger.
+		if not did_land or landing_dist_to_hole > MAX_PROJECTED_LANDING_DISTANCE_METERS:
+			will_enter = false
+		else:
+			# If projected to land within 20 yards of the hole, trigger if it holes out,
+			# enters within threshold (25 ft), or finishes close:
+			if holed_out or min_dist_2d <= CHIP_THRESHOLD_METERS or ending_dist_2d <= (CHIP_THRESHOLD_METERS + 2.0):
+				will_enter = true
 
 	var time_to_apex: float = 0.0
 	var delay_to_apex: float = 0.25
@@ -384,11 +396,12 @@ func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool
 		"min_dist": min_dist_2d if holed_out else ending_dist_2d,
 		"mode": mode,
 		"time_to_apex": time_to_apex,
-		"delay_to_apex": delay_to_apex
+		"delay_to_apex": delay_to_apex,
+		"landing_dist_to_hole": landing_dist_to_hole
 	}
 
 func schedule_apex_tension(mode: String, delay_seconds: float = 0.25, ending_dist: float = 0.0) -> void:
-	if not is_course_play_active() or _shot_suspense_locked_out:
+	if not is_course_play_active() or _shot_suspense_locked_out or _tree_hit_this_shot:
 		return
 	cancel_scheduled_tension()
 	_is_scheduled = true
@@ -399,7 +412,7 @@ func schedule_apex_tension(mode: String, delay_seconds: float = 0.25, ending_dis
 	_has_entered_suspense_zone = false
 	var timer = get_tree().create_timer(delay_seconds)
 	await timer.timeout
-	if _is_scheduled and not _shot_suspense_locked_out:
+	if _is_scheduled and not _shot_suspense_locked_out and not _tree_hit_this_shot:
 		_is_scheduled = false
 		var threshold = PUTT_THRESHOLD_METERS if mode == "putt" else CHIP_THRESHOLD_METERS
 		var closeness = clampf(1.0 - (ending_dist / maxf(threshold, 0.001)), 0.35, 1.0)
@@ -411,9 +424,16 @@ func schedule_early_tension(mode: String, delay_seconds: float = 0.02, ending_di
 func cancel_scheduled_tension() -> void:
 	_is_scheduled = false
 
+func on_tree_hit() -> void:
+	_tree_hit_this_shot = true
+	_suspense_predicted_close = false
+	cancel_scheduled_tension()
+	stop_tension(true)
+
 func reset_for_new_shot() -> void:
 	cancel_scheduled_tension()
 	_shot_suspense_locked_out = false
+	_tree_hit_this_shot = false
 	_suspense_predicted_close = false
 	_predicted_ending_dist = 0.0
 	_closest_dist_reached = 9999.0
@@ -432,8 +452,17 @@ func check_ball_proximity(
 	shot_start_pos: Vector3 = Vector3.ZERO,
 	is_sand: bool = false,
 	is_airborne: bool = false,
-	ball_vel: Vector3 = Vector3.ZERO
+	ball_vel: Vector3 = Vector3.ZERO,
+	hit_tree: bool = false
 ) -> bool:
+	# Never trigger or continue after hitting a tree
+	if _tree_hit_this_shot or hit_tree:
+		_tree_hit_this_shot = true
+		cancel_scheduled_tension()
+		if tension_active:
+			stop_tension(true)
+		return false
+
 	# If tension is ALREADY active:
 	if tension_active:
 		# 1. Turn off if the ball has come to a complete rest:
@@ -465,7 +494,7 @@ func check_ball_proximity(
 		current_closeness = maxf(current_closeness, closeness)
 		return true
 
-	# If not active, but already locked out on this shot (e.g. shot previously reached rest or went past):
+	# If not active, but already locked out on this shot (e.g. shot previously reached rest, hit tree, or went past):
 	if _shot_suspense_locked_out:
 		return false
 
@@ -485,7 +514,7 @@ func check_ball_proximity(
 	var vel_2d = Vector2(ball_vel.x, ball_vel.z)
 	var speed_2d = vel_2d.length()
 
-	# AIRBORNE APEX TRIGGER (For shots predicted to be close):
+	# AIRBORNE APEX TRIGGER (For shots predicted to be close and landing within 20 yards):
 	# If predicted close, start the heartbeat shortly after apex (once descending: ball_vel.y <= -0.5)
 	if _suspense_predicted_close and is_airborne and ball_vel.y <= -0.5:
 		var pred_closeness = clampf(1.0 - (_predicted_ending_dist / maxf(threshold, 0.001)), 0.35, 1.0)
@@ -495,6 +524,10 @@ func check_ball_proximity(
 	# LIVE PROXIMITY TRIGGER:
 	# Inside threshold (25 ft for chips, 10 ft for putts)
 	if dist_2d <= threshold and speed_2d > 0.08:
+		# If the ball is high in the air above the green, don't trigger live ground proximity
+		if is_airborne and (ball_pos.y - target_pos.y > 3.0):
+			return false
+
 		# If the ball is already physically more than 1 foot past the hole, do not start:
 		var start_pos_2d = Vector2(shot_start_pos.x, shot_start_pos.z) if not shot_start_pos.is_zero_approx() else Vector2.ZERO
 		if not start_pos_2d.is_zero_approx():
@@ -532,12 +565,13 @@ func check_ball_proximity(
 # ----------------- ACTIVATION / DEACTIVATION -----------------
 
 func start_tension(mode: String = "putt", initial_closeness: float = 0.40) -> void:
-	if _shot_suspense_locked_out:
+	if _shot_suspense_locked_out or _tree_hit_this_shot:
 		return
 	if not is_course_play_active():
 		return
 	cancel_scheduled_tension()
-	if has_node("/root/GlobalSettings") and not GlobalSettings.range_settings.tension_effects_enabled.value:
+	var gs = get_node_or_null("/root/GlobalSettings")
+	if gs != null and not gs.range_settings.tension_effects_enabled.value:
 		return
 	current_mode = mode
 	current_closeness = initial_closeness

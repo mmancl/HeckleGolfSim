@@ -2043,7 +2043,7 @@ func _setup_keybindings_section() -> void:
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margin.add_theme_constant_override("margin_left", 16)
 	margin.add_theme_constant_override("margin_top", 16)
-	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_right", 36)
 	margin.add_theme_constant_override("margin_bottom", 16)
 	scroll.add_child(margin)
 

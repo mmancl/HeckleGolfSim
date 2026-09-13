@@ -97,7 +97,7 @@ static func apply_boost(data: Dictionary, fallback_club: String = "") -> void:
 	if "foam_ball_boost_percent" in range_settings:
 		boost_percent = float(range_settings.foam_ball_boost_percent.value)
 	
-	if boost_percent <= 0.0:
+	if is_nan(boost_percent) or is_inf(boost_percent) or boost_percent <= 0.0:
 		data["_foam_boost_applied"] = true
 		return
 	
@@ -112,6 +112,8 @@ static func apply_boost(data: Dictionary, fallback_club: String = "") -> void:
 	
 	var effective_pct := get_effective_boost_pct(boost_percent, club)
 	var multiplier := 1.0 + (effective_pct / 100.0)
+	if is_nan(multiplier) or is_inf(multiplier):
+		multiplier = 1.0
 	
 	data["_foam_boost_applied"] = true
 	data["_foam_boost_effective_pct"] = effective_pct
@@ -120,20 +122,30 @@ static func apply_boost(data: Dictionary, fallback_club: String = "") -> void:
 		data["Club"] = club
 	
 	var raw_speed: float = float(data.get("Speed", data.get("BallSpeed", 0.0)))
+	if is_nan(raw_speed) or is_inf(raw_speed):
+		raw_speed = 0.0
 	data["_original_speed"] = raw_speed
 	
 	if raw_speed > 0.0 and multiplier != 1.0:
 		var boosted_speed: float = raw_speed * multiplier
-		data["Speed"] = boosted_speed
-		if data.has("BallSpeed"):
-			data["BallSpeed"] = boosted_speed
-		
-		# Update SmashFactor if present
-		if data.has("ClubSpeed") and float(data["ClubSpeed"]) > 0.0:
-			data["SmashFactor"] = boosted_speed / float(data["ClubSpeed"])
-		elif data.has("SmashFactor") and float(data["SmashFactor"]) > 0.0:
-			data["SmashFactor"] = float(data["SmashFactor"]) * multiplier
-		
-		print("[FoamBallBoost] Applied +%.1f%% boost to %s shot. Speed: %.1f -> %.1f mph" % [
-			effective_pct, club, raw_speed, boosted_speed
-		])
+		if not is_nan(boosted_speed) and not is_inf(boosted_speed):
+			data["Speed"] = boosted_speed
+			if data.has("BallSpeed"):
+				data["BallSpeed"] = boosted_speed
+			
+			# Update SmashFactor safely if present
+			var raw_club_speed: float = float(data.get("ClubSpeed", 0.0))
+			if raw_club_speed > 0.1 and not is_nan(raw_club_speed) and not is_inf(raw_club_speed):
+				var smash: float = boosted_speed / raw_club_speed
+				if not is_nan(smash) and not is_inf(smash):
+					data["SmashFactor"] = smash
+			elif data.has("SmashFactor"):
+				var raw_smash: float = float(data["SmashFactor"])
+				if raw_smash > 0.0 and not is_nan(raw_smash) and not is_inf(raw_smash):
+					var smash: float = raw_smash * multiplier
+					if not is_nan(smash) and not is_inf(smash):
+						data["SmashFactor"] = smash
+			
+			print("[FoamBallBoost] Applied +%.1f%% boost to %s shot. Speed: %.1f -> %.1f mph" % [
+				effective_pct, club, raw_speed, boosted_speed
+			])
