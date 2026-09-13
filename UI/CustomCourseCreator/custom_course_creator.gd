@@ -53,6 +53,7 @@ func _ready() -> void:
 	ThemeManager.apply_option_button_style(course_opt, 18, Vector2(220, 48))
 	ThemeManager.apply_option_button_style(hole_opt, 18, Vector2(180, 48))
 	ThemeManager.apply_input_style(title_input)
+	ThemeManager.apply_item_list_style(hole_list)
 
 	done_btn.pressed.connect(_on_done_pressed)
 	cancel_btn.pressed.connect(_on_cancel_pressed)

@@ -6,6 +6,9 @@ signal set_session(dir: String, player_name: String)
 signal hit_shot(data)
 signal manage_players_requested
 signal skip_flight_requested
+signal stats_visibility_changed(is_visible: bool)
+signal golfer_cam_modal_state_changed(is_open: bool)
+signal golfer_cam_enabled_changed(is_enabled: bool)
 
 
 var _avg_carry: Label
@@ -17,6 +20,7 @@ var _prev_shot_popup: Panel
 var _prev_shot_data_label: Label
 var _last_shot_data: Dictionary = {}
 var _averages_panel: PanelContainer = null
+var _prev_shot_btn: Button = null
 var _right_panel: VBoxContainer = null
 var _home_btn: Button = null
 var _exit_confirm_dialog: Control = null
@@ -24,10 +28,20 @@ var _hide_helpers_btn: Button = null
 var _stats_btn: Button = null
 var _map_btn: Button = null
 var _skip_btn: Button = null
+var _announcer_btn: Button = null
+var _tension_btn: Button = null
+var _dist_btn: Button = null
+var _golfer_cam_btn: Button = null
+var _shot_analysis_btn: Button = null
 var _golfer_cam_panel: PanelContainer = null
 var _camera_feed_rect: TextureRect = null
 var _current_camera_feed_index: int = 0
 var _camera_flip_btn: Button = null
+var _camera_minimize_btn: Button = null
+var _camera_restore_pill: Button = null
+var _is_golfer_cam_enabled: bool = false
+var _is_golfer_cam_minimized: bool = false
+var _stats_were_visible_before_cam: bool = true
 var _phone_cam_url: String:
 	get:
 		return GlobalSettings.range_settings.phone_cam_url.value
@@ -51,13 +65,17 @@ func _ready() -> void:
 	if has_node("SettingsLayer"):
 		$SettingsLayer.layer = 105
 	GlobalSettings.range_settings.shot_injector_enabled.setting_changed.connect(toggle_shot_injector)
+	if has_node("/root/GlobalSettings") and "range_settings" in GlobalSettings and "shot_analysis_enabled" in GlobalSettings.range_settings:
+		GlobalSettings.range_settings.shot_analysis_enabled.setting_changed.connect(func(_val = null):
+			_update_prev_shot_analysis_visibility()
+		)
 	_setup_averages_ui()
 	_setup_prev_shot_ui()
 	_setup_golfer_camera_ui()
 	
 	if CameraServer.has_signal("camera_feed_added"):
 		CameraServer.connect("camera_feed_added", func(_id):
-			if is_golfer_camera_visible() and not _use_phone_stream:
+			if is_golfer_camera_enabled() and not _use_phone_stream:
 				_update_camera_feed(true)
 		)
 
@@ -65,6 +83,8 @@ func _ready() -> void:
 	if bridge != null:
 		if bridge.has_signal("desktop_frame_received") and not bridge.desktop_frame_received.is_connected(_on_desktop_frame_received):
 			bridge.desktop_frame_received.connect(_on_desktop_frame_received)
+		if bridge.has_signal("desktop_cameras_updated") and not bridge.desktop_cameras_updated.is_connected(_on_desktop_cameras_updated):
+			bridge.desktop_cameras_updated.connect(_on_desktop_cameras_updated)
 
 	$SessionPopUp.cancelled.connect(_on_session_pop_up_cancelled)
 
@@ -214,11 +234,14 @@ func _ready() -> void:
 				if new_val:
 					announcer_btn.text = "🎙 Announcer: ON"
 					apply_material_button_style(announcer_btn, Color(0.2, 0.6, 0.3, 0.85))
+					a.call("SpeakHecklesEnabled")
 				else:
 					announcer_btn.text = "🎙 Announcer: MUTED"
 					apply_material_button_style(announcer_btn, Color(0.5, 0.5, 0.5, 0.85))
+					a.call("SpeakHecklesDisabled")
 		)
 		toggles_container.add_child(announcer_btn)
+		_announcer_btn = announcer_btn
 		
 		# Suspense Heartbeat & Tunnel Vision Toggle Button
 		var tension_btn = Button.new()
@@ -244,6 +267,7 @@ func _ready() -> void:
 					apply_material_button_style(tension_btn, Color(0.5, 0.5, 0.5, 0.85))
 		)
 		toggles_container.add_child(tension_btn)
+		_tension_btn = tension_btn
 
 		# Distance Menu Button
 		var dist_btn = Button.new()
@@ -269,6 +293,7 @@ func _ready() -> void:
 						menu.aim_target_node = p.get("aim_target_pos")
 		)
 		toggles_container.add_child(dist_btn)
+		_dist_btn = dist_btn
 		
 		var distance_menu_script = load("res://UI/distance_menu.gd")
 		var dist_menu = distance_menu_script.new()
@@ -284,16 +309,15 @@ func _ready() -> void:
 		golfer_cam_btn.custom_minimum_size = Vector2(180, 56)
 		apply_material_button_style(golfer_cam_btn, Color(0.2, 0.45, 0.45, 0.85))
 		golfer_cam_btn.pressed.connect(func():
-			var is_vis = not is_golfer_camera_visible()
-			set_golfer_camera_visible(is_vis)
-			if is_vis:
-				golfer_cam_btn.text = "📹 Golfer Cam: ON"
-				apply_material_button_style(golfer_cam_btn, Color(0.15, 0.6, 0.5, 0.85))
+			if not is_golfer_camera_enabled():
+				set_golfer_camera_visible(true)
+			elif is_golfer_camera_minimized():
+				restore_golfer_camera()
 			else:
-				golfer_cam_btn.text = "📹 Golfer Cam: OFF"
-				apply_material_button_style(golfer_cam_btn, Color(0.2, 0.45, 0.45, 0.85))
+				set_golfer_camera_visible(false)
 		)
 		toggles_container.add_child(golfer_cam_btn)
+		_golfer_cam_btn = golfer_cam_btn
 
 		# Shot Analysis Toggle Button
 		var shot_analysis_btn = Button.new()
@@ -317,6 +341,8 @@ func _ready() -> void:
 				apply_material_button_style(shot_analysis_btn, Color(0.25, 0.35, 0.45, 0.85))
 		)
 		toggles_container.add_child(shot_analysis_btn)
+		_shot_analysis_btn = shot_analysis_btn
+
 
 		# Position ClubSelector directly underneath SettingsButton and HideHelpersButton
 		var club_sel = get_node_or_null("GridCanvas/ClubSelector")
@@ -354,10 +380,6 @@ func _ready() -> void:
 		stats_btn.offset_bottom = -24
 		stats_btn.pressed.connect(func():
 			toggle_stats_visibility()
-			if is_stats_visible():
-				apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85))
-			else:
-				apply_circular_button_style(stats_btn, Color(0.15, 0.15, 0.15, 0.85))
 		)
 		$OverlayLayer.add_child(stats_btn)
 		_stats_btn = stats_btn
@@ -416,10 +438,15 @@ func _ready() -> void:
 	)
 	$OverlayLayer.add_child(_skip_btn)
 
+	if has_node("/root/KeybindingManager"):
+		KeybindingManager.keybindings_changed.connect(_update_tooltips)
+	_update_tooltips()
+
+
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(_delta: float) -> void:
-	if is_golfer_camera_visible():
+	if is_golfer_camera_enabled():
 		if _camera_feed_rect != null and _camera_feed_rect.texture == null:
 			if not _use_phone_stream and CameraServer.get_feed_count() > 0:
 				_update_camera_feed(true)
@@ -452,15 +479,10 @@ func set_data(data: Dictionary, is_final_rest: bool = false) -> void:
 				val = _format_angle(val)
 			if child.has_method("set_data"):
 				child.call("set_data", str(val))
-	
-	# Only pop up shot analysis / swing replay at the END of the shot when the ball has settled
-	if is_final_rest:
-		if is_golfer_camera_visible() or is_shot_analysis_enabled():
-			trigger_swing_replay_modal(data)
 
 
 func on_ball_hit() -> void:
-	if is_golfer_camera_visible() and _swing_frame_buffer != null:
+	if is_golfer_camera_enabled() and _swing_frame_buffer != null:
 		# Continue capturing for 1.2s to capture impact and follow-through, then save snapshot
 		get_tree().create_timer(1.2).timeout.connect(func():
 			if _swing_frame_buffer != null:
@@ -469,7 +491,7 @@ func on_ball_hit() -> void:
 
 
 func trigger_swing_replay_modal(data: Dictionary) -> void:
-	var cam_active: bool = is_golfer_camera_visible()
+	var cam_active: bool = is_golfer_camera_enabled()
 	var analysis_active: bool = is_shot_analysis_enabled()
 	if not cam_active and not analysis_active:
 		return
@@ -504,7 +526,6 @@ func trigger_swing_replay_modal(data: Dictionary) -> void:
 		if not is_suggestions_only:
 			if not _saved_swing_frames.is_empty():
 				recorded_frames = _saved_swing_frames.duplicate()
-				_saved_swing_frames.clear()
 			elif _swing_frame_buffer != null:
 				recorded_frames = _swing_frame_buffer.get_captured_frames()
 		
@@ -534,9 +555,6 @@ func trigger_swing_replay_modal(data: Dictionary) -> void:
 					modal_data["lie_type"] = "teebox" if modal_data.get("is_tee", false) else "fairway"
 
 		modal.setup_modal(modal_data, recorded_frames, is_suggestions_only)
-		modal.closed.connect(func():
-			_saved_swing_frames.clear()
-		)
 
 
 func _format_angle(value) -> String:
@@ -591,10 +609,19 @@ func toggle_shot_injector(value) -> void:
 
 func _on_toggle_settings_requested() -> void:
 	$SettingsLayer.visible = not $SettingsLayer.visible
+	if $SettingsLayer.visible:
+		var rs = get_node_or_null("SettingsLayer/Container/RangeSettings")
+		if rs != null:
+			rs.visible = true
+			if rs.has_method("_on_settings_opened"):
+				rs.call("_on_settings_opened")
 
 
 func _on_close_settings_requested() -> void:
 	$SettingsLayer.visible = false
+	var rs = get_node_or_null("SettingsLayer/Container/RangeSettings")
+	if rs != null:
+		rs.visible = false
 
 
 func set_total_distance(text: String) -> void:
@@ -616,7 +643,7 @@ func _setup_averages_ui() -> void:
 	_averages_panel = PanelContainer.new()
 	_averages_panel.name = "AveragesPanel"
 	_averages_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_averages_panel.size_flags_vertical = Control.SIZE_SHRINK_END
+	_averages_panel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_averages_panel.custom_minimum_size = Vector2(0, 52)
 	
 	var panel_style = StyleBoxFlat.new()
@@ -666,16 +693,31 @@ func _setup_averages_ui() -> void:
 	_avg_target_diff.add_theme_font_size_override("font_size", 15)
 	averages_hbox.add_child(_avg_target_diff)
 	
-	var view_prev_btn = Button.new()
-	view_prev_btn.text = "View Previous Shot"
-	view_prev_btn.custom_minimum_size = Vector2(180, 48)
-	view_prev_btn.add_theme_font_size_override("font_size", 15)
-	apply_material_button_style(view_prev_btn, Color(0.25, 0.35, 0.45, 0.85))
-	view_prev_btn.pressed.connect(_on_view_prev_shot_pressed)
-	averages_hbox.add_child(view_prev_btn)
-	
 	_averages_panel.add_child(averages_hbox)
-	add_child(_averages_panel)
+
+	_prev_shot_btn = Button.new()
+	_prev_shot_btn.name = "PrevShotAnalysisButton"
+	_prev_shot_btn.text = "Previous Shot Analysis"
+	_prev_shot_btn.custom_minimum_size = Vector2(210, 48)
+	_prev_shot_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_prev_shot_btn.add_theme_font_size_override("font_size", 15)
+	apply_material_button_style(_prev_shot_btn, Color(0.25, 0.35, 0.45, 0.85))
+	_prev_shot_btn.pressed.connect(_on_prev_shot_analysis_pressed)
+	_prev_shot_btn.tooltip_text = "View analysis and recommendations for your previous shot"
+
+	var bottom_bar = HBoxContainer.new()
+	bottom_bar.name = "BottomBarContainer"
+	bottom_bar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	bottom_bar.size_flags_vertical = Control.SIZE_SHRINK_END
+	bottom_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	bottom_bar.add_theme_constant_override("separation", 16)
+	bottom_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	bottom_bar.add_child(_averages_panel)
+	bottom_bar.add_child(_prev_shot_btn)
+	add_child(bottom_bar)
+
+	_update_prev_shot_analysis_visibility()
 
 
 func update_average_stats(avg_data: Dictionary) -> void:
@@ -764,29 +806,17 @@ func _setup_prev_shot_ui() -> void:
 	add_child(_prev_shot_popup)
 
 
-func _on_view_prev_shot_pressed() -> void:
+func _update_prev_shot_analysis_visibility() -> void:
+	if _prev_shot_btn != null:
+		var cam_active: bool = is_golfer_camera_enabled()
+		var analysis_active: bool = is_shot_analysis_enabled()
+		_prev_shot_btn.visible = cam_active or analysis_active
+
+
+func _on_prev_shot_analysis_pressed() -> void:
 	if _last_shot_data.is_empty():
-		_prev_shot_data_label.text = "No shot recorded in this session yet."
-	else:
-		var is_imperial: bool = GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL if has_node("/root/GlobalSettings") else true
-		var stats: Array[String] = []
-		for stat_def in StatDefinitions.STATS:
-			var id_str: String = str(stat_def.get("id", ""))
-			if _last_shot_data.has(id_str):
-				var name_str: String = str(stat_def.get("name", id_str))
-				var u_str: String = str(stat_def.get("units_imperial" if is_imperial else "units_metric", ""))
-				var val = _last_shot_data.get(id_str)
-				if u_str != "" and u_str != "ratio":
-					stats.append("• %s: %s %s" % [name_str, str(val), u_str])
-				else:
-					stats.append("• %s: %s" % [name_str, str(val)])
-		
-		if stats.is_empty():
-			_prev_shot_data_label.text = "No shot recorded in this session yet."
-		else:
-			_prev_shot_data_label.text = "\n".join(stats)
-	
-	_prev_shot_popup.visible = true
+		return
+	trigger_swing_replay_modal(_last_shot_data)
 
 
 func is_stats_visible() -> bool:
@@ -794,8 +824,7 @@ func is_stats_visible() -> bool:
 	return dist_panel.visible if dist_panel != null else true
 
 
-func toggle_stats_visibility() -> void:
-	var show_stats = not is_stats_visible()
+func set_stats_visible(show_stats: bool) -> void:
 	var grid = get_node_or_null("GridCanvas")
 	if grid != null:
 		for child in grid.get_children():
@@ -803,6 +832,16 @@ func toggle_stats_visibility() -> void:
 				child.visible = show_stats
 	if _averages_panel != null:
 		_averages_panel.visible = show_stats
+	if _stats_btn != null and is_instance_valid(_stats_btn):
+		if show_stats:
+			apply_circular_button_style(_stats_btn, Color(0.24, 0.46, 0.72, 0.85))
+		else:
+			apply_circular_button_style(_stats_btn, Color(0.15, 0.15, 0.15, 0.85))
+	stats_visibility_changed.emit(show_stats)
+
+
+func toggle_stats_visibility() -> void:
+	set_stats_visible(not is_stats_visible())
 
 
 func apply_material_button_style(btn: Button, bg_color: Color):
@@ -886,6 +925,9 @@ func _on_home_button_pressed() -> void:
 
 
 func _show_exit_confirm_dialog() -> void:
+	if has_node("/root/AnnouncerEngine"):
+		get_node("/root/AnnouncerEngine").call("SpeakHomeButtonHeckle")
+
 	if _exit_confirm_dialog != null:
 		_exit_confirm_dialog.visible = true
 		return
@@ -1092,6 +1134,15 @@ func _setup_golfer_camera_ui() -> void:
 	status_dot.add_theme_font_size_override("font_size", 14)
 	status_dot.add_theme_color_override("font_color", Color(1.0, 0.42, 0.42))
 	header.add_child(status_dot)
+
+	_camera_minimize_btn = Button.new()
+	_camera_minimize_btn.name = "MinimizeCameraButton"
+	_camera_minimize_btn.text = "🗕"
+	_camera_minimize_btn.tooltip_text = "Minimize Golfer Cam (Keeps recording in background)"
+	_camera_minimize_btn.custom_minimum_size = Vector2(44, 48)
+	apply_material_button_style(_camera_minimize_btn, Color(0.25, 0.35, 0.45, 0.9))
+	_camera_minimize_btn.pressed.connect(minimize_golfer_camera)
+	header.add_child(_camera_minimize_btn)
 	
 	main_vbox.add_child(header)
 
@@ -1171,22 +1222,171 @@ func _setup_golfer_camera_ui() -> void:
 	_golfer_cam_panel.add_child(main_vbox)
 	$OverlayLayer.add_child(_golfer_cam_panel)
 
+	# Floating restore pill (visible only when camera is minimized & recording)
+	_camera_restore_pill = Button.new()
+	_camera_restore_pill.name = "CameraRestorePill"
+	_camera_restore_pill.text = "📹 Golfer Cam [REC] 🗖"
+	_camera_restore_pill.tooltip_text = "Golfer Cam is recording in background. Click to expand preview."
+	_camera_restore_pill.visible = false
+	_camera_restore_pill.custom_minimum_size = Vector2(180, 42)
+	_camera_restore_pill.anchor_left = 0.0
+	_camera_restore_pill.anchor_right = 0.0
+	_camera_restore_pill.anchor_top = 1.0
+	_camera_restore_pill.anchor_bottom = 1.0
+	_camera_restore_pill.offset_left = 30
+	_camera_restore_pill.offset_top = -160
+	_camera_restore_pill.offset_right = 210
+	_camera_restore_pill.offset_bottom = -118
+	_camera_restore_pill.add_theme_font_size_override("font_size", 13)
+	
+	var pill_style = StyleBoxFlat.new()
+	pill_style.bg_color = Color(0.12, 0.45, 0.4, 0.9)
+	pill_style.corner_radius_top_left = 10
+	pill_style.corner_radius_top_right = 10
+	pill_style.corner_radius_bottom_left = 10
+	pill_style.corner_radius_bottom_right = 10
+	pill_style.content_margin_left = 10
+	pill_style.content_margin_right = 10
+	pill_style.content_margin_top = 8
+	pill_style.content_margin_bottom = 8
+	pill_style.border_width_left = 1
+	pill_style.border_width_top = 1
+	pill_style.border_width_right = 1
+	pill_style.border_width_bottom = 1
+	pill_style.border_color = Color(0.2, 0.75, 0.65, 0.8)
+	_camera_restore_pill.add_theme_stylebox_override("normal", pill_style)
+	
+	var pill_hover = pill_style.duplicate()
+	pill_hover.bg_color = Color(0.16, 0.55, 0.48, 0.95)
+	_camera_restore_pill.add_theme_stylebox_override("hover", pill_hover)
+	
+	var pill_pressed = pill_style.duplicate()
+	pill_pressed.bg_color = Color(0.08, 0.35, 0.3, 0.95)
+	_camera_restore_pill.add_theme_stylebox_override("pressed", pill_pressed)
+	
+	_camera_restore_pill.pressed.connect(restore_golfer_camera)
+	$OverlayLayer.add_child(_camera_restore_pill)
+
+
+var _hud_elements_suppressed: bool = false
+
+
+func set_hud_elements_visible(is_vis: bool) -> void:
+	_hud_elements_suppressed = not is_vis
+	_update_restore_pill_visibility()
+	if _golfer_cam_panel != null and is_instance_valid(_golfer_cam_panel):
+		if not is_vis:
+			_golfer_cam_panel.visible = false
+		else:
+			_golfer_cam_panel.visible = is_golfer_camera_modal_open()
+	if _stats_btn != null and is_instance_valid(_stats_btn):
+		_stats_btn.visible = is_vis
+	if _map_btn != null and is_instance_valid(_map_btn):
+		_map_btn.visible = is_vis
+
+
+func _update_restore_pill_visibility() -> void:
+	if _camera_restore_pill != null and is_instance_valid(_camera_restore_pill):
+		_camera_restore_pill.visible = _is_golfer_cam_minimized and not _hud_elements_suppressed
+
+
+func is_golfer_camera_enabled() -> bool:
+	return _is_golfer_cam_enabled
+
+
+func is_golfer_camera_minimized() -> bool:
+	return _is_golfer_cam_minimized
+
+
+func is_golfer_camera_visible() -> bool:
+	return _golfer_cam_panel.visible if _golfer_cam_panel != null else false
+
+
+func is_golfer_camera_modal_open() -> bool:
+	return _is_golfer_cam_enabled and not _is_golfer_cam_minimized and _golfer_cam_panel != null and _golfer_cam_panel.visible
+
+
+func minimize_golfer_camera() -> void:
+	if not _is_golfer_cam_enabled:
+		return
+	_is_golfer_cam_minimized = true
+	if _golfer_cam_panel != null:
+		_golfer_cam_panel.visible = false
+	_update_restore_pill_visibility()
+	_update_golfer_cam_button_state()
+	_update_button_shifts()
+	golfer_cam_modal_state_changed.emit(false)
+
+
+func restore_golfer_camera() -> void:
+	if not _is_golfer_cam_enabled:
+		set_golfer_camera_visible(true)
+		return
+	_is_golfer_cam_minimized = false
+	if _golfer_cam_panel != null:
+		_golfer_cam_panel.visible = not _hud_elements_suppressed
+	_update_restore_pill_visibility()
+	_update_golfer_cam_button_state()
+	_update_button_shifts()
+	golfer_cam_modal_state_changed.emit(true)
+
+
+func _update_golfer_cam_button_state() -> void:
+	if _golfer_cam_btn != null and is_instance_valid(_golfer_cam_btn):
+		if not _is_golfer_cam_enabled:
+			_golfer_cam_btn.text = "📹 Golfer Cam: OFF"
+			apply_material_button_style(_golfer_cam_btn, Color(0.2, 0.45, 0.45, 0.85))
+		elif _is_golfer_cam_minimized:
+			_golfer_cam_btn.text = "📹 Golfer Cam: MIN [REC]"
+			apply_material_button_style(_golfer_cam_btn, Color(0.2, 0.55, 0.7, 0.85))
+		else:
+			_golfer_cam_btn.text = "📹 Golfer Cam: ON"
+			apply_material_button_style(_golfer_cam_btn, Color(0.15, 0.6, 0.5, 0.85))
+
+
+func _update_button_shifts() -> void:
+	var modal_open = is_golfer_camera_modal_open()
+	if _stats_btn != null and is_instance_valid(_stats_btn):
+		if modal_open:
+			_stats_btn.offset_left = 495
+			_stats_btn.offset_right = 559
+		else:
+			_stats_btn.offset_left = 30
+			_stats_btn.offset_right = 94
+
 
 func set_golfer_camera_visible(enabled: bool) -> void:
+	if enabled:
+		_is_golfer_cam_enabled = true
+		_is_golfer_cam_minimized = false
+		_stats_were_visible_before_cam = is_stats_visible()
+		if is_stats_visible():
+			set_stats_visible(false)
+	else:
+		_is_golfer_cam_enabled = false
+		_is_golfer_cam_minimized = false
+		if _stats_were_visible_before_cam and not is_stats_visible():
+			set_stats_visible(true)
+
 	if _golfer_cam_panel != null:
-		_golfer_cam_panel.visible = enabled
+		_golfer_cam_panel.visible = enabled and not _hud_elements_suppressed
 		_update_camera_feed(enabled)
 	
+	_update_restore_pill_visibility()
+	
+	_update_golfer_cam_button_state()
+	_update_button_shifts()
+	golfer_cam_enabled_changed.emit(_is_golfer_cam_enabled)
+	golfer_cam_modal_state_changed.emit(is_golfer_camera_modal_open())
+
 	var grid = get_node_or_null("GridCanvas")
 	if grid != null:
 		if grid.has_method("set_golfer_camera_active"):
 			grid.call("set_golfer_camera_active", enabled)
 		else:
 			grid.position.x = 350.0 if enabled else 0.0
-
-
-func is_golfer_camera_visible() -> bool:
-	return _golfer_cam_panel.visible if _golfer_cam_panel != null else false
+	
+	_update_prev_shot_analysis_visibility()
 
 
 func is_shot_analysis_enabled() -> bool:
@@ -1202,36 +1402,60 @@ func set_shot_analysis_enabled(enabled: bool) -> void:
 	if btn is Button:
 		btn.text = "📊 Shot Analysis: ON" if enabled else "📊 Shot Analysis: OFF"
 		apply_material_button_style(btn, Color(0.15, 0.55, 0.75, 0.85) if enabled else Color(0.25, 0.35, 0.45, 0.85))
+	_update_prev_shot_analysis_visibility()
 
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_RESUMED or what == NOTIFICATION_WM_WINDOW_FOCUS_IN:
-		if is_golfer_camera_visible() and not _use_phone_stream:
-			_update_camera_feed(true)
+		if is_golfer_camera_enabled() and not _use_phone_stream:
+			var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
+			var is_desk_active = bridge != null and bridge.has_method("is_desktop_camera_active") and bridge.is_desktop_camera_active()
+			if not is_desk_active:
+				_update_camera_feed(true)
+
+
+func _on_desktop_cameras_updated(cams: Array) -> void:
+	if is_golfer_camera_enabled() and not _use_phone_stream:
+		if _camera_feed_rect != null and _camera_feed_rect.texture == null and cams.size() > 0:
+			var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
+			if bridge != null and bridge.has_method("select_desktop_camera"):
+				var sel_idx = clamp(_current_camera_feed_index, 0, cams.size() - 1)
+				_current_camera_feed_index = sel_idx
+				if _camera_feed_rect != null:
+					_camera_feed_rect.material = null
+				bridge.select_desktop_camera(sel_idx)
+				_update_status_overlay("", false)
 
 
 func _on_desktop_frame_received(_img: Image, tex: Texture2D, _landmarks: Dictionary) -> void:
-	if is_golfer_camera_visible() and not _use_phone_stream:
+	if is_golfer_camera_enabled() and not _use_phone_stream:
 		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
 			_camera_feed_rect.texture = tex
 		_update_status_overlay("", false)
 
 
 func _update_camera_feed(active: bool) -> void:
 	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
-	if pose_bridge != null and pose_bridge.has_method("stop_desktop_camera"):
-		pose_bridge.stop_desktop_camera()
 
 	if not active:
+		if pose_bridge != null and pose_bridge.has_method("stop_desktop_camera"):
+			pose_bridge.stop_desktop_camera()
 		CameraServer.set_monitoring_feeds(false)
 		var feeds = CameraServer.feeds()
 		for feed in feeds:
 			if feed != null:
 				feed.feed_is_active = false
 		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
 			_camera_feed_rect.texture = null
 		_update_status_overlay("GOLFER CAMERA FEED\n[ Click ⚙️ Setup to connect ]", true)
+		return
+
+	# If desktop camera is already actively streaming, maintain it without restarting
+	if pose_bridge != null and pose_bridge.has_method("is_desktop_camera_active") and pose_bridge.is_desktop_camera_active():
+		_update_status_overlay("", false)
 		return
 
 	# Request permission on mobile OS if needed
@@ -1247,10 +1471,11 @@ func _update_camera_feed(active: bool) -> void:
 				OS.call("request_permissions")
 			_update_status_overlay("CAMERA PERMISSION REQUIRED\n[ Please grant camera permission when prompted ]", true)
 			if _camera_feed_rect != null:
+				_camera_feed_rect.material = null
 				_camera_feed_rect.texture = null
 			# Re-check after user grants permission
 			get_tree().create_timer(1.5).timeout.connect(func():
-				if is_golfer_camera_visible():
+				if is_golfer_camera_enabled():
 					_update_camera_feed(true)
 			)
 			return
@@ -1271,17 +1496,20 @@ func _update_camera_feed(active: bool) -> void:
 	elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
 		var sel_idx = clamp(_current_camera_feed_index, 0, pose_bridge.desktop_cameras.size() - 1)
 		_current_camera_feed_index = sel_idx
+		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
 		pose_bridge.select_desktop_camera(sel_idx)
 		_update_status_overlay("", false)
 	else:
 		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
 			_camera_feed_rect.texture = null
 		_update_status_overlay("SEARCHING FOR WEBCAMS...\n[ Click ⚙️ Connect Camera for setup ]", true)
 		if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
 			pose_bridge.fetch_desktop_cameras()
 		# Schedule asynchronous re-scan
 		get_tree().create_timer(0.6).timeout.connect(func():
-			if is_golfer_camera_visible() and not _use_phone_stream:
+			if is_golfer_camera_enabled() and not _use_phone_stream:
 				var rescan_feeds = CameraServer.feeds()
 				if rescan_feeds.size() > 0:
 					var sel_idx = _find_default_camera_index(rescan_feeds)
@@ -1290,6 +1518,8 @@ func _update_camera_feed(active: bool) -> void:
 				elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
 					var sel_idx = clamp(_current_camera_feed_index, 0, pose_bridge.desktop_cameras.size() - 1)
 					_current_camera_feed_index = sel_idx
+					if _camera_feed_rect != null:
+						_camera_feed_rect.material = null
 					pose_bridge.select_desktop_camera(sel_idx)
 					_update_status_overlay("", false)
 				elif _phone_cam_url.is_empty():
@@ -1323,11 +1553,14 @@ func _activate_camera_feed_index(index: int) -> void:
 	if index < 0 or index >= feeds.size():
 		var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
 		if pose_bridge != null and "desktop_cameras" in pose_bridge and index >= 0 and index < pose_bridge.desktop_cameras.size():
+			if _camera_feed_rect != null:
+				_camera_feed_rect.material = null
 			pose_bridge.select_desktop_camera(index)
 			_update_status_overlay("", false)
 			return
 		
 		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
 			_camera_feed_rect.texture = null
 		_update_status_overlay("NO LOCAL WEBCAM DETECTED\n[ Click ⚙️ Connect Camera for Phone WiFi Stream ]", true)
 		return
@@ -1335,11 +1568,58 @@ func _activate_camera_feed_index(index: int) -> void:
 	var feed = feeds[index]
 	if feed != null:
 		feed.feed_is_active = true
-		var cam_tex = CameraTexture.new()
-		cam_tex.camera_feed_id = feed.get_id()
-		cam_tex.camera_is_active = true
-		if _camera_feed_rect != null:
-			_camera_feed_rect.texture = cam_tex
+		var data_type = feed.get_datatype()
+		if data_type == CameraFeed.FEED_YCBCR or data_type == CameraFeed.FEED_YCBCR_SEP:
+			var y_tex = CameraTexture.new()
+			y_tex.camera_feed_id = feed.get_id()
+			y_tex.which_feed = CameraServer.FEED_Y_IMAGE
+			y_tex.camera_is_active = true
+
+			var cbcr_tex = CameraTexture.new()
+			cbcr_tex.camera_feed_id = feed.get_id()
+			cbcr_tex.which_feed = CameraServer.FEED_CBCR_IMAGE
+			cbcr_tex.camera_is_active = true
+
+			var shader = Shader.new()
+			shader.code = """
+shader_type canvas_item;
+
+uniform sampler2D y_tex : hint_default_black;
+uniform sampler2D cbcr_tex : hint_default_black;
+uniform mat3 feed_transform;
+
+void fragment() {
+	vec2 uv = (feed_transform * vec3(UV, 1.0)).xy;
+	float y = texture(y_tex, uv).r;
+	vec2 cbcr = texture(cbcr_tex, uv).rg;
+
+	float cb = cbcr.r - 0.5;
+	float cr = cbcr.g - 0.5;
+
+	float r = y + 1.402 * cr;
+	float g = y - 0.344136 * cb - 0.714136 * cr;
+	float b = y + 1.772 * cb;
+
+	COLOR = vec4(clamp(vec3(r, g, b), 0.0, 1.0), 1.0);
+}
+"""
+			var mat = ShaderMaterial.new()
+			mat.shader = shader
+			mat.set_shader_parameter("y_tex", y_tex)
+			mat.set_shader_parameter("cbcr_tex", cbcr_tex)
+			mat.set_shader_parameter("feed_transform", feed.get_transform())
+
+			if _camera_feed_rect != null:
+				_camera_feed_rect.material = mat
+				_camera_feed_rect.texture = y_tex
+		else:
+			if _camera_feed_rect != null:
+				_camera_feed_rect.material = null
+				var cam_tex = CameraTexture.new()
+				cam_tex.camera_feed_id = feed.get_id()
+				cam_tex.which_feed = CameraServer.FEED_RGBA_IMAGE
+				cam_tex.camera_is_active = true
+				_camera_feed_rect.texture = cam_tex
 		
 		_update_status_overlay("", false)
 
@@ -1507,6 +1787,8 @@ func _open_camera_setup_dialog() -> void:
 			_activate_camera_feed_index(sel_idx)
 		else:
 			if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
+				if _camera_feed_rect != null:
+					_camera_feed_rect.material = null
 				pose_bridge.select_desktop_camera(sel_idx)
 				_update_status_overlay("", false)
 		popup.queue_free()
@@ -1604,9 +1886,11 @@ func _start_phone_camera_stream(url_str: String) -> void:
 		if not host_ip.is_empty():
 			bridge.set_remote_server_ip(host_ip)
 
-	# Reset texture so uninitialized/broken textures are removed
-	if _camera_feed_rect != null and not (_camera_feed_rect.texture is ImageTexture):
-		_camera_feed_rect.texture = null
+	# Reset texture and material so uninitialized/broken textures are removed
+	if _camera_feed_rect != null:
+		_camera_feed_rect.material = null
+		if not (_camera_feed_rect.texture is ImageTexture):
+			_camera_feed_rect.texture = null
 
 	_update_status_overlay("CONNECTING TO PHONE STREAM...\n" + _phone_cam_url, true)
 
@@ -1678,7 +1962,7 @@ func _normalize_phone_url(raw_url: String) -> String:
 
 
 func _request_next_phone_frame() -> void:
-	if not is_golfer_camera_visible() or _phone_cam_url.is_empty() or _http_req == null or _is_requesting_frame:
+	if not is_golfer_camera_enabled() or _phone_cam_url.is_empty() or _http_req == null or _is_requesting_frame:
 		return
 
 	_is_requesting_frame = true
@@ -1714,7 +1998,7 @@ func _on_phone_cam_frame_received(result: int, response_code: int, _headers: Pac
 	else:
 		_try_fallback_endpoint_or_error(result, response_code, "")
 
-	if is_golfer_camera_visible() and not _phone_cam_url.is_empty():
+	if is_golfer_camera_enabled() and not _phone_cam_url.is_empty():
 		var delay = 0.033 if _phone_stream_failed_count == 0 else clamp(0.4 * _phone_stream_failed_count, 0.4, 2.0)
 		get_tree().create_timer(delay).timeout.connect(_request_next_phone_frame)
 
@@ -1758,6 +2042,62 @@ func _handle_phone_stream_error(result: int, response_code: int, custom_msg: Str
 
 	var max_allowed_failures = 10 if _stream_established else 2
 	if _phone_stream_failed_count >= max_allowed_failures:
-		if _camera_feed_rect != null and not (_camera_feed_rect.texture is ImageTexture):
-			_camera_feed_rect.texture = null
+		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
+			if not (_camera_feed_rect.texture is ImageTexture):
+				_camera_feed_rect.texture = null
 		_update_status_overlay("📡 PHONE STREAM DISCONNECTED\n" + err_detail + "\n[ Click ⚙️ Setup to reconfigure ]", true)
+
+
+func _update_tooltips() -> void:
+	if not has_node("/root/KeybindingManager"):
+		return
+	var km = get_node("/root/KeybindingManager")
+	if _stats_btn != null and is_instance_valid(_stats_btn):
+		_stats_btn.tooltip_text = "Toggle Stats (Show/Hide) [%s]" % km.get_action_key_name("toggle_stats")
+	if _map_btn != null and is_instance_valid(_map_btn):
+		_map_btn.tooltip_text = "Toggle Map View [%s]" % km.get_action_key_name("aerial_aim")
+	if _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
+		_hide_helpers_btn.tooltip_text = "Toggle Helpers (Show/Hide) [%s]" % km.get_action_key_name("toggle_helpers")
+	if _skip_btn != null and is_instance_valid(_skip_btn):
+		_skip_btn.tooltip_text = "Skip Flight [%s]" % km.get_action_key_name("skip_flight")
+	if _announcer_btn != null and is_instance_valid(_announcer_btn):
+		_announcer_btn.tooltip_text = "Toggle Announcer Commentary [%s]" % km.get_action_key_name("announcer_toggle")
+	if _tension_btn != null and is_instance_valid(_tension_btn):
+		_tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision [%s]" % km.get_action_key_name("suspense_toggle")
+	if _golfer_cam_btn != null and is_instance_valid(_golfer_cam_btn):
+		_golfer_cam_btn.tooltip_text = "Toggle Golfer Camera [%s]" % km.get_action_key_name("golfer_cam_toggle")
+	if _shot_analysis_btn != null and is_instance_valid(_shot_analysis_btn):
+		_shot_analysis_btn.tooltip_text = "Toggle Shot Suggestions & Flaw Analysis [%s]" % km.get_action_key_name("shot_analysis_toggle")
+	if _dist_btn != null and is_instance_valid(_dist_btn):
+		_dist_btn.tooltip_text = "Hit Distance Menu [%s]" % km.get_action_key_name("distance_menu_toggle")
+
+
+func update_announcer_button_state() -> void:
+	if _announcer_btn == null or not is_instance_valid(_announcer_btn):
+		return
+	var a = get_node_or_null("/root/AnnouncerEngine")
+	var is_announcer_on = a.get("AnnouncerRange") if a != null else false
+	if is_announcer_on:
+		_announcer_btn.text = "🎙 Announcer: ON"
+		apply_material_button_style(_announcer_btn, Color(0.2, 0.6, 0.3, 0.85))
+	else:
+		_announcer_btn.text = "🎙 Announcer: MUTED"
+		apply_material_button_style(_announcer_btn, Color(0.5, 0.5, 0.5, 0.85))
+
+
+func update_suspense_button_state() -> void:
+	if _tension_btn == null or not is_instance_valid(_tension_btn):
+		return
+	var is_tension_on = GlobalSettings.range_settings.tension_effects_enabled.value if has_node("/root/GlobalSettings") else true
+	if is_tension_on:
+		_tension_btn.text = "💓 Suspense: ON"
+		apply_material_button_style(_tension_btn, Color(0.75, 0.2, 0.3, 0.85))
+	else:
+		_tension_btn.text = "💓 Suspense: OFF"
+		apply_material_button_style(_tension_btn, Color(0.5, 0.5, 0.5, 0.85))
+
+
+func toggle_distance_menu() -> void:
+	if _dist_btn != null and is_instance_valid(_dist_btn):
+		_dist_btn.emit_signal("pressed")

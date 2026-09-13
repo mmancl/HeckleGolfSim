@@ -12,6 +12,7 @@ signal connected_and_continued
 @onready var other_tab: ScrollContainer = %OtherTab
 
 # Bluetooth controls
+@onready var device_type_option: OptionButton = %DeviceTypeOption
 @onready var device_option: OptionButton = %DeviceOption
 @onready var scan_button: Button = %ScanButton
 @onready var connect_button: Button = %ConnectButton
@@ -24,7 +25,18 @@ signal connected_and_continued
 # Other / GSPro controls
 @onready var other_device_option: OptionButton = %OtherDeviceOption
 @onready var other_selector_card: PanelContainer = %OtherSelectorCard
+@onready var network_config_card: PanelContainer = %NetworkConfigCard
+@onready var port_49152_button: Button = %Port49152Button
+@onready var port_921_button: Button = %Port921Button
+@onready var network_port_spin_box: SpinBox = %NetworkPortSpinBox
+@onready var ip_all_button: Button = %IpAllButton
+@onready var ip_local_button: Button = %IpLocalButton
+@onready var network_ip_input: LineEdit = %NetworkIpInput
+@onready var lan_ip_label: Label = %LanIpLabel
 @onready var network_info_card: PanelContainer = %NetworkInfoCard
+@onready var host_label: RichTextLabel = %HostLabel
+@onready var port_label: RichTextLabel = %PortLabel
+@onready var protocol_label: RichTextLabel = %ProtocolLabel
 @onready var instructions_card: PanelContainer = %InstructionsCard
 @onready var instructions_text: RichTextLabel = %InstructionsText
 
@@ -43,7 +55,7 @@ const OTHER_DEVICE_GUIDES = {
 	"garmin_r10": {
 		"name": "Garmin Approach R10 (Garmin R10 OpenConnect)",
 		"bridge": "Garmin R10 OpenConnect / E6 to GSPro Bridge",
-		"text": "[b]Bridge Software:[/b] [color=#64b5f6]Garmin R10 OpenConnect / E6 Bridge[/color]\n[b]Protocol:[/b] GSPro Open Connect v1 over TCP\n[b]Destination Host / Port:[/b] [color=#81c784]127.0.0.1 : 49152[/color]\n\n[b]Step-by-Step Instructions:[/b]\n1. Turn on your [b]Garmin Approach R10[/b] and pair it with the Garmin Golf app or PC bridge.\n2. In your bridge settings, set the target IP address to [b]127.0.0.1[/b] (or PC local IP) and port to [b]49152[/b].\n3. Make sure your PC and mobile device are on the same Wi-Fi network.\n4. Load into any Range or Course in Heckle Golf Simulator.\n5. Take a swing — radar metrics will trigger real-time ball flight and announcer commentary."
+		"text": "[b]Bridge Software:[/b] [color=#64b5f6]Garmin R10 OpenConnect / E6 Bridge[/color]\n[b]Protocol:[/b] GSPro Open Connect v1 over TCP\n[b]Destination Host / Port:[/b] [color=#81c784]127.0.0.1 : 49152[/color]\n\n[b]Step-by-Step Instructions:[/b]\n1. Turn on your [b]Garmin Approach R10[/b] and pair it with the Garmin Golf app or PC bridge.\n2. In your bridge settings, set the target IP address to [b]127.0.0.1[/b] (or PC local IP) and port to [b]49152[/b].\n3. Make sure your PC and mobile device are on the same Wi-Fi network.\n4. Load into any Range or Course in Heckle Golf Simulator.\n5. Take a swing — radar metrics will trigger real-time ball flight and announcer commentary.\n\n[color=#81c784]💡 [b]Direct Bluetooth Tip:[/b] You can also connect directly via Bluetooth without any third-party bridge app on the [b]Bluetooth[/b] tab![/color]"
 	},
 	"flightscope": {
 		"name": "FlightScope Mevo+ / X3 (GSPro Bridge)",
@@ -83,6 +95,8 @@ func _ready() -> void:
 		ThemeManager.apply_card_panel_style(status_card, false, 10, 14, 12, 14, 12)
 	if other_selector_card != null:
 		ThemeManager.apply_card_panel_style(other_selector_card, false, 10, 14, 14, 14, 14)
+	if network_config_card != null:
+		ThemeManager.apply_card_panel_style(network_config_card, false, 10, 14, 14, 14, 14)
 	if instructions_card != null:
 		ThemeManager.apply_card_panel_style(instructions_card, false, 10, 14, 14, 14, 14)
 
@@ -99,7 +113,7 @@ func _ready() -> void:
 		tab_container.add_theme_stylebox_override("tab_selected", _create_tab_style(ThemeManager.COLOR_PRIMARY_NORMAL, ThemeManager.COLOR_PRIMARY_NORMAL.lightened(0.2)))
 		tab_container.add_theme_stylebox_override("tab_unselected", _create_tab_style(ThemeManager.COLOR_NAV_NORMAL, Color(1, 1, 1, 0.15)))
 		tab_container.add_theme_stylebox_override("tab_hovered", _create_tab_style(ThemeManager.COLOR_NAV_HOVER, Color(1, 1, 1, 0.3)))
-		tab_container.set_tab_title(0, "📶 Bluetooth (Square)")
+		tab_container.set_tab_title(0, "📶 Bluetooth")
 		tab_container.set_tab_title(1, "🌐 Other (GSPro / Network)")
 
 	# Apply touch scroll styling
@@ -116,6 +130,7 @@ func _ready() -> void:
 	ThemeManager.apply_secondary_button_style(skip_button, 8)
 	ThemeManager.apply_primary_button_style(continue_button, 8)
 
+	_setup_touch_option_button(device_type_option)
 	_setup_touch_option_button(device_option)
 	_setup_touch_option_button(other_device_option)
 
@@ -126,9 +141,12 @@ func _ready() -> void:
 	scan_button.pressed.connect(_on_scan_pressed)
 	connect_button.pressed.connect(_on_connect_pressed)
 	disconnect_button.pressed.connect(_on_disconnect_pressed)
+	device_option.item_selected.connect(_on_device_option_selected)
 
-	# Setup Other Launch Monitor device dropdown
+	# Setup dropdowns & network settings
+	_setup_device_type_dropdown()
 	_setup_other_devices_dropdown()
+	_setup_network_config()
 
 	if has_node("/root/LaunchMonitorManager"):
 		_launch_monitor = get_node("/root/LaunchMonitorManager")
@@ -170,6 +188,37 @@ func _setup_touch_option_button(opt: OptionButton) -> void:
 	ThemeManager.apply_option_button_style(opt, 18, Vector2(220, 52))
 
 
+func _setup_device_type_dropdown() -> void:
+	if device_type_option == null:
+		return
+	device_type_option.clear()
+	device_type_option.add_item("Auto-Detect (Recommended)", 0)
+	device_type_option.set_item_metadata(0, "auto")
+	device_type_option.add_item("Square Golf", 1)
+	device_type_option.set_item_metadata(1, "square")
+	device_type_option.add_item("Garmin Approach R10", 2)
+	device_type_option.set_item_metadata(2, "garmin")
+
+	var current_type := "auto"
+	if _launch_monitor != null:
+		current_type = str(_launch_monitor.settings.get("device_type", "auto"))
+
+	match current_type:
+		"square": device_type_option.select(1)
+		"garmin": device_type_option.select(2)
+		_: device_type_option.select(0)
+
+	device_type_option.item_selected.connect(_on_device_type_selected)
+
+
+func _on_device_type_selected(index: int) -> void:
+	if device_type_option == null or _launch_monitor == null:
+		return
+	var selected_type := str(device_type_option.get_item_metadata(index))
+	_launch_monitor.set_device_type(selected_type)
+	_refresh_devices()
+
+
 func _setup_other_devices_dropdown() -> void:
 	if other_device_option == null:
 		return
@@ -186,12 +235,164 @@ func _setup_other_devices_dropdown() -> void:
 	_on_other_device_selected(0)
 
 
+func _setup_network_config() -> void:
+	if port_49152_button != null:
+		ThemeManager.apply_secondary_button_style(port_49152_button, 6)
+		port_49152_button.pressed.connect(func(): _set_configured_port(49152))
+	if port_921_button != null:
+		ThemeManager.apply_secondary_button_style(port_921_button, 6)
+		port_921_button.pressed.connect(func(): _set_configured_port(921))
+	if ip_all_button != null:
+		ThemeManager.apply_secondary_button_style(ip_all_button, 6)
+		ip_all_button.pressed.connect(func(): _set_configured_ip("0.0.0.0"))
+	if ip_local_button != null:
+		ThemeManager.apply_secondary_button_style(ip_local_button, 6)
+		ip_local_button.pressed.connect(func(): _set_configured_ip("127.0.0.1"))
+	if network_ip_input != null:
+		ThemeManager.apply_input_style(network_ip_input, 6)
+		network_ip_input.text = _get_configured_ip()
+		network_ip_input.text_submitted.connect(func(new_text: String): _set_configured_ip(new_text))
+		network_ip_input.focus_exited.connect(func(): _set_configured_ip(network_ip_input.text))
+	if network_port_spin_box != null:
+		network_port_spin_box.min_value = 1
+		network_port_spin_box.max_value = 65535
+		network_port_spin_box.step = 1
+		network_port_spin_box.value = _get_configured_port()
+		var le = network_port_spin_box.get_line_edit()
+		if le != null:
+			ThemeManager.apply_input_style(le, 6)
+		network_port_spin_box.value_changed.connect(func(val: float): _set_configured_port(int(val)))
+	
+	_update_network_display()
+
+
+func _update_network_display() -> void:
+	var port = _get_configured_port()
+	var ip = _get_configured_ip()
+	var lan_ip = _get_local_ip()
+
+	if host_label != null:
+		var host_display = ip if ip != "0.0.0.0" and ip != "*" else "0.0.0.0 (All Interfaces)"
+		host_label.text = "🖥️ [b]Host:[/b] %s" % host_display
+	if port_label != null:
+		port_label.text = "🔌 [b]Port:[/b] %d (TCP)" % port
+	if lan_ip_label != null:
+		lan_ip_label.text = "💡 Local Network IP: [b]%s[/b] (use this in connector apps on the same Wi-Fi)" % lan_ip
+
+	if network_port_spin_box != null and int(network_port_spin_box.value) != port:
+		network_port_spin_box.set_value_no_signal(port)
+	if network_ip_input != null and network_ip_input.text != ip:
+		network_ip_input.text = ip
+
+	# Highlight preset buttons
+	if port_49152_button != null:
+		if port == 49152:
+			ThemeManager.apply_primary_button_style(port_49152_button, 6)
+		else:
+			ThemeManager.apply_secondary_button_style(port_49152_button, 6)
+	if port_921_button != null:
+		if port == 921:
+			ThemeManager.apply_primary_button_style(port_921_button, 6)
+		else:
+			ThemeManager.apply_secondary_button_style(port_921_button, 6)
+	if ip_all_button != null:
+		if ip == "0.0.0.0" or ip == "*":
+			ThemeManager.apply_primary_button_style(ip_all_button, 6)
+		else:
+			ThemeManager.apply_secondary_button_style(ip_all_button, 6)
+	if ip_local_button != null:
+		if ip == "127.0.0.1":
+			ThemeManager.apply_primary_button_style(ip_local_button, 6)
+		else:
+			ThemeManager.apply_secondary_button_style(ip_local_button, 6)
+
+	if other_device_option != null and other_device_option.selected >= 0:
+		var key = str(other_device_option.get_item_metadata(other_device_option.selected))
+		if instructions_text != null:
+			instructions_text.text = _format_guide_text(key)
+
+
+func _format_guide_text(key: String) -> String:
+	if not OTHER_DEVICE_GUIDES.has(key):
+		return ""
+	var text: String = OTHER_DEVICE_GUIDES[key]["text"]
+	var port = _get_configured_port()
+	var ip = _get_configured_ip()
+	var lan_ip = _get_local_ip()
+	var display_host = ip if ip != "0.0.0.0" and ip != "*" else "127.0.0.1"
+
+	# Dynamically replace 49152 and 127.0.0.1 with user settings
+	text = text.replace("127.0.0.1 : 49152", "%s : %d" % [display_host, port])
+	text = text.replace("127.0.0.1:49152", "%s:%d" % [display_host, port])
+	text = text.replace("port 49152", "port %d" % port)
+	text = text.replace("Port[/b] to [b]49152[/b]", "Port[/b] to [b]%d[/b]" % port)
+	text = text.replace("port to [b]49152[/b]", "port to [b]%d[/b]" % port)
+	text = text.replace("port to [b]49152", "port to [b]%d" % port)
+	if lan_ip != "127.0.0.1":
+		text = text.replace("(or your PC's LAN IP if running on phone)", "(or your PC's LAN IP: [b]%s[/b])" % lan_ip)
+		text = text.replace("(or PC local IP)", "(or PC local IP: [b]%s[/b])" % lan_ip)
+	return text
+
+
+func _get_configured_port() -> int:
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.get("range_settings") != null and "tcp_server_port" in gs.range_settings:
+			return int(gs.range_settings.tcp_server_port.value)
+	return 49152
+
+
+func _get_configured_ip() -> String:
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.get("range_settings") != null and "tcp_server_ip" in gs.range_settings:
+			return str(gs.range_settings.tcp_server_ip.value)
+	return "0.0.0.0"
+
+
+func _set_configured_port(new_port: int) -> void:
+	new_port = clampi(new_port, 1, 65535)
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.get("range_settings") != null and "tcp_server_port" in gs.range_settings:
+			gs.range_settings.tcp_server_port.set_value(new_port)
+			gs.save_settings()
+	_notify_active_tcp_server()
+	_update_network_display()
+
+
+func _set_configured_ip(new_ip: String) -> void:
+	new_ip = new_ip.strip_edges()
+	if new_ip.is_empty():
+		new_ip = "0.0.0.0"
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.get("range_settings") != null and "tcp_server_ip" in gs.range_settings:
+			gs.range_settings.tcp_server_ip.set_value(new_ip)
+			gs.save_settings()
+	_notify_active_tcp_server()
+	_update_network_display()
+
+
+func _notify_active_tcp_server() -> void:
+	var root = get_tree().root
+	var tcp_server = root.find_child("TCPServer", true, false)
+	if tcp_server != null and tcp_server.has_method("Restart"):
+		tcp_server.call("Restart", _get_configured_port(), _get_configured_ip())
+
+
+func _get_local_ip() -> String:
+	for address in IP.get_local_addresses():
+		if not address.contains(":") and not address.begins_with("127.") and not address.begins_with("169.254."):
+			return address
+	return "127.0.0.1"
+
+
 func _on_other_device_selected(index: int) -> void:
 	if other_device_option == null or instructions_text == null:
 		return
 	var key = str(other_device_option.get_item_metadata(index))
-	if OTHER_DEVICE_GUIDES.has(key):
-		instructions_text.text = OTHER_DEVICE_GUIDES[key]["text"]
+	instructions_text.text = _format_guide_text(key)
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -215,8 +416,14 @@ func _on_continue_pressed() -> void:
 
 func _on_scan_pressed() -> void:
 	if _launch_monitor != null:
+		if _launch_monitor.status == "Scanning":
+			_launch_monitor.stop_scan()
+			scan_button.text = "🔍 Scan"
+			status_label.text = "Status: Disconnected"
+			status_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+			return
 		_launch_monitor.start_scan()
-		scan_button.text = "🔄 Scanning..."
+		scan_button.text = "⏹ Stop Scan"
 		status_label.text = "Status: Scanning for devices..."
 		status_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
 
@@ -225,9 +432,12 @@ func _on_connect_pressed() -> void:
 	if _launch_monitor == null or device_option == null or device_option.item_count == 0:
 		return
 	var index = device_option.selected
+	if index < 0:
+		index = 0
 	var device_id = str(device_option.get_item_metadata(index))
 	if device_id == "":
 		return
+	_launch_monitor.stop_scan()
 	_launch_monitor.set_enabled(true)
 	_launch_monitor.connect_to_device(device_id)
 	status_label.text = "Status: Connecting..."
@@ -242,41 +452,96 @@ func _on_disconnect_pressed() -> void:
 		status_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
 
 
+func _on_device_option_selected(index: int) -> void:
+	if device_option == null or _launch_monitor == null or index < 0:
+		return
+	var dev_id := str(device_option.get_item_metadata(index))
+	if dev_id == "":
+		return
+	_launch_monitor.settings["device_id"] = dev_id
+	if _launch_monitor.devices.has(dev_id):
+		var dev = _launch_monitor.devices[dev_id]
+		_launch_monitor.settings["device_name"] = str(dev.get("name", ""))
+	_launch_monitor._save_settings()
+
+
 func _refresh_devices() -> void:
 	if device_option == null or _launch_monitor == null:
 		return
-	
+
 	var selected_device := str(_launch_monitor.settings.get("device_id", ""))
 	var saved_name := str(_launch_monitor.settings.get("device_name", ""))
+	var saved_type := str(_launch_monitor.settings.get("device_type", "auto"))
 	if saved_name == "":
-		saved_name = "Square Golf"
+		saved_name = "Square Golf" if saved_type != "garmin" else "Garmin Approach R10"
 
 	if selected_device != "" and not _launch_monitor.devices.has(selected_device):
 		_launch_monitor.devices[selected_device] = {
 			"name": saved_name,
-			"rssi": 0
+			"rssi": 0,
+			"type": saved_type if saved_type != "auto" else _launch_monitor.detect_device_type(selected_device, saved_name)
 		}
 
-	device_option.clear()
+	var filter_type := "auto"
+	if device_type_option != null and device_type_option.selected >= 0:
+		filter_type = str(device_type_option.get_item_metadata(device_type_option.selected))
 
-	if _launch_monitor.devices.is_empty():
+	var matching_keys: Array = []
+	for dev_id in _launch_monitor.devices.keys():
+		var device = _launch_monitor.devices[dev_id]
+		var dev_name: String = str(device.get("name", ""))
+		var dev_type: String = str(device.get("type", ""))
+		if dev_type == "":
+			dev_type = _launch_monitor.detect_device_type(dev_id, dev_name)
+
+		if filter_type == "square" and dev_type != "square":
+			continue
+		if filter_type == "garmin" and dev_type != "garmin":
+			continue
+		matching_keys.append(dev_id)
+
+	if matching_keys.is_empty():
+		device_option.clear()
 		device_option.add_item("No devices found (Click Scan)", 0)
 		device_option.set_item_metadata(0, "")
 		connect_button.disabled = true
 		return
 
-	connect_button.disabled = false
-	for dev_id in _launch_monitor.devices.keys():
-		var device = _launch_monitor.devices[dev_id]
-		var label := str(device.get("name", "Square Golf"))
-		var idx := device_option.item_count
-		device_option.add_item(label, idx)
-		device_option.set_item_metadata(idx, dev_id)
-		if dev_id == selected_device:
-			device_option.select(idx)
+	# Auto-select discovered device if none previously selected or previous device not found
+	if (selected_device == "" or not matching_keys.has(selected_device)) and matching_keys.size() > 0:
+		selected_device = str(matching_keys[0])
+		_launch_monitor.settings["device_id"] = selected_device
+		var dev = _launch_monitor.devices[selected_device]
+		_launch_monitor.settings["device_name"] = str(dev.get("name", ""))
+		_launch_monitor._save_settings()
 
-	if device_option.selected < 0 and device_option.item_count > 0:
-		device_option.select(0)
+	# Avoid clearing/rebuilding OptionButton if items match to prevent closing the popup
+	var already_matches := (device_option.item_count == matching_keys.size())
+	if already_matches:
+		for i in range(matching_keys.size()):
+			if str(device_option.get_item_metadata(i)) != str(matching_keys[i]):
+				already_matches = false
+				break
+
+	if not already_matches:
+		device_option.clear()
+		for dev_id in matching_keys:
+			var device = _launch_monitor.devices[dev_id]
+			var dev_name: String = str(device.get("name", "Launch Monitor"))
+			var dev_type: String = str(device.get("type", ""))
+			var prefix := ""
+			if filter_type == "auto":
+				prefix = "[Garmin R10] " if dev_type == "garmin" else "[Square] "
+			var label := prefix + dev_name
+			var idx := device_option.item_count
+			device_option.add_item(label, idx)
+			device_option.set_item_metadata(idx, dev_id)
+
+	connect_button.disabled = false
+	for i in range(device_option.item_count):
+		if str(device_option.get_item_metadata(i)) == selected_device:
+			device_option.select(i)
+			break
 
 
 func _update_status_display() -> void:
@@ -317,6 +582,9 @@ func _update_status_display() -> void:
 
 func _on_device_discovered(_device_id: String, _name: String, _rssi: int) -> void:
 	_refresh_devices()
+	if _launch_monitor != null and _launch_monitor.status == "Scanning":
+		status_label.text = "Status: Device found! Ready to connect."
+		status_label.add_theme_color_override("font_color", Color(0.35, 0.85, 0.45))
 
 
 func _on_status_changed(_status: String) -> void:

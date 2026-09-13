@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
@@ -17,10 +19,9 @@ public partial class OsmMapLoader : Node
     private static readonly string OverpassUrl = "https://overpass-api.de/api/interpreter";
     private static readonly string[] OverpassEndpoints = new[]
     {
+        "https://lz4.overpass-api.de/api/interpreter",
         "https://overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter",
-        "https://overpass.private.coffee/api/interpreter",
-        "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+        "https://z.overpass-api.de/api/interpreter"
     };
     private static readonly System.Net.Http.HttpClient HttpClient = CreateHttpClient();
 
@@ -41,7 +42,7 @@ public partial class OsmMapLoader : Node
     [Signal]
     public delegate void DownloadProgressEventHandler(string statusMessage);
 
-    private record GolfSearchResult(string Name, double Lat, double Lon, string Location);
+    private record GolfSearchResult(string Name, double Lat, double Lon, string Location, int HoleCount = 0, string LastUpdated = "");
 
     private void ReportProgress(string message)
     {
@@ -146,9 +147,9 @@ public partial class OsmMapLoader : Node
     private async Task<string> DownloadOsmDataAsync(double lat, double lon, string courseName)
     {
         GD.Print($"{LogPrefix} Downloading OSM data for course '{courseName}' around {lat}, {lon}...");
-        // Reduced radius to 1000 to prevent Gateway Timeout (504) on Overpass API, increased query timeout to 90s, and removed natural=tree since we scan satellite imagery
+        // Reduced radius to 1000 to prevent Gateway Timeout on Overpass API, query timeout to 60s, and removed natural=tree since we scan satellite imagery
         string query = $@"
-        [out:json][timeout:90];
+        [out:json][timeout:60];
         (
           nwr(around:1000, {lat}, {lon})[""leisure""=""golf_course""];
           nwr(around:1000, {lat}, {lon})[""golf""];
@@ -161,7 +162,7 @@ public partial class OsmMapLoader : Node
         out skel qt;
         ";
 
-        int maxAttempts = 3;
+        int maxAttempts = OverpassEndpoints.Length;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
             string endpoint = OverpassEndpoints[(attempt - 1) % OverpassEndpoints.Length];
@@ -169,8 +170,9 @@ public partial class OsmMapLoader : Node
 
             try
             {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(35));
                 var content = new FormUrlEncodedContent(new[] { new KeyValuePair<string, string>("data", query) });
-                var response = await HttpClient.PostAsync(endpoint, content);
+                var response = await HttpClient.PostAsync(endpoint, content, cts.Token);
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -190,9 +192,9 @@ public partial class OsmMapLoader : Node
 
             if (attempt < maxAttempts)
             {
-                _generationMessage = $"Overpass server busy, retrying query (attempt {attempt + 1}/{maxAttempts})...";
+                _generationMessage = $"Overpass server busy or timed out, trying mirror (attempt {attempt + 1}/{maxAttempts})...";
                 ReportProgress(_generationMessage);
-                await Task.Delay(2000);
+                await Task.Delay(500);
             }
         }
 
@@ -1297,8 +1299,8 @@ public partial class OsmMapLoader : Node
                 GD.Print($"{LogPrefix} Procedural tree placement completed. Total trees: {placedTreePositions.Count}.");
             }
 
-            float cellSize = isMobilePlatform ? 6.5f : 3.0f;
-            int maxSubdiv = isMobilePlatform ? 200 : 400;
+            float cellSize = isMobilePlatform ? 5.0f : 2.0f;
+            int maxSubdiv = isMobilePlatform ? 250 : 600;
             int subdivisionsX = Mathf.Clamp((int)Math.Ceiling(courseWidth / cellSize), 40, maxSubdiv);
             int subdivisionsZ = Mathf.Clamp((int)Math.Ceiling(courseDepth / cellSize), 40, maxSubdiv);
 
@@ -2356,6 +2358,8 @@ public partial class OsmMapLoader : Node
                     dict["lat"] = item.Lat;
                     dict["lon"] = item.Lon;
                     dict["location"] = item.Location;
+                    dict["hole_count"] = item.HoleCount;
+                    dict["last_updated"] = item.LastUpdated;
                     godotResults.Add(dict);
                 }
                 EmitSignal(SignalName.SearchCompleted, godotResults);
@@ -2374,6 +2378,30 @@ public partial class OsmMapLoader : Node
         }
     }
 
+    private class SearchCandidate
+    {
+        public string Name { get; set; } = "";
+        public double Lat { get; set; }
+        public double Lon { get; set; }
+        public string Location { get; set; } = "";
+        public int HoleCount { get; set; }
+        public string LastUpdated { get; set; } = "";
+        public HashSet<int> HoleRefs { get; } = new();
+        public int BoundaryHoles { get; set; }
+    }
+
+    private static double HaversineDistanceMeters(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double r = 6371000.0;
+        double dLat = (lat2 - lat1) * Math.PI / 180.0;
+        double dLon = (lon2 - lon1) * Math.PI / 180.0;
+        double a = Math.Sin(dLat / 2.0) * Math.Sin(dLat / 2.0) +
+                   Math.Cos(lat1 * Math.PI / 180.0) * Math.Cos(lat2 * Math.PI / 180.0) *
+                   Math.Sin(dLon / 2.0) * Math.Sin(dLon / 2.0);
+        double c = 2.0 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1.0 - a));
+        return r * c;
+    }
+
     private async Task<List<GolfSearchResult>> SearchGolfCoursesInternalAsync(string queryText)
     {
         var results = new List<GolfSearchResult>();
@@ -2382,91 +2410,318 @@ public partial class OsmMapLoader : Node
             return results;
         }
 
-        // If search doesn't contain "golf", append " golf" to help target golf courses first
-        string query = queryText.Trim();
-        if (!query.Contains("golf", StringComparison.OrdinalIgnoreCase))
-        {
-            query += " golf";
-        }
+        string cleanQuery = queryText.Trim();
+        var rawCandidates = new List<SearchCandidate>();
 
-        string escapedQuery = Uri.EscapeDataString(query);
-        string url = $"https://nominatim.openstreetmap.org/search?q={escapedQuery}&format=json&limit=15";
-
-        GD.Print($"{LogPrefix} Searching Nominatim for '{query}'...");
-
+        // 1. Primary Search: Query Photon API for true golf courses (leisure=golf_course)
         try
         {
-            var response = await HttpClient.GetAsync(url);
-            if (!response.IsSuccessStatusCode)
+            string photonUrl = $"https://photon.komoot.io/api/?q={Uri.EscapeDataString(cleanQuery)}&osm_tag=leisure:golf_course&limit=15";
+            GD.Print($"{LogPrefix} Searching Photon for '{cleanQuery}'...");
+            var photonResp = await HttpClient.GetAsync(photonUrl);
+            if (photonResp.IsSuccessStatusCode)
             {
-                GD.PrintErr($"{LogPrefix} Nominatim search failed with status: {response.StatusCode}");
-                return results;
-            }
-
-            string jsonString = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(jsonString);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
-            {
-                GD.PrintErr($"{LogPrefix} Invalid JSON array received from Nominatim.");
-                return results;
-            }
-
-            foreach (var element in doc.RootElement.EnumerateArray())
-            {
-                string name = "";
-                if (element.TryGetProperty("name", out var nameProp))
+                string photonJson = await photonResp.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(photonJson);
+                if (doc.RootElement.TryGetProperty("features", out var featuresProp) && featuresProp.ValueKind == JsonValueKind.Array)
                 {
-                    name = nameProp.GetString() ?? "";
-                }
-                if (string.IsNullOrEmpty(name))
-                {
-                    if (element.TryGetProperty("display_name", out var dispProp))
+                    foreach (var feat in featuresProp.EnumerateArray())
                     {
-                        string disp = dispProp.GetString() ?? "";
-                        name = disp.Split(',')[0].Trim();
-                    }
-                }
+                        if (!feat.TryGetProperty("properties", out var props) || !feat.TryGetProperty("geometry", out var geom))
+                            continue;
 
-                if (string.IsNullOrEmpty(name)) continue;
+                        string name = props.TryGetProperty("name", out var np) ? np.GetString() ?? "" : "";
+                        if (string.IsNullOrWhiteSpace(name))
+                            continue;
 
-                double lat = 0;
-                double lon = 0;
-                
-                if (element.TryGetProperty("lat", out var latProp) && double.TryParse(latProp.GetString(), out var parsedLat))
-                {
-                    lat = parsedLat;
-                }
-                if (element.TryGetProperty("lon", out var lonProp) && double.TryParse(lonProp.GetString(), out var parsedLon))
-                {
-                    lon = parsedLon;
-                }
-
-                if (lat == 0 && lon == 0) continue;
-
-                string location = "";
-                if (element.TryGetProperty("display_name", out var dispNameProp))
-                {
-                    string displayName = dispNameProp.GetString() ?? "";
-                    var parts = displayName.Split(',');
-                    if (parts.Length > 1)
-                    {
-                        var locParts = new List<string>();
-                        for (int i = 1; i < Math.Min(parts.Length, 5); i++)
+                        double lon = 0, lat = 0;
+                        if (geom.TryGetProperty("coordinates", out var coordsProp) && coordsProp.ValueKind == JsonValueKind.Array)
                         {
-                            locParts.Add(parts[i].Trim());
+                            var coords = coordsProp.EnumerateArray().ToArray();
+                            if (coords.Length >= 2)
+                            {
+                                lon = coords[0].GetDouble();
+                                lat = coords[1].GetDouble();
+                            }
                         }
-                        location = string.Join(", ", locParts);
+                        if (lat == 0 && lon == 0) continue;
+
+                        var locParts = new List<string>();
+                        foreach (var key in new[] { "city", "district", "county", "state", "country" })
+                        {
+                            if (props.TryGetProperty(key, out var kp))
+                            {
+                                string val = kp.GetString() ?? "";
+                                if (!string.IsNullOrWhiteSpace(val) && !locParts.Contains(val))
+                                    locParts.Add(val);
+                            }
+                        }
+                        string location = string.Join(", ", locParts);
+                        rawCandidates.Add(new SearchCandidate { Name = name, Lat = lat, Lon = lon, Location = location });
                     }
                 }
-
-                results.Add(new GolfSearchResult(name, lat, lon, location));
             }
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"{LogPrefix} Failed to search Nominatim: {ex}");
+            GD.PrintErr($"{LogPrefix} Photon search exception: {ex.Message}");
         }
 
+        // 2. Fallback to Nominatim if Photon returned no results
+        if (rawCandidates.Count == 0)
+        {
+            GD.Print($"{LogPrefix} Photon yielded no results; falling back to Nominatim for '{cleanQuery}'...");
+            try
+            {
+                // Try clean query first
+                string nomUrl = $"https://nominatim.openstreetmap.org/search?q={Uri.EscapeDataString(cleanQuery)}&format=json&limit=15";
+                var nomResp = await HttpClient.GetAsync(nomUrl);
+                string nomJson = (nomResp.IsSuccessStatusCode) ? await nomResp.Content.ReadAsStringAsync() : "";
+
+                // If empty and didn't have "golf", retry with " golf"
+                if ((string.IsNullOrWhiteSpace(nomJson) || nomJson == "[]") && !cleanQuery.Contains("golf", StringComparison.OrdinalIgnoreCase))
+                {
+                    string nomRetryUrl = $"https://nominatim.openstreetmap.org/search?q={Uri.EscapeDataString(cleanQuery + " golf")}&format=json&limit=15";
+                    nomResp = await HttpClient.GetAsync(nomRetryUrl);
+                    if (nomResp.IsSuccessStatusCode)
+                    {
+                        nomJson = await nomResp.Content.ReadAsStringAsync();
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(nomJson) && nomJson != "[]")
+                {
+                    using var doc = JsonDocument.Parse(nomJson);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var element in doc.RootElement.EnumerateArray())
+                        {
+                            string name = "";
+                            if (element.TryGetProperty("name", out var nameProp))
+                                name = nameProp.GetString() ?? "";
+                            if (string.IsNullOrEmpty(name) && element.TryGetProperty("display_name", out var dispProp))
+                                name = (dispProp.GetString() ?? "").Split(',')[0].Trim();
+
+                            if (string.IsNullOrEmpty(name)) continue;
+
+                            double lat = 0, lon = 0;
+                            if (element.TryGetProperty("lat", out var latProp) && double.TryParse(latProp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedLat))
+                                lat = parsedLat;
+                            if (element.TryGetProperty("lon", out var lonProp) && double.TryParse(lonProp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedLon))
+                                lon = parsedLon;
+
+                            if (lat == 0 && lon == 0) continue;
+
+                            string location = "";
+                            if (element.TryGetProperty("display_name", out var dispNameProp))
+                            {
+                                var parts = (dispNameProp.GetString() ?? "").Split(',');
+                                if (parts.Length > 1)
+                                {
+                                    var locParts = new List<string>();
+                                    for (int i = 1; i < Math.Min(parts.Length, 5); i++)
+                                        locParts.Add(parts[i].Trim());
+                                    location = string.Join(", ", locParts);
+                                }
+                            }
+                            rawCandidates.Add(new SearchCandidate { Name = name, Lat = lat, Lon = lon, Location = location });
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{LogPrefix} Nominatim fallback search exception: {ex.Message}");
+            }
+        }
+
+        if (rawCandidates.Count == 0)
+        {
+            GD.Print($"{LogPrefix} No candidate golf courses found for '{cleanQuery}'.");
+            return results;
+        }
+
+        // 3. Deduplicate candidates by name and proximity (< 300 meters)
+        var deduped = new List<SearchCandidate>();
+        foreach (var cand in rawCandidates)
+        {
+            bool isDuplicate = deduped.Any(d =>
+                HaversineDistanceMeters(d.Lat, d.Lon, cand.Lat, cand.Lon) < 300.0 &&
+                string.Equals(d.Name, cand.Name, StringComparison.OrdinalIgnoreCase));
+            if (!isDuplicate)
+            {
+                deduped.Add(cand);
+            }
+        }
+
+        // Limit verification batch to top 8 candidates to guarantee snappy response times
+        var candidatesToVerify = deduped.Take(8).ToList();
+        GD.Print($"{LogPrefix} Verifying hole counts and timestamps for {candidatesToVerify.Count} candidate courses via Overpass...");
+
+        // 4. Batch query Overpass for hole definitions and course metadata
+        var sb = new StringBuilder();
+        sb.AppendLine("[out:json][timeout:25];");
+        sb.AppendLine("(");
+        foreach (var c in candidatesToVerify)
+        {
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:1500, {c.Lat}, {c.Lon})[\"golf\"=\"hole\"];");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:500, {c.Lat}, {c.Lon})[\"leisure\"=\"golf_course\"];");
+        }
+        sb.AppendLine(");");
+        sb.AppendLine("out center tags meta;");
+        string overpassQuery = sb.ToString();
+
+        string overpassJson = "";
+        for (int attempt = 1; attempt <= OverpassEndpoints.Length; attempt++)
+        {
+            string endpoint = OverpassEndpoints[(attempt - 1) % OverpassEndpoints.Length];
+            try
+            {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(12));
+                var content = new FormUrlEncodedContent(new[] { new KeyValuePair<string, string>("data", overpassQuery) });
+                var response = await HttpClient.PostAsync(endpoint, content, cts.Token);
+                if (response.IsSuccessStatusCode)
+                {
+                    overpassJson = await response.Content.ReadAsStringAsync();
+                    if (!string.IsNullOrWhiteSpace(overpassJson))
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{LogPrefix} Overpass verification attempt {attempt} failed on {endpoint}: {ex.Message}");
+            }
+        }
+
+        // 5. Parse Overpass elements to inspect holes and latest updated timestamps
+        if (!string.IsNullOrWhiteSpace(overpassJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(overpassJson);
+                if (doc.RootElement.TryGetProperty("elements", out var elementsProp) && elementsProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var el in elementsProp.EnumerateArray())
+                    {
+                        double elLat = 0, elLon = 0;
+                        if (el.TryGetProperty("lat", out var latProp))
+                            elLat = latProp.GetDouble();
+                        else if (el.TryGetProperty("center", out var centerProp) && centerProp.TryGetProperty("lat", out var cLat))
+                            elLat = cLat.GetDouble();
+
+                        if (el.TryGetProperty("lon", out var lonProp))
+                            elLon = lonProp.GetDouble();
+                        else if (el.TryGetProperty("center", out var centerProp2) && centerProp2.TryGetProperty("lon", out var cLon))
+                            elLon = cLon.GetDouble();
+
+                        if (elLat == 0 && elLon == 0) continue;
+
+                        string ts = el.TryGetProperty("timestamp", out var tsProp) ? tsProp.GetString() ?? "" : "";
+
+                        if (!el.TryGetProperty("tags", out var tagsProp) || tagsProp.ValueKind != JsonValueKind.Object)
+                            continue;
+
+                        string golfVal = tagsProp.TryGetProperty("golf", out var gProp) ? gProp.GetString() ?? "" : "";
+                        string leisureVal = tagsProp.TryGetProperty("leisure", out var lProp) ? lProp.GetString() ?? "" : "";
+
+                        foreach (var c in candidatesToVerify)
+                        {
+                            double dist = HaversineDistanceMeters(c.Lat, c.Lon, elLat, elLon);
+                            if (dist > 1500.0) continue;
+
+                            if (!string.IsNullOrEmpty(ts) && string.Compare(ts, c.LastUpdated, StringComparison.Ordinal) > 0)
+                            {
+                                c.LastUpdated = ts;
+                            }
+
+                            if (golfVal == "hole")
+                            {
+                                if (tagsProp.TryGetProperty("ref", out var refProp))
+                                {
+                                    string refStr = refProp.GetString() ?? "";
+                                    if (int.TryParse(refStr, out int hNum) && hNum >= 1 && hNum <= 36)
+                                    {
+                                        c.HoleRefs.Add(hNum);
+                                    }
+                                }
+                                else if (tagsProp.TryGetProperty("name", out var nProp))
+                                {
+                                    string nStr = nProp.GetString() ?? "";
+                                    var match = System.Text.RegularExpressions.Regex.Match(nStr, @"\b([1-9]|[1-2][0-9]|3[0-6])\b");
+                                    if (match.Success && int.TryParse(match.Groups[1].Value, out int hNum))
+                                    {
+                                        c.HoleRefs.Add(hNum);
+                                    }
+                                }
+                            }
+
+                            if (leisureVal == "golf_course")
+                            {
+                                if (tagsProp.TryGetProperty("golf:holes", out var ghProp) && int.TryParse(ghProp.GetString(), out int gh))
+                                    c.BoundaryHoles = gh;
+                                else if (tagsProp.TryGetProperty("holes", out var hProp) && int.TryParse(hProp.GetString(), out int h))
+                                    c.BoundaryHoles = h;
+                                else if (tagsProp.TryGetProperty("golf:course", out var gcProp))
+                                {
+                                    string gcStr = gcProp.GetString() ?? "";
+                                    if (gcStr == "18_hole") c.BoundaryHoles = 18;
+                                    else if (gcStr == "9_hole") c.BoundaryHoles = 9;
+                                }
+                                else if (tagsProp.TryGetProperty("description", out var descProp))
+                                {
+                                    string desc = descProp.GetString() ?? "";
+                                    if (desc.Contains("18 hole", StringComparison.OrdinalIgnoreCase) || desc.Contains("18-hole", StringComparison.OrdinalIgnoreCase))
+                                        c.BoundaryHoles = 18;
+                                    else if (desc.Contains("9 hole", StringComparison.OrdinalIgnoreCase) || desc.Contains("9-hole", StringComparison.OrdinalIgnoreCase))
+                                        c.BoundaryHoles = 9;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{LogPrefix} Error parsing Overpass verification JSON: {ex.Message}");
+            }
+        }
+
+        // 6. Filter results to only courses with exactly 9 or 18 holes defined
+        var validCandidates = new List<SearchCandidate>();
+        foreach (var c in candidatesToVerify)
+        {
+            int holes = c.HoleRefs.Count > 0 ? c.HoleRefs.Count : c.BoundaryHoles;
+            if (holes == 9 || holes == 18)
+            {
+                c.HoleCount = holes;
+                validCandidates.Add(c);
+            }
+            else
+            {
+                GD.Print($"{LogPrefix} Filtering out '{c.Name}' (holes detected: {holes}, requires exactly 9 or 18).");
+            }
+        }
+
+        // 7. Order results by most recently updated course first
+        validCandidates.Sort((a, b) => string.Compare(b.LastUpdated, a.LastUpdated, StringComparison.Ordinal));
+
+        // If Overpass was completely unreachable, fallback gracefully to returning candidates
+        if (validCandidates.Count == 0 && string.IsNullOrWhiteSpace(overpassJson))
+        {
+            GD.Print($"{LogPrefix} Overpass verification was unreachable; returning unverified candidates as fallback.");
+            foreach (var c in candidatesToVerify)
+            {
+                results.Add(new GolfSearchResult(c.Name, c.Lat, c.Lon, c.Location, c.BoundaryHoles, c.LastUpdated));
+            }
+            return results;
+        }
+
+        foreach (var c in validCandidates)
+        {
+            results.Add(new GolfSearchResult(c.Name, c.Lat, c.Lon, c.Location, c.HoleCount, c.LastUpdated));
+        }
+
+        GD.Print($"{LogPrefix} Returning {results.Count} qualified course(s) (ordered by latest update).");
         return results;
     }
 
@@ -2566,7 +2821,7 @@ public partial class OsmMapLoader : Node
                 if (taperWidth > 0.0f && distToEdge < taperWidth)
                 {
                     float t = distToEdge / taperWidth;
-                    taperFactor = t * t * (3.0f - 2.0f * t);
+                    taperFactor = QuinticSmoothstep(t);
                 }
 
                 float vy = GetHeight(vx, vz) + height * taperFactor;
@@ -2975,12 +3230,132 @@ public partial class OsmMapLoader : Node
                 return null;
             }
 
+            float usgsMin = float.MaxValue;
+            float usgsMax = float.MinValue;
+            for (int i = 0; i < elevationData.Length; i += step)
+            {
+                if (elevationData[i] >= -9000f && !float.IsNaN(elevationData[i]) && elevationData[i] <= 10000f)
+                {
+                    if (elevationData[i] < usgsMin) usgsMin = elevationData[i];
+                    if (elevationData[i] > usgsMax) usgsMax = elevationData[i];
+                }
+            }
+
+            if (usgsMax - usgsMin < 0.5f)
+            {
+                GD.Print($"{LogPrefix} USGS returned completely flat/zero values (range: {usgsMax - usgsMin:F2}m, outside US coverage). Falling back.");
+                return null;
+            }
+
             GD.Print($"{LogPrefix} Successfully downloaded USGS 3DEP elevation data!");
             return elevationData;
         }
         catch (Exception ex)
         {
             GD.Print($"{LogPrefix} Exception querying USGS 3DEP: {ex.Message}");
+            return null;
+        }
+    }
+
+    private async Task<float[]?> DownloadOpenMeteoElevationAsync(BBox bbox, double leftLon, double rightLon, double topLat, double bottomLat, int widthPixels, int heightPixels)
+    {
+        GD.Print($"{LogPrefix} Attempting to fetch global Open-Meteo elevation data...");
+        try
+        {
+            // Sample a 24x24 grid across bounding box (576 coordinates total, queried in chunks of 96)
+            int sampleCountX = 24;
+            int sampleCountY = 24;
+            int totalSamples = sampleCountX * sampleCountY;
+            float[] sampleHeights = new float[totalSamples];
+
+            var coords = new List<(double lat, double lon, int index)>(totalSamples);
+            for (int gy = 0; gy < sampleCountY; gy++)
+            {
+                double lat = topLat - (gy / (double)(sampleCountY - 1)) * (topLat - bottomLat);
+                for (int gx = 0; gx < sampleCountX; gx++)
+                {
+                    double lon = leftLon + (gx / (double)(sampleCountX - 1)) * (rightLon - leftLon);
+                    coords.Add((lat, lon, gy * sampleCountX + gx));
+                }
+            }
+
+            int chunkSize = 96; // Open-Meteo max is 100 per request
+            for (int i = 0; i < coords.Count; i += chunkSize)
+            {
+                var chunk = coords.Skip(i).Take(chunkSize).ToList();
+                string latStr = string.Join(",", chunk.Select(c => c.lat.ToString("F6", System.Globalization.CultureInfo.InvariantCulture)));
+                string lonStr = string.Join(",", chunk.Select(c => c.lon.ToString("F6", System.Globalization.CultureInfo.InvariantCulture)));
+
+                string url = $"https://api.open-meteo.com/v1/elevation?latitude={latStr}&longitude={lonStr}";
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10));
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.TryAddWithoutValidation("User-Agent", "HeckleGolfSimulator/1.0");
+                var response = await HttpClient.SendAsync(request, cts.Token);
+                if (!response.IsSuccessStatusCode)
+                {
+                    GD.PrintErr($"{LogPrefix} Open-Meteo request failed with status: {response.StatusCode}");
+                    return null;
+                }
+
+                string jsonStr = await response.Content.ReadAsStringAsync();
+                using var doc = System.Text.Json.JsonDocument.Parse(jsonStr);
+                if (!doc.RootElement.TryGetProperty("elevation", out var elevArray))
+                {
+                    GD.PrintErr($"{LogPrefix} Open-Meteo response did not contain 'elevation' array.");
+                    return null;
+                }
+
+                int elemIdx = 0;
+                foreach (var el in elevArray.EnumerateArray())
+                {
+                    if (elemIdx < chunk.Count)
+                    {
+                        sampleHeights[chunk[elemIdx].index] = el.GetSingle();
+                        elemIdx++;
+                    }
+                }
+            }
+
+            // Validate the sample heights
+            float minH = float.MaxValue;
+            float maxH = float.MinValue;
+            for (int i = 0; i < sampleHeights.Length; i++)
+            {
+                if (float.IsNaN(sampleHeights[i]) || sampleHeights[i] < -500f || sampleHeights[i] > 9000f)
+                    return null;
+                if (sampleHeights[i] < minH) minH = sampleHeights[i];
+                if (sampleHeights[i] > maxH) maxH = sampleHeights[i];
+            }
+
+            GD.Print($"{LogPrefix} Successfully fetched Open-Meteo elevation (range: {minH:F1}m to {maxH:F1}m).");
+
+            // Bilinear interpolate sample heights to widthPixels x heightPixels
+            float[] elevationData = new float[widthPixels * heightPixels];
+            for (int destY = 0; destY < heightPixels; destY++)
+            {
+                float v = destY / (float)(heightPixels - 1) * (sampleCountY - 1);
+                int y0 = Math.Clamp((int)Math.Floor(v), 0, sampleCountY - 1);
+                int y1 = Math.Clamp(y0 + 1, 0, sampleCountY - 1);
+                float ty = v - y0;
+
+                for (int destX = 0; destX < widthPixels; destX++)
+                {
+                    float u = destX / (float)(widthPixels - 1) * (sampleCountX - 1);
+                    int x0 = Math.Clamp((int)Math.Floor(u), 0, sampleCountX - 1);
+                    int x1 = Math.Clamp(x0 + 1, 0, sampleCountX - 1);
+                    float tx = u - x0;
+
+                    float h0 = sampleHeights[y0 * sampleCountX + x0] * (1f - tx) + sampleHeights[y0 * sampleCountX + x1] * tx;
+                    float h1 = sampleHeights[y1 * sampleCountX + x0] * (1f - tx) + sampleHeights[y1 * sampleCountX + x1] * tx;
+                    elevationData[destY * widthPixels + destX] = h0 * (1f - ty) + h1 * ty;
+                }
+            }
+
+            return elevationData;
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Exception fetching Open-Meteo elevation: {ex.Message}");
             return null;
         }
     }
@@ -3017,7 +3392,12 @@ public partial class OsmMapLoader : Node
 
         if (elevationData == null)
         {
-            GD.Print($"{LogPrefix} USGS 3DEP not available or failed. Falling back to S3 Terrain Tiles.");
+            elevationData = await DownloadOpenMeteoElevationAsync(bbox, leftLon, rightLon, topLat, bottomLat, widthPixels, heightPixels);
+        }
+
+        if (elevationData == null)
+        {
+            GD.Print($"{LogPrefix} USGS 3DEP and Open-Meteo not available or failed. Falling back to S3 Terrain Tiles.");
             elevationData = new float[widthPixels * heightPixels];
 
             for (int ty = minTileY; ty <= maxTileY; ty++)
@@ -3066,6 +3446,31 @@ public partial class OsmMapLoader : Node
                     {
                         GD.PrintErr($"{LogPrefix} Exception downloading elevation tile {tx},{ty}: {ex.Message}");
                     }
+                }
+            }
+        }
+
+        // Validate elevationData across the board: if flat or invalid, synthesize procedural golf course topography
+        float minVal = float.MaxValue;
+        float maxVal = float.MinValue;
+        for (int i = 0; i < elevationData.Length; i++)
+        {
+            if (elevationData[i] < minVal) minVal = elevationData[i];
+            if (elevationData[i] > maxVal) maxVal = elevationData[i];
+        }
+
+        if (maxVal - minVal < 0.5f)
+        {
+            GD.Print($"{LogPrefix} Downloaded elevation data is flat (range: {maxVal - minVal:F2}m). Generating procedural golf course elevation.");
+            for (int destY = 0; destY < heightPixels; destY++)
+            {
+                double lat = topLat - (destY / (double)(heightPixels - 1)) * (topLat - bottomLat);
+                float zCoord = (float)(-(lat - bbox.RefLat) * bbox.MetersPerLat);
+                for (int destX = 0; destX < widthPixels; destX++)
+                {
+                    double lon = leftLon + (destX / (double)(widthPixels - 1)) * (rightLon - leftLon);
+                    float xCoord = (float)((lon - bbox.RefLon) * bbox.MetersPerLon);
+                    elevationData[destY * widthPixels + destX] = OsmMapLoader.GetProceduralHeight(xCoord, zCoord);
                 }
             }
         }
@@ -3291,6 +3696,15 @@ public partial class OsmMapLoader : Node
         return resampled;
     }
 
+    public static float GetProceduralHeight(float x, float z)
+    {
+        // Gradual, natural golf course topography with broad wavelengths (800m - 1500m)
+        // producing gentle ~1% grades with at most 1 gradual rise or fall across an entire hole.
+        double h = Math.Sin(x * 0.0042 + z * 0.0031) * Math.Cos(z * 0.0051 - x * 0.0036) * 1.2
+                 + Math.Sin(x * 0.0078 - z * 0.0062) * 0.5;
+        return (float)h;
+    }
+
     private float GetHeight(float x, float z)
     {
         if (_currentElevationMap != null)
@@ -3300,12 +3714,7 @@ public partial class OsmMapLoader : Node
             return SampleRawHeight(lat, lon) - _currentElevationMap.Offset;
         }
 
-        // Multi-octave golf course procedural topography with rolling fairways, swales, mounds, and ridges
-        double h = Math.Sin(x * 0.022 + z * 0.012) * Math.Cos(z * 0.025 - x * 0.015) * 7.5
-                 + Math.Sin(x * 0.045 - z * 0.035) * 3.2
-                 + Math.Cos(x * 0.085 + z * 0.065) * 1.6
-                 + Math.Sin(x * 0.16 + z * 0.14) * 0.65;
-        return (float)h;
+        return GetProceduralHeight(x, z);
     }
 
     private Vector3 GetTerrainNormal(float vx, float vz)
@@ -3383,7 +3792,7 @@ public partial class OsmMapLoader : Node
                     if (distToWaterBoundary < 15.0f)
                     {
                         float t = distToWaterBoundary / 15.0f;
-                        float smoothT = t * t * (3.0f - 2.0f * t);
+                        float smoothT = QuinticSmoothstep(t);
                         depWater = smoothT * 2.0f;
                     }
                     else
@@ -3395,13 +3804,23 @@ public partial class OsmMapLoader : Node
                 float depBunker = 0f;
                 if (isInsideBunker)
                 {
-                    depBunker = 0.45f;
+                    float dist = DistanceToPolygon(vertexPoint, exclusions.First(e => e.GolfType == "bunker" && Geometry2D.IsPointInPolygon(vertexPoint, e.Polygon)).Polygon);
+                    float bowlRadius = 7.0f;
+                    float maxDepth = 1.0f;
+                    if (dist < bowlRadius)
+                    {
+                        float t = dist / bowlRadius;
+                        depBunker = QuinticSmoothstep(t) * maxDepth;
+                    }
+                    else
+                    {
+                        depBunker = maxDepth;
+                    }
                 }
-                else if (minDistBunker < 3.0f)
+                else if (minDistBunker < 4.0f)
                 {
-                    float t = 1.0f - (minDistBunker / 3.0f);
-                    float smoothT = t * t * (3.0f - 2.0f * t);
-                    depBunker = smoothT * 0.45f;
+                    float t = 1.0f - (minDistBunker / 4.0f);
+                    depBunker = -QuinticSmoothstep(t) * 0.12f; // gentle raised lip
                 }
                 
                 float depPlay = 0f;
@@ -4483,6 +4902,16 @@ public partial class OsmMapLoader : Node
     }
 
     /// <summary>
+    /// Quintic smoothstep (C2 continuous: smooth first and second derivatives).
+    /// Eliminates angular curvature kinks at transition boundaries.
+    /// </summary>
+    private static float QuinticSmoothstep(float t)
+    {
+        float c = Math.Clamp(t, 0f, 1f);
+        return c * c * c * (c * (c * 6f - 15f) + 10f);
+    }
+
+    /// <summary>
     /// Returns terrain height with smooth bunker bowl depressions applied.
     /// </summary>
     private float GetHeightWithFeatures(float x, float z, List<ExclusionPolygon> exclusions)
@@ -4495,26 +4924,31 @@ public partial class OsmMapLoader : Node
 
         float? overrideHeight = null;
         float overrideWeight = 0f;
+        bool inPlayArea = false;
 
         for (int i = 0; i < exclusions.Count; i++)
         {
             var excl = exclusions[i];
-            if (x < excl.MinX - 5f || x > excl.MaxX + 5f || z < excl.MinY - 5f || z > excl.MaxY + 5f)
+            if (x < excl.MinX - 8.0f || x > excl.MaxX + 8.0f || z < excl.MinY - 8.0f || z > excl.MaxY + 8.0f)
                 continue;
 
             bool inside = PointInPolygon(point, excl.Polygon);
+            if (inside && (excl.GolfType == "fairway" || excl.GolfType == "green" || excl.GolfType == "tee" || excl.GolfType == "bunker" || excl.GolfType == "water"))
+            {
+                inPlayArea = true;
+            }
 
             if (excl.GolfType == "bunker")
             {
                 if (inside)
                 {
                     float dist = DistanceToPolygon(point, excl.Polygon);
-                    float bowlRadius = 3.5f;
-                    float maxDepth = 1.15f;
+                    float bowlRadius = 7.0f;
+                    float maxDepth = 1.0f;
                     if (dist < bowlRadius)
                     {
                         float t = dist / bowlRadius;
-                        float smoothT = t * t * (3.0f - 2.0f * t);
+                        float smoothT = QuinticSmoothstep(t);
                         bunkerDepression = Math.Max(bunkerDepression, smoothT * maxDepth);
                     }
                     else
@@ -4524,13 +4958,14 @@ public partial class OsmMapLoader : Node
                 }
                 else
                 {
-                    // Raised lip outside bunker boundary
+                    // Raised lip outside bunker boundary: wider and gentler transition
                     float dist = DistanceToPolygon(point, excl.Polygon);
-                    if (dist < 2.0f)
+                    float lipRadius = 4.0f;
+                    if (dist < lipRadius)
                     {
-                        float t = 1.0f - (dist / 2.0f);
-                        float smoothT = t * t * (3.0f - 2.0f * t);
-                        bunkerDepression = Math.Max(bunkerDepression, -smoothT * 0.20f);
+                        float t = 1.0f - (dist / lipRadius);
+                        float smoothT = QuinticSmoothstep(t);
+                        bunkerDepression = Math.Max(bunkerDepression, -smoothT * 0.12f);
                     }
                 }
             }
@@ -4543,12 +4978,24 @@ public partial class OsmMapLoader : Node
                     if (dist < 15.0f)
                     {
                         float t = dist / 15.0f;
-                        float smoothT = t * t * (3.0f - 2.0f * t);
+                        float smoothT = QuinticSmoothstep(t);
                         waterDepression = Math.Max(waterDepression, smoothT * maxDepth);
                     }
                     else
                     {
                         waterDepression = Math.Max(waterDepression, maxDepth);
+                    }
+                }
+                else
+                {
+                    // Gentle approach slope bank leading down into water hazard (max 0.25m drop over 10m)
+                    float dist = DistanceToPolygon(point, excl.Polygon);
+                    float bankRadius = 10.0f;
+                    if (dist < bankRadius)
+                    {
+                        float t = 1.0f - (dist / bankRadius);
+                        float smoothT = QuinticSmoothstep(t);
+                        waterDepression = Math.Max(waterDepression, smoothT * 0.25f);
                     }
                 }
             }
@@ -4558,11 +5005,11 @@ public partial class OsmMapLoader : Node
                 if (inside)
                 {
                     float dist = DistanceToPolygon(point, excl.Polygon);
-                    float blendRadius = 2.0f;
+                    float blendRadius = 3.0f;
                     if (dist < blendRadius)
                     {
                         float t = dist / blendRadius;
-                        float smoothT = t * t * (3.0f - 2.0f * t);
+                        float smoothT = QuinticSmoothstep(t);
                         overrideHeight = (overrideHeight ?? baseHeight) * (1f - smoothT) + targetH * smoothT;
                         overrideWeight = Math.Max(overrideWeight, smoothT);
                     }
@@ -4579,14 +5026,15 @@ public partial class OsmMapLoader : Node
                 if (inside)
                 {
                     float dist = DistanceToPolygon(point, excl.Polygon);
-                    float blendRadius = 2.0f;
-                    // Green smoothing: scale down vertical variation relative to average height
-                    float greenSlopeScale = (_currentElevationMap != null) ? 1.0f : 0.35f;
+                    float blendRadius = 3.0f;
+                    // Green flattening: strongly suppress slopes to a gentle 0.5% - 1.0% putting grade
+                    // so golf balls can comfortably come to rest and stay on the green.
+                    float greenSlopeScale = 0.04f;
                     float smoothedH = targetH + (baseHeight - targetH) * greenSlopeScale;
                     if (dist < blendRadius)
                     {
                         float t = dist / blendRadius;
-                        float smoothT = t * t * (3.0f - 2.0f * t);
+                        float smoothT = QuinticSmoothstep(t);
                         overrideHeight = (overrideHeight ?? baseHeight) * (1f - smoothT) + smoothedH * smoothT;
                         overrideWeight = Math.Max(overrideWeight, smoothT);
                     }
@@ -4599,7 +5047,14 @@ public partial class OsmMapLoader : Node
             }
         }
 
-        float finalBase = overrideHeight.HasValue ? overrideHeight.Value : baseHeight;
+        // Very subtle natural variation in the rough (at most +/- 0.08m) while keeping in-play turf smooth
+        float roughMounds = 0f;
+        if (!inPlayArea && !overrideHeight.HasValue)
+        {
+            roughMounds = (float)(Math.Sin(x * 0.015 + z * 0.012) * 0.08);
+        }
+
+        float finalBase = (overrideHeight.HasValue ? overrideHeight.Value : baseHeight) + roughMounds;
         return finalBase - Math.Max(bunkerDepression, waterDepression);
     }
 
@@ -4615,7 +5070,7 @@ public partial class OsmMapLoader : Node
 
         float worldWidth = maxX - minX;
         float worldDepth = maxZ - minZ;
-        float blendRadius = 1.5f; // meters of smooth blending at zone boundaries
+        float blendRadius = 3.0f; // meters of smooth blending at zone boundaries (widened for gentle transitions)
 
         Parallel.For(0, texSize, py =>
         {
@@ -4647,7 +5102,7 @@ public partial class OsmMapLoader : Node
                     else if (dist < blendRadius)
                     {
                         float t = 1.0f - (dist / blendRadius);
-                        weight = t * t * (3.0f - 2.0f * t); // smoothstep
+                        weight = QuinticSmoothstep(t); // C2 quintic smoothstep
                     }
 
                     if (weight > 0f)
@@ -4728,7 +5183,7 @@ public partial class OsmMapLoader : Node
                     {
                         float dist = (float)Math.Sqrt(distSq);
                         float w = 1.0f - (dist / mulchRadius);
-                        float mulchWeight = w * w * (3.0f - 2.0f * w); // smoothstep
+                        float mulchWeight = QuinticSmoothstep(w); // C2 quintic smoothstep
                         byte mByte = (byte)Math.Clamp((int)(mulchWeight * 255.0f), 0, 255);
 
                         int byteIdx = (py * texSize + px) * 4;
@@ -4757,7 +5212,7 @@ public partial class OsmMapLoader : Node
 
         float worldWidth = maxX - minX;
         float worldDepth = maxZ - minZ;
-        float sampleRadius = 4.0f; // meters
+        float sampleRadius = 6.0f; // meters (widened from 4.0m to match gentler bowls and valleys)
 
         Parallel.For(0, texSize, py =>
         {
@@ -4767,17 +5222,14 @@ public partial class OsmMapLoader : Node
                 float worldX = minX + (px / (float)(texSize - 1)) * worldWidth;
                 float hCenter = GetHeightWithFeatures(worldX, worldZ, exclusions);
                 
-                // Sample 8 neighbors around circle
+                // Sample 12 neighbors around circle for smooth angular coverage
                 float hSum = 0f;
-                hSum += GetHeightWithFeatures(worldX + sampleRadius, worldZ, exclusions);
-                hSum += GetHeightWithFeatures(worldX - sampleRadius, worldZ, exclusions);
-                hSum += GetHeightWithFeatures(worldX, worldZ + sampleRadius, exclusions);
-                hSum += GetHeightWithFeatures(worldX, worldZ - sampleRadius, exclusions);
-                hSum += GetHeightWithFeatures(worldX + sampleRadius * 0.707f, worldZ + sampleRadius * 0.707f, exclusions);
-                hSum += GetHeightWithFeatures(worldX - sampleRadius * 0.707f, worldZ + sampleRadius * 0.707f, exclusions);
-                hSum += GetHeightWithFeatures(worldX + sampleRadius * 0.707f, worldZ - sampleRadius * 0.707f, exclusions);
-                hSum += GetHeightWithFeatures(worldX - sampleRadius * 0.707f, worldZ - sampleRadius * 0.707f, exclusions);
-                float hAvg = hSum / 8.0f;
+                for (int i = 0; i < 12; i++)
+                {
+                    float angle = i * (Mathf.Pi / 6.0f);
+                    hSum += GetHeightWithFeatures(worldX + MathF.Cos(angle) * sampleRadius, worldZ + MathF.Sin(angle) * sampleRadius, exclusions);
+                }
+                float hAvg = hSum / 12.0f;
 
                 // If center is lower than surroundings, it's a depression/swale (AO < 1.0)
                 float diff = hCenter - hAvg;

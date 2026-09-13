@@ -1,9 +1,11 @@
 import socket
 import json
 import sys
+import os
+import argparse
 
-PORT = 49152
-HOST = "127.0.0.1"
+DEFAULT_PORT = int(os.environ.get("GSPRO_PORT", 49152))
+DEFAULT_HOST = os.environ.get("GSPRO_HOST", "127.0.0.1")
 
 # Presets of shot metrics:
 # Speed in mph (will be converted in-game)
@@ -102,9 +104,10 @@ PRESETS = {
     }
 }
 
-def inject_shot():
+def inject_shot(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT):
     print("=" * 50)
     print("      HeckleLinks Shot Injection Utility")
+    print(f"      Target: {host}:{port}")
     print("=" * 50)
     print("Select a shot type preset to inject:")
     for key, val in PRESETS.items():
@@ -154,11 +157,11 @@ def inject_shot():
     }
 
     payload_str = json.dumps(payload)
-    print(f"\nConnecting to HeckleLinks on {HOST}:{PORT}...")
+    print(f"\nConnecting to HeckleLinks on {host}:{port}...")
     
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect((HOST, PORT))
+            s.connect((host, port))
             print("Connected! Sending payload:")
             print(json.dumps(payload, indent=2))
             s.sendall(payload_str.encode('utf-8'))
@@ -171,11 +174,16 @@ def inject_shot():
             else:
                 print(f"\n[ERROR] Server returned error: {resp.get('Message', 'Unknown')}")
     except ConnectionRefusedError:
-        print("\n[ERROR] Connection refused! Make sure the game is running, a course/range is loaded, and the TCP Server is listening.")
+        print(f"\n[ERROR] Connection refused on {host}:{port}! Make sure the game is running, a course/range is loaded, and the TCP Server is listening.")
     except Exception as e:
         print(f"\n[ERROR] Failed to inject shot: {e}")
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="HeckleLinks GSPro Open Connect v1 Shot Injector")
+    parser.add_argument("--port", "-p", type=int, default=DEFAULT_PORT, help=f"Destination TCP port (default: {DEFAULT_PORT}, e.g. 49152 or 921)")
+    parser.add_argument("--host", "-H", type=str, default=DEFAULT_HOST, help=f"Destination host IP (default: {DEFAULT_HOST})")
+    args = parser.parse_args()
+
     while True:
-        inject_shot()
+        inject_shot(host=args.host, port=args.port)
         print("\n")

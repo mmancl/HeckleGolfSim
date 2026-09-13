@@ -65,3 +65,6 @@ PLAY_STORE_DEPLOYMENT.md
 /build/
 !scripts/build/
 dist/
+
+# Commercial generator tool
+scripts/tools/commercial_generator/

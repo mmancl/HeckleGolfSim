@@ -126,11 +126,35 @@ func _process(_delta: float) -> void:
 					var cam_rect = parent_node.get_node_or_null("CameraFeedRect") as TextureRect
 					if cam_rect != null:
 						tex = cam_rect.texture
-			if tex != null and tex.has_method("get_image"):
+			if tex != null:
 				var now := Time.get_ticks_msec() / 1000.0
 				if now - _last_push_time >= 0.066: # ~15 FPS cap
 					_last_push_time = now
-					var img = tex.get_image()
+					var img: Image = null
+					if tex.has_method("get_image"):
+						img = tex.get_image()
+					# Fallback for mobile CameraTexture / GPU textures where get_image() returns null:
+					if (img == null or img.is_empty()) and is_inside_tree():
+						var vp = get_viewport()
+						if vp != null:
+							var vp_tex = vp.get_texture()
+							if vp_tex != null:
+								var full_img = vp_tex.get_image()
+								if full_img != null and not full_img.is_empty():
+									var cam_rect = parent_tex_rect
+									if cam_rect == null:
+										var parent_node = get_parent()
+										if parent_node != null:
+											cam_rect = parent_node.get_node_or_null("CameraFeedRect") as TextureRect
+									var target_rect: Rect2 = cam_rect.get_global_rect() if cam_rect != null else get_global_rect()
+									var vp_sz = vp.get_visible_rect().size
+									if target_rect.size.x > 10 and target_rect.size.y > 10:
+										var crop_x = clamp(int(target_rect.position.x), 0, int(vp_sz.x - 10))
+										var crop_y = clamp(int(target_rect.position.y), 0, int(vp_sz.y - 10))
+										var crop_w = clamp(int(target_rect.size.x), 10, int(vp_sz.x - crop_x))
+										var crop_h = clamp(int(target_rect.size.y), 10, int(vp_sz.y - crop_y))
+										if crop_w > 0 and crop_h > 0:
+											img = full_img.get_region(Rect2i(crop_x, crop_y, crop_w, crop_h))
 					if img != null and not img.is_empty():
 						frame_buffer.push_frame(img, {})
 

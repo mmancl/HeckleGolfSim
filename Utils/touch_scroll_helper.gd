@@ -4,7 +4,11 @@ extends Node
 ## Helper node that provides touch swipe/drag scrolling and kinetic momentum
 ## to Godot ScrollContainers on touchscreens, mobile devices, and desktop.
 
+var _target_control: Control = null
 var _scroll_container: ScrollContainer = null
+var _item_list: ItemList = null
+var _v_bar: VScrollBar = null
+var _h_bar: HScrollBar = null
 var _touch_active: bool = false
 var _touch_index: int = -1
 var _touch_start_pos: Vector2 = Vector2.ZERO
@@ -19,24 +23,37 @@ const DRAG_THRESHOLD: float = 8.0
 const FRICTION: float = 8.0
 
 
-static func attach_to(scroll: ScrollContainer) -> TouchScrollHelper:
-	if scroll == null:
+static func attach_to(target: Control) -> TouchScrollHelper:
+	if target == null:
 		return null
-	var existing = scroll.get_node_or_null("TouchScrollHelper")
+	var existing = target.get_node_or_null("TouchScrollHelper")
 	if existing != null and existing is TouchScrollHelper:
 		return existing
 	var helper = TouchScrollHelper.new()
 	helper.name = "TouchScrollHelper"
-	scroll.add_child(helper)
+	target.add_child(helper)
 	return helper
 
 
 func _ready() -> void:
-	_scroll_container = get_parent() as ScrollContainer
+	_target_control = get_parent() as Control
+	if _target_control is ScrollContainer:
+		_scroll_container = _target_control as ScrollContainer
+		_v_bar = _scroll_container.get_v_scroll_bar()
+		_h_bar = _scroll_container.get_h_scroll_bar()
+	elif _target_control is ItemList:
+		_item_list = _target_control as ItemList
+		_v_bar = _item_list.get_v_scroll_bar()
+		_h_bar = _item_list.get_h_scroll_bar()
+	elif _target_control != null:
+		if _target_control.has_method("get_v_scroll_bar"):
+			_v_bar = _target_control.call("get_v_scroll_bar")
+		if _target_control.has_method("get_h_scroll_bar"):
+			_h_bar = _target_control.call("get_h_scroll_bar")
 
 
 func _input(event: InputEvent) -> void:
-	if _scroll_container == null or not _scroll_container.is_inside_tree() or not _scroll_container.is_visible_in_tree():
+	if _target_control == null or not _target_control.is_inside_tree() or not _target_control.is_visible_in_tree():
 		_reset_touch()
 		return
 
@@ -80,9 +97,14 @@ func _handle_mouse_motion(event: InputEventMouseMotion) -> void:
 
 
 func _is_pos_inside_container(pos: Vector2) -> bool:
-	if _scroll_container == null:
+	if _target_control == null:
 		return false
-	var rect = _scroll_container.get_global_rect()
+	# If the touch is on the scrollbar itself, let the scrollbar handle it natively
+	if _v_bar != null and _v_bar.is_visible_in_tree() and _v_bar.get_global_rect().has_point(pos):
+		return false
+	if _h_bar != null and _h_bar.is_visible_in_tree() and _h_bar.get_global_rect().has_point(pos):
+		return false
+	var rect = _target_control.get_global_rect()
 	return rect.has_point(pos)
 
 
@@ -91,8 +113,20 @@ func _begin_touch(pos: Vector2, index: int) -> void:
 	_touch_index = index
 	_touch_start_pos = pos
 	_last_touch_pos = pos
-	_start_scroll_v = _scroll_container.scroll_vertical
-	_start_scroll_h = _scroll_container.scroll_horizontal
+	if _v_bar != null:
+		_start_scroll_v = int(_v_bar.value)
+	elif _scroll_container != null:
+		_start_scroll_v = _scroll_container.scroll_vertical
+	else:
+		_start_scroll_v = 0
+		
+	if _h_bar != null:
+		_start_scroll_h = int(_h_bar.value)
+	elif _scroll_container != null:
+		_start_scroll_h = _scroll_container.scroll_horizontal
+	else:
+		_start_scroll_h = 0
+
 	_is_dragging = false
 	_velocity = Vector2.ZERO
 	_last_time = Time.get_ticks_msec()
@@ -119,11 +153,12 @@ func _process_drag(pos: Vector2) -> void:
 
 
 func _end_touch() -> void:
+	var was_dragging = _is_dragging
 	_touch_active = false
 	_touch_index = -1
-	if _is_dragging:
+	_is_dragging = false
+	if was_dragging:
 		get_viewport().set_input_as_handled()
-		_is_dragging = false
 
 
 func _reset_touch() -> void:
@@ -134,54 +169,66 @@ func _reset_touch() -> void:
 
 
 func _apply_scroll(new_h: int, new_v: int) -> void:
-	if _scroll_container == null:
-		return
-	if _scroll_container.vertical_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED:
+	if _v_bar != null:
+		_v_bar.value = clamp(new_v, _v_bar.min_value, _get_max_scroll_v())
+	elif _scroll_container != null and _scroll_container.vertical_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED:
 		_scroll_container.scroll_vertical = int(clamp(new_v, 0, _get_max_scroll_v()))
-	if _scroll_container.horizontal_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED:
+
+	if _h_bar != null:
+		_h_bar.value = clamp(new_h, _h_bar.min_value, _get_max_scroll_h())
+	elif _scroll_container != null and _scroll_container.horizontal_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED:
 		_scroll_container.scroll_horizontal = int(clamp(new_h, 0, _get_max_scroll_h()))
 
 
-func _get_max_scroll_v() -> int:
-	if _scroll_container == null:
-		return 0
-	var v_bar = _scroll_container.get_v_scroll_bar()
-	if v_bar != null:
-		return int(max(0.0, v_bar.max_value - v_bar.page))
-	return 0
+func _get_max_scroll_v() -> float:
+	if _v_bar != null:
+		return max(0.0, _v_bar.max_value - _v_bar.page)
+	if _scroll_container != null:
+		var v_bar = _scroll_container.get_v_scroll_bar()
+		if v_bar != null:
+			return max(0.0, v_bar.max_value - v_bar.page)
+	return 0.0
 
 
-func _get_max_scroll_h() -> int:
-	if _scroll_container == null:
-		return 0
-	var h_bar = _scroll_container.get_h_scroll_bar()
-	if h_bar != null:
-		return int(max(0.0, h_bar.max_value - h_bar.page))
-	return 0
+func _get_max_scroll_h() -> float:
+	if _h_bar != null:
+		return max(0.0, _h_bar.max_value - _h_bar.page)
+	if _scroll_container != null:
+		var h_bar = _scroll_container.get_h_scroll_bar()
+		if h_bar != null:
+			return max(0.0, h_bar.max_value - h_bar.page)
+	return 0.0
 
 
 func _process(delta: float) -> void:
 	if not _touch_active and _velocity.length() > 8.0:
-		if _scroll_container == null or not _scroll_container.is_inside_tree() or not _scroll_container.is_visible_in_tree():
+		if _target_control == null or not _target_control.is_inside_tree() or not _target_control.is_visible_in_tree():
 			_velocity = Vector2.ZERO
 			return
 		
 		var max_v = _get_max_scroll_v()
 		var max_h = _get_max_scroll_h()
 		
-		var current_v = _scroll_container.scroll_vertical
-		var current_h = _scroll_container.scroll_horizontal
+		var current_v = float(_v_bar.value) if _v_bar != null else (float(_scroll_container.scroll_vertical) if _scroll_container != null else 0.0)
+		var current_h = float(_h_bar.value) if _h_bar != null else (float(_scroll_container.scroll_horizontal) if _scroll_container != null else 0.0)
 		
-		var target_v = clamp(current_v + _velocity.y * delta, 0.0, float(max_v))
-		var target_h = clamp(current_h + _velocity.x * delta, 0.0, float(max_h))
+		var target_v = clamp(current_v + _velocity.y * delta, 0.0, max_v)
+		var target_h = clamp(current_h + _velocity.x * delta, 0.0, max_h)
 		
-		if target_v <= 0.0 or target_v >= float(max_v):
+		if target_v <= 0.0 or target_v >= max_v:
 			_velocity.y = 0.0
-		if target_h <= 0.0 or target_h >= float(max_h):
+		if target_h <= 0.0 or target_h >= max_h:
 			_velocity.x = 0.0
 			
-		_scroll_container.scroll_vertical = int(target_v)
-		_scroll_container.scroll_horizontal = int(target_h)
+		if _v_bar != null:
+			_v_bar.value = target_v
+		elif _scroll_container != null:
+			_scroll_container.scroll_vertical = int(target_v)
+
+		if _h_bar != null:
+			_h_bar.value = target_h
+		elif _scroll_container != null:
+			_scroll_container.scroll_horizontal = int(target_h)
 		
 		_velocity = _velocity.lerp(Vector2.ZERO, FRICTION * delta)
 		if _velocity.length() < 8.0:

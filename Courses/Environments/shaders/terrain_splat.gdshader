@@ -116,9 +116,9 @@ void fragment() {
     float raw_rough = clamp(1.0 - raw_green - raw_fairway - raw_bunker - raw_mulch, 0.0, 1.0);
 
     // Only apply height modulation where surfaces are transitioning (avoids TV noise in solid zones)
-    float in_transition = smoothstep(0.02, 0.25, raw_rough) * smoothstep(0.98, 0.75, raw_rough)
-                        + smoothstep(0.02, 0.25, raw_fairway) * smoothstep(0.98, 0.75, raw_fairway)
-                        + smoothstep(0.02, 0.25, raw_green) * smoothstep(0.98, 0.75, raw_green);
+    float in_transition = smoothstep(0.02, 0.30, raw_rough) * smoothstep(0.98, 0.70, raw_rough)
+                        + smoothstep(0.02, 0.30, raw_fairway) * smoothstep(0.98, 0.70, raw_fairway)
+                        + smoothstep(0.02, 0.30, raw_green) * smoothstep(0.98, 0.70, raw_green);
     in_transition = clamp(in_transition, 0.0, 1.0) * height_blend_contrast;
 
     float adj_rough   = raw_rough   + (h_r - 0.5) * in_transition * raw_rough;
@@ -179,7 +179,7 @@ void fragment() {
     col_fairway = clamp(vibrant_fairway * vec3(1.02, 1.16, 1.00), 0.0, 1.0);
 
     // 3B. Fairway-to-Rough Fringe Gradience
-    float fairway_fringe = smoothstep(0.02, 0.30, fairway_w) * smoothstep(0.98, 0.70, fairway_w);
+    float fairway_fringe = smoothstep(0.02, 0.35, fairway_w) * smoothstep(0.98, 0.65, fairway_w);
     vec3 col_fairway_fringe = col_fairway * vec3(0.90, 0.96, 0.88);
     col_fairway = mix(col_fairway, col_fairway_fringe, fairway_fringe * 0.5);
 
@@ -193,13 +193,13 @@ void fragment() {
     float rake_effect = mix(0.94, 1.06, rake_wave);
     col_bunker = clamp(col_bunker * rake_effect, 0.0, 1.0);
 
-    // 3E. Exposed Soil Bunker Lip
-    float bunker_edge = smoothstep(0.01, 0.38, bunker_w) * smoothstep(1.0, 0.60, bunker_w);
+    // 3E. Exposed Soil Bunker Lip (Smooth organic gradient)
+    float bunker_edge = smoothstep(0.01, 0.30, bunker_w) * smoothstep(1.0, 0.50, bunker_w);
     vec3 soil_color = vec3(0.22, 0.15, 0.09) * (0.85 + 0.30 * sin(UV.x * 2.0));
     col_bunker = mix(col_bunker, soil_color, bunker_edge * 0.85);
 
-    // 3F. Green Collar / Fringe Transition
-    float fringe_w = smoothstep(0.05, 0.40, green_w) * smoothstep(0.95, 0.75, green_w);
+    // 3F. Green Collar / Fringe Transition (Wider, smoother collar)
+    float fringe_w = smoothstep(0.03, 0.30, green_w) * smoothstep(0.97, 0.65, green_w);
     vec3 col_fringe = mix(col_green, col_fairway, 0.50) * vec3(0.94, 0.98, 0.94);
     vec3 green_output = mix(col_green, col_fringe, fringe_w);
 
@@ -213,18 +213,20 @@ void fragment() {
                         + col_mulch   * mulch_w;
 
     // -----------------------------------------------------------------------
-    // 4A. Clean Elevation Slope Shading (Contours without darkening flat areas)
+    // 4A. Clean Elevation Slope Shading & 3D Hill Relief
     // -----------------------------------------------------------------------
     vec3 wn = normalize(v_world_normal);
-    // Flat ground has wn.y ~ 1.0. Only steeper slopes have wn.y < 0.92
-    float slope_steepness = clamp((0.94 - wn.y) * 2.8, 0.0, 1.0);
-    float slope_mod = mix(1.0, 1.0 - slope_shading_strength * 0.28, slope_steepness);
-    blended_albedo *= slope_mod;
+    float slope_grade = length(wn.xz);
+    float slope_intensity = clamp(slope_grade * 6.0, 0.0, 1.0);
 
-    // Subtle sunward slope highlight
-    vec3 sun_dir = normalize(sun_direction);
-    float sun_facing = clamp(dot(wn, -sun_dir), 0.0, 1.0);
-    blended_albedo *= mix(0.98, 1.03, sun_facing);
+    vec3 light_dir = normalize(-sun_direction);
+    float NdotL = dot(wn, light_dir);
+    float flat_dot = light_dir.y;
+    float relief_diff = (NdotL - flat_dot) * 2.2;
+    float relief_factor = 1.0 + (relief_diff * slope_shading_strength);
+    float bank_darkening = 1.0 - (slope_intensity * 0.35 * slope_shading_strength);
+
+    blended_albedo *= clamp(relief_factor * bank_darkening, 0.30, 1.35);
 
     ALBEDO = clamp(blended_albedo, 0.0, 1.0);
 

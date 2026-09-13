@@ -23,7 +23,12 @@ internal static class BluetoothGattClientFactory
             return new Android.AndroidBluetoothGattClient();
         }
 
-        return new UnsupportedBluetoothGattClient("Bluetooth GATT support is only available on Windows, Linux, and Android.");
+        if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
+        {
+            return new Apple.AppleBluetoothGattClient();
+        }
+
+        return new UnsupportedBluetoothGattClient("Bluetooth GATT support is only available on Windows, Linux, Android, macOS, and iOS.");
     }
 
     private static IBluetoothGattClient CreateWindowsClient()

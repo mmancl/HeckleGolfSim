@@ -18,11 +18,15 @@ const SQUARE_CLASS_NAME := "SquareLaunchMonitor"
 const SQUARE_SCRIPT_PATH := "res://addons/launch_monitors/square/SquareLaunchMonitor.cs"
 const SQUARE_LOG_PREFIX := "[SquareLM]"
 const SQUARE_DEVICE_PREFIX := "squaregolf"
+const GARMIN_CLASS_NAME := "GarminLaunchMonitor"
+const GARMIN_SCRIPT_PATH := "res://addons/launch_monitors/garmin/GarminLaunchMonitor.cs"
+const GARMIN_LOG_PREFIX := "[GarminLM]"
 const BLUEZ_DEVICE_SEGMENT_PREFIX := "/dev_"
 const LINUX_AUTO_CONNECT_SCAN_SECONDS := 15.0
 const TRANSIENT_CONNECT_ERROR_MARKERS := [
 	"not ready yet",
-	"could not open the selected bluetooth device"
+	"could not open the selected bluetooth device",
+	"unreachable"
 ]
 
 var devices: Dictionary = {}
@@ -32,10 +36,13 @@ var firmware := ""
 var is_ready := false
 var last_sensor_data := {"pos_x": 0, "pos_y": 0, "pos_z": 0, "ready": false, "detected": false}
 var _square_init_error := ""
+var _garmin_init_error := ""
+var _active_driver := "" # "square" or "garmin"
 var settings := {
 	"enabled": false,
 	"device_id": "",
 	"device_name": "",
+	"device_type": "auto", # "auto", "square", "garmin"
 	"club_code": DEFAULT_CLUB_CODE,
 	"handedness": 0,
 	"ready_ding_enabled": true,
@@ -44,6 +51,7 @@ var settings := {
 }
 
 var _square: Node = null
+var _garmin: Node = null
 var _config := ConfigFile.new()
 var _linux_auto_connect_active := false
 var _linux_auto_connect_target_address := ""
@@ -51,6 +59,7 @@ var _linux_auto_connect_timer: Timer = null
 var _auto_reconnect_timer: Timer = null
 var _ready_audio_player: AudioStreamPlayer = null
 var _ready_hud: CanvasLayer = null
+var _is_manual_connect := false
 
 
 func _ready() -> void:
@@ -63,8 +72,9 @@ func _ready() -> void:
 	_setup_audio_player()
 	_setup_ready_hud()
 	_create_square_monitor()
-	if _square == null:
-		_debug_error("Square monitor unavailable during startup: %s" % _square_init_error)
+	_create_garmin_monitor()
+	if _square == null and _garmin == null:
+		_debug_error("Neither Square nor Garmin monitor could be loaded: Square='%s', Garmin='%s'" % [_square_init_error, _garmin_init_error])
 	if bool(settings.get("enabled", false)):
 		_connect_saved_device_on_startup(str(settings.get("device_id", "")))
 	
@@ -150,45 +160,120 @@ func set_ready_indicator_enabled(enabled: bool) -> void:
 	_update_hud_display()
 
 
+func set_device_type(type_name: String) -> void:
+	settings["device_type"] = type_name
+	_save_settings()
+
+
+func is_garmin_device_name(name: String) -> bool:
+	var n := name.strip_edges().to_lower()
+	return n.contains("approach") or n.contains("r10") or n.contains("garmin")
+
+
+func is_square_device_name(name: String) -> bool:
+	var n := name.strip_edges().to_lower()
+	return n.begins_with(SQUARE_DEVICE_PREFIX) or n.contains("square")
+
+
+func detect_device_type(device_id: String, device_name: String = "") -> String:
+	var explicit_type := str(settings.get("device_type", "auto"))
+	if explicit_type == "square" or explicit_type == "garmin":
+		return explicit_type
+	if device_name != "":
+		if is_garmin_device_name(device_name):
+			return "garmin"
+		if is_square_device_name(device_name):
+			return "square"
+	if devices.has(device_id):
+		var dev: Dictionary = devices[device_id]
+		var dev_type := str(dev.get("type", ""))
+		if dev_type != "":
+			return dev_type
+		var dname := str(dev.get("name", ""))
+		if is_garmin_device_name(dname):
+			return "garmin"
+		if is_square_device_name(dname):
+			return "square"
+	return "square"
+
+
 func start_scan() -> void:
 	_cancel_linux_auto_connect_scan()
-	_start_square_scan()
+	devices.clear()
+	var dev_type := str(settings.get("device_type", "auto"))
+	_set_status("Scanning")
+	if dev_type == "garmin":
+		_start_garmin_scan()
+	elif dev_type == "square":
+		_start_square_scan()
+	else:
+		_start_square_scan()
+		_start_garmin_scan()
 
 
 func stop_scan() -> void:
 	_cancel_linux_auto_connect_scan()
 	_stop_square_scan()
+	_stop_garmin_scan()
+	if status == "Scanning":
+		_set_status("Disconnected")
 
 
-func connect_to_device(device_id: String) -> void:
+func connect_to_device(device_id: String, is_auto: bool = false) -> void:
+	_is_manual_connect = not is_auto
 	_cancel_linux_auto_connect_scan()
-	if _square == null:
-		var message := _missing_support_message()
-		_debug_error("connect_to_device blocked: %s" % message)
-		_set_status(message)
-		emit_signal("error_occurred", message)
-		return
-	_debug_log("connect_to_device requested for %s" % device_id)
+	stop_scan()
+	_debug_log("connect_to_device requested for %s (auto=%s)" % [device_id, str(is_auto)])
 	settings["device_id"] = device_id
 	var device_name := ""
+	var detected_type := ""
 	if devices.has(device_id):
 		device_name = str(devices[device_id].get("name", ""))
+		detected_type = str(devices[device_id].get("type", ""))
 	if device_name != "":
 		settings["device_name"] = device_name
 	elif str(settings.get("device_name", "")) != "":
 		device_name = str(settings.get("device_name", ""))
+	
+	if detected_type == "":
+		detected_type = detect_device_type(device_id, device_name)
+
+	if detected_type == "garmin":
+		if device_name == "":
+			device_name = "Garmin Approach R10"
+			settings["device_name"] = device_name
+		_active_driver = "garmin"
+		settings["device_type"] = "garmin"
+		_save_settings()
+		if not devices.has(device_id):
+			devices[device_id] = { "name": device_name, "rssi": 0, "type": "garmin" }
+		if _garmin == null:
+			var msg := "Garmin support is unavailable in this build."
+			_set_status(msg)
+			if _is_manual_connect:
+				emit_signal("error_occurred", msg)
+			return
+		_update_garmin_weather_config()
+		_garmin.call("ConnectToDevice", device_id)
 	else:
-		device_name = "Square Golf"
-		settings["device_name"] = device_name
-	_save_settings()
-	if not devices.has(device_id):
-		devices[device_id] = {
-			"name": device_name,
-			"rssi": 0
-		}
-	_square.call("SetHandedness", int(settings.get("handedness", 0)))
-	_square.call("SetClub", str(settings.get("club_code", DEFAULT_CLUB_CODE)))
-	_square.call("ConnectToDevice", device_id)
+		if device_name == "":
+			device_name = "Square Golf"
+			settings["device_name"] = device_name
+		_active_driver = "square"
+		if str(settings.get("device_type", "auto")) != "auto":
+			settings["device_type"] = "square"
+		_save_settings()
+		if not devices.has(device_id):
+			devices[device_id] = { "name": device_name, "rssi": 0, "type": "square" }
+		if _square == null:
+			var msg := _missing_support_message()
+			_set_status(msg)
+			if _is_manual_connect:
+				emit_signal("error_occurred", msg)
+			return
+		_square.call("SetHandedness", int(settings.get("handedness", 0)))
+		_square.call("SetClub", str(settings.get("club_code", DEFAULT_CLUB_CODE)))
+		_square.call("ConnectToDevice", device_id)
 
 
 func disconnect_device() -> void:
@@ -196,27 +281,36 @@ func disconnect_device() -> void:
 	_cancel_auto_reconnect()
 	settings["enabled"] = false
 	_save_settings()
+	_debug_log("disconnect_device requested")
 	if _square != null:
-		_debug_log("disconnect_device requested")
 		_square.call("DisconnectFromDevice")
+	if _garmin != null:
+		_garmin.call("DisconnectFromDevice")
+	_active_driver = ""
 
 
 func _start_square_scan() -> void:
-	if _square == null:
-		var message := _missing_support_message()
-		_debug_error("start_scan blocked: %s" % message)
-		_set_status(message)
-		emit_signal("error_occurred", message)
-		return
-	_debug_log("start_scan requested")
-	devices.clear()
-	_square.call("StartScan")
+	if _square != null:
+		_debug_log("Square start_scan requested")
+		_square.call("StartScan")
 
 
 func _stop_square_scan() -> void:
 	if _square != null:
-		_debug_log("stop_scan requested")
+		_debug_log("Square stop_scan requested")
 		_square.call("StopScan")
+
+
+func _start_garmin_scan() -> void:
+	if _garmin != null:
+		_debug_log("Garmin start_scan requested")
+		_garmin.call("StartScan")
+
+
+func _stop_garmin_scan() -> void:
+	if _garmin != null:
+		_debug_log("Garmin stop_scan requested")
+		_garmin.call("StopScan")
 
 
 func set_enabled(value: bool) -> void:
@@ -267,15 +361,42 @@ func notify_ball_at_rest() -> void:
 
 
 func set_ready() -> void:
-	if _square != null:
-		_debug_log("set_ready requested")
+	_debug_log("set_ready requested")
+	if _active_driver == "garmin" and _garmin != null:
+		_garmin.call("SetReady")
+	elif _square != null:
 		_square.call("SetReady")
 
 
 func rearm() -> void:
 	_debug_log("rearm requested")
-	if _square != null:
+	if _active_driver == "garmin" and _garmin != null:
+		_garmin.call("SetReady")
+	elif _square != null:
 		_square.call("SetReady")
+
+
+func calibrate_garmin_tilt() -> void:
+	_debug_log("calibrate_garmin_tilt requested")
+	if _garmin != null:
+		_garmin.call("CalibrateTilt")
+
+
+func _update_garmin_weather_config() -> void:
+	if _garmin == null:
+		return
+	var temp := 72.0
+	var alt := 0.0
+	var tee := 7.0
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.get("range_settings") != null:
+			if "temperature" in gs.range_settings:
+				temp = float(gs.range_settings.temperature.value)
+			if "altitude" in gs.range_settings:
+				alt = float(gs.range_settings.altitude.value)
+	_debug_log("Sending shot config to Garmin R10: Temp=%.1f F, Alt=%.1f ft, Tee=%.1f ft" % [temp, alt, tee])
+	_garmin.call("SetShotConfig", temp, alt, tee)
 
 
 func _create_square_monitor() -> void:
@@ -284,28 +405,21 @@ func _create_square_monitor() -> void:
 	var square_script := load(SQUARE_SCRIPT_PATH) as Script
 	if square_script == null:
 		_square_init_error = "Square script could not be loaded at %s." % SQUARE_SCRIPT_PATH
-		_set_status(_square_init_error)
-		emit_signal("error_occurred", _square_init_error)
 		_debug_error(_square_init_error)
 		return
 
 	if not square_script.can_instantiate():
-		_square_init_error = "%s script is loaded but cannot instantiate. Ensure C# build succeeds and class name matches filename." % SQUARE_CLASS_NAME
-		_set_status(_square_init_error)
-		emit_signal("error_occurred", _square_init_error)
+		_square_init_error = "%s script is loaded but cannot instantiate." % SQUARE_CLASS_NAME
 		_debug_error(_square_init_error)
 		return
 
 	_square = square_script.new() as Node
 	if _square == null:
-		_square_init_error = "%s could not be created from %s. Check C# build output for load errors." % [SQUARE_CLASS_NAME, SQUARE_SCRIPT_PATH]
-		_set_status(_square_init_error)
-		emit_signal("error_occurred", _square_init_error)
+		_square_init_error = "%s could not be created from %s." % [SQUARE_CLASS_NAME, SQUARE_SCRIPT_PATH]
 		_debug_error(_square_init_error)
 		return
 
 	add_child(_square)
-	_set_status("Disconnected")
 	_debug_log("%s instantiated and signals connected." % SQUARE_CLASS_NAME)
 	_square.connect("DeviceDiscovered", _on_square_device_discovered)
 	_square.connect("StatusChanged", _on_square_status_changed)
@@ -316,6 +430,37 @@ func _create_square_monitor() -> void:
 	if _square.has_signal("SensorDataReceived"):
 		_square.connect("SensorDataReceived", _on_square_sensor_data_received)
 	_square.connect("ShotReceived", _on_square_shot_received)
+
+
+func _create_garmin_monitor() -> void:
+	_garmin_init_error = ""
+	_debug_log("Attempting to load script %s" % GARMIN_SCRIPT_PATH)
+	var garmin_script := load(GARMIN_SCRIPT_PATH) as Script
+	if garmin_script == null:
+		_garmin_init_error = "Garmin script could not be loaded at %s." % GARMIN_SCRIPT_PATH
+		_debug_error(_garmin_init_error)
+		return
+
+	if not garmin_script.can_instantiate():
+		_garmin_init_error = "%s script is loaded but cannot instantiate." % GARMIN_CLASS_NAME
+		_debug_error(_garmin_init_error)
+		return
+
+	_garmin = garmin_script.new() as Node
+	if _garmin == null:
+		_garmin_init_error = "%s could not be created from %s." % [GARMIN_CLASS_NAME, GARMIN_SCRIPT_PATH]
+		_debug_error(_garmin_init_error)
+		return
+
+	add_child(_garmin)
+	_debug_log("%s instantiated and signals connected." % GARMIN_CLASS_NAME)
+	_garmin.connect("DeviceDiscovered", _on_garmin_device_discovered)
+	_garmin.connect("StatusChanged", _on_garmin_status_changed)
+	_garmin.connect("ErrorOccurred", _on_garmin_error_occurred)
+	_garmin.connect("BatteryChanged", _on_garmin_battery_changed)
+	_garmin.connect("FirmwareChanged", _on_garmin_firmware_changed)
+	_garmin.connect("ReadyChanged", _on_garmin_ready_changed)
+	_garmin.connect("ShotReceived", _on_garmin_shot_received)
 
 
 func set_ball_placement_guide_enabled(enabled: bool) -> void:
@@ -331,6 +476,7 @@ func _load_settings() -> void:
 	settings["enabled"] = bool(_config.get_value("square", "enabled", false))
 	settings["device_id"] = str(_config.get_value("square", "device_id", ""))
 	settings["device_name"] = str(_config.get_value("square", "device_name", ""))
+	settings["device_type"] = str(_config.get_value("square", "device_type", "auto"))
 	settings["club_code"] = str(_config.get_value("square", "club_code", DEFAULT_CLUB_CODE))
 	settings["handedness"] = int(_config.get_value("square", "handedness", 0))
 	settings["ready_ding_enabled"] = bool(_config.get_value("square", "ready_ding_enabled", true))
@@ -342,6 +488,7 @@ func _save_settings() -> void:
 	_config.set_value("square", "enabled", bool(settings.get("enabled", false)))
 	_config.set_value("square", "device_id", str(settings.get("device_id", "")))
 	_config.set_value("square", "device_name", str(settings.get("device_name", "")))
+	_config.set_value("square", "device_type", str(settings.get("device_type", "auto")))
 	_config.set_value("square", "club_code", str(settings.get("club_code", DEFAULT_CLUB_CODE)))
 	_config.set_value("square", "handedness", int(settings.get("handedness", 0)))
 	_config.set_value("square", "ready_ding_enabled", bool(settings.get("ready_ding_enabled", true)))
@@ -349,34 +496,109 @@ func _save_settings() -> void:
 	_config.set_value("square", "ball_placement_guide_enabled", bool(settings.get("ball_placement_guide_enabled", true)))
 	var err := _config.save(SETTINGS_PATH)
 	if err != OK:
-		_debug_error("Failed to save Square settings file at %s" % SETTINGS_PATH)
-		emit_signal("error_occurred", "Square settings could not be saved.")
+		_debug_error("Failed to save launch monitor settings file at %s" % SETTINGS_PATH)
+		emit_signal("error_occurred", "Launch monitor settings could not be saved.")
 
 
 func _on_square_device_discovered(device_id: String, name: String, rssi: int) -> void:
-	if not _is_square_device_name(name):
-		_debug_log("ignoring non-square device discovery: %s (%s)" % [name, device_id])
+	if str(settings.get("device_type", "auto")) == "garmin":
 		return
-	_debug_log("device discovered: %s (%s) RSSI=%d" % [name, device_id, rssi])
+	if not is_square_device_name(name):
+		return
+	var is_new := not devices.has(device_id)
 	devices[device_id] = {
 		"name": name,
-		"rssi": rssi
+		"rssi": rssi,
+		"type": "square"
 	}
-	if device_id == str(settings.get("device_id", "")):
-		settings["device_name"] = name
-		_save_settings()
-	emit_signal("device_discovered", device_id, name, rssi)
-	if _is_linux_auto_connect_match(device_id):
-		_debug_log("saved Linux Square discovered; connecting automatically")
-		connect_to_device(device_id)
+	if is_new:
+		_debug_log("Square device discovered: %s (%s) RSSI=%d" % [name, device_id, rssi])
+		if device_id == str(settings.get("device_id", "")):
+			settings["device_name"] = name
+			_save_settings()
+		emit_signal("device_discovered", device_id, name, rssi)
+		if _is_linux_auto_connect_match(device_id):
+			_debug_log("saved Linux Square discovered; connecting automatically")
+			connect_to_device(device_id, true)
+
+
+func _on_garmin_device_discovered(device_id: String, name: String, rssi: int) -> void:
+	if str(settings.get("device_type", "auto")) == "square":
+		return
+	var display_name := name if name.strip_edges() != "" else "Garmin Approach R10"
+	var is_new := not devices.has(device_id)
+	devices[device_id] = {
+		"name": display_name,
+		"rssi": rssi,
+		"type": "garmin"
+	}
+	if is_new:
+		_debug_log("Garmin device discovered: %s (%s) RSSI=%d" % [display_name, device_id, rssi])
+		if device_id == str(settings.get("device_id", "")):
+			settings["device_name"] = display_name
+			_save_settings()
+		emit_signal("device_discovered", device_id, display_name, rssi)
+		if _is_linux_auto_connect_match(device_id):
+			_debug_log("saved Linux Garmin discovered; connecting automatically")
+			connect_to_device(device_id, true)
 
 
 func _on_square_status_changed(value: String) -> void:
 	_set_status(value)
-	if value == "Disconnected" and bool(settings.get("enabled", false)) and str(settings.get("device_id", "")) != "":
+	if value == "Disconnected" and bool(settings.get("enabled", false)) and str(settings.get("device_id", "")) != "" and _active_driver == "square":
 		_schedule_auto_reconnect()
 	elif value == "Connected" or value == "Connecting" or value == "Ready":
 		_cancel_auto_reconnect()
+
+
+func _on_garmin_status_changed(value: String) -> void:
+	_set_status(value)
+	if value == "Disconnected" and bool(settings.get("enabled", false)) and str(settings.get("device_id", "")) != "" and _active_driver == "garmin":
+		_schedule_auto_reconnect()
+	elif value == "Connected" or value == "Connecting" or value == "Ready":
+		_cancel_auto_reconnect()
+
+
+func _on_garmin_error_occurred(message: String) -> void:
+	_debug_error("Garmin runtime error: %s" % message)
+	_cancel_auto_reconnect()
+	emit_signal("error_occurred", message)
+
+
+func _on_garmin_battery_changed(level: int) -> void:
+	_debug_log("Garmin battery changed: %d%%" % level)
+	battery_level = level
+	emit_signal("battery_changed", level)
+
+
+func _on_garmin_firmware_changed(value: String) -> void:
+	_debug_log("Garmin firmware changed: %s" % value)
+	firmware = value
+	emit_signal("firmware_changed", value)
+
+
+func _on_garmin_ready_changed(value: bool) -> void:
+	_debug_log("Garmin ready changed: %s" % str(value))
+	var became_ready := value and not is_ready
+	is_ready = value
+	if became_ready:
+		if is_ball_in_flight():
+			_pending_ready_ding = true
+		else:
+			_pending_ready_ding = false
+			play_ready_ding()
+	elif not value:
+		_pending_ready_ding = false
+	emit_signal("ready_changed", value)
+	_update_hud_display()
+
+
+func _on_garmin_shot_received(data: Dictionary) -> void:
+	_debug_log("Garmin shot received with %d fields" % data.size())
+	FoamBallBoost.apply_boost(data)
+	notify_shot_started()
+	emit_signal("hit_ball", data)
+	_update_hud_display()
 
 
 func _schedule_auto_reconnect() -> void:
@@ -395,7 +617,7 @@ func _on_auto_reconnect_timeout() -> void:
 	var dev_id := str(settings.get("device_id", ""))
 	if bool(settings.get("enabled", false)) and dev_id != "" and status == "Disconnected":
 		_debug_log("Attempting automatic reconnection to saved device %s" % dev_id)
-		connect_to_device(dev_id)
+		connect_to_device(dev_id, true)
 
 
 func _cancel_auto_reconnect() -> void:
@@ -408,7 +630,11 @@ func _cancel_auto_reconnect() -> void:
 
 
 func _on_square_error_occurred(message: String) -> void:
-	if _is_transient_square_connect_error(message):
+	var is_transient := _is_transient_square_connect_error(message)
+	if not _is_manual_connect and is_transient:
+		_debug_log("Square auto-connect suppressed error: %s" % message)
+		return
+	if is_transient:
 		_debug_log("Square runtime warning: %s" % message)
 	else:
 		_debug_error("Square runtime error: %s" % message)
@@ -458,6 +684,7 @@ func _on_square_sensor_data_received(pos_x: int, pos_y: int, pos_z: int, ready: 
 
 func _on_square_shot_received(data: Dictionary) -> void:
 	_debug_log("shot received with %d fields" % data.size())
+	FoamBallBoost.apply_boost(data)
 	notify_shot_started()
 	emit_signal("hit_ball", data)
 	_update_hud_display()
@@ -466,25 +693,26 @@ func _on_square_shot_received(data: Dictionary) -> void:
 func _missing_support_message() -> String:
 	if _square_init_error != "":
 		return "Square support is unavailable in this build. %s" % _square_init_error
-	return "Square support is unavailable in this build."
+	if _garmin_init_error != "":
+		return "Garmin support is unavailable in this build. %s" % _garmin_init_error
+	return "Launch monitor support is unavailable in this build."
 
 
 func _connect_saved_device_on_startup(device_id: String) -> void:
 	if device_id == "":
 		return
 	var saved_name := str(settings.get("device_name", ""))
+	var saved_type := str(settings.get("device_type", "auto"))
 	if saved_name == "":
-		saved_name = "Square Golf"
+		saved_name = "Square Golf" if saved_type != "garmin" else "Garmin Approach R10"
 	if not devices.has(device_id):
 		devices[device_id] = {
 			"name": saved_name,
-			"rssi": 0
+			"rssi": 0,
+			"type": saved_type if saved_type != "auto" else detect_device_type(device_id, saved_name)
 		}
-	if _square == null:
-		connect_to_device(device_id)
-		return
 	if OS.get_name() != "Linux":
-		connect_to_device(device_id)
+		connect_to_device(device_id, true)
 		return
 	_start_linux_auto_connect_scan(device_id)
 
@@ -595,6 +823,8 @@ func _update_hud_display() -> void:
 	if _ready_hud != null and _ready_hud.has_method("set_ready_status"):
 		var hud_enabled := bool(settings.get("ready_indicator_enabled", true))
 		var guide_enabled := bool(settings.get("ball_placement_guide_enabled", true))
+		if _active_driver == "garmin":
+			guide_enabled = false
 		if _ready_hud.has_method("set_placement_guide_enabled"):
 			_ready_hud.call("set_placement_guide_enabled", guide_enabled)
 		_ready_hud.call("set_ready_status", is_ready, status, hud_enabled)

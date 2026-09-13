@@ -1,6 +1,7 @@
 extends Node
 
 signal achievement_unlocked(player_name: String, achievement: Dictionary)
+signal longest_drive_recorded(player_name: String, distance_yds: float, prev_distance_yds: float)
 
 const SAVE_PATH = "user://player_achievements.json"
 
@@ -299,11 +300,25 @@ func check_hole_achievements(player_name: String, hole_par: int, strokes: int, l
 	if diff <= 0 and "bunker" in lies_in_hole:
 		unlock_achievement(player_name, "sand_save")
 
-func check_shot_achievements(player_name: String, club_name: String, total_yards: float) -> void:
+func check_shot_achievements(player_name: String, club_name: String, total_yards: float, prev_longest_drive: float = -1.0) -> void:
 	if player_name.is_empty():
 		return
-	if total_yards >= 300.0 and (club_name.begins_with("Dr") or club_name.to_lower() == "driver"):
+	var is_driver = (club_name.begins_with("Dr") or club_name.to_lower() == "driver")
+	if total_yards >= 300.0 and is_driver:
 		unlock_achievement(player_name, "long_drive")
+		
+	# Check longest drive personal record
+	if is_driver and total_yards > 0.0:
+		var prev_best = prev_longest_drive
+		if prev_best < 0.0 and has_node("/root/MultiplayerManager"):
+			var mp_mgr = get_node("/root/MultiplayerManager")
+			if mp_mgr.has_method("calculate_player_stats"):
+				var stats = mp_mgr.calculate_player_stats(player_name)
+				prev_best = float(stats.get("longest_drive", 0.0))
+		
+		# If the new shot surpasses previous best (or is a valid qualifying drive >= 150 yds if no previous record)
+		if total_yards > prev_best and (prev_best > 0.0 or total_yards >= 150.0):
+			emit_signal("longest_drive_recorded", player_name, total_yards, prev_best)
 
 func check_round_achievements(player_name: String, total_strokes: int, hole_count: int, is_winner: bool, total_wins: int) -> void:
 	if player_name.is_empty() or total_strokes <= 0:

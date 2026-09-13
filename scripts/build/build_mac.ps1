@@ -103,6 +103,34 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path $ZipOutput)) {
     throw "Godot export failed with exit code $LASTEXITCODE"
 }
 
+# Verify / inject NSBluetoothAlwaysUsageDescription into Info.plist inside the zip
+try {
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zipArchive = [System.IO.Compression.ZipFile]::Open($ZipOutput, [System.IO.Compression.ZipArchiveMode]::Update)
+    $plistEntry = $zipArchive.Entries | Where-Object { $_.FullName -like "*Contents/Info.plist" } | Select-Object -First 1
+    if ($plistEntry) {
+        $reader = New-Object System.IO.StreamReader($plistEntry.Open(), [System.Text.Encoding]::UTF8)
+        $plistText = $reader.ReadToEnd()
+        $reader.Close()
+        if ($plistText -notmatch "NSBluetoothAlwaysUsageDescription") {
+            Write-Host "Injecting NSBluetoothAlwaysUsageDescription into macOS Info.plist..." -ForegroundColor Yellow
+            $insert = "`t<key>NSBluetoothAlwaysUsageDescription</key>`n`t<string>Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor.</string>`n</dict>"
+            $plistText = $plistText -replace "</dict>", $insert
+            $entryName = $plistEntry.FullName
+            $plistEntry.Delete()
+            $newEntry = $zipArchive.CreateEntry($entryName)
+            $writer = New-Object System.IO.StreamWriter($newEntry.Open(), [System.Text.Encoding]::UTF8)
+            $writer.Write($plistText)
+            $writer.Close()
+            Write-Host "[OK] macOS Info.plist verified and updated with Bluetooth permissions." -ForegroundColor Green
+        }
+    }
+    $zipArchive.Dispose()
+} catch {
+    Write-Host "[WARNING] Could not check Info.plist inside zip: $_" -ForegroundColor Yellow
+}
+
 $fileItem = Get-Item $ZipOutput
 $sizeMB = [math]::Round($fileItem.Length / 1MB, 2)
 

@@ -20,9 +20,11 @@ var dof_blur_amount := Setting.new(0.03, 0.0, 0.3)
 var vignette_enabled := Setting.new(false)
 var vignette_intensity := Setting.new(1.5, 0.0, 3.0)
 var gimme_range_1_enabled := Setting.new(true)
-var gimme_range_1_distance := Setting.new(5.0, 0.5, 20.0)
+var gimme_range_1_distance := Setting.new(4.0, 1.0, 100.0)
 var gimme_range_2_enabled := Setting.new(false)
-var gimme_range_2_distance := Setting.new(25.0, 0.5, 30.0)
+var gimme_range_2_distance := Setting.new(10.0, 1.0, 100.0)
+var gimme_range_3_enabled := Setting.new(false)
+var gimme_range_3_distance := Setting.new(30.0, 1.0, 100.0)
 var custom_next_player := Setting.new(true)
 var turn_order_mode := Setting.new("Stay Up")
 var golf_clap_enabled := Setting.new(true)
@@ -36,6 +38,11 @@ var use_phone_stream := Setting.new(false)
 var tension_effects_enabled := Setting.new(true)
 var shot_analysis_enabled := Setting.new(false)
 var displayed_stats := Setting.new(StatDefinitions.DEFAULT_ENABLED_STAT_IDS.duplicate())
+var foam_ball_boost_enabled := Setting.new(false)
+var foam_ball_boost_percent := Setting.new(20.0, 0.0, 100.0)
+var tcp_server_ip := Setting.new("0.0.0.0")
+var tcp_server_port := Setting.new(49152, 1, 65535)
+var graphics_quality := Setting.new(MobilePerformance.get_default_graphics_quality())
 
 func _init():
 	init({
@@ -61,6 +68,8 @@ func _init():
 		"gimme_range_1_distance": gimme_range_1_distance,
 		"gimme_range_2_enabled": gimme_range_2_enabled,
 		"gimme_range_2_distance": gimme_range_2_distance,
+		"gimme_range_3_enabled": gimme_range_3_enabled,
+		"gimme_range_3_distance": gimme_range_3_distance,
 		"custom_next_player": custom_next_player,
 		"turn_order_mode": turn_order_mode,
 		"golf_clap_enabled": golf_clap_enabled,
@@ -74,6 +83,11 @@ func _init():
 		"tension_effects_enabled": tension_effects_enabled,
 		"shot_analysis_enabled": shot_analysis_enabled,
 		"displayed_stats": displayed_stats,
+		"foam_ball_boost_enabled": foam_ball_boost_enabled,
+		"foam_ball_boost_percent": foam_ball_boost_percent,
+		"tcp_server_ip": tcp_server_ip,
+		"tcp_server_port": tcp_server_port,
+		"graphics_quality": graphics_quality,
 	})
 
 

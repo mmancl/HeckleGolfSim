@@ -81,11 +81,12 @@ public partial class BounceCalculator : RefCounted
         float currentSpinRpm = omega.Length() / ShotSetup.RAD_PER_RPM;
 
         float tangentialRetention;
+        float tangentSpinFactor = 1.0f;
 
         if (currentState == PhysicsEnums.BallState.Flight)
         {
-            float spinFactor = Mathf.Clamp(1.0f - (currentSpinRpm / bp.FlightSpinFactorDivisor), bp.FlightSpinFactorMin, 1.0f);
-            tangentialRetention = bp.FlightTangentialRetentionBase * spinFactor;
+            tangentSpinFactor = Mathf.Clamp(1.0f - (currentSpinRpm / bp.FlightSpinFactorDivisor), bp.FlightSpinFactorMin, 1.0f);
+            tangentialRetention = bp.FlightTangentialRetentionBase * tangentSpinFactor;
         }
         else
         {
@@ -122,14 +123,31 @@ public partial class BounceCalculator : RefCounted
 
             if (!shouldUsePenner)
             {
-                newTangentSpeed = speedTangent * tangentialRetention;
                 if (!isSteepImpact)
-                    PhysicsLogger.Verbose($"  Bounce: Shallow angle ({impactAngleDeg:F2}° < {criticalAngleDeg:F2}°) - using simple retention");
-                else if (impactSpeed < bp.PennerLowEnergyThreshold && !hasSpinbackSurface)
-                    PhysicsLogger.Verbose($"  Bounce: Low energy ({impactSpeed:F2} m/s < {bp.PennerLowEnergyThreshold:F1} m/s) - using simple retention");
+                {
+                    float angleRatio = effectiveCriticalAngle > 0.001f
+                        ? Mathf.Clamp(impactAngle / effectiveCriticalAngle, 0.0f, 1.0f)
+                        : 0.0f;
+                    float baseRetention = Mathf.Lerp(bp.ShallowImpactRetentionMin, bp.ShallowImpactRetentionMax, 1.0f - angleRatio);
+
+                    if (parameters != null && parameters.InitialLaunchAngleDeg < 12.0f)
+                    {
+                        float vlaFactor = Mathf.Clamp(parameters.InitialLaunchAngleDeg / 12.0f, 0.75f, 1.0f);
+                        baseRetention *= vlaFactor;
+                    }
+
+                    newTangentSpeed = speedTangent * baseRetention * tangentSpinFactor;
+                    PhysicsLogger.Verbose($"  Bounce: Shallow angle ({impactAngleDeg:F2}° < {criticalAngleDeg:F2}°, retention={baseRetention * tangentSpinFactor:F3}) - newTangentSpeed={newTangentSpeed:F2} m/s");
+                }
                 else
-                    PhysicsLogger.Verbose($"  Bounce: Using simple retention (surface={parameters.SurfaceType}, speed={impactSpeed:F2} m/s)");
-                PhysicsLogger.Verbose($"    speedTangent={speedTangent:F2} m/s, newTangentSpeed={newTangentSpeed:F2} m/s");
+                {
+                    newTangentSpeed = speedTangent * tangentialRetention;
+                    if (impactSpeed < bp.PennerLowEnergyThreshold && !hasSpinbackSurface)
+                        PhysicsLogger.Verbose($"  Bounce: Low energy ({impactSpeed:F2} m/s < {bp.PennerLowEnergyThreshold:F1} m/s) - using simple retention");
+                    else
+                        PhysicsLogger.Verbose($"  Bounce: Using simple retention (surface={parameters.SurfaceType}, speed={impactSpeed:F2} m/s)");
+                    PhysicsLogger.Verbose($"    speedTangent={speedTangent:F2} m/s, newTangentSpeed={newTangentSpeed:F2} m/s");
+                }
             }
             else
             {

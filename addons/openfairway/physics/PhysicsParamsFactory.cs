@@ -4,8 +4,22 @@ using Godot;
 /// Resolves environment, surface, and ball-profile inputs into the final
 /// parameters consumed by the physics engine.
 /// </summary>
-public sealed class PhysicsParamsFactory
+[GlobalClass]
+public partial class PhysicsParamsFactory : RefCounted
 {
+	private BallPhysicsProfile _ballProfile = new();
+
+	public BallPhysicsProfile BallProfile
+	{
+		get => _ballProfile;
+		set => _ballProfile = value ?? new BallPhysicsProfile();
+	}
+
+	public void LoadProfileFromJson(string json)
+	{
+		_ballProfile = BallPhysicsProfile.FromJson(json);
+	}
+
 	public ResolvedPhysicsParams Create(
 		float airDensity,
 		float airViscosity,
@@ -17,17 +31,23 @@ public sealed class PhysicsParamsFactory
 		BallPhysicsProfile ballProfile = null,
 		float initialLaunchAngleDeg = 0.0f,
 		float launchSpeedMph = 0.0f,
-		float launchSpinRpm = 0.0f)
+		float launchSpinRpm = 0.0f,
+		bool isPutt = false)
 	{
-		BallPhysicsProfile profile = ballProfile ?? new BallPhysicsProfile();
+		BallPhysicsProfile profile = ballProfile ?? _ballProfile ?? new BallPhysicsProfile();
 		SurfacePhysicsSettings surface = SurfacePhysicsCatalog.Get(surfaceType);
 		RegimeScaleOverride regimeScale = profile.ResolveScaleOverride(
 			launchSpeedMph,
 			initialLaunchAngleDeg,
 			launchSpinRpm,
-			out _,
-			out _
+			out string regimeKey,
+			out string matchedOverrideKey
 		);
+
+		if (!string.IsNullOrEmpty(matchedOverrideKey))
+		{
+			PhysicsLogger.Info($"[Regime] {regimeKey} matched={matchedOverrideKey} drag={regimeScale.DragScaleMultiplier:F3} lift={regimeScale.LiftScaleMultiplier:F3}");
+		}
 
 		return new ResolvedPhysicsParams(
 			airDensity,
@@ -48,7 +68,125 @@ public sealed class PhysicsParamsFactory
 			surface.SpinbackSpeedStartMps,
 			surface.SpinbackSpeedEndMps,
 			initialLaunchAngleDeg,
-			profile.ResolvedFlight
+			profile.ResolvedFlight,
+			isPutt: isPutt
 		);
+	}
+
+	public PhysicsParams CreateParams(
+		float airDensity,
+		float airViscosity,
+		float dragScale,
+		float liftScale,
+		PhysicsEnums.SurfaceType surfaceType,
+		Vector3 floorNormal,
+		float rolloutImpactSpin = 0.0f,
+		float initialLaunchAngleDeg = 0.0f,
+		float launchSpeedMph = 0.0f,
+		float launchSpinRpm = 0.0f,
+		bool isPutt = false)
+	{
+		return Create(
+			airDensity,
+			airViscosity,
+			dragScale,
+			liftScale,
+			surfaceType,
+			floorNormal,
+			rolloutImpactSpin,
+			_ballProfile,
+			initialLaunchAngleDeg,
+			launchSpeedMph,
+			launchSpinRpm,
+			isPutt
+		).ToPhysicsParams();
+	}
+
+	public PhysicsParams CreateParams(
+		float airDensity,
+		float airViscosity,
+		float dragScale,
+		float liftScale,
+		int surfaceType,
+		Vector3 floorNormal,
+		float rolloutImpactSpin = 0.0f,
+		float initialLaunchAngleDeg = 0.0f,
+		float launchSpeedMph = 0.0f,
+		float launchSpinRpm = 0.0f,
+		bool isPutt = false)
+	{
+		return CreateParams(
+			airDensity,
+			airViscosity,
+			dragScale,
+			liftScale,
+			(PhysicsEnums.SurfaceType)surfaceType,
+			floorNormal,
+			rolloutImpactSpin,
+			initialLaunchAngleDeg,
+			launchSpeedMph,
+			launchSpinRpm,
+			isPutt
+		);
+	}
+
+	public void ConfigureShot(
+		PhysicsParams parameters,
+		float airDensity,
+		float airViscosity,
+		float dragScale,
+		float liftScale,
+		float initialLaunchAngleDeg,
+		float launchSpeedMph,
+		float launchSpinRpm,
+		bool isPutt = false)
+	{
+		if (parameters == null)
+			return;
+
+		RegimeScaleOverride regimeScale = _ballProfile.ResolveScaleOverride(
+			launchSpeedMph,
+			initialLaunchAngleDeg,
+			launchSpinRpm,
+			out string regimeKey,
+			out string matchedOverrideKey
+		);
+
+		if (!string.IsNullOrEmpty(matchedOverrideKey))
+		{
+			PhysicsLogger.Info($"[Regime] {regimeKey} matched={matchedOverrideKey} drag={regimeScale.DragScaleMultiplier:F3} lift={regimeScale.LiftScaleMultiplier:F3}");
+		}
+
+		parameters.AirDensity = airDensity;
+		parameters.AirViscosity = airViscosity;
+		parameters.InitialLaunchAngleDeg = initialLaunchAngleDeg;
+		parameters.DragScale = dragScale * _ballProfile.DragScaleMultiplier * regimeScale.DragScaleMultiplier;
+		parameters.LiftScale = liftScale * _ballProfile.LiftScaleMultiplier * regimeScale.LiftScaleMultiplier;
+		parameters.FlightProfile = _ballProfile.ResolvedFlight;
+		parameters.IsPutt = isPutt;
+	}
+
+	public Godot.Collections.Dictionary GetRegimeInfo(float launchSpeedMph, float launchAngleDeg, float launchSpinRpm)
+	{
+		RegimeScaleOverride regimeScale = _ballProfile.ResolveScaleOverride(
+			launchSpeedMph,
+			launchAngleDeg,
+			launchSpinRpm,
+			out string regimeKey,
+			out string matchedOverrideKey
+		);
+
+		return new Godot.Collections.Dictionary
+		{
+			{ "regime_key", regimeKey },
+			{ "matched_key", matchedOverrideKey },
+			{ "drag_multiplier", _ballProfile.DragScaleMultiplier * regimeScale.DragScaleMultiplier },
+			{ "lift_multiplier", _ballProfile.LiftScaleMultiplier * regimeScale.LiftScaleMultiplier },
+			{ "profile_drag_multiplier", _ballProfile.DragScaleMultiplier },
+			{ "profile_lift_multiplier", _ballProfile.LiftScaleMultiplier },
+			{ "regime_drag_multiplier", regimeScale.DragScaleMultiplier },
+			{ "regime_lift_multiplier", regimeScale.LiftScaleMultiplier },
+			{ "flight_profile_name", _ballProfile.ResolvedFlight.Name }
+		};
 	}
 }

@@ -16,6 +16,8 @@ addons/launch_monitors/
     ├── bluetooth/              # BLE GATT transport (LaunchMonitors.Common.Bluetooth)
     │   ├── IBluetoothGattClient.cs
     │   ├── BluetoothGattClientFactory.cs
+    │   ├── apple/              # CoreBluetooth (macOS Apple Silicon & Intel, iOS)
+    │   ├── android/            # Android BluetoothGatt via JavaClassWrapper / JNI
     │   ├── linux/              # BlueZ over D-Bus (Tmds.DBus)
     │   └── windows/            # Windows.Devices.Bluetooth (compiled only on Windows builds)
     └── tcp_server/
@@ -43,6 +45,8 @@ Registered in `project.godot` as `LaunchMonitorManager`. Owns the active monitor
 
 Cross-platform BLE GATT abstraction. `BluetoothGattClientFactory.Create()` picks the platform implementation:
 
+- **macOS & iOS** → `AppleBluetoothGattClient` via Apple's `CoreBluetooth` framework using native Objective-C runtime P/Invoke.
+- **Android** → `AndroidBluetoothGattClient` via Godot's JavaClassWrapper and Android `BluetoothGatt`.
 - **Linux** → `LinuxBluetoothGattClient` via BlueZ over D-Bus. Requires the BlueZ daemon to be running.
 - **Windows** → `WindowsBluetoothGattClient` via WinRT (loaded reflectively; compiled only when `GodotTargetPlatform == windows`). The exclusion lives in `OpenShotGolf.csproj`.
 - **Other** → `UnsupportedBluetoothGattClient` (throws on use).

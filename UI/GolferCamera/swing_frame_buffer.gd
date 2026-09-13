@@ -57,9 +57,11 @@ func get_captured_frames() -> Array[Dictionary]:
 	return _frames.duplicate()
 
 
-## Find impact frame index based on sudden motion or default to ~60% through buffer
+## Find impact frame index based on wrist trajectory motion analysis or default to ~60% through buffer
 func get_impact_frame_index() -> int:
 	if _frames.is_empty():
 		return 0
-	# Default to ~60% into the buffer as impact point if no telemetry spike
+	var phases = GolfSwingAnalyzer.detect_key_phases(_frames)
+	if phases.get("has_phases", false):
+		return phases.get("orig_impact_index", int(_frames.size() * 0.6))
 	return int(_frames.size() * 0.6)

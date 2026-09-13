@@ -5,6 +5,16 @@ var current_club: Button = null
 var club_button: Button = null
 var grid_container: GridContainer = null
 
+# Sizing constants
+const DEFAULT_TOGGLE_WIDTH: float = 256.0
+const DEFAULT_TOGGLE_HEIGHT: float = 56.0
+const CLUB_BUTTON_SIZE: Vector2 = Vector2(84, 84)
+const CLUB_BUTTON_FONT_SIZE: int = 22
+const GRID_COLUMNS: int = 4
+const GRID_H_SEPARATION: int = 8
+const GRID_V_SEPARATION: int = 8
+const GRID_OFFSET_TOP: float = 6.0
+
 # Theme colors
 const BUTTON_BG_NORMAL = Color(0.10, 0.14, 0.18, 0.85)
 const BUTTON_BG_HOVER = Color(0.18, 0.34, 0.50, 0.85)
@@ -15,6 +25,13 @@ const BUTTON_FONT_SELECTED = Color.WHITE
 const DISPLAY_BG_NORMAL = Color(0.14, 0.52, 0.28, 0.90)
 const DISPLAY_BG_HOVER = Color(0.18, 0.65, 0.35, 0.95)
 const DISPLAY_BORDER = Color(1.0, 1.0, 1.0, 0.3)
+
+func _get_grid_width() -> float:
+	return float(GRID_COLUMNS * CLUB_BUTTON_SIZE.x + (GRID_COLUMNS - 1) * GRID_H_SEPARATION)
+
+func _get_grid_height() -> float:
+	var rows = int(ceil(float(clubs.size()) / float(GRID_COLUMNS)))
+	return float(rows * CLUB_BUTTON_SIZE.y + (rows - 1) * GRID_V_SEPARATION)
 
 func _ready() -> void:
 	grid_container = $MarginContainer/VBoxContainer/DropdownWrapper/GridContainer
@@ -31,6 +48,13 @@ func _ready() -> void:
 		margin.add_theme_constant_override("margin_top", 0)
 		margin.add_theme_constant_override("margin_bottom", 0)
 		
+	if grid_container != null:
+		grid_container.columns = GRID_COLUMNS
+		grid_container.add_theme_constant_override("h_separation", GRID_H_SEPARATION)
+		grid_container.add_theme_constant_override("v_separation", GRID_V_SEPARATION)
+		grid_container.offset_top = GRID_OFFSET_TOP
+		grid_container.offset_bottom = _get_grid_height() + GRID_OFFSET_TOP
+
 	_create_club_display_button()
 	_create_club_buttons()
 	current_club = grid_container.get_child(0)
@@ -54,7 +78,7 @@ func _input(event: InputEvent) -> void:
 func _create_club_display_button() -> void:
 	club_button = Button.new()
 	club_button.text = "🏌 Club: " + clubs[0]
-	club_button.custom_minimum_size = Vector2(256, 56)
+	club_button.custom_minimum_size = Vector2(DEFAULT_TOGGLE_WIDTH, DEFAULT_TOGGLE_HEIGHT)
 	club_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	club_button.theme = _create_display_button_theme()
 	club_button.pressed.connect(_on_display_button_pressed)
@@ -68,7 +92,9 @@ func _create_club_buttons() -> void:
 	for i in range(clubs.size()):
 		var button = Button.new()
 		button.text = clubs[i]
-		button.custom_minimum_size = Vector2(58, 58)
+		button.custom_minimum_size = CLUB_BUTTON_SIZE
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		button.theme = button_theme
 		button.pressed.connect(_on_club_button_pressed.bindv([button]))
 		grid_container.add_child(button)
@@ -76,7 +102,7 @@ func _create_club_buttons() -> void:
 
 func _create_club_button_theme() -> Theme:
 	var button_theme = Theme.new()
-	button_theme.set_font_size("font_size", "Button", 18)
+	button_theme.set_font_size("font_size", "Button", CLUB_BUTTON_FONT_SIZE)
 
 	var normal_style = _create_button_style(BUTTON_BG_NORMAL)
 	button_theme.set_stylebox("normal", "Button", normal_style)
@@ -87,16 +113,19 @@ func _create_club_button_theme() -> Theme:
 	var pressed_style = _create_button_style(BUTTON_BG_PRESSED)
 	button_theme.set_stylebox("pressed", "Button", pressed_style)
 
+	var focus_style = StyleBoxEmpty.new()
+	button_theme.set_stylebox("focus", "Button", focus_style)
+
 	return button_theme
 
 
 func _create_button_style(bg_color: Color) -> StyleBoxFlat:
 	var style = StyleBoxFlat.new()
 	style.bg_color = bg_color
-	style.corner_radius_top_left = 8
-	style.corner_radius_top_right = 8
-	style.corner_radius_bottom_left = 8
-	style.corner_radius_bottom_right = 8
+	style.corner_radius_top_left = 10
+	style.corner_radius_top_right = 10
+	style.corner_radius_bottom_left = 10
+	style.corner_radius_bottom_right = 10
 	style.border_color = BUTTON_BORDER
 	style.border_width_left = 1
 	style.border_width_right = 1
@@ -131,8 +160,22 @@ func _create_display_button_theme() -> Theme:
 func _toggle_grid_visibility() -> void:
 	grid_container.visible = not grid_container.visible
 	var wrapper = get_node_or_null("MarginContainer/VBoxContainer/DropdownWrapper")
+	var grid_w = _get_grid_width()
+	var grid_h = _get_grid_height() + GRID_OFFSET_TOP
+
 	if wrapper != null:
-		wrapper.custom_minimum_size.y = 330 if grid_container.visible else 0
+		if grid_container.visible:
+			wrapper.custom_minimum_size = Vector2(grid_w, grid_h)
+			custom_minimum_size.x = grid_w
+			if anchor_left == 1.0 and anchor_right == 1.0:
+				offset_left = offset_right - grid_w
+		else:
+			var current_right = offset_right
+			wrapper.custom_minimum_size = Vector2(DEFAULT_TOGGLE_WIDTH, 0)
+			custom_minimum_size.x = DEFAULT_TOGGLE_WIDTH
+			if anchor_left == 1.0 and anchor_right == 1.0:
+				offset_right = current_right
+				offset_left = current_right - DEFAULT_TOGGLE_WIDTH
 
 
 func _on_display_button_pressed() -> void:
@@ -187,4 +230,27 @@ func select_club_by_name(club_name: String) -> void:
 		current_club = target_btn
 		_set_button_selected(current_club)
 		EventBus.emit_signal("club_selected", current_club.text)
+
+
+func get_current_club_name() -> String:
+	if current_club != null:
+		return current_club.text
+	return clubs[0] if not clubs.is_empty() else ""
+
+
+func select_next_club() -> void:
+	# Cycles to next longer club (e.g. 5i -> 4i -> 3i -> Dr)
+	var cur_name = get_current_club_name()
+	var idx = clubs.find(cur_name)
+	if idx > 0:
+		select_club_by_name(clubs[idx - 1])
+
+
+func select_prev_club() -> void:
+	# Cycles to next shorter club (e.g. 5i -> 6i -> 7i -> Pw)
+	var cur_name = get_current_club_name()
+	var idx = clubs.find(cur_name)
+	if idx >= 0 and idx < clubs.size() - 1:
+		select_club_by_name(clubs[idx + 1])
+
 

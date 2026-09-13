@@ -8,6 +8,7 @@ const OPENFAIRWAY_LOG_LEVEL_INFO := 2
 var practice_mode_primed : bool = false
 var is_chipping_minigame : bool = false
 var is_putting_minigame : bool = false
+var current_selected_club : String = "Dr"
 
 
 var _loaded_announcer_settings := {}
@@ -16,6 +17,11 @@ func _ready() -> void:
 	PhysicsLogger.SetLevel(OPENFAIRWAY_LOG_LEVEL_INFO)
 	load_settings()
 	_setup_audio_players()
+	
+	if has_node("/root/EventBus"):
+		var eb = get_node("/root/EventBus")
+		if eb.has_signal("club_selected") and not eb.is_connected("club_selected", Callable(self, "_on_club_selected")):
+			eb.connect("club_selected", Callable(self, "_on_club_selected"))
 	
 	# Wait for announcer engine if it enters tree later
 	var announcer = get_node_or_null("/root/AnnouncerEngine")
@@ -26,6 +32,20 @@ func _ready() -> void:
 		
 	# Connect save_settings to settings_changed signal
 	range_settings.settings_changed.connect(save_settings)
+
+
+func _on_club_selected(club_name: String) -> void:
+	current_selected_club = club_name
+
+
+func apply_foam_ball_boost(data: Dictionary, fallback_club: String = "") -> void:
+	FoamBallBoost.apply_boost(data, fallback_club if not fallback_club.is_empty() else current_selected_club)
+
+
+func is_low_graphics() -> bool:
+	if range_settings != null and range_settings.settings.has("graphics_quality"):
+		return range_settings.settings["graphics_quality"].value == "Low"
+	return MobilePerformance.is_mobile()
 
 
 func _on_root_child_entered_tree(node: Node) -> void:
@@ -41,6 +61,8 @@ func _apply_announcer_settings(announcer: Node) -> void:
 
 func resett_defaults():
 	range_settings.reset_defaults()
+	if has_node("/root/KeybindingManager"):
+		get_node("/root/KeybindingManager").reset_to_defaults()
 	var announcer = get_node_or_null("/root/AnnouncerEngine")
 	if announcer:
 		announcer.set("AnnouncerCoursePlay", true)
@@ -86,7 +108,11 @@ func load_settings() -> void:
 	
 	# Migration / validation for displayed_stats
 	var stats_val = range_settings.displayed_stats.value
-	if not (stats_val is Array) or stats_val.is_empty():
+	var legacy_default_stats = [
+		"Distance", "Carry", "Speed", "VLA", "HLA", "BackSpin",
+		"SideSpin", "TotalSpin", "SpinAxis", "Apex", "Offline", "FaceAngle"
+	]
+	if not (stats_val is Array) or stats_val.is_empty() or stats_val == legacy_default_stats:
 		range_settings.displayed_stats.set_value(StatDefinitions.DEFAULT_ENABLED_STAT_IDS.duplicate())
 		migrated = true
 	else:
@@ -101,6 +127,20 @@ func load_settings() -> void:
 		if cleaned_stats != stats_val:
 			range_settings.displayed_stats.set_value(cleaned_stats)
 			migrated = true
+
+	# Validation / migration for TCP server IP and Port (GSPro Open Connect v1)
+	var port_val = range_settings.tcp_server_port.value
+	if typeof(port_val) != TYPE_INT and typeof(port_val) != TYPE_FLOAT:
+		range_settings.tcp_server_port.set_value(49152)
+		migrated = true
+	elif int(port_val) < 1 or int(port_val) > 65535:
+		range_settings.tcp_server_port.set_value(49152)
+		migrated = true
+
+	var ip_val = range_settings.tcp_server_ip.value
+	if typeof(ip_val) != TYPE_STRING or str(ip_val).strip_edges().is_empty():
+		range_settings.tcp_server_ip.set_value("0.0.0.0")
+		migrated = true
 
 	if migrated:
 		save_settings()

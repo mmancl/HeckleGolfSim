@@ -33,9 +33,17 @@ var _scorecard_view_tab: String = "All"
 var _last_scorecard_action_type: String = "toggle"
 @onready var hud_manage_players = Panel.new()
 @onready var hud_overview = Panel.new()
+const MINIMAP_NORMAL_SIZE: Vector2 = Vector2(180, 180)
+const MINIMAP_ENLARGED_SIZE: Vector2 = Vector2(500, 500)
+const MINIMAP_PANEL_PADDING: Vector2 = Vector2(4, 4)
+
 var _minimap_camera: Camera3D = null
 var _minimap_viewport: SubViewport = null
 var _minimap_panel: PanelContainer = null
+var _minimap_container: SubViewportContainer = null
+var _minimap_hint_label: Label = null
+var _minimap_tween: Tween = null
+var _is_minimap_enlarged: bool = false
 var minimap_zoom: float = 300.0
 var _last_was_on_green: bool = false
 var _default_non_green_minimap_zoom: float = 300.0
@@ -65,11 +73,22 @@ var grid_btn: Button = null
 var map_btn: Button = null
 var mulligan_btn: Button = null
 var forfeit_btn: Button = null
+var golfer_cam_btn: Button = null
+var announcer_btn: Button = null
+var tension_btn: Button = null
 var club_selector_node: Control = null
 
 var course_instance: Node = null
 var active_ball: Node = null
 var mulligan_confirm_dialog: PanelContainer = null
+var _mulligan_is_selection_mode: bool = false
+var _mulligan_new_shot_btn: Button = null
+var _mulligan_confirm_btn: Button = null
+var _mulligan_cancel_btn: Button = null
+var _mulligan_option_buttons: Array[Button] = []
+var _mulligan_matching_entries: Array = []
+var _mulligan_selected_idx: int = -1
+var _mulligan_scroll: ScrollContainer = null
 var forfeit_confirm_dialog: PanelContainer = null
 var exit_confirm_dialog: Control = null
 var add_player_prompt_dialog: PanelContainer = null
@@ -99,6 +118,8 @@ func _ready() -> void:
 	MultiplayerManager.catch_up_mode_changed.connect(func(_active, _name, _c, _t):
 		_update_catch_up_hud()
 	)
+	if has_node("/root/KeybindingManager"):
+		KeybindingManager.keybindings_changed.connect(_update_hud_tooltips)
 	
 	if get_parent() != null and get_parent() != get_tree().get_root() and get_parent().name != "CourseManager":
 		course_instance = get_parent()
@@ -130,6 +151,12 @@ func _setup_hud() -> void:
 				r_top_bar.visible = false
 			if range_ui.has_signal("manage_players_requested") and not range_ui.manage_players_requested.is_connected(_on_manage_players_toggle_pressed):
 				range_ui.manage_players_requested.connect(_on_manage_players_toggle_pressed)
+			if range_ui.has_signal("golfer_cam_modal_state_changed") and not range_ui.golfer_cam_modal_state_changed.is_connected(_on_golfer_cam_modal_state_changed):
+				range_ui.golfer_cam_modal_state_changed.connect(_on_golfer_cam_modal_state_changed)
+			if range_ui.has_signal("stats_visibility_changed") and not range_ui.stats_visibility_changed.is_connected(_on_stats_visibility_changed):
+				range_ui.stats_visibility_changed.connect(_on_stats_visibility_changed)
+			if range_ui.has_signal("golfer_cam_enabled_changed") and not range_ui.golfer_cam_enabled_changed.is_connected(_on_golfer_cam_enabled_changed):
+				range_ui.golfer_cam_enabled_changed.connect(_on_golfer_cam_enabled_changed)
 
 	var canvas = CanvasLayer.new()
 	canvas.layer = 15 # Render on top of VignetteLayer (layer 10)
@@ -148,10 +175,10 @@ func _setup_hud() -> void:
 	mulligan_confirm_dialog.anchor_bottom = 0.5
 	mulligan_confirm_dialog.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	mulligan_confirm_dialog.grow_vertical = Control.GROW_DIRECTION_BOTH
-	mulligan_confirm_dialog.offset_left = -220
-	mulligan_confirm_dialog.offset_right = 220
-	mulligan_confirm_dialog.offset_top = -100
-	mulligan_confirm_dialog.offset_bottom = 100
+	mulligan_confirm_dialog.offset_left = -280
+	mulligan_confirm_dialog.offset_right = 280
+	mulligan_confirm_dialog.offset_top = -135
+	mulligan_confirm_dialog.offset_bottom = 135
 	
 	var dialog_style = StyleBoxFlat.new()
 	dialog_style.bg_color = Color(0.08, 0.08, 0.08, 0.95)
@@ -164,10 +191,12 @@ func _setup_hud() -> void:
 	dialog_style.corner_radius_top_right = 12
 	dialog_style.corner_radius_bottom_left = 12
 	dialog_style.corner_radius_bottom_right = 12
-	dialog_style.content_margin_left = 24
+	dialog_style.content_margin_left = 28
 	dialog_style.content_margin_top = 24
-	dialog_style.content_margin_right = 24
+	dialog_style.content_margin_right = 28
 	dialog_style.content_margin_bottom = 24
+	dialog_style.shadow_color = Color(0, 0, 0, 0.7)
+	dialog_style.shadow_size = 10
 	mulligan_confirm_dialog.add_theme_stylebox_override("panel", dialog_style)
 	
 	var content_vbox = VBoxContainer.new()
@@ -197,7 +226,8 @@ func _setup_hud() -> void:
 	
 	var confirm_btn = Button.new()
 	confirm_btn.text = "Yes, Undo"
-	confirm_btn.custom_minimum_size = Vector2(140, 50)
+	confirm_btn.custom_minimum_size = Vector2(170, 52)
+	confirm_btn.add_theme_font_size_override("font_size", 18)
 	apply_material_button_style(confirm_btn, Color(0.24, 0.46, 0.72, 0.85))
 	confirm_btn.pressed.connect(func():
 		mulligan_confirm_dialog.visible = false
@@ -207,7 +237,8 @@ func _setup_hud() -> void:
 	
 	var cancel_btn = Button.new()
 	cancel_btn.text = "Cancel"
-	cancel_btn.custom_minimum_size = Vector2(140, 50)
+	cancel_btn.custom_minimum_size = Vector2(170, 52)
+	cancel_btn.add_theme_font_size_override("font_size", 18)
 	apply_material_button_style(cancel_btn, Color(0.56, 0.22, 0.22, 0.85))
 	cancel_btn.pressed.connect(func():
 		mulligan_confirm_dialog.visible = false
@@ -782,6 +813,8 @@ func _setup_hud() -> void:
 			if mulligan_confirm_dialog != null:
 				mulligan_confirm_dialog.visible = false
 			exit_confirm_dialog.visible = true
+			if has_node("/root/AnnouncerEngine"):
+				get_node("/root/AnnouncerEngine").call("SpeakHomeButtonHeckle")
 	)
 	canvas.add_child(home_btn)
 
@@ -841,7 +874,7 @@ func _setup_hud() -> void:
 	right_panel.add_child(toggles_scroll)
 
 	# Announcer Mute/Unmute Toggle Button
-	var announcer_btn = Button.new()
+	announcer_btn = Button.new()
 	announcer_btn.name = "AnnouncerToggleButton"
 	var announcer_node = get_node_or_null("/root/AnnouncerEngine")
 	var is_announcer_on = announcer_node.get("AnnouncerCoursePlay") if announcer_node != null else true
@@ -860,14 +893,16 @@ func _setup_hud() -> void:
 			if new_val:
 				announcer_btn.text = "🎙 Announcer: ON"
 				apply_material_button_style(announcer_btn, Color(0.2, 0.6, 0.3, 0.85))
+				a.call("SpeakHecklesEnabled")
 			else:
 				announcer_btn.text = "🎙 Announcer: MUTED"
 				apply_material_button_style(announcer_btn, Color(0.5, 0.5, 0.5, 0.85))
+				a.call("SpeakHecklesDisabled")
 	)
 	toggles_container.add_child(announcer_btn)
 
 	# Suspense Heartbeat & Tunnel Vision Toggle Button
-	var tension_btn = Button.new()
+	tension_btn = Button.new()
 	tension_btn.name = "SuspenseToggleButton"
 	var is_tension_on = GlobalSettings.range_settings.tension_effects_enabled.value if has_node("/root/GlobalSettings") else true
 	tension_btn.text = "💓 Suspense: ON" if is_tension_on else "💓 Suspense: OFF"
@@ -921,23 +956,28 @@ func _setup_hud() -> void:
 	toggles_container.add_child(dist_menu)
 
 	# Golfer Cam Toggle Button
-	var golfer_cam_btn = Button.new()
+	golfer_cam_btn = Button.new()
 	golfer_cam_btn.name = "GolferCamButton"
 	golfer_cam_btn.text = "📹 Golfer Cam: OFF"
 	golfer_cam_btn.custom_minimum_size = Vector2(180, 56)
 	apply_material_button_style(golfer_cam_btn, Color(0.2, 0.45, 0.45, 0.85))
 	golfer_cam_btn.pressed.connect(func():
-		if range_ui != null and range_ui.has_method("set_golfer_camera_visible"):
-			var is_vis = not range_ui.call("is_golfer_camera_visible")
-			range_ui.call("set_golfer_camera_visible", is_vis)
-			if is_vis:
-				golfer_cam_btn.text = "📹 Golfer Cam: ON"
-				apply_material_button_style(golfer_cam_btn, Color(0.15, 0.6, 0.5, 0.85))
+		if range_ui != null:
+			var enabled = range_ui.call("is_golfer_camera_enabled") if range_ui.has_method("is_golfer_camera_enabled") else false
+			var minimized = range_ui.call("is_golfer_camera_minimized") if range_ui.has_method("is_golfer_camera_minimized") else false
+			if not enabled:
+				range_ui.call("set_golfer_camera_visible", true)
+			elif minimized:
+				if range_ui.has_method("restore_golfer_camera"):
+					range_ui.call("restore_golfer_camera")
+				else:
+					range_ui.call("set_golfer_camera_visible", true)
 			else:
-				golfer_cam_btn.text = "📹 Golfer Cam: OFF"
-				apply_material_button_style(golfer_cam_btn, Color(0.2, 0.45, 0.45, 0.85))
+				range_ui.call("set_golfer_camera_visible", false)
+			_update_course_golfer_cam_btn_state()
 	)
 	toggles_container.add_child(golfer_cam_btn)
+	_update_course_golfer_cam_btn_state()
 
 	# Shot Analysis Toggle Button
 	var shot_analysis_btn = Button.new()
@@ -1105,10 +1145,6 @@ func _setup_hud() -> void:
 	stats_btn.pressed.connect(func():
 		if range_ui != null:
 			range_ui.call("toggle_stats_visibility")
-			if range_ui.call("is_stats_visible"):
-				apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85))
-			else:
-				apply_circular_button_style(stats_btn, Color(0.15, 0.15, 0.15, 0.85))
 	)
 	canvas.add_child(stats_btn)
 
@@ -1137,6 +1173,12 @@ func _setup_hud() -> void:
 			course_instance.set("show_green_grid", not current_grid)
 	)
 	canvas.add_child(grid_btn)
+
+	if range_ui != null:
+		var modal_open = range_ui.call("is_golfer_camera_modal_open") if range_ui.has_method("is_golfer_camera_modal_open") else false
+		_on_golfer_cam_modal_state_changed(modal_open)
+		var stats_vis = range_ui.call("is_stats_visible") if range_ui.has_method("is_stats_visible") else true
+		_on_stats_visibility_changed(stats_vis)
 
 	# Map Toggle Button (Icon Only) - Bottom-Right Corner
 	map_btn = Button.new()
@@ -1262,6 +1304,7 @@ func _setup_hud() -> void:
 	_distance_tracker_panel.add_theme_stylebox_override("panel", dt_style)
 	_distance_tracker_panel.custom_minimum_size = Vector2(80, 184)
 	_distance_tracker_panel.size = Vector2(80, 184)
+	_distance_tracker_panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_minimap_group.add_child(_distance_tracker_panel)
 	
 	var dt_vbox = VBoxContainer.new()
@@ -1328,6 +1371,9 @@ func _setup_hud() -> void:
 	var minimap_container = SubViewportContainer.new()
 	minimap_container.custom_minimum_size = Vector2(180, 180)
 	minimap_container.size = Vector2(180, 180)
+	minimap_container.stretch = true
+	minimap_container.mouse_filter = Control.MOUSE_FILTER_PASS
+	_minimap_container = minimap_container
 	
 	var viewport = SubViewport.new()
 	viewport.size = Vector2(180, 180)
@@ -1353,10 +1399,10 @@ func _setup_hud() -> void:
 	_minimap_viewport = viewport
 	_minimap_panel = minimap_panel
 	
-	# Add Zoom buttons to Minimap Panel
+	# Add Zoom buttons and interactive overlay to Minimap Panel
 	var zoom_overlay = Control.new()
 	zoom_overlay.name = "ZoomOverlay"
-	zoom_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	zoom_overlay.mouse_filter = Control.MOUSE_FILTER_PASS
 	zoom_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	minimap_panel.add_child(zoom_overlay)
 
@@ -1385,6 +1431,29 @@ func _setup_hud() -> void:
 	ball_icon.visible = false
 	zoom_overlay.add_child(ball_icon)
 	_minimap_ball_icon = ball_icon
+
+	# Desktop Click-to-Aim hint label
+	var hint_label = Label.new()
+	hint_label.name = "MinimapAimHint"
+	hint_label.text = "🎯 Click to Aim"
+	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hint_label.add_theme_font_size_override("font_size", 12)
+	hint_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5, 0.95))
+	hint_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	hint_label.add_theme_constant_override("outline_size", 3)
+	hint_label.anchor_left = 0.0
+	hint_label.anchor_right = 1.0
+	hint_label.anchor_top = 1.0
+	hint_label.anchor_bottom = 1.0
+	hint_label.offset_left = 0
+	hint_label.offset_right = 0
+	hint_label.offset_top = -28
+	hint_label.offset_bottom = -6
+	hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hint_label.modulate.a = 0.0
+	zoom_overlay.add_child(hint_label)
+	_minimap_hint_label = hint_label
 
 	var zoom_vbox = VBoxContainer.new()
 	zoom_vbox.name = "ZoomVBox"
@@ -1426,6 +1495,15 @@ func _setup_hud() -> void:
 		_update_minimap()
 	)
 	zoom_vbox.add_child(zoom_out_btn)
+
+	# Connect hover and click-to-aim events on desktop
+	minimap_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	minimap_panel.mouse_entered.connect(_on_minimap_mouse_entered)
+	minimap_panel.mouse_exited.connect(_on_minimap_mouse_exited)
+	minimap_container.mouse_entered.connect(_on_minimap_mouse_entered)
+	minimap_container.mouse_exited.connect(_on_minimap_mouse_exited)
+	minimap_container.gui_input.connect(_on_minimap_gui_input)
+	zoom_overlay.gui_input.connect(_on_minimap_gui_input)
 	
 	# Scorecard Panel
 	hud_scorecard.name = "ScorecardPanel"
@@ -1713,6 +1791,270 @@ func _setup_hud() -> void:
 	overview_style.content_margin_bottom = 24
 	hud_overview.add_theme_stylebox_override("panel", overview_style)
 	margin.add_child(hud_overview)
+	_update_hud_tooltips()
+
+
+func is_any_dialog_open() -> bool:
+	if mulligan_confirm_dialog != null and is_instance_valid(mulligan_confirm_dialog) and mulligan_confirm_dialog.visible:
+		return true
+	if forfeit_confirm_dialog != null and is_instance_valid(forfeit_confirm_dialog) and forfeit_confirm_dialog.visible:
+		return true
+	if exit_confirm_dialog != null and is_instance_valid(exit_confirm_dialog) and exit_confirm_dialog.visible:
+		return true
+	if add_player_prompt_dialog != null and is_instance_valid(add_player_prompt_dialog) and add_player_prompt_dialog.visible:
+		return true
+	if resume_player_prompt_dialog != null and is_instance_valid(resume_player_prompt_dialog) and resume_player_prompt_dialog.visible:
+		return true
+	if hud_scorecard != null and is_instance_valid(hud_scorecard) and hud_scorecard.visible:
+		return true
+	if hud_manage_players != null and is_instance_valid(hud_manage_players) and hud_manage_players.visible:
+		return true
+	if hud_overview != null and is_instance_valid(hud_overview) and hud_overview.visible:
+		return true
+	return false
+
+
+func _style_mulligan_option_button(btn: Button, bg_color: Color, is_selected: bool) -> void:
+	var style = StyleBoxFlat.new()
+	style.corner_radius_top_left = 20
+	style.corner_radius_top_right = 20
+	style.corner_radius_bottom_left = 20
+	style.corner_radius_bottom_right = 20
+	style.content_margin_left = 18
+	style.content_margin_right = 18
+	style.content_margin_top = 12
+	style.content_margin_bottom = 12
+
+	if is_selected:
+		style.bg_color = bg_color.lightened(0.18)
+		style.border_width_left = 3
+		style.border_width_top = 3
+		style.border_width_right = 3
+		style.border_width_bottom = 3
+		style.border_color = Color(1.0, 0.84, 0.25, 1.0)
+		style.shadow_color = Color(1.0, 0.84, 0.25, 0.4)
+		style.shadow_size = 5
+	else:
+		style.bg_color = bg_color
+		style.border_width_left = 1
+		style.border_width_top = 1
+		style.border_width_right = 1
+		style.border_width_bottom = 1
+		style.border_color = Color(1.0, 1.0, 1.0, 0.2)
+
+	var style_hover = style.duplicate()
+	style_hover.bg_color = bg_color.lightened(0.25)
+
+	var style_pressed = style.duplicate()
+	style_pressed.bg_color = bg_color.darkened(0.15)
+
+	btn.add_theme_stylebox_override("normal", style)
+	btn.add_theme_stylebox_override("hover", style_hover)
+	btn.add_theme_stylebox_override("pressed", style_pressed)
+	btn.add_theme_color_override("font_color", Color.WHITE)
+	btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	btn.add_theme_color_override("font_pressed_color", Color.WHITE)
+
+
+func _update_mulligan_selection_highlight() -> void:
+	if not _mulligan_is_selection_mode:
+		return
+	for i in range(_mulligan_option_buttons.size()):
+		var btn = _mulligan_option_buttons[i]
+		if btn == null or not is_instance_valid(btn):
+			continue
+		var is_selected = (i == _mulligan_selected_idx)
+		var base_col = Color(0.24, 0.62, 0.36, 0.85) if i == 0 else Color(0.24, 0.46, 0.72, 0.85)
+		_style_mulligan_option_button(btn, base_col, is_selected)
+		if is_selected and _mulligan_scroll != null and is_instance_valid(_mulligan_scroll):
+			_mulligan_scroll.ensure_control_visible(btn)
+
+
+func _handle_mulligan_dialog_input(event: InputEventKey) -> bool:
+	if mulligan_confirm_dialog == null or not mulligan_confirm_dialog.visible:
+		return false
+
+	if event.keycode == KEY_ESCAPE:
+		mulligan_confirm_dialog.visible = false
+		return true
+
+	if not _mulligan_is_selection_mode:
+		if event.is_action_pressed("mulligan") or event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
+			mulligan_confirm_dialog.visible = false
+			_on_mulligan_confirmed()
+			return true
+	else:
+		if event.is_action_pressed("mulligan"):
+			mulligan_confirm_dialog.visible = false
+			_on_mulligan_confirmed()
+			return true
+		elif event.keycode == KEY_DOWN or event.is_action_pressed("aim_backward"):
+			if not _mulligan_option_buttons.is_empty():
+				_mulligan_selected_idx = mini(_mulligan_selected_idx + 1, _mulligan_option_buttons.size() - 1)
+				_update_mulligan_selection_highlight()
+			return true
+		elif event.keycode == KEY_UP or event.is_action_pressed("aim_forward"):
+			if not _mulligan_option_buttons.is_empty():
+				_mulligan_selected_idx = maxi(_mulligan_selected_idx - 1, 0)
+				_update_mulligan_selection_highlight()
+			return true
+		elif event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
+			mulligan_confirm_dialog.visible = false
+			if _mulligan_selected_idx == 0:
+				_on_mulligan_confirmed()
+			elif _mulligan_selected_idx - 1 >= 0 and _mulligan_selected_idx - 1 < _mulligan_matching_entries.size():
+				_on_previous_mulligan_selected(_mulligan_matching_entries[_mulligan_selected_idx - 1])
+			return true
+
+	return true
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if mulligan_confirm_dialog != null and is_instance_valid(mulligan_confirm_dialog) and mulligan_confirm_dialog.visible:
+			_handle_mulligan_dialog_input(event)
+			get_viewport().set_input_as_handled()
+			return
+		if forfeit_confirm_dialog != null and is_instance_valid(forfeit_confirm_dialog) and forfeit_confirm_dialog.visible:
+			if event.keycode == KEY_ESCAPE:
+				forfeit_confirm_dialog.visible = false
+			elif event.is_action_pressed("concede_hole") or event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
+				forfeit_confirm_dialog.visible = false
+				_on_forfeit_confirmed()
+			get_viewport().set_input_as_handled()
+			return
+		if exit_confirm_dialog != null and is_instance_valid(exit_confirm_dialog) and exit_confirm_dialog.visible:
+			if event.keycode == KEY_ESCAPE:
+				exit_confirm_dialog.visible = false
+			get_viewport().set_input_as_handled()
+			return
+		if add_player_prompt_dialog != null and is_instance_valid(add_player_prompt_dialog) and add_player_prompt_dialog.visible:
+			if event.keycode == KEY_ESCAPE:
+				add_player_prompt_dialog.visible = false
+			get_viewport().set_input_as_handled()
+			return
+		if resume_player_prompt_dialog != null and is_instance_valid(resume_player_prompt_dialog) and resume_player_prompt_dialog.visible:
+			if event.keycode == KEY_ESCAPE:
+				resume_player_prompt_dialog.visible = false
+			get_viewport().set_input_as_handled()
+			return
+
+		if event.is_action_pressed("mulligan"):
+			if mulligan_btn != null and is_instance_valid(mulligan_btn) and mulligan_btn.visible and not mulligan_btn.disabled:
+				_on_mulligan_pressed()
+				get_viewport().set_input_as_handled()
+				return
+		elif event.is_action_pressed("concede_hole"):
+			if forfeit_btn != null and is_instance_valid(forfeit_btn) and forfeit_btn.visible and not forfeit_btn.disabled:
+				_on_forfeit_pressed()
+				get_viewport().set_input_as_handled()
+				return
+		elif event.is_action_pressed("skip_flight"):
+			if catch_up_banner != null and is_instance_valid(catch_up_banner) and catch_up_banner.visible:
+				if catch_up_skip_btn != null and is_instance_valid(catch_up_skip_btn) and catch_up_skip_btn.visible:
+					catch_up_skip_btn.emit_signal("pressed")
+					get_viewport().set_input_as_handled()
+					return
+		elif event.is_action_pressed("golfer_cam_toggle"):
+			if range_ui != null:
+				var enabled = range_ui.call("is_golfer_camera_enabled") if range_ui.has_method("is_golfer_camera_enabled") else false
+				var minimized = range_ui.call("is_golfer_camera_minimized") if range_ui.has_method("is_golfer_camera_minimized") else false
+				if not enabled:
+					range_ui.call("set_golfer_camera_visible", true)
+				elif minimized:
+					if range_ui.has_method("restore_golfer_camera"):
+						range_ui.call("restore_golfer_camera")
+					else:
+						range_ui.call("set_golfer_camera_visible", true)
+				else:
+					range_ui.call("set_golfer_camera_visible", false)
+				_update_course_golfer_cam_btn_state()
+				get_viewport().set_input_as_handled()
+				return
+		elif event.is_action_pressed("announcer_toggle"):
+			if announcer_btn != null and is_instance_valid(announcer_btn) and announcer_btn.visible and not announcer_btn.disabled:
+				announcer_btn.emit_signal("pressed")
+				get_viewport().set_input_as_handled()
+				return
+		elif event.is_action_pressed("suspense_toggle"):
+			if tension_btn != null and is_instance_valid(tension_btn) and tension_btn.visible and not tension_btn.disabled:
+				tension_btn.emit_signal("pressed")
+				get_viewport().set_input_as_handled()
+				return
+
+
+func _update_hud_tooltips() -> void:
+	if not has_node("/root/KeybindingManager"):
+		return
+	var km = get_node("/root/KeybindingManager")
+	if stats_btn != null and is_instance_valid(stats_btn):
+		stats_btn.tooltip_text = "Toggle Stats (Show/Hide) [%s]" % km.get_action_key_name("toggle_stats")
+	if grid_btn != null and is_instance_valid(grid_btn):
+		grid_btn.tooltip_text = "Toggle Slope Grid (Show/Hide) [%s]" % km.get_action_key_name("green_grid")
+	if golfer_cam_btn != null and is_instance_valid(golfer_cam_btn):
+		golfer_cam_btn.tooltip_text = "Toggle Golfer Camera [%s]" % km.get_action_key_name("golfer_cam_toggle")
+	if map_btn != null and is_instance_valid(map_btn):
+		var is_aerial = course_instance.get("is_aerial_view") as bool if course_instance != null and course_instance.get("is_aerial_view") != null else false
+		if is_aerial:
+			map_btn.tooltip_text = "Return to Player [%s]" % km.get_action_key_name("aerial_aim")
+		else:
+			map_btn.tooltip_text = "Toggle Map View [%s]" % km.get_action_key_name("aerial_aim")
+	if mulligan_btn != null and is_instance_valid(mulligan_btn):
+		mulligan_btn.tooltip_text = "Mulligan (Undo Shot) [%s]" % km.get_action_key_name("mulligan")
+	if forfeit_btn != null and is_instance_valid(forfeit_btn):
+		forfeit_btn.tooltip_text = "White Flag (Concede Hole) [%s]" % km.get_action_key_name("concede_hole")
+	if hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
+		hide_helpers_btn.tooltip_text = "Toggle Helpers (Show/Hide) [%s]" % km.get_action_key_name("toggle_helpers")
+	if announcer_btn != null and is_instance_valid(announcer_btn):
+		announcer_btn.tooltip_text = "Toggle Announcer Commentary [%s]" % km.get_action_key_name("announcer_toggle")
+	if tension_btn != null and is_instance_valid(tension_btn):
+		tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision [%s]" % km.get_action_key_name("suspense_toggle")
+
+
+func _on_golfer_cam_modal_state_changed(is_open: bool) -> void:
+	if stats_btn != null and is_instance_valid(stats_btn):
+		if is_open:
+			stats_btn.offset_left = 495
+			stats_btn.offset_right = 575
+		else:
+			stats_btn.offset_left = 30
+			stats_btn.offset_right = 110
+	if grid_btn != null and is_instance_valid(grid_btn):
+		if is_open:
+			grid_btn.offset_left = 595
+			grid_btn.offset_right = 675
+		else:
+			grid_btn.offset_left = 130
+			grid_btn.offset_right = 210
+
+
+func _on_stats_visibility_changed(is_vis: bool) -> void:
+	if stats_btn != null and is_instance_valid(stats_btn):
+		if is_vis:
+			apply_circular_button_style(stats_btn, Color(0.24, 0.46, 0.72, 0.85))
+		else:
+			apply_circular_button_style(stats_btn, Color(0.15, 0.15, 0.15, 0.85))
+
+
+func _on_golfer_cam_enabled_changed(_is_enabled: bool) -> void:
+	_update_course_golfer_cam_btn_state()
+
+
+func _update_course_golfer_cam_btn_state() -> void:
+	if golfer_cam_btn == null or not is_instance_valid(golfer_cam_btn):
+		return
+	if range_ui != null:
+		var enabled = range_ui.call("is_golfer_camera_enabled") if range_ui.has_method("is_golfer_camera_enabled") else false
+		var minimized = range_ui.call("is_golfer_camera_minimized") if range_ui.has_method("is_golfer_camera_minimized") else false
+		if not enabled:
+			golfer_cam_btn.text = "📹 Golfer Cam: OFF"
+			apply_material_button_style(golfer_cam_btn, Color(0.2, 0.45, 0.45, 0.85))
+		elif minimized:
+			golfer_cam_btn.text = "📹 Golfer Cam: MIN [REC]"
+			apply_material_button_style(golfer_cam_btn, Color(0.2, 0.55, 0.7, 0.85))
+		else:
+			golfer_cam_btn.text = "📹 Golfer Cam: ON"
+			apply_material_button_style(golfer_cam_btn, Color(0.15, 0.6, 0.5, 0.85))
 
 
 func _get_current_green_vertices() -> PackedVector3Array:
@@ -1917,16 +2259,14 @@ func _on_active_player_changed(player: Dictionary) -> void:
 
 	
 	if course_instance != null:
+		if "_aim_is_manual" in course_instance:
+			course_instance.set("_aim_is_manual", false)
 		course_instance.current_hole_name = active_hole.get("Name", hole_id)
 		course_instance.current_hole_par = active_hole.get("Par", 4)
 		var hole_loc = active_hole.get("Hole Location")
 		if hole_loc != null:
 			course_instance.current_hole_location = Vector3(hole_loc[0], course_instance.get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
-			# Reset aim target to current hole pin
-			course_instance.aim_target_pos = course_instance.current_hole_location
 			
-			if course_instance.has_node("AimMarker"):
-				course_instance.get_node("AimMarker").global_position = course_instance.current_hole_location
 			if course_instance.has_node("PinMarker"):
 				course_instance.get_node("PinMarker").global_position = course_instance.current_hole_location
 				course_instance.get_node("PinMarker").visible = true
@@ -1964,19 +2304,21 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			should_initialize = false
 			
 		if should_initialize:
-			# Teleport the ball to this player's current resting position
+			var player_node_ref = course_instance.get_node_or_null("Player") if course_instance != null else null
+			var initial_lie = player.get("lie_type", "teebox" if player.get("strokes", 0) == 0 else "fairway")
 			active_ball.spawn_position = player["position"]
-			active_ball.lie_type = player.get("lie_type", "teebox" if player.get("strokes", 0) == 0 else "fairway")
+			active_ball.lie_type = initial_lie
+			if player_node_ref != null:
+				player_node_ref.current_lie_type = initial_lie
+				if player_node_ref.get("_last_starting_pos") != null:
+					player_node_ref._last_starting_pos = player.get("last_starting_pos", player["position"])
 			active_ball.reset()
 			
 			# Recalculate lie immediately after teleporting/resetting
 			if course_instance != null and course_instance.has_method("update_current_lie_and_reduction"):
 				course_instance.call("update_current_lie_and_reduction")
-			var player_node_ref = course_instance.get_node_or_null("Player") if course_instance != null else null
 			if player_node_ref != null:
 				player_node_ref.current_lie_type = active_ball.lie_type
-				if player_node_ref.get("_last_starting_pos") != null:
-					player_node_ref._last_starting_pos = player.get("last_starting_pos", player["position"])
 			
 			if course_instance != null and course_instance.has_method("update_auto_club"):
 				course_instance.call("update_auto_club", true)
@@ -1993,62 +2335,70 @@ func _on_active_player_changed(player: Dictionary) -> void:
 				if cam_3d != null:
 					cam_3d.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 				
-			# Automatically aim at the pin and position/rotate the camera behind the ball
+			# Automatically set default aim and position/rotate the camera behind the ball
 			if course_instance != null:
-				var pin_pos = course_instance.get("current_hole_location")
+				var target_aim = course_instance.get("aim_target_pos")
+				if target_aim == null or target_aim.is_zero_approx():
+					if course_instance.has_method("apply_default_aim"):
+						var sel_club = MultiplayerManager.current_club if "current_club" in MultiplayerManager else ""
+						target_aim = course_instance.call("apply_default_aim", sel_club)
+					else:
+						target_aim = course_instance.get("current_hole_location")
 				if GlobalSettings.is_chipping_minigame and course_instance.get("aim_target_pos") != null:
-					pin_pos = course_instance.get("aim_target_pos")
-				if pin_pos != null and not pin_pos.is_zero_approx():
+					target_aim = course_instance.get("aim_target_pos")
+				if target_aim != null and not target_aim.is_zero_approx():
 					var ball_pos = active_ball.global_position
-					var diff = pin_pos - ball_pos
+					var diff = target_aim - ball_pos
 					var angle_rad = atan2(diff.z, diff.x)
 					active_ball.aim_yaw_offset_deg = rad_to_deg(-angle_rad)
-					course_instance.aim_target_pos = pin_pos
+					course_instance.aim_target_pos = target_aim
 					if course_instance.has_node("AimMarker"):
-						course_instance.get_node("AimMarker").global_position = pin_pos
+						course_instance.get_node("AimMarker").global_position = target_aim
 					if course_instance.has_method("set_aim_distance"):
-						course_instance.call("set_aim_distance", int(ball_pos.distance_to(pin_pos) * 1.09361))
+						course_instance.call("set_aim_distance", int(ball_pos.distance_to(target_aim) * 1.09361))
 					
-					# Position the camera behind the ball facing the pin
+					# Position the camera behind the ball facing the target aim
 					if camera != null:
 						camera.follow_mode = PhantomCamera3D.FollowMode.NONE
 						camera.look_at_mode = PhantomCamera3D.LookAtMode.NONE
 						var is_on_green = false
 						if active_ball != null:
 							var lie = str(active_ball.get("lie_type")).to_lower()
-							is_on_green = (lie in ["green", "fringe"])
+							is_on_green = (lie == "green")
 							if not is_on_green and course_instance != null:
 								if course_instance.has_method("is_ball_on_green"):
 									is_on_green = course_instance.call("is_ball_on_green")
-								if not is_on_green and course_instance.has_method("is_ball_on_fringe"):
-									is_on_green = course_instance.call("is_ball_on_fringe")
-						var cam_dist = GlobalSettings.range_settings.camera_distance.value
-						var cam_height = GlobalSettings.range_settings.camera_height.value
-						var local_offset = Vector3(-1.05, 0.6, 0) if is_on_green else Vector3(-cam_dist, cam_height, 0)
-						if course_instance.has_method("get_camera_local_offset"):
-							local_offset = course_instance.call("get_camera_local_offset", is_on_green)
-						var rotated_offset = local_offset.rotated(Vector3.UP, -angle_rad)
-						var cam_pos = ball_pos + rotated_offset
-						if course_instance.has_method("clamp_camera_position"):
-							cam_pos = course_instance.call("clamp_camera_position", cam_pos)
+						var cam_pos: Vector3
+						if course_instance != null and course_instance.has_method("get_address_camera_position"):
+							cam_pos = course_instance.call("get_address_camera_position", ball_pos, -angle_rad, is_on_green)
+						else:
+							var cam_dist = GlobalSettings.range_settings.camera_distance.value
+							var cam_height = GlobalSettings.range_settings.camera_height.value
+							var local_offset = Vector3(-1.05, 0.6, 0) if is_on_green else Vector3(-cam_dist, cam_height, 0)
+							if course_instance != null and course_instance.has_method("get_camera_local_offset"):
+								local_offset = course_instance.call("get_camera_local_offset", is_on_green)
+							var rotated_offset = local_offset.rotated(Vector3.UP, -angle_rad)
+							cam_pos = ball_pos + rotated_offset
+							if course_instance != null and course_instance.has_method("clamp_camera_position"):
+								cam_pos = course_instance.call("clamp_camera_position", cam_pos)
 						camera.global_position = cam_pos
 						
 						var target_look: Vector3
 						if course_instance.has_method("get_camera_target_look"):
-							target_look = course_instance.call("get_camera_target_look", pin_pos, ball_pos, is_on_green)
+							target_look = course_instance.call("get_camera_target_look", target_aim, ball_pos, is_on_green)
 						elif is_on_green:
-							var dist = ball_pos.distance_to(pin_pos)
+							var dist = ball_pos.distance_to(target_aim)
 							var look_dist = clamp(dist * 0.4, 2.0, 6.0)
 							if dist < 2.0:
 								look_dist = dist
 							var fraction = clamp(look_dist / max(dist, 0.001), 0.0, 1.0)
-							target_look = ball_pos.lerp(pin_pos, fraction)
+							target_look = ball_pos.lerp(target_aim, fraction)
 						else:
-							var dist = ball_pos.distance_to(pin_pos)
+							var dist = ball_pos.distance_to(target_aim)
 							if dist < 45.0:
-								target_look = pin_pos + Vector3.UP * 0.35
+								target_look = target_aim + Vector3.UP * 0.35
 							else:
-								var aim_dir = (pin_pos - ball_pos).normalized()
+								var aim_dir = (target_aim - ball_pos).normalized()
 								if aim_dir.is_zero_approx():
 									aim_dir = Vector3.RIGHT.rotated(Vector3.UP, deg_to_rad(active_ball.aim_yaw_offset_deg))
 								target_look = ball_pos + aim_dir * 50.0 + Vector3.UP * 1.0
@@ -2071,6 +2421,38 @@ func _on_active_player_changed(player: Dictionary) -> void:
 		if course_instance != null and course_instance.has_method("update_auto_club"):
 			course_instance.call("update_auto_club", true)
 
+		# Evaluate if the active player is actually on the green
+		var active_on_green = false
+		if active_ball != null:
+			active_on_green = (str(active_ball.get("lie_type")).to_lower() == "green")
+		if not active_on_green and course_instance != null and course_instance.has_method("is_ball_on_green"):
+			active_on_green = bool(course_instance.call("is_ball_on_green"))
+		if not active_on_green and not player.is_empty():
+			if player.get("lie_type", "").to_lower() == "green":
+				active_on_green = true
+
+		# Synchronize green grid view strictly for the active player
+		if course_instance != null and "show_green_grid" in course_instance:
+			course_instance.show_green_grid = active_on_green
+			_update_grid_button_state(active_on_green)
+
+		# Recalculate zoom zone and minimap zoom for the newly active player
+		_minimap_zoom_dirty = true
+		var new_zone = get_current_zoom_zone()
+		var target_zoom = get_zoom_for_zone(new_zone)
+		minimap_zoom = target_zoom
+		_last_zoom_zone = new_zone
+		_last_was_on_green = active_on_green
+		if _minimap_camera != null:
+			_minimap_camera.size = minimap_zoom
+		if course_instance != null and "aerial_zoom" in course_instance:
+			course_instance.aerial_zoom = target_zoom
+			var aerial_cam = course_instance.get_node_or_null("AerialCamera")
+			if aerial_cam != null:
+				aerial_cam.size = target_zoom
+
+		_update_minimap()
+
 	if not player.get("holed_out", false):
 		is_player_turn_ready = true
 
@@ -2078,6 +2460,8 @@ func _on_active_player_changed(player: Dictionary) -> void:
 
 
 func _on_mulligan_pressed() -> void:
+	if has_node("/root/AnnouncerEngine"):
+		get_node("/root/AnnouncerEngine").call("SpeakMulliganHeckle")
 	if forfeit_confirm_dialog != null:
 		forfeit_confirm_dialog.visible = false
 	if mulligan_confirm_dialog == null:
@@ -2090,7 +2474,7 @@ func _on_mulligan_pressed() -> void:
 		
 	# Build the dialog content dynamically
 	var content_vbox = VBoxContainer.new()
-	content_vbox.add_theme_constant_override("separation", 16)
+	content_vbox.add_theme_constant_override("separation", 18)
 	
 	var target_idx = MultiplayerManager.get_mulligan_target_player_index()
 	if target_idx < 0 or target_idx >= MultiplayerManager.players.size():
@@ -2126,7 +2510,7 @@ func _on_mulligan_pressed() -> void:
 	# Setup title
 	var title_lbl = Label.new()
 	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_lbl.add_theme_font_size_override("font_size", 24)
+	title_lbl.add_theme_font_size_override("font_size", 26)
 	title_lbl.add_theme_color_override("font_color", Color(0.24, 0.46, 0.72, 1.0))
 	title_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
 	title_lbl.add_theme_constant_override("outline_size", 4)
@@ -2134,29 +2518,25 @@ func _on_mulligan_pressed() -> void:
 	
 	var msg_lbl = Label.new()
 	msg_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	msg_lbl.add_theme_font_size_override("font_size", 16)
+	msg_lbl.add_theme_font_size_override("font_size", 18)
 	msg_lbl.add_theme_color_override("font_color", Color.WHITE)
 	msg_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
 	msg_lbl.add_theme_constant_override("outline_size", 4)
 	content_vbox.add_child(msg_lbl)
 	
-	var scroll = ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(400, 160)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	ThemeManager.apply_scroll_container_style(scroll, 28)
-	content_vbox.add_child(scroll)
-	
-	var list_vbox = VBoxContainer.new()
-	list_vbox.add_theme_constant_override("separation", 10)
-	list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(list_vbox)
-	
 	if matching_mulligans.is_empty():
 		# Standard confirmation flow
+		_mulligan_is_selection_mode = false
+		_mulligan_confirm_btn = null
+		_mulligan_cancel_btn = null
+		_mulligan_new_shot_btn = null
+		_mulligan_option_buttons.clear()
+		_mulligan_matching_entries.clear()
+		_mulligan_scroll = null
+		_mulligan_selected_idx = 0
+
 		title_lbl.text = "Confirm Mulligan" if not is_multi else "Confirm Mulligan: %s" % p_name
 		msg_lbl.text = "Are you sure you want to take a mulligan?\nThis will undo your last shot." if not is_multi else "Are you sure you want to take a mulligan for %s?\nThis will undo their last shot." % p_name
-		scroll.visible = false
 		
 		var btn_hbox = HBoxContainer.new()
 		btn_hbox.add_theme_constant_override("separation", 24)
@@ -2164,44 +2544,90 @@ func _on_mulligan_pressed() -> void:
 		
 		var confirm_btn = Button.new()
 		confirm_btn.text = "Yes, Undo"
-		confirm_btn.custom_minimum_size = Vector2(140, 45)
+		confirm_btn.custom_minimum_size = Vector2(170, 52)
+		confirm_btn.add_theme_font_size_override("font_size", 18)
 		apply_material_button_style(confirm_btn, Color(0.24, 0.46, 0.72, 0.85))
 		confirm_btn.pressed.connect(func():
 			mulligan_confirm_dialog.visible = false
 			_on_mulligan_confirmed()
 		)
 		btn_hbox.add_child(confirm_btn)
+		_mulligan_confirm_btn = confirm_btn
 		
 		var cancel_btn = Button.new()
 		cancel_btn.text = "Cancel"
-		cancel_btn.custom_minimum_size = Vector2(140, 45)
+		cancel_btn.custom_minimum_size = Vector2(170, 52)
+		cancel_btn.add_theme_font_size_override("font_size", 18)
 		apply_material_button_style(cancel_btn, Color(0.56, 0.22, 0.22, 0.85))
 		cancel_btn.pressed.connect(func():
 			mulligan_confirm_dialog.visible = false
 		)
 		btn_hbox.add_child(cancel_btn)
+		_mulligan_cancel_btn = cancel_btn
 		
 		content_vbox.add_child(btn_hbox)
+		
+		mulligan_confirm_dialog.offset_left = -280
+		mulligan_confirm_dialog.offset_right = 280
+		mulligan_confirm_dialog.offset_top = -135
+		mulligan_confirm_dialog.offset_bottom = 135
 	else:
 		# Selection flow
+		_mulligan_is_selection_mode = true
+		_mulligan_option_buttons.clear()
+		_mulligan_matching_entries = matching_mulligans
+		_mulligan_selected_idx = 0
+		_mulligan_confirm_btn = null
+
 		title_lbl.text = "Mulligan Selection" if not is_multi else "Mulligan Selection: %s" % p_name
 		msg_lbl.text = "Select an option for your mulligan from this spot:" if not is_multi else "Select an option for %s's mulligan from this spot:" % p_name
 		
+		var scroll = ScrollContainer.new()
+		scroll.custom_minimum_size = Vector2(500, 300)
+		scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+		ThemeManager.apply_scroll_container_style(scroll, 24)
+		content_vbox.add_child(scroll)
+		_mulligan_scroll = scroll
+		
+		var scroll_margin = MarginContainer.new()
+		scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		scroll_margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		scroll_margin.add_theme_constant_override("margin_right", 24)
+		scroll_margin.add_theme_constant_override("margin_left", 4)
+		scroll_margin.add_theme_constant_override("margin_top", 4)
+		scroll_margin.add_theme_constant_override("margin_bottom", 4)
+		scroll.add_child(scroll_margin)
+		
+		var list_vbox = VBoxContainer.new()
+		list_vbox.add_theme_constant_override("separation", 10)
+		list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		scroll_margin.add_child(list_vbox)
+		
 		var new_mulligan_btn = Button.new()
 		new_mulligan_btn.text = "Take Another Mulligan (New Shot)"
-		new_mulligan_btn.custom_minimum_size = Vector2(380, 45)
-		apply_material_button_style(new_mulligan_btn, Color(0.24, 0.62, 0.36, 0.85))
+		new_mulligan_btn.custom_minimum_size = Vector2(0, 52)
+		new_mulligan_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		new_mulligan_btn.add_theme_font_size_override("font_size", 18)
 		new_mulligan_btn.pressed.connect(func():
 			mulligan_confirm_dialog.visible = false
 			_on_mulligan_confirmed()
 		)
+		new_mulligan_btn.mouse_entered.connect(func():
+			_mulligan_selected_idx = 0
+			_update_mulligan_selection_highlight()
+		)
 		list_vbox.add_child(new_mulligan_btn)
+		_mulligan_new_shot_btn = new_mulligan_btn
+		_mulligan_option_buttons.append(new_mulligan_btn)
 		
 		var sep_lbl = Label.new()
 		sep_lbl.text = "--- Keep a Previous Shot ---"
 		sep_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		sep_lbl.add_theme_font_size_override("font_size", 14)
-		sep_lbl.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+		sep_lbl.add_theme_font_size_override("font_size", 15)
+		sep_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 		list_vbox.add_child(sep_lbl)
 		
 		for i in range(matching_mulligans.size()):
@@ -2214,32 +2640,41 @@ func _on_mulligan_pressed() -> void:
 			var btn_text = "Restore Shot %d: %s | %.0f yds (%s)" % [i + 1, club, dist, lie.capitalize()]
 			var opt_btn = Button.new()
 			opt_btn.text = btn_text
-			opt_btn.custom_minimum_size = Vector2(380, 40)
-			apply_material_button_style(opt_btn, Color(0.24, 0.46, 0.72, 0.85))
+			opt_btn.custom_minimum_size = Vector2(0, 48)
+			opt_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			opt_btn.add_theme_font_size_override("font_size", 17)
 			opt_btn.pressed.connect(func():
 				mulligan_confirm_dialog.visible = false
 				_on_previous_mulligan_selected(entry)
 			)
+			var cur_idx = i + 1
+			opt_btn.mouse_entered.connect(func():
+				_mulligan_selected_idx = cur_idx
+				_update_mulligan_selection_highlight()
+			)
 			list_vbox.add_child(opt_btn)
+			_mulligan_option_buttons.append(opt_btn)
 			
 		var cancel_btn = Button.new()
 		cancel_btn.text = "Cancel"
-		cancel_btn.custom_minimum_size = Vector2(380, 40)
+		cancel_btn.custom_minimum_size = Vector2(0, 48)
+		cancel_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cancel_btn.add_theme_font_size_override("font_size", 17)
 		apply_material_button_style(cancel_btn, Color(0.56, 0.22, 0.22, 0.85))
 		cancel_btn.pressed.connect(func():
 			mulligan_confirm_dialog.visible = false
 		)
 		list_vbox.add_child(cancel_btn)
+		_mulligan_cancel_btn = cancel_btn
+		
+		mulligan_confirm_dialog.offset_left = -290
+		mulligan_confirm_dialog.offset_right = 290
+		mulligan_confirm_dialog.offset_top = -250
+		mulligan_confirm_dialog.offset_bottom = 250
+
+		_update_mulligan_selection_highlight()
 		
 	mulligan_confirm_dialog.add_child(content_vbox)
-	
-	if matching_mulligans.is_empty():
-		mulligan_confirm_dialog.offset_top = -100
-		mulligan_confirm_dialog.offset_bottom = 100
-	else:
-		mulligan_confirm_dialog.offset_top = -180
-		mulligan_confirm_dialog.offset_bottom = 180
-		
 	mulligan_confirm_dialog.visible = true
 
 
@@ -2698,6 +3133,17 @@ func _process(_delta: float) -> void:
 	if course_instance != null and course_instance.get("show_green_grid") != null:
 		_update_grid_button_state(course_instance.get("show_green_grid") as bool)
 		
+	# Ensure enlarged minimap collapses on desktop if mouse moves away or state changes
+	if _is_minimap_enlarged and _is_desktop():
+		if ball_is_moving or hud_scorecard.visible or hud_overview.visible or (hud_manage_players != null and hud_manage_players.visible):
+			_set_minimap_enlarged(false)
+		elif _minimap_panel != null and _minimap_panel.is_visible_in_tree():
+			var m_pos = _minimap_panel.get_global_mouse_position()
+			if not _minimap_panel.get_global_rect().has_point(m_pos):
+				_set_minimap_enlarged(false)
+		else:
+			_set_minimap_enlarged(false)
+
 	_update_minimap()
 	
 	# Update top HUD if data changed (safety fallback for practice mode/penalties)
@@ -2783,8 +3229,7 @@ func is_player_close_to_green() -> bool:
 			ball = player_node.get("ball")
 	if ball != null:
 		var lie_str = str(ball.get("lie_type")).to_lower()
-		var club_str = str(ball.get("current_selected_club")).to_lower()
-		if lie_str == "green" or lie_str == "fringe" or club_str in ["pt", "putt", "putter"]:
+		if lie_str == "green":
 			return true
 		if course_instance != null:
 			var pin_pos = course_instance.get("current_hole_location")
@@ -2795,7 +3240,7 @@ func is_player_close_to_green() -> bool:
 		var mp_mgr = get_node("/root/MultiplayerManager")
 		if not mp_mgr.players.is_empty():
 			var ap = mp_mgr.get_active_player()
-			if ap.get("lie_type", "").to_lower() in ["green", "fringe"] or mp_mgr.current_club.to_lower() in ["pt", "putt", "putter"]:
+			if ap.get("lie_type", "").to_lower() == "green":
 				return true
 	return false
 
@@ -2831,6 +3276,7 @@ func reset_zoom_to_default() -> void:
 	_default_non_green_minimap_zoom = 300.0
 	_last_zoom_zone = -1
 	_last_was_on_green = false
+	_minimap_zoom_dirty = true
 	if _minimap_camera != null:
 		_minimap_camera.size = minimap_zoom
 	if course_instance != null:
@@ -2914,12 +3360,18 @@ func _update_minimap() -> void:
 				if aerial_cam != null:
 					aerial_cam.size = target_zoom
 			
-			# Auto-toggle green slope grid when on or close to green
+			# Auto-toggle green slope grid only when actually on the green
+			var on_green = false
+			if ball != null:
+				on_green = (str(ball.get("lie_type")).to_lower() == "green")
+			if not on_green and course_instance != null and course_instance.has_method("is_ball_on_green"):
+				on_green = bool(course_instance.call("is_ball_on_green"))
 			if course_instance != null and course_instance.get("show_green_grid") != null:
-				course_instance.set("show_green_grid", current_zone == 2)
+				course_instance.set("show_green_grid", on_green)
+				_update_grid_button_state(on_green)
 				
 			_last_zoom_zone = current_zone
-			_last_was_on_green = (current_zone == 2)
+			_last_was_on_green = on_green
 	
 	if is_aerial:
 		if _minimap_flag_icon != null:
@@ -3004,15 +3456,13 @@ func _update_minimap() -> void:
 			var is_on_green = false
 			if ball != null:
 				var lie = str(ball.get("lie_type")).to_lower()
-				is_on_green = (lie in ["green", "fringe"])
+				is_on_green = (lie == "green")
 			if not is_on_green and course_instance != null:
 				if course_instance.has_method("is_ball_on_green"):
 					is_on_green = course_instance.call("is_ball_on_green")
-				if not is_on_green and course_instance.has_method("is_ball_on_fringe"):
-					is_on_green = course_instance.call("is_ball_on_fringe")
 			if not is_on_green and MultiplayerManager.players.size() > 0:
 				var ap = MultiplayerManager.get_active_player()
-				if ap.get("lie_type", "").to_lower() in ["green", "fringe"]:
+				if ap.get("lie_type", "").to_lower() == "green":
 					is_on_green = true
 
 			if is_on_green:
@@ -3097,14 +3547,13 @@ func _update_minimap_flag_marker(pin_pos: Variant, current_zone: int, ball: Node
 		is_on_green_or_putting = bool(course_instance.call("is_ball_on_green"))
 	if not is_on_green_or_putting and ball != null:
 		var lie_str = str(ball.get("lie_type")).to_lower()
-		var club_str = str(ball.get("current_selected_club")).to_lower()
-		if lie_str in ["green", "fringe"] or club_str in ["pt", "putt", "putter"] or ball.get("is_putt") == true:
+		if lie_str == "green" or ball.get("is_putt") == true:
 			is_on_green_or_putting = true
 	if not is_on_green_or_putting and has_node("/root/MultiplayerManager"):
 		var mp_mgr = get_node("/root/MultiplayerManager")
 		if not mp_mgr.players.is_empty():
 			var ap = mp_mgr.get_active_player()
-			if ap.get("lie_type", "").to_lower() in ["green", "fringe"] or mp_mgr.current_club.to_lower() in ["pt", "putt", "putter"]:
+			if ap.get("lie_type", "").to_lower() == "green":
 				is_on_green_or_putting = true
 				
 	# If green heatmap is actively shown, treat as green/putting view
@@ -3121,8 +3570,9 @@ func _update_minimap_flag_marker(pin_pos: Variant, current_zone: int, ball: Node
 		return
 		
 	var screen_pos = _minimap_camera.unproject_position(pin_pos)
-	# Viewport is 180x180; check if within minimap bounds
-	if screen_pos.x >= -12 and screen_pos.x <= 192 and screen_pos.y >= -12 and screen_pos.y <= 192:
+	var vp_w = float(_minimap_viewport.size.x) if _minimap_viewport != null else 180.0
+	var vp_h = float(_minimap_viewport.size.y) if _minimap_viewport != null else 180.0
+	if screen_pos.x >= -12 and screen_pos.x <= vp_w + 12 and screen_pos.y >= -12 and screen_pos.y <= vp_h + 12:
 		# Anchor at cup ellipse center (8, 32) so cup is on pin location and flag flies above it
 		_minimap_flag_icon.position = screen_pos - Vector2(8, 32)
 		_minimap_flag_icon.visible = true
@@ -3189,14 +3639,13 @@ func _update_minimap_ball_marker(ball_pos: Vector3, current_zone: int, ball: Nod
 		is_on_green_or_putting = bool(course_instance.call("is_ball_on_green"))
 	if not is_on_green_or_putting and ball != null:
 		var lie_str = str(ball.get("lie_type")).to_lower()
-		var club_str = str(ball.get("current_selected_club")).to_lower()
-		if lie_str in ["green", "fringe"] or club_str in ["pt", "putt", "putter"] or ball.get("is_putt") == true:
+		if lie_str == "green" or ball.get("is_putt") == true:
 			is_on_green_or_putting = true
 	if not is_on_green_or_putting and has_node("/root/MultiplayerManager"):
 		var mp_mgr = get_node("/root/MultiplayerManager")
 		if not mp_mgr.players.is_empty():
 			var ap = mp_mgr.get_active_player()
-			if ap.get("lie_type", "").to_lower() in ["green", "fringe"] or mp_mgr.current_club.to_lower() in ["pt", "putt", "putter"]:
+			if ap.get("lie_type", "").to_lower() == "green":
 				is_on_green_or_putting = true
 				
 	# If green heatmap is actively shown, treat as green/putting view
@@ -3215,13 +3664,262 @@ func _update_minimap_ball_marker(ball_pos: Vector3, current_zone: int, ball: Nod
 		return
 		
 	var screen_pos = _minimap_camera.unproject_position(ball_pos)
-	# Viewport is 180x180; check if within minimap bounds
-	if screen_pos.x >= -12 and screen_pos.x <= 192 and screen_pos.y >= -12 and screen_pos.y <= 192:
+	var vp_w = float(_minimap_viewport.size.x) if _minimap_viewport != null else 180.0
+	var vp_h = float(_minimap_viewport.size.y) if _minimap_viewport != null else 180.0
+	if screen_pos.x >= -12 and screen_pos.x <= vp_w + 12 and screen_pos.y >= -12 and screen_pos.y <= vp_h + 12:
 		# Anchor at center (12, 12) for 24x24 icon so ball icon is centered at ball position
 		_minimap_ball_icon.position = screen_pos - Vector2(12, 12)
 		_minimap_ball_icon.visible = true
 	else:
 		_minimap_ball_icon.visible = false
+
+
+func _is_desktop() -> bool:
+	if MobilePerformance.is_mobile():
+		return false
+	if DisplayServer.is_touchscreen_available() and not (OS.has_feature("pc") or OS.has_feature("windows") or OS.has_feature("macos") or OS.has_feature("linux")):
+		return false
+	return true
+
+
+func _set_minimap_enlarged(enlarged: bool) -> void:
+	if not _is_desktop():
+		return
+	if _minimap_panel == null or _minimap_container == null:
+		return
+	if _is_minimap_enlarged == enlarged:
+		return
+	_is_minimap_enlarged = enlarged
+
+	if _minimap_tween != null and _minimap_tween.is_valid():
+		_minimap_tween.kill()
+
+	var target_container_size = MINIMAP_ENLARGED_SIZE if enlarged else MINIMAP_NORMAL_SIZE
+	var target_panel_size = target_container_size + MINIMAP_PANEL_PADDING
+	var duration = 0.22 if enlarged else 0.18
+
+	if enlarged:
+		_minimap_container.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		if _minimap_panel != null:
+			_minimap_panel.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	else:
+		_minimap_container.mouse_default_cursor_shape = Control.CURSOR_ARROW
+		if _minimap_panel != null:
+			_minimap_panel.mouse_default_cursor_shape = Control.CURSOR_ARROW
+
+	_minimap_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_minimap_tween.tween_property(_minimap_panel, "custom_minimum_size", target_panel_size, duration)
+	_minimap_tween.tween_property(_minimap_panel, "size", target_panel_size, duration)
+	_minimap_tween.tween_property(_minimap_container, "custom_minimum_size", target_container_size, duration)
+	_minimap_tween.tween_property(_minimap_container, "size", target_container_size, duration)
+	if _minimap_viewport != null:
+		_minimap_tween.tween_property(_minimap_viewport, "size", target_container_size, duration)
+	if _minimap_hint_label != null:
+		var target_alpha = 1.0 if enlarged else 0.0
+		_minimap_tween.tween_property(_minimap_hint_label, "modulate:a", target_alpha, duration)
+	_minimap_tween.chain().tween_callback(_update_minimap)
+
+
+func _on_minimap_mouse_entered() -> void:
+	if not _is_desktop():
+		return
+	# Don't enlarge if overlays, modals or full aerial view are active
+	if hud_scorecard.visible or hud_manage_players.visible or hud_overview.visible:
+		return
+	if course_instance != null and course_instance.get("is_aerial_view") == true:
+		return
+	_set_minimap_enlarged(true)
+
+
+func _on_minimap_mouse_exited() -> void:
+	if not _is_desktop():
+		return
+	if _minimap_panel != null and _minimap_panel.is_visible_in_tree():
+		var m_pos = _minimap_panel.get_global_mouse_position()
+		if _minimap_panel.get_global_rect().has_point(m_pos):
+			return # Still inside the panel (e.g. over child controls)
+	_set_minimap_enlarged(false)
+
+
+func _on_minimap_gui_input(event: InputEvent) -> void:
+	if _minimap_camera == null or course_instance == null:
+		return
+
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			_handle_minimap_aim_at_screen_pos(event.position)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+			minimap_zoom = clamp(minimap_zoom - 25.0, 50.0, 500.0)
+			if _last_zoom_zone == 0:
+				_teebox_minimap_zoom = minimap_zoom
+				_default_non_green_minimap_zoom = minimap_zoom
+			_update_minimap()
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+			minimap_zoom = clamp(minimap_zoom + 25.0, 50.0, 500.0)
+			if _last_zoom_zone == 0:
+				_teebox_minimap_zoom = minimap_zoom
+				_default_non_green_minimap_zoom = minimap_zoom
+			_update_minimap()
+
+
+func _handle_minimap_aim_at_screen_pos(click_pos: Vector2) -> void:
+	if _minimap_camera == null or course_instance == null or _minimap_viewport == null:
+		return
+
+	var ball = active_ball
+	if ball == null:
+		var player_node = course_instance.get_node_or_null("Player")
+		if player_node != null:
+			ball = player_node.get("ball")
+	if ball == null:
+		return
+	if ball.get("state") != PhysicsEnums.BallState.REST:
+		return
+
+	var c_size = _minimap_container.size if _minimap_container != null else Vector2(180, 180)
+	var vp_size = Vector2(_minimap_viewport.size)
+	var norm_x = clampf(click_pos.x / maxf(c_size.x, 1.0), 0.0, 1.0)
+	var norm_y = clampf(click_pos.y / maxf(c_size.y, 1.0), 0.0, 1.0)
+	var vp_click = Vector2(norm_x * vp_size.x, norm_y * vp_size.y)
+
+	var ray_start = _minimap_camera.project_ray_origin(vp_click)
+	var ray_dir = _minimap_camera.project_ray_normal(vp_click)
+	var ray_end = ray_start + ray_dir * 1000.0
+
+	var space_state = course_instance.get_world_3d().direct_space_state
+	var query = PhysicsRayQueryParameters3D.create(ray_start, ray_end)
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	if ball != null:
+		query.exclude = [ball.get_rid()]
+	var hit = space_state.intersect_ray(query)
+
+	var target_pos: Vector3
+	if not hit.is_empty():
+		target_pos = hit["position"]
+	else:
+		var ground_h = 0.0
+		if course_instance.has_method("get_height"):
+			ground_h = course_instance.call("get_height", ray_start.x, ray_start.z)
+		target_pos = Vector3(ray_start.x, ground_h, ray_start.z)
+
+	if course_instance.has_method("get_height"):
+		target_pos.y = course_instance.call("get_height", target_pos.x, target_pos.z)
+
+	var ball_pos = ball.global_position
+	var diff_2d = Vector2(target_pos.x - ball_pos.x, target_pos.z - ball_pos.z)
+	if diff_2d.length() < 1.5:
+		return
+
+	aim_at_world_position(target_pos)
+
+
+func aim_at_world_position(target_pos: Vector3) -> void:
+	if course_instance == null:
+		return
+	var player_node = course_instance.get_node_or_null("Player")
+	var ball = active_ball
+	if ball == null and player_node != null:
+		ball = player_node.get("ball")
+	if ball == null:
+		return
+	if ball.get("state") != PhysicsEnums.BallState.REST:
+		return
+
+	var ball_pos = ball.global_position
+	var diff = target_pos - ball_pos
+	var angle_rad = atan2(diff.z, diff.x)
+	var aim_yaw = rad_to_deg(-angle_rad)
+
+	# Update course_instance aim target if method exists
+	if course_instance.has_method("set_aim_target"):
+		course_instance.call("set_aim_target", target_pos, true)
+	else:
+		if "_aim_is_manual" in course_instance:
+			course_instance.set("_aim_is_manual", true)
+		course_instance.set("aim_target_pos", target_pos)
+		ball.set("aim_yaw_offset_deg", aim_yaw)
+		if course_instance.has_node("AimMarker"):
+			var marker = course_instance.get_node("AimMarker")
+			marker.global_position = target_pos
+			marker.visible = true
+		if course_instance.has_method("set_aim_distance"):
+			course_instance.call("set_aim_distance", int(ball_pos.distance_to(target_pos) * 1.09361))
+
+	# Keep course_instance and ball yaw in sync
+	ball.set("aim_yaw_offset_deg", aim_yaw)
+	course_instance.set("aim_target_pos", target_pos)
+
+	# Position the address camera behind the ball facing the new aim target
+	var camera = course_instance.get_node_or_null("PhantomCamera3D")
+	if camera != null:
+		camera.follow_mode = PhantomCamera3D.FollowMode.NONE
+		camera.look_at_mode = PhantomCamera3D.LookAtMode.NONE
+		var is_on_green = false
+		var lie = str(ball.get("lie_type")).to_lower()
+		is_on_green = (lie == "green")
+		if not is_on_green and course_instance.has_method("is_ball_on_green"):
+			is_on_green = bool(course_instance.call("is_ball_on_green"))
+
+		var cam_pos: Vector3
+		if course_instance.has_method("get_address_camera_position"):
+			cam_pos = course_instance.call("get_address_camera_position", ball_pos, -angle_rad, is_on_green)
+		else:
+			var cam_dist = GlobalSettings.range_settings.camera_distance.value
+			var cam_height = GlobalSettings.range_settings.camera_height.value
+			var local_offset = Vector3(-1.05, 0.6, 0) if is_on_green else Vector3(-cam_dist, cam_height, 0)
+			if course_instance.has_method("get_camera_local_offset"):
+				local_offset = course_instance.call("get_camera_local_offset", is_on_green)
+			var rotated_offset = local_offset.rotated(Vector3.UP, -angle_rad)
+			cam_pos = ball_pos + rotated_offset
+			if course_instance.has_method("clamp_camera_position"):
+				cam_pos = course_instance.call("clamp_camera_position", cam_pos)
+		camera.global_position = cam_pos
+
+		var target_look: Vector3
+		if course_instance.has_method("get_camera_target_look"):
+			target_look = course_instance.call("get_camera_target_look", target_pos, ball_pos, is_on_green)
+		elif is_on_green:
+			var dist = ball_pos.distance_to(target_pos)
+			var look_dist = clamp(dist * 0.4, 2.0, 6.0)
+			if dist < 2.0:
+				look_dist = dist
+			var fraction = clamp(look_dist / max(dist, 0.001), 0.0, 1.0)
+			target_look = ball_pos.lerp(target_pos, fraction)
+		else:
+			var dist = ball_pos.distance_to(target_pos)
+			if dist < 45.0:
+				target_look = target_pos + Vector3.UP * 0.35
+			else:
+				var aim_dir = (target_pos - ball_pos).normalized()
+				if aim_dir.is_zero_approx():
+					aim_dir = Vector3.RIGHT.rotated(Vector3.UP, deg_to_rad(aim_yaw))
+				target_look = ball_pos + aim_dir * 50.0 + Vector3.UP * 1.0
+		camera.look_at(target_look)
+		if camera.camera_3d_resource != null:
+			camera.camera_3d_resource.fov = GlobalSettings.range_settings.camera_fov.value
+
+		var cam3d = course_instance.get_node_or_null("Camera3D")
+		if cam3d != null:
+			cam3d.global_position = cam_pos
+			cam3d.look_at(target_look)
+			cam3d.fov = GlobalSettings.range_settings.camera_fov.value
+
+	if player_node != null:
+		player_node.set("_last_aim_target_pos", target_pos)
+		player_node.set("_last_aim_yaw_offset_deg", aim_yaw)
+
+	if has_node("/root/MultiplayerManager") and not MultiplayerManager.players.is_empty():
+		var ap = MultiplayerManager.get_active_player()
+		if not ap.is_empty():
+			ap["last_aim_target_pos"] = target_pos
+			ap["last_aim_yaw_offset_deg"] = aim_yaw
+
+	var dist_yds = int(ball_pos.distance_to(target_pos) * 1.09361)
+	if _minimap_hint_label != null:
+		_minimap_hint_label.text = "🎯 Aim: %d YDS" % dist_yds
+
+	_update_minimap()
 
 
 func apply_material_button_style(btn: Button, bg_color: Color):
@@ -3298,11 +3996,12 @@ func update_map_button_text(is_aerial: bool) -> void:
 				
 	if target_btn != null:
 		target_btn.text = ""
+		var key_str = KeybindingManager.get_action_key_name("aerial_aim") if has_node("/root/KeybindingManager") else "A"
 		if is_aerial:
-			target_btn.tooltip_text = "Return to Player"
+			target_btn.tooltip_text = "Return to Player [%s]" % key_str
 			apply_circular_button_style(target_btn, Color(0.2, 0.7, 0.35, 0.95))
 		else:
-			target_btn.tooltip_text = "Toggle Map View"
+			target_btn.tooltip_text = "Toggle Map View [%s]" % key_str
 			apply_circular_button_style(target_btn, Color(0.18, 0.45, 0.25, 0.85))
 
 
@@ -3957,6 +4656,8 @@ func _set_other_elements_visible(is_visible: bool) -> void:
 	_hud_elements_visible = is_visible
 	if range_ui != null:
 		range_ui.visible = is_visible
+		if range_ui.has_method("set_hud_elements_visible"):
+			range_ui.call("set_hud_elements_visible", is_visible)
 	if _minimap_group != null:
 		var is_aerial = false
 		if course_instance != null and course_instance.get("is_aerial_view") != null:
@@ -4808,8 +5509,8 @@ func _draw_ball_overlays(overlay: Control) -> void:
 	if MultiplayerManager.is_finished:
 		return
 		
-	# Skip if scorecard, players list, camera setup dialog, replay modal, exit confirm dialog, forfeit dialog, or prompt dialogs are open
-	if hud_scorecard.visible or hud_manage_players.visible or hud_overview.visible or (exit_confirm_dialog != null and exit_confirm_dialog.visible) or (forfeit_confirm_dialog != null and forfeit_confirm_dialog.visible) or (add_player_prompt_dialog != null and add_player_prompt_dialog.visible) or (resume_player_prompt_dialog != null and resume_player_prompt_dialog.visible):
+	# Skip if scorecard, players list, camera setup dialog, replay modal, exit confirm dialog, forfeit dialog, mulligan dialog, or prompt dialogs are open
+	if is_any_dialog_open():
 		return
 	var root = get_tree().root
 	if root.find_child("CameraSetupDialog", true, false) != null or root.find_child("SwingReplayModal", true, false) != null:

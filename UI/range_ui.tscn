@@ -112,91 +112,91 @@ offset_bottom = 494.0
 label = "Carry"
 units = "yd"
 
-[node name="Offline" parent="GridCanvas" unique_id=2003394921 instance=ExtResource("1_q72xt")]
+[node name="SpinAxis" parent="GridCanvas" unique_id=850043213 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_top = 500.0
 offset_right = 100.0
 offset_bottom = 564.0
-label = "Offline"
-units = "yd"
-
-[node name="Apex" parent="GridCanvas" unique_id=1199759367 instance=ExtResource("1_q72xt")]
-layout_mode = 0
-offset_top = 570.0
-offset_right = 100.0
-offset_bottom = 634.0
-label = "Apex"
-units = "ft"
-
-[node name="VLA" parent="GridCanvas" unique_id=1786497158 instance=ExtResource("1_q72xt")]
-layout_mode = 0
-offset_top = 640.0
-offset_right = 100.0
-offset_bottom = 704.0
-label = "VLA"
-units = "deg"
-
-[node name="HLA" parent="GridCanvas" unique_id=486822729 instance=ExtResource("1_q72xt")]
-layout_mode = 0
-offset_top = 710.0
-offset_right = 100.0
-offset_bottom = 774.0
-label = "HLA"
+label = "SpinAxis"
 units = "deg"
 
 [node name="Speed" parent="GridCanvas" unique_id=156075773 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_left = 106.0
-offset_top = 360.0
-offset_right = 206.0
-offset_bottom = 424.0
+offset_top = 570.0
+offset_right = 100.0
+offset_bottom = 634.0
 label = "Speed"
 units = "mph"
 
 [node name="BackSpin" parent="GridCanvas" unique_id=212846167 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_left = 106.0
-offset_top = 430.0
-offset_right = 206.0
-offset_bottom = 494.0
+offset_top = 640.0
+offset_right = 100.0
+offset_bottom = 704.0
 label = "BackSpin"
 units = "rpm"
 
 [node name="SideSpin" parent="GridCanvas" unique_id=38660713 instance=ExtResource("1_q72xt")]
 layout_mode = 0
+offset_top = 710.0
+offset_right = 100.0
+offset_bottom = 774.0
+label = "SideSpin"
+units = "rpm"
+
+[node name="FaceAngle" parent="GridCanvas" unique_id=1999999999 instance=ExtResource("1_q72xt")]
+layout_mode = 0
+offset_left = 106.0
+offset_top = 360.0
+offset_right = 206.0
+offset_bottom = 424.0
+label = "Face Ang"
+units = "deg"
+
+[node name="ClubPath" parent="GridCanvas" unique_id=486822729 instance=ExtResource("1_q72xt")]
+layout_mode = 0
+offset_left = 106.0
+offset_top = 430.0
+offset_right = 206.0
+offset_bottom = 494.0
+label = "Club Path"
+units = "deg"
+
+[node name="FaceToPath" parent="GridCanvas" unique_id=1703626966 instance=ExtResource("1_q72xt")]
+layout_mode = 0
 offset_left = 106.0
 offset_top = 500.0
 offset_right = 206.0
 offset_bottom = 564.0
-label = "SideSpin"
-units = "rpm"
+label = "Face-Path"
+units = "deg"
 
-[node name="TotalSpin" parent="GridCanvas" unique_id=1703626966 instance=ExtResource("1_q72xt")]
+[node name="ClubSpeed" parent="GridCanvas" unique_id=1199759367 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_left = 106.0
 offset_top = 570.0
 offset_right = 206.0
 offset_bottom = 634.0
-label = "TotalSpin"
-units = "rpm"
+label = "Club Spd"
+units = "mph"
 
-[node name="SpinAxis" parent="GridCanvas" unique_id=850043213 instance=ExtResource("1_q72xt")]
+[node name="SmashFactor" parent="GridCanvas" unique_id=1786497158 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_left = 106.0
 offset_top = 640.0
 offset_right = 206.0
 offset_bottom = 704.0
-label = "SpinAxis"
-units = "deg"
+label = "Smash"
+units = "ratio"
 
-[node name="FaceAngle" parent="GridCanvas" unique_id=1999999999 instance=ExtResource("1_q72xt")]
+[node name="Offline" parent="GridCanvas" unique_id=2003394921 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_left = 106.0
 offset_top = 710.0
 offset_right = 206.0
 offset_bottom = 774.0
-label = "Face Ang"
-units = "deg"
+label = "Offline"
+units = "yd"
 
 [node name="ClubSelector" parent="GridCanvas" unique_id=1107551091 instance=ExtResource("3_crlyb")]
 layout_mode = 0
@@ -276,30 +276,6 @@ text = "Hit Shot"
 [connection signal="close_settings_requested" from="SettingsLayer/Container/RangeSettings" to="." method="_on_close_settings_requested"]
 [connection signal="toggle_settings_requested" from="SettingsLayer/Container/RangeSettings" to="." method="_on_toggle_settings_requested"]
 [connection signal="dir_selected" from="SessionPopUp" to="." method="_on_session_pop_up_dir_selected"]
-[connection signal="drag_ended" from="GridCanvas/Distance" to="GridCanvas" method="_on_panel_drag_ended"]
-[connection signal="drag_started" from="GridCanvas/Distance" to="GridCanvas" method="_on_panel_drag_started"]
-[connection signal="drag_ended" from="GridCanvas/Carry" to="GridCanvas" method="_on_panel_drag_ended"]
-[connection signal="drag_started" from="GridCanvas/Carry" to="GridCanvas" method="_on_panel_drag_started"]
-[connection signal="drag_ended" from="GridCanvas/Offline" to="GridCanvas" method="_on_panel_drag_ended"]
-[connection signal="drag_started" from="GridCanvas/Offline" to="GridCanvas" method="_on_panel_drag_started"]
-[connection signal="drag_ended" from="GridCanvas/Apex" to="GridCanvas" method="_on_panel_drag_ended"]
-[connection signal="drag_started" from="GridCanvas/Apex" to="GridCanvas" method="_on_panel_drag_started"]
-[connection signal="drag_ended" from="GridCanvas/VLA" to="GridCanvas" method="_on_panel_drag_ended"]
-[connection signal="drag_started" from="GridCanvas/VLA" to="GridCanvas" method="_on_panel_drag_started"]
-[connection signal="drag_ended" from="GridCanvas/HLA" to="GridCanvas" method="_on_panel_drag_ended"]
-[connection signal="drag_started" from="GridCanvas/HLA" to="GridCanvas" method="_on_panel_drag_started"]
-[connection signal="drag_ended" from="GridCanvas/Speed" to="GridCanvas" method="_on_panel_drag_ended"]
-[connection signal="drag_started" from="GridCanvas/Speed" to="GridCanvas" method="_on_panel_drag_started"]
-[connection signal="drag_ended" from="GridCanvas/BackSpin" to="GridCanvas" method="_on_panel_drag_ended"]
-[connection signal="drag_started" from="GridCanvas/BackSpin" to="GridCanvas" method="_on_panel_drag_started"]
-[connection signal="drag_ended" from="GridCanvas/SideSpin" to="GridCanvas" method="_on_panel_drag_ended"]
-[connection signal="drag_started" from="GridCanvas/SideSpin" to="GridCanvas" method="_on_panel_drag_started"]
-[connection signal="drag_ended" from="GridCanvas/TotalSpin" to="GridCanvas" method="_on_panel_drag_ended"]
-[connection signal="drag_started" from="GridCanvas/TotalSpin" to="GridCanvas" method="_on_panel_drag_started"]
-[connection signal="drag_ended" from="GridCanvas/SpinAxis" to="GridCanvas" method="_on_panel_drag_ended"]
-[connection signal="drag_started" from="GridCanvas/SpinAxis" to="GridCanvas" method="_on_panel_drag_started"]
-[connection signal="drag_ended" from="GridCanvas/FaceAngle" to="GridCanvas" method="_on_panel_drag_ended"]
-[connection signal="drag_started" from="GridCanvas/FaceAngle" to="GridCanvas" method="_on_panel_drag_started"]
 [connection signal="inject" from="ShotInjector" to="." method="_on_shot_injector_inject"]
 [connection signal="item_selected" from="ShotInjector/PayloadOption" to="ShotInjector" method="_on_payload_option_item_selected"]
 [connection signal="pressed" from="ShotInjector/Button" to="ShotInjector" method="_on_button_pressed"]

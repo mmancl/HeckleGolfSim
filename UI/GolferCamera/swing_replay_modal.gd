@@ -29,6 +29,12 @@ var shot_data: Dictionary = {}
 var recommendations: Array[Dictionary] = []
 var _recorded_frames: Array = []
 var _is_suggestions_only: bool = false
+var _checkpoint_progress: Dictionary = {
+	"Address": 0.0,
+	"Top (P4)": 0.35,
+	"Impact (P7)": 0.65,
+	"Finish": 1.0
+}
 
 # Deferred Background Analysis State
 var _is_analysis_complete: bool = false
@@ -87,6 +93,12 @@ func _recenter_modal() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
+			var detail_modal = get_node_or_null("DetailModal")
+			if detail_modal != null:
+				InAppVideoPlayer.stop_all_players()
+				detail_modal.queue_free()
+				get_viewport().set_input_as_handled()
+				return
 			_on_close_button_pressed()
 			get_viewport().set_input_as_handled()
 
@@ -97,6 +109,10 @@ func setup_modal(data: Dictionary, frames: Array = [], suggestions_only: bool = 
 	_recorded_frames = [] if suggestions_only else frames.duplicate()
 	if not _recorded_frames.is_empty():
 		total_duration = max(1.0, _recorded_frames.size() * 0.066)
+		var initial_phases = GolfSwingAnalyzer.detect_key_phases(_recorded_frames)
+		if initial_phases.get("has_phases", false):
+			_checkpoint_progress["Top (P4)"] = initial_phases.get("top_progress", 0.35)
+			_checkpoint_progress["Impact (P7)"] = initial_phases.get("impact_progress", 0.65)
 	_is_analysis_complete = suggestions_only
 	_analysis_cancelled = false
 
@@ -264,10 +280,12 @@ shader_type canvas_item;
 
 uniform sampler2D y_tex : hint_default_black;
 uniform sampler2D cbcr_tex : hint_default_black;
+uniform mat3 feed_transform;
 
 void fragment() {
-	float y = texture(y_tex, UV).r;
-	vec2 cbcr = texture(cbcr_tex, UV).rg;
+	vec2 uv = (feed_transform * vec3(UV, 1.0)).xy;
+	float y = texture(y_tex, uv).r;
+	vec2 cbcr = texture(cbcr_tex, uv).rg;
 
 	float cb = cbcr.r - 0.5;
 	float cr = cbcr.g - 0.5;
@@ -283,6 +301,7 @@ void fragment() {
 					mat.shader = shader
 					mat.set_shader_parameter("y_tex", y_tex)
 					mat.set_shader_parameter("cbcr_tex", cbcr_tex)
+					mat.set_shader_parameter("feed_transform", feed.get_transform())
 
 					feed_rect.material = mat
 					feed_rect.texture = y_tex
@@ -293,6 +312,14 @@ void fragment() {
 					cam_tex.which_feed = CameraServer.FEED_RGBA_IMAGE
 					cam_tex.camera_is_active = true
 					feed_rect.texture = cam_tex
+		elif not OS.has_feature("mobile"):
+			var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
+			if pose_bridge != null and pose_bridge.has_signal("desktop_frame_received"):
+				pose_bridge.desktop_frame_received.connect(func(_img, tex, _landmarks):
+					if _replay_feed_rect != null and _recorded_frames.is_empty():
+						_replay_feed_rect.material = null
+						_replay_feed_rect.texture = tex
+				)
 
 	video_panel.add_child(feed_rect)
 
@@ -331,9 +358,11 @@ void fragment() {
 		cp_btn.custom_minimum_size = Vector2(85, 36) if is_mob else Vector2(90, 32)
 		cp_btn.add_theme_font_size_override("font_size", 13 if is_mob else 14)
 		_apply_btn_style(cp_btn, Color(0.18, 0.25, 0.35))
-		var prog_val: float = cp[1]
+		var cp_name: String = cp[0]
+		var default_prog: float = cp[1]
 		cp_btn.pressed.connect(func():
 			_set_paused_state(true)
+			var prog_val: float = _checkpoint_progress.get(cp_name, default_prog)
 			current_time = prog_val * total_duration
 			_update_playback_frame()
 		)
@@ -1147,6 +1176,10 @@ func _on_analysis_finished() -> void:
 	# Compute deep skeleton sequence analysis across all frames
 	var fallback_telemetry := _get_combined_telemetry()
 	var skeleton_analysis: Dictionary = GolfSwingAnalyzer.analyze_skeleton_sequence(_recorded_frames, fallback_telemetry)
+	if skeleton_analysis.has("top_frame_progress"):
+		_checkpoint_progress["Top (P4)"] = skeleton_analysis["top_frame_progress"]
+	if skeleton_analysis.has("impact_frame_progress"):
+		_checkpoint_progress["Impact (P7)"] = skeleton_analysis["impact_frame_progress"]
 	recommendations = GolfSwingAnalyzer.analyze_shot_unified(shot_data, skeleton_analysis)
 	_refresh_recommendation_cards()
 	_record_swing_recommendations()
@@ -1184,11 +1217,23 @@ func _refresh_recommendation_cards() -> void:
 
 func _on_close_button_pressed() -> void:
 	_analysis_cancelled = true
+	_close_active_video_players()
 	emit_signal("closed")
 	var p = get_parent()
 	if p != null:
 		p.remove_child(self)
 	queue_free()
+
+
+func _exit_tree() -> void:
+	_close_active_video_players()
+
+
+func _close_active_video_players() -> void:
+	InAppVideoPlayer.stop_all_players()
+	var detail_modal = get_node_or_null("DetailModal")
+	if detail_modal != null and is_instance_valid(detail_modal):
+		detail_modal.queue_free()
 
 func _create_recommendation_card(rec: Dictionary) -> PanelContainer:
 	var card = PanelContainer.new()
@@ -1226,13 +1271,13 @@ func _create_recommendation_card(rec: Dictionary) -> PanelContainer:
 	
 	var badge_lbl = Label.new()
 	badge_lbl.text = " #%d [%s PRIORITY] " % [priority_num, severity]
-	badge_lbl.add_theme_font_size_override("font_size", 13 if is_mob else 14)
+	badge_lbl.add_theme_font_size_override("font_size", 15 if is_mob else 15)
 	badge_lbl.add_theme_color_override("font_color", border_col)
 	head_hbox.add_child(badge_lbl)
 
 	var cat_lbl = Label.new()
 	cat_lbl.text = "• " + str(rec.get("category", "SWING MECHANICS"))
-	cat_lbl.add_theme_font_size_override("font_size", 13 if is_mob else 14)
+	cat_lbl.add_theme_font_size_override("font_size", 15 if is_mob else 15)
 	cat_lbl.add_theme_color_override("font_color", Color(0.75, 0.85, 0.95))
 	head_hbox.add_child(cat_lbl)
 	vbox.add_child(head_hbox)
@@ -1240,96 +1285,574 @@ func _create_recommendation_card(rec: Dictionary) -> PanelContainer:
 	var title_lbl = Label.new()
 	title_lbl.text = str(rec.get("title", "Swing Flaw"))
 	title_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	title_lbl.add_theme_font_size_override("font_size", 17 if is_mob else 19)
+	title_lbl.add_theme_font_size_override("font_size", 20 if is_mob else 21)
 	title_lbl.add_theme_color_override("font_color", Color.WHITE)
 	vbox.add_child(title_lbl)
 
+	# ── Action Button Row (Progressive Disclosure - Combined Data Comparison) ──
+	var btn_flow = HFlowContainer.new()
+	btn_flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_flow.add_theme_constant_override("h_separation", 10 if is_mob else 12)
+	btn_flow.add_theme_constant_override("v_separation", 10 if is_mob else 10)
+
+	var btn_defs: Array[Dictionary] = [
+		{"label": "📊 DATA COMPARISON", "color": Color(0.16, 0.48, 0.58), "modal": "data_comparison"},
+		{"label": "🔍 EXPLAIN ISSUE", "color": Color(0.32, 0.38, 0.56), "modal": "explain"},
+		{"label": "🏋️ DRILLS TO FIX", "color": Color(0.44, 0.32, 0.58), "modal": "drills"},
+		{"label": "▶ VIDEO LINK", "color": Color(0.64, 0.24, 0.24), "modal": "video"}
+	]
+
+	for def in btn_defs:
+		var btn = Button.new()
+		btn.text = def["label"]
+		# Large touch targets for phone screens and projector readability
+		btn.custom_minimum_size = Vector2(165 if is_mob else 170, 52 if is_mob else 46)
+		btn.add_theme_font_size_override("font_size", 16 if is_mob else 15)
+		btn.mouse_filter = Control.MOUSE_FILTER_STOP
+		_apply_btn_style(btn, def["color"])
+		btn.pressed.connect(_on_detail_button_pressed.bind(rec, def["modal"]))
+		btn_flow.add_child(btn)
+
+	vbox.add_child(btn_flow)
+
+	card.add_child(vbox)
+	return card
+
+
+# =============================================================================
+# DETAIL MODAL POPUP SYSTEM (PROGRESSIVE DISCLOSURE)
+# =============================================================================
+
+func _on_detail_button_pressed(rec: Dictionary, modal_type: String) -> void:
+	var existing = get_node_or_null("DetailModal")
+	if existing != null:
+		InAppVideoPlayer.stop_all_players()
+		existing.queue_free()
+
+	var modal = _create_detail_modal(rec, modal_type)
+	add_child(modal)
+
+
+func _create_detail_modal(rec: Dictionary, modal_type: String) -> Control:
+	var is_mob = _is_mobile_view()
+	var vp_size = get_viewport_rect().size
+
+	var root = Control.new()
+	root.name = "DetailModal"
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	root.z_index = 50
+
+	var dismiss_modal = func():
+		InAppVideoPlayer.stop_all_players()
+		root.queue_free()
+
+	root.tree_exiting.connect(func():
+		InAppVideoPlayer.stop_all_players()
+	)
+
+	# Semi-transparent backdrop dimmer (click to dismiss)
+	var dimmer = ColorRect.new()
+	dimmer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dimmer.color = Color(0.0, 0.0, 0.0, 0.70)
+	dimmer.mouse_filter = Control.MOUSE_FILTER_STOP
+	dimmer.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.pressed:
+			dismiss_modal.call()
+	)
+	root.add_child(dimmer)
+
+	# Centered modal panel
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(center)
+
+	var is_video = (modal_type == "video")
+	var panel = PanelContainer.new()
+	# Generous sizing for mobile and large screens / projectors
+	var panel_w = clamp(vp_size.x * 0.94, 320, 840) if is_mob else (clamp(vp_size.x * 0.72, 720, 920) if is_video else clamp(vp_size.x * 0.62, 460, 880))
+	var panel_h = clamp(vp_size.y * 0.90, 360, 820) if is_mob else (clamp(vp_size.y * 0.88, 580, 780) if is_video else clamp(vp_size.y * 0.68, 300, 680))
+	panel.custom_minimum_size = Vector2(panel_w, panel_h)
+	ThemeManager.apply_modal_style(panel, 14)
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	center.add_child(panel)
+
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 18 if is_mob else 22)
+	margin.add_theme_constant_override("margin_right", 18 if is_mob else 22)
+	margin.add_theme_constant_override("margin_top", 16 if is_mob else 20)
+	margin.add_theme_constant_override("margin_bottom", 16 if is_mob else 20)
+	panel.add_child(margin)
+
+	var outer_vbox = VBoxContainer.new()
+	outer_vbox.add_theme_constant_override("separation", 14)
+	margin.add_child(outer_vbox)
+
+	# ── Header ──
+	var header = HBoxContainer.new()
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var title_lbl = Label.new()
+	title_lbl.text = _get_detail_modal_title(modal_type)
+	title_lbl.add_theme_font_size_override("font_size", 21 if is_mob else 23)
+	title_lbl.add_theme_color_override("font_color", Color(1.0, 0.9, 0.55))
+	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	header.add_child(title_lbl)
+
+	var close_btn = Button.new()
+	close_btn.text = "✖"
+	close_btn.custom_minimum_size = Vector2(50 if is_mob else 46, 50 if is_mob else 46)
+	close_btn.add_theme_font_size_override("font_size", 22)
+	close_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	_apply_btn_style(close_btn, Color(0.70, 0.22, 0.22))
+	close_btn.pressed.connect(dismiss_modal)
+	header.add_child(close_btn)
+
+	outer_vbox.add_child(header)
+
+	# Issue subtitle banner
+	var issue_title = str(rec.get("title", ""))
+	if issue_title != "":
+		var sub_lbl = Label.new()
+		sub_lbl.text = "Issue: " + issue_title
+		sub_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		sub_lbl.add_theme_font_size_override("font_size", 16 if is_mob else 17)
+		sub_lbl.add_theme_color_override("font_color", Color(0.75, 0.88, 0.98))
+		outer_vbox.add_child(sub_lbl)
+
+	var sep = HSeparator.new()
+	sep.add_theme_constant_override("separation", 6)
+	outer_vbox.add_child(sep)
+
+	# ── Scrollable Body ──
+	var scroll = ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	if is_video:
+		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	ThemeManager.apply_scroll_container_style(scroll, 28)
+
+	var content_vbox = VBoxContainer.new()
+	content_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content_vbox.add_theme_constant_override("separation", 14 if is_mob else 14)
+
+	_populate_detail_content(content_vbox, rec, modal_type, is_mob)
+
+	scroll.add_child(content_vbox)
+	outer_vbox.add_child(scroll)
+
+	# ── Footer Button for Quick Mobile / Remote Dismissal ──
+	var footer_btn = Button.new()
+	footer_btn.text = "Close"
+	footer_btn.custom_minimum_size = Vector2(160, 50 if is_mob else 44)
+	footer_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	footer_btn.add_theme_font_size_override("font_size", 16 if is_mob else 16)
+	footer_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	_apply_btn_style(footer_btn, Color(0.25, 0.32, 0.42))
+	footer_btn.pressed.connect(dismiss_modal)
+	outer_vbox.add_child(footer_btn)
+
+	return root
+
+
+func _get_detail_modal_title(modal_type: String) -> String:
+	match modal_type:
+		"data_comparison":
+			return "📊 YOUR DATA VS PRO BENCHMARK"
+		"explain":
+			return "🔍 ISSUE EXPLANATION"
+		"drills":
+			return "🏋️ DRILLS TO FIX"
+		"video":
+			return "▶ VIDEO & VISUAL GUIDE"
+		_:
+			return "DETAILS"
+
+
+func _populate_detail_content(container: VBoxContainer, rec: Dictionary, modal_type: String, is_mob: bool) -> void:
+	match modal_type:
+		"data_comparison":
+			_build_data_comparison_content(container, rec, is_mob)
+		"explain":
+			_build_explain_content(container, rec, is_mob)
+		"drills":
+			_build_drills_content(container, rec, is_mob)
+		"video":
+			_build_video_content(container, rec, is_mob)
+
+
+func _build_data_comparison_content(container: VBoxContainer, rec: Dictionary, is_mob: bool) -> void:
+	# ── Section 1: Comparison Cards (Your Data vs Pro Benchmark) ──
+	var comp_flow = HFlowContainer.new()
+	comp_flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	comp_flow.add_theme_constant_override("h_separation", 14)
+	comp_flow.add_theme_constant_override("v_separation", 14)
+
+	# 🔴 Your Shot Card
+	var your_panel = PanelContainer.new()
+	your_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	your_panel.custom_minimum_size = Vector2(260, 0)
+	var your_style = StyleBoxFlat.new()
+	your_style.bg_color = Color(0.12, 0.06, 0.08, 0.95)
+	your_style.corner_radius_top_left = 8
+	your_style.corner_radius_top_right = 8
+	your_style.corner_radius_bottom_left = 8
+	your_style.corner_radius_bottom_right = 8
+	your_style.border_width_left = 4
+	your_style.border_color = Color(1.0, 0.40, 0.40, 0.95)
+	your_style.content_margin_left = 16
+	your_style.content_margin_top = 14
+	your_style.content_margin_right = 16
+	your_style.content_margin_bottom = 14
+	your_panel.add_theme_stylebox_override("panel", your_style)
+
+	var your_vbox = VBoxContainer.new()
+	your_vbox.add_theme_constant_override("separation", 8)
+
+	var your_title = Label.new()
+	your_title.text = "🔴 YOUR SHOT"
+	your_title.add_theme_font_size_override("font_size", 18 if is_mob else 18)
+	your_title.add_theme_color_override("font_color", Color(1.0, 0.70, 0.70))
+	your_vbox.add_child(your_title)
+
+	var player_val = str(rec.get("player_val", "---"))
+	var parts = player_val.split("|")
+	for part in parts:
+		var part_str = part.strip_edges()
+		if part_str != "":
+			var val_lbl = Label.new()
+			val_lbl.text = "• " + part_str
+			val_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			val_lbl.add_theme_font_size_override("font_size", 17 if is_mob else 18)
+			val_lbl.add_theme_color_override("font_color", Color.WHITE)
+			your_vbox.add_child(val_lbl)
+
+	your_panel.add_child(your_vbox)
+	comp_flow.add_child(your_panel)
+
+	# 🟢 Pro Target Card
+	var pro_panel = PanelContainer.new()
+	pro_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pro_panel.custom_minimum_size = Vector2(260, 0)
+	var pro_style = StyleBoxFlat.new()
+	pro_style.bg_color = Color(0.04, 0.11, 0.07, 0.95)
+	pro_style.corner_radius_top_left = 8
+	pro_style.corner_radius_top_right = 8
+	pro_style.corner_radius_bottom_left = 8
+	pro_style.corner_radius_bottom_right = 8
+	pro_style.border_width_left = 4
+	pro_style.border_color = Color(0.35, 0.90, 0.55, 0.95)
+	pro_style.content_margin_left = 16
+	pro_style.content_margin_top = 14
+	pro_style.content_margin_right = 16
+	pro_style.content_margin_bottom = 14
+	pro_panel.add_theme_stylebox_override("panel", pro_style)
+
+	var pro_vbox = VBoxContainer.new()
+	pro_vbox.add_theme_constant_override("separation", 8)
+
+	var pro_title = Label.new()
+	pro_title.text = "🟢 PRO BENCHMARK"
+	pro_title.add_theme_font_size_override("font_size", 18 if is_mob else 18)
+	pro_title.add_theme_color_override("font_color", Color(0.55, 0.95, 0.70))
+	pro_vbox.add_child(pro_title)
+
+	var bench_lbl = Label.new()
+	bench_lbl.text = str(rec.get("benchmark_val", "---"))
+	bench_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	bench_lbl.add_theme_font_size_override("font_size", 17 if is_mob else 18)
+	bench_lbl.add_theme_color_override("font_color", Color.WHITE)
+	pro_vbox.add_child(bench_lbl)
+
+	pro_panel.add_child(pro_vbox)
+	comp_flow.add_child(pro_panel)
+
+	container.add_child(comp_flow)
+
+	# ── Section 2: Launch Impact / Consequence ──
+	var launch_effect = str(rec.get("launch_effect", ""))
+	if launch_effect != "":
+		var effect_panel = PanelContainer.new()
+		var eff_style = StyleBoxFlat.new()
+		eff_style.bg_color = Color(0.08, 0.09, 0.13, 0.95)
+		eff_style.corner_radius_top_left = 8
+		eff_style.corner_radius_top_right = 8
+		eff_style.corner_radius_bottom_left = 8
+		eff_style.corner_radius_bottom_right = 8
+		eff_style.border_width_left = 3
+		eff_style.border_color = Color(1.0, 0.85, 0.40, 0.9)
+		eff_style.content_margin_left = 16
+		eff_style.content_margin_top = 12
+		eff_style.content_margin_right = 16
+		eff_style.content_margin_bottom = 12
+		effect_panel.add_theme_stylebox_override("panel", eff_style)
+
+		var eff_vbox = VBoxContainer.new()
+		eff_vbox.add_theme_constant_override("separation", 6)
+
+		var eff_head = Label.new()
+		eff_head.text = "⚡ Launch Consequence"
+		eff_head.add_theme_font_size_override("font_size", 17 if is_mob else 17)
+		eff_head.add_theme_color_override("font_color", Color(1.0, 0.90, 0.55))
+		eff_vbox.add_child(eff_head)
+
+		var eff_lbl = Label.new()
+		eff_lbl.text = launch_effect
+		eff_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		eff_lbl.add_theme_font_size_override("font_size", 16 if is_mob else 16)
+		eff_lbl.add_theme_color_override("font_color", Color(0.95, 0.92, 0.80))
+		eff_vbox.add_child(eff_lbl)
+
+		effect_panel.add_child(eff_vbox)
+		container.add_child(effect_panel)
+
+
+func _build_explain_content(container: VBoxContainer, rec: Dictionary, is_mob: bool) -> void:
 	var cam_flaw = str(rec.get("camera_flaw", ""))
-	if not _is_suggestions_only and cam_flaw != "":
+	if cam_flaw != "":
+		var cam_panel = PanelContainer.new()
+		var cam_style = StyleBoxFlat.new()
+		cam_style.bg_color = Color(0.05, 0.09, 0.14, 0.95)
+		cam_style.corner_radius_top_left = 8
+		cam_style.corner_radius_top_right = 8
+		cam_style.corner_radius_bottom_left = 8
+		cam_style.corner_radius_bottom_right = 8
+		cam_style.border_width_left = 4
+		cam_style.border_color = Color(0.35, 0.85, 1.0, 0.9)
+		cam_style.content_margin_left = 16
+		cam_style.content_margin_top = 12
+		cam_style.content_margin_right = 16
+		cam_style.content_margin_bottom = 12
+		cam_panel.add_theme_stylebox_override("panel", cam_style)
+
+		var cam_vbox = VBoxContainer.new()
+		cam_vbox.add_theme_constant_override("separation", 6)
+
+		var cam_header = Label.new()
+		cam_header.text = "🦴 Biomechanics & Camera Observation"
+		cam_header.add_theme_font_size_override("font_size", 18 if is_mob else 18)
+		cam_header.add_theme_color_override("font_color", Color(0.40, 0.85, 1.0))
+		cam_vbox.add_child(cam_header)
+
 		var cam_lbl = Label.new()
-		cam_lbl.text = "🦴 Camera Telemetry: " + cam_flaw
+		cam_lbl.text = cam_flaw
 		cam_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		cam_lbl.add_theme_font_size_override("font_size", 14 if is_mob else 15)
-		cam_lbl.add_theme_color_override("font_color", Color(0.4, 0.9, 1.0))
-		vbox.add_child(cam_lbl)
+		cam_lbl.add_theme_font_size_override("font_size", 16 if is_mob else 16)
+		cam_lbl.add_theme_color_override("font_color", Color(0.88, 0.94, 1.0))
+		cam_vbox.add_child(cam_lbl)
+
+		cam_panel.add_child(cam_vbox)
+		container.add_child(cam_panel)
 
 	var launch_effect = str(rec.get("launch_effect", ""))
 	if launch_effect != "":
+		var launch_panel = PanelContainer.new()
+		var launch_style = StyleBoxFlat.new()
+		launch_style.bg_color = Color(0.10, 0.08, 0.05, 0.95)
+		launch_style.corner_radius_top_left = 8
+		launch_style.corner_radius_top_right = 8
+		launch_style.corner_radius_bottom_left = 8
+		launch_style.corner_radius_bottom_right = 8
+		launch_style.border_width_left = 4
+		launch_style.border_color = Color(1.0, 0.85, 0.40, 0.9)
+		launch_style.content_margin_left = 16
+		launch_style.content_margin_top = 12
+		launch_style.content_margin_right = 16
+		launch_style.content_margin_bottom = 12
+		launch_panel.add_theme_stylebox_override("panel", launch_style)
+
+		var l_vbox = VBoxContainer.new()
+		l_vbox.add_theme_constant_override("separation", 6)
+
+		var launch_header = Label.new()
+		launch_header.text = "⚡ Launch Symptom"
+		launch_header.add_theme_font_size_override("font_size", 18 if is_mob else 18)
+		launch_header.add_theme_color_override("font_color", Color(1.0, 0.90, 0.55))
+		l_vbox.add_child(launch_header)
+
 		var launch_lbl = Label.new()
-		launch_lbl.text = "⚡ Shot Result: " + launch_effect
+		launch_lbl.text = launch_effect
 		launch_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		launch_lbl.add_theme_font_size_override("font_size", 14 if is_mob else 15)
-		launch_lbl.add_theme_color_override("font_color", Color(1.0, 0.9, 0.55))
-		vbox.add_child(launch_lbl)
+		launch_lbl.add_theme_font_size_override("font_size", 16 if is_mob else 16)
+		launch_lbl.add_theme_color_override("font_color", Color(0.95, 0.92, 0.80))
+		l_vbox.add_child(launch_lbl)
 
-	# Benchmark Comparison Panel (Responsive chip layout)
-	var comp_panel = PanelContainer.new()
-	var comp_style = StyleBoxFlat.new()
-	comp_style.bg_color = Color(0.04, 0.06, 0.09, 0.95)
-	comp_style.corner_radius_top_left = 6
-	comp_style.corner_radius_top_right = 6
-	comp_style.corner_radius_bottom_left = 6
-	comp_style.corner_radius_bottom_right = 6
-	comp_style.content_margin_left = 12
-	comp_style.content_margin_top = 8
-	comp_style.content_margin_right = 12
-	comp_style.content_margin_bottom = 8
-	comp_panel.add_theme_stylebox_override("panel", comp_style)
+		launch_panel.add_child(l_vbox)
+		container.add_child(launch_panel)
 
-	var comp_flow = HFlowContainer.new()
-	comp_flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	comp_flow.add_theme_constant_override("h_separation", 16)
-	comp_flow.add_theme_constant_override("v_separation", 4)
+	var fix_instruction = str(rec.get("fix_instruction", ""))
+	if fix_instruction != "":
+		var fix_panel = PanelContainer.new()
+		var fix_style = StyleBoxFlat.new()
+		fix_style.bg_color = Color(0.04, 0.11, 0.08, 0.95)
+		fix_style.corner_radius_top_left = 8
+		fix_style.corner_radius_top_right = 8
+		fix_style.corner_radius_bottom_left = 8
+		fix_style.corner_radius_bottom_right = 8
+		fix_style.border_width_left = 4
+		fix_style.border_color = Color(0.35, 1.0, 0.65, 0.9)
+		fix_style.content_margin_left = 16
+		fix_style.content_margin_top = 12
+		fix_style.content_margin_right = 16
+		fix_style.content_margin_bottom = 12
+		fix_panel.add_theme_stylebox_override("panel", fix_style)
 
-	var your_lbl = Label.new()
-	your_lbl.text = "🔴 YOUR SHOT: %s" % str(rec.get("player_val", "---"))
-	your_lbl.add_theme_font_size_override("font_size", 14 if is_mob else 15)
-	your_lbl.add_theme_color_override("font_color", Color(1.0, 0.65, 0.65))
-	comp_flow.add_child(your_lbl)
+		var f_vbox = VBoxContainer.new()
+		f_vbox.add_theme_constant_override("separation", 6)
 
-	var target_lbl = Label.new()
-	target_lbl.text = "🟢 TARGET: %s" % str(rec.get("benchmark_val", "---"))
-	target_lbl.add_theme_font_size_override("font_size", 14 if is_mob else 15)
-	target_lbl.add_theme_color_override("font_color", Color(0.5, 0.95, 0.65))
-	comp_flow.add_child(target_lbl)
+		var fix_header = Label.new()
+		fix_header.text = "💡 How to Correct It"
+		fix_header.add_theme_font_size_override("font_size", 18 if is_mob else 18)
+		fix_header.add_theme_color_override("font_color", Color(0.40, 1.0, 0.68))
+		f_vbox.add_child(fix_header)
 
-	comp_panel.add_child(comp_flow)
-	vbox.add_child(comp_panel)
+		var fix_lbl = Label.new()
+		fix_lbl.text = fix_instruction
+		fix_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		fix_lbl.add_theme_font_size_override("font_size", 16 if is_mob else 16)
+		fix_lbl.add_theme_color_override("font_color", Color(0.88, 0.98, 0.90))
+		f_vbox.add_child(fix_lbl)
 
-	var fix_lbl = Label.new()
-	fix_lbl.text = "💡 How to Fix: " + str(rec.get("fix_instruction", ""))
-	fix_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	fix_lbl.add_theme_font_size_override("font_size", 14 if is_mob else 15)
-	fix_lbl.add_theme_color_override("font_color", Color(0.3, 1.0, 0.6))
-	vbox.add_child(fix_lbl)
+		fix_panel.add_child(f_vbox)
+		container.add_child(fix_panel)
 
+
+func _build_drills_content(container: VBoxContainer, rec: Dictionary, is_mob: bool) -> void:
 	var drill_str = str(rec.get("drill", ""))
 	if drill_str != "":
 		var drill_panel = PanelContainer.new()
 		var drill_style = StyleBoxFlat.new()
-		drill_style.bg_color = Color(0.09, 0.06, 0.14, 0.95)
-		drill_style.corner_radius_top_left = 6
-		drill_style.corner_radius_top_right = 6
-		drill_style.corner_radius_bottom_left = 6
-		drill_style.corner_radius_bottom_right = 6
-		drill_style.border_width_left = 3
-		drill_style.border_color = Color(0.7, 0.5, 0.9, 0.9)
-		drill_style.content_margin_left = 12
-		drill_style.content_margin_top = 8
-		drill_style.content_margin_right = 12
-		drill_style.content_margin_bottom = 8
+		drill_style.bg_color = Color(0.10, 0.06, 0.17, 0.95)
+		drill_style.corner_radius_top_left = 8
+		drill_style.corner_radius_top_right = 8
+		drill_style.corner_radius_bottom_left = 8
+		drill_style.corner_radius_bottom_right = 8
+		drill_style.border_width_left = 4
+		drill_style.border_color = Color(0.80, 0.55, 1.0, 0.95)
+		drill_style.content_margin_left = 16
+		drill_style.content_margin_top = 14
+		drill_style.content_margin_right = 16
+		drill_style.content_margin_bottom = 14
 		drill_panel.add_theme_stylebox_override("panel", drill_style)
+
+		var d_vbox = VBoxContainer.new()
+		d_vbox.add_theme_constant_override("separation", 8)
+
+		var header_lbl = Label.new()
+		header_lbl.text = "🏋️ Recommended Practice Drill"
+		header_lbl.add_theme_font_size_override("font_size", 18 if is_mob else 18)
+		header_lbl.add_theme_color_override("font_color", Color(0.92, 0.82, 1.0))
+		d_vbox.add_child(header_lbl)
 
 		var drill_lbl = Label.new()
 		drill_lbl.text = drill_str
 		drill_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		drill_lbl.add_theme_font_size_override("font_size", 13 if is_mob else 14)
-		drill_lbl.add_theme_color_override("font_color", Color(0.92, 0.82, 1.0))
-		drill_panel.add_child(drill_lbl)
-		vbox.add_child(drill_panel)
+		drill_lbl.add_theme_font_size_override("font_size", 16 if is_mob else 16)
+		drill_lbl.add_theme_color_override("font_color", Color(0.96, 0.90, 1.0))
+		d_vbox.add_child(drill_lbl)
 
-	card.add_child(vbox)
-	return card
+		drill_panel.add_child(d_vbox)
+		container.add_child(drill_panel)
+	else:
+		var no_drill = Label.new()
+		no_drill.text = "Focus on repeating clean baseline swing tempo."
+		no_drill.add_theme_font_size_override("font_size", 16)
+		no_drill.add_theme_color_override("font_color", Color(0.7, 0.7, 0.8))
+		container.add_child(no_drill)
+
+	var fix_instruction = str(rec.get("fix_instruction", ""))
+	if fix_instruction != "":
+		var cue_panel = PanelContainer.new()
+		var cue_style = StyleBoxFlat.new()
+		cue_style.bg_color = Color(0.05, 0.10, 0.08, 0.95)
+		cue_style.corner_radius_top_left = 8
+		cue_style.corner_radius_top_right = 8
+		cue_style.corner_radius_bottom_left = 8
+		cue_style.corner_radius_bottom_right = 8
+		cue_style.border_width_left = 3
+		cue_style.border_color = Color(0.35, 0.90, 0.60, 0.85)
+		cue_style.content_margin_left = 16
+		cue_style.content_margin_top = 10
+		cue_style.content_margin_right = 16
+		cue_style.content_margin_bottom = 10
+		cue_panel.add_theme_stylebox_override("panel", cue_style)
+
+		var cue_vbox = VBoxContainer.new()
+		cue_vbox.add_theme_constant_override("separation", 4)
+
+		var cue_head = Label.new()
+		cue_head.text = "💡 Key Swing Cue"
+		cue_head.add_theme_font_size_override("font_size", 17 if is_mob else 17)
+		cue_head.add_theme_color_override("font_color", Color(0.40, 1.0, 0.68))
+		cue_vbox.add_child(cue_head)
+
+		var fix_lbl = Label.new()
+		fix_lbl.text = fix_instruction
+		fix_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		fix_lbl.add_theme_font_size_override("font_size", 15 if is_mob else 15)
+		fix_lbl.add_theme_color_override("font_color", Color(0.85, 0.96, 0.88))
+		cue_vbox.add_child(fix_lbl)
+
+		cue_panel.add_child(cue_vbox)
+		container.add_child(cue_panel)
+
+
+func _build_video_content(container: VBoxContainer, rec: Dictionary, is_mob: bool) -> void:
+	var video_url = str(rec.get("video_url", ""))
+	if video_url != "":
+		var player = InAppVideoPlayer.new()
+		player.setup(
+			video_url,
+			str(rec.get("video_title", "HackMotion Video Drill Tutorial")),
+			str(rec.get("drill", "")),
+			str(rec.get("benchmark_val", rec.get("category", ""))),
+			is_mob
+		)
+		container.add_child(player)
+	else:
+		var note_panel = PanelContainer.new()
+		var note_style = StyleBoxFlat.new()
+		note_style.bg_color = Color(0.06, 0.08, 0.12, 0.95)
+		note_style.corner_radius_top_left = 8
+		note_style.corner_radius_top_right = 8
+		note_style.corner_radius_bottom_left = 8
+		note_style.corner_radius_bottom_right = 8
+		note_style.border_width_left = 4
+		note_style.border_color = Color(0.8, 0.35, 0.35, 0.85)
+		note_style.content_margin_left = 16
+		note_style.content_margin_top = 14
+		note_style.content_margin_right = 16
+		note_style.content_margin_bottom = 14
+		note_panel.add_theme_stylebox_override("panel", note_style)
+
+		var note_vbox = VBoxContainer.new()
+		note_vbox.add_theme_constant_override("separation", 8)
+
+		var note_head = Label.new()
+		note_head.text = "📹 Video Guide"
+		note_head.add_theme_font_size_override("font_size", 18 if is_mob else 18)
+		note_head.add_theme_color_override("font_color", Color(1.0, 0.65, 0.65))
+		note_vbox.add_child(note_head)
+
+		var note_msg = Label.new()
+		note_msg.text = "Video lessons for this specific flaw will be linked in an upcoming update."
+		note_msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		note_msg.add_theme_font_size_override("font_size", 16)
+		note_msg.add_theme_color_override("font_color", Color.WHITE)
+		note_vbox.add_child(note_msg)
+
+		var tip_msg = Label.new()
+		tip_msg.text = "Tip: If Golfer Camera is active, use the left video pane to review your slow-motion swing replay and skeleton wireframe at address and impact."
+		tip_msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		tip_msg.add_theme_font_size_override("font_size", 14)
+		tip_msg.add_theme_color_override("font_color", Color(0.70, 0.85, 0.95))
+		note_vbox.add_child(tip_msg)
+
+		note_panel.add_child(note_vbox)
+		container.add_child(note_panel)
 
 func _apply_btn_style(btn: Button, bg_col: Color) -> void:
 	var style = StyleBoxFlat.new()

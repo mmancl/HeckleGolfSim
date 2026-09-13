@@ -246,6 +246,7 @@ text = "Heckle Golf Simulator is built using outstanding open-source technologie
   — [i]Moon Texture[/i]: Copyright © 2019 GPoSM (MIT License).
 • [b]Terrain3D[/b] ([url=https://github.com/CoryPetkovsek/godot-terrain3d]github.com/CoryPetkovsek/godot-terrain3d[/url]) - High-performance editable terrain system by Cory Petkovsek, Roope Palmroos, and Contributors (MIT License).
 • [b]Phantom Camera[/b] ([url=https://github.com/ramok/phantom-camera]github.com/ramok/phantom-camera[/url]) - Dynamic camera controls by Marcus Skov (MIT License).
+• [b]Garmin Approach R10 BLE Protocol Adapter[/b] ([url=https://github.com/mholow/gsp-r10-adapter]github.com/mholow/gsp-r10-adapter[/url]) - Direct Bluetooth Low Energy GATT communication sequence, COBS frame encoding/decoding, and protobuf messaging specs based on the open-source adapter by Mark Holowka / mholow (MIT License).
 • [b]PBR Textures & 3D Foliage[/b] - Materials sourced from [url=https://ambientcg.com/]ambientCG.com[/url] and Shapespark low-poly plants, dedicated to the public domain under [url=https://creativecommons.org/publicdomain/zero/1.0/]Creative Commons CC0 1.0 Universal[/url].
 • [b]Music & Soundtracks[/b] - Minigame music: Music from #Uppbeat (free for Creators!):
   — [i]8beatz[/i] (by 21 On The Block): [url=https://uppbeat.io/t/21-on-the-block/8beatz]https://uppbeat.io/t/21-on-the-block/8beatz[/url]

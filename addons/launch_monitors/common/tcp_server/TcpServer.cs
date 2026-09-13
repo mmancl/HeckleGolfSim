@@ -10,6 +10,7 @@ public partial class TcpServer : Node
 {
 	private const int MaxTcpBuffer = 65536;
 	private const int DefaultPort = 49152;
+	private const string DefaultAddress = "*";
 
 	private readonly TcpServerPeer _tcpServer = new();
 	private StreamPeerTcp? _tcpConnection;
@@ -22,8 +23,17 @@ public partial class TcpServer : Node
 	[Signal]
 	public delegate void HitBallEventHandler(Dictionary data);
 
+	[Signal]
+	public delegate void ServerStatusChangedEventHandler(bool isListening, string host, int port, string error);
+
 	[Export]
 	public int Port { get; set; } = DefaultPort;
+
+	[Export]
+	public string BindAddress { get; set; } = DefaultAddress;
+
+	public bool IsListening => _tcpServer.IsListening();
+	public string LastError { get; private set; } = string.Empty;
 
 	public override void _Ready()
 	{
@@ -47,7 +57,8 @@ public partial class TcpServer : Node
 			}
 		}
 
-		ListenOnPort(Port);
+		LoadConfiguredEndpoint();
+		ListenOnEndpoint(Port, BindAddress);
 	}
 
 	public override void _ExitTree()
@@ -208,19 +219,144 @@ public partial class TcpServer : Node
 		respond_error(501, "Invalid ball data");
 	}
 
-	private void ListenOnPort(int port)
+	public void LoadConfiguredEndpoint()
+	{
+		try
+		{
+			var tree = GetTree();
+			if (tree != null)
+			{
+				var root = tree.Root;
+				if (root != null && root.HasNode("GlobalSettings"))
+				{
+					var globalSettings = root.GetNode("GlobalSettings");
+					var rangeSettings = globalSettings?.Get("range_settings").AsGodotObject();
+					if (rangeSettings != null)
+					{
+						var portObj = rangeSettings.Get("tcp_server_port").AsGodotObject();
+						if (portObj != null)
+						{
+							var p = portObj.Get("value").AsInt32();
+							if (p >= 1 && p <= 65535)
+							{
+								Port = p;
+							}
+						}
+
+						var ipObj = rangeSettings.Get("tcp_server_ip").AsGodotObject();
+						if (ipObj != null)
+						{
+							var ip = ipObj.Get("value").AsString();
+							if (!string.IsNullOrWhiteSpace(ip))
+							{
+								BindAddress = ip.Trim();
+							}
+						}
+
+						return;
+					}
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			GD.PushWarning($"[TcpServer] Could not read settings from GlobalSettings: {ex.Message}");
+		}
+
+		// Fallback to reading directly from global_settings.cfg
+		var config = new ConfigFile();
+		if (config.Load("user://global_settings.cfg") == Error.Ok)
+		{
+			if (config.HasSectionKey("range_settings", "tcp_server_port"))
+			{
+				var p = config.GetValue("range_settings", "tcp_server_port", DefaultPort).AsInt32();
+				if (p >= 1 && p <= 65535)
+				{
+					Port = p;
+				}
+			}
+			if (config.HasSectionKey("range_settings", "tcp_server_ip"))
+			{
+				var ip = config.GetValue("range_settings", "tcp_server_ip", DefaultAddress).AsString();
+				if (!string.IsNullOrWhiteSpace(ip))
+				{
+					BindAddress = ip.Trim();
+				}
+			}
+		}
+	}
+
+	public void Restart(int port, string bindAddress)
 	{
 		Port = Math.Clamp(port, 1, 65535);
+		BindAddress = string.IsNullOrWhiteSpace(bindAddress) ? DefaultAddress : bindAddress.Trim();
+		ListenOnEndpoint(Port, BindAddress);
+	}
+
+	public void Restart()
+	{
+		LoadConfiguredEndpoint();
+		ListenOnEndpoint(Port, BindAddress);
+	}
+
+	private void ListenOnEndpoint(int port, string bindAddress)
+	{
+		Port = Math.Clamp(port, 1, 65535);
+		BindAddress = string.IsNullOrWhiteSpace(bindAddress) ? DefaultAddress : bindAddress.Trim();
+
 		if (_tcpServer.IsListening())
 		{
 			_tcpServer.Stop();
 		}
 
-		var error = _tcpServer.Listen((ushort)Port);
+		if (_tcpConnection != null)
+		{
+			_tcpConnection.DisconnectFromHost();
+			_tcpConnection = null;
+			_tcpConnected = false;
+		}
+
+		LastError = string.Empty;
+		var error = _tcpServer.Listen((ushort)Port, BindAddress);
 		if (error != Error.Ok)
 		{
-			GD.PushError($"TCP server failed to listen on port {Port}. Error: {error}");
+			LastError = $"Failed to bind to {BindAddress}:{Port} ({error})";
+			GD.PushError($"[TcpServer] TCP server failed to listen on {BindAddress}:{Port}. Error: {error}");
+
+			// Fallback: If custom bind address failed and wasn't "*", try binding to "*" on the same port
+			if (BindAddress != "*" && BindAddress != "0.0.0.0")
+			{
+				GD.PushWarning($"[TcpServer] Retrying port {Port} on wildcard address '*'...");
+				error = _tcpServer.Listen((ushort)Port, "*");
+				if (error == Error.Ok)
+				{
+					BindAddress = "*";
+					LastError = string.Empty;
+					GD.Print($"[TcpServer] Successfully bound fallback on *:{Port}");
+				}
+				else
+				{
+					LastError = $"Failed to bind to *:{Port} ({error})";
+				}
+			}
 		}
+		else
+		{
+			GD.Print($"[TcpServer] Listening for GSPro / external launch monitor connections on {BindAddress}:{Port}");
+		}
+
+		EmitSignal(SignalName.ServerStatusChanged, _tcpServer.IsListening(), BindAddress, Port, LastError);
+	}
+
+	public Dictionary GetServerInfo()
+	{
+		return new Dictionary
+		{
+			{ "is_listening", _tcpServer.IsListening() },
+			{ "port", Port },
+			{ "bind_address", BindAddress },
+			{ "last_error", LastError }
+		};
 	}
 
 	private void Shutdown()

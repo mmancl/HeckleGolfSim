@@ -129,6 +129,10 @@ func _ready() -> void:
 		var launch_monitor = get_node("/root/LaunchMonitorManager")
 		if not launch_monitor.hit_ball.is_connected(_on_launch_monitor_hit_ball):
 			launch_monitor.hit_ball.connect(_on_launch_monitor_hit_ball)
+		if launch_monitor.has_method("_update_hud_display"):
+			launch_monitor.call("_update_hud_display")
+		if launch_monitor.has_method("notify_ball_at_rest"):
+			launch_monitor.call("notify_ball_at_rest")
 			
 	var tcp_server = get_node_or_null("TCPServer")
 	if tcp_server == null:
@@ -1275,6 +1279,10 @@ func _reset_ball_position() -> void:
 	_update_aim_and_camera()
 	_update_island_buttons()
 	_update_hud()
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("notify_ball_at_rest"):
+			lm.notify_ball_at_rest()
 
 func _update_aim_and_camera() -> void:
 	var target_island_pos = island_positions[selected_island_index]
@@ -1355,8 +1363,12 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	if player.ball.state != PhysicsEnums.BallState.REST:
 		return # Ignore if shot in progress
 
+	FoamBallBoost.apply_boost(data)
+
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
+	if has_node("/root/LaunchMonitorManager"):
+		get_node("/root/LaunchMonitorManager").call("notify_shot_started")
 
 	shot_in_progress = true
 	if pvp_mode:
@@ -1404,6 +1416,10 @@ func _physics_process(delta: float) -> void:
 func _on_ball_rest(_shot_data: Dictionary) -> void:
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("notify_ball_at_rest"):
+			lm.notify_ball_at_rest()
 	raw_ball_data = _shot_data.duplicate()
 	_update_stats_display(true)
 	var final_pos = player.ball.global_position
@@ -2201,9 +2217,15 @@ func _on_settings_pressed() -> void:
 
 func _close_settings() -> void:
 	if _settings_layer != null and is_instance_valid(_settings_layer):
+		_settings_layer.visible = false
 		_settings_layer.queue_free()
 		_settings_layer = null
 
 	# Restore gameplay HUD visuals
 	if hud_layer != null and is_instance_valid(hud_layer):
 		hud_layer.visible = true
+
+	if has_node("/root/LaunchMonitorManager"):
+		var launch_monitor = get_node("/root/LaunchMonitorManager")
+		if launch_monitor != null and launch_monitor.has_method("_update_hud_display"):
+			launch_monitor.call("_update_hud_display")

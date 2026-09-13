@@ -10,6 +10,55 @@ extends RefCounted
 
 class_name GolfSwingAnalyzer
 
+# HackMotion YouTube video tutorials & drill references from:
+# https://hackmotion.com/launch-monitor-data-explained/
+const HM_VIDEOS = {
+	"low_point": {
+		"id": "SprUtqdpP68",
+		"title": "Simple Low Point Drill You Can Do at the Range - Strike It Pure Every Time",
+		"url": "https://www.youtube.com/watch?v=SprUtqdpP68",
+		"embed": "https://www.youtube.com/embed/SprUtqdpP68"
+	},
+	"barrier_path": {
+		"id": "XklxkK1FsWg",
+		"title": "Perfect Your Swing Indoors: Golf Simulator Practice Tips",
+		"url": "https://www.youtube.com/watch?v=XklxkK1FsWg",
+		"embed": "https://www.youtube.com/embed/XklxkK1FsWg"
+	},
+	"downswing_sequence": {
+		"id": "YQhfe1MOOKg",
+		"title": "2 Powerful Downswing Drills for Better Sequence and Clubface Control",
+		"url": "https://www.youtube.com/watch?v=YQhfe1MOOKg",
+		"embed": "https://www.youtube.com/embed/YQhfe1MOOKg"
+	},
+	"shaft_lean": {
+		"id": "fyi1k63ly_k",
+		"title": "2 Biggest Shaft Lean Mistakes (And How to Fix Them!)",
+		"url": "https://www.youtube.com/watch?v=fyi1k63ly_k",
+		"embed": "https://www.youtube.com/embed/fyi1k63ly_k"
+	},
+	"one_metric_aoa": {
+		"id": "Gy1_w4pB5RE",
+		"title": "You Only Need to Fix ONE Metric | Combine TrackMan + HackMotion to Do It",
+		"url": "https://www.youtube.com/watch?v=Gy1_w4pB5RE",
+		"embed": "https://www.youtube.com/embed/Gy1_w4pB5RE"
+	},
+	"sim_improvement": {
+		"id": "2bbjlF3nDYs",
+		"title": "Home Golf Simulator Tips for Better, Faster Improvement",
+		"url": "https://www.youtube.com/watch?v=2bbjlF3nDYs",
+		"embed": "https://www.youtube.com/embed/2bbjlF3nDYs"
+	}
+}
+
+static func _attach_video_metadata(rec: Dictionary, video_key: String) -> void:
+	if HM_VIDEOS.has(video_key):
+		var v: Dictionary = HM_VIDEOS[video_key]
+		rec["video_url"] = v["url"]
+		rec["video_embed_url"] = v["embed"]
+		rec["video_title"] = v["title"]
+		rec["video_id"] = v["id"]
+
 # =============================================================================
 # 1. LAUNCH MONITOR BALLISTIC ANALYSIS (PHASE 1 - INSTANT DIAGNOSTICS)
 # =============================================================================
@@ -109,7 +158,7 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 		if smash_factor < crit_thresh:
 			var yards_lost: int = int((target_smash_min - smash_factor) * (club_speed if club_speed > 0 else 95.0) * 1.5)
 			yards_lost = clamp(yards_lost, 12, 35)
-			recs.append({
+			var r = {
 				"priority": 1,
 				"score": 96,
 				"severity": "CRITICAL",
@@ -120,11 +169,13 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 				"launch_effect": "Off-center impact (toe/heel/low) leaking approx %d yards of potential carry." % yards_lost,
 				"player_val": "Smash Factor: %.2f | Ball Speed: %.1f mph" % [smash_factor, ball_speed],
 				"benchmark_val": "Target: %s" % bench_desc,
-				"fix_instruction": fix_inst,
-				"drill": drill_inst
-			})
+				"fix_instruction": "Focus on centered face contact before swinging faster. Smooth out your transition and stabilize the lead wrist through impact.",
+				"drill": "⛳ HackMotion Impact Spray & Low Point Drill: Spray clubface with dry-shampoo or impact decal. Rehearse centered contact and ensure lead wrist remains stable through impact rather than scooping early."
+			}
+			_attach_video_metadata(r, "low_point")
+			recs.append(r)
 		elif smash_factor < target_smash_min:
-			recs.append({
+			var r = {
 				"priority": 2,
 				"score": 82,
 				"severity": "HIGH",
@@ -136,8 +187,10 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 				"player_val": "Smash Factor: %.2f" % smash_factor,
 				"benchmark_val": "Target: %s" % bench_desc,
 				"fix_instruction": "Maintain steady head position through the strike and check ball position relative to stance.",
-				"drill": "⛳ Gate Drill: Place two markers just wider than clubhead; swing cleanly through the gate."
-			})
+				"drill": "⛳ Gate & Low Point Drill: Place two markers just wider than clubhead; swing cleanly through the gate to groove centered compression."
+			}
+			_attach_video_metadata(r, "low_point")
+			recs.append(r)
 
 	# ─── 2. FACE-TO-PATH & SPIN AXIS (PRIMARY ACCURACY & CURVATURE GOVERNOR) ───
 	var is_severe_slice: bool = spin_axis > 8.0 or face_to_path > 3.5
@@ -147,7 +200,7 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 
 	if is_severe_slice:
 		var path_str = ("%.1f° Out-to-In" % abs(club_path)) if club_path < 0 else ("%.1f° In-to-Out" % club_path)
-		recs.append({
+		var r = {
 			"priority": 1,
 			"score": 94 + int(abs(spin_axis) * 0.4),
 			"severity": "CRITICAL",
@@ -158,11 +211,13 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 			"launch_effect": "Face-to-Path of %+.1f° creates heavy clockwise sidespin, slicing ball offline right." % face_to_path,
 			"player_val": "Spin Axis: +%.1f° | Face-to-Path: %+.1f° | Path: %s" % [spin_axis, face_to_path, path_str],
 			"benchmark_val": "Target: -2.0° to +2.0° Face-to-Path | ±3.0° Axis",
-			"fix_instruction": "Strengthen lead hand grip slightly. At transition, shallow the club onto an inside delivery path and rotate trail forearm through impact.",
-			"drill": "⛳ Headcover Barrier Drill: Place a clubhead cover 5 inches outside the ball to groove an inside-to-out swing path."
-		})
+			"fix_instruction": "Strengthen lead hand grip slightly. At transition, shallow the club onto an inside delivery path and train lead wrist flexion (flatter wrist) into impact.",
+			"drill": "⛳ HackMotion Barrier Drill: Place a second ball or headcover 5 inches outside the ball to block the over-the-top path; pair with the Motorcycle Drill to flex lead wrist and square the face."
+		}
+		_attach_video_metadata(r, "barrier_path")
+		recs.append(r)
 	elif is_mild_slice:
-		recs.append({
+		var r = {
 			"priority": 2,
 			"score": 78,
 			"severity": "HIGH",
@@ -173,11 +228,13 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 			"launch_effect": "Gentle curve to the right (+%.1f° spin axis); monitor face angle at impact." % spin_axis,
 			"player_val": "Spin Axis: +%.1f° | Face-to-Path: %+.1f°" % [spin_axis, face_to_path],
 			"benchmark_val": "Target: ±2.0° Face-to-Path",
-			"fix_instruction": "Ensure clubface is square at address and maintain quiet wrists through the takeaway.",
-			"drill": "⛳ Alignment Stick Gate: Practice launching ball along target line between two alignment rods."
-		})
+			"fix_instruction": "Ensure clubface is square at address and maintain quiet, stable wrists through transition to keep face-to-path neutral.",
+			"drill": "⛳ HackMotion Alignment Gate & Barrier Drill: Practice launching ball along target line between alignment rods while keeping swing path within ±2° neutral."
+		}
+		_attach_video_metadata(r, "barrier_path")
+		recs.append(r)
 	elif is_severe_hook:
-		recs.append({
+		var r = {
 			"priority": 1,
 			"score": 92 + int(abs(spin_axis) * 0.4),
 			"severity": "CRITICAL",
@@ -188,11 +245,13 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 			"launch_effect": "Face-to-Path of %+.1f° produces counter-clockwise sidespin hook taking ball left." % face_to_path,
 			"player_val": "Spin Axis: %.1f° | Face-to-Path: %+.1f°" % [spin_axis, face_to_path],
 			"benchmark_val": "Target: -2.0° to +2.0° Face-to-Path | ±3.0° Axis",
-			"fix_instruction": "Check that grip is not excessively strong. Rotate chest and torso through impact rather than flipping hands early.",
-			"drill": "⛳ Split-Hand Drill: Hold grip with 3-inch gap between hands; practice turning chest through without flipping wrists."
-		})
+			"fix_instruction": "Check that grip is not excessively strong. Rotate chest and torso through impact in sequence rather than rolling forearms and flipping hands early.",
+			"drill": "⛳ HackMotion Transition & Split-Hand Drill: Use the Transition Drill to train lower-to-upper body sequencing; hold grip with a 3-inch gap to rotate chest through without flipping wrists."
+		}
+		_attach_video_metadata(r, "downswing_sequence")
+		recs.append(r)
 	elif is_mild_hook:
-		recs.append({
+		var r = {
 			"priority": 3,
 			"score": 74,
 			"severity": "MEDIUM",
@@ -203,9 +262,11 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 			"launch_effect": "Ball draws left of intended flight line.",
 			"player_val": "Spin Axis: %.1f° | Face-to-Path: %+.1f°" % [spin_axis, face_to_path],
 			"benchmark_val": "Target: ±2.0° Face-to-Path",
-			"fix_instruction": "Keep trail wrist extended slightly longer through impact zone.",
-			"drill": "⛳ Towel Drill: Hold towel across chest with arms to synchronize upper body rotation."
-		})
+			"fix_instruction": "Keep trail wrist extended slightly longer through impact zone and rotate the torso through to the finish.",
+			"drill": "⛳ HackMotion Downswing Sequence Drill: Synchronize upper body rotation with hips through impact to prevent over-rotating the clubface closed."
+		}
+		_attach_video_metadata(r, "downswing_sequence")
+		recs.append(r)
 
 	# ─── 3. ANGLE OF ATTACK (AOA) OPTIMIZATION ───
 	if attack_angle < 900.0:
@@ -215,7 +276,7 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 					var spin_penalty = int(abs(attack_angle - 2.5) * 260)
 					var yds_gain = int(abs(attack_angle - 2.5) * 4.5)
 					yds_gain = clamp(yds_gain, 12, 28)
-					recs.append({
+					var r = {
 						"priority": 2,
 						"score": 88,
 						"severity": "HIGH",
@@ -227,12 +288,14 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 						"player_val": "AoA: %.1f° | Total Spin: %.0f RPM" % [attack_angle, total_spin],
 						"benchmark_val": "Driver Tee Target: +1.0° to +5.0° (Upward)",
 						"fix_instruction": "Tee ball forward off inside of lead heel. Tilt spine 6°–10° away from target at address to sweep upward on the teed ball.",
-						"drill": "⛳ Empty Box Drill: Place an empty golf ball box 12 inches in front of tee; hit drive without touching box."
-					})
+						"drill": "⛳ HackMotion Low Point & Box Drill: Place an empty golf ball box 12 inches in front of tee; sweep upward through the ball without clipping the box to move low point behind ball."
+					}
+					_attach_video_metadata(r, "one_metric_aoa")
+					recs.append(r)
 			else:
 				# Driver off the deck / turf
 				if attack_angle < -3.5:
-					recs.append({
+					var r = {
 						"priority": 2,
 						"score": 85,
 						"severity": "HIGH",
@@ -244,13 +307,15 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 						"player_val": "AoA: %.1f°" % attack_angle,
 						"benchmark_val": "Turf Driver Target: -1.0° to +1.0° (Level)",
 						"fix_instruction": "Sweep the ball cleanly off the grass with a level shoulder rotation. Do not hit down steeply.",
-						"drill": "⛳ Sweeping Brush Drill: Practice clipping the grass smoothly without gouging turf."
-					})
+						"drill": "⛳ HackMotion Level Sweep Drill: Practice clipping the grass blades smoothly with a wide arc without gouging turf."
+					}
+					_attach_video_metadata(r, "one_metric_aoa")
+					recs.append(r)
 		elif club_cat == "wood":
 			if is_tee:
 				# Wood off tee
 				if attack_angle < -2.5:
-					recs.append({
+					var r = {
 						"priority": 2,
 						"score": 84,
 						"severity": "HIGH",
@@ -262,12 +327,14 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 						"player_val": "AoA: %.1f°" % attack_angle,
 						"benchmark_val": "Teed Wood Target: -1.0° to +1.5° (Sweeping)",
 						"fix_instruction": "Peg the ball low (only 1/4 of ball above crown). Sweep cleanly through impact with a shallow path.",
-						"drill": "⛳ Low Peg Drill: Push tee into ground until ball is barely floating above grass blades."
-					})
+						"drill": "⛳ HackMotion Low Peg Sweeper: Push tee into ground until ball is barely floating above grass; sweep through impact with a shallow arc."
+					}
+					_attach_video_metadata(r, "one_metric_aoa")
+					recs.append(r)
 			else:
 				# Wood off turf / fairway / rough (NO TEE!)
 				if attack_angle > 0.8:
-					recs.append({
+					var r = {
 						"priority": 2,
 						"score": 88,
 						"severity": "HIGH",
@@ -279,10 +346,12 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 						"player_val": "AoA: %+.1f° (Upward) | VLA: %.1f°" % [attack_angle, vla],
 						"benchmark_val": "Optimal Turf Wood: -1.0° to -3.0° (Shallow Brush)",
 						"fix_instruction": "Do not try to lift or hit up on the ball. Trust the club's built-in loft! Position ball 1-2 balls inside lead heel and sweep the turf with a wide, level bottom arc.",
-						"drill": "⛳ Sweeping Coin Drill: Place a coin or leaf 2 inches ahead of ball; sweep through impact brushing the coin forward along the grass."
-					})
+						"drill": "⛳ HackMotion Forward Lean & Sweeping Coin Drill: Place a coin 2 inches ahead of ball; maintain slight forward shaft lean and brush coin forward along grass."
+					}
+					_attach_video_metadata(r, "shaft_lean")
+					recs.append(r)
 				elif attack_angle < -4.5:
-					recs.append({
+					var r = {
 						"priority": 2,
 						"score": 85,
 						"severity": "HIGH",
@@ -294,11 +363,13 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 						"player_val": "AoA: %.1f° (Steep) | Total Spin: %.0f RPM" % [attack_angle, total_spin],
 						"benchmark_val": "Optimal Turf Wood: -1.0° to -3.0° (Shallow Brush)",
 						"fix_instruction": "Shallow out your transition. Keep shoulders level and feel the clubhead gliding through the turf rather than chopping into it.",
-						"drill": "⛳ Brush the Grass Drill: Rehearse wide practice swings skimming the grass blades without disturbing the soil."
-					})
+						"drill": "⛳ HackMotion Low Point Turf Brush: Rehearse wide practice swings skimming the grass blades without disturbing the soil, shifting low point forward."
+					}
+					_attach_video_metadata(r, "one_metric_aoa")
+					recs.append(r)
 		elif club_cat == "hybrid":
 			if not is_tee and attack_angle > 0.5:
-				recs.append({
+				var r = {
 					"priority": 2,
 					"score": 85,
 					"severity": "HIGH",
@@ -309,11 +380,13 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 					"launch_effect": "Thin contact and loss of compression.",
 					"player_val": "AoA: %+.1f°" % attack_angle,
 					"benchmark_val": "Hybrid Target: -2.0° to -4.0° (Descending Strike)",
-					"fix_instruction": "Treat the hybrid like a 5-iron: strike slightly down on the ball before brushing the grass.",
-					"drill": "⛳ Towel Behind Ball: Lay a towel 3 inches behind ball; strike ball without touching towel."
-				})
+					"fix_instruction": "Treat the hybrid like a 5-iron: maintain forward shaft lean and lead wrist flexion to compress the ball before brushing turf.",
+					"drill": "⛳ HackMotion Forward Shaft Lean Drill: Lay a towel 3 inches behind ball; strike ball with hands leading clubhead without touching towel."
+				}
+				_attach_video_metadata(r, "shaft_lean")
+				recs.append(r)
 			elif attack_angle < -5.5:
-				recs.append({
+				var r = {
 					"priority": 2,
 					"score": 82,
 					"severity": "HIGH",
@@ -324,14 +397,16 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 					"launch_effect": "Excess spin and lost distance.",
 					"player_val": "AoA: %.1f°" % attack_angle,
 					"benchmark_val": "Hybrid Target: -2.0° to -4.0°",
-					"fix_instruction": "Widen your swing arc and sweep through turf smoothly.",
-					"drill": "⛳ Smooth Sweeping Practice: Make rhythm swings focusing on shallow turf contact."
-				})
+					"fix_instruction": "Widen your swing arc and shift weight smoothly onto lead side through impact.",
+					"drill": "⛳ HackMotion Shallow Sweep Drill: Make rhythm swings focusing on shallow turf interaction and proper low point distance 2-4 inches ahead of ball."
+				}
+				_attach_video_metadata(r, "one_metric_aoa")
+				recs.append(r)
 		elif club_cat in ["mid_iron", "long_iron", "wedge"]:
 			if attack_angle > 0.5:
 				var c_type = "Iron" if club_cat != "wedge" else "Wedge"
 				var targ_range = "-3.0° to -5.0°" if club_cat != "wedge" else "-4.0° to -6.5°"
-				recs.append({
+				var r = {
 					"priority": 2,
 					"score": 85,
 					"severity": "HIGH",
@@ -342,17 +417,19 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 					"launch_effect": "Causes thin strikes, inconsistent turf interaction, and insufficient green-stopping spin.",
 					"player_val": "AoA: %+.1f° | Launch Angle: %.1f°" % [attack_angle, vla],
 					"benchmark_val": "Optimal %s AoA: %s (Downward)" % [c_type, targ_range],
-					"fix_instruction": "Position ball center of stance, transfer 60% weight to lead foot at impact, and strike ball before turf.",
-					"drill": "⛳ Towel Behind Ball: Lay a small towel 3 inches behind ball; strike ball crisply without touching towel."
-				})
+					"fix_instruction": "Position ball center of stance, transfer 60% weight to lead foot at impact, and maintain forward shaft lean to compress the ball.",
+					"drill": "⛳ HackMotion Shaft Lean & Towel Drill: Lay a small towel 3 inches behind ball; strike ball crisply with forward shaft lean and flat lead wrist."
+				}
+				_attach_video_metadata(r, "shaft_lean")
+				recs.append(r)
 
 	# ─── 4. SPIN RATE HARMONY (BALLOONING VS KNUCKLEBALL) ───
 	if total_spin > 0.0:
 		if club_cat == "driver":
 			if total_spin > 3000.0:
-				var drill_desc = "⛳ High Tee Drill: Tee ball up half a ball higher to encourage contact on upper quadrant of face." if is_tee else "⛳ Centered Strike Drill: Spray clubface to confirm contact is centered, avoiding low-face strikes."
+				var drill_desc = "⛳ HackMotion High Tee & Face Centering Drill: Tee ball up half a ball higher to encourage contact on upper equator of face, optimizing dynamic loft." if is_tee else "⛳ HackMotion Centered Strike Drill: Spray clubface to confirm contact is centered, avoiding low-face strikes."
 				var fix_desc = "Strike higher on clubface (above center creates gear effect reducing spin). Ensure driver attack angle is positive." if is_tee else "Sweep cleanly off turf and ensure centered impact to avoid low-face spin multiplication."
-				recs.append({
+				var r = {
 					"priority": 3,
 					"score": 77,
 					"severity": "MEDIUM",
@@ -365,11 +442,13 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 					"benchmark_val": "Driver Target: 2,000–2,600 RPM",
 					"fix_instruction": fix_desc,
 					"drill": drill_desc
-				})
+				}
+				_attach_video_metadata(r, "shaft_lean")
+				recs.append(r)
 			elif total_spin < 1700.0 and ball_speed > 110.0:
-				var drill_desc = "⛳ Level Strike Practice: Verify ball rests at center equator on driver face at address." if is_tee else "⛳ Centered Face Strike: Verify ball strikes middle groove on clubface."
+				var drill_desc = "⛳ HackMotion Centered Strike Drill: Verify ball rests at center equator on driver face at address; verify ball contact is centered to prevent knuckleball diving." if is_tee else "⛳ Centered Face Strike: Verify ball strikes middle groove on clubface."
 				var fix_desc = "Check launch angle and strike height. Slightly lower tee height if hitting too high on face." if is_tee else "Check launch angle and strike height. Avoid hitting high on the crown."
-				recs.append({
+				var r = {
 					"priority": 3,
 					"score": 70,
 					"severity": "MEDIUM",
@@ -382,13 +461,15 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 					"benchmark_val": "Target: 2,000–2,600 RPM",
 					"fix_instruction": fix_desc,
 					"drill": drill_desc
-				})
+				}
+				_attach_video_metadata(r, "shaft_lean")
+				recs.append(r)
 		elif club_cat == "wood":
 			var wood_min_spin = 2600.0 if is_tee else 3000.0
 			var wood_max_spin = 3800.0 if is_tee else 4400.0
 			var wood_bench = "2,800–3,600 RPM (Tee Shot)" if is_tee else "3,200–4,200 RPM (Off Turf)"
 			if total_spin > wood_max_spin + 400.0:
-				recs.append({
+				var r = {
 					"priority": 3,
 					"score": 76,
 					"severity": "MEDIUM",
@@ -399,11 +480,13 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 					"launch_effect": "Shot balloons into the wind and stops dead with zero rollout.",
 					"player_val": "Spin: %.0f RPM (%s)" % [total_spin, wood_bench],
 					"benchmark_val": "Target: %s" % wood_bench,
-					"fix_instruction": "Shallow out your downswing. A level sweeping contact through the ball creates penetrating ball flight with optimal roll.",
-					"drill": "⛳ Wide Arc Drill: Keep wrists firm and swing through with a wide sweeping extension through impact."
-				})
+					"fix_instruction": "Shallow out your downswing. Level sweeping contact with flat lead wrist creates penetrating ball flight with optimal roll.",
+					"drill": "⛳ HackMotion Wide Arc & Shaft Lean Drill: Rehearse level sweeping strikes with controlled shaft lean to eliminate high ballooning spin."
+				}
+				_attach_video_metadata(r, "shaft_lean")
+				recs.append(r)
 			elif total_spin < wood_min_spin - 600.0 and ball_speed > 90.0:
-				recs.append({
+				var r = {
 					"priority": 3,
 					"score": 70,
 					"severity": "MEDIUM",
@@ -415,11 +498,13 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 					"player_val": "Spin: %.0f RPM" % total_spin,
 					"benchmark_val": "Target: %s" % wood_bench,
 					"fix_instruction": "Catch ball centered on the sweet spot. Avoid forward-pressing shaft excessively at address.",
-					"drill": "⛳ Center Strike Verification: Check face contact marks to ensure strike is not on the upper crown."
-				})
+					"drill": "⛳ HackMotion Face Decal Drill: Verify strike location is centered on sweet spot; avoid excessive forward shaft press at address."
+				}
+				_attach_video_metadata(r, "shaft_lean")
+				recs.append(r)
 		elif club_cat == "hybrid":
 			if total_spin > 5200.0:
-				recs.append({
+				var r = {
 					"priority": 3,
 					"score": 74,
 					"severity": "MEDIUM",
@@ -430,12 +515,14 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 					"launch_effect": "Shot climbs steeply and loses penetrating carry.",
 					"player_val": "Spin: %.0f RPM" % total_spin,
 					"benchmark_val": "Target: 3,800–4,800 RPM",
-					"fix_instruction": "Smooth out transition to shallow approach path and strike centered.",
-					"drill": "⛳ Sweeping Mat Drill: Swing with smooth tempo, brushing mat without digging."
-				})
+					"fix_instruction": "Smooth out transition to shallow approach path and maintain stable lead wrist through impact.",
+					"drill": "⛳ HackMotion Sweeping Mat Drill: Swing with smooth tempo, brushing mat with controlled dynamic loft without digging."
+				}
+				_attach_video_metadata(r, "shaft_lean")
+				recs.append(r)
 		elif club_cat == "mid_iron":
 			if total_spin < 4800.0 and total_spin > 1000.0:
-				recs.append({
+				var r = {
 					"priority": 3,
 					"score": 75,
 					"severity": "MEDIUM",
@@ -447,15 +534,17 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 					"player_val": "Spin: %.0f RPM (Target: 6,000–7,000 RPM)" % total_spin,
 					"benchmark_val": "Target: 6,000–7,000 RPM (Rule of Thumb: Club # × 1,000)",
 					"fix_instruction": "Hit down on ball with forward shaft lean to compress grooves against ball cover.",
-					"drill": "⛳ Impact Bag Drill: Practice hitting into impact bag with hands leading clubhead."
-				})
+					"drill": "⛳ HackMotion Shaft Lean & Compression Bag Drill: Practice hitting into impact bag with hands leading clubhead to deliver optimal dynamic loft."
+				}
+				_attach_video_metadata(r, "shaft_lean")
+				recs.append(r)
 
 	# ─── 5. LAUNCH ANGLE WINDOW (VLA) ───
 	if club_cat == "driver":
 		if vla < 9.5 and vla > 3.0:
-			var drill_desc = "⛳ High Launch Gate: Imagine hitting over a 15-foot crossbar located 30 yards ahead." if is_tee else "⛳ Sweeping Arc: Rehearse level sweeping strikes without delofting."
+			var drill_desc = "⛳ HackMotion High Launch Gate: Imagine launching ball over a 15-foot crossbar 30 yards ahead with positive attack angle and proper dynamic loft." if is_tee else "⛳ Sweeping Arc: Rehearse level sweeping strikes without delofting."
 			var fix_desc = "Tee ball slightly higher and ensure head stays behind ball through impact." if is_tee else "Check ball position inside lead heel and ensure chest is not leaning forward ahead of ball."
-			recs.append({
+			var r = {
 				"priority": 4,
 				"score": 69,
 				"severity": "MEDIUM",
@@ -468,11 +557,13 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 				"benchmark_val": "Target: 11.0°–14.5°",
 				"fix_instruction": fix_desc,
 				"drill": drill_desc
-			})
+			}
+			_attach_video_metadata(r, "one_metric_aoa")
+			recs.append(r)
 		elif vla > 16.5:
-			var drill_desc = "⛳ Level Peg Drill: Lower tee height until half the ball is above crown." if is_tee else "⛳ Stay Centered: Prevent scooping or hanging back on trail foot."
+			var drill_desc = "⛳ HackMotion Level Peg & Wrist Control Drill: Lower tee height until half the ball is above crown; prevent scooping or hanging back on trail foot." if is_tee else "⛳ Stay Centered: Prevent scooping or hanging back on trail foot."
 			var fix_desc = "Check for steep attack angle or ball teed excessively high." if is_tee else "Avoid scooping wrists before impact; keep lead wrist flat through strike."
-			recs.append({
+			var r = {
 				"priority": 4,
 				"score": 67,
 				"severity": "MEDIUM",
@@ -485,13 +576,15 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 				"benchmark_val": "Target: 11.0°–14.5°",
 				"fix_instruction": fix_desc,
 				"drill": drill_desc
-			})
+			}
+			_attach_video_metadata(r, "shaft_lean")
+			recs.append(r)
 	elif club_cat == "wood":
 		var min_vla = 9.5 if is_tee else 8.5
 		var max_vla = 16.0 if is_tee else 15.0
 		var bench_vla = "11.0°–15.0° (Teed Wood)" if is_tee else "10.0°–14.0° (Off Turf)"
 		if vla < min_vla and vla > 2.0:
-			recs.append({
+			var r = {
 				"priority": 4,
 				"score": 71,
 				"severity": "MEDIUM",
@@ -503,10 +596,12 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 				"player_val": "VLA: %.1f° (Optimal: %s)" % [vla, bench_vla],
 				"benchmark_val": "Target: %s" % bench_vla,
 				"fix_instruction": "Position ball 1-2 balls inside lead heel. Let the natural loft launch the ball—do not lean shaft excessively forward.",
-				"drill": "⛳ Sweeper Drill: Focus on sweeping the grass smoothly without driving down into the turf."
-			})
+				"drill": "⛳ HackMotion Shallow Sweep Drill: Position ball 1-2 balls inside lead heel and sweep grass smoothly without delofting."
+			}
+			_attach_video_metadata(r, "one_metric_aoa")
+			recs.append(r)
 		elif vla > max_vla + 2.0:
-			recs.append({
+			var r = {
 				"priority": 4,
 				"score": 68,
 				"severity": "MEDIUM",
@@ -518,13 +613,15 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 				"player_val": "VLA: %.1f°" % vla,
 				"benchmark_val": "Target: %s" % bench_vla,
 				"fix_instruction": "Maintain firm lead wrist through impact. Rotate body through to lead side rather than flipping hands.",
-				"drill": "⛳ Flat Wrist Impact Drill: Practice short punch shots keeping lead wrist flat and pointing at target."
-			})
+				"drill": "⛳ HackMotion Flat Wrist Punch Drill: Practice short punch shots keeping lead wrist flat and pointing at target to eliminate scooping."
+			}
+			_attach_video_metadata(r, "shaft_lean")
+			recs.append(r)
 
 	# ─── 6. SWING PATH & HORIZONTAL LAUNCH DIRECTION (HLA) ───
 	if abs(hla) > 3.2:
 		var dir_str = "Push Right" if hla > 0 else "Pull Left"
-		recs.append({
+		var r = {
 			"priority": 4,
 			"score": 65,
 			"severity": "MEDIUM",
@@ -536,12 +633,14 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 			"player_val": "HLA: %+.1f° (%s)" % [hla, dir_str],
 			"benchmark_val": "Target: -1.5° to +1.5° HLA",
 			"fix_instruction": "Verify stance and clubface alignment with target before beginning takeaway.",
-			"drill": "⛳ Railway Alignment: Lay two clubs parallel pointing directly at your target."
-		})
+			"drill": "⛳ HackMotion Direction Game: Use simulator centerline as visual barrier; hit 10 consecutive shots keeping ball on target side."
+		}
+		_attach_video_metadata(r, "sim_improvement")
+		recs.append(r)
 
 	# If no major flaws, acknowledge solid execution
 	if recs.is_empty():
-		recs.append({
+		var r = {
 			"priority": 1,
 			"score": 30,
 			"severity": "LOW",
@@ -553,8 +652,10 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 			"player_val": "Smash: %.2f | Spin Axis: %+.1f°" % [smash_factor, spin_axis],
 			"benchmark_val": "Pro Benchmark: Matched",
 			"fix_instruction": "Maintain consistent tempo, rhythm, and pre-shot visualization.",
-			"drill": "⛳ Target Fairway Practice: Continue repeating your reliable baseline swing."
-		})
+			"drill": "⛳ HackMotion Full-Bag Audit & Distance Game: Hit 10 shots with target carry distance scoring 1 point per yard off target; practice consistent routine."
+		}
+		_attach_video_metadata(r, "sim_improvement")
+		recs.append(r)
 
 	recs.sort_custom(func(a, b): return a["score"] > b["score"])
 	for idx in range(recs.size()):
@@ -566,6 +667,177 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 # =============================================================================
 # 2. SKELETON WIREFRAME SEQUENCE BIOMECHANICS (PHASE 2)
 # =============================================================================
+
+## Detects key swing phase frames (Address, Top of Backswing P4, Impact P7)
+## from a sequence of recorded frames using biomechanical wrist trajectory analysis.
+static func detect_key_phases(recorded_frames: Array) -> Dictionary:
+	var def_res: Dictionary = {
+		"has_phases": false,
+		"top_index": 0,
+		"impact_index": 0,
+		"orig_top_index": 0,
+		"orig_impact_index": 0,
+		"top_progress": 0.35,
+		"impact_progress": 0.65,
+		"valid_frames": []
+	}
+	if recorded_frames.size() < 4:
+		return def_res
+
+	# Extract valid landmark frames and their original indices
+	var valid_frames: Array[Dictionary] = []
+	var valid_indices: Array[int] = []
+	for i in range(recorded_frames.size()):
+		var f = recorded_frames[i]
+		if not (f is Dictionary):
+			continue
+		var lms: Dictionary = f.get("landmarks", {})
+		if lms.has("left_shoulder") and lms.has("right_shoulder") and lms.has("left_hip") and lms.has("right_hip"):
+			valid_frames.append(f)
+			valid_indices.append(i)
+
+	if valid_frames.size() < 4:
+		return def_res
+
+	var total_f: int = valid_frames.size()
+	var addr_count: int = min(4, total_f / 4)
+
+	# Calculate baseline wrist Y from address frames (screen Y: larger = lower, smaller = higher)
+	var base_wrist_y: float = 0.0
+	var base_wrist_count: int = 0
+	for i in range(addr_count):
+		var lm = valid_frames[i]["landmarks"]
+		var wy: float = -1.0
+		if lm.has("left_wrist") and lm.has("right_wrist"):
+			wy = (float(lm["left_wrist"].get("y", 0.0)) + float(lm["right_wrist"].get("y", 0.0))) * 0.5
+		elif lm.has("left_wrist"):
+			wy = float(lm["left_wrist"].get("y", 0.0))
+		elif lm.has("right_wrist"):
+			wy = float(lm["right_wrist"].get("y", 0.0))
+		if wy >= 0.0:
+			base_wrist_y += wy
+			base_wrist_count += 1
+	if base_wrist_count > 0:
+		base_wrist_y /= float(base_wrist_count)
+	else:
+		base_wrist_y = 0.70
+
+	# Extract wrist height signal across all valid frames
+	var raw_wrist_y: Array[float] = []
+	for i in range(total_f):
+		var lm = valid_frames[i]["landmarks"]
+		var wy: float = 999.0
+		if lm.has("left_wrist"):
+			wy = float(lm["left_wrist"].get("y", 999.0))
+		if lm.has("right_wrist"):
+			wy = min(wy, float(lm["right_wrist"].get("y", 999.0)))
+		if wy > 900.0:
+			wy = raw_wrist_y[i - 1] if i > 0 else base_wrist_y
+		raw_wrist_y.append(wy)
+
+	# 3-frame moving average to smooth MediaPipe jitter
+	var smooth_wrist_y: Array[float] = []
+	for i in range(total_f):
+		var sum_y: float = raw_wrist_y[i]
+		var count_y: int = 1
+		if i > 0:
+			sum_y += raw_wrist_y[i - 1]
+			count_y += 1
+		if i + 1 < total_f:
+			sum_y += raw_wrist_y[i + 1]
+			count_y += 1
+		smooth_wrist_y.append(sum_y / float(count_y))
+
+	# ─── 1. DETECT TOP OF BACKSWING (P4) ───
+	# Apex of backswing: hands reach highest point (lowest screen Y) before reversing downward.
+	var top_idx: int = -1
+	var best_top_val: float = 999.0
+	var p4_search_start: int = max(1, addr_count)
+	var p4_search_end: int = clamp(int(total_f * 0.70), p4_search_start + 1, total_f - 2)
+
+	# Pass 1: Local minimum with directional reversal (hands rising before, falling after)
+	# and hands significantly above address
+	for i in range(p4_search_start, p4_search_end + 1):
+		var wy = smooth_wrist_y[i]
+		var rising_before = (smooth_wrist_y[i - 1] >= wy)
+		var falling_after = (i + 1 < total_f and smooth_wrist_y[i + 1] >= wy)
+		if i >= 2 and i + 2 < total_f:
+			rising_before = rising_before and (smooth_wrist_y[i - 2] >= smooth_wrist_y[i - 1])
+			falling_after = falling_after and (smooth_wrist_y[i + 2] >= smooth_wrist_y[i + 1])
+		var hands_raised = (base_wrist_y - wy) > 0.08
+		if rising_before and falling_after and hands_raised:
+			if wy < best_top_val:
+				best_top_val = wy
+				top_idx = i
+
+	# Pass 2: Global minimum wrist Y in search window where hands are raised above address
+	if top_idx < 1:
+		for i in range(p4_search_start, p4_search_end + 1):
+			var wy = smooth_wrist_y[i]
+			if wy < best_top_val and (base_wrist_y - wy) > 0.05:
+				best_top_val = wy
+				top_idx = i
+
+	# Pass 3: Fallback
+	if top_idx < 1:
+		top_idx = clamp(int(total_f * 0.38), 1, total_f - 2)
+
+	# ─── 2. DETECT IMPACT (P7) ───
+	# Following top_idx, hands descend (screen Y increases) towards ball/address level,
+	# reaching the bottom of the swing arc at ball strike, before rising into follow-through.
+	var impact_idx: int = -1
+	var max_downswing_wrist_y: float = -1.0
+	var min_dist_to_base: float = 999.0
+	var impact_search_end: int = clamp(int(total_f * 0.85), top_idx + 1, total_f - 1)
+
+	# Pass 1: Local maximum of wrist Y (lowest hands / bottom of swing arc) on downswing
+	# where hands were descending before and begin rising after
+	for i in range(top_idx + 1, impact_search_end):
+		var wy = smooth_wrist_y[i]
+		if wy > smooth_wrist_y[top_idx] + 0.08:
+			var descending_before = (smooth_wrist_y[i - 1] <= wy)
+			var rising_after = (i + 1 < total_f and smooth_wrist_y[i + 1] <= wy)
+			if descending_before and rising_after:
+				if wy > max_downswing_wrist_y:
+					max_downswing_wrist_y = wy
+					impact_idx = i
+
+	# Pass 2: Return to address baseline height on downswing
+	if impact_idx < 0:
+		for i in range(top_idx + 1, impact_search_end + 1):
+			var wy = smooth_wrist_y[i]
+			var dist = abs(wy - base_wrist_y)
+			if dist < min_dist_to_base:
+				min_dist_to_base = dist
+				impact_idx = i
+
+	# Pass 3: Maximum wrist Y on downswing
+	if impact_idx < 0:
+		for i in range(top_idx + 1, impact_search_end + 1):
+			var wy = smooth_wrist_y[i]
+			if wy > max_downswing_wrist_y:
+				max_downswing_wrist_y = wy
+				impact_idx = i
+
+	# Pass 4: Fallback
+	if impact_idx < 0:
+		impact_idx = clamp(int(total_f * 0.60), top_idx + 1, total_f - 1)
+
+	var orig_top = valid_indices[top_idx] if top_idx < valid_indices.size() else top_idx
+	var orig_imp = valid_indices[impact_idx] if impact_idx < valid_indices.size() else impact_idx
+	var total_orig = max(1, recorded_frames.size() - 1)
+
+	return {
+		"has_phases": true,
+		"top_index": top_idx,
+		"impact_index": impact_idx,
+		"orig_top_index": orig_top,
+		"orig_impact_index": orig_imp,
+		"top_progress": float(orig_top) / float(total_orig),
+		"impact_progress": float(orig_imp) / float(total_orig),
+		"valid_frames": valid_frames
+	}
+
 
 ## Analyzes the full frame sequence of landmarks to detect:
 ## - Address (P1): Shoulder tilt, shoulder & hip squareness/alignment
@@ -589,6 +861,10 @@ static func analyze_skeleton_sequence(recorded_frames: Array[Dictionary], fallba
 		"impact_hip_clearance": 0.0, # degrees hips are open at impact
 		"impact_chicken_wing": false,
 		"lead_elbow_angle": 180.0,
+		"top_frame_index": 0,
+		"impact_frame_index": 0,
+		"top_frame_progress": 0.35,
+		"impact_frame_progress": 0.65,
 		"flaws_detected": []
 	}
 
@@ -602,17 +878,19 @@ static func analyze_skeleton_sequence(recorded_frames: Array[Dictionary], fallba
 			result["impact_spine_loss"] = max(0.0, 35.0 - m_spine)
 		return result
 
-	# Extract valid landmark frames
-	var valid_frames: Array[Dictionary] = []
-	for f in recorded_frames:
-		var lms: Dictionary = f.get("landmarks", {})
-		if lms.has("left_shoulder") and lms.has("right_shoulder") and lms.has("left_hip") and lms.has("right_hip"):
-			valid_frames.append(f)
-
-	if valid_frames.size() < 4:
+	var phases = detect_key_phases(recorded_frames)
+	if not phases.get("has_phases", false):
 		return result
 
+	var valid_frames: Array[Dictionary] = phases["valid_frames"]
+	var top_idx: int = phases["top_index"]
+	var impact_idx: int = phases["impact_index"]
+
 	result["has_valid_data"] = true
+	result["top_frame_index"] = phases["orig_top_index"]
+	result["impact_frame_index"] = phases["orig_impact_index"]
+	result["top_frame_progress"] = phases["top_progress"]
+	result["impact_frame_progress"] = phases["impact_progress"]
 	var total_f = valid_frames.size()
 
 	# ─── 1. ADDRESS PHASE (P1) ───
@@ -663,34 +941,7 @@ static func analyze_skeleton_sequence(recorded_frames: Array[Dictionary], fallba
 	var base_spine_angle = rad_to_deg(atan2(abs(base_spine_vec.x), -base_spine_vec.y))
 
 	# ─── 2. DETECT KEY SWING FRAMES (P4 TOP & P7 IMPACT) ───
-	var top_idx: int = -1
-	var min_wrist_y: float = 999.0
-	var min_shoulder_w: float = 999.0
-
-	var p4_search_limit: int = int(total_f * 0.65)
-	for i in range(1, p4_search_limit):
-		var lm = valid_frames[i]["landmarks"]
-		var ls = Vector2(float(lm["left_shoulder"].get("x", 0)), float(lm["left_shoulder"].get("y", 0)))
-		var rs = Vector2(float(lm["right_shoulder"].get("x", 0)), float(lm["right_shoulder"].get("y", 0)))
-		var sw = ls.distance_to(rs)
-		
-		var wy: float = 999.0
-		if lm.has("left_wrist"):
-			wy = float(lm["left_wrist"].get("y", 999.0))
-		if lm.has("right_wrist"):
-			wy = min(wy, float(lm["right_wrist"].get("y", 999.0)))
-
-		# Highest hands (lowest y) or greatest shoulder contraction
-		if wy < min_wrist_y or (sw < min_shoulder_w and wy < 0.6):
-			min_wrist_y = wy
-			min_shoulder_w = sw
-			top_idx = i
-
-	if top_idx < 1:
-		top_idx = clamp(int(total_f * 0.38), 1, total_f - 2)
-
-	# Impact frame (P7) around 55% - 70%
-	var impact_idx: int = clamp(int(total_f * 0.60), top_idx + 1, total_f - 1)
+	# Determined dynamically via detect_key_phases above
 
 	# ─── 3. TOP OF BACKSWING (P4) KINEMATICS ───
 	var top_lm = valid_frames[top_idx]["landmarks"]
@@ -840,7 +1091,7 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 	if has_smash_issue and has_posture_loss:
 		used_lm_types.append("Low Smash Factor")
 		used_lm_types.append("Sub-Optimal Smash Factor")
-		final_recs.append({
+		var r = {
 			"priority": 1,
 			"score": 98,
 			"severity": "CRITICAL",
@@ -852,10 +1103,12 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 			"player_val": "Spine Angle Lost: %.1f° | Smash: %.2f" % [spine_loss, smash],
 			"benchmark_val": "Pro Benchmark: < 3.0° Spine Loss | 1.48+ Smash",
 			"fix_instruction": "Keep trail glute pressed back against an imaginary chair through the entire transition and impact zone.",
-			"drill": "⛳ Chair / Wall Butt Drill: Touch lead hip to a chair behind you at address; keep hips in contact with chair until after impact."
-		})
+			"drill": "⛳ HackMotion Low Point & Chair Drill: Touch lead hip to a chair behind you at address; keep hips in contact with chair until after impact to stabilize low point and smash factor."
+		}
+		_attach_video_metadata(r, "low_point")
+		final_recs.append(r)
 	elif has_posture_loss:
-		final_recs.append({
+		var r = {
 			"priority": 2,
 			"score": 86,
 			"severity": "HIGH",
@@ -868,7 +1121,9 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 			"benchmark_val": "Benchmark: Retain Address Posture (35° Spine)",
 			"fix_instruction": "Stay down through the shot. Feel your chest looking down at the turf until the ball is airborne.",
 			"drill": "⛳ Head-on-Wall Drill: Place forehead lightly against a soft cushion on a wall; rehearse slow-motion turn without lifting head."
-		})
+		}
+		_attach_video_metadata(r, "sim_improvement")
+		final_recs.append(r)
 
 	# ─── CORRELATION 2: SLICE / OPEN FACE + OVER-THE-TOP SEQUENCE & SETUP ───
 	var has_slice: bool = spin_axis > 5.0
@@ -885,7 +1140,7 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 		if chicken_wing:
 			cause_desc += "Lead elbow collapsed to %.0f° (chicken wing). " % skeleton.get("lead_elbow_angle", 145.0)
 
-		final_recs.append({
+		var r = {
 			"priority": 1,
 			"score": 97,
 			"severity": "CRITICAL",
@@ -897,8 +1152,10 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 			"player_val": "Spin Axis: +%.1f° | Shoulder Setup: %+.1f°" % [spin_axis, shoulder_align],
 			"benchmark_val": "Target: -2° to +2° Path | Square Shoulders",
 			"fix_instruction": "Square shoulders parallel to target line at setup. Start downswing by shifting weight onto lead heel, letting arms drop inside.",
-			"drill": "⛳ Headcover Under Armpit: Place glove under trail armpit; hit balls keeping glove pinned until well after impact."
-		})
+			"drill": "⛳ HackMotion Barrier & Armpit Glove Drill: Place a barrier 5 inches outside ball and glove under trail armpit; hit balls keeping path inside-to-out."
+		}
+		_attach_video_metadata(r, "barrier_path")
+		final_recs.append(r)
 
 	# ─── CORRELATION 3: DRIVER STEEP AOA + FLAT ADDRESS SHOULDERS / REVERSE TILT ───
 	if club_cat == "driver" and is_tee and aoa < -1.0 and aoa > -20.0:
@@ -906,7 +1163,7 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 			used_lm_types.append("Steep Driver Attack Angle")
 			var yds_recov = int(abs(aoa - 3.0) * 4.2)
 			yds_recov = clamp(yds_recov, 14, 28)
-			final_recs.append({
+			var r = {
 				"priority": 2,
 				"score": 89,
 				"severity": "HIGH",
@@ -918,11 +1175,13 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 				"player_val": "Address Shoulder Tilt: %.1f° | AoA: %.1f°" % [shoulder_tilt, aoa],
 				"benchmark_val": "Target: 8.0°–12.0° Tilt | +2.0° to +5.0° AoA",
 				"fix_instruction": "At address, bump lead hip slightly toward target so spine tilts 8° away from target. Trail shoulder must sit lower than lead shoulder to hit upward on the teed ball.",
-				"drill": "⛳ Zipper Tilt Drill: Hold club vertically against sternum; tilt upper body away from target until shaft points at inside of trail knee."
-			})
+				"drill": "⛳ HackMotion Zipper Tilt Drill: Hold club vertically against sternum; tilt upper body away from target until shaft points at inside of trail knee."
+			}
+			_attach_video_metadata(r, "one_metric_aoa")
+			final_recs.append(r)
 	elif club_cat == "wood" and not is_tee and (aoa > 0.8 or spine_loss > 4.5):
 		used_lm_types.append("Scooping Wood Off Turf")
-		final_recs.append({
+		var r = {
 			"priority": 2,
 			"score": 90,
 			"severity": "HIGH",
@@ -934,13 +1193,15 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 			"player_val": "Spine Loss: %.1f° | AoA: %+.1f°" % [spine_loss, aoa],
 			"benchmark_val": "Target: Retain Address Posture | -1.0° to -3.0° AoA",
 			"fix_instruction": "Shift weight onto lead side during downswing. Keep your chest facing down toward the turf through impact and sweep the grass.",
-			"drill": "⛳ Step-Through Drill: Step your trail foot forward toward target after striking fairway wood to ensure weight shifts fully onto lead side."
-		})
+			"drill": "⛳ HackMotion Step-Through Drill: Step your trail foot forward toward target after striking fairway wood to ensure weight shifts fully onto lead side."
+		}
+		_attach_video_metadata(r, "one_metric_aoa")
+		final_recs.append(r)
 
 	# ─── CORRELATION 4: RESTRICTED SHOULDER TURN & POWER LEAK ───
 	if s_turn < 75.0:
 		used_lm_types.append("Low Ball Speed")
-		final_recs.append({
+		var r = {
 			"priority": 3,
 			"score": 79,
 			"severity": "MEDIUM",
@@ -952,13 +1213,15 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 			"player_val": "Shoulder Turn: %.1f° | X-Factor: %.1f°" % [s_turn, x_factor],
 			"benchmark_val": "Pro Benchmark: 90.0° Turn | 45.0° X-Factor",
 			"fix_instruction": "Allow your lead heel to float slightly if needed, and focus on turning your lead shoulder fully behind the ball.",
-			"drill": "⛳ Cross-Arm Chest Turn: Cross arms across shoulders and rotate until shaft points down toward ball line."
-		})
+			"drill": "⛳ HackMotion Cross-Arm Coil Drill: Cross arms across shoulders and rotate until shaft points down toward ball line to build transition power."
+		}
+		_attach_video_metadata(r, "downswing_sequence")
+		final_recs.append(r)
 
 	# ─── CORRELATION 5: LATERAL HIP SWAY ───
 	if abs(hip_sway) > 3.0:
 		var dir_txt = "away from target" if hip_sway < 0 else "toward target"
-		final_recs.append({
+		var r = {
 			"priority": 3,
 			"score": 73,
 			"severity": "MEDIUM",
@@ -970,12 +1233,14 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 			"player_val": "Hip Sway: %.1f units" % abs(hip_sway),
 			"benchmark_val": "Target: Centered Pivot (< 1.5 units sway)",
 			"fix_instruction": "Feel pressure on the inside instep of your trail foot. Turn around your spine axis without sliding hips sideways.",
-			"drill": "⛳ Ball Under Trail Foot: Place half a tennis ball under outside edge of trail foot during backswing."
-		})
+			"drill": "⛳ HackMotion Foot Stability Drill: Place half a tennis ball under outside edge of trail foot during backswing to stabilize low point distance."
+		}
+		_attach_video_metadata(r, "one_metric_aoa")
+		final_recs.append(r)
 
 	# ─── CORRELATION 6: STALLED HIPS AT IMPACT ───
 	if hip_clearance < 18.0 and not has_smash_issue:
-		final_recs.append({
+		var r = {
 			"priority": 4,
 			"score": 68,
 			"severity": "MEDIUM",
@@ -987,8 +1252,10 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 			"player_val": "Hip Clearance: %.1f° Open" % hip_clearance,
 			"benchmark_val": "Target: 35.0°–45.0° Open at Impact",
 			"fix_instruction": "Focus on clearing the lead hip behind you as your first downswing move. Belt buckle should face the target by follow-through.",
-			"drill": "⛳ Step-Through Drill: Practice hitting short shots where your trail foot steps forward toward the target immediately after impact."
-		})
+			"drill": "⛳ HackMotion Hip Clearance Step Drill: Focus on clearing lead hip 35°–45° open at impact; rehearse step-through finish to let body rotation lead the swing."
+		}
+		_attach_video_metadata(r, "downswing_sequence")
+		final_recs.append(r)
 
 	# Add any launch monitor recommendations that weren't subsumed by cross-correlations
 	for r in lm_recs:

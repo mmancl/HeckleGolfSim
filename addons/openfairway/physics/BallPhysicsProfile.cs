@@ -275,6 +275,8 @@ public sealed class BallPhysicsProfile
             FlightTangentialRetentionBase = TryFloat(el, "FlightTangentialRetentionBase", bp.FlightTangentialRetentionBase),
             FlightSpinFactorMin = TryFloat(el, "FlightSpinFactorMin", bp.FlightSpinFactorMin),
             FlightSpinFactorDivisor = TryFloat(el, "FlightSpinFactorDivisor", bp.FlightSpinFactorDivisor),
+            ShallowImpactRetentionMin = TryFloat(el, "ShallowImpactRetentionMin", bp.ShallowImpactRetentionMin),
+            ShallowImpactRetentionMax = TryFloat(el, "ShallowImpactRetentionMax", bp.ShallowImpactRetentionMax),
             RolloutLowSpinRetention = TryFloat(el, "RolloutLowSpinRetention", bp.RolloutLowSpinRetention),
             RolloutHighSpinRetention = TryFloat(el, "RolloutHighSpinRetention", bp.RolloutHighSpinRetention),
             RolloutSpinRatioThreshold = TryFloat(el, "RolloutSpinRatioThreshold", bp.RolloutSpinRatioThreshold),
@@ -309,6 +311,7 @@ public sealed class BallPhysicsProfile
             HighSpinMultiplierMax = TryFloat(el, "HighSpinMultiplierMax", rp.HighSpinMultiplierMax),
             HighSpinRampRange = TryFloat(el, "HighSpinRampRange", rp.HighSpinRampRange),
             FrictionBlendSpeed = TryFloat(el, "FrictionBlendSpeed", rp.FrictionBlendSpeed),
+            RollFrictionBlendMinSpeed = TryFloat(el, "RollFrictionBlendMinSpeed", rp.RollFrictionBlendMinSpeed),
             Name = TryString(el, "Name", "JsonOverride"),
             Version = TryString(el, "Version", rp.Version),
         };

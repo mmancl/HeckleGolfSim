@@ -11,6 +11,7 @@ extends Control
 @onready var _minigames_button: Button = $VerticalLayout/TilesRow/MiniGamesTile/MiniGamesTextBackdrop/MiniGamesButton
 @onready var _version_label: Label = $VerticalLayout/BottomBarContainer/HBoxContainer/VersionLabel
 @onready var _discord_button: Button = $VerticalLayout/TopStrip/HBoxContainer/DiscordButton
+@onready var _youtube_button: Button = $VerticalLayout/TopStrip/HBoxContainer/YouTubeButton
 var _version_fall_back: String = "dev"
 var _version_setting_path: String = "application/config/version"
 var _version_text: String
@@ -26,6 +27,8 @@ func _ready():
 		_credits_button.pressed.connect(_on_credits_pressed)
 	if _discord_button != null:
 		_discord_button.pressed.connect(_on_discord_pressed)
+	if _youtube_button != null:
+		_youtube_button.pressed.connect(_on_youtube_pressed)
 	_range_button.pressed.connect(_on_range_pressed)
 	_courses_button.pressed.connect(_on_courses_pressed)
 	_practice_button.pressed.connect(_on_practice_pressed)
@@ -45,6 +48,8 @@ func _ready():
 	ThemeManager.apply_nav_button_style(_exit_button, 6)
 	if _discord_button != null:
 		ThemeManager.apply_icon_button_style(_discord_button, 6, 12)
+	if _youtube_button != null:
+		ThemeManager.apply_icon_button_style(_youtube_button, 6, 12)
 
 	# Apply central theme card styling to tiles
 	var tiles_row = get_node_or_null("VerticalLayout/TilesRow")
@@ -95,8 +100,11 @@ func _on_settings_pressed() -> void:
 		inst.set_anchors_preset(Control.PRESET_FULL_RECT)
 		inst.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		inst.grow_vertical = Control.GROW_DIRECTION_BOTH
+		inst.close_settings_requested.connect(func():
+			inst.visible = false
+			inst.queue_free()
+		)
 		add_child(inst)
-		inst.close_settings_requested.connect(func(): inst.queue_free())
 
 
 func _on_credits_pressed() -> void:
@@ -113,6 +121,10 @@ func _on_exit_pressed() -> void:
 
 func _on_discord_pressed() -> void:
 	OS.shell_open("https://discord.gg/gjaNhkQwJ")
+
+
+func _on_youtube_pressed() -> void:
+	OS.shell_open("https://www.youtube.com/@hecklegolfsimulator")
 
 
 func _on_history_pressed() -> void:

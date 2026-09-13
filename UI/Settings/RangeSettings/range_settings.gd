@@ -11,11 +11,13 @@ var surface_option : OptionButton = null
 var ball_type_option : OptionButton = null
 var tracer_count_spin_box : SpinBox = null
 var square_enabled_button : CheckButton = null
+var square_device_type_option : OptionButton = null
 var square_device_option : OptionButton = null
 var square_scan_button : Button = null
 var square_connect_button : Button = null
 var square_disconnect_button : Button = null
 var square_ready_button : Button = null
+var garmin_calibrate_button : Button = null
 var square_status_label : Label = null
 var square_battery_label : Label = null
 var square_firmware_label : Label = null
@@ -25,6 +27,11 @@ var temperature_unit_label : Label = null
 var altitude_unit_label : Label = null
 var _stats_count_label : Label = null
 var _stat_limit_modal : Control = null
+var _key_buttons_by_action : Dictionary = {}
+var _rebind_modal : Control = null
+var _rebind_action_name : String = ""
+var _last_applied_graphics_quality: String = ""
+var _graphics_quality_changed: bool = false
 
 const SQUARE_UI_LOG_PREFIX := "[SquareUI]"
 const SQUARE_CLUBS := {
@@ -133,11 +140,25 @@ func _ready() -> void:
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 
+	if GlobalSettings and GlobalSettings.range_settings and "graphics_quality" in GlobalSettings.range_settings:
+		_last_applied_graphics_quality = str(GlobalSettings.range_settings.graphics_quality.value)
+	close_settings_requested.connect(_on_close_settings_requested)
+	tree_exiting.connect(_on_close_settings_requested)
+	visibility_changed.connect(func():
+		if not is_visible_in_tree():
+			_on_close_settings_requested()
+		else:
+			_on_settings_opened()
+	)
+	if is_visible_in_tree():
+		_on_settings_opened()
+
 	# Header Close Button Styling
 	var header_close_btn = get_node_or_null("MarginContainer/VBoxContainer/HeaderHBox/HeaderCloseButton")
 	if header_close_btn != null:
 		header_close_btn.custom_minimum_size = Vector2(48, 48)
 		header_close_btn.add_theme_font_size_override("font_size", 20)
+		header_close_btn.focus_mode = Control.FOCUS_NONE
 		ThemeManager.apply_nav_button_style(header_close_btn, 8)
 
 	# Style TabContainer
@@ -227,11 +248,115 @@ func _ready() -> void:
 	)
 	_setup_displayed_stats_section()
 	_setup_square_monitor_section()
+	_setup_tcp_monitor_section()
 	_setup_hecklelinks_announcer_section()
+	_setup_keybindings_section()
+
+	var gameplay_vbox = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox
+
+	# Foam Ball Boost Mode section in Gameplay tab
+	var foam_sep = HSeparator.new()
+	gameplay_vbox.add_child(foam_sep)
+	
+	var foam_title = Label.new()
+	foam_title.text = "Foam Ball Boost Mode"
+	foam_title.add_theme_font_size_override("font_size", 22)
+	foam_title.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
+	gameplay_vbox.add_child(foam_title)
+
+	var foam_desc = Label.new()
+	foam_desc.text = "Compensates for the reduced launch velocity of foam practice balls by scaling ball speed from the launch monitor before calculating flight and stats."
+	foam_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	foam_desc.add_theme_font_size_override("font_size", 16)
+	foam_desc.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	gameplay_vbox.add_child(foam_desc)
+
+	var foam_toggle_row = _create_toggle_setting_row("Enable Foam Ball Boost", "foam_ball_boost_enabled")
+	gameplay_vbox.add_child(foam_toggle_row)
+	
+	var foam_slider_container = VBoxContainer.new()
+	foam_slider_container.name = "FoamBoostSliderContainer"
+	foam_slider_container.add_theme_constant_override("separation", 6)
+	foam_slider_container.visible = bool(GlobalSettings.range_settings.foam_ball_boost_enabled.value)
+	
+	var boost_setting = GlobalSettings.range_settings.foam_ball_boost_percent
+	var foam_slider_row = HBoxContainer.new()
+	foam_slider_row.name = "FoamBoostSliderRow"
+	foam_slider_row.custom_minimum_size = Vector2(0, 52)
+	foam_slider_row.add_theme_constant_override("separation", 10)
+	
+	var foam_slider_lbl = Label.new()
+	foam_slider_lbl.text = "Boost Amount: %.0f%%" % boost_setting.value
+	foam_slider_lbl.add_theme_font_size_override("font_size", 19)
+	foam_slider_lbl.custom_minimum_size = Vector2(300, 0)
+	foam_slider_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	foam_slider_row.add_child(foam_slider_lbl)
+	
+	var minus_btn = Button.new()
+	minus_btn.text = "－"
+	minus_btn.custom_minimum_size = Vector2(48, 48)
+	minus_btn.add_theme_font_size_override("font_size", 20)
+	ThemeManager.apply_nav_button_style(minus_btn, 8)
+	foam_slider_row.add_child(minus_btn)
+	
+	var slider = HSlider.new()
+	slider.name = "HSlider"
+	slider.min_value = 0.0
+	slider.max_value = 100.0
+	slider.step = 1.0
+	slider.value = boost_setting.value
+	slider.custom_minimum_size = Vector2(180, 48)
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	foam_slider_row.add_child(slider)
+	
+	var plus_btn = Button.new()
+	plus_btn.text = "＋"
+	plus_btn.custom_minimum_size = Vector2(48, 48)
+	plus_btn.add_theme_font_size_override("font_size", 20)
+	ThemeManager.apply_nav_button_style(plus_btn, 8)
+	foam_slider_row.add_child(plus_btn)
+	
+	foam_slider_container.add_child(foam_slider_row)
+	
+	# Breakdown preview label showing exact scaling for each club category
+	var preview_lbl = Label.new()
+	preview_lbl.add_theme_font_size_override("font_size", 16)
+	preview_lbl.add_theme_color_override("font_color", Color(0.65, 0.85, 1.0))
+	
+	var update_preview = func(pct: float):
+		var woods_pct = pct * 1.0
+		var irons_pct = pct * 0.75
+		var wedges_pct = pct * 0.50
+		preview_lbl.text = "Scaling: Woods/Driver: +%.1f%% (100%%) | Hybrids/Irons: +%.1f%% (75%%) | Wedges: +%.1f%% (50%%) | Putter: +0%%" % [
+			woods_pct, irons_pct, wedges_pct
+		]
+	
+	update_preview.call(boost_setting.value)
+	foam_slider_container.add_child(preview_lbl)
+	
+	slider.value_changed.connect(func(val: float):
+		boost_setting.set_value(val)
+		foam_slider_lbl.text = "Boost Amount: %.0f%%" % val
+		update_preview.call(val)
+	)
+	
+	minus_btn.pressed.connect(func():
+		slider.value = clamp(slider.value - 1.0, slider.min_value, slider.max_value)
+	)
+	plus_btn.pressed.connect(func():
+		slider.value = clamp(slider.value + 1.0, slider.min_value, slider.max_value)
+	)
+	
+	for child in foam_toggle_row.get_children():
+		if child is CheckButton:
+			child.toggled.connect(func(toggled_on: bool):
+				foam_slider_container.visible = toggled_on
+			)
+			break
+	
+	gameplay_vbox.add_child(foam_slider_container)
 
 	# Create and insert Gimme Range configuration settings rows in the Gameplay tab
-	var gameplay_vbox = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox
-	
 	var gimme_sep = HSeparator.new()
 	gameplay_vbox.add_child(gimme_sep)
 	
@@ -244,14 +369,20 @@ func _ready() -> void:
 	var gimme_1_toggle = _create_toggle_setting_row("Gimme +1 Stroke Circle", "gimme_range_1_enabled")
 	gameplay_vbox.add_child(gimme_1_toggle)
 	
-	var gimme_1_dist = _create_spinbox_setting_row("Gimme +1 Distance", "gimme_range_1_distance", 0.5, 20.0, 0.5, "yd")
+	var gimme_1_dist = _create_spinbox_setting_row("Gimme +1 Distance", "gimme_range_1_distance", 1.0, 100.0, 0.5, "ft")
 	gameplay_vbox.add_child(gimme_1_dist)
 	
 	var gimme_2_toggle = _create_toggle_setting_row("Gimme +2 Strokes Circle", "gimme_range_2_enabled")
 	gameplay_vbox.add_child(gimme_2_toggle)
 	
-	var gimme_2_dist = _create_spinbox_setting_row("Gimme +2 Distance", "gimme_range_2_distance", 0.5, 30.0, 0.5, "yd")
+	var gimme_2_dist = _create_spinbox_setting_row("Gimme +2 Distance", "gimme_range_2_distance", 1.0, 100.0, 0.5, "ft")
 	gameplay_vbox.add_child(gimme_2_dist)
+
+	var gimme_3_toggle = _create_toggle_setting_row("Gimme +3 Strokes Circle", "gimme_range_3_enabled")
+	gameplay_vbox.add_child(gimme_3_toggle)
+	
+	var gimme_3_dist = _create_spinbox_setting_row("Gimme +3 Distance", "gimme_range_3_distance", 1.0, 100.0, 0.5, "ft")
+	gameplay_vbox.add_child(gimme_3_dist)
 
 	var turn_sep = HSeparator.new()
 	gameplay_vbox.add_child(turn_sep)
@@ -265,7 +396,7 @@ func _ready() -> void:
 	var turn_order_row = _create_option_setting_row("Turn Order Mode", "turn_order_mode", ["Stay Up", "Classic", "Full Hole"])
 	gameplay_vbox.add_child(turn_order_row)
 	
-	var custom_next_player_toggle = _create_toggle_setting_row("Repeat Shot if <= 20 Yards", "custom_next_player")
+	var custom_next_player_toggle = _create_toggle_setting_row("Repeat Shot if <= 35% Club Distance", "custom_next_player")
 	gameplay_vbox.add_child(custom_next_player_toggle)
 
 	var golf_clap_toggle = _create_toggle_setting_row("Golf Clap Audio", "golf_clap_enabled")
@@ -321,6 +452,9 @@ func _ready() -> void:
 	fx_label.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
 	camera_vbox.add_child(fx_label)
 	
+	var graphics_row = _create_option_setting_row("Graphics Quality", "graphics_quality", ["Low", "High"])
+	camera_vbox.add_child(graphics_row)
+	
 	# DOF toggle
 	var dof_row = _create_toggle_setting_row("Depth of Field", "dof_enabled")
 	camera_vbox.add_child(dof_row)
@@ -361,7 +495,7 @@ func _ready() -> void:
 			ThemeManager.apply_primary_button_style(players_btn, 8)
 			players_btn.pressed.connect(func():
 				manage_players_requested.emit()
-				close_settings_requested.emit()
+				request_close()
 			)
 			buttons_hbox.add_child(players_btn)
 
@@ -370,13 +504,57 @@ func _ready() -> void:
 		close_btn.text = "Close"
 		close_btn.custom_minimum_size = Vector2(170, 54)
 		close_btn.add_theme_font_size_override("font_size", 18)
+		close_btn.focus_mode = Control.FOCUS_NONE
 		ThemeManager.apply_primary_button_style(close_btn, 8)
-		close_btn.pressed.connect(func(): close_settings_requested.emit())
+		close_btn.pressed.connect(func(): request_close())
 		buttons_hbox.add_child(close_btn)
 
 
-func _on_header_close_button_pressed() -> void:
+func request_close() -> void:
+	visible = false
+	var curr: Node = get_parent()
+	while curr != null:
+		if curr is CanvasLayer or curr.name == "SettingsLayer" or curr.name.ends_with("Settings") or curr.name == "SettingsModalLayer":
+			if "visible" in curr:
+				curr.visible = false
+		curr = curr.get_parent()
 	close_settings_requested.emit()
+	_on_close_settings_requested()
+
+
+func _on_close_settings_requested() -> void:
+	if not is_inside_tree():
+		return
+	visible = false
+	var curr: Node = get_parent()
+	while curr != null:
+		if curr is CanvasLayer or curr.name == "SettingsLayer" or curr.name.ends_with("Settings") or curr.name == "SettingsModalLayer":
+			if "visible" in curr:
+				curr.visible = false
+		curr = curr.get_parent()
+	if GlobalSettings and GlobalSettings.range_settings and "graphics_quality" in GlobalSettings.range_settings:
+		GlobalSettings.save_settings()
+		var q = str(GlobalSettings.range_settings.graphics_quality.value)
+		if _graphics_quality_changed or q != _last_applied_graphics_quality:
+			_graphics_quality_changed = false
+			_last_applied_graphics_quality = q
+			print("[RangeSettings] Graphics quality setting changed to '%s'. Reloading graphics in scene tree with spinner..." % q)
+			MobilePerformance.apply_graphics_quality_with_spinner(get_tree(), q)
+
+
+var _last_opened_msec: int = 0
+
+func _on_settings_opened() -> void:
+	var now = Time.get_ticks_msec()
+	if now - _last_opened_msec < 500:
+		return
+	_last_opened_msec = now
+	if has_node("/root/AnnouncerEngine"):
+		get_node("/root/AnnouncerEngine").call("SpeakSettingsOpened")
+
+
+func _on_header_close_button_pressed() -> void:
+	request_close()
 
 
 func _on_settings_button_pressed() -> void:
@@ -386,7 +564,7 @@ func _on_settings_button_pressed() -> void:
 func _on_background_clicked(event: InputEvent) -> void:
 	# Close the menu when clicking on the background
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		close_settings_requested.emit()
+		request_close()
 
 
 func _on_exit_button_pressed() -> void:
@@ -467,7 +645,7 @@ func _setup_square_monitor_section() -> void:
 	section.add_theme_constant_override("separation", 16)
 
 	var title := Label.new()
-	title.text = "Square Launch Monitor"
+	title.text = "Bluetooth Launch Monitor (Square Golf / Garmin Approach R10)"
 	title.add_theme_font_size_override("font_size", 22)
 	title.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
 	section.add_child(title)
@@ -483,12 +661,38 @@ func _setup_square_monitor_section() -> void:
 	enabled_row.add_child(square_enabled_button)
 	section.add_child(enabled_row)
 
+	var type_row := HBoxContainer.new()
+	type_row.custom_minimum_size = Vector2(0, 52)
+	type_row.add_child(_make_label("Device Type"))
+	square_device_type_option = OptionButton.new()
+	square_device_type_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	square_device_type_option.add_item("Auto-Detect (Recommended)", 0)
+	square_device_type_option.set_item_metadata(0, "auto")
+	square_device_type_option.add_item("Square Golf", 1)
+	square_device_type_option.set_item_metadata(1, "square")
+	square_device_type_option.add_item("Garmin Approach R10", 2)
+	square_device_type_option.set_item_metadata(2, "garmin")
+	var saved_t := str(launch_monitor.settings.get("device_type", "auto"))
+	match saved_t:
+		"square": square_device_type_option.select(1)
+		"garmin": square_device_type_option.select(2)
+		_: square_device_type_option.select(0)
+	square_device_type_option.item_selected.connect(func(idx: int):
+		var val := str(square_device_type_option.get_item_metadata(idx))
+		launch_monitor.set_device_type(val)
+		_refresh_square_devices()
+	)
+	_setup_touch_option_button(square_device_type_option)
+	type_row.add_child(square_device_type_option)
+	section.add_child(type_row)
+
 	var device_row := HBoxContainer.new()
 	device_row.custom_minimum_size = Vector2(0, 52)
 	device_row.add_child(_make_label("Device"))
 	square_device_option = OptionButton.new()
 	square_device_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_setup_touch_option_button(square_device_option)
+	square_device_option.item_selected.connect(_on_square_device_selected)
 	device_row.add_child(square_device_option)
 	section.add_child(device_row)
 
@@ -527,6 +731,16 @@ func _setup_square_monitor_section() -> void:
 	ThemeManager.apply_primary_button_style(square_ready_button, 8)
 	square_ready_button.pressed.connect(_on_square_ready_pressed)
 	action_row.add_child(square_ready_button)
+
+	garmin_calibrate_button = Button.new()
+	garmin_calibrate_button.text = "Calibrate Tilt"
+	garmin_calibrate_button.custom_minimum_size = Vector2(140, 52)
+	garmin_calibrate_button.add_theme_font_size_override("font_size", 18)
+	ThemeManager.apply_secondary_button_style(garmin_calibrate_button, 8)
+	garmin_calibrate_button.pressed.connect(func():
+		launch_monitor.calibrate_garmin_tilt()
+	)
+	action_row.add_child(garmin_calibrate_button)
 	
 	section.add_child(action_row)
 
@@ -642,6 +856,201 @@ func _setup_square_monitor_section() -> void:
 	_update_square_status_labels()
 
 
+func _setup_tcp_monitor_section() -> void:
+	var root := $MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox
+	
+	var sep := HSeparator.new()
+	root.add_child(sep)
+	
+	var section := VBoxContainer.new()
+	section.name = "TcpMonitorSection"
+	section.add_theme_constant_override("separation", 14)
+	
+	var title := Label.new()
+	title.text = "GSPro / Network Launch Monitor (TCP)"
+	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
+	section.add_child(title)
+	
+	var desc := Label.new()
+	desc.text = "Receives GSPro Open Connect v1 shot packets over TCP from external bridges (PiTrac, MLM2PRO, Garmin R10, FlightScope, Uneekor, Bushnell, inject_shot.py)."
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.add_theme_font_size_override("font_size", 15)
+	desc.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	section.add_child(desc)
+	
+	# Current values
+	var current_port: int = int(GlobalSettings.range_settings.tcp_server_port.value) if "tcp_server_port" in GlobalSettings.range_settings else 49152
+	var current_ip: String = str(GlobalSettings.range_settings.tcp_server_ip.value) if "tcp_server_ip" in GlobalSettings.range_settings else "0.0.0.0"
+	
+	# Status Label
+	var tcp_status_lbl := Label.new()
+	tcp_status_lbl.name = "TcpStatusLabel"
+	tcp_status_lbl.add_theme_font_size_override("font_size", 17)
+	tcp_status_lbl.add_theme_color_override("font_color", Color(0.4, 0.85, 0.55))
+	
+	var update_status_text = func():
+		var p = int(GlobalSettings.range_settings.tcp_server_port.value) if "tcp_server_port" in GlobalSettings.range_settings else 49152
+		var ip = str(GlobalSettings.range_settings.tcp_server_ip.value) if "tcp_server_ip" in GlobalSettings.range_settings else "0.0.0.0"
+		var host_str = ip if ip != "0.0.0.0" and ip != "*" else "all interfaces (0.0.0.0)"
+		tcp_status_lbl.text = "🟢 Active Listener: %s on port %d" % [host_str, p]
+	
+	update_status_text.call()
+	section.add_child(tcp_status_lbl)
+	
+	# Port Row
+	var port_row := HBoxContainer.new()
+	port_row.custom_minimum_size = Vector2(0, 52)
+	port_row.add_theme_constant_override("separation", 10)
+	port_row.add_child(_make_label("Port"))
+	
+	var btn_49152 := Button.new()
+	btn_49152.text = "49152 (Default)"
+	btn_49152.custom_minimum_size = Vector2(150, 48)
+	btn_49152.add_theme_font_size_override("font_size", 16)
+	port_row.add_child(btn_49152)
+	
+	var btn_921 := Button.new()
+	btn_921.text = "921 (Legacy GSPro v1)"
+	btn_921.custom_minimum_size = Vector2(190, 48)
+	btn_921.add_theme_font_size_override("font_size", 16)
+	port_row.add_child(btn_921)
+	
+	var port_spin := SpinBox.new()
+	port_spin.min_value = 1
+	port_spin.max_value = 65535
+	port_spin.step = 1
+	port_spin.value = current_port
+	port_spin.custom_minimum_size = Vector2(130, 48)
+	var spin_le = port_spin.get_line_edit()
+	if spin_le != null:
+		spin_le.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		spin_le.add_theme_font_size_override("font_size", 18)
+		ThemeManager.apply_input_style(spin_le, 8)
+	port_row.add_child(port_spin)
+	
+	section.add_child(port_row)
+	
+	# Bind IP Row
+	var ip_row := HBoxContainer.new()
+	ip_row.custom_minimum_size = Vector2(0, 52)
+	ip_row.add_theme_constant_override("separation", 10)
+	ip_row.add_child(_make_label("Bind IP"))
+	
+	var btn_ip_all := Button.new()
+	btn_ip_all.text = "0.0.0.0 (All)"
+	btn_ip_all.custom_minimum_size = Vector2(150, 48)
+	btn_ip_all.add_theme_font_size_override("font_size", 16)
+	ip_row.add_child(btn_ip_all)
+	
+	var btn_ip_local := Button.new()
+	btn_ip_local.text = "127.0.0.1 (Local)"
+	btn_ip_local.custom_minimum_size = Vector2(160, 48)
+	btn_ip_local.add_theme_font_size_override("font_size", 16)
+	ip_row.add_child(btn_ip_local)
+	
+	var ip_input := LineEdit.new()
+	ip_input.text = current_ip
+	ip_input.placeholder_text = "0.0.0.0"
+	ip_input.custom_minimum_size = Vector2(140, 48)
+	ip_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ip_input.add_theme_font_size_override("font_size", 16)
+	ThemeManager.apply_input_style(ip_input, 8)
+	ip_row.add_child(ip_input)
+	
+	section.add_child(ip_row)
+	
+	# LAN IP hint
+	var lan_lbl := Label.new()
+	var lan_ip := "127.0.0.1"
+	for addr in IP.get_local_addresses():
+		if not addr.contains(":") and not addr.begins_with("127.") and not addr.begins_with("169.254."):
+			lan_ip = addr
+			break
+	lan_lbl.text = "💡 Local Network IP: %s (configure this destination in phone or tablet connector apps on Wi-Fi)" % lan_ip
+	lan_lbl.add_theme_font_size_override("font_size", 14)
+	lan_lbl.add_theme_color_override("font_color", Color(0.65, 0.85, 1.0))
+	lan_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	section.add_child(lan_lbl)
+	
+	# Highlight helper
+	var update_buttons_and_restart = func(new_port: int, new_ip: String):
+		if "tcp_server_port" in GlobalSettings.range_settings:
+			GlobalSettings.range_settings.tcp_server_port.set_value(new_port)
+		if "tcp_server_ip" in GlobalSettings.range_settings:
+			GlobalSettings.range_settings.tcp_server_ip.set_value(new_ip)
+		GlobalSettings.save_settings()
+		
+		# Update UI
+		if int(port_spin.value) != new_port:
+			port_spin.set_value_no_signal(new_port)
+		if ip_input.text != new_ip:
+			ip_input.text = new_ip
+			
+		if new_port == 49152:
+			ThemeManager.apply_primary_button_style(btn_49152, 8)
+			ThemeManager.apply_secondary_button_style(btn_921, 8)
+		elif new_port == 921:
+			ThemeManager.apply_secondary_button_style(btn_49152, 8)
+			ThemeManager.apply_primary_button_style(btn_921, 8)
+		else:
+			ThemeManager.apply_secondary_button_style(btn_49152, 8)
+			ThemeManager.apply_secondary_button_style(btn_921, 8)
+			
+		if new_ip == "0.0.0.0" or new_ip == "*":
+			ThemeManager.apply_primary_button_style(btn_ip_all, 8)
+			ThemeManager.apply_secondary_button_style(btn_ip_local, 8)
+		elif new_ip == "127.0.0.1":
+			ThemeManager.apply_secondary_button_style(btn_ip_all, 8)
+			ThemeManager.apply_primary_button_style(btn_ip_local, 8)
+		else:
+			ThemeManager.apply_secondary_button_style(btn_ip_all, 8)
+			ThemeManager.apply_secondary_button_style(btn_ip_local, 8)
+			
+		update_status_text.call()
+		
+		# Restart any active TCPServer in scene
+		var scene_tcp = get_tree().root.find_child("TCPServer", true, false)
+		if scene_tcp != null and scene_tcp.has_method("Restart"):
+			scene_tcp.call("Restart", new_port, new_ip)
+	
+	# Initial button highlight
+	var init_p = int(GlobalSettings.range_settings.tcp_server_port.value) if "tcp_server_port" in GlobalSettings.range_settings else 49152
+	var init_ip = str(GlobalSettings.range_settings.tcp_server_ip.value) if "tcp_server_ip" in GlobalSettings.range_settings else "0.0.0.0"
+	update_buttons_and_restart.call(init_p, init_ip)
+	
+	btn_49152.pressed.connect(func():
+		var current_ip_val = str(GlobalSettings.range_settings.tcp_server_ip.value) if "tcp_server_ip" in GlobalSettings.range_settings else "0.0.0.0"
+		update_buttons_and_restart.call(49152, current_ip_val)
+	)
+	btn_921.pressed.connect(func():
+		var current_ip_val = str(GlobalSettings.range_settings.tcp_server_ip.value) if "tcp_server_ip" in GlobalSettings.range_settings else "0.0.0.0"
+		update_buttons_and_restart.call(921, current_ip_val)
+	)
+	port_spin.value_changed.connect(func(v: float):
+		var current_ip_val = str(GlobalSettings.range_settings.tcp_server_ip.value) if "tcp_server_ip" in GlobalSettings.range_settings else "0.0.0.0"
+		update_buttons_and_restart.call(int(v), current_ip_val)
+	)
+	btn_ip_all.pressed.connect(func():
+		var current_p_val = int(GlobalSettings.range_settings.tcp_server_port.value) if "tcp_server_port" in GlobalSettings.range_settings else 49152
+		update_buttons_and_restart.call(current_p_val, "0.0.0.0")
+	)
+	btn_ip_local.pressed.connect(func():
+		var current_p_val = int(GlobalSettings.range_settings.tcp_server_port.value) if "tcp_server_port" in GlobalSettings.range_settings else 49152
+		update_buttons_and_restart.call(current_p_val, "127.0.0.1")
+	)
+	ip_input.text_submitted.connect(func(txt: String):
+		var current_p_val = int(GlobalSettings.range_settings.tcp_server_port.value) if "tcp_server_port" in GlobalSettings.range_settings else 49152
+		update_buttons_and_restart.call(current_p_val, txt.strip_edges() if not txt.strip_edges().is_empty() else "0.0.0.0")
+	)
+	ip_input.focus_exited.connect(func():
+		var current_p_val = int(GlobalSettings.range_settings.tcp_server_port.value) if "tcp_server_port" in GlobalSettings.range_settings else 49152
+		update_buttons_and_restart.call(current_p_val, ip_input.text.strip_edges() if not ip_input.text.strip_edges().is_empty() else "0.0.0.0")
+	)
+	
+	root.add_child(section)
+
+
 func _make_label(text: String) -> Label:
 	var label := Label.new()
 	label.text = text
@@ -664,28 +1073,91 @@ func _select_option_by_metadata(option: OptionButton, metadata: String) -> void:
 			return
 
 
+func _on_square_device_selected(index: int) -> void:
+	if square_device_option == null or not has_node("/root/LaunchMonitorManager") or index < 0:
+		return
+	var launch_monitor = get_node("/root/LaunchMonitorManager")
+	var dev_id := str(square_device_option.get_item_metadata(index))
+	if dev_id == "":
+		return
+	launch_monitor.settings["device_id"] = dev_id
+	if launch_monitor.devices.has(dev_id):
+		var dev = launch_monitor.devices[dev_id]
+		launch_monitor.settings["device_name"] = str(dev.get("name", ""))
+	launch_monitor._save_settings()
+	_square_debug("Selected device_id=%s (%s)" % [dev_id, launch_monitor.settings.get("device_name", "")])
+
+
 func _refresh_square_devices() -> void:
 	if square_device_option == null or not has_node("/root/LaunchMonitorManager"):
 		return
 	var launch_monitor = get_node("/root/LaunchMonitorManager")
 	var selected_device := str(launch_monitor.settings.get("device_id", ""))
 	var saved_name := str(launch_monitor.settings.get("device_name", ""))
+	var saved_t := str(launch_monitor.settings.get("device_type", "auto"))
 	if saved_name == "":
-		saved_name = "Square Golf"
+		saved_name = "Square Golf" if saved_t != "garmin" else "Garmin Approach R10"
 	if selected_device != "" and not launch_monitor.devices.has(selected_device):
 		launch_monitor.devices[selected_device] = {
 			"name": saved_name,
-			"rssi": 0
+			"rssi": 0,
+			"type": saved_t if saved_t != "auto" else launch_monitor.detect_device_type(selected_device, saved_name)
 		}
-	square_device_option.clear()
+
+	var matching_keys: Array[String] = []
 	for device_id in launch_monitor.devices.keys():
 		var device = launch_monitor.devices[device_id]
-		var label := str(device.get("name", "Square Golf"))
-		var index := square_device_option.item_count
-		square_device_option.add_item(label)
-		square_device_option.set_item_metadata(index, device_id)
-		if device_id == selected_device:
-			square_device_option.select(index)
+		var dev_name: String = str(device.get("name", "Launch Monitor"))
+		var dev_type: String = str(device.get("type", ""))
+		if dev_type == "":
+			dev_type = launch_monitor.detect_device_type(device_id, dev_name)
+
+		if saved_t == "square" and dev_type != "square":
+			continue
+		if saved_t == "garmin" and dev_type != "garmin":
+			continue
+		matching_keys.append(device_id)
+
+	# Auto-select first device if none is selected or current selection is invalid
+	if (selected_device == "" or not matching_keys.has(selected_device)) and matching_keys.size() > 0:
+		selected_device = matching_keys[0]
+		launch_monitor.settings["device_id"] = selected_device
+		var dev = launch_monitor.devices[selected_device]
+		launch_monitor.settings["device_name"] = str(dev.get("name", ""))
+		launch_monitor._save_settings()
+
+	# Avoid clearing dropdown if items are already identical (prevents closing popup while user interacts)
+	var needs_rebuild := false
+	if square_device_option.item_count != matching_keys.size():
+		needs_rebuild = true
+	else:
+		for i in range(matching_keys.size()):
+			if str(square_device_option.get_item_metadata(i)) != matching_keys[i]:
+				needs_rebuild = true
+				break
+
+	if needs_rebuild:
+		square_device_option.clear()
+		for device_id in matching_keys:
+			var device = launch_monitor.devices[device_id]
+			var dev_name: String = str(device.get("name", "Launch Monitor"))
+			var dev_type: String = str(device.get("type", ""))
+			if dev_type == "":
+				dev_type = launch_monitor.detect_device_type(device_id, dev_name)
+
+			var prefix := ""
+			if saved_t == "auto":
+				prefix = "[Garmin R10] " if dev_type == "garmin" else "[Square] "
+			var label := prefix + dev_name
+			var index := square_device_option.item_count
+			square_device_option.add_item(label)
+			square_device_option.set_item_metadata(index, device_id)
+
+	for index in range(square_device_option.item_count):
+		if str(square_device_option.get_item_metadata(index)) == selected_device:
+			if square_device_option.selected != index:
+				square_device_option.select(index)
+			break
 
 
 func _exit_tree() -> void:
@@ -710,6 +1182,8 @@ func _update_square_status_labels() -> void:
 		return
 	var launch_monitor = get_node("/root/LaunchMonitorManager")
 	square_status_label.text = "Status: %s" % launch_monitor.status
+	if square_scan_button != null:
+		square_scan_button.text = "Stop Scan" if launch_monitor.status == "Scanning" else "Scan"
 	if int(launch_monitor.battery_level) >= 0:
 		square_battery_label.text = "Battery: %d%%" % int(launch_monitor.battery_level)
 	else:
@@ -730,7 +1204,15 @@ func _on_square_enabled_toggled(toggled_on: bool) -> void:
 
 func _on_square_scan_pressed() -> void:
 	_square_debug("Scan pressed")
-	get_node("/root/LaunchMonitorManager").start_scan()
+	var launch_monitor = get_node("/root/LaunchMonitorManager")
+	if launch_monitor.status == "Scanning":
+		launch_monitor.stop_scan()
+		if square_scan_button != null:
+			square_scan_button.text = "Scan"
+	else:
+		launch_monitor.start_scan()
+		if square_scan_button != null:
+			square_scan_button.text = "Stop Scan"
 
 
 func _on_square_connect_pressed() -> void:
@@ -864,6 +1346,11 @@ func _create_announcer_toggle_row(label_text: String, prop_name: String, announc
 	btn.toggled.connect(func(toggled_on: bool):
 		announcer.set(prop_name, toggled_on)
 		GlobalSettings.save_settings()
+		if prop_name.begins_with("Heckle") or prop_name.begins_with("Announcer"):
+			if toggled_on:
+				announcer.call("SpeakHecklesEnabled")
+			else:
+				announcer.call("SpeakHecklesDisabled")
 	)
 	row.add_child(btn)
 	return row
@@ -1230,7 +1717,7 @@ func _create_option_setting_row(label_text: String, setting_name: String, option
 
 	var setting: Setting = GlobalSettings.range_settings.settings.get(setting_name, null)
 	var active_val = ""
-	if has_node("/root/MultiplayerManager"):
+	if setting_name == "turn_order_mode" and has_node("/root/MultiplayerManager"):
 		var mp_mgr = get_node("/root/MultiplayerManager")
 		if "turn_order_mode" in mp_mgr and not str(mp_mgr.turn_order_mode).is_empty():
 			active_val = str(mp_mgr.turn_order_mode)
@@ -1242,15 +1729,21 @@ func _create_option_setting_row(label_text: String, setting_name: String, option
 			opt.selected = i
 			break
 
+	opt.focus_mode = Control.FOCUS_NONE
 	opt.item_selected.connect(func(index: int):
+		opt.release_focus()
 		var val = options[index]
 		if setting != null:
 			setting.set_value(val)
-		if has_node("/root/MultiplayerManager"):
+		if setting_name == "turn_order_mode" and has_node("/root/MultiplayerManager"):
 			var mp_mgr = get_node("/root/MultiplayerManager")
 			mp_mgr.turn_order_mode = val
 			if mp_mgr.has_method("save_current_match"):
 				mp_mgr.save_current_match()
+		elif setting_name == "graphics_quality":
+			_graphics_quality_changed = true
+			if GlobalSettings:
+				GlobalSettings.save_settings()
 	)
 	row.add_child(opt)
 
@@ -1513,3 +2006,279 @@ func _show_stat_limit_popup() -> void:
 	
 	add_child(overlay)
 	_stat_limit_modal = overlay
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _rebind_modal != null and is_instance_valid(_rebind_modal):
+		if event is InputEventKey and event.pressed and not event.echo:
+			_handle_rebind_key_event(event, _rebind_action_name, _rebind_modal)
+			get_viewport().set_input_as_handled()
+
+
+func _setup_keybindings_section() -> void:
+	var tab_container = get_node_or_null("MarginContainer/VBoxContainer/TabContainer")
+	if tab_container == null:
+		return
+
+	var scroll: ScrollContainer = tab_container.get_node_or_null("Keybindings")
+	if scroll == null:
+		scroll = ScrollContainer.new()
+		scroll.name = "Keybindings"
+		scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		scroll.follow_focus = true
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+		tab_container.add_child(scroll)
+		var t_idx = scroll.get_index()
+		tab_container.set_tab_title(t_idx, "Keybindings")
+
+	for c in scroll.get_children():
+		c.queue_free()
+
+	_key_buttons_by_action.clear()
+
+	var margin = MarginContainer.new()
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_top", 16)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_bottom", 16)
+	scroll.add_child(margin)
+
+	var root = VBoxContainer.new()
+	root.name = "KeybindingsVBox"
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 16)
+	margin.add_child(root)
+
+	# --- Header & Description Card ---
+	var header_card := PanelContainer.new()
+	ThemeManager.apply_card_panel_style(header_card, true, 10, 16, 14, 16, 14)
+
+	var header_vbox := VBoxContainer.new()
+	header_vbox.add_theme_constant_override("separation", 8)
+
+	var header_top_hbox := HBoxContainer.new()
+	var header_title := Label.new()
+	header_title.text = "⌨ PC Keyboard Controls & Keybindings"
+	header_title.add_theme_font_size_override("font_size", 20)
+	header_title.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	header_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_top_hbox.add_child(header_title)
+
+	var reset_all_btn := Button.new()
+	reset_all_btn.text = "↺ Reset All to Defaults"
+	reset_all_btn.custom_minimum_size = Vector2(190, 42)
+	ThemeManager.apply_secondary_button_style(reset_all_btn, 8)
+	reset_all_btn.pressed.connect(func():
+		if has_node("/root/KeybindingManager"):
+			KeybindingManager.reset_to_defaults()
+			_refresh_keybinding_buttons()
+	)
+	header_top_hbox.add_child(reset_all_btn)
+	header_vbox.add_child(header_top_hbox)
+
+	var header_desc := Label.new()
+	header_desc.text = "Click any key binding button to rebind it. Press Escape to cancel, or Backspace to clear. Any changed keybindings are automatically saved for future sessions."
+	header_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	header_desc.add_theme_font_size_override("font_size", 16)
+	header_desc.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	header_vbox.add_child(header_desc)
+
+	header_card.add_child(header_vbox)
+	root.add_child(header_card)
+
+	# --- Categorized Action Cards ---
+	if not has_node("/root/KeybindingManager"):
+		return
+	var km = get_node("/root/KeybindingManager")
+	var categories = km.get_categories()
+
+	for cat in categories:
+		var cat_actions = km.get_actions_in_category(cat)
+		if cat_actions.is_empty():
+			continue
+
+		var cat_label := Label.new()
+		cat_label.text = cat.to_upper()
+		cat_label.add_theme_font_size_override("font_size", 18)
+		cat_label.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
+		root.add_child(cat_label)
+
+		var card := PanelContainer.new()
+		ThemeManager.apply_card_panel_style(card, false, 8, 16, 12, 16, 12)
+
+		var card_vbox := VBoxContainer.new()
+		card_vbox.add_theme_constant_override("separation", 10)
+		card_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+		for i in range(cat_actions.size()):
+			var act_name = cat_actions[i]
+			var act_label = km.get_action_label(act_name)
+			var row = _create_keybinding_row(act_name, act_label)
+			card_vbox.add_child(row)
+			if i < cat_actions.size() - 1:
+				var row_sep = HSeparator.new()
+				row_sep.modulate.a = 0.25
+				card_vbox.add_child(row_sep)
+
+		card.add_child(card_vbox)
+		root.add_child(card)
+
+		var cat_sep := HSeparator.new()
+		root.add_child(cat_sep)
+
+
+func _create_keybinding_row(action_name: String, action_label: String) -> HBoxContainer:
+	var hbox := HBoxContainer.new()
+	hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.custom_minimum_size = Vector2(0, 48)
+
+	var name_lbl := Label.new()
+	name_lbl.text = action_label
+	name_lbl.add_theme_font_size_override("font_size", 17)
+	name_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hbox.add_child(name_lbl)
+
+	var key_btn := Button.new()
+	key_btn.name = "KeyBtn_" + action_name
+	var current_key_str = get_node("/root/KeybindingManager").get_action_key_name(action_name) if has_node("/root/KeybindingManager") else ""
+	key_btn.text = "[ %s ]" % current_key_str
+	key_btn.custom_minimum_size = Vector2(140, 44)
+	key_btn.add_theme_font_size_override("font_size", 16)
+	ThemeManager.apply_secondary_button_style(key_btn, 8)
+
+	key_btn.pressed.connect(func():
+		_open_rebind_modal(action_name, action_label, key_btn)
+	)
+
+	hbox.add_child(key_btn)
+	_key_buttons_by_action[action_name] = key_btn
+	return hbox
+
+
+func _refresh_keybinding_buttons() -> void:
+	if not has_node("/root/KeybindingManager"):
+		return
+	var km = get_node("/root/KeybindingManager")
+	for act_name in _key_buttons_by_action.keys():
+		var btn = _key_buttons_by_action[act_name] as Button
+		if btn != null and is_instance_valid(btn):
+			var k_name = km.get_action_key_name(act_name)
+			btn.text = "[ %s ]" % k_name
+
+
+func _open_rebind_modal(action_name: String, action_label: String, _target_btn: Button) -> void:
+	if _rebind_modal != null and is_instance_valid(_rebind_modal):
+		_rebind_modal.queue_free()
+		_rebind_modal = null
+
+	_rebind_action_name = action_name
+
+	var overlay := ColorRect.new()
+	overlay.name = "RebindOverlay"
+	overlay.color = Color(0.0, 0.0, 0.0, 0.75)
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var modal := PanelContainer.new()
+	ThemeManager.apply_modal_style(modal, 12)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+
+	var title_lbl := Label.new()
+	title_lbl.text = "⌨ Rebind Control"
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 24)
+	title_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_ACCENT)
+	vbox.add_child(title_lbl)
+
+	var target_lbl := Label.new()
+	target_lbl.text = "Press any key on your keyboard to assign to:\n\"%s\"" % action_label
+	target_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	target_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	target_lbl.add_theme_font_size_override("font_size", 18)
+	target_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	vbox.add_child(target_lbl)
+
+	var listening_lbl := Label.new()
+	listening_lbl.text = "● LISTENING FOR KEY PRESS..."
+	listening_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	listening_lbl.add_theme_font_size_override("font_size", 18)
+	listening_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_GOLD)
+	vbox.add_child(listening_lbl)
+
+	var note_lbl := Label.new()
+	note_lbl.text = "Press ESC to cancel  •  Press Backspace to unbind"
+	note_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note_lbl.add_theme_font_size_override("font_size", 14)
+	note_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	vbox.add_child(note_lbl)
+
+	var cancel_btn := Button.new()
+	cancel_btn.text = "Cancel"
+	cancel_btn.custom_minimum_size = Vector2(130, 44)
+	cancel_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	ThemeManager.apply_secondary_button_style(cancel_btn, 8)
+	cancel_btn.pressed.connect(func():
+		overlay.queue_free()
+		_rebind_modal = null
+		_rebind_action_name = ""
+	)
+	vbox.add_child(cancel_btn)
+
+	modal.add_child(vbox)
+	overlay.add_child(modal)
+
+	modal.anchor_left = 0.5
+	modal.anchor_top = 0.5
+	modal.anchor_right = 0.5
+	modal.anchor_bottom = 0.5
+	modal.offset_left = -250
+	modal.offset_top = -140
+	modal.offset_right = 250
+	modal.offset_bottom = 140
+
+	add_child(overlay)
+	_rebind_modal = overlay
+
+
+func _handle_rebind_key_event(event: InputEventKey, action_name: String, overlay: Control) -> void:
+	if event.keycode == KEY_ESCAPE:
+		overlay.queue_free()
+		_rebind_modal = null
+		_rebind_action_name = ""
+		return
+
+	if event.keycode == KEY_BACKSPACE:
+		if has_node("/root/KeybindingManager"):
+			var km = get_node("/root/KeybindingManager")
+			km.rebind_action(action_name, KEY_NONE)
+			_refresh_keybinding_buttons()
+		overlay.queue_free()
+		_rebind_modal = null
+		_rebind_action_name = ""
+		return
+
+	var chosen_key: Key = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+	if chosen_key == KEY_NONE or chosen_key == 0:
+		return
+
+	if has_node("/root/KeybindingManager"):
+		var km = get_node("/root/KeybindingManager")
+		var conflict_action = km.get_conflict_action(chosen_key, action_name)
+		if not conflict_action.is_empty():
+			km.rebind_action(conflict_action, KEY_NONE)
+
+		km.rebind_action(action_name, chosen_key)
+		_refresh_keybinding_buttons()
+
+	overlay.queue_free()
+	_rebind_modal = null
+	_rebind_action_name = ""

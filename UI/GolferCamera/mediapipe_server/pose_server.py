@@ -158,24 +158,43 @@ class CameraManager:
         self.lock = threading.Lock()
         self.cap = None
         self.active_index = -1
+        self._read_fail_count = 0
 
     def scan_cameras(self) -> list:
         cams = []
-        # Check indices 0..3 using standard VideoCapture (fast MSMF on Windows)
+        with self.lock:
+            active_idx = self.active_index
+            active_opened = self.cap is not None and self.cap.isOpened()
+
+        # Check indices 0..3 using safe probe
         for i in range(4):
-            cap = cv2.VideoCapture(i)
+            if active_opened and i == active_idx:
+                cams.append({"index": i, "name": f"System Camera {i} (Active)"})
+                continue
+
+            cap = None
+            if os.name == "nt":
+                cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+                if not cap.isOpened():
+                    cap.release()
+                    cap = cv2.VideoCapture(i)
+            else:
+                cap = cv2.VideoCapture(i)
+
             if cap.isOpened():
                 ret, _ = cap.read()
                 if ret:
                     cams.append({"index": i, "name": f"System Camera {i}"})
                 cap.release()
             else:
+                cap.release()
                 if i >= 1 and len(cams) == 0:
                     break
         return cams
 
     def select_camera(self, index: int) -> bool:
         with self.lock:
+            self._read_fail_count = 0
             if self.active_index == index and self.cap is not None and self.cap.isOpened():
                 return True
             if self.cap is not None:
@@ -186,13 +205,23 @@ class CameraManager:
             if index < 0:
                 return True
 
-            cap = cv2.VideoCapture(index)
+            cap = None
+            if os.name == "nt":
+                cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+                if not cap.isOpened():
+                    cap.release()
+                    cap = cv2.VideoCapture(index)
+            else:
+                cap = cv2.VideoCapture(index)
+
             if cap is not None and cap.isOpened():
                 self.cap = cap
                 self.active_index = index
                 print(f"[PoseServer] Activated system camera {index}")
                 return True
             else:
+                if cap is not None:
+                    cap.release()
                 print(f"[PoseServer] Failed to open system camera {index}")
                 return False
 
@@ -203,7 +232,28 @@ class CameraManager:
 
             ret, frame = self.cap.read()
             if not ret or frame is None:
+                # Retry once in case of dropped frame
+                ret, frame = self.cap.read()
+
+            if not ret or frame is None:
+                self._read_fail_count += 1
+                if self._read_fail_count >= 5 and self.active_index >= 0:
+                    print(f"[PoseServer] Camera {self.active_index} read failed {self._read_fail_count} times, reconnecting...")
+                    # Reopen camera
+                    if self.cap is not None:
+                        self.cap.release()
+                        self.cap = None
+                    if os.name == "nt":
+                        self.cap = cv2.VideoCapture(self.active_index, cv2.CAP_DSHOW)
+                        if not self.cap.isOpened():
+                            self.cap.release()
+                            self.cap = cv2.VideoCapture(self.active_index)
+                    else:
+                        self.cap = cv2.VideoCapture(self.active_index)
+                    self._read_fail_count = 0
                 return {"detected": False, "landmarks": {}, "image_base64": "", "error": "Frame read failed"}
+
+            self._read_fail_count = 0
 
             # Resize if large to ensure smooth 30 FPS transmission
             h, w = frame.shape[:2]
@@ -288,10 +338,15 @@ class PoseHandler(http.server.BaseHTTPRequestHandler):
         if path == "/health":
             self._send(200, {
                 "status": "ok",
+                "pid": os.getpid(),
                 "model": MODEL_FILENAME,
                 "camera_active": camera_mgr.active_index >= 0,
                 "camera_index": camera_mgr.active_index
             })
+        elif path == "/shutdown":
+            camera_mgr.close()
+            self._send(200, {"status": "shutting down"})
+            threading.Thread(target=lambda: (time.sleep(0.2), os._exit(0))).start()
         elif path == "/cameras":
             cams = camera_mgr.scan_cameras()
             self._send(200, {"cameras": cams})

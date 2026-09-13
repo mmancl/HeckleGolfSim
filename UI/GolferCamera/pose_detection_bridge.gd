@@ -176,12 +176,17 @@ func _check_existing_server() -> void:
 	_health_req = HTTPRequest.new()
 	_health_req.name = "InitialHealthCheck"
 	_health_req.timeout = 0.8
-	_health_req.request_completed.connect(func(_result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray):
+	_health_req.request_completed.connect(func(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
 		if _health_req != null:
 			_health_req.queue_free()
 			_health_req = null
 		if response_code == 200:
-			print("[PoseDetectionBridge] Reusing existing Python server at %s." % SERVER_URL)
+			var json := JSON.new()
+			if json.parse(body.get_string_from_utf8()) == OK and json.data is Dictionary:
+				var pid_val = json.data.get("pid", -1)
+				if pid_val is int and pid_val > 0:
+					_python_pid = pid_val
+			print("[PoseDetectionBridge] Reusing existing Python server at %s (PID: %d)." % [SERVER_URL, _python_pid])
 			_server_is_ready = true
 			server_ready.emit()
 			fetch_desktop_cameras()
@@ -357,6 +362,8 @@ func select_desktop_camera(index: int) -> void:
 				_poll_desktop_camera_frame()
 		)
 		add_child(_cam_select_req)
+	elif _cam_select_req.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		_cam_select_req.cancel_request()
 	
 	print("[PoseDetectionBridge] Requesting select camera %d..." % index)
 	var headers: PackedStringArray = ["Content-Type: application/json"]
@@ -407,11 +414,13 @@ func _poll_desktop_camera_frame() -> void:
 		_cam_capture_req.timeout = 3.0
 		_cam_capture_req.request_completed.connect(_on_cam_capture_response)
 		add_child(_cam_capture_req)
+	elif _cam_capture_req.get_http_client_status() == HTTPClient.STATUS_REQUESTING or _cam_capture_req.get_http_client_status() == HTTPClient.STATUS_BODY:
+		_cam_capture_req.cancel_request()
 	
 	var err := _cam_capture_req.request(CAM_CAPTURE_URL)
 	if err != OK:
 		_desktop_polling_in_flight = false
-		if _desktop_polling_active:
+		if is_inside_tree() and _desktop_polling_active:
 			get_tree().create_timer(FRAME_INTERVAL).timeout.connect(_poll_desktop_camera_frame)
 
 
@@ -439,7 +448,7 @@ func _on_cam_capture_response(_result: int, response_code: int, _headers: Packed
 						pose_lost.emit()
 					desktop_frame_received.emit(img, tex, landmarks)
 	
-	if _desktop_polling_active:
+	if is_inside_tree() and _desktop_polling_active:
 		get_tree().create_timer(FRAME_INTERVAL).timeout.connect(_poll_desktop_camera_frame)
 
 
@@ -611,3 +620,12 @@ func _kill_python_server() -> void:
 		print("[PoseDetectionBridge] Stopping Python server (PID: %d)..." % _python_pid)
 		OS.kill(_python_pid)
 		_python_pid = -1
+	
+	# Send HTTP shutdown signal if server is still reachable
+	if is_inside_tree():
+		var shutdown_req = HTTPRequest.new()
+		add_child(shutdown_req)
+		shutdown_req.request("http://127.0.0.1:49154/shutdown")
+		shutdown_req.request_completed.connect(func(_res, _code, _hdr, _body):
+			shutdown_req.queue_free()
+		)

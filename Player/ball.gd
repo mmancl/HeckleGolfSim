@@ -46,6 +46,7 @@ var _physics
 var _aero
 var _surface
 var _shot_setup
+var _physics_params_factory
 
 # Physics parameters
 var params = null
@@ -121,6 +122,7 @@ var launch_spin_rpm := 0.0  # Stored for bounce calculations
 var rollout_impact_spin_rpm := 0.0  # Spin on first impact; used for rollout friction
 var is_putt := false
 var _hit_leaves_this_shot := false
+var hit_tree_this_shot := false
 var _skipping_flight := false
 
 
@@ -137,6 +139,7 @@ const OPENFAIRWAY_CLASS_PATHS := {
 	"Surface": "res://addons/openfairway/physics/Surface.cs",
 	"PhysicsParams": "res://addons/openfairway/physics/PhysicsParams.cs",
 	"ShotSetup": "res://addons/openfairway/physics/ShotSetup.cs",
+	"PhysicsParamsFactory": "res://addons/openfairway/physics/PhysicsParamsFactory.cs",
 }
 const DEFAULT_BALL_MASS := 0.04592623
 const DEFAULT_BALL_RADIUS := 0.021335
@@ -289,6 +292,7 @@ func _init_openfairway_instances() -> bool:
 	_aero = _new_openfairway(&"Aerodynamics")
 	_surface = _new_openfairway(&"Surface")
 	_shot_setup = _new_openfairway(&"ShotSetup")
+	_physics_params_factory = _new_openfairway(&"PhysicsParamsFactory")
 	if _physics == null or _aero == null or _surface == null:
 		return false
 	_ball_mass = float(_get_openfairway_property(_physics, &"ball_mass", &"BallMass", DEFAULT_BALL_MASS))
@@ -455,6 +459,29 @@ func _update_tee_elevation() -> void:
 func _create_physics_params():
 	if params != null:
 		return
+	if _physics_params_factory != null:
+		var created_params = _call_openfairway_method(
+			_physics_params_factory,
+			&"create_params",
+			&"CreateParams",
+			[
+				_air_density,
+				_air_viscosity,
+				_drag_scale,
+				_lift_scale,
+				surface_type,
+				floor_normal,
+				rollout_impact_spin_rpm,
+				0.0,
+				0.0,
+				0.0
+			]
+		)
+		if created_params != null:
+			params = created_params
+			_set_openfairway_property(params, &"slope_force_scale", &"SlopeForceScale", slope_force_scale)
+			return
+
 	var _params = _new_openfairway(&"PhysicsParams")
 	if _params == null:
 		return
@@ -470,6 +497,7 @@ func _create_physics_params():
 	_set_openfairway_property(_params, &"rollout_impact_spin", &"RolloutImpactSpin", rollout_impact_spin_rpm)
 	_set_openfairway_property(_params, &"slope_force_scale", &"SlopeForceScale", slope_force_scale)
 	_set_openfairway_property(_params, &"initial_launch_angle_deg", &"InitialLaunchAngleDeg", 0.0)
+	_set_openfairway_property(_params, &"is_putt", &"IsPutt", false)
 	
 	params = _params
 
@@ -507,6 +535,9 @@ func _update_environment() -> void:
 		return
 	_air_density = float(density)
 	_air_viscosity = float(viscosity)
+	if params != null:
+		_set_openfairway_property(params, &"air_density", &"AirDensity", _air_density)
+		_set_openfairway_property(params, &"air_viscosity", &"AirViscosity", _air_viscosity)
 
 
 func set_surface(surface: int) -> void:
@@ -635,7 +666,8 @@ func _physics_process(delta: float) -> void:
 
 	if has_node("/root/TensionManager") and not target_hole_live.is_zero_approx() and TensionManager.is_course_play_active():
 		var start_p = shot_start_pos_global if not shot_start_pos_global.is_zero_approx() else (position if not position.is_zero_approx() else spawn_position)
-		TensionManager.check_ball_proximity(global_position, target_hole_live, is_putt, start_p, shot_was_in_sand)
+		var is_airborne = (state == PhysicsEnums.BallState.FLIGHT)
+		TensionManager.check_ball_proximity(global_position, target_hole_live, is_putt, start_p, shot_was_in_sand, is_airborne, velocity)
 
 	# Check hole and rim physics interaction
 	if not is_falling_in_hole:
@@ -750,6 +782,7 @@ func _physics_process(delta: float) -> void:
 		_set_openfairway_property(params, &"surface_type", &"SurfaceType", surface_type)
 		_set_openfairway_property(params, &"slope_force_scale", &"SlopeForceScale", slope_force_scale)
 		_set_openfairway_property(params, &"is_in_sand", &"IsInSand", is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER)
+		_set_openfairway_property(params, &"is_putt", &"IsPutt", is_putt)
 
 	# Calculate forces and torques using BallPhysics
 	var total_force = _call_openfairway_method(_physics, &"calculate_forces", &"CalculateForces", [velocity, omega, was_on_ground, params])
@@ -778,6 +811,7 @@ func _physics_process(delta: float) -> void:
 			
 			if not _hit_leaves_this_shot:
 				_hit_leaves_this_shot = true
+				hit_tree_this_shot = true
 				print("[ball.gd] Hitting tree leaves! Reducing velocity.")
 				if has_node("/root/AnnouncerEngine") and not _skipping_flight:
 					get_node("/root/AnnouncerEngine").call("SpeakTreeHeckle")
@@ -1046,6 +1080,10 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 					_sfx_player.pitch_scale = randf_range(0.95, 1.05)
 					_sfx_player.stream = _sfx_tree_hit
 					_sfx_player.play()
+				if not hit_tree_this_shot:
+					hit_tree_this_shot = true
+					if has_node("/root/AnnouncerEngine") and not _skipping_flight:
+						get_node("/root/AnnouncerEngine").call("SpeakTreeHeckle")
 
 			# Damped reflection off vertical surfaces (walls, barriers, trees, etc.)
 			velocity = velocity.bounce(normal) * 0.35
@@ -1217,7 +1255,7 @@ func _enter_rest_state() -> void:
 
 func reset() -> void:
 	if has_node("/root/TensionManager"):
-		TensionManager.stop_tension()
+		TensionManager.reset_for_new_shot()
 	global_position = spawn_position
 	velocity = Vector3.ZERO
 	omega = Vector3.ZERO
@@ -1275,17 +1313,18 @@ func get_interpolated_position() -> Vector3:
 
 
 func _is_position_on_fringe(pos: Vector3) -> bool:
-	if lie_type == "fringe":
-		return true
+	var course = null
 	var player_parent = get_parent()
 	if player_parent != null:
-		if str(player_parent.get("current_lie_type")).to_lower() == "fringe":
+		course = player_parent.get_parent()
+	if course == null or not course.has_method("get_distance_to_nearest_green"):
+		var root = get_tree().current_scene if get_tree() != null else null
+		if root != null and root.has_method("get_distance_to_nearest_green"):
+			course = root
+	if course != null and course.has_method("get_distance_to_nearest_green"):
+		var d: float = course.get_distance_to_nearest_green(pos)
+		if d > 0.001 and d <= 2.5:
 			return true
-		var course = player_parent.get_parent()
-		if course != null and course.has_method("get_distance_to_nearest_green"):
-			var d: float = course.get_distance_to_nearest_green(pos)
-			if d > 0.001 and d <= 2.5:
-				return true
 	return false
 
 
@@ -1351,6 +1390,7 @@ func hit_from_data(data: Dictionary) -> void:
 	is_in_sand = false
 	water_collider = null
 	_hit_leaves_this_shot = false
+	hit_tree_this_shot = false
 	_is_in_tree_canopy = false
 	_tree_check_timer = 0.0
 	_surface_check_timer = 0.0
@@ -1538,7 +1578,16 @@ func hit_from_data(data: Dictionary) -> void:
 			global_position.y = GROUND_CENTER_HEIGHT + 0.005
 
 	if params != null:
-		_set_openfairway_property(params, &"initial_launch_angle_deg", &"InitialLaunchAngleDeg", vla_deg)
+		if _physics_params_factory != null:
+			_call_openfairway_method(
+				_physics_params_factory,
+				&"configure_shot",
+				&"ConfigureShot",
+				[params, _air_density, _air_viscosity, _drag_scale, _lift_scale, vla_deg, speed_mph, total_spin, is_putt]
+			)
+		else:
+			_set_openfairway_property(params, &"initial_launch_angle_deg", &"InitialLaunchAngleDeg", vla_deg)
+			_set_openfairway_property(params, &"is_putt", &"IsPutt", is_putt)
 
 	velocity = launch_velocity
 	omega = launch_omega
@@ -1549,6 +1598,9 @@ func hit_from_data(data: Dictionary) -> void:
 	shot_start_pos_global = global_position
 	shot_was_in_sand = is_in_sand or (lie_type == "sand")
 	launch_spin_rpm = total_spin
+
+	if has_node("/root/TensionManager"):
+		TensionManager.reset_for_new_shot()
 
 	_print_launch_debug(data, speed_mps, vla_deg, hla_deg, total_spin, spin_axis)
 
@@ -1603,7 +1655,32 @@ func _print_launch_debug(data: Dictionary, speed_mps: float, vla: float, hla: fl
 	print("VLA: %.2f deg, HLA: %.2f deg" % [vla, hla])
 	print("Aim yaw offset: %.2f deg" % aim_yaw_offset_deg)
 	print("Spin: %.0f rpm, Axis: %.2f deg" % [spin, axis])
-	print("drag_cf: %.2f, lift_cf: %.2f" % [_drag_scale, _lift_scale])
+
+	var eff_drag: float = float(_get_openfairway_property(params, &"drag_scale", &"DragScale", _drag_scale))
+	var eff_lift: float = float(_get_openfairway_property(params, &"lift_scale", &"LiftScale", _lift_scale))
+	print("drag_scale: %.3f, lift_scale: %.3f (base: %.2f, %.2f)" % [eff_drag, eff_lift, _drag_scale, _lift_scale])
+
+	if _physics_params_factory != null:
+		var regime_info = _call_openfairway_method(
+			_physics_params_factory,
+			&"get_regime_info",
+			&"GetRegimeInfo",
+			[float(data.get("Speed", 0.0)), vla, spin]
+		)
+		if typeof(regime_info) == TYPE_DICTIONARY and not regime_info.is_empty():
+			var matched_key: String = str(regime_info.get("matched_key", ""))
+			var regime_key: String = str(regime_info.get("regime_key", ""))
+			var profile_name: String = str(regime_info.get("flight_profile_name", "Default"))
+			if matched_key != "":
+				print("Regime: %s (matched: %s) -> drag_mult=%.3f, lift_mult=%.3f, profile=%s" % [
+					regime_key, matched_key,
+					float(regime_info.get("drag_multiplier", 1.0)),
+					float(regime_info.get("lift_multiplier", 1.0)),
+					profile_name
+				])
+			else:
+				print("Regime: %s (neutral, profile=%s)" % [regime_key, profile_name])
+
 	print("Air density: %.4f kg/m^3" % _air_density)
 	print("Dynamic viscosity: %.11f" % _air_viscosity)
 

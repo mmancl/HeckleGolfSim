@@ -26,6 +26,7 @@ func _ready() -> void:
 	ThemeManager.apply_primary_button_style(download_button, 6)
 	ThemeManager.apply_nav_button_style(cancel_button, 6)
 	ThemeManager.apply_input_style(search_input)
+	ThemeManager.apply_item_list_style(results_list)
 
 	search_button.pressed.connect(_on_search_pressed)
 	cancel_button.pressed.connect(_on_cancel_pressed)
@@ -76,19 +77,31 @@ func _on_search_pressed() -> void:
 	_set_ui_disabled(false)
 	
 	if results_array == null or results_array.is_empty():
-		status_label.text = "No golf courses found matching '" + query + "'."
+		status_label.text = "No golf courses with 9 or 18 holes found matching '" + query + "'."
 		return
 		
 	_results = results_array
 	for item in _results:
 		var name_text = item.get("name", "Unnamed Course")
 		var loc_text = item.get("location", "")
+		var holes = item.get("hole_count", 0)
+		var updated_ts = item.get("last_updated", "")
+		
+		var meta_parts = []
+		if holes > 0:
+			meta_parts.append(str(holes) + " Holes")
+		if not updated_ts.is_empty():
+			var date_only = updated_ts.split("T")[0]
+			meta_parts.append("Updated: " + date_only)
+			
 		var display_text = name_text
+		if not meta_parts.is_empty():
+			display_text += " [" + " | ".join(meta_parts) + "]"
 		if not loc_text.is_empty():
 			display_text += " (" + loc_text + ")"
 		results_list.add_item(display_text)
 		
-	status_label.text = "Found " + str(_results.size()) + " course(s). Select one to download."
+	status_label.text = "Found " + str(_results.size()) + " verified course(s) (newest first). Select one to download."
 
 
 func _on_item_selected(_index: int) -> void:

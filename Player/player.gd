@@ -273,6 +273,7 @@ func get_ball_state():
 
 
 func _on_tcp_client_hit_ball(data: Dictionary) -> void:
+	FoamBallBoost.apply_boost(data, ball.current_selected_club if ball != null else "")
 	var success : bool = validate_data(data)
 	if success:
 		emit_signal("good_data")
@@ -315,6 +316,8 @@ func _on_tcp_client_hit_ball(data: Dictionary) -> void:
 
 
 func _on_range_ui_hit_shot(data: Variant) -> void:
+	if data is Dictionary:
+		FoamBallBoost.apply_boost(data, ball.current_selected_club if ball != null else "")
 	var target_dist := 0.0
 	var parent_scene = get_parent()
 	if parent_scene != null and "aim_target_pos" in parent_scene:

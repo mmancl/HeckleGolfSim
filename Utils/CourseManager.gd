@@ -36,6 +36,7 @@ func initialize(scene_path: String, config_path: String) -> void:
 		if course_scene == null:
 			push_error("[CourseManager] Could not instantiate course scene: %s" % scene_path)
 			return
+		_apply_course_graphics_quality(course_scene)
 		add_child(course_scene)
 		return
 		
@@ -56,6 +57,7 @@ func initialize(scene_path: String, config_path: String) -> void:
 	if course_scene == null:
 		push_error("[CourseManager] Could not instantiate course scene: %s" % scene_path)
 		return
+	_apply_course_graphics_quality(course_scene)
 	add_child(course_scene)
 
 
@@ -101,3 +103,10 @@ func reload_current_config() -> void:
 
 func get_current_config_path() -> String:
 	return _current_config_path
+
+
+func _apply_course_graphics_quality(course_scene: Node) -> void:
+	var quality = "Low"
+	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("graphics_quality"):
+		quality = GlobalSettings.range_settings.settings["graphics_quality"].value
+	MobilePerformance.apply_graphics_quality(course_scene, quality)

@@ -150,6 +150,10 @@ func _ready() -> void:
 		var launch_monitor = get_node("/root/LaunchMonitorManager")
 		if not launch_monitor.hit_ball.is_connected(_on_launch_monitor_hit_ball):
 			launch_monitor.hit_ball.connect(_on_launch_monitor_hit_ball)
+		if launch_monitor.has_method("_update_hud_display"):
+			launch_monitor.call("_update_hud_display")
+		if launch_monitor.has_method("notify_ball_at_rest"):
+			launch_monitor.call("notify_ball_at_rest")
 			
 	var tcp_server = get_node_or_null("TCPServer")
 	if tcp_server == null:
@@ -799,8 +803,12 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	if player.ball.state != PhysicsEnums.BallState.REST:
 		return
 		
+	FoamBallBoost.apply_boost(data)
+
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
+	if has_node("/root/LaunchMonitorManager"):
+		get_node("/root/LaunchMonitorManager").call("notify_shot_started")
 		
 	shot_counter += 1
 	attempts_count += 1
@@ -1056,6 +1064,10 @@ func _trigger_victory() -> void:
 func _on_ball_rest(_data: Dictionary) -> void:
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("notify_ball_at_rest"):
+			lm.notify_ball_at_rest()
 	raw_ball_data = _data.duplicate()
 	_update_stats_display(true)
 	_update_hud()
@@ -1120,6 +1132,11 @@ func _reset_ball_only() -> void:
 		prev_ball_pos = start_pos
 		if not viewing_wall_cam:
 			_update_camera_to_tee()
+
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("notify_ball_at_rest"):
+			lm.notify_ball_at_rest()
 			
 	_update_hud()
 
@@ -1794,8 +1811,14 @@ func _on_settings_pressed() -> void:
 
 func _close_settings() -> void:
 	if _settings_layer != null and is_instance_valid(_settings_layer):
+		_settings_layer.visible = false
 		_settings_layer.queue_free()
 		_settings_layer = null
 
 	if hud_layer != null and is_instance_valid(hud_layer):
 		hud_layer.visible = true
+
+	if has_node("/root/LaunchMonitorManager"):
+		var launch_monitor = get_node("/root/LaunchMonitorManager")
+		if launch_monitor != null and launch_monitor.has_method("_update_hud_display"):
+			launch_monitor.call("_update_hud_display")

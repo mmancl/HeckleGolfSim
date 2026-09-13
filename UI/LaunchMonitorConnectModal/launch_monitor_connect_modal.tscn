@@ -152,6 +152,22 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_card")
 layout_mode = 2
 theme_override_constants/separation = 12
 
+[node name="DeviceTypeHBox" type="HBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/BluetoothTab/BluetoothVBox/DeviceCard/DeviceVBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="DeviceTypeLabel" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/BluetoothTab/BluetoothVBox/DeviceCard/DeviceVBox/DeviceTypeHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.92, 1, 1)
+theme_override_font_sizes/font_size = 15
+text = "Device Filter:"
+
+[node name="DeviceTypeOption" type="OptionButton" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/BluetoothTab/BluetoothVBox/DeviceCard/DeviceVBox/DeviceTypeHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+size_flags_horizontal = 3
+
 [node name="DeviceLabel" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/BluetoothTab/BluetoothVBox/DeviceCard/DeviceVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.85, 0.92, 1, 1)
@@ -223,7 +239,7 @@ theme_override_font_sizes/font_size = 15
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.65, 0.75, 1)
 theme_override_font_sizes/font_size = 13
-text = "💡 Power on your Square Golf launch monitor before scanning. You can also pair or change settings at any time in Settings."
+text = "💡 Power on your launch monitor before scanning. For Garmin Approach R10, hold the power button until the LED flashes blue. You can also pair or change settings at any time in Settings."
 autowrap_mode = 3
 
 [node name="OtherTab" type="ScrollContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer"]
@@ -259,6 +275,110 @@ custom_minimum_size = Vector2(0, 50)
 layout_mode = 2
 size_flags_horizontal = 3
 
+[node name="NetworkConfigCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="ConfigVBox" type="VBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="ConfigTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.85, 0.55, 1)
+theme_override_font_sizes/font_size = 17
+text = "⚙️ TCP Server Port & IP Configuration"
+
+[node name="PortHBox" type="HBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="PortLabelTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox/PortHBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "Port:"
+vertical_alignment = 1
+
+[node name="Port49152Button" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox/PortHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "49152 (Default)"
+
+[node name="Port921Button" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox/PortHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(170, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "921 (Legacy GSPro v1)"
+
+[node name="CustomPortLabel" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox/PortHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 14
+text = "Custom:"
+vertical_alignment = 1
+
+[node name="NetworkPortSpinBox" type="SpinBox" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox/PortHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 42)
+layout_mode = 2
+min_value = 1.0
+max_value = 65535.0
+value = 49152.0
+
+[node name="IpHBox" type="HBoxContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="IpLabelTitle" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox/IpHBox"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "Bind IP:"
+vertical_alignment = 1
+
+[node name="IpAllButton" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox/IpHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(150, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "0.0.0.0 (All)"
+
+[node name="IpLocalButton" type="Button" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox/IpHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(170, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "127.0.0.1 (Localhost)"
+
+[node name="CustomIpLabel" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox/IpHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 14
+text = "Custom:"
+vertical_alignment = 1
+
+[node name="NetworkIpInput" type="LineEdit" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox/IpHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(130, 42)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 14
+text = "0.0.0.0"
+placeholder_text = "0.0.0.0"
+
+[node name="LanIpLabel" type="Label" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkConfigCard/ConfigVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65, 0.85, 1, 1)
+theme_override_font_sizes/font_size = 13
+text = "💡 Local Network IP: 127.0.0.1 (use this in connector apps on the same Wi-Fi)"
+autowrap_mode = 3
+
 [node name="NetworkInfoCard" type="PanelContainer" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -269,6 +389,7 @@ layout_mode = 2
 theme_override_constants/separation = 16
 
 [node name="HostLabel" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkInfoCard/NetworkInfoHBox"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/default_color = Color(0.9, 0.95, 1, 1)
@@ -278,6 +399,7 @@ text = "🖥️ [b]Host:[/b] 127.0.0.1"
 fit_content = true
 
 [node name="PortLabel" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkInfoCard/NetworkInfoHBox"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/default_color = Color(0.9, 0.95, 1, 1)
@@ -287,6 +409,7 @@ text = "🔌 [b]Port:[/b] 49152 (TCP)"
 fit_content = true
 
 [node name="ProtocolLabel" type="RichTextLabel" parent="CenterContainer/ModalPanel/MarginContainer/VBoxContainer/TabContainer/OtherTab/OtherVBox/NetworkInfoCard/NetworkInfoHBox"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/default_color = Color(0.9, 0.95, 1, 1)

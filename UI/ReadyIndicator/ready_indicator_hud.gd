@@ -146,12 +146,20 @@ func _check_scene_shot_active(scene: Node) -> bool:
 	if "_shot_transition_active" in scene and bool(scene.get("_shot_transition_active")):
 		return true
 
+	if "shot_in_progress" in scene and bool(scene.get("shot_in_progress")):
+		return true
+
+	if "is_shot_in_progress" in scene and bool(scene.get("is_shot_in_progress")):
+		return true
+
 	if "course_instance" in scene:
 		var ci = scene.get("course_instance")
 		if ci != null and is_instance_valid(ci):
 			if "_shot_active" in ci and bool(ci.get("_shot_active")):
 				return true
 			if "_shot_transition_active" in ci and bool(ci.get("_shot_transition_active")):
+				return true
+			if "shot_in_progress" in ci and bool(ci.get("shot_in_progress")):
 				return true
 
 	var player_node = _find_player_node(scene)
@@ -236,10 +244,24 @@ func _on_scene_changed() -> void:
 	_cached_ball = null
 	_ball_moving_prev = false
 	_shot_active = false
-	_has_sensor_data = false
 	_sensor_unit_scale = 0.0
 	_displayed_norm_pos = Vector2.ZERO
 	_last_ball_pos = Vector3.ZERO
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and is_instance_valid(lm):
+			if "last_sensor_data" in lm and lm.last_sensor_data is Dictionary and not lm.last_sensor_data.is_empty():
+				var sd: Dictionary = lm.last_sensor_data
+				var px: int = int(sd.get("pos_x", sd.get("PositionX", 0)))
+				var py: int = int(sd.get("pos_y", sd.get("PositionY", 0)))
+				var pz: int = int(sd.get("pos_z", sd.get("PositionZ", 0)))
+				var rdy: bool = bool(sd.get("ready", sd.get("Ready", false)))
+				var det: bool = bool(sd.get("detected", sd.get("Detected", false)))
+				set_sensor_position(px, py, pz, rdy, det)
+			else:
+				_has_sensor_data = false
+	else:
+		_has_sensor_data = false
 	call_deferred("_refresh_layout_and_display", true)
 
 
@@ -653,7 +675,8 @@ func _detect_current_gameplay_screen() -> ScreenLayout:
 		or full_id.contains("putting") or scene_name.contains("putting") \
 		or full_id.contains("putt") or scene_name.contains("putt") \
 		or full_id.contains("shape") or scene_name.contains("shape") \
-		or full_id.contains("loft") or scene_name.contains("loft"):
+		or full_id.contains("loft") or scene_name.contains("loft") \
+		or full_id.contains("/minigames/") or full_id.contains("minigame"):
 		return ScreenLayout.TOP_LEFT
 
 	# Driving Range, Course Play, CourseManager, and all loaded course scenes -> TOP_CENTER_UNDER_AIM
@@ -865,6 +888,10 @@ func _apply_layout(layout: ScreenLayout) -> void:
 		_container.set_anchors_preset(Control.PRESET_TOP_LEFT)
 		_container.grow_horizontal = Control.GROW_DIRECTION_END
 		_container.grow_vertical = Control.GROW_DIRECTION_END
+		_container.offset_left = 0
+		_container.offset_top = 0
+		_container.offset_right = 0
+		_container.offset_bottom = 0
 		_container.add_theme_constant_override("margin_top", 18)
 		_container.add_theme_constant_override("margin_left", 20)
 	elif layout == ScreenLayout.TOP_CENTER_UNDER_AIM:
@@ -872,6 +899,10 @@ func _apply_layout(layout: ScreenLayout) -> void:
 		_container.set_anchors_preset(Control.PRESET_CENTER_TOP)
 		_container.grow_horizontal = Control.GROW_DIRECTION_BOTH
 		_container.grow_vertical = Control.GROW_DIRECTION_END
+		_container.offset_left = 0
+		_container.offset_top = 0
+		_container.offset_right = 0
+		_container.offset_bottom = 0
 		_container.add_theme_constant_override("margin_top", 78) # Right beneath "Aim: 464 Yards | Tee Box" pill!
 		_container.add_theme_constant_override("margin_left", 0)
 
@@ -1045,8 +1076,12 @@ func _update_display(instant: bool = false) -> void:
 			_show_rearming_feedback()
 		else:
 			_stop_pulse_animation()
-			_status_label.text = "PLACE BALL IN ZONE"
-			_sub_label.text = "WAITING FOR BALL"
+			if not _placement_guide_enabled:
+				_status_label.text = "LAUNCH MONITOR"
+				_sub_label.text = "WAITING FOR RADAR"
+			else:
+				_status_label.text = "PLACE BALL IN ZONE"
+				_sub_label.text = "WAITING FOR BALL"
 			_status_label.add_theme_color_override("font_color", Color(0.98, 0.95, 0.9))
 			_sub_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
 			

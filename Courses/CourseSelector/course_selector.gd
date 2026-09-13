@@ -29,6 +29,7 @@ func _ready() -> void:
 	_refresh_button.mouse_entered.connect(_on_refresh_button_mouse_entered)
 	_refresh_button.mouse_exited.connect(_on_refresh_button_mouse_exited)
 	_course_list.item_selected.connect(_on_course_selected)
+	ThemeManager.apply_item_list_style(_course_list)
 
 	var vbox = $ContentPanel/ContentMargin/VBoxContainer
 	if vbox != null:
@@ -38,7 +39,7 @@ func _ready() -> void:
 		if scroll_node != null:
 			vbox.move_child(tab_hbox, scroll_node.get_index())
 			if scroll_node is ScrollContainer:
-				ThemeManager.apply_scroll_container_style(scroll_node, 28)
+				ThemeManager.apply_scroll_container_style(scroll_node)
 
 	_switch_course_tab("Real")
 

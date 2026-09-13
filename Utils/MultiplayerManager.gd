@@ -149,6 +149,8 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 			"last_aim_target_pos": Vector3.ZERO,
 			"last_aim_yaw_offset_deg": 0.0,
 			"last_shot_distance_yards": -1.0,
+			"last_shot_club": "",
+			"last_shot_starting_lie": "",
 			"last_starting_pos": Vector3.ZERO
 		}
 		players.append(p)
@@ -269,6 +271,8 @@ func start_hole() -> void:
 		p["last_aim_target_pos"] = Vector3.ZERO
 		p["last_aim_yaw_offset_deg"] = 0.0
 		p["last_shot_distance_yards"] = -1.0
+		p["last_shot_club"] = ""
+		p["last_shot_starting_lie"] = ""
 
 	scramble_best_pos = Vector3.ZERO
 	team_best_pos.clear()
@@ -419,6 +423,8 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 		ground_dist_yds = 0.0
 	var shot_dist_yds: float = max(raw_total_yds, ground_dist_yds)
 	active_player["last_shot_distance_yards"] = shot_dist_yds
+	active_player["last_shot_club"] = current_club
+	active_player["last_shot_starting_lie"] = prev_lie
 	print("[MultiplayerManager] Shot recorded for %s: dist = %.1f yds (raw: %.1f yds, ground: %.1f yds)" % [active_player.get("name", "Player"), shot_dist_yds, raw_total_yds, ground_dist_yds])
 
 	active_player["strokes"] += 1
@@ -443,6 +449,7 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 	active_player["last_aim_yaw_offset_deg"] = last_aim_yaw
 
 	var stat_entry = {}
+	var prev_longest_drive := -1.0
 
 	if not hole_ids.is_empty():
 		var hole_id: String = hole_ids[current_hole_index]
@@ -494,6 +501,9 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 
 		# Also record the shot globally
 		var p_name = active_player.get("name", "")
+		prev_longest_drive = -1.0
+		if not p_name.is_empty():
+			prev_longest_drive = get_player_longest_drive(p_name)
 		if not p_name.is_empty() and not current_club.is_empty():
 			record_global_shot(p_name, current_club, raw_shot_data)
 
@@ -512,7 +522,7 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 
 	if has_node("/root/AchievementManager") and not practice_mode_active:
 		var total_yds = (raw_shot_data.get("TotalDistance", 0.0) as float) * 1.09361
-		get_node("/root/AchievementManager").check_shot_achievements(active_player.get("name", ""), current_club, total_yds)
+		get_node("/root/AchievementManager").check_shot_achievements(active_player.get("name", ""), current_club, total_yds, prev_longest_drive)
 
 	# Check for holing out/clap triggers
 	if not practice_mode_active:
@@ -545,32 +555,31 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 			if landed_in_fairway or landed_on_green:
 				GlobalSettings.play_golf_clap()
 
-	# Check gimme ranges if enabled
-			var g1_enabled = GlobalSettings.range_settings.gimme_range_1_enabled.value
-			var g1_dist_yards = GlobalSettings.range_settings.gimme_range_1_distance.value
+			# Check gimme ranges if enabled
+			var active_gimmes = []
+			if GlobalSettings.range_settings.gimme_range_1_enabled.value:
+				active_gimmes.append({
+					"strokes": 1,
+					"dist_feet": GlobalSettings.range_settings.gimme_range_1_distance.value
+				})
+			if GlobalSettings.range_settings.gimme_range_2_enabled.value:
+				active_gimmes.append({
+					"strokes": 2,
+					"dist_feet": GlobalSettings.range_settings.gimme_range_2_distance.value
+				})
+			if GlobalSettings.range_settings.gimme_range_3_enabled.value:
+				active_gimmes.append({
+					"strokes": 3,
+					"dist_feet": GlobalSettings.range_settings.gimme_range_3_distance.value
+				})
 			
-			var g2_enabled = GlobalSettings.range_settings.gimme_range_2_enabled.value
-			var g2_dist_yards = GlobalSettings.range_settings.gimme_range_2_distance.value
+			active_gimmes.sort_custom(func(a, b): return a["dist_feet"] < b["dist_feet"])
+			var dist_to_pin_feet = dist_to_pin * 3.28084 # meters to feet
 			
-			var dist_to_pin_yards = dist_to_pin * 1.09361 # meters to yards
-			
-			if g1_enabled and g2_enabled:
-				if g1_dist_yards < g2_dist_yards:
-					if dist_to_pin_yards <= g1_dist_yards:
-						_apply_gimme(active_player, 1, hole_ids[current_hole_index])
-					elif dist_to_pin_yards <= g2_dist_yards:
-						_apply_gimme(active_player, 2, hole_ids[current_hole_index])
-				else:
-					if dist_to_pin_yards <= g2_dist_yards:
-						_apply_gimme(active_player, 2, hole_ids[current_hole_index])
-					elif dist_to_pin_yards <= g1_dist_yards:
-						_apply_gimme(active_player, 1, hole_ids[current_hole_index])
-			elif g1_enabled:
-				if dist_to_pin_yards <= g1_dist_yards:
-					_apply_gimme(active_player, 1, hole_ids[current_hole_index])
-			elif g2_enabled:
-				if dist_to_pin_yards <= g2_dist_yards:
-					_apply_gimme(active_player, 2, hole_ids[current_hole_index])
+			for gimme in active_gimmes:
+				if dist_to_pin_feet <= gimme["dist_feet"]:
+					_apply_gimme(active_player, gimme["strokes"], hole_ids[current_hole_index])
+					break
 
 	# Mode-specific shot handling (Scramble / 2v2 Scramble)
 	if game_mode == "Scramble" and not hole_ids.is_empty():
@@ -783,18 +792,7 @@ func _get_target_pin_position() -> Vector3:
 
 
 func _select_next_player_stay_up(remaining_players: Array) -> void:
-	# Exception: If the player who just hit had their shot go 20 yards or less, let them hit again rather than switching players
-	var just_hit_player = get_active_player()
-	var custom_enabled = GlobalSettings.range_settings.custom_next_player.value
-	if custom_enabled and not just_hit_player.is_empty() and (just_hit_player in remaining_players) and just_hit_player.get("strokes", 0) > 0 and just_hit_player.get("last_shot_penalty", 0) == 0:
-		var last_dist: float = float(just_hit_player.get("last_shot_distance_yards", -1.0))
-		if last_dist >= 0.0 and last_dist <= 20.0:
-			print("[MultiplayerManager] Player %s hit <= 20 yards (%.1f yds). Allowing repeat hit!" % [just_hit_player["name"], last_dist])
-			active_player_index = players.find(just_hit_player)
-			emit_signal("active_player_changed", get_active_player())
-			return
-
-	# Check if all players have taken their first shot (tee shot)
+	# 1. Check if all players have taken their first shot (tee shot). All players tee off first.
 	var tee_players = remaining_players.filter(func(p): return p.get("strokes", 0) == 0)
 	if not tee_players.is_empty():
 		var next_player = tee_players[0]
@@ -802,6 +800,50 @@ func _select_next_player_stay_up(remaining_players: Array) -> void:
 		emit_signal("active_player_changed", get_active_player())
 		print("[MultiplayerManager] Next to tee off: %s" % get_active_player()["name"])
 		return
+
+	# 2. Exception: If the player who just hit had their shot go <= 35% of average distance for the selected club,
+	# let them hit again rather than switching players (Stay Up).
+	# Restrictions:
+	# - Player never hits again off the teebox (tee shots / shots started on teebox do not stay up).
+	# - Players only stay up when on the green if all remaining players are on the green.
+	var just_hit_player = get_active_player()
+	var custom_enabled = true
+	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.custom_next_player != null:
+		custom_enabled = GlobalSettings.range_settings.custom_next_player.value
+
+	var shot_from_teebox: bool = (
+		str(just_hit_player.get("last_shot_starting_lie", "")).to_lower() == "teebox"
+		or (not last_shot_info.is_empty() and str(last_shot_info.get("lie_type", "")).to_lower() == "teebox")
+		or just_hit_player.get("strokes", 0) <= 1
+	)
+
+	if custom_enabled and not just_hit_player.is_empty() and (just_hit_player in remaining_players) and just_hit_player.get("strokes", 0) > 0 and just_hit_player.get("last_shot_penalty", 0) == 0 and not shot_from_teebox:
+		var last_dist: float = float(just_hit_player.get("last_shot_distance_yards", -1.0))
+		var club_used: String = str(just_hit_player.get("last_shot_club", current_club))
+		if club_used.is_empty():
+			club_used = current_club
+		if club_used.is_empty():
+			club_used = "Dr"
+		var p_name: String = str(just_hit_player.get("name", ""))
+		var avg_dist: float = get_club_effective_distance(p_name, club_used)
+		var threshold_dist: float = avg_dist * 0.35
+
+		# Players should only stay up when they are on the green if all players are on the green
+		var player_on_green: bool = str(just_hit_player.get("lie_type", "")).to_lower() == "green"
+		var all_on_green: bool = true
+		if player_on_green:
+			for p in remaining_players:
+				if str(p.get("lie_type", "")).to_lower() != "green":
+					all_on_green = false
+					break
+
+		var can_stay_up_on_green: bool = not player_on_green or all_on_green
+
+		if last_dist >= 0.0 and last_dist <= threshold_dist and can_stay_up_on_green:
+			print("[MultiplayerManager] Player %s hit <= 35%% of avg club distance (%s: %.1f yds, threshold: %.1f yds, shot: %.1f yds, on_green: %s, all_on_green: %s). Allowing repeat hit!" % [just_hit_player.get("name", "Player"), club_used, avg_dist, threshold_dist, last_dist, str(player_on_green), str(all_on_green)])
+			active_player_index = players.find(just_hit_player)
+			emit_signal("active_player_changed", get_active_player())
+			return
 
 	# Furthest away from the hole hits
 	var target_pin := _get_target_pin_position()
@@ -1121,6 +1163,8 @@ func pause_player(idx: int) -> void:
 		"last_aim_target_pos": player.get("last_aim_target_pos", Vector3.ZERO),
 		"last_aim_yaw_offset_deg": player.get("last_aim_yaw_offset_deg", 0.0),
 		"last_shot_distance_yards": player.get("last_shot_distance_yards", -1.0),
+		"last_shot_club": player.get("last_shot_club", ""),
+		"last_shot_starting_lie": player.get("last_shot_starting_lie", ""),
 		"mulligan_history": player.get("mulligan_history", {}).duplicate(true)
 	}
 	print("[MultiplayerManager] Player %s paused their turn on hole index %d (strokes: %d)." % [player["name"], current_hole_index, player["strokes"]])
@@ -1218,7 +1262,9 @@ func start_catch_up_mode(player_dict: Dictionary, start_hole_idx: int, target_ho
 				"last_shot_penalty": p.get("last_shot_penalty", 0),
 				"last_aim_target_pos": p.get("last_aim_target_pos", Vector3.ZERO),
 				"last_aim_yaw_offset_deg": p.get("last_aim_yaw_offset_deg", 0.0),
-				"last_shot_distance_yards": p.get("last_shot_distance_yards", -1.0)
+				"last_shot_distance_yards": p.get("last_shot_distance_yards", -1.0),
+				"last_shot_club": p.get("last_shot_club", ""),
+				"last_shot_starting_lie": p.get("last_shot_starting_lie", "")
 			}
 			
 	# Move to start_hole_idx
@@ -1338,6 +1384,8 @@ func finish_catch_up_mode() -> void:
 			p["last_aim_target_pos"] = saved["last_aim_target_pos"]
 			p["last_aim_yaw_offset_deg"] = saved["last_aim_yaw_offset_deg"]
 			p["last_shot_distance_yards"] = saved["last_shot_distance_yards"]
+			p["last_shot_club"] = saved.get("last_shot_club", "")
+			p["last_shot_starting_lie"] = saved.get("last_shot_starting_lie", "")
 			
 	# Setup catch-up player on target_idx teebox
 	if not cp.is_empty():
@@ -1410,6 +1458,8 @@ func add_new_player_with_mode(player_name: String, tee_color: String, mode: Stri
 		"last_aim_target_pos": Vector3.ZERO,
 		"last_aim_yaw_offset_deg": 0.0,
 		"last_shot_distance_yards": -1.0,
+		"last_shot_club": "",
+		"last_shot_starting_lie": "",
 		"last_starting_pos": Vector3.ZERO
 	}
 	
@@ -1779,6 +1829,8 @@ func _deserialize_players(serialized_array: Array) -> Array[Dictionary]:
 			dup["mulligan_history"] = mulligan_hist_deserialized
 			
 		dup["last_shot_distance_yards"] = float(dup.get("last_shot_distance_yards", -1.0))
+		dup["last_shot_club"] = str(dup.get("last_shot_club", ""))
+		dup["last_shot_starting_lie"] = str(dup.get("last_shot_starting_lie", ""))
 		deserialized.append(dup)
 	return deserialized
 
@@ -1975,9 +2027,29 @@ func load_global_club_stats() -> Dictionary:
 							if sd > 100.0 or (td > 15.0 and sd > td * 1.2):
 								entry["SideDistance"] = 0.0
 								modified = true
+
+					# Cleanse existing outlier shots (> 2 standard deviations of existing data)
+					var club_shots: Array = stats[p][clb]
+					if club_shots.size() >= MIN_SHOTS_FOR_OUTLIER_CHECK:
+						var out_stats = calculate_shots_mean_and_std_dev(club_shots)
+						if out_stats["count"] >= MIN_SHOTS_FOR_OUTLIER_CHECK:
+							var mean_d: float = out_stats["mean"]
+							var eff_sd: float = out_stats["effective_std_dev"]
+							var max_diff = OUTLIER_STD_DEV_THRESHOLD * eff_sd
+							var filtered: Array = []
+							for s in club_shots:
+								if typeof(s) == TYPE_DICTIONARY:
+									var d = get_shot_distance_m(s)
+									if absf(d - mean_d) <= max_diff:
+										filtered.append(s)
+									else:
+										modified = true
+							if filtered.size() != club_shots.size():
+								stats[p][clb] = filtered
+								print("[MultiplayerManager] Cleansed %d outlier shots for %s (%s)" % [club_shots.size() - filtered.size(), p, clb])
 			if modified:
 				save_global_club_stats(stats)
-				print("[MultiplayerManager] Repaired legacy corrupted SideDistance entries in player_club_stats.json")
+				print("[MultiplayerManager] Repaired legacy corrupted SideDistance and/or outlier entries in player_club_stats.json")
 			return stats
 	return {}
 
@@ -1987,9 +2059,9 @@ func save_global_club_stats(stats: Dictionary) -> void:
 	if file != null:
 		file.store_string(JSON.stringify(stats, "\t"))
 
-func record_global_shot(player_name: String, club_name: String, raw_shot: Dictionary) -> void:
+func record_global_shot(player_name: String, club_name: String, raw_shot: Dictionary) -> bool:
 	if player_name.is_empty() or club_name.is_empty():
-		return
+		return false
 	var stats = load_global_club_stats()
 	if not stats.has(player_name):
 		stats[player_name] = {}
@@ -2004,8 +2076,19 @@ func record_global_shot(player_name: String, club_name: String, raw_shot: Dictio
 		"TargetDistance": raw_shot.get("TargetDistance", 0.0),
 		"TotalDistance": raw_shot.get("TotalDistance", 0.0)
 	}
+
+	# Exclude outlier shots outside 2 standard deviations of existing data
+	if is_shot_outlier(stats[player_name][club_name], entry):
+		var out_stats = calculate_shots_mean_and_std_dev(stats[player_name][club_name])
+		var shot_d = get_shot_distance_m(entry)
+		print("[MultiplayerManager] Excluded outlier shot for %s (%s): distance %.1fm (%.1fyds) is outside 2 std dev of existing mean %.1fm (std dev: %.1fm)" % [
+			player_name, club_name, shot_d, shot_d * 1.09361, out_stats["mean"], out_stats["effective_std_dev"]
+		])
+		return false
+
 	stats[player_name][club_name].append(entry)
 	save_global_club_stats(stats)
+	return true
 
 func remove_last_global_shot(player_name: String, club_name: String) -> void:
 	if player_name.is_empty() or club_name.is_empty():
@@ -2024,6 +2107,153 @@ func clear_player_club_shot_data(player_name: String, club_name: String) -> void
 		stats[player_name].erase(club_name)
 		save_global_club_stats(stats)
 		print("[MultiplayerManager] Cleared shot data for player: %s, club: %s" % [player_name, club_name])
+
+const DEFAULT_CLUB_DISTANCES: Dictionary = {
+	"Dr": 250.0,
+	"3w": 225.0,
+	"5w": 210.0,
+	"2H": 210.0,
+	"3H": 200.0,
+	"4H": 190.0,
+	"1i": 220.0,
+	"2i": 210.0,
+	"3i": 200.0,
+	"4i": 195.0,
+	"5i": 180.0,
+	"6i": 160.0,
+	"7i": 140.0,
+	"8i": 130.0,
+	"9i": 120.0,
+	"Pw": 100.0,
+	"Gw": 90.0,
+	"Sw": 80.0,
+	"Lw": 60.0,
+	"Pt": 15.0
+}
+
+const DEFAULT_SUGGESTION_CLUBS: Array[String] = [
+	"3w", "5w", "4i", "5i", "6i", "7i", "8i", "9i", "Pw", "Sw"
+]
+
+const MIN_SHOTS_FOR_AVERAGES: int = 10
+const OUTLIER_STD_DEV_THRESHOLD: float = 2.0
+const MIN_SHOTS_FOR_OUTLIER_CHECK: int = 3
+const MIN_EFFECTIVE_STD_DEV_METERS: float = 3.0
+
+static func get_shot_distance_m(shot_dict: Dictionary) -> float:
+	var total_dist = float(shot_dict.get("TotalDistance", 0.0))
+	var carry_dist = float(shot_dict.get("CarryDistance", 0.0))
+	if total_dist > 0.0:
+		return total_dist
+	elif carry_dist > 0.0:
+		return carry_dist
+	return 0.0
+
+static func calculate_shots_mean_and_std_dev(shots: Array) -> Dictionary:
+	if shots.size() < MIN_SHOTS_FOR_OUTLIER_CHECK:
+		return {"mean": 0.0, "std_dev": 0.0, "effective_std_dev": 0.0, "count": shots.size()}
+	
+	var distances: Array[float] = []
+	var sum_dist := 0.0
+	for s in shots:
+		if typeof(s) == TYPE_DICTIONARY:
+			var d = get_shot_distance_m(s)
+			distances.append(d)
+			sum_dist += d
+			
+	var count = distances.size()
+	if count < MIN_SHOTS_FOR_OUTLIER_CHECK:
+		return {"mean": 0.0, "std_dev": 0.0, "effective_std_dev": 0.0, "count": count}
+		
+	var mean = sum_dist / float(count)
+	var sum_sq_diff := 0.0
+	for d in distances:
+		var diff = d - mean
+		sum_sq_diff += diff * diff
+		
+	var std_dev = sqrt(sum_sq_diff / float(count))
+	var effective_std = maxf(std_dev, MIN_EFFECTIVE_STD_DEV_METERS)
+	return {
+		"mean": mean,
+		"std_dev": std_dev,
+		"effective_std_dev": effective_std,
+		"count": count
+	}
+
+static func is_shot_outlier(existing_shots: Array, new_shot: Dictionary) -> bool:
+	if existing_shots.size() < MIN_SHOTS_FOR_OUTLIER_CHECK:
+		return false
+	var stats = calculate_shots_mean_and_std_dev(existing_shots)
+	if stats["count"] < MIN_SHOTS_FOR_OUTLIER_CHECK:
+		return false
+	var new_d = get_shot_distance_m(new_shot)
+	var diff = absf(new_d - stats["mean"])
+	return diff > (OUTLIER_STD_DEV_THRESHOLD * stats["effective_std_dev"])
+
+func get_club_effective_distance(player_name: String, club_name: String) -> float:
+	var default_dist = float(DEFAULT_CLUB_DISTANCES.get(club_name, 100.0))
+	if player_name.is_empty() or club_name.is_empty():
+		return default_dist
+		
+	var player_stats = get_player_club_stats(player_name)
+	var shots: Array = player_stats.get(club_name, [])
+	if shots.size() < MIN_SHOTS_FOR_AVERAGES:
+		return default_dist
+		
+	var sum_dist := 0.0
+	var count := 0
+	for s in shots:
+		if typeof(s) == TYPE_DICTIONARY:
+			var d = get_shot_distance_m(s)
+			if d > 0.0:
+				sum_dist += d
+				count += 1
+	if count >= MIN_SHOTS_FOR_AVERAGES:
+		var avg_m = sum_dist / float(count)
+		return avg_m * 1.09361
+	return default_dist
+
+func get_suggested_club(player_name: String, dist_yards: float, is_in_teebox: bool = false, is_on_green: bool = false, is_fringe: bool = false) -> String:
+	# Rule 1: Green & Fringe check - select putter when on green or on fringe near the green
+	if is_on_green or (is_fringe and dist_yards <= 35.0):
+		return "Pt"
+	
+	# Rule 2: Teebox driver check
+	if is_in_teebox and dist_yards > 200.0:
+		return "Dr"
+		
+	# Rule 3: Select based on distance (never driver, never putter when off green)
+	# Build candidate pool: start with default suggestion clubs
+	var candidates: Array[String] = []
+	for c in DEFAULT_SUGGESTION_CLUBS:
+		if not candidates.has(c):
+			candidates.append(c)
+			
+	# Also include any club the player has at least 10 shots with (e.g. 3H, 4H, Gw, Lw)
+	if not player_name.is_empty():
+		var player_stats = get_player_club_stats(player_name)
+		for c in player_stats.keys():
+			var c_str = str(c)
+			if c_str == "Dr" or c_str == "Pt":
+				continue
+			var shots: Array = player_stats[c]
+			if shots.size() >= MIN_SHOTS_FOR_AVERAGES and not candidates.has(c_str):
+				candidates.append(c_str)
+				
+	# Find candidate whose effective distance is closest to dist_yards
+	var best_club: String = "Sw"
+	var best_diff: float = 999999.0
+	var best_eff_dist: float = -1.0
+	
+	for club in candidates:
+		var eff_dist = get_club_effective_distance(player_name, club)
+		var diff = absf(eff_dist - dist_yards)
+		if diff < best_diff or (is_equal_approx(diff, best_diff) and eff_dist > best_eff_dist):
+			best_diff = diff
+			best_club = club
+			best_eff_dist = eff_dist
+			
+	return best_club
 
 const STANDARD_CLUBS: Array[String] = [
 	"Dr", "3w", "5w", "2H", "3H", "4H", "1i", "2i", "3i", "4i",
@@ -2328,6 +2558,11 @@ func calculate_player_stats(player_name: String) -> Dictionary:
 	stats["longest_drive"] = max_drive
 	
 	return stats
+
+func get_player_longest_drive(player_name: String) -> float:
+	var stats = calculate_player_stats(player_name)
+	return float(stats.get("longest_drive", 0.0))
+
 
 
 # --- Video Swing Analysis Recommendation Tracking ---

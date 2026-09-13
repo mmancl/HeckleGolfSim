@@ -131,6 +131,10 @@ func _ready() -> void:
 		var lm = get_node("/root/LaunchMonitorManager")
 		if not lm.hit_ball.is_connected(_on_launch_monitor_hit_ball):
 			lm.hit_ball.connect(_on_launch_monitor_hit_ball)
+		if lm.has_method("_update_hud_display"):
+			lm.call("_update_hud_display")
+		if lm.has_method("notify_ball_at_rest"):
+			lm.call("notify_ball_at_rest")
 			
 	var tcp_server = get_node_or_null("TCPServer")
 	if tcp_server == null:
@@ -1025,6 +1029,11 @@ func _reset_ball_position() -> void:
 	last_camera_offset = default_cam_pos - Vector3(0.0, 0.05, 0.0)
 	camera_following = false
 
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("notify_ball_at_rest"):
+			lm.notify_ball_at_rest()
+
 	var cur_data = target_data[selected_target_index]
 	var front = cur_data["front_wall_yd"]
 	var back = cur_data["back_wall_yd"]
@@ -1095,6 +1104,8 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	if is_shot_in_progress:
 		return # Ignore if shot already in flight
 
+	FoamBallBoost.apply_boost(data)
+
 	is_shot_in_progress = true
 	is_resetting = false
 	shot_reset_token += 1
@@ -1102,6 +1113,8 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
+	if has_node("/root/LaunchMonitorManager"):
+		get_node("/root/LaunchMonitorManager").call("notify_shot_started")
 
 	player._on_tcp_client_hit_ball(data)
 	raw_ball_data = data.duplicate()
@@ -1173,6 +1186,10 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("notify_ball_at_rest"):
+			lm.notify_ball_at_rest()
 		
 	var final_pos = player.ball.global_position
 	var cur_data = target_data[selected_target_index]
@@ -1906,5 +1923,14 @@ func _on_settings_pressed() -> void:
 
 func _close_settings() -> void:
 	if _settings_layer != null and is_instance_valid(_settings_layer):
+		_settings_layer.visible = false
 		_settings_layer.queue_free()
 		_settings_layer = null
+
+	if hud_layer != null and is_instance_valid(hud_layer):
+		hud_layer.visible = true
+
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("_update_hud_display"):
+			lm.call("_update_hud_display")

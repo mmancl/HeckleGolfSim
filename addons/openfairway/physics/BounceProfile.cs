@@ -16,6 +16,8 @@ public sealed class BounceProfile
     public float FlightTangentialRetentionBase { get; init; } = 0.60f;
     public float FlightSpinFactorMin { get; init; } = 0.40f;
     public float FlightSpinFactorDivisor { get; init; } = 8000.0f;
+    public float ShallowImpactRetentionMin { get; init; } = 0.32f;
+    public float ShallowImpactRetentionMax { get; init; } = 0.48f;
 
     // --- Tangential retention (rollout bounces) ---
     public float RolloutLowSpinRetention { get; init; } = 0.865f;
@@ -59,6 +61,8 @@ public sealed class BounceProfile
         FlightTangentialRetentionBase = 0.18f,
         FlightSpinFactorMin = 0.20f,
         FlightSpinFactorDivisor = 4000.0f,
+        ShallowImpactRetentionMin = 0.15f,
+        ShallowImpactRetentionMax = 0.20f,
         RolloutLowSpinRetention = 0.30f,
         RolloutHighSpinRetention = 0.20f,
         RolloutSpinRatioThreshold = 0.20f,

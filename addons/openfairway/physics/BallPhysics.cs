@@ -102,25 +102,29 @@ public partial class BallPhysics : RefCounted
             Vector3 tangentVelocity = contactVelocity - parameters.FloorNormal * contactVelocity.Dot(parameters.FloorNormal);
             float tangentVelMag = tangentVelocity.Length();
 
+            float velocityMag = velocity.Length();
+            float baseFriction;
+            if (parameters.IsPutt || velocityMag <= DefaultRollout.RollFrictionBlendMinSpeed)
+            {
+                baseFriction = parameters.RollingFriction;
+            }
+            else
+            {
+                float blendRange = DefaultRollout.FrictionBlendSpeed - DefaultRollout.RollFrictionBlendMinSpeed;
+                float blendFactor = blendRange > 0.001f
+                    ? Mathf.Clamp((velocityMag - DefaultRollout.RollFrictionBlendMinSpeed) / blendRange, 0.0f, 1.0f)
+                    : 1.0f;
+                blendFactor = blendFactor * blendFactor;
+                baseFriction = Mathf.Lerp(parameters.RollingFriction, parameters.KineticFriction, blendFactor);
+            }
+
             if (tangentVelMag < DefaultRollout.TangentVelocityThreshold)
             {
-                float effectiveRollingFriction = parameters.RollingFriction * spinMultiplier;
+                float effectiveRollingFriction = baseFriction * spinMultiplier;
                 PhysicsLogger.Verbose($"  ROLLING: vel={velocity.Length():F2} m/s, spin={omega.Length() / ShotSetup.RAD_PER_RPM:F0} rpm, c_rr={effectiveRollingFriction:F3} (×{spinMultiplier:F2})");
             }
             else
             {
-                float velocityMag = velocity.Length();
-                float baseFriction;
-                if (velocityMag < DefaultRollout.FrictionBlendSpeed)
-                {
-                    float blendFactor = Mathf.Clamp(velocityMag / DefaultRollout.FrictionBlendSpeed, 0.0f, 1.0f);
-                    blendFactor = blendFactor * blendFactor;
-                    baseFriction = Mathf.Lerp(parameters.RollingFriction, parameters.KineticFriction, blendFactor);
-                }
-                else
-                {
-                    baseFriction = parameters.KineticFriction;
-                }
                 float effectiveFriction = baseFriction * spinMultiplier;
                 PhysicsLogger.Verbose($"  SLIPPING: vel={velocityMag:F2} m/s, spin={omega.Length() / ShotSetup.RAD_PER_RPM:F0} rpm, tangent_vel={tangentVelMag:F2}, μ_eff={effectiveFriction:F3} (×{spinMultiplier:F2})");
             }
@@ -399,30 +403,32 @@ public partial class BallPhysics : RefCounted
 
         float spinMultiplier = GetSpinFrictionMultiplier(omega, parameters.RolloutImpactSpin, velocity.Length(), rp);
         float tangentVelMag = tangentVelocity.Length();
+        float velocityMag = velocity.Length();
+
+        float baseFriction;
+        if (parameters.IsPutt || velocityMag <= rp.RollFrictionBlendMinSpeed)
+        {
+            baseFriction = parameters.RollingFriction;
+        }
+        else
+        {
+            float blendRange = rp.FrictionBlendSpeed - rp.RollFrictionBlendMinSpeed;
+            float blendFactor = blendRange > 0.001f
+                ? Mathf.Clamp((velocityMag - rp.RollFrictionBlendMinSpeed) / blendRange, 0.0f, 1.0f)
+                : 1.0f;
+            blendFactor = blendFactor * blendFactor;
+            baseFriction = Mathf.Lerp(parameters.RollingFriction, parameters.KineticFriction, blendFactor);
+        }
 
         if (tangentVelMag < rp.TangentVelocityThreshold)
         {
             Vector3 flatVelocity = velocity - parameters.FloorNormal * velocity.Dot(parameters.FloorNormal);
             Vector3 frictionDir = flatVelocity.Length() > 0.01f ? flatVelocity.Normalized() : Vector3.Zero;
-            float effectiveRollingFriction = parameters.RollingFriction * spinMultiplier;
+            float effectiveRollingFriction = baseFriction * spinMultiplier;
             return frictionDir * (-effectiveRollingFriction * MASS * 9.81f);
         }
         else
         {
-            float velocityMag = velocity.Length();
-            float baseFriction;
-
-            if (velocityMag < rp.FrictionBlendSpeed)
-            {
-                float blendFactor = Mathf.Clamp(velocityMag / rp.FrictionBlendSpeed, 0.0f, 1.0f);
-                blendFactor = blendFactor * blendFactor;
-                baseFriction = Mathf.Lerp(parameters.RollingFriction, parameters.KineticFriction, blendFactor);
-            }
-            else
-            {
-                baseFriction = parameters.KineticFriction;
-            }
-
             float effectiveFriction = baseFriction * spinMultiplier;
             Vector3 slipDir = tangentVelMag > 0.01f ? tangentVelocity.Normalized() : Vector3.Zero;
             return slipDir * (-effectiveFriction * MASS * 9.81f);

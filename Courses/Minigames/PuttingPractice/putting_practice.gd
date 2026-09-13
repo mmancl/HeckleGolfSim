@@ -106,6 +106,8 @@ func _ready() -> void:
 	
 	# 3. Generate Surrounding Environment (Trees & Bushes)
 	_generate_trees()
+	var q = "Low" if (GlobalSettings != null and GlobalSettings.is_low_graphics()) else "High"
+	MobilePerformance.apply_graphics_quality(self, q)
 	
 	# 4. Setup Player
 	_setup_player()
@@ -827,8 +829,9 @@ void vertex() {
 	float phase_offset = COLOR.r;
 	float segment_phase = float(INSTANCE_ID / 2) * 0.25;
 	
-	// Speed scales dynamically with slope so steeper slopes flow faster, but subtle slopes remain clearly active
-	float move_speed = 0.08 + clamp(slope_val * 7.0, 0.0, 0.52);
+	// Speed scales with slope gradient to represent acceleration/speed added to the ball in that direction
+	// Nearly flat areas hardly move at all, while steep sections move faster up to a capped maximum
+	float move_speed = clamp(slope_val * 11.0, 0.0, 0.75);
 	float progress = fract(TIME * move_speed * time_scale + phase_offset + segment_phase);
 	
 	vec4 world_offset = vec4(displacement * progress, 0.0);
@@ -837,28 +840,8 @@ void vertex() {
 	
 	float fade = sin(progress * 3.14159265);
 	
-	// Dynamic color transition based on slope severity (0.2% to 3.6%+)
-	float t = clamp(slope_val * 28.0, 0.0, 1.0);
-	
-	vec3 col;
-	if (t < 0.2) {
-		// 0% - 0.7% slope: Sky Blue -> Cyan
-		col = mix(vec3(0.1, 0.6, 1.0), vec3(0.0, 0.95, 0.9), t / 0.2);
-	} else if (t < 0.4) {
-		// 0.7% - 1.4% slope: Cyan -> Lime Green
-		col = mix(vec3(0.0, 0.95, 0.9), vec3(0.2, 0.95, 0.2), (t - 0.2) / 0.2);
-	} else if (t < 0.6) {
-		// 1.4% - 2.1% slope: Lime Green -> Bright Yellow
-		col = mix(vec3(0.2, 0.95, 0.2), vec3(1.0, 0.95, 0.0), (t - 0.4) / 0.2);
-	} else if (t < 0.8) {
-		// 2.1% - 2.8% slope: Bright Yellow -> Vivid Orange
-		col = mix(vec3(1.0, 0.95, 0.0), vec3(1.0, 0.5, 0.0), (t - 0.6) / 0.2);
-	} else {
-		// 2.8% - 3.6%+ slope: Vivid Orange -> Hot Crimson / Red
-		col = mix(vec3(1.0, 0.5, 0.0), vec3(1.0, 0.08, 0.15), (t - 0.8) / 0.2);
-	}
-	
-	v_color = vec4(col, fade * 0.95);
+	// White arrows with smooth segment edge fading
+	v_color = vec4(vec3(1.0), fade * 0.95);
 }
 
 void fragment() {
@@ -1212,6 +1195,8 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 		return
 	if player.ball.state != PhysicsEnums.BallState.REST:
 		return # Ignore if putt in progress
+
+	FoamBallBoost.apply_boost(data, "Pt")
 
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
@@ -2165,6 +2150,7 @@ func _on_settings_pressed() -> void:
 
 func _close_settings() -> void:
 	if _settings_layer != null and is_instance_valid(_settings_layer):
+		_settings_layer.visible = false
 		_settings_layer.queue_free()
 		_settings_layer = null
 

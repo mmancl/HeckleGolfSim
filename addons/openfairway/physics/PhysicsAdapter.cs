@@ -94,11 +94,18 @@ public partial class PhysicsAdapter : RefCounted
         Vector3 shotDir = (Vector3)launch["shot_direction"];
 
         Vector3 contactNormal = floorNormal.LengthSquared() > 0.000001f ? floorNormal.Normalized() : Vector3.Up;
-        var parameters = CreateParams(contactNormal, surface, vla, speedMph, totalSpin);
+        bool isPutt = (shot.ContainsKey("ShotType") && shot["ShotType"].ToString().ToLower() == "putt") ||
+                      (ballDict.ContainsKey("ShotType") && ballDict["ShotType"].ToString().ToLower() == "putt");
+        var parameters = CreateParams(contactNormal, surface, vla, speedMph, totalSpin, isPutt);
 
-        Vector3 pos = new Vector3(0.0f, START_HEIGHT, 0.0f);
-        PhysicsEnums.BallState state = PhysicsEnums.BallState.Flight;
-        bool onGround = false;
+        Vector3 pos = isPutt ? Vector3.Zero : new Vector3(0.0f, START_HEIGHT, 0.0f);
+        PhysicsEnums.BallState state = isPutt ? PhysicsEnums.BallState.Rollout : PhysicsEnums.BallState.Flight;
+        bool onGround = isPutt;
+        if (isPutt)
+        {
+            velocity.Y = 0.0f;
+            omega = contactNormal.Cross(velocity) / BallPhysics.RADIUS;
+        }
         float carryM = 0.0f;
         bool carryRecorded = false;
         float hangTimeS = 0.0f;
@@ -415,7 +422,8 @@ public partial class PhysicsAdapter : RefCounted
         PhysicsEnums.SurfaceType surface,
         float initialLaunchAngleDeg,
         float launchSpeedMph,
-        float launchSpinRpm)
+        float launchSpinRpm,
+        bool isPutt = false)
     {
         float airDensity = _aero.GetAirDensity(DEFAULT_ALT_FT, DEFAULT_TEMP_F, PhysicsEnums.Units.Imperial);
         float airViscosity = _aero.GetDynamicViscosity(DEFAULT_TEMP_F, PhysicsEnums.Units.Imperial);
@@ -431,7 +439,8 @@ public partial class PhysicsAdapter : RefCounted
             ballProfile: _ballProfile,
             initialLaunchAngleDeg: initialLaunchAngleDeg,
             launchSpeedMph: launchSpeedMph,
-            launchSpinRpm: launchSpinRpm
+            launchSpinRpm: launchSpinRpm,
+            isPutt: isPutt
         ).ToPhysicsParams();
     }
 }

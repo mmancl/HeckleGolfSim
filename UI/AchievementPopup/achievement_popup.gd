@@ -37,12 +37,41 @@ func _ready() -> void:
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	
 	if has_node("/root/AchievementManager"):
-		get_node("/root/AchievementManager").connect("achievement_unlocked", _on_achievement_unlocked)
+		var ach_mgr = get_node("/root/AchievementManager")
+		ach_mgr.connect("achievement_unlocked", _on_achievement_unlocked)
+		if ach_mgr.has_signal("longest_drive_recorded"):
+			ach_mgr.connect("longest_drive_recorded", _on_longest_drive_recorded)
 
 func _on_achievement_unlocked(player_name: String, ach: Dictionary) -> void:
 	_queue.append({
+		"type": "achievement",
 		"player_name": player_name,
 		"ach": ach
+	})
+	if not _is_showing:
+		_show_next()
+
+func _on_longest_drive_recorded(player_name: String, distance_yds: float, prev_distance_yds: float) -> void:
+	var prev_text = "Personal Best!"
+	if prev_distance_yds > 0.0:
+		prev_text = "Beat previous best: %.1f yds!" % prev_distance_yds
+	_queue.append({
+		"type": "longest_drive",
+		"header": "🚀 NEW LONGEST DRIVE (%s)" % player_name.to_upper(),
+		"title": "%.1f Yards!" % distance_yds,
+		"description": prev_text,
+		"badge_path": "res://assets/images/achievements/badge_long_drive.svg"
+	})
+	if not _is_showing:
+		_show_next()
+
+func show_custom_notification(header_text: String, title_text: String, desc_text: String, badge_path: String = "res://assets/images/achievements/badge_long_drive.svg") -> void:
+	_queue.append({
+		"type": "custom",
+		"header": header_text,
+		"title": title_text,
+		"description": desc_text,
+		"badge_path": badge_path
 	})
 	if not _is_showing:
 		_show_next()
@@ -54,18 +83,28 @@ func _show_next() -> void:
 		
 	_is_showing = true
 	var item = _queue.pop_front()
-	var player_name: String = item["player_name"]
-	var ach: Dictionary = item["ach"]
+	var item_type = item.get("type", "achievement")
 	
-	header_lbl.text = "🏆 ACHIEVEMENT UNLOCKED (%s)" % player_name.to_upper()
-	title_lbl.text = ach.get("title", "Achievement")
-	desc_lbl.text = ach.get("description", "")
-	
-	var badge_path = ach.get("badge_path", "")
-	if ResourceLoader.exists(badge_path):
-		badge_rect.texture = load(badge_path)
+	if item_type == "achievement":
+		var player_name: String = item["player_name"]
+		var ach: Dictionary = item["ach"]
+		header_lbl.text = "🏆 ACHIEVEMENT UNLOCKED (%s)" % player_name.to_upper()
+		title_lbl.text = ach.get("title", "Achievement")
+		desc_lbl.text = ach.get("description", "")
+		var badge_path = ach.get("badge_path", "")
+		if ResourceLoader.exists(badge_path):
+			badge_rect.texture = load(badge_path)
+		else:
+			badge_rect.texture = null
 	else:
-		badge_rect.texture = null
+		header_lbl.text = item.get("header", "NOTIFICATION")
+		title_lbl.text = item.get("title", "")
+		desc_lbl.text = item.get("description", "")
+		var badge_path = item.get("badge_path", "")
+		if ResourceLoader.exists(badge_path):
+			badge_rect.texture = load(badge_path)
+		else:
+			badge_rect.texture = null
 		
 	# Reset position offscreen
 	popup_control.offset_top = OFFSCREEN_TOP

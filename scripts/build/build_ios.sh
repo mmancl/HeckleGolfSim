@@ -83,6 +83,14 @@ if command -v xcodebuild &>/dev/null; then
     if [ -z "$SCHEME_NAME" ]; then
         SCHEME_NAME="Heckle Golf"
     fi
+
+    echo "Ensuring Bluetooth usage descriptions in iOS Info.plist..."
+    find "$TMP_XCODE_DIR" -name "*-Info.plist" -o -name "Info.plist" | while read -r plist; do
+        /usr/libexec/PlistBuddy -c "Add :NSBluetoothAlwaysUsageDescription string Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || \
+        /usr/libexec/PlistBuddy -c "Set :NSBluetoothAlwaysUsageDescription Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Add :NSBluetoothPeripheralUsageDescription string Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || \
+        /usr/libexec/PlistBuddy -c "Set :NSBluetoothPeripheralUsageDescription Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || true
+    done
     
     ARCHIVE_DIR="$TMP_XCODE_DIR/archive.xcarchive"
     xcodebuild -project "$XCODEPROJ" \

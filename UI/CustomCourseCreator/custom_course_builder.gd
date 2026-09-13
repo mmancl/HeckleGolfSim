@@ -726,7 +726,7 @@ static func _build_hole_unified_terrain(
 	# 1. Rasterize 256x256 splat map (optimal resolution and performance)
 	var tex_size = 256
 	var image = Image.create_empty(tex_size, tex_size, false, Image.FORMAT_RGBA8)
-	var blend_radius = 1.5
+	var blend_radius = 3.0
 
 	var green_tris = features.get("green", [])
 	var fairway_tris = features.get("fairway", [])
@@ -752,7 +752,7 @@ static func _build_hole_unified_terrain(
 				var d = pt.distance_to(t_pos)
 				if d < 2.2:
 					var w = 1.0 - (d / 2.2)
-					mulch_w = max(mulch_w, w * w * (3.0 - 2.0 * w))
+					mulch_w = max(mulch_w, _quintic_smooth(w))
 
 			# Priority override: bunker > green/tee > mulch > fairway
 			if bunker_w >= 1.0:
@@ -777,8 +777,8 @@ static func _build_hole_unified_terrain(
 	var splat_tex = ImageTexture.create_from_image(image)
 
 	# 2. Build UnifiedTerrain ArrayMesh grid with authentic elevation and normals
-	var subdiv_x = clampi(int(width / 4.0), 25, 200)
-	var subdiv_z = clampi(int(depth / 4.0), 20, 50)
+	var subdiv_x = clampi(int(width / 3.0), 30, 250)
+	var subdiv_z = clampi(int(depth / 3.0), 25, 75)
 	var cell_w = width / float(subdiv_x)
 	var cell_d = depth / float(subdiv_z)
 
@@ -792,16 +792,52 @@ static func _build_hole_unified_terrain(
 	var uv2s = PackedVector2Array()
 	uv2s.resize(num_verts)
 
+	# Precalculate boundary segments for smooth organic curvature around hazards
+	var bunker_boundary = _get_boundary_segments(bunker_tris)
+	var water_boundary = _get_boundary_segments(features.get("water", []))
+
 	var sample_h = func(sx: float, sz: float) -> float:
+		var base_y = 0.0
 		if not height_grid.is_empty():
-			return _sample_height_from_grid(sx, sz, height_grid, 4.0, 0.0)
-		var bh = sin(sx * 0.022 + sz * 0.012) * cos(sz * 0.025 - sx * 0.015) * 5.5 + sin(sx * 0.045 - sz * 0.035) * 2.2 + cos(sx * 0.085 + sz * 0.065) * 1.0
+			base_y = _sample_height_from_grid(sx, sz, height_grid, 4.0, 0.0)
+		else:
+			base_y = sin(sx * 0.022 + sz * 0.012) * cos(sz * 0.025 - sx * 0.015) * 5.5 + sin(sx * 0.045 - sz * 0.035) * 2.2 + cos(sx * 0.085 + sz * 0.065) * 1.0
+
 		var sp2d = Vector2(sx, sz)
-		if not bunker_tris.is_empty() and _is_point_in_tri_list(sp2d, bunker_tris):
-			return bh - 1.05
-		elif not features.get("water", []).is_empty() and _is_point_in_tri_list(sp2d, features["water"]):
-			return bh - 2.0
-		return bh
+		var bunker_dep = 0.0
+		if not bunker_boundary.is_empty():
+			var min_edge_d = 999999.0
+			for edge in bunker_boundary:
+				var d = _dist_to_segment_2d(sp2d, edge[0], edge[1])
+				if d < min_edge_d:
+					min_edge_d = d
+
+			if _is_point_in_tri_list(sp2d, bunker_tris):
+				var bowl_radius = 7.0
+				var max_depth = 1.0
+				if min_edge_d < bowl_radius:
+					var t = min_edge_d / bowl_radius
+					bunker_dep = _quintic_smooth(t) * max_depth
+				else:
+					bunker_dep = max_depth
+			elif min_edge_d < 4.0:
+				var t = 1.0 - (min_edge_d / 4.0)
+				bunker_dep = -_quintic_smooth(t) * 0.12 # gentle raised lip outside bunker
+
+		var water_dep = 0.0
+		if not water_boundary.is_empty() and _is_point_in_tri_list(sp2d, features.get("water", [])):
+			var min_water_d = 999999.0
+			for edge in water_boundary:
+				var d = _dist_to_segment_2d(sp2d, edge[0], edge[1])
+				if d < min_water_d:
+					min_water_d = d
+			if min_water_d < 15.0:
+				var t = min_water_d / 15.0
+				water_dep = _quintic_smooth(t) * 2.0
+			else:
+				water_dep = 2.0
+
+		return base_y - maxf(bunker_dep, water_dep)
 
 	var idx = 0
 	for z in range(subdiv_z + 1):
@@ -1008,6 +1044,8 @@ static func _build_hole_unified_terrain(
 	var ground_mesh = MeshInstance3D.new()
 	ground_mesh.name = "UnifiedTerrain"
 	ground_mesh.mesh = arr_mesh
+	var q = "Low" if (GlobalSettings != null and GlobalSettings.is_low_graphics()) else "High"
+	MobilePerformance.apply_graphics_quality(ground_mesh, q)
 	hole_node.add_child(ground_mesh)
 	ground_mesh.owner = root
 
@@ -1059,9 +1097,34 @@ static func _calculate_weight_for_tris(p: Vector2, tris: Array, blend_radius: fl
 
 	if has_nearby and min_dist < blend_radius:
 		var t = 1.0 - (min_dist / blend_radius)
-		return t * t * (3.0 - 2.0 * t)
+		return _quintic_smooth(t)
 
 	return 0.0
+
+
+static func _quintic_smooth(t: float) -> float:
+	var c = clampf(t, 0.0, 1.0)
+	return c * c * c * (c * (c * 6.0 - 15.0) + 10.0)
+
+
+static func _get_boundary_segments(tris: Array) -> Array:
+	if tris.is_empty():
+		return []
+	var edge_counts = {}
+	for tri in tris:
+		for i in range(3):
+			var a: Vector2 = tri[i]
+			var b: Vector2 = tri[(i + 1) % 3]
+			var key = "%0.2f,%0.2f_%0.2f,%0.2f" % [a.x, a.y, b.x, b.y] if (a.x < b.x or (a.x == b.x and a.y < b.y)) else "%0.2f,%0.2f_%0.2f,%0.2f" % [b.x, b.y, a.x, a.y]
+			if edge_counts.has(key):
+				edge_counts[key]["count"] += 1
+			else:
+				edge_counts[key] = {"count": 1, "a": a, "b": b}
+	var boundary = []
+	for key in edge_counts:
+		if edge_counts[key]["count"] == 1:
+			boundary.append([edge_counts[key]["a"], edge_counts[key]["b"]])
+	return boundary
 
 
 static func _is_point_in_tri_list(p: Vector2, tris: Array) -> bool:

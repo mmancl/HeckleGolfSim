@@ -6,16 +6,16 @@ const MAX_DISPLAYED_STATS := 12
 const DEFAULT_ENABLED_STAT_IDS: Array[String] = [
 	"Distance",
 	"Carry",
+	"SpinAxis",
 	"Speed",
-	"VLA",
-	"HLA",
 	"BackSpin",
 	"SideSpin",
-	"TotalSpin",
-	"SpinAxis",
-	"Apex",
-	"Offline",
-	"FaceAngle"
+	"FaceAngle",
+	"ClubPath",
+	"FaceToPath",
+	"ClubSpeed",
+	"SmashFactor",
+	"Offline"
 ]
 
 const DYNAMIC_STAT_IDS: Array[String] = [
@@ -70,7 +70,7 @@ const STATS: Array[Dictionary] = [
 		"description": "The initial takeoff angle of the ball relative to the flat ground plane immediately after impact. Crucial for optimizing launch window.",
 		"units_imperial": "deg",
 		"units_metric": "deg",
-		"default_enabled": true,
+		"default_enabled": false,
 		"is_dynamic": false
 	},
 	{
@@ -81,7 +81,7 @@ const STATS: Array[Dictionary] = [
 		"description": "The starting launch direction of the ball relative to the target line (Push to the right or Pull to the left) before spin curvature takes effect.",
 		"units_imperial": "deg",
 		"units_metric": "deg",
-		"default_enabled": true,
+		"default_enabled": false,
 		"is_dynamic": false
 	},
 	{
@@ -114,7 +114,7 @@ const STATS: Array[Dictionary] = [
 		"description": "The combined 3D rotational rate of the ball across all axes, expressed in revolutions per minute (RPM).",
 		"units_imperial": "rpm",
 		"units_metric": "rpm",
-		"default_enabled": true,
+		"default_enabled": false,
 		"is_dynamic": false
 	},
 	{
@@ -136,7 +136,7 @@ const STATS: Array[Dictionary] = [
 		"description": "The highest altitude / peak vertical height reached by the ball above the launch elevation during its flight.",
 		"units_imperial": "ft",
 		"units_metric": "m",
-		"default_enabled": true,
+		"default_enabled": false,
 		"is_dynamic": true
 	},
 	{
@@ -193,7 +193,7 @@ const STATS: Array[Dictionary] = [
 		"description": "The horizontal direction the clubhead is traveling through impact relative to the target line (In-to-Out for draws, Out-to-In for fades).",
 		"units_imperial": "deg",
 		"units_metric": "deg",
-		"default_enabled": false,
+		"default_enabled": true,
 		"is_dynamic": false
 	},
 	{
@@ -204,7 +204,7 @@ const STATS: Array[Dictionary] = [
 		"description": "The angle difference between the club face angle and the swing path (Face Angle minus Club Path). Directly dictates ball curvature and spin axis.",
 		"units_imperial": "deg",
 		"units_metric": "deg",
-		"default_enabled": false,
+		"default_enabled": true,
 		"is_dynamic": false
 	},
 	{
@@ -237,7 +237,7 @@ const STATS: Array[Dictionary] = [
 		"description": "The velocity of the clubhead immediately prior to initial contact with the ball.",
 		"units_imperial": "mph",
 		"units_metric": "m/s",
-		"default_enabled": false,
+		"default_enabled": true,
 		"is_dynamic": false
 	},
 	{
@@ -248,7 +248,7 @@ const STATS: Array[Dictionary] = [
 		"description": "Energy transfer efficiency from clubhead to ball, calculated as Ball Speed divided by Clubhead Speed (1.45 - 1.50 is optimal for Driver).",
 		"units_imperial": "ratio",
 		"units_metric": "ratio",
-		"default_enabled": false,
+		"default_enabled": true,
 		"is_dynamic": false
 	}
 ]

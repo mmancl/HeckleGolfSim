@@ -34,6 +34,10 @@ var turn_classic_btn: Button
 var turn_full_hole_btn: Button
 var turn_desc_lbl: Label
 
+var quality_low_btn: Button
+var quality_high_btn: Button
+var quality_desc_lbl: Label
+
 func _ready() -> void:
 	# Build the setup screen dynamically
 	name = "CoursePlaySetup"
@@ -109,7 +113,7 @@ func _ready() -> void:
 	# Left Column: Player Setup
 	var left_vbox = VBoxContainer.new()
 	left_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left_vbox.size_flags_stretch_ratio = 1.2
+	left_vbox.size_flags_stretch_ratio = 1.0
 	left_vbox.add_theme_constant_override("separation", 20)
 	main_hbox.add_child(left_vbox)
 	
@@ -187,14 +191,21 @@ func _ready() -> void:
 	add_row.add_child(add_btn)
 	left_vbox.add_child(add_row)
 	
-	# Players list vbox container
+	# Players list vbox container inside ScrollContainer
+	var player_scroll = ScrollContainer.new()
+	player_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	player_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	player_scroll.custom_minimum_size = Vector2(0, 220)
+	ThemeManager.apply_scroll_container_style(player_scroll, 16)
 	player_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	player_list_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	left_vbox.add_child(player_list_vbox)
+	player_scroll.add_child(player_list_vbox)
+	left_vbox.add_child(player_scroll)
 	
 	# Right Column: Course Select & Play
 	var right_vbox = VBoxContainer.new()
 	right_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_vbox.size_flags_stretch_ratio = 1.0
 	right_vbox.add_theme_constant_override("separation", 20)
 	main_hbox.add_child(right_vbox)
 	
@@ -206,21 +217,14 @@ func _ready() -> void:
 	var tab_selector = _create_tab_selector()
 	right_vbox.add_child(tab_selector)
 	
-	# Course list
+	# Course list (expands to fill vertical room)
 	course_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	course_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	course_list.custom_minimum_size = Vector2(0, 220)
 	course_list.add_theme_font_size_override("font_size", 24)
-	course_list.add_theme_constant_override("v_separation", 20)
+	course_list.add_theme_constant_override("v_separation", 16)
+	ThemeManager.apply_item_list_style(course_list)
 	right_vbox.add_child(course_list)
-	
-	var game_mode_selector = _create_game_mode_selector()
-	right_vbox.add_child(game_mode_selector)
-
-	var length_selector = _create_length_selector()
-	right_vbox.add_child(length_selector)
-	
-	var turn_order_selector = _create_turn_order_selector()
-	right_vbox.add_child(turn_order_selector)
 	
 	course_list.item_selected.connect(func(idx):
 		_update_start_button()
@@ -232,14 +236,16 @@ func _ready() -> void:
 	)
 	_scan_available_courses()
 	
-	# Footer Actions
+	# Actions Row (placed directly below Course List)
 	var action_row = HBoxContainer.new()
-	action_row.add_theme_constant_override("separation", 10)
+	action_row.add_theme_constant_override("separation", 12)
+	action_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
 	var download_btn = Button.new()
 	download_btn.text = "Download Course"
-	download_btn.custom_minimum_size = Vector2(220, 64)
-	download_btn.add_theme_font_size_override("font_size", 22)
+	download_btn.custom_minimum_size = Vector2(0, 48)
+	download_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	download_btn.add_theme_font_size_override("font_size", 19)
 	download_btn.pressed.connect(func():
 		var dialog_scene = load("res://Courses/OsmDownloadDialog/osm_download_dialog.tscn")
 		if dialog_scene != null:
@@ -253,8 +259,9 @@ func _ready() -> void:
 	
 	var delete_btn = Button.new()
 	delete_btn.text = "Delete Course"
-	delete_btn.custom_minimum_size = Vector2(180, 64)
-	delete_btn.add_theme_font_size_override("font_size", 22)
+	delete_btn.custom_minimum_size = Vector2(0, 48)
+	delete_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	delete_btn.add_theme_font_size_override("font_size", 19)
 	delete_btn.pressed.connect(_on_delete_course_pressed)
 	action_row.add_child(delete_btn)
 	
@@ -267,22 +274,54 @@ func _ready() -> void:
 	add_child(delete_confirm_dialog)
 	
 	preview_button.text = "Preview Course"
-	preview_button.custom_minimum_size = Vector2(200, 64)
-	preview_button.add_theme_font_size_override("font_size", 22)
+	preview_button.custom_minimum_size = Vector2(0, 48)
+	preview_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	preview_button.add_theme_font_size_override("font_size", 19)
 	ThemeManager.apply_secondary_button_style(preview_button)
 	preview_button.disabled = true
 	preview_button.pressed.connect(_on_preview_pressed)
 	action_row.add_child(preview_button)
 
 	start_button.text = "Play Course"
-	start_button.custom_minimum_size = Vector2(200, 64)
-	start_button.add_theme_font_size_override("font_size", 22)
+	start_button.custom_minimum_size = Vector2(0, 48)
+	start_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	start_button.add_theme_font_size_override("font_size", 19)
 	ThemeManager.apply_primary_button_style(start_button)
 	start_button.disabled = true
 	start_button.pressed.connect(_on_start_pressed)
 	action_row.add_child(start_button)
 	
 	right_vbox.add_child(action_row)
+
+	# Bottom Section: 2 Columns for Game Options & Settings (matching mockup)
+	var bottom_hbox = HBoxContainer.new()
+	bottom_hbox.add_theme_constant_override("separation", 50)
+	bottom_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	main_vbox.add_child(bottom_hbox)
+
+	# Bottom Left Column: Turn Order & Graphics Quality
+	var bottom_left_vbox = VBoxContainer.new()
+	bottom_left_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bottom_left_vbox.add_theme_constant_override("separation", 14)
+	bottom_hbox.add_child(bottom_left_vbox)
+
+	var turn_order_selector = _create_turn_order_selector()
+	bottom_left_vbox.add_child(turn_order_selector)
+
+	var quality_selector = _create_quality_selector()
+	bottom_left_vbox.add_child(quality_selector)
+
+	# Bottom Right Column: Game Mode & Hole Selection
+	var bottom_right_vbox = VBoxContainer.new()
+	bottom_right_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bottom_right_vbox.add_theme_constant_override("separation", 14)
+	bottom_hbox.add_child(bottom_right_vbox)
+
+	var game_mode_selector = _create_game_mode_selector()
+	bottom_right_vbox.add_child(game_mode_selector)
+
+	var length_selector = _create_length_selector()
+	bottom_right_vbox.add_child(length_selector)
 	
 	# Add default Player 1
 	_add_player_ui("Player 1", "Blue")
@@ -586,24 +625,24 @@ func _on_start_pressed() -> void:
 func _create_game_mode_selector() -> PanelContainer:
 	var panel = PanelContainer.new()
 	var panel_style = StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.1, 0.15, 0.2, 0.4)
+	panel_style.bg_color = Color(0.08, 0.12, 0.15, 0.65)
 	panel_style.border_width_left = 1
 	panel_style.border_width_right = 1
 	panel_style.border_width_top = 1
 	panel_style.border_width_bottom = 1
-	panel_style.border_color = Color(0.3, 0.4, 0.5, 0.3)
+	panel_style.border_color = Color(0.2, 0.28, 0.35, 0.4)
 	panel_style.corner_radius_top_left = 8
 	panel_style.corner_radius_top_right = 8
 	panel_style.corner_radius_bottom_left = 8
 	panel_style.corner_radius_bottom_right = 8
-	panel_style.content_margin_left = 12
-	panel_style.content_margin_right = 12
-	panel_style.content_margin_top = 8
-	panel_style.content_margin_bottom = 8
+	panel_style.content_margin_left = 14
+	panel_style.content_margin_right = 14
+	panel_style.content_margin_top = 10
+	panel_style.content_margin_bottom = 10
 	panel.add_theme_stylebox_override("panel", panel_style)
 
 	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 8)
+	vbox.add_theme_constant_override("separation", 6)
 	panel.add_child(vbox)
 
 	var hbox = HBoxContainer.new()
@@ -612,7 +651,7 @@ func _create_game_mode_selector() -> PanelContainer:
 
 	var lbl = Label.new()
 	lbl.text = "Game Mode:"
-	lbl.add_theme_font_size_override("font_size", 24)
+	lbl.add_theme_font_size_override("font_size", 20)
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hbox.add_child(lbl)
 
@@ -622,37 +661,37 @@ func _create_game_mode_selector() -> PanelContainer:
 
 	mode_std_btn = Button.new()
 	mode_std_btn.text = "Standard"
-	mode_std_btn.custom_minimum_size = Vector2(115, 48)
-	mode_std_btn.add_theme_font_size_override("font_size", 17)
+	mode_std_btn.custom_minimum_size = Vector2(95, 44)
+	mode_std_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(mode_std_btn)
 
 	mode_scramble_btn = Button.new()
 	mode_scramble_btn.text = "Scramble"
-	mode_scramble_btn.custom_minimum_size = Vector2(115, 48)
-	mode_scramble_btn.add_theme_font_size_override("font_size", 17)
+	mode_scramble_btn.custom_minimum_size = Vector2(95, 44)
+	mode_scramble_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(mode_scramble_btn)
 
 	mode_2v2_btn = Button.new()
 	mode_2v2_btn.text = "2v2 Scramble"
-	mode_2v2_btn.custom_minimum_size = Vector2(135, 48)
-	mode_2v2_btn.add_theme_font_size_override("font_size", 17)
+	mode_2v2_btn.custom_minimum_size = Vector2(115, 44)
+	mode_2v2_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(mode_2v2_btn)
 
 	mode_skins_btn = Button.new()
 	mode_skins_btn.text = "Skins"
-	mode_skins_btn.custom_minimum_size = Vector2(95, 48)
-	mode_skins_btn.add_theme_font_size_override("font_size", 17)
+	mode_skins_btn.custom_minimum_size = Vector2(75, 44)
+	mode_skins_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(mode_skins_btn)
 
 	mode_closest_btn = Button.new()
 	mode_closest_btn.text = "Closest to Pin"
-	mode_closest_btn.custom_minimum_size = Vector2(145, 48)
-	mode_closest_btn.add_theme_font_size_override("font_size", 17)
+	mode_closest_btn.custom_minimum_size = Vector2(125, 44)
+	mode_closest_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(mode_closest_btn)
 
 	mode_desc_lbl = Label.new()
-	mode_desc_lbl.add_theme_font_size_override("font_size", 16)
-	mode_desc_lbl.add_theme_color_override("font_color", Color(0.8, 0.85, 0.9))
+	mode_desc_lbl.add_theme_font_size_override("font_size", 14)
+	mode_desc_lbl.add_theme_color_override("font_color", Color(0.72, 0.80, 0.86))
 	mode_desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(mode_desc_lbl)
 
@@ -689,20 +728,20 @@ func _select_game_mode(mode_name: String) -> void:
 func _create_length_selector() -> PanelContainer:
 	var panel = PanelContainer.new()
 	var panel_style = StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.1, 0.15, 0.2, 0.4)
+	panel_style.bg_color = Color(0.08, 0.12, 0.15, 0.65)
 	panel_style.border_width_left = 1
 	panel_style.border_width_right = 1
 	panel_style.border_width_top = 1
 	panel_style.border_width_bottom = 1
-	panel_style.border_color = Color(0.3, 0.4, 0.5, 0.3)
+	panel_style.border_color = Color(0.2, 0.28, 0.35, 0.4)
 	panel_style.corner_radius_top_left = 8
 	panel_style.corner_radius_top_right = 8
 	panel_style.corner_radius_bottom_left = 8
 	panel_style.corner_radius_bottom_right = 8
-	panel_style.content_margin_left = 12
-	panel_style.content_margin_right = 12
-	panel_style.content_margin_top = 8
-	panel_style.content_margin_bottom = 8
+	panel_style.content_margin_left = 14
+	panel_style.content_margin_right = 14
+	panel_style.content_margin_top = 10
+	panel_style.content_margin_bottom = 10
 	panel.add_theme_stylebox_override("panel", panel_style)
 
 	var hbox = HBoxContainer.new()
@@ -711,31 +750,31 @@ func _create_length_selector() -> PanelContainer:
 
 	var lbl = Label.new()
 	lbl.text = "Select Holes:"
-	lbl.add_theme_font_size_override("font_size", 24)
+	lbl.add_theme_font_size_override("font_size", 20)
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hbox.add_child(lbl)
 
 	# Segmented buttons container
 	var seg_hbox = HBoxContainer.new()
-	seg_hbox.add_theme_constant_override("separation", 0) # Segments touch
+	seg_hbox.add_theme_constant_override("separation", 0)
 	hbox.add_child(seg_hbox)
 
 	front_9_btn = Button.new()
 	front_9_btn.text = "Front 9"
-	front_9_btn.custom_minimum_size = Vector2(150, 48)
-	front_9_btn.add_theme_font_size_override("font_size", 20)
+	front_9_btn.custom_minimum_size = Vector2(110, 44)
+	front_9_btn.add_theme_font_size_override("font_size", 18)
 	seg_hbox.add_child(front_9_btn)
 
 	back_9_btn = Button.new()
 	back_9_btn.text = "Back 9"
-	back_9_btn.custom_minimum_size = Vector2(150, 48)
-	back_9_btn.add_theme_font_size_override("font_size", 20)
+	back_9_btn.custom_minimum_size = Vector2(110, 44)
+	back_9_btn.add_theme_font_size_override("font_size", 18)
 	seg_hbox.add_child(back_9_btn)
 
 	full_18_btn = Button.new()
 	full_18_btn.text = "Full 18"
-	full_18_btn.custom_minimum_size = Vector2(150, 48)
-	full_18_btn.add_theme_font_size_override("font_size", 20)
+	full_18_btn.custom_minimum_size = Vector2(110, 44)
+	full_18_btn.add_theme_font_size_override("font_size", 18)
 	seg_hbox.add_child(full_18_btn)
 
 	# Style buttons and setup connections
@@ -743,31 +782,31 @@ func _create_length_selector() -> PanelContainer:
 	back_9_btn.pressed.connect(func(): _select_length("Back 9"))
 	full_18_btn.pressed.connect(func(): _select_length("Full 18"))
 
-	_select_length("Full 18") # Default selection
+	_select_length("Full 18")
 	return panel
 
 
 func _create_turn_order_selector() -> PanelContainer:
 	var panel = PanelContainer.new()
 	var panel_style = StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.1, 0.15, 0.2, 0.4)
+	panel_style.bg_color = Color(0.08, 0.12, 0.15, 0.65)
 	panel_style.border_width_left = 1
 	panel_style.border_width_right = 1
 	panel_style.border_width_top = 1
 	panel_style.border_width_bottom = 1
-	panel_style.border_color = Color(0.3, 0.4, 0.5, 0.3)
+	panel_style.border_color = Color(0.2, 0.28, 0.35, 0.4)
 	panel_style.corner_radius_top_left = 8
 	panel_style.corner_radius_top_right = 8
 	panel_style.corner_radius_bottom_left = 8
 	panel_style.corner_radius_bottom_right = 8
-	panel_style.content_margin_left = 12
-	panel_style.content_margin_right = 12
-	panel_style.content_margin_top = 8
-	panel_style.content_margin_bottom = 8
+	panel_style.content_margin_left = 14
+	panel_style.content_margin_right = 14
+	panel_style.content_margin_top = 10
+	panel_style.content_margin_bottom = 10
 	panel.add_theme_stylebox_override("panel", panel_style)
 
 	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 8)
+	vbox.add_theme_constant_override("separation", 6)
 	panel.add_child(vbox)
 
 	var hbox = HBoxContainer.new()
@@ -776,7 +815,7 @@ func _create_turn_order_selector() -> PanelContainer:
 
 	var lbl = Label.new()
 	lbl.text = "Turn Order:"
-	lbl.add_theme_font_size_override("font_size", 24)
+	lbl.add_theme_font_size_override("font_size", 20)
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hbox.add_child(lbl)
 
@@ -786,25 +825,25 @@ func _create_turn_order_selector() -> PanelContainer:
 
 	turn_stay_up_btn = Button.new()
 	turn_stay_up_btn.text = "Stay Up"
-	turn_stay_up_btn.custom_minimum_size = Vector2(120, 48)
-	turn_stay_up_btn.add_theme_font_size_override("font_size", 18)
+	turn_stay_up_btn.custom_minimum_size = Vector2(95, 44)
+	turn_stay_up_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(turn_stay_up_btn)
 
 	turn_classic_btn = Button.new()
 	turn_classic_btn.text = "Classic"
-	turn_classic_btn.custom_minimum_size = Vector2(120, 48)
-	turn_classic_btn.add_theme_font_size_override("font_size", 18)
+	turn_classic_btn.custom_minimum_size = Vector2(95, 44)
+	turn_classic_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(turn_classic_btn)
 
 	turn_full_hole_btn = Button.new()
 	turn_full_hole_btn.text = "Full Hole"
-	turn_full_hole_btn.custom_minimum_size = Vector2(130, 48)
-	turn_full_hole_btn.add_theme_font_size_override("font_size", 18)
+	turn_full_hole_btn.custom_minimum_size = Vector2(100, 44)
+	turn_full_hole_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(turn_full_hole_btn)
 
 	turn_desc_lbl = Label.new()
-	turn_desc_lbl.add_theme_font_size_override("font_size", 16)
-	turn_desc_lbl.add_theme_color_override("font_color", Color(0.8, 0.85, 0.9))
+	turn_desc_lbl.add_theme_font_size_override("font_size", 14)
+	turn_desc_lbl.add_theme_color_override("font_color", Color(0.72, 0.80, 0.86))
 	turn_desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(turn_desc_lbl)
 
@@ -827,11 +866,90 @@ func _select_turn_order(mode_name: String) -> void:
 
 	match selected_turn_order:
 		"Stay Up":
-			turn_desc_lbl.text = "Stay Up (Default): All players tee off first. The furthest player hits next and stays up to hit again if still furthest or <= 20 yards."
+			turn_desc_lbl.text = "Stay Up (Default): All players tee off first (never repeat hit off teebox). The furthest player hits next and stays up to hit again if still furthest or <= 35% of club average (only on green if all on green)."
 		"Classic":
 			turn_desc_lbl.text = "Classic: Whichever player is currently furthest from the pin always hits next."
 		"Full Hole":
 			turn_desc_lbl.text = "Full Hole: The player with honors plays their entire hole from tee to cup, followed by the next player."
+
+
+func _create_quality_selector() -> PanelContainer:
+	var panel = PanelContainer.new()
+	var panel_style = StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.08, 0.12, 0.15, 0.65)
+	panel_style.border_width_left = 1
+	panel_style.border_width_right = 1
+	panel_style.border_width_top = 1
+	panel_style.border_width_bottom = 1
+	panel_style.border_color = Color(0.2, 0.28, 0.35, 0.4)
+	panel_style.corner_radius_top_left = 8
+	panel_style.corner_radius_top_right = 8
+	panel_style.corner_radius_bottom_left = 8
+	panel_style.corner_radius_bottom_right = 8
+	panel_style.content_margin_left = 14
+	panel_style.content_margin_right = 14
+	panel_style.content_margin_top = 10
+	panel_style.content_margin_bottom = 10
+	panel.add_theme_stylebox_override("panel", panel_style)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 6)
+	panel.add_child(vbox)
+
+	var hbox = HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 15)
+	vbox.add_child(hbox)
+
+	var lbl = Label.new()
+	lbl.text = "Graphics Quality:"
+	lbl.add_theme_font_size_override("font_size", 20)
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hbox.add_child(lbl)
+
+	var seg_hbox = HBoxContainer.new()
+	seg_hbox.add_theme_constant_override("separation", 0)
+	hbox.add_child(seg_hbox)
+
+	quality_low_btn = Button.new()
+	quality_low_btn.text = "Low (Fast)"
+	quality_low_btn.custom_minimum_size = Vector2(105, 44)
+	quality_low_btn.add_theme_font_size_override("font_size", 16)
+	seg_hbox.add_child(quality_low_btn)
+
+	quality_high_btn = Button.new()
+	quality_high_btn.text = "High (PBR)"
+	quality_high_btn.custom_minimum_size = Vector2(105, 44)
+	quality_high_btn.add_theme_font_size_override("font_size", 16)
+	seg_hbox.add_child(quality_high_btn)
+
+	quality_desc_lbl = Label.new()
+	quality_desc_lbl.add_theme_font_size_override("font_size", 14)
+	quality_desc_lbl.add_theme_color_override("font_color", Color(0.72, 0.80, 0.86))
+	quality_desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(quality_desc_lbl)
+
+	quality_low_btn.pressed.connect(func(): _select_quality("Low"))
+	quality_high_btn.pressed.connect(func(): _select_quality("High"))
+
+	var current_q = "Low"
+	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("graphics_quality"):
+		current_q = GlobalSettings.range_settings.settings["graphics_quality"].value
+	_select_quality(current_q)
+	return panel
+
+
+func _select_quality(q_name: String) -> void:
+	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("graphics_quality"):
+		GlobalSettings.range_settings.settings["graphics_quality"].set_value(q_name)
+		GlobalSettings.save_settings()
+
+	_style_seg_button(quality_low_btn, "left", q_name == "Low")
+	_style_seg_button(quality_high_btn, "right", q_name == "High")
+
+	if q_name == "Low":
+		quality_desc_lbl.text = "Low (Fast): Stylized stippled turf with clear high-contrast slope shading. Optimized for mobile and systems with < 8GB RAM."
+	else:
+		quality_desc_lbl.text = "High (PBR): Photorealistic 27-texture PBR terrain splatting, depth water, and 4-split cascaded shadows."
 
 
 func _style_seg_button(btn: Button, position: String, active: bool) -> void:

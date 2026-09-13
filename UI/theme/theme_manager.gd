@@ -117,18 +117,47 @@ static func apply_input_style(control: Control, corner_radius: int = 6) -> void:
 		if control.custom_minimum_size.y < 48:
 			control.custom_minimum_size.y = 48
 
-static func apply_scrollbar_style(scrollbar: ScrollBar, width: int = 28) -> void:
+static func apply_scrollbar_style(scrollbar: ScrollBar, width: int = -1) -> void:
 	if scrollbar == null:
 		return
+	var is_mob = MobilePerformance.is_mobile()
+	var effective_width = width
+	if effective_width <= 0:
+		effective_width = 56 if is_mob else 28
+	elif is_mob and effective_width < 52:
+		effective_width = 56
+
 	if scrollbar is VScrollBar:
-		scrollbar.custom_minimum_size = Vector2(width, 0)
+		scrollbar.custom_minimum_size = Vector2(effective_width, 0)
 	else:
-		scrollbar.custom_minimum_size = Vector2(0, width)
+		scrollbar.custom_minimum_size = Vector2(0, effective_width)
 	
-	var track_style = _create_stylebox(Color(0.04, 0.07, 0.11, 0.65), Color(0.24, 0.44, 0.65, 0.3), 8, 1, 3, 3, 3, 3)
-	var grabber_normal = _create_stylebox(COLOR_SECONDARY_HOVER, Color(0.40, 0.65, 0.90, 0.5), 8, 1, 2, 2, 2, 2)
-	var grabber_hover = _create_stylebox(Color(0.35, 0.65, 0.95, 0.95), Color(0.70, 0.88, 1.0, 0.8), 8, 1, 2, 2, 2, 2)
-	var grabber_pressed = _create_stylebox(COLOR_PRIMARY_HOVER, Color(0.80, 1.0, 0.80, 0.9), 8, 1, 2, 2, 2, 2)
+	var corner_rad = 12 if is_mob else 8
+	var pad = 4 if is_mob else 2
+	var track_style = _create_stylebox(
+		Color(0.04, 0.07, 0.11, 0.75),
+		Color(0.24, 0.44, 0.65, 0.40),
+		corner_rad, 1,
+		pad + 1, pad + 1, pad + 1, pad + 1
+	)
+	var grabber_normal = _create_stylebox(
+		COLOR_SECONDARY_HOVER,
+		Color(0.45, 0.70, 0.95, 0.75),
+		corner_rad, 1,
+		pad, 14 if is_mob else 4, pad, 14 if is_mob else 4
+	)
+	var grabber_hover = _create_stylebox(
+		Color(0.35, 0.65, 0.95, 0.95),
+		Color(0.75, 0.90, 1.0, 0.90),
+		corner_rad, 1,
+		pad, 14 if is_mob else 4, pad, 14 if is_mob else 4
+	)
+	var grabber_pressed = _create_stylebox(
+		COLOR_PRIMARY_HOVER,
+		Color(0.80, 1.0, 0.80, 0.95),
+		corner_rad, 1,
+		pad, 14 if is_mob else 4, pad, 14 if is_mob else 4
+	)
 
 	scrollbar.add_theme_stylebox_override("scroll", track_style)
 	scrollbar.add_theme_stylebox_override("scroll_focus", track_style)
@@ -136,7 +165,7 @@ static func apply_scrollbar_style(scrollbar: ScrollBar, width: int = 28) -> void
 	scrollbar.add_theme_stylebox_override("grabber_highlight", grabber_hover)
 	scrollbar.add_theme_stylebox_override("grabber_pressed", grabber_pressed)
 
-static func apply_scroll_container_style(scroll: ScrollContainer, width: int = 28) -> void:
+static func apply_scroll_container_style(scroll: ScrollContainer, width: int = -1) -> void:
 	if scroll == null:
 		return
 	var v_bar = scroll.get_v_scroll_bar()
@@ -146,6 +175,51 @@ static func apply_scroll_container_style(scroll: ScrollContainer, width: int = 2
 	if h_bar != null:
 		apply_scrollbar_style(h_bar, width)
 	TouchScrollHelper.attach_to(scroll)
+
+static func apply_item_list_style(list: ItemList, scrollbar_width: int = -1) -> void:
+	if list == null:
+		return
+	var is_mob = MobilePerformance.is_mobile()
+	var effective_width = scrollbar_width
+	if effective_width <= 0:
+		effective_width = 56 if is_mob else 28
+	elif is_mob and effective_width < 52:
+		effective_width = 56
+
+	var v_bar = list.get_v_scroll_bar()
+	if v_bar != null:
+		apply_scrollbar_style(v_bar, effective_width)
+	var h_bar = list.get_h_scroll_bar()
+	if h_bar != null:
+		apply_scrollbar_style(h_bar, effective_width)
+
+	# Clean glass panel with right padding so items don't overlap the scrollbar
+	var list_panel = _create_stylebox(
+		Color(0.05, 0.08, 0.12, 0.50),
+		Color(0.24, 0.44, 0.65, 0.25),
+		8, 1,
+		14, 10, effective_width + 12, 10
+	)
+	list.add_theme_stylebox_override("panel", list_panel)
+
+	# Ensure item vertical separation is touch-friendly
+	if is_mob:
+		var curr_v_sep = list.get_theme_constant("v_separation")
+		if curr_v_sep < 24:
+			list.add_theme_constant_override("v_separation", 24)
+
+	# Keep scrollbar width enforced if layout recalculates
+	if not list.resized.is_connected(_on_item_list_resized):
+		list.resized.connect(_on_item_list_resized.bind(list, effective_width))
+
+	TouchScrollHelper.attach_to(list)
+
+static func _on_item_list_resized(list: ItemList, effective_width: int) -> void:
+	if list == null:
+		return
+	var v_bar = list.get_v_scroll_bar()
+	if v_bar != null and v_bar.custom_minimum_size.x != effective_width:
+		v_bar.custom_minimum_size = Vector2(effective_width, 0)
 
 static func _apply_button_styles(btn: Button, style_normal: StyleBoxFlat, style_hover: StyleBoxFlat, style_pressed: StyleBoxFlat, text_color: Color) -> void:
 	btn.add_theme_stylebox_override("normal", style_normal)

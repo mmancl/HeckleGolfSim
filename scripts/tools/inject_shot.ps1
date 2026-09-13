@@ -1,3 +1,10 @@
+param(
+    [Alias("Host", "H")]
+    [string]$TargetHost = "127.0.0.1",
+    [Alias("p")]
+    [int]$Port = 49152
+)
+
 # HeckleLinks Shot Injection Utility (PowerShell Native)
 # No dependencies or Python installation required!
 
@@ -95,10 +102,10 @@ while ($true) {
     # Convert to JSON string
     $payloadStr = ConvertTo-Json $payload -Depth 4 -Compress
 
-    Write-Host "`nConnecting to HeckleLinks on 127.0.0.1:49152..." -ForegroundColor Yellow
+    Write-Host "`nConnecting to HeckleLinks on $TargetHost`:$Port..." -ForegroundColor Yellow
     
     try {
-        $socket = New-Object System.Net.Sockets.TcpClient("127.0.0.1", 49152)
+        $socket = New-Object System.Net.Sockets.TcpClient($TargetHost, $Port)
         $socket.ReceiveTimeout = 3000 # 3 seconds timeout
         $stream = $socket.GetStream()
         $writer = New-Object System.IO.StreamWriter($stream)
