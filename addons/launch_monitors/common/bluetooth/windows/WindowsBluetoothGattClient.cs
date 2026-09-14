@@ -21,7 +21,6 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
     private DeviceWatcher? _deviceWatcher;
     private BluetoothLEAdvertisementWatcher? _advertisementWatcher;
     private BluetoothLEDevice? _device;
-    private GattSession? _session;
     private BluetoothScanOptions _scanOptions = new(string.Empty);
     private BluetoothConnectionOptions _connectionOptions = new([], [], 4, TimeSpan.FromMilliseconds(700));
     private bool _isDisconnecting;
@@ -100,20 +99,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
             throw new TimeoutException("The selected Bluetooth device is not ready yet. Wait a moment and try connecting again.");
         }
 
-        await PairIfNeededAsync(_device).ConfigureAwait(false);
-        try
-        {
-            _session = await GattSession.FromDeviceIdAsync(_device.BluetoothDeviceId).AsTask(token).ConfigureAwait(false);
-            if (_session is not null)
-            {
-                _session.MaintainConnection = true;
-                _session.SessionStatusChanged += OnGattSessionStatusChanged;
-            }
-        }
-        catch
-        {
-            // GattSession is optional on Windows
-        }
+        _device.ConnectionStatusChanged += OnDeviceConnectionStatusChanged;
         await LoadCharacteristicsAsync(options, token).ConfigureAwait(false);
 
         _isConnected = true;
@@ -124,9 +110,9 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         _isDisconnecting = true;
         _isConnected = false;
 
-        if (_session is not null)
+        if (_device is not null)
         {
-            _session.SessionStatusChanged -= OnGattSessionStatusChanged;
+            _device.ConnectionStatusChanged -= OnDeviceConnectionStatusChanged;
         }
 
         foreach (var characteristicUuid in _subscribedCharacteristicUuids)
@@ -151,8 +137,6 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         _subscribedCharacteristicUuids.Clear();
         _characteristics.Clear();
         ClearServices();
-        _session?.Dispose();
-        _session = null;
         _device?.Dispose();
         _device = null;
         _isDisconnecting = false;
@@ -228,13 +212,24 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
             writeOption = GattWriteOption.WriteWithResponse;
         }
 
-        var result = await characteristic.WriteValueWithResultAsync(
-            writer.DetachBuffer(),
-            writeOption).AsTask(cancellationToken).ConfigureAwait(false);
-
-        if (result.Status != GattCommunicationStatus.Success)
+        if (writeOption == GattWriteOption.WriteWithoutResponse)
         {
-            throw new InvalidOperationException($"Bluetooth write returned {result.Status}.");
+            var status = await characteristic.WriteValueAsync(writer.DetachBuffer(), GattWriteOption.WriteWithoutResponse).AsTask(cancellationToken).ConfigureAwait(false);
+            if (status != GattCommunicationStatus.Success)
+            {
+                throw new InvalidOperationException($"Bluetooth write returned {status}.");
+            }
+        }
+        else
+        {
+            var result = await characteristic.WriteValueWithResultAsync(
+                writer.DetachBuffer(),
+                GattWriteOption.WriteWithResponse).AsTask(cancellationToken).ConfigureAwait(false);
+
+            if (result.Status != GattCommunicationStatus.Success)
+            {
+                throw new InvalidOperationException($"Bluetooth write returned {result.Status}.");
+            }
         }
     }
 
@@ -274,40 +269,6 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         }
 
         return null;
-    }
-
-    private static async Task PairIfNeededAsync(BluetoothLEDevice device)
-    {
-        try
-        {
-            var pairing = device.DeviceInformation.Pairing;
-            if (pairing.IsPaired || !pairing.CanPair)
-            {
-                return;
-            }
-
-            var custom = pairing.Custom;
-            void OnPairingRequested(DeviceInformationCustomPairing sender, DevicePairingRequestedEventArgs args)
-            {
-                args.Accept();
-            }
-
-            custom.PairingRequested += OnPairingRequested;
-            try
-            {
-                await custom.PairAsync(
-                    DevicePairingKinds.ConfirmOnly | DevicePairingKinds.ProvidePin,
-                    DevicePairingProtectionLevel.None);
-            }
-            finally
-            {
-                custom.PairingRequested -= OnPairingRequested;
-            }
-        }
-        catch
-        {
-            // Ignore in-app pairing exceptions
-        }
     }
 
     private async Task LoadCharacteristicsAsync(BluetoothConnectionOptions options, CancellationToken cancellationToken)
@@ -463,9 +424,9 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
             && name.Trim().StartsWith(_scanOptions.DeviceNamePrefix, StringComparison.OrdinalIgnoreCase);
     }
 
-    private void OnGattSessionStatusChanged(GattSession sender, GattSessionStatusChangedEventArgs args)
+    private void OnDeviceConnectionStatusChanged(BluetoothLEDevice sender, object args)
     {
-        if (!_isDisconnecting && _isConnected && args.Status == GattSessionStatus.Closed)
+        if (!_isDisconnecting && _isConnected && sender.ConnectionStatus == BluetoothConnectionStatus.Disconnected)
         {
             _isConnected = false;
             Disconnected?.Invoke();

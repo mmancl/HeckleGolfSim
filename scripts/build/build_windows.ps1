@@ -102,14 +102,33 @@ if (-not (Test-Path $StagingRoot)) {
 
 # Target executable output
 $TargetExe = Join-Path $StagingRoot "HeckleGolfSim.exe"
+$TargetPck = Join-Path $StagingRoot "HeckleGolfSim.pck"
 
 Write-Host ""
-Write-Host "[1/2] Exporting Windows Desktop release via Godot..." -ForegroundColor Green
-& $GodotExe --headless --path $RepoRoot --export-release "Windows Desktop" $TargetExe
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path $TargetExe)) {
-    throw "Godot export failed with exit code $LASTEXITCODE"
+Write-Host "[1/3] Pre-compiling C# .NET solution for Windows (ExportRelease)..." -ForegroundColor Green
+$dotnetProc = Start-Process -FilePath "dotnet" -ArgumentList @("build", "-c", "ExportRelease", "-p:GodotTargetPlatform=windows") -WorkingDirectory $RepoRoot -Wait -NoNewWindow -PassThru
+if ($dotnetProc.ExitCode -ne 0) {
+    throw "dotnet build failed with exit code $($dotnetProc.ExitCode)"
 }
-Write-Host "[OK] Executable and assets exported to: $StagingRoot" -ForegroundColor Green
+
+Write-Host "[2/3] Exporting Windows Desktop release via Godot..." -ForegroundColor Green
+& $GodotExe --headless --path $RepoRoot --export-release "Windows Desktop" $TargetExe
+
+if (-not (Test-Path $TargetExe)) {
+    throw "Godot export failed. Target executable not found at $TargetExe"
+}
+
+# Ensure .NET data folder is present and accessible
+$openShotData = Join-Path $StagingRoot "data_OpenShotGolf_windows_x86_64"
+$heckleData = Join-Path $StagingRoot "data_HeckleGolfSim_windows_x86_64"
+if ((Test-Path $openShotData) -and -not (Test-Path $heckleData)) {
+    Copy-Item -Path $openShotData -Destination $heckleData -Recurse -Force
+}
+
+# Clean any leftover temporary export files
+Get-ChildItem -Path $StagingRoot -Filter "*.tmp" -ErrorAction SilentlyContinue | Remove-Item -Force
+
+Write-Host "[OK] Executable and assets exported successfully to: $StagingRoot" -ForegroundColor Green
 
 # 6. Create README / Quick Start inside the distribution folder
 $readmeContent = @"
@@ -141,7 +160,7 @@ if ($Zip) {
     }
     
     Write-Host ""
-    Write-Host "[2/2] Packaging into ZIP archive for Google Drive upload..." -ForegroundColor Green
+    Write-Host "[3/3] Packaging into ZIP archive for Google Drive upload..." -ForegroundColor Green
     Compress-Archive -Path "$StagingRoot\*" -DestinationPath $ZipPath -CompressionLevel Optimal
     
     $fileItem = Get-Item $ZipPath

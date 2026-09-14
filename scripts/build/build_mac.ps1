@@ -97,7 +97,13 @@ if ($Clean -and (Test-Path $ZipOutput)) {
 }
 
 Write-Host ""
-Write-Host "[1/1] Exporting macOS Universal App (.app) via Godot..." -ForegroundColor Green
+Write-Host "[1/2] Pre-compiling C# .NET solution for macOS (ExportRelease)..." -ForegroundColor Green
+$dotnetProc = Start-Process -FilePath "dotnet" -ArgumentList @("build", "-c", "ExportRelease", "-p:GodotTargetPlatform=macos") -WorkingDirectory $RepoRoot -Wait -NoNewWindow -PassThru
+if ($dotnetProc.ExitCode -ne 0) {
+    throw "dotnet build failed with exit code $($dotnetProc.ExitCode)"
+}
+
+Write-Host "[2/2] Exporting macOS Universal App (.app) via Godot..." -ForegroundColor Green
 & $GodotExe --headless --path $RepoRoot --export-release "macOS" $ZipOutput
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $ZipOutput)) {
     throw "Godot export failed with exit code $LASTEXITCODE"

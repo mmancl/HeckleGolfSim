@@ -127,42 +127,32 @@ $destination = if ([System.IO.Path]::IsPathRooted($OutputPath)) {
     Join-Path $distDir $OutputPath
 }
 
-# Locate Godot 4.7 Mono CLI
-$KnownGodotPaths = @(
-    "C:\Users\micha\Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe",
-    (Get-Command "godot" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
-)
-$GodotExe = $KnownGodotPaths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-
-$buildSuccess = $false
-if ($GodotExe) {
-    Write-Host "Compiling C# .NET solution & exporting Release AAB via Godot..." -ForegroundColor Green
-    $UserDotnet = Join-Path $env:USERPROFILE ".dotnet"
-    if (Test-Path $UserDotnet) {
-        $env:DOTNET_ROOT = $UserDotnet
-        $env:PATH = "$UserDotnet;$env:PATH"
-    }
-    $ExportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "Android", $destination) -WorkingDirectory $RepoRoot -Wait -NoNewWindow -PassThru
-    $buildSuccess = ($ExportProc.ExitCode -eq 0 -and (Test-Path $destination))
-    if (-not $buildSuccess) {
-        Write-Host "Godot CLI export exited with code $($ExportProc.ExitCode); compiling directly via Gradle..." -ForegroundColor Yellow
-    }
+# Compile C# .NET Solution for Android
+$UserDotnet = Join-Path $env:USERPROFILE ".dotnet"
+if (Test-Path $UserDotnet) {
+    $env:DOTNET_ROOT = $UserDotnet
+    $env:PATH = "$UserDotnet;$env:PATH"
 }
 
-if (-not $buildSuccess) {
-    Push-Location $androidBuildDir
-    try {
-        & .\gradlew.bat @gradleArgs
-        $buildSuccess = ($LASTEXITCODE -eq 0)
-    } finally {
-        Pop-Location
-    }
+Write-Host "Compiling C# .NET solution for Android (ExportRelease)..." -ForegroundColor Green
+$dotnetProc = Start-Process -FilePath "dotnet" -ArgumentList @("build", "-c", "ExportRelease", "-p:GodotTargetPlatform=android") -WorkingDirectory $RepoRoot -Wait -NoNewWindow -PassThru
+if ($dotnetProc.ExitCode -ne 0) {
+    throw "dotnet build failed with exit code $($dotnetProc.ExitCode)"
+}
 
-    if ($buildSuccess) {
-        $bundleSource = Join-Path $androidBuildDir "build\outputs\bundle\monoRelease\build-mono-release.aab"
-        if (Test-Path $bundleSource) {
-            Copy-Item -Path $bundleSource -Destination $destination -Force
-        }
+Write-Host "Compiling R8-Optimized Release AAB Bundle via Gradle (bundleMonoRelease)..." -ForegroundColor Green
+Push-Location $androidBuildDir
+try {
+    & .\gradlew.bat @gradleArgs
+    $buildSuccess = ($LASTEXITCODE -eq 0)
+} finally {
+    Pop-Location
+}
+
+if ($buildSuccess) {
+    $bundleSource = Join-Path $androidBuildDir "build\outputs\bundle\monoRelease\build-mono-release.aab"
+    if (Test-Path $bundleSource) {
+        Copy-Item -Path $bundleSource -Destination $destination -Force
     }
 }
 

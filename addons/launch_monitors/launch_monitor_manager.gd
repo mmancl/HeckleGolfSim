@@ -227,7 +227,6 @@ func connect_to_device(device_id: String, is_auto: bool = false) -> void:
 	if _is_manual_connect:
 		_auto_reconnect_attempts = 0
 	_cancel_linux_auto_connect_scan()
-	stop_scan()
 	_debug_log("connect_to_device requested for %s (auto=%s)" % [device_id, str(is_auto)])
 	settings["device_id"] = device_id
 	var device_name := ""
@@ -243,11 +242,13 @@ func connect_to_device(device_id: String, is_auto: bool = false) -> void:
 	if detected_type == "":
 		detected_type = detect_device_type(device_id, device_name)
 
+	_active_driver = detected_type
+	stop_scan()
+
 	if detected_type == "garmin":
 		if device_name == "":
 			device_name = "Garmin Approach R10"
 			settings["device_name"] = device_name
-		_active_driver = "garmin"
 		settings["device_type"] = "garmin"
 		_save_settings()
 		if not devices.has(device_id):
@@ -264,7 +265,6 @@ func connect_to_device(device_id: String, is_auto: bool = false) -> void:
 		if device_name == "":
 			device_name = "Square Golf"
 			settings["device_name"] = device_name
-		_active_driver = "square"
 		if str(settings.get("device_type", "auto")) != "auto":
 			settings["device_type"] = "square"
 		_save_settings()
@@ -550,6 +550,8 @@ func _on_garmin_device_discovered(device_id: String, name: String, rssi: int) ->
 
 
 func _on_square_status_changed(value: String) -> void:
+	if _active_driver != "square" and _active_driver != "":
+		return
 	_set_status(value)
 	if value == "Disconnected" and bool(settings.get("enabled", false)) and str(settings.get("device_id", "")) != "" and _active_driver == "square":
 		_schedule_auto_reconnect()
@@ -560,6 +562,8 @@ func _on_square_status_changed(value: String) -> void:
 
 
 func _on_garmin_status_changed(value: String) -> void:
+	if _active_driver != "garmin" and _active_driver != "":
+		return
 	_set_status(value)
 	if value == "Disconnected" and bool(settings.get("enabled", false)) and str(settings.get("device_id", "")) != "" and _active_driver == "garmin":
 		_schedule_auto_reconnect()
@@ -570,24 +574,32 @@ func _on_garmin_status_changed(value: String) -> void:
 
 
 func _on_garmin_error_occurred(message: String) -> void:
+	if _active_driver != "garmin" and _active_driver != "":
+		return
 	_debug_error("Garmin runtime error: %s" % message)
 	_cancel_auto_reconnect()
 	emit_signal("error_occurred", message)
 
 
 func _on_garmin_battery_changed(level: int) -> void:
+	if _active_driver != "garmin":
+		return
 	_debug_log("Garmin battery changed: %d%%" % level)
 	battery_level = level
 	emit_signal("battery_changed", level)
 
 
 func _on_garmin_firmware_changed(value: String) -> void:
+	if _active_driver != "garmin":
+		return
 	_debug_log("Garmin firmware changed: %s" % value)
 	firmware = value
 	emit_signal("firmware_changed", value)
 
 
 func _on_garmin_ready_changed(value: bool) -> void:
+	if _active_driver != "garmin":
+		return
 	_debug_log("Garmin ready changed: %s" % str(value))
 	var became_ready := value and not is_ready
 	is_ready = value
@@ -604,6 +616,8 @@ func _on_garmin_ready_changed(value: bool) -> void:
 
 
 func _on_garmin_shot_received(data: Dictionary) -> void:
+	if _active_driver != "garmin":
+		return
 	_debug_log("Garmin shot received with %d fields" % data.size())
 	FoamBallBoost.apply_boost(data, _current_club_name)
 	notify_shot_started()
@@ -648,6 +662,8 @@ func _cancel_auto_reconnect() -> void:
 
 
 func _on_square_error_occurred(message: String) -> void:
+	if _active_driver != "square" and _active_driver != "":
+		return
 	var is_transient := _is_transient_square_connect_error(message)
 	if not _is_manual_connect and is_transient:
 		_debug_log("Square auto-connect suppressed error: %s" % message)
@@ -660,18 +676,24 @@ func _on_square_error_occurred(message: String) -> void:
 
 
 func _on_square_battery_changed(level: int) -> void:
+	if _active_driver != "square":
+		return
 	_debug_log("battery changed: %d%%" % level)
 	battery_level = level
 	emit_signal("battery_changed", level)
 
 
 func _on_square_firmware_changed(value: String) -> void:
+	if _active_driver != "square":
+		return
 	_debug_log("firmware changed: %s" % value)
 	firmware = value
 	emit_signal("firmware_changed", value)
 
 
 func _on_square_ready_changed(value: bool) -> void:
+	if _active_driver != "square":
+		return
 	_debug_log("ready changed: %s" % str(value))
 	var became_ready := value and not is_ready
 	is_ready = value
@@ -688,6 +710,8 @@ func _on_square_ready_changed(value: bool) -> void:
 
 
 func _on_square_sensor_data_received(pos_x: int, pos_y: int, pos_z: int, ready: bool, detected: bool) -> void:
+	if _active_driver != "square":
+		return
 	last_sensor_data = {
 		"pos_x": pos_x,
 		"pos_y": pos_y,
@@ -701,6 +725,8 @@ func _on_square_sensor_data_received(pos_x: int, pos_y: int, pos_z: int, ready: 
 
 
 func _on_square_shot_received(data: Dictionary) -> void:
+	if _active_driver != "square":
+		return
 	_debug_log("shot received with %d fields" % data.size())
 	FoamBallBoost.apply_boost(data, _current_club_name)
 	notify_shot_started()

@@ -10,7 +10,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet("standard", "mono")]
-    [string]$Edition = "standard",
+    [string]$Edition = "mono",
 
     [string]$DeviceId = ""
 )
@@ -37,10 +37,16 @@ if (Test-Path $StaleCl) {
     Remove-Item -Path $StaleCl -Force -ErrorAction SilentlyContinue
 }
 
+# Ensure asset pack assets directory exists to prevent build failures
+$assetPackAssetsDir = Join-Path $AndroidBuildDir "assetPackInstallTime\src\main\assets"
+if (-not (Test-Path $assetPackAssetsDir)) {
+    New-Item -ItemType Directory -Path $assetPackAssetsDir -Force | Out-Null
+}
+
 # Step 1: Parse versioning and SDK configurations
 $PackageName = "com.hecklegolf.simulator"
-$VersionName = "0.35.6"
-$VersionCode = 7
+$VersionName = "0.57.3"
+$VersionCode = 10
 $targetSdk = "36"
 $minSdk = "30"
 
@@ -72,7 +78,7 @@ if (Test-Path $exportPresetsPath) {
     }
 }
 
-# Step 1b: Compile R8-Optimized Release AAB Bundle via Godot CLI / Gradle
+# Step 1b: Compile C# .NET solution and R8-Optimized Release AAB Bundle via Gradle
 $distDir = Join-Path $RepoRoot "dist"
 if (-not (Test-Path $distDir)) { New-Item -ItemType Directory -Path $distDir -Force | Out-Null }
 $AabFullPath = Join-Path $distDir "HeckleGolfSim.aab"
@@ -84,61 +90,46 @@ $AabRelativePath = if ($Edition -eq "mono") {
 }
 $GradleAabPath = Join-Path $AndroidBuildDir $AabRelativePath
 
-$KnownGodotPaths = @(
-    "C:\Users\micha\Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe",
-    (Get-Command "godot" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
-)
-$GodotExe = $KnownGodotPaths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+$UserDotnet = Join-Path $env:USERPROFILE ".dotnet"
+if (Test-Path $UserDotnet) {
+    $env:DOTNET_ROOT = $UserDotnet
+    $env:PATH = "$UserDotnet;$env:PATH"
+}
 
-$buildSuccess = $false
-if ($GodotExe) {
-    Write-Host "[1/3] Compiling C# .NET solution & exporting Release AAB via Godot CLI..." -ForegroundColor Green
-    Write-Host "      Package: $PackageName | Version: $VersionName (code: $VersionCode)" -ForegroundColor Gray
-    $UserDotnet = Join-Path $env:USERPROFILE ".dotnet"
-    if (Test-Path $UserDotnet) {
-        $env:DOTNET_ROOT = $UserDotnet
-        $env:PATH = "$UserDotnet;$env:PATH"
-    }
-    $ExportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "Android", $AabFullPath) -WorkingDirectory $RepoRoot -Wait -NoNewWindow -PassThru
-    $buildSuccess = ($ExportProc.ExitCode -eq 0 -and (Test-Path $AabFullPath))
-    if (-not $buildSuccess) {
-        Write-Host "Godot CLI export exited with code $($ExportProc.ExitCode); compiling directly via Gradle..." -ForegroundColor Yellow
+if ($Edition -eq "mono") {
+    Write-Host "[1/3] Compiling C# .NET Solution for Android (ExportRelease)..." -ForegroundColor Green
+    $dotnetProc = Start-Process -FilePath "dotnet" -ArgumentList @("build", "-c", "ExportRelease", "-p:GodotTargetPlatform=android") -WorkingDirectory $RepoRoot -Wait -NoNewWindow -PassThru
+    if ($dotnetProc.ExitCode -ne 0) {
+        throw "dotnet build failed with exit code $($dotnetProc.ExitCode)"
     }
 }
 
-if (-not $buildSuccess) {
-    Write-Host "[1/3] Compiling R8-Optimized Release AAB Bundle via Gradle ($TaskName)..." -ForegroundColor Green
-    Write-Host "      Package: $PackageName | Version: $VersionName (code: $VersionCode)" -ForegroundColor Gray
-    $UserDotnet = Join-Path $env:USERPROFILE ".dotnet"
-    if (Test-Path $UserDotnet) {
-        $env:DOTNET_ROOT = $UserDotnet
-        $env:PATH = "$UserDotnet;$env:PATH"
-    }
+Write-Host "[1/3] Compiling R8-Optimized Release AAB Bundle via Gradle ($TaskName)..." -ForegroundColor Green
+Write-Host "      Package: $PackageName | Version: $VersionName (code: $VersionCode)" -ForegroundColor Gray
 
-    $gradleArgs = @(
-        $TaskName,
-        "-Pexport_package_name=$PackageName",
-        "-Pexport_version_name=$VersionName",
-        "-Pexport_version_code=$VersionCode",
-        "-Pexport_version_min_sdk=$minSdk",
-        "-Pexport_version_target_sdk=$targetSdk",
-        "-Pexport_format=aab",
-        "-Pexport_edition=$Edition",
-        "-Pexport_build_type=release"
-    )
+$gradleArgs = @(
+    $TaskName,
+    "-Pexport_package_name=$PackageName",
+    "-Pexport_version_name=$VersionName",
+    "-Pexport_version_code=$VersionCode",
+    "-Pexport_version_min_sdk=$minSdk",
+    "-Pexport_version_target_sdk=$targetSdk",
+    "-Pexport_format=aab",
+    "-Pexport_edition=$Edition",
+    "-Pexport_build_type=release"
+)
 
-    Push-Location $AndroidBuildDir
-    try {
-        & .\gradlew.bat @gradleArgs
-        if ($LASTEXITCODE -ne 0) {
-            throw "Gradle build failed with exit code $LASTEXITCODE"
-        }
-        if (Test-Path $GradleAabPath) {
-            Copy-Item -Path $GradleAabPath -Destination $AabFullPath -Force
-        }
-    } finally {
-        Pop-Location
+Push-Location $AndroidBuildDir
+try {
+    & .\gradlew.bat @gradleArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Gradle build failed with exit code $LASTEXITCODE"
     }
+    if (Test-Path $GradleAabPath) {
+        Copy-Item -Path $GradleAabPath -Destination $AabFullPath -Force
+    }
+} finally {
+    Pop-Location
 }
 
 if (-not (Test-Path $AabFullPath)) {
