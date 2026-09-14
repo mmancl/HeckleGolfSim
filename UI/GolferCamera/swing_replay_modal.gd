@@ -6,6 +6,8 @@ extends PanelContainer
 
 class_name SwingReplayModal
 
+const ClubDeliveryVisuals = preload("res://UI/GolferCamera/club_delivery_visuals.gd")
+
 signal closed()
 
 # Nodes
@@ -517,6 +519,10 @@ void fragment() {
 	var telem_panel = _create_telemetry_panel()
 	_right_vbox.add_child(telem_panel)
 
+	# Dynamic Club Delivery & Impact Visuals (3 Side-by-Side Cards)
+	var delivery_panel = ClubDeliveryVisuals.create_panel(shot_data, false)
+	_right_vbox.add_child(delivery_panel)
+
 	# Loading / Analysis Progress Panel (shown until background wireframe analysis completes)
 	if not _is_analysis_complete:
 		var load_panel = PanelContainer.new()
@@ -683,6 +689,10 @@ func _build_suggestions_only_ui() -> void:
 	# Shot Telemetry Bar (Mobile Responsive Chips)
 	var telem_panel = _create_telemetry_panel()
 	vbox.add_child(telem_panel)
+
+	# Dynamic Club Delivery & Impact Visuals (3 Side-by-Side Cards)
+	var delivery_panel = ClubDeliveryVisuals.create_panel(shot_data, false)
+	vbox.add_child(delivery_panel)
 
 	# Informational Note Banner for Video Shot Analysis
 	var note_panel = PanelContainer.new()

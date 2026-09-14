@@ -7,6 +7,12 @@ var _close_btn: Button
 var aim_target_node = null
 var current_ball_node = null
 
+var _include_club_data_cb: CheckBox = null
+var _face_angle_spin: SpinBox = null
+var _club_path_spin: SpinBox = null
+var _impact_h_spin: SpinBox = null
+var _impact_v_spin: SpinBox = null
+
 # Approximate table for distances (yards) to physics payload
 var _calibration_table = [
 	{ "distance": 10.0, "speed": 20.0, "vla": 40.0, "spin": 2000.0 },
@@ -61,18 +67,25 @@ func _ready() -> void:
 	style.content_margin_bottom = 20
 	add_theme_stylebox_override("panel", style)
 	
-	custom_minimum_size = Vector2(300, 400)
+	custom_minimum_size = Vector2(340, 560)
 	size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	size_flags_vertical = Control.SIZE_SHRINK_CENTER
+
+	var scroll = ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	add_child(scroll)
 	
 	_vbox = VBoxContainer.new()
-	_vbox.add_theme_constant_override("separation", 15)
-	add_child(_vbox)
+	_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_vbox.add_theme_constant_override("separation", 10)
+	scroll.add_child(_vbox)
 	
 	var title = Label.new()
 	title.text = "Hit Specific Distance"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_font_size_override("font_size", 20)
 	_vbox.add_child(title)
 	
 	_add_distance_button("50 Yards", 50.0)
@@ -83,15 +96,70 @@ func _ready() -> void:
 	
 	var aim_btn = Button.new()
 	aim_btn.text = "🎯 Hit Aim Distance"
-	aim_btn.custom_minimum_size = Vector2(260, 50)
+	aim_btn.custom_minimum_size = Vector2(260, 44)
 	_apply_material_button_style(aim_btn, Color(0.6, 0.2, 0.6, 0.85))
 	aim_btn.pressed.connect(_on_hit_aim_distance)
 	_vbox.add_child(aim_btn)
+
+	# --- Shot Shape Testing Presets ---
+	var shape_sep = HSeparator.new()
+	_vbox.add_child(shape_sep)
+
+	var test_title = Label.new()
+	test_title.text = "Shot Shape & Heckle Testing"
+	test_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	test_title.add_theme_font_size_override("font_size", 14)
+	test_title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.45))
+	_vbox.add_child(test_title)
+
+	var fade_btn = Button.new()
+	fade_btn.text = "↪️ 100-Yard Fade"
+	fade_btn.custom_minimum_size = Vector2(260, 44)
+	_apply_material_button_style(fade_btn, Color(0.2, 0.5, 0.65, 0.85))
+	fade_btn.pressed.connect(_on_hit_100y_fade)
+	_vbox.add_child(fade_btn)
+
+	var slice_btn = Button.new()
+	slice_btn.text = "↩️ 100-Yard Slice (Heckle)"
+	slice_btn.custom_minimum_size = Vector2(260, 44)
+	_apply_material_button_style(slice_btn, Color(0.75, 0.25, 0.2, 0.85))
+	slice_btn.pressed.connect(_on_hit_100y_slice)
+	_vbox.add_child(slice_btn)
+
+	# --- Club Delivery Stats Controls ---
+	var telem_sep = HSeparator.new()
+	_vbox.add_child(telem_sep)
+
+	var telem_title = Label.new()
+	telem_title.text = "Club Delivery Telemetry"
+	telem_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	telem_title.add_theme_font_size_override("font_size", 14)
+	telem_title.add_theme_color_override("font_color", Color(0.4, 0.85, 1.0))
+	_vbox.add_child(telem_title)
+
+	_include_club_data_cb = CheckBox.new()
+	_include_club_data_cb.text = "Include Club Data in Shots"
+	_include_club_data_cb.button_pressed = true
+	_vbox.add_child(_include_club_data_cb)
+
+	var grid = GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 4)
+	_vbox.add_child(grid)
+
+	_face_angle_spin = _create_spinbox_row(grid, "Face Angle:", -15.0, 15.0, 0.5, 0.0, "°")
+	_club_path_spin = _create_spinbox_row(grid, "Club Path:", -15.0, 15.0, 0.5, 0.0, "°")
+	_impact_h_spin = _create_spinbox_row(grid, "Impact Toe/Heel:", -25.0, 25.0, 1.0, 0.0, "mm")
+	_impact_v_spin = _create_spinbox_row(grid, "Impact High/Low:", -20.0, 20.0, 1.0, 0.0, "mm")
+
+	var btn_sep = HSeparator.new()
+	_vbox.add_child(btn_sep)
 	
 	_close_btn = Button.new()
 	_close_btn.text = "Close"
-	_close_btn.custom_minimum_size = Vector2(260, 50)
-	_apply_material_button_style(_close_btn, Color(0.4, 0.4, 0.4, 0.85))
+	_close_btn.custom_minimum_size = Vector2(260, 44)
+	_apply_material_button_style(_close_btn, Color(0.35, 0.35, 0.35, 0.85))
 	_close_btn.pressed.connect(func(): visible = false)
 	_vbox.add_child(_close_btn)
 
@@ -166,9 +234,97 @@ func _inject_shot_for_distance(distance_yards: float) -> void:
 			"TotalSpin": spin,
 			"SpinAxis": 0.0
 		}
+
+	# Always include club delivery and impact metrics so graphics show up and can be tested
+	data["FaceAngle"] = _face_angle_spin.value if _face_angle_spin != null else 0.0
+	data["ClubPath"] = _club_path_spin.value if _club_path_spin != null else 0.0
+	data["HorizontalFaceImpact"] = _impact_h_spin.value if _impact_h_spin != null else 0.0
+	data["VerticalFaceImpact"] = _impact_v_spin.value if _impact_v_spin != null else 0.0
 	
 	emit_signal("inject_shot", data)
 	visible = false
+
+func _on_hit_100y_fade() -> void:
+	# Randomize open face (+0.8° to +2.4°) and out-to-in path (-3.2° to -1.4°)
+	var rand_face = snappedf(randf_range(0.8, 2.4), 0.1)
+	var rand_path = snappedf(randf_range(-3.2, -1.4), 0.1)
+	var rand_h = snappedf(randf_range(0.5, 3.5), 0.5)
+	var rand_v = snappedf(randf_range(-1.5, 1.5), 0.5)
+	var rand_axis = snappedf(randf_range(4.5, 8.5), 0.5)
+
+	if _face_angle_spin != null:
+		_face_angle_spin.value = rand_face
+	if _club_path_spin != null:
+		_club_path_spin.value = rand_path
+	if _impact_h_spin != null:
+		_impact_h_spin.value = rand_h
+	if _impact_v_spin != null:
+		_impact_v_spin.value = rand_v
+
+	var payload = _interpolate_payload(100.0)
+	var data = {
+		"Speed": payload["speed"],
+		"VLA": payload["vla"],
+		"HLA": snappedf(randf_range(-1.8, -0.8), 0.1),
+		"TotalSpin": 6500.0,
+		"SpinAxis": rand_axis,
+		"FaceAngle": rand_face,
+		"ClubPath": rand_path,
+		"HorizontalFaceImpact": rand_h,
+		"VerticalFaceImpact": rand_v
+	}
+	emit_signal("inject_shot", data)
+	visible = false
+
+func _on_hit_100y_slice() -> void:
+	# Randomize severely open face (+3.5° to +7.5°) and out-to-in path (-9.5° to -5.0°)
+	var rand_face = snappedf(randf_range(3.5, 7.5), 0.1)
+	var rand_path = snappedf(randf_range(-9.5, -5.0), 0.1)
+	var rand_h = snappedf(randf_range(4.0, 12.0), 0.5) * (1.0 if randf() > 0.4 else -1.0)
+	var rand_v = snappedf(randf_range(-4.0, 2.5), 0.5)
+	var rand_axis = snappedf(randf_range(18.0, 32.0), 0.5) # Heavy slice tilt to reliably roast
+
+	if _face_angle_spin != null:
+		_face_angle_spin.value = rand_face
+	if _club_path_spin != null:
+		_club_path_spin.value = rand_path
+	if _impact_h_spin != null:
+		_impact_h_spin.value = rand_h
+	if _impact_v_spin != null:
+		_impact_v_spin.value = rand_v
+
+	var payload = _interpolate_payload(100.0)
+	var data = {
+		"Speed": payload["speed"],
+		"VLA": payload["vla"],
+		"HLA": snappedf(randf_range(-2.5, -1.0), 0.1),
+		"TotalSpin": 6800.0,
+		"SpinAxis": rand_axis,
+		"FaceAngle": rand_face,
+		"ClubPath": rand_path,
+		"HorizontalFaceImpact": rand_h,
+		"VerticalFaceImpact": rand_v
+	}
+	emit_signal("inject_shot", data)
+	visible = false
+
+
+func _create_spinbox_row(parent: Node, label_text: String, min_v: float, max_v: float, step_v: float, def_v: float, sfx: String) -> SpinBox:
+	var lbl = Label.new()
+	lbl.text = label_text
+	lbl.add_theme_font_size_override("font_size", 12)
+	lbl.add_theme_color_override("font_color", Color(0.8, 0.88, 0.95))
+	parent.add_child(lbl)
+
+	var sb = SpinBox.new()
+	sb.min_value = min_v
+	sb.max_value = max_v
+	sb.step = step_v
+	sb.value = def_v
+	sb.suffix = sfx
+	sb.custom_minimum_size = Vector2(90, 32)
+	parent.add_child(sb)
+	return sb
 
 func _interpolate_payload(distance_yards: float) -> Dictionary:
 	var count = _calibration_table.size()

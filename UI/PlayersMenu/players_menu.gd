@@ -1,5 +1,7 @@
 extends Control
 
+const ClubDeliveryVisuals = preload("res://UI/GolferCamera/club_delivery_visuals.gd")
+
 @onready var players_list_vbox = VBoxContainer.new()
 @onready var stats_panel = PanelContainer.new()
 @onready var new_player_input = LineEdit.new()
@@ -1213,9 +1215,14 @@ func _build_club_distances_tab(player_name: String) -> VBoxContainer:
 			card_style.border_color = Color(0.2, 0.25, 0.3, 0.25)
 		card.add_theme_stylebox_override("panel", card_style)
 
+		var card_vbox = VBoxContainer.new()
+		card_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		card_vbox.add_theme_constant_override("separation", 8)
+		card.add_child(card_vbox)
+
 		var row_hbox = HBoxContainer.new()
 		row_hbox.add_theme_constant_override("separation", 14)
-		card.add_child(row_hbox)
+		card_vbox.add_child(row_hbox)
 
 		# Column 1: Club Badge & Name
 		var name_vbox = VBoxContainer.new()
@@ -1296,15 +1303,27 @@ func _build_club_distances_tab(player_name: String) -> VBoxContainer:
 		add_metric.call(spin_str, "Avg Spin", false, 85.0)
 		add_metric.call(off_str, "Avg Offline", false, 85.0)
 
-		# Column 4: Reset Button
-		var btn_vbox = VBoxContainer.new()
-		btn_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-		btn_vbox.custom_minimum_size = Vector2(110, 0)
-		row_hbox.add_child(btn_vbox)
+		# Column 4: Expand Visuals & Reset Buttons
+		var btn_hbox = HBoxContainer.new()
+		btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+		btn_hbox.add_theme_constant_override("separation", 6)
+		row_hbox.add_child(btn_hbox)
+
+		var expand_btn = Button.new()
+		expand_btn.text = "▼ Visuals"
+		expand_btn.custom_minimum_size = Vector2(92, 44)
+		expand_btn.add_theme_font_size_override("font_size", 13)
+		if has_shots:
+			ThemeManager.apply_nav_button_style(expand_btn, 6)
+		else:
+			expand_btn.disabled = true
+			expand_btn.modulate = Color(1, 1, 1, 0.3)
+		btn_hbox.add_child(expand_btn)
 
 		var reset_btn = Button.new()
-		reset_btn.text = "🗑 Reset"
-		reset_btn.custom_minimum_size = Vector2(110, 44)
+		reset_btn.text = "🗑"
+		reset_btn.tooltip_text = "Clear Shot Data for this Club"
+		reset_btn.custom_minimum_size = Vector2(44, 44)
 		reset_btn.add_theme_font_size_override("font_size", 15)
 
 		if has_shots:
@@ -1316,7 +1335,34 @@ func _build_club_distances_tab(player_name: String) -> VBoxContainer:
 		else:
 			reset_btn.disabled = true
 			reset_btn.modulate = Color(1, 1, 1, 0.3)
-		btn_vbox.add_child(reset_btn)
+		btn_hbox.add_child(reset_btn)
+
+		# Expandable Drawer with 3 Delivery Visuals
+		var drawer = PanelContainer.new()
+		drawer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		drawer.visible = false
+		var drawer_style = StyleBoxFlat.new()
+		drawer_style.bg_color = Color(0.04, 0.06, 0.09, 0.75)
+		drawer_style.corner_radius_top_left = 6
+		drawer_style.corner_radius_top_right = 6
+		drawer_style.corner_radius_bottom_left = 6
+		drawer_style.corner_radius_bottom_right = 6
+		drawer_style.border_width_top = 1
+		drawer_style.border_color = Color(0.2, 0.35, 0.5, 0.5)
+		drawer_style.content_margin_left = 6
+		drawer_style.content_margin_top = 6
+		drawer_style.content_margin_right = 6
+		drawer_style.content_margin_bottom = 6
+		drawer.add_theme_stylebox_override("panel", drawer_style)
+
+		var delivery_panel = ClubDeliveryVisuals.create_panel(c_data, true)
+		drawer.add_child(delivery_panel)
+		card_vbox.add_child(drawer)
+
+		expand_btn.pressed.connect(func():
+			drawer.visible = not drawer.visible
+			expand_btn.text = "▲ Hide" if drawer.visible else "▼ Visuals"
+		)
 
 		if show_only_active_clubs and not has_shots:
 			card.visible = false

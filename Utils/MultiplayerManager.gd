@@ -2077,6 +2077,29 @@ func record_global_shot(player_name: String, club_name: String, raw_shot: Dictio
 		"TotalDistance": raw_shot.get("TotalDistance", 0.0)
 	}
 
+	# Record club delivery telemetry if provided by launch monitor
+	if raw_shot.has("FaceAngle"):
+		entry["FaceAngle"] = float(raw_shot["FaceAngle"])
+	elif raw_shot.has("ClubFaceAngle"):
+		entry["FaceAngle"] = float(raw_shot["ClubFaceAngle"])
+	elif raw_shot.has("FaceToTarget"):
+		entry["FaceAngle"] = float(raw_shot["FaceToTarget"])
+
+	if raw_shot.has("ClubPath"):
+		entry["ClubPath"] = float(raw_shot["ClubPath"])
+	elif raw_shot.has("Path"):
+		entry["ClubPath"] = float(raw_shot["Path"])
+
+	if raw_shot.has("HorizontalFaceImpact"):
+		entry["HorizontalFaceImpact"] = float(raw_shot["HorizontalFaceImpact"])
+	elif raw_shot.has("impact_offset_horizontal"):
+		entry["HorizontalFaceImpact"] = float(raw_shot["impact_offset_horizontal"])
+
+	if raw_shot.has("VerticalFaceImpact"):
+		entry["VerticalFaceImpact"] = float(raw_shot["VerticalFaceImpact"])
+	elif raw_shot.has("impact_offset_vertical"):
+		entry["VerticalFaceImpact"] = float(raw_shot["impact_offset_vertical"])
+
 	# Exclude outlier shots outside 2 standard deviations of existing data
 	if is_shot_outlier(stats[player_name][club_name], entry):
 		var out_stats = calculate_shots_mean_and_std_dev(stats[player_name][club_name])
@@ -2315,6 +2338,14 @@ func calculate_player_club_averages(player_name: String) -> Dictionary:
 				"avg_spin_rpm": 0.0,
 				"avg_offline_m": 0.0,
 				"avg_target_diff_m": 0.0,
+				"avg_face_angle": 0.0,
+				"has_face_angle": false,
+				"face_angle_count": 0,
+				"avg_club_path": 0.0,
+				"has_club_path": false,
+				"club_path_count": 0,
+				"impact_points": [],
+				"has_impact_data": false,
 				"has_data": false,
 				"shots": []
 			}
@@ -2327,6 +2358,11 @@ func calculate_player_club_averages(player_name: String) -> Dictionary:
 		var sum_offline := 0.0
 		var sum_target_diff := 0.0
 		var valid_target_diff_count := 0
+		var sum_face_angle := 0.0
+		var valid_face_count := 0
+		var sum_club_path := 0.0
+		var valid_path_count := 0
+		var impact_points: Array = []
 		
 		for shot in shots:
 			var carry_dist = float(shot.get("CarryDistance", 0.0))
@@ -2350,6 +2386,26 @@ func calculate_player_club_averages(player_name: String) -> Dictionary:
 			if target_dist > 0.0:
 				sum_target_diff += (total_dist - target_dist)
 				valid_target_diff_count += 1
+
+			if shot.has("FaceAngle"):
+				sum_face_angle += float(shot["FaceAngle"])
+				valid_face_count += 1
+			elif shot.has("ClubFaceAngle"):
+				sum_face_angle += float(shot["ClubFaceAngle"])
+				valid_face_count += 1
+
+			if shot.has("ClubPath"):
+				sum_club_path += float(shot["ClubPath"])
+				valid_path_count += 1
+			elif shot.has("Path"):
+				sum_club_path += float(shot["Path"])
+				valid_path_count += 1
+
+			if shot.has("HorizontalFaceImpact") or shot.has("VerticalFaceImpact"):
+				impact_points.append({
+					"h": float(shot.get("HorizontalFaceImpact", 0.0)),
+					"v": float(shot.get("VerticalFaceImpact", 0.0))
+				})
 				
 		var cnt = float(shot_count)
 		result[club] = {
@@ -2362,6 +2418,14 @@ func calculate_player_club_averages(player_name: String) -> Dictionary:
 			"avg_spin_rpm": sum_spin / cnt,
 			"avg_offline_m": sum_offline / cnt,
 			"avg_target_diff_m": (sum_target_diff / valid_target_diff_count) if valid_target_diff_count > 0 else 0.0,
+			"avg_face_angle": (sum_face_angle / valid_face_count) if valid_face_count > 0 else 0.0,
+			"has_face_angle": valid_face_count > 0,
+			"face_angle_count": valid_face_count,
+			"avg_club_path": (sum_club_path / valid_path_count) if valid_path_count > 0 else 0.0,
+			"has_club_path": valid_path_count > 0,
+			"club_path_count": valid_path_count,
+			"impact_points": impact_points,
+			"has_impact_data": not impact_points.is_empty(),
 			"has_data": true,
 			"shots": shots
 		}

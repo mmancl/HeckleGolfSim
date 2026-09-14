@@ -243,4 +243,26 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 	else:
 		ball_data["lie_type"] = "teebox" if ball_data.get("is_tee", false) else "fairway"
 
+	# Preserve numeric Club Delivery & Impact metrics for Shot Analysis & Profile Visuals
+	if raw_ball_data.has("HorizontalFaceImpact"):
+		ball_data["HorizontalFaceImpact"] = float(raw_ball_data["HorizontalFaceImpact"])
+	elif raw_ball_data.has("impact_offset_horizontal"):
+		ball_data["HorizontalFaceImpact"] = float(raw_ball_data["impact_offset_horizontal"])
+	elif raw_ball_data.has("ImpactLocationX"):
+		ball_data["HorizontalFaceImpact"] = float(raw_ball_data["ImpactLocationX"])
+
+	if raw_ball_data.has("VerticalFaceImpact"):
+		ball_data["VerticalFaceImpact"] = float(raw_ball_data["VerticalFaceImpact"])
+	elif raw_ball_data.has("impact_offset_vertical"):
+		ball_data["VerticalFaceImpact"] = float(raw_ball_data["impact_offset_vertical"])
+	elif raw_ball_data.has("ImpactLocationY"):
+		ball_data["VerticalFaceImpact"] = float(raw_ball_data["ImpactLocationY"])
+
+	if raw_ball_data.has("impact_points"):
+		ball_data["impact_points"] = raw_ball_data["impact_points"]
+
+	ball_data["RawFaceAngle"] = face_angle
+	ball_data["RawClubPath"] = club_path
+	ball_data["RawFaceToPath"] = face_to_path
+
 	return ball_data
