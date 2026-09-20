@@ -84,6 +84,31 @@ func _ready() -> void:
 	_recenter_modal()
 	if get_viewport() != null and not get_viewport().size_changed.is_connected(_on_viewport_resized):
 		get_viewport().size_changed.connect(_on_viewport_resized)
+	call_deferred("_grab_initial_focus")
+
+
+func _grab_initial_focus() -> void:
+	if not is_visible_in_tree():
+		return
+	if has_node("/root/KeybindingManager"):
+		var km = get_node("/root/KeybindingManager")
+		km.focus_first_control(self)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	var is_cancel = event.is_action_pressed("ui_cancel") or event.is_action_pressed("prev_shot_analysis_toggle") or \
+		(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
+	if is_cancel:
+		var detail_modal = get_node_or_null("DetailModal")
+		if detail_modal != null:
+			InAppVideoPlayer.stop_all_players()
+			detail_modal.queue_free()
+			get_viewport().set_input_as_handled()
+			return
+		_on_close_button_pressed()
+		get_viewport().set_input_as_handled()
 
 
 func _on_viewport_resized() -> void:
@@ -117,19 +142,6 @@ func _recenter_modal() -> void:
 	size = Vector2(modal_w, modal_h)
 	custom_minimum_size = size
 	position = (vp_size - size) * 0.5
-
-
-func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_ESCAPE:
-			var detail_modal = get_node_or_null("DetailModal")
-			if detail_modal != null:
-				InAppVideoPlayer.stop_all_players()
-				detail_modal.queue_free()
-				get_viewport().set_input_as_handled()
-				return
-			_on_close_button_pressed()
-			get_viewport().set_input_as_handled()
 
 
 func setup_modal(data: Dictionary, frames: Array = [], suggestions_only: bool = false) -> void:

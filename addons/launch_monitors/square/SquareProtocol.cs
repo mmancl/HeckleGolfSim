@@ -25,7 +25,12 @@ public static class SquareProtocol
 
     public static bool IsStatusPacket(ReadOnlySpan<byte> data)
     {
-        return data.Length >= 3 && data[0] == 0x11 && data[1] == 0x03;
+        return data.Length == 3 && data[0] == 0x11 && data[1] == 0x03;
+    }
+
+    public static bool IsClubDataPacket(ReadOnlySpan<byte> data)
+    {
+        return data.Length >= 9 && data[0] == 0x11 && data[1] == 0x03;
     }
 
     public static bool TryParseStatus(ReadOnlySpan<byte> data, out byte statusCode)
@@ -37,6 +42,38 @@ public static class SquareProtocol
         }
 
         statusCode = data[2];
+        return true;
+    }
+
+    public static bool TryParseClubData(ReadOnlySpan<byte> data, out SquareClubMetrics clubMetrics)
+    {
+        clubMetrics = default;
+        if (!IsClubDataPacket(data))
+        {
+            return false;
+        }
+
+        // 9-byte 0x11 0x03 Club Delivery Packet layout:
+        // [0] 0x11 (header)
+        // [1] 0x03 (club event type)
+        // [2] Sequence / counter
+        // [3] Face Angle (signed sbyte, in degrees, + open / - closed)
+        // [4] Club Path (signed sbyte, in degrees, + in-to-out / - out-to-in)
+        // [5] Attack Angle (signed sbyte, in degrees)
+        // [6] Dynamic Loft (byte, in degrees)
+        // [7] 0x00
+        // [8] 0x01
+        var rawFace = (sbyte)data[3];
+        var rawPath = (sbyte)data[4];
+        var rawAttack = (sbyte)data[5];
+        var rawLoft = data[6];
+
+        clubMetrics = new SquareClubMetrics(
+            FaceAngle: rawFace,
+            ClubPath: rawPath,
+            AttackAngle: rawAttack,
+            DynamicLoft: rawLoft);
+
         return true;
     }
 

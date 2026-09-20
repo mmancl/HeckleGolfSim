@@ -1150,7 +1150,7 @@ func _show_rearming_feedback() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if ((event is InputEventKey and not event.echo) or event is InputEventJoypadButton) and event.is_pressed():
+	if ((event is InputEventKey and not event.echo) or event is InputEventJoypadButton or event is InputEventJoypadMotion) and event.is_pressed():
 		if event.is_action_pressed("reset_shot") or (event is InputEventKey and (event as InputEventKey).keycode == KEY_R):
 			var scene := _get_active_scene()
 			if scene != null and not _is_menu_screen(scene) and not _is_menu_overlay_open(scene) and not is_ball_in_flight():

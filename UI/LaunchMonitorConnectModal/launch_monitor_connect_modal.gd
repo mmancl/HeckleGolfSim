@@ -168,6 +168,26 @@ func _ready() -> void:
 
 	if _launch_monitor != null and (_launch_monitor.status == "Disconnected" or _launch_monitor.status.contains("No launch monitors found")):
 		_launch_monitor.start_scan()
+	call_deferred("_grab_initial_focus")
+
+
+func _grab_initial_focus() -> void:
+	if not is_visible_in_tree():
+		return
+	if continue_button != null and continue_button.visible and not continue_button.disabled:
+		continue_button.grab_focus()
+	elif skip_button != null and skip_button.visible:
+		skip_button.grab_focus()
+	elif close_header_button != null and close_header_button.visible:
+		close_header_button.grab_focus()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	if event.is_action_pressed("ui_cancel"):
+		_on_skip_pressed()
+		get_viewport().set_input_as_handled()
 
 
 func _create_tab_style(bg_color: Color, border_color: Color) -> StyleBoxFlat:

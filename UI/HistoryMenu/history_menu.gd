@@ -98,6 +98,32 @@ func _ready() -> void:
 	
 	# Load and render matches
 	_render_history_list()
+	call_deferred("_grab_initial_focus")
+
+
+func _grab_initial_focus() -> void:
+	if not is_visible_in_tree():
+		return
+	if has_node("/root/KeybindingManager"):
+		var km = get_node("/root/KeybindingManager")
+		km.focus_first_control(self)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	if event.is_action_pressed("ui_cancel"):
+		if delete_confirm_dialog != null and delete_confirm_dialog.visible:
+			delete_confirm_dialog.visible = false
+			get_viewport().set_input_as_handled()
+			return
+		if scorecard_overlay != null and scorecard_overlay.visible:
+			scorecard_overlay.visible = false
+			get_viewport().set_input_as_handled()
+			return
+		SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")
+		get_viewport().set_input_as_handled()
+
 
 func _setup_scorecard_overlay() -> void:
 	scorecard_overlay = ColorRect.new()

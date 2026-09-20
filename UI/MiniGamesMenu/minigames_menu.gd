@@ -148,6 +148,23 @@ func _ready() -> void:
 
 	_update_music_button()
 	GlobalSettings.range_settings.minigame_music_enabled.setting_changed.connect(func(_val): _update_music_button())
+	call_deferred("_grab_initial_focus")
+
+
+func _grab_initial_focus() -> void:
+	if not is_visible_in_tree():
+		return
+	if has_node("/root/KeybindingManager"):
+		var km = get_node("/root/KeybindingManager")
+		km.focus_first_control(self)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	if event.is_action_pressed("ui_cancel"):
+		SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")
+		get_viewport().set_input_as_handled()
 
 
 func _toggle_music() -> void:

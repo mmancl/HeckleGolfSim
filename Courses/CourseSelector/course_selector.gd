@@ -121,6 +121,33 @@ func _ready() -> void:
 		footer_hbox.add_child(_play_button)
 		vbox.add_child(footer_hbox)
 
+	call_deferred("_grab_initial_focus")
+
+
+func _grab_initial_focus() -> void:
+	if not is_visible_in_tree():
+		return
+	if has_node("/root/KeybindingManager"):
+		var km = get_node("/root/KeybindingManager")
+		km.focus_first_control(self)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	if event.is_action_pressed("ui_cancel"):
+		for child in get_children():
+			if (child is ConfirmationDialog or child is AcceptDialog) and child.visible:
+				child.visible = false
+				get_viewport().set_input_as_handled()
+				return
+			if child.is_visible_in_tree() and (child.name.contains("Dialog") or child.name.contains("Creator")):
+				child.queue_free()
+				get_viewport().set_input_as_handled()
+				return
+		_on_main_menu_button_pressed()
+		get_viewport().set_input_as_handled()
+
 
 func _on_main_menu_button_pressed() -> void:
 	SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")

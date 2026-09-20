@@ -117,14 +117,21 @@ func _on_add_remove_pressed() -> void:
 	open_stats_modal()
 
 func open_stats_modal() -> void:
+	var add_remove_btn = get_node_or_null("AddRemoveButton")
 	var existing = get_tree().root.find_child("StatsCustomizationModal", true, false)
 	if existing != null and is_instance_valid(existing):
 		existing.visible = true
+		if existing.has_method("_grab_initial_focus"):
+			existing.call_deferred("_grab_initial_focus")
 		return
 	var modal_script = load("res://UI/stats_customization_modal.gd")
 	if modal_script != null:
 		var modal = modal_script.new()
 		modal.name = "StatsCustomizationModal"
+		modal.modal_closed.connect(func():
+			if add_remove_btn != null and is_instance_valid(add_remove_btn) and add_remove_btn.is_visible_in_tree():
+				add_remove_btn.call_deferred("grab_focus")
+		)
 		get_tree().root.add_child(modal)
 
 func reset_layout():

@@ -75,6 +75,22 @@ func _ready() -> void:
 	# Hide initial donation feedback
 	if donation_feedback_panel != null:
 		donation_feedback_panel.visible = false
+	call_deferred("_grab_initial_focus")
+
+
+func _grab_initial_focus() -> void:
+	if close_footer_button != null and is_instance_valid(close_footer_button):
+		close_footer_button.grab_focus()
+	elif close_header_button != null and is_instance_valid(close_header_button):
+		close_header_button.grab_focus()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	if event.is_action_pressed("ui_cancel"):
+		_on_close_pressed()
+		get_viewport().set_input_as_handled()
 
 
 func _gui_input(event: InputEvent) -> void:

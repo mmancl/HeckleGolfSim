@@ -7,6 +7,10 @@ var _stats_count_label: Label = null
 var _warning_banner: PanelContainer = null
 var _warning_label: Label = null
 var _checkboxes_by_stat_id: Dictionary = {}
+var _check_button_list: Array[CheckButton] = []
+var _close_btn: Button = null
+var _reset_btn: Button = null
+var _done_btn: Button = null
 
 func _init() -> void:
 	layer = 110
@@ -14,6 +18,13 @@ func _init() -> void:
 
 func _ready() -> void:
 	_build_ui()
+	call_deferred("_grab_initial_focus")
+
+func _grab_initial_focus() -> void:
+	if not _check_button_list.is_empty() and is_instance_valid(_check_button_list[0]):
+		_check_button_list[0].grab_focus()
+	elif _close_btn != null and is_instance_valid(_close_btn):
+		_close_btn.grab_focus()
 
 func _build_ui() -> void:
 	# Fullscreen dark translucent backdrop
@@ -131,6 +142,7 @@ func _build_ui() -> void:
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.follow_focus = true
 	ThemeManager.apply_scroll_container_style(scroll, 20)
 
 	var stats_list_vbox := VBoxContainer.new()
@@ -138,6 +150,8 @@ func _build_ui() -> void:
 	stats_list_vbox.add_theme_constant_override("separation", 12)
 
 	var is_imperial: bool = GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL if has_node("/root/GlobalSettings") else true
+
+	_check_button_list.clear()
 
 	var categories = ["Ball Flight", "Club Delivery", "Trajectory"]
 	for cat in categories:
@@ -183,6 +197,32 @@ func _build_ui() -> void:
 
 	main_vbox.add_child(footer_hbox)
 
+	_close_btn = close_btn
+	_reset_btn = reset_btn
+	_done_btn = done_btn
+
+	if not _check_button_list.is_empty():
+		_close_btn.focus_neighbor_bottom = _close_btn.get_path_to(_check_button_list[0])
+		for i in range(_check_button_list.size()):
+			var cb = _check_button_list[i]
+			if i == 0:
+				cb.focus_neighbor_top = cb.get_path_to(_close_btn)
+			else:
+				cb.focus_neighbor_top = cb.get_path_to(_check_button_list[i - 1])
+			if i < _check_button_list.size() - 1:
+				cb.focus_neighbor_bottom = cb.get_path_to(_check_button_list[i + 1])
+			else:
+				cb.focus_neighbor_bottom = cb.get_path_to(_done_btn)
+		
+		_reset_btn.focus_neighbor_top = _reset_btn.get_path_to(_check_button_list.back())
+		_done_btn.focus_neighbor_top = _done_btn.get_path_to(_check_button_list.back())
+
+	_reset_btn.focus_neighbor_right = _reset_btn.get_path_to(_done_btn)
+	_reset_btn.focus_neighbor_left = _reset_btn.get_path_to(_reset_btn)
+	_done_btn.focus_neighbor_left = _done_btn.get_path_to(_reset_btn)
+	_done_btn.focus_neighbor_right = _done_btn.get_path_to(_done_btn)
+
+
 func _create_stat_card(stat: Dictionary, is_imperial: bool) -> PanelContainer:
 	var card := PanelContainer.new()
 	ThemeManager.apply_card_panel_style(card, false, 8, 14, 8, 14, 8)
@@ -224,13 +264,38 @@ func _create_stat_card(stat: Dictionary, is_imperial: bool) -> PanelContainer:
 
 	var check_btn := CheckButton.new()
 	check_btn.custom_minimum_size = Vector2(68, 44)
+	check_btn.focus_mode = Control.FOCUS_ALL
+
+	var focus_style = StyleBoxFlat.new()
+	focus_style.bg_color = Color(0.15, 0.25, 0.35, 0.6)
+	focus_style.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	focus_style.border_width_left = 2
+	focus_style.border_width_top = 2
+	focus_style.border_width_right = 2
+	focus_style.border_width_bottom = 2
+	focus_style.corner_radius_top_left = 6
+	focus_style.corner_radius_top_right = 6
+	focus_style.corner_radius_bottom_left = 6
+	focus_style.corner_radius_bottom_right = 6
+	check_btn.add_theme_stylebox_override("focus", focus_style)
+
 	var stat_id := str(stat.get("id", ""))
 	var active_stats: Array = GlobalSettings.range_settings.displayed_stats.value if has_node("/root/GlobalSettings") else StatDefinitions.DEFAULT_ENABLED_STAT_IDS
 	check_btn.set_pressed_no_signal(active_stats.has(stat_id))
 	_checkboxes_by_stat_id[stat_id] = check_btn
+	_check_button_list.append(check_btn)
 
 	check_btn.toggled.connect(func(toggled_on: bool):
 		_on_stat_toggled(stat_id, toggled_on, check_btn)
+	)
+
+	check_btn.gui_input.connect(func(ev: InputEvent):
+		if ev.is_action_pressed("ui_left") and check_btn.button_pressed:
+			check_btn.button_pressed = false
+			get_viewport().set_input_as_handled()
+		elif ev.is_action_pressed("ui_right") and not check_btn.button_pressed:
+			check_btn.button_pressed = true
+			get_viewport().set_input_as_handled()
 	)
 
 	hbox.add_child(check_btn)

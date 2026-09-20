@@ -76,6 +76,22 @@ func _ready() -> void:
 
 	_scan_real_courses()
 	_update_done_button()
+	call_deferred("_grab_initial_focus")
+
+
+func _grab_initial_focus() -> void:
+	if not is_visible_in_tree():
+		return
+	if cancel_btn != null and is_instance_valid(cancel_btn):
+		cancel_btn.grab_focus()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	if event.is_action_pressed("ui_cancel"):
+		_on_cancel_pressed()
+		get_viewport().set_input_as_handled()
 
 
 func _on_cancel_pressed() -> void:

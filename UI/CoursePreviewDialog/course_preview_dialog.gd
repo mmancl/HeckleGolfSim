@@ -65,6 +65,22 @@ func _ready() -> void:
 	
 	if layout_2d_canvas != null:
 		layout_2d_canvas.draw.connect(_on_layout_2d_draw)
+	call_deferred("_grab_initial_focus")
+
+
+func _grab_initial_focus() -> void:
+	if not is_visible_in_tree():
+		return
+	if close_btn != null and is_instance_valid(close_btn):
+		close_btn.grab_focus()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	if event.is_action_pressed("ui_cancel"):
+		_on_close_pressed()
+		get_viewport().set_input_as_handled()
 
 
 func setup(p_config_path: String, p_scene_path: String = "") -> void:

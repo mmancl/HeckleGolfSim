@@ -450,14 +450,24 @@ To rebuild the native Android GPU MediaPipe pose detection plugin (`MediaPipePos
 ---
 
 ## Controls
-| Action | Key / Input | Context |
-| :--- | :--- | :--- |
-| **Simulate Hit** | `H` | Range, Course Play, Minigames |
-| **Reset Ball** | `R` | Range, Course Play, Minigames |
-| **Orbit Aim / Look Around** | **Right-Click Drag** | Putting & Chipping Minigames |
-| **Rotate Aim Yaw** | `A` / `D` or **Left / Right Arrows** | Putting & Chipping Minigames |
-| **Select Target** | **Click Left Target Panel** | Putting & Chipping Minigames |
-| **Open Menu / Settings** | **Escape** or **UI Cog Button** | All Game Modes |
+| Action | Keyboard | Controller (Xbox / PlayStation) | Context |
+| :--- | :--- | :--- | :--- |
+| **Stats Panel Toggle** | `S` | **A** / **Cross** | Range, Course Play |
+| **Mulligan (Undo Shot)** | `M` | **B** / **Circle** | Course Play, Range |
+| **Toggle Green Slope Grid** | `G` | **X** / **Square** | Range, Course Play |
+| **Previous Shot Analysis Menu** | `V` | **Y** / **Triangle** | Range, Course Play |
+| **Suspense Heartbeat Toggle** | `U` | **LB** / **L1** | Range, Course Play |
+| **Announcer Mute / Unmute** | `N` | **RB** / **R1** | Range, Course Play |
+| **Next Club (Longer)** | `E` | **RT** / **R2** (Right Trigger) | All Game Modes |
+| **Previous Club (Shorter)** | `Q` | **LT** / **L2** (Left Trigger) | All Game Modes |
+| **Simulate Hit** | `H` | **RS Click** / **R3** (Right Stick) | Range, Course Play, Minigames |
+| **Skip Ball Flight** | `Space` | **LS Click** / **L3** (Left Stick) | Range, Course Play |
+| **Aim / Target Adjust** | **Arrow Keys** | **D-Pad Up / Down / Left / Right** | Range, Course Play |
+| **Home / Main Menu** | `Escape` | **View (Select)** / **Share** | All Game Modes |
+| **Settings Menu** | `O` | **Menu (Start)** / **Options** | All Game Modes |
+| **Reset Ball / Next Shot** | `R` | *Unbound* (Keyboard `R`) | Range, Course Play, Minigames |
+| **Orbit Aim / Look Around** | **Right-Click Drag** | **Right Stick** | Putting & Chipping Minigames |
+| **Select Target** | **Click Left Target Panel** | **D-Pad / Click** | Putting & Chipping Minigames |
 
 ---
 

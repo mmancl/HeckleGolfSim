@@ -924,16 +924,51 @@ func _unhandled_input(event: InputEvent) -> void:
 		if has_node("RangeUI") and $RangeUI.has_method("on_next_shot_started"):
 			$RangeUI.on_next_shot_started()
 
-	# Keyboard shortcuts & controller button bindings
-	if ((event is InputEventKey and not event.echo) or event is InputEventJoypadButton) and event.is_pressed():
+	# Keyboard shortcuts & controller button/trigger bindings
+	if ((event is InputEventKey and not event.echo) or event is InputEventJoypadButton or event is InputEventJoypadMotion) and event.is_pressed():
 		if event.is_action_pressed("aerial_aim"):
 			_on_map_button_pressed()
 			get_viewport().set_input_as_handled()
 			return
-		elif ((event is InputEventKey and (event as InputEventKey).keycode == KEY_ESCAPE) or (event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == JOY_BUTTON_B)) and is_aerial_view:
-			_on_map_button_pressed()
+		elif event.is_action_pressed("home"):
+			if has_node("RangeUI"):
+				$RangeUI.call("_on_home_button_pressed")
 			get_viewport().set_input_as_handled()
 			return
+		elif event.is_action_pressed("settings"):
+			if has_node("RangeUI"):
+				$RangeUI.call("_on_toggle_settings_requested")
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("mulligan"):
+			var course_play_node = get_node_or_null("MultiplayerController")
+			if course_play_node != null and course_play_node.has_method("_on_mulligan_pressed"):
+				course_play_node.call("_on_mulligan_pressed")
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("reset_shot"):
+			_reset_display_data()
+			$RangeUI.set_data(display_data)
+			if has_node("RangeUI") and $RangeUI.has_method("on_next_shot_started"):
+				$RangeUI.on_next_shot_started()
+			get_viewport().set_input_as_handled()
+			return
+		elif (event is InputEventKey and (event as InputEventKey).keycode == KEY_ESCAPE) or event.is_action_pressed("ui_cancel"):
+			if is_aerial_view:
+				_on_map_button_pressed()
+				get_viewport().set_input_as_handled()
+				return
+			if has_node("RangeUI"):
+				var r_ui = $RangeUI
+				var modal = r_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
+				if modal != null and is_instance_valid(modal):
+					r_ui.toggle_prev_shot_analysis()
+					get_viewport().set_input_as_handled()
+					return
+				if r_ui.has_node("SettingsLayer") and r_ui.get_node("SettingsLayer").visible:
+					r_ui.get_node("SettingsLayer").visible = false
+					get_viewport().set_input_as_handled()
+					return
 		elif event.is_action_pressed("green_grid"):
 			show_green_grid = not show_green_grid
 			var course_play_node = get_node_or_null("MultiplayerController")
@@ -971,7 +1006,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		elif event.is_action_pressed("hit_shot"):
 			if has_node("Player"):
-				$Player._on_hit_button_pressed()
+				var p = get_node("Player")
+				if p.has_method("manual_hit_shot"):
+					p.manual_hit_shot()
+				elif p.has_method("_on_hit_button_pressed"):
+					p._on_hit_button_pressed()
 			get_viewport().set_input_as_handled()
 			return
 		elif event.is_action_pressed("toggle_helpers"):
@@ -1015,6 +1054,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			if has_node("RangeUI"):
 				var new_v = not $RangeUI.is_shot_analysis_enabled()
 				$RangeUI.set_shot_analysis_enabled(new_v)
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("prev_shot_analysis_toggle"):
+			if has_node("RangeUI"):
+				$RangeUI.toggle_prev_shot_analysis()
 			get_viewport().set_input_as_handled()
 			return
 		elif event.is_action_pressed("distance_menu_toggle"):

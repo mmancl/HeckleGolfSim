@@ -327,7 +327,32 @@ func _ready() -> void:
 	if def_tee.is_empty():
 		def_tee = "Blue"
 	_add_player_ui(default_player, def_tee)
+	call_deferred("_grab_initial_focus")
 
+
+func _grab_initial_focus() -> void:
+	if not is_visible_in_tree():
+		return
+	if has_node("/root/KeybindingManager"):
+		var km = get_node("/root/KeybindingManager")
+		km.focus_first_control(self)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	if event.is_action_pressed("ui_cancel"):
+		for child in get_children():
+			if (child is ConfirmationDialog or child is AcceptDialog) and child.visible:
+				child.visible = false
+				get_viewport().set_input_as_handled()
+				return
+			if child.is_visible_in_tree() and (child.name.contains("Dialog") or child.name.contains("Preview")):
+				child.queue_free()
+				get_viewport().set_input_as_handled()
+				return
+		SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")
+		get_viewport().set_input_as_handled()
 
 
 func _add_player_ui(p_name: String, tee: String = "") -> void:

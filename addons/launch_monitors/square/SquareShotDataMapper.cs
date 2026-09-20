@@ -51,16 +51,29 @@ public static class SquareShotDataMapper
 
         // Only include club delivery metrics when the hardware actually measured them.
         // Square Golf's camera system provides these when club stickers are detected.
-        if (MathF.Abs(metrics.FaceAngle) > 0.001f)
+        if (metrics.HasClubData)
+        {
             data["FaceAngle"] = metrics.FaceAngle;
-        if (MathF.Abs(metrics.ClubPath) > 0.001f)
             data["ClubPath"] = metrics.ClubPath;
-        if (MathF.Abs(metrics.AttackAngle) > 0.001f)
             data["AttackAngle"] = metrics.AttackAngle;
-        if (metrics.DynamicLoft > 0.001f)
             data["DynamicLoft"] = metrics.DynamicLoft;
-        if (data.ContainsKey("FaceAngle") && data.ContainsKey("ClubPath"))
             data["FaceToPath"] = metrics.FaceAngle - metrics.ClubPath;
+            data["RawFaceAngle"] = metrics.FaceAngle;
+            data["RawClubPath"] = metrics.ClubPath;
+        }
+        else
+        {
+            if (MathF.Abs(metrics.FaceAngle) > 0.001f)
+                data["FaceAngle"] = metrics.FaceAngle;
+            if (MathF.Abs(metrics.ClubPath) > 0.001f)
+                data["ClubPath"] = metrics.ClubPath;
+            if (MathF.Abs(metrics.AttackAngle) > 0.001f)
+                data["AttackAngle"] = metrics.AttackAngle;
+            if (metrics.DynamicLoft > 0.001f)
+                data["DynamicLoft"] = metrics.DynamicLoft;
+            if (data.ContainsKey("FaceAngle") && data.ContainsKey("ClubPath"))
+                data["FaceToPath"] = metrics.FaceAngle - metrics.ClubPath;
+        }
 
         return data;
     }

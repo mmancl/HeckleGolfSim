@@ -516,15 +516,20 @@ class ClubDeliveryVisualsPanel extends PanelContainer:
 		elif data.has("FaceAngle") or data.has("ClubFaceAngle") or data.has("FaceToTarget") or data.has("avg_face_angle"):
 			var raw_val = data.get("FaceAngle", data.get("ClubFaceAngle", data.get("FaceToTarget", data.get("avg_face_angle", 0.0))))
 			var fa_str = str(raw_val).strip_edges()
-			if fa_str.ends_with("C") or fa_str.ends_with("Closed"):
+			if fa_str == "---" or fa_str.is_empty():
+				has_face_data = false
+			elif fa_str.ends_with("C") or fa_str.ends_with("Closed"):
 				face_val = -absf(float(fa_str))
+				has_face_data = true
 			elif fa_str.ends_with("O") or fa_str.ends_with("Open"):
 				face_val = absf(float(fa_str))
+				has_face_data = true
 			elif fa_str.ends_with("Sq"):
 				face_val = 0.0
-			else:
+				has_face_data = true
+			elif fa_str.is_valid_float():
 				face_val = float(fa_str)
-			has_face_data = true
+				has_face_data = true
 		elif data.get("has_face_angle", false):
 			face_val = float(data.get("avg_face_angle", 0.0))
 			has_face_data = true
@@ -564,15 +569,20 @@ class ClubDeliveryVisualsPanel extends PanelContainer:
 		elif data.has("ClubPath") or data.has("Path") or data.has("avg_club_path"):
 			var raw_path = data.get("ClubPath", data.get("Path", data.get("avg_club_path", 0.0)))
 			var cp_str = str(raw_path).strip_edges()
-			if cp_str.ends_with("Out-In"):
+			if cp_str == "---" or cp_str.is_empty():
+				has_path_data = false
+			elif cp_str.ends_with("Out-In"):
 				path_val = -absf(float(cp_str))
+				has_path_data = true
 			elif cp_str.ends_with("In-Out"):
 				path_val = absf(float(cp_str))
+				has_path_data = true
 			elif cp_str.ends_with("Str"):
 				path_val = 0.0
-			else:
+				has_path_data = true
+			elif cp_str.is_valid_float():
 				path_val = float(cp_str)
-			has_path_data = true
+				has_path_data = true
 		elif data.get("has_club_path", false):
 			path_val = float(data.get("avg_club_path", 0.0))
 			has_path_data = true

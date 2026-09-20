@@ -30,6 +30,7 @@ var _stat_limit_modal : Control = null
 var _key_buttons_by_action : Dictionary = {}
 var _joy_buttons_by_action : Dictionary = {}
 var _rebind_modal : Control = null
+var _rebind_conflict_modal : Control = null
 var _rebind_action_name : String = ""
 var _rebind_mode : String = "key"
 var _controller_status_label : Label = null
@@ -163,7 +164,7 @@ func _ready() -> void:
 	if header_close_btn != null:
 		header_close_btn.custom_minimum_size = Vector2(48, 48)
 		header_close_btn.add_theme_font_size_override("font_size", 20)
-		header_close_btn.focus_mode = Control.FOCUS_NONE
+		header_close_btn.focus_mode = Control.FOCUS_ALL
 		ThemeManager.apply_nav_button_style(header_close_btn, 8)
 
 	# Style TabContainer
@@ -595,7 +596,7 @@ func _ready() -> void:
 		close_btn.text = "Close"
 		close_btn.custom_minimum_size = Vector2(170, 54)
 		close_btn.add_theme_font_size_override("font_size", 18)
-		close_btn.focus_mode = Control.FOCUS_NONE
+		close_btn.focus_mode = Control.FOCUS_ALL
 		ThemeManager.apply_primary_button_style(close_btn, 8)
 		close_btn.pressed.connect(func(): request_close())
 		buttons_hbox.add_child(close_btn)
@@ -643,6 +644,20 @@ func _on_settings_opened() -> void:
 	_sync_wind_slider()
 	if has_node("/root/AnnouncerEngine"):
 		get_node("/root/AnnouncerEngine").call("SpeakSettingsOpened")
+	call_deferred("_focus_initial_control")
+
+
+func _focus_initial_control() -> void:
+	if not is_visible_in_tree():
+		return
+	var tab_container = get_node_or_null("MarginContainer/VBoxContainer/TabContainer")
+	if tab_container != null and tab_container.is_visible_in_tree():
+		var cur_tab = tab_container.get_current_tab_control()
+		if cur_tab != null and KeybindingManager.focus_first_control(cur_tab):
+			return
+	var header_close = get_node_or_null("MarginContainer/VBoxContainer/HeaderHBox/HeaderCloseButton")
+	if header_close != null and header_close.is_visible_in_tree():
+		header_close.grab_focus()
 
 
 func _sync_wind_slider() -> void:
@@ -1845,9 +1860,8 @@ func _create_option_setting_row(label_text: String, setting_name: String, option
 			opt.selected = i
 			break
 
-	opt.focus_mode = Control.FOCUS_NONE
+	opt.focus_mode = Control.FOCUS_ALL
 	opt.item_selected.connect(func(index: int):
-		opt.release_focus()
 		var val = options[index]
 		if setting != null:
 			setting.set_value(val)
@@ -2124,16 +2138,70 @@ func _show_stat_limit_popup() -> void:
 	_stat_limit_modal = overlay
 
 
-func _unhandled_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+
+	# If Key/Joy Listening Modal active, intercept in _input before GUI consumes it
 	if _rebind_modal != null and is_instance_valid(_rebind_modal):
 		if _rebind_mode == "joy":
-			if (event is InputEventJoypadButton and event.pressed) or (event is InputEventKey and event.pressed and not event.echo):
+			if (event is InputEventJoypadButton and event.pressed) or (event is InputEventKey and event.pressed and not event.echo) or (event is InputEventJoypadMotion and ((event as InputEventJoypadMotion).axis == JOY_AXIS_TRIGGER_LEFT or (event as InputEventJoypadMotion).axis == JOY_AXIS_TRIGGER_RIGHT) and (event as InputEventJoypadMotion).axis_value > 0.5):
 				_handle_rebind_joy_event(event, _rebind_action_name, _rebind_modal)
 				get_viewport().set_input_as_handled()
+				return
 		else:
 			if event is InputEventKey and event.pressed and not event.echo:
 				_handle_rebind_key_event(event, _rebind_action_name, _rebind_modal)
 				get_viewport().set_input_as_handled()
+				return
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+
+	# 1. Conflict Confirmation Modal active
+	if _rebind_conflict_modal != null and is_instance_valid(_rebind_conflict_modal):
+		if event.is_action_pressed("ui_cancel"):
+			_rebind_conflict_modal.queue_free()
+			_rebind_conflict_modal = null
+			get_viewport().set_input_as_handled()
+			return
+		return
+
+	# If Rebind Modal active, handled by _input
+	if _rebind_modal != null and is_instance_valid(_rebind_modal):
+		return
+
+	# 2. Dismiss Stat Limit Modal if active
+	if _stat_limit_modal != null and is_instance_valid(_stat_limit_modal):
+		if event.is_action_pressed("ui_cancel"):
+			_stat_limit_modal.queue_free()
+			_stat_limit_modal = null
+			get_viewport().set_input_as_handled()
+			return
+
+	# 3. Close Settings via B button, Escape, or Settings toggle action
+	if event.is_action_pressed("ui_cancel") or event.is_action_pressed("settings"):
+		request_close()
+		get_viewport().set_input_as_handled()
+		return
+
+	# 4. Tab cycling with LB / RB (Joypad shoulders) when in settings
+	var tab_container = get_node_or_null("MarginContainer/VBoxContainer/TabContainer") as TabContainer
+	if tab_container != null and tab_container.is_visible_in_tree():
+		if event is InputEventJoypadButton and event.pressed:
+			var btn_idx = (event as InputEventJoypadButton).button_index
+			if btn_idx == JOY_BUTTON_LEFT_SHOULDER:
+				var prev_tab = (tab_container.current_tab - 1 + tab_container.get_tab_count()) % tab_container.get_tab_count()
+				tab_container.current_tab = prev_tab
+				get_viewport().set_input_as_handled()
+				return
+			elif btn_idx == JOY_BUTTON_RIGHT_SHOULDER:
+				var next_tab = (tab_container.current_tab + 1) % tab_container.get_tab_count()
+				tab_container.current_tab = next_tab
+				get_viewport().set_input_as_handled()
+				return
 
 
 func _setup_keybindings_section() -> void:
@@ -2382,6 +2450,10 @@ func _open_rebind_modal(action_name: String, action_label: String, is_joy: bool)
 	_rebind_action_name = action_name
 	_rebind_mode = "joy" if is_joy else "key"
 
+	var vp = get_viewport()
+	if vp != null:
+		vp.gui_release_focus()
+
 	var overlay := ColorRect.new()
 	overlay.name = "RebindOverlay"
 	overlay.color = Color(0.0, 0.0, 0.0, 0.75)
@@ -2430,7 +2502,9 @@ func _open_rebind_modal(action_name: String, action_label: String, is_joy: bool)
 	btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 
 	var unbind_btn := Button.new()
+	unbind_btn.name = "UnbindButton"
 	unbind_btn.text = "Clear / Unbind"
+	unbind_btn.focus_mode = Control.FOCUS_NONE
 	unbind_btn.custom_minimum_size = Vector2(140, 44)
 	ThemeManager.apply_secondary_button_style(unbind_btn, 8)
 	unbind_btn.pressed.connect(func():
@@ -2448,7 +2522,9 @@ func _open_rebind_modal(action_name: String, action_label: String, is_joy: bool)
 	btn_hbox.add_child(unbind_btn)
 
 	var cancel_btn := Button.new()
+	cancel_btn.name = "CancelButton"
 	cancel_btn.text = "Cancel"
+	cancel_btn.focus_mode = Control.FOCUS_NONE
 	cancel_btn.custom_minimum_size = Vector2(130, 44)
 	ThemeManager.apply_secondary_button_style(cancel_btn, 8)
 	cancel_btn.pressed.connect(func():
@@ -2500,7 +2576,10 @@ func _handle_rebind_key_event(event: InputEventKey, action_name: String, overlay
 		var km = get_node("/root/KeybindingManager")
 		var conflict_action = km.get_conflict_key_action(chosen_key, action_name)
 		if not conflict_action.is_empty():
-			km.rebind_key(conflict_action, KEY_NONE)
+			var action_label = km.get_action_label(action_name)
+			var conflict_label = km.get_action_label(conflict_action)
+			_open_rebind_conflict_dialog(action_name, action_label, chosen_key, false, conflict_action, conflict_label, overlay)
+			return
 
 		km.rebind_key(action_name, chosen_key)
 		_refresh_keybinding_buttons()
@@ -2528,17 +2607,127 @@ func _handle_rebind_joy_event(event: InputEvent, action_name: String, overlay: C
 			_rebind_action_name = ""
 			return
 
+	var chosen_joy_btn: int = -1
 	if event is InputEventJoypadButton and event.pressed:
-		var joy_btn = (event as InputEventJoypadButton).button_index
+		chosen_joy_btn = (event as InputEventJoypadButton).button_index
+	elif event is InputEventJoypadMotion:
+		var motion_ev = event as InputEventJoypadMotion
+		if motion_ev.axis == JOY_AXIS_TRIGGER_LEFT and motion_ev.axis_value > 0.5:
+			chosen_joy_btn = KeybindingManager.JOY_TRIGGER_LEFT
+		elif motion_ev.axis == JOY_AXIS_TRIGGER_RIGHT and motion_ev.axis_value > 0.5:
+			chosen_joy_btn = KeybindingManager.JOY_TRIGGER_RIGHT
+
+	if chosen_joy_btn >= 0:
 		if has_node("/root/KeybindingManager"):
 			var km = get_node("/root/KeybindingManager")
-			var conflict_action = km.get_conflict_joy_action(joy_btn, action_name)
+			var conflict_action = km.get_conflict_joy_action(chosen_joy_btn, action_name)
 			if not conflict_action.is_empty():
-				km.rebind_joy_button(conflict_action, -1)
+				var action_label = km.get_action_label(action_name)
+				var conflict_label = km.get_action_label(conflict_action)
+				_open_rebind_conflict_dialog(action_name, action_label, chosen_joy_btn, true, conflict_action, conflict_label, overlay)
+				return
 
-			km.rebind_joy_button(action_name, joy_btn)
+			km.rebind_joy_button(action_name, chosen_joy_btn)
 			_refresh_keybinding_buttons()
 
 		overlay.queue_free()
 		_rebind_modal = null
 		_rebind_action_name = ""
+
+
+func _open_rebind_conflict_dialog(action_name: String, action_label: String, new_code: Variant, is_joy: bool, conflict_action: String, conflict_label: String, rebind_overlay: Control) -> void:
+	if _rebind_conflict_modal != null and is_instance_valid(_rebind_conflict_modal):
+		_rebind_conflict_modal.queue_free()
+		_rebind_conflict_modal = null
+
+	var overlay := ColorRect.new()
+	overlay.name = "RebindConflictOverlay"
+	overlay.color = Color(0.0, 0.0, 0.0, 0.85)
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var modal := PanelContainer.new()
+	ThemeManager.apply_modal_style(modal, 12)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+
+	var title_lbl := Label.new()
+	title_lbl.text = "⚠️ Binding Conflict"
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 22)
+	title_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WARNING)
+	vbox.add_child(title_lbl)
+
+	var input_name = KeybindingManager.get_joy_button_display_name(int(new_code)) if is_joy else KeybindingManager.get_key_display_name(new_code as Key)
+
+	var msg_lbl := Label.new()
+	msg_lbl.text = "%s \"%s\" is already bound to:\n\"%s\"\n\nDo you want to reassign it to \"%s\" and unbind it from \"%s\"?" % [
+		"Controller button" if is_joy else "Key",
+		input_name,
+		conflict_label,
+		action_label,
+		conflict_label
+	]
+	msg_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	msg_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	msg_lbl.add_theme_font_size_override("font_size", 16)
+	msg_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	vbox.add_child(msg_lbl)
+
+	var btn_hbox := HBoxContainer.new()
+	btn_hbox.add_theme_constant_override("separation", 16)
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+
+	var confirm_btn := Button.new()
+	confirm_btn.name = "ConfirmReassignButton"
+	confirm_btn.text = "✓ Reassign"
+	confirm_btn.custom_minimum_size = Vector2(140, 44)
+	ThemeManager.apply_primary_button_style(confirm_btn, 8)
+	confirm_btn.pressed.connect(func():
+		if has_node("/root/KeybindingManager"):
+			var km = get_node("/root/KeybindingManager")
+			if is_joy:
+				km.rebind_joy_button(conflict_action, -1)
+				km.rebind_joy_button(action_name, int(new_code))
+			else:
+				km.rebind_key(conflict_action, KEY_NONE)
+				km.rebind_key(action_name, new_code as Key)
+			_refresh_keybinding_buttons()
+		overlay.queue_free()
+		_rebind_conflict_modal = null
+		if rebind_overlay != null and is_instance_valid(rebind_overlay):
+			rebind_overlay.queue_free()
+		_rebind_modal = null
+		_rebind_action_name = ""
+	)
+	btn_hbox.add_child(confirm_btn)
+
+	var cancel_btn := Button.new()
+	cancel_btn.name = "CancelReassignButton"
+	cancel_btn.text = "✕ Cancel"
+	cancel_btn.custom_minimum_size = Vector2(130, 44)
+	ThemeManager.apply_secondary_button_style(cancel_btn, 8)
+	cancel_btn.pressed.connect(func():
+		overlay.queue_free()
+		_rebind_conflict_modal = null
+	)
+	btn_hbox.add_child(cancel_btn)
+
+	vbox.add_child(btn_hbox)
+	modal.add_child(vbox)
+	overlay.add_child(modal)
+
+	modal.anchor_left = 0.5
+	modal.anchor_top = 0.5
+	modal.anchor_right = 0.5
+	modal.anchor_bottom = 0.5
+	modal.offset_left = -290
+	modal.offset_top = -140
+	modal.offset_right = 290
+	modal.offset_bottom = 140
+
+	add_child(overlay)
+	_rebind_conflict_modal = overlay
+	confirm_btn.grab_focus()

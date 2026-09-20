@@ -130,6 +130,16 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 		else:
 			ball_data["FaceAngle"] = "%.1f C" % abs(face_angle)
 		ball_data["RawFaceAngle"] = face_angle
+	elif raw_speed_mph > 20.0:
+		# Fallback estimation using launch direction and spin axis
+		var est_face = raw_hla * 0.75 + (spin_axis * 0.15)
+		if abs(est_face) < 0.1:
+			ball_data["FaceAngle"] = "0.0 Sq"
+		elif est_face > 0.0:
+			ball_data["FaceAngle"] = "%.1f O" % est_face
+		else:
+			ball_data["FaceAngle"] = "%.1f C" % abs(est_face)
+		ball_data["RawFaceAngle"] = est_face
 	else:
 		ball_data["FaceAngle"] = "---"
 
@@ -144,6 +154,15 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 		else:
 			ball_data["ClubPath"] = "%.1f Out-In" % abs(club_path)
 		ball_data["RawClubPath"] = club_path
+	elif raw_speed_mph > 20.0 and ball_data.has("RawFaceAngle"):
+		var est_path = (raw_hla - float(ball_data["RawFaceAngle"]) * 0.75) / 0.25
+		if abs(est_path) < 0.1:
+			ball_data["ClubPath"] = "0.0 Str"
+		elif est_path > 0.0:
+			ball_data["ClubPath"] = "%.1f In-Out" % est_path
+		else:
+			ball_data["ClubPath"] = "%.1f Out-In" % abs(est_path)
+		ball_data["RawClubPath"] = est_path
 	else:
 		ball_data["ClubPath"] = "---"
 
@@ -158,7 +177,7 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 		else:
 			ball_data["FaceToPath"] = "%.1f C" % abs(face_to_path)
 		ball_data["RawFaceToPath"] = face_to_path
-	elif has_face_angle and has_club_path:
+	elif ball_data.has("RawFaceAngle") and ball_data.has("RawClubPath"):
 		var face_to_path = float(ball_data["RawFaceAngle"]) - float(ball_data["RawClubPath"])
 		if abs(face_to_path) < 0.1:
 			ball_data["FaceToPath"] = "0.0 Sq"

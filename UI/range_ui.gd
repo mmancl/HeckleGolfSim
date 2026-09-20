@@ -1216,6 +1216,37 @@ func _on_prev_shot_analysis_pressed() -> void:
 	trigger_swing_replay_modal(_last_shot_data)
 
 
+func toggle_prev_shot_analysis() -> void:
+	# 1. If attached SwingReplayModal is open, close it
+	var modal = $OverlayLayer.get_node_or_null("SwingReplayModal")
+	if modal != null and is_instance_valid(modal):
+		if modal.has_method("_on_close_button_pressed"):
+			modal.call("_on_close_button_pressed")
+		else:
+			modal.queue_free()
+		return
+
+	# 2. If detached window modal is open, close it
+	if _detached_window != null and is_instance_valid(_detached_window):
+		_close_detached_window()
+		return
+
+	# 3. If prev shot popup panel is visible, hide it
+	if _prev_shot_popup != null and is_instance_valid(_prev_shot_popup) and _prev_shot_popup.visible:
+		_prev_shot_popup.visible = false
+		return
+
+	# 4. Otherwise, open previous shot analysis
+	if _last_shot_data.is_empty():
+		if _prev_shot_popup != null:
+			if _prev_shot_data_label != null:
+				_prev_shot_data_label.text = "No shot data recorded yet.\nTake a swing on the range or course to view your swing replay, club delivery visuals, and AI flaw analysis."
+			_prev_shot_popup.visible = true
+		return
+	
+	trigger_swing_replay_modal(_last_shot_data)
+
+
 func is_stats_visible() -> bool:
 	var dist_panel = get_node_or_null("GridCanvas/Distance")
 	return dist_panel.visible if dist_panel != null else true
@@ -1270,10 +1301,18 @@ func apply_material_button_style(btn: Button, bg_color: Color):
 	style_disabled.bg_color = Color(0.2, 0.2, 0.2, 0.4)
 	style_disabled.border_color = Color(0.3, 0.3, 0.3, 0.3)
 
+	var style_focus = style_normal.duplicate()
+	style_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	style_focus.border_width_left = 3
+	style_focus.border_width_top = 3
+	style_focus.border_width_right = 3
+	style_focus.border_width_bottom = 3
+
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_pressed)
 	btn.add_theme_stylebox_override("disabled", style_disabled)
+	btn.add_theme_stylebox_override("focus", style_focus)
 	btn.add_theme_color_override("font_color", Color.WHITE)
 	btn.add_theme_color_override("font_hover_color", Color.WHITE)
 	btn.add_theme_color_override("font_pressed_color", Color.WHITE)
@@ -1301,9 +1340,17 @@ func apply_circular_button_style(btn: Button, bg_color: Color):
 	var style_pressed = style_normal.duplicate()
 	style_pressed.bg_color = bg_color.darkened(0.15)
 
+	var style_focus = style_normal.duplicate()
+	style_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	style_focus.border_width_left = 3
+	style_focus.border_width_top = 3
+	style_focus.border_width_right = 3
+	style_focus.border_width_bottom = 3
+
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_pressed)
+	btn.add_theme_stylebox_override("focus", style_focus)
 
 
 func _on_home_button_pressed() -> void:
@@ -1327,6 +1374,9 @@ func _show_exit_confirm_dialog() -> void:
 
 	if _exit_confirm_dialog != null:
 		_exit_confirm_dialog.visible = true
+		var no_b = _exit_confirm_dialog.find_child("NoButton", true, false) as Button
+		if no_b != null:
+			no_b.call_deferred("grab_focus")
 		return
 
 	_exit_confirm_dialog = Control.new()
@@ -1431,10 +1481,48 @@ func _show_exit_confirm_dialog() -> void:
 	)
 	exit_btn_hbox.add_child(exit_no_btn)
 
+	exit_yes_btn.focus_neighbor_right = exit_yes_btn.get_path_to(exit_no_btn)
+	exit_yes_btn.focus_neighbor_left = exit_yes_btn.get_path_to(exit_no_btn)
+	exit_no_btn.focus_neighbor_left = exit_no_btn.get_path_to(exit_yes_btn)
+	exit_no_btn.focus_neighbor_right = exit_no_btn.get_path_to(exit_yes_btn)
+
 	exit_content_vbox.add_child(exit_btn_hbox)
 	exit_panel.add_child(exit_content_vbox)
 	_exit_confirm_dialog.add_child(exit_panel)
 	$OverlayLayer.add_child(_exit_confirm_dialog)
+
+	exit_no_btn.call_deferred("grab_focus")
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _exit_confirm_dialog != null and is_instance_valid(_exit_confirm_dialog) and _exit_confirm_dialog.visible:
+		if event.is_action_pressed("ui_cancel") or (event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE):
+			_exit_confirm_dialog.visible = false
+			get_viewport().set_input_as_handled()
+			return
+		if event.is_action_pressed("ui_left") or event.is_action_pressed("ui_right") or \
+		   event.is_action_pressed("aim_left") or event.is_action_pressed("aim_right"):
+			var cur_f = get_viewport().gui_get_focus_owner()
+			var no_btn = _exit_confirm_dialog.find_child("NoButton", true, false) as Button
+			var yes_btn = _exit_confirm_dialog.find_child("YesButton", true, false) as Button
+			if cur_f == yes_btn and no_btn != null:
+				no_btn.grab_focus()
+			elif yes_btn != null:
+				yes_btn.grab_focus()
+			get_viewport().set_input_as_handled()
+			return
+		if event.is_action_pressed("ui_accept") or (event is InputEventKey and event.pressed and not event.echo and (event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER)):
+			var cur_f = get_viewport().gui_get_focus_owner()
+			var yes_btn = _exit_confirm_dialog.find_child("YesButton", true, false) as Button
+			var no_btn = _exit_confirm_dialog.find_child("NoButton", true, false) as Button
+			if cur_f == yes_btn:
+				yes_btn.emit_signal("pressed")
+			elif no_btn != null:
+				no_btn.emit_signal("pressed")
+			else:
+				_exit_confirm_dialog.visible = false
+			get_viewport().set_input_as_handled()
+			return
 
 
 func update_map_button_text(is_aerial: bool) -> void:
@@ -2979,6 +3067,8 @@ func _update_tooltips() -> void:
 		_putting_cam_btn.tooltip_text = "Toggle Putting Camera [%s]" % km.get_action_summary_str("putting_cam_toggle")
 	if _shot_analysis_btn != null and is_instance_valid(_shot_analysis_btn):
 		_shot_analysis_btn.tooltip_text = "Toggle Shot Suggestions & Flaw Analysis [%s]" % km.get_action_summary_str("shot_analysis_toggle")
+	if _prev_shot_btn != null and is_instance_valid(_prev_shot_btn):
+		_prev_shot_btn.tooltip_text = "View analysis and recommendations for your previous shot [%s]" % km.get_action_summary_str("prev_shot_analysis_toggle")
 	if _dist_btn != null and is_instance_valid(_dist_btn):
 		_dist_btn.tooltip_text = "Hit Distance Menu [%s]" % km.get_action_summary_str("distance_menu_toggle")
 

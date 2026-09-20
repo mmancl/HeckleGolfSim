@@ -64,6 +64,43 @@ func _ready():
 				ThemeManager.apply_card_panel_style(tile, false, 12, 0, 0, 0, 0)
 				tile.mouse_entered.connect(func(): ThemeManager.apply_card_panel_style(tile, true, 12, 0, 0, 0, 0))
 				tile.mouse_exited.connect(func(): ThemeManager.apply_card_panel_style(tile, false, 12, 0, 0, 0, 0))
+				var tile_btn = tile.find_child("*Button*", true, false) as Button
+				if tile_btn != null:
+					var focus_border = StyleBoxFlat.new()
+					focus_border.bg_color = Color(0, 0, 0, 0)
+					focus_border.border_color = Color(0.35, 0.82, 1.0, 0.95)
+					focus_border.border_width_left = 3
+					focus_border.border_width_top = 3
+					focus_border.border_width_right = 3
+					focus_border.border_width_bottom = 3
+					focus_border.corner_radius_top_left = 12
+					focus_border.corner_radius_top_right = 12
+					focus_border.corner_radius_bottom_right = 12
+					focus_border.corner_radius_bottom_left = 12
+					tile_btn.add_theme_stylebox_override("focus", focus_border)
+					tile_btn.focus_entered.connect(func(): ThemeManager.apply_card_panel_style(tile, true, 12, 0, 0, 0, 0))
+					tile_btn.focus_exited.connect(func(): ThemeManager.apply_card_panel_style(tile, false, 12, 0, 0, 0, 0))
+
+	call_deferred("_grab_initial_focus")
+
+
+func _grab_initial_focus() -> void:
+	if not is_visible_in_tree():
+		return
+	if _courses_button != null and is_instance_valid(_courses_button):
+		_courses_button.grab_focus()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	if event.is_action_pressed("ui_cancel"):
+		if _exit_button != null and is_instance_valid(_exit_button):
+			if get_viewport().gui_get_focus_owner() == _exit_button:
+				_on_exit_pressed()
+			else:
+				_exit_button.grab_focus()
+			get_viewport().set_input_as_handled()
 
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.

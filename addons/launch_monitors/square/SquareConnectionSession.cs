@@ -13,6 +13,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
 
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly SemaphoreSlim _shotLock = new(1, 1);
     private readonly IBluetoothGattClient _bluetoothClient;
     private readonly SquareConnectionOptions _options;
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
@@ -29,6 +30,10 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
     private bool _isReady;
     private DateTime _lastSensorPacketTime = DateTime.MinValue;
     private DateTime _lastRearmAttemptTime = DateTime.MinValue;
+    private SquareShotMetrics? _pendingShotMetrics;
+    private CancellationTokenSource? _pendingShotCts;
+    private SquareClubMetrics? _recentClubMetrics;
+    private DateTime _recentClubMetricsTime = DateTime.MinValue;
 
     public SquareConnectionSession(
         IBluetoothGattClient bluetoothClient,
@@ -207,6 +212,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         await _bluetoothClient.DisposeAsync();
         _connectionLock.Dispose();
         _writeLock.Dispose();
+        _shotLock.Dispose();
     }
 
     private async Task ReadDeviceInfoAsync(CancellationToken cancellationToken)
@@ -290,6 +296,11 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         _isConnected = false;
         _isDetectBallActive = false;
         _isReady = false;
+        _pendingShotCts?.Cancel();
+        _pendingShotCts?.Dispose();
+        _pendingShotCts = null;
+        _pendingShotMetrics = null;
+        _recentClubMetrics = null;
         _lastSensorPacketTime = DateTime.MinValue;
         _lastRearmAttemptTime = DateTime.MinValue;
         await _bluetoothClient.DisconnectAsync(cancellationToken);
@@ -413,6 +424,47 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         // Debug: log full packet hex for diagnosing club data byte layout
         _logInfo($"Notification received: {data.Length} bytes, hex={Convert.ToHexString(data)}");
 
+        if (SquareProtocol.TryParseClubData(data, out var clubMetrics))
+        {
+            _logInfo($"Square club data packet received: face={clubMetrics.FaceAngle}, path={clubMetrics.ClubPath}, aoa={clubMetrics.AttackAngle}, loft={clubMetrics.DynamicLoft}");
+            SquareShotMetrics? mergedShot = null;
+            await _shotLock.WaitAsync();
+            try
+            {
+                if (_pendingShotMetrics.HasValue)
+                {
+                    mergedShot = _pendingShotMetrics.Value with
+                    {
+                        FaceAngle = clubMetrics.FaceAngle,
+                        ClubPath = clubMetrics.ClubPath,
+                        AttackAngle = clubMetrics.AttackAngle,
+                        DynamicLoft = clubMetrics.DynamicLoft,
+                        HasClubData = true
+                    };
+                    _pendingShotMetrics = null;
+                    _pendingShotCts?.Cancel();
+                    _pendingShotCts?.Dispose();
+                    _pendingShotCts = null;
+                }
+                else
+                {
+                    _recentClubMetrics = clubMetrics;
+                    _recentClubMetricsTime = DateTime.UtcNow;
+                }
+            }
+            finally
+            {
+                _shotLock.Release();
+            }
+
+            if (mergedShot.HasValue)
+            {
+                _logInfo($"Merged club data into pending shot: face={mergedShot.Value.FaceAngle}, path={mergedShot.Value.ClubPath}, aoa={mergedShot.Value.AttackAngle}, loft={mergedShot.Value.DynamicLoft}");
+                await DispatchShotAsync(mergedShot.Value);
+            }
+            return;
+        }
+
         if (SquareProtocol.TryParseStatus(data, out var statusCode))
         {
             _logInfo($"Square status packet received: 0x{statusCode:X2}");
@@ -458,10 +510,84 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         }
 
         _lastPayload = payload;
+
+        SquareShotMetrics? immediateShot = null;
+        await _shotLock.WaitAsync();
+        try
+        {
+            var now = DateTime.UtcNow;
+            if (_recentClubMetrics.HasValue && (now - _recentClubMetricsTime) < TimeSpan.FromMilliseconds(600))
+            {
+                var club = _recentClubMetrics.Value;
+                _recentClubMetrics = null;
+                immediateShot = metrics with
+                {
+                    FaceAngle = club.FaceAngle,
+                    ClubPath = club.ClubPath,
+                    AttackAngle = club.AttackAngle,
+                    DynamicLoft = club.DynamicLoft,
+                    HasClubData = true
+                };
+            }
+            else
+            {
+                _pendingShotCts?.Cancel();
+                _pendingShotCts?.Dispose();
+                _pendingShotCts = new CancellationTokenSource();
+                _pendingShotMetrics = metrics;
+
+                var cts = _pendingShotCts;
+                _ = RunAsync(async () =>
+                {
+                    try
+                    {
+                        await _delayAsync(TimeSpan.FromMilliseconds(350), cts.Token);
+                        SquareShotMetrics? toEmit = null;
+                        await _shotLock.WaitAsync();
+                        try
+                        {
+                            if (_pendingShotMetrics.HasValue)
+                            {
+                                toEmit = _pendingShotMetrics.Value;
+                                _pendingShotMetrics = null;
+                            }
+                        }
+                        finally
+                        {
+                            _shotLock.Release();
+                        }
+
+                        if (toEmit.HasValue)
+                        {
+                            _logInfo("Club data window (350ms) elapsed without club packet. Emitting ball-only shot.");
+                            await DispatchShotAsync(toEmit.Value);
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Club data packet arrived in time and handled dispatch!
+                    }
+                });
+            }
+        }
+        finally
+        {
+            _shotLock.Release();
+        }
+
+        if (immediateShot.HasValue)
+        {
+            _logInfo($"Immediately merged recent club data into shot: face={immediateShot.Value.FaceAngle}, path={immediateShot.Value.ClubPath}, aoa={immediateShot.Value.AttackAngle}, loft={immediateShot.Value.DynamicLoft}");
+            await DispatchShotAsync(immediateShot.Value);
+        }
+    }
+
+    private async Task DispatchShotAsync(SquareShotMetrics metrics)
+    {
         _isDetectBallActive = false;
         EmitReady(false);
         ShotReceived?.Invoke(metrics);
-        _logInfo($"Shot packet parsed. {data.Length} bytes, speed={metrics.BallSpeedMps} m/s, spin={metrics.TotalSpinRpm} rpm, faceAngle={metrics.FaceAngle}, clubPath={metrics.ClubPath}, attackAngle={metrics.AttackAngle}, dynamicLoft={metrics.DynamicLoft}");
+        _logInfo($"Shot emitted. speed={metrics.BallSpeedMps} m/s, spin={metrics.TotalSpinRpm} rpm, hasClubData={metrics.HasClubData}, faceAngle={metrics.FaceAngle}, clubPath={metrics.ClubPath}, attackAngle={metrics.AttackAngle}, dynamicLoft={metrics.DynamicLoft}");
         await _delayAsync(_options.ConnectionReadyDelay, CancellationToken.None);
         await SetReadyAsync();
     }

@@ -168,31 +168,32 @@ func _process(_delta: float) -> void:
 		current_tracer.update_trail(ball_pos)
 
 	if Input.is_action_just_pressed("hit"):
-		_last_starting_pos = ball.global_position
-		var parent_scene = get_parent()
-		if parent_scene != null and "aim_target_pos" in parent_scene:
-			_last_aim_target_pos = parent_scene.aim_target_pos
-		_last_aim_yaw_offset_deg = ball.aim_yaw_offset_deg if ball != null else 0.0
-		track_points = false
-		create_new_tracer()
-		print("[player.gd] Hitting ball manually! ball.aim_yaw_offset_deg = ", ball.aim_yaw_offset_deg)
-		ball.hit()
-		if current_tracer != null:
-			current_tracer.start_trail(ball.position)
-		track_points = true
-		trail_timer = 0.0
-		emit_signal("manual_hit")
-		if has_node("/root/LaunchMonitorManager"):
-			get_node("/root/LaunchMonitorManager").call("notify_shot_started")
+		manual_hit_shot()
 	if Input.is_action_just_pressed("reset"):
-		ball.call_deferred("reset")
-		apex = 0.0
-		carry = 0.0
-		side_distance = 0.0
-		track_points = false
-		clear_tracers()
-		if has_node("/root/LaunchMonitorManager"):
-			get_node("/root/LaunchMonitorManager").call("notify_ball_at_rest")
+		reset_ball()
+
+func manual_hit_shot() -> void:
+	if ball == null:
+		return
+	_last_starting_pos = ball.global_position
+	var parent_scene = get_parent()
+	if parent_scene != null and "aim_target_pos" in parent_scene:
+		_last_aim_target_pos = parent_scene.aim_target_pos
+	_last_aim_yaw_offset_deg = ball.aim_yaw_offset_deg if ball != null else 0.0
+	track_points = false
+	create_new_tracer()
+	print("[player.gd] Hitting ball manually! ball.aim_yaw_offset_deg = ", ball.aim_yaw_offset_deg)
+	ball.hit()
+	if current_tracer != null:
+		current_tracer.start_trail(ball.position)
+	track_points = true
+	trail_timer = 0.0
+	emit_signal("manual_hit")
+	if has_node("/root/LaunchMonitorManager"):
+		get_node("/root/LaunchMonitorManager").call("notify_shot_started")
+
+func _on_hit_button_pressed() -> void:
+	manual_hit_shot()
 
 
 func _physics_process(_delta: float) -> void:

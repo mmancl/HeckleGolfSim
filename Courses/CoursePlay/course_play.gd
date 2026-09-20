@@ -250,6 +250,12 @@ func _setup_hud() -> void:
 	cancel_btn.pressed.connect(func():
 		mulligan_confirm_dialog.visible = false
 	)
+	confirm_btn.name = "ConfirmBtn"
+	cancel_btn.name = "CancelBtn"
+	confirm_btn.focus_neighbor_right = confirm_btn.get_path_to(cancel_btn)
+	confirm_btn.focus_neighbor_left = confirm_btn.get_path_to(cancel_btn)
+	cancel_btn.focus_neighbor_left = cancel_btn.get_path_to(confirm_btn)
+	cancel_btn.focus_neighbor_right = cancel_btn.get_path_to(confirm_btn)
 	btn_hbox.add_child(cancel_btn)
 	
 	content_vbox.add_child(btn_hbox)
@@ -391,7 +397,10 @@ func _setup_hud() -> void:
 	exit_no_btn.pressed.connect(func():
 		exit_confirm_dialog.visible = false
 	)
-	exit_btn_hbox.add_child(exit_no_btn)
+	exit_yes_btn.focus_neighbor_right = exit_yes_btn.get_path_to(exit_no_btn)
+	exit_yes_btn.focus_neighbor_left = exit_yes_btn.get_path_to(exit_no_btn)
+	exit_no_btn.focus_neighbor_left = exit_no_btn.get_path_to(exit_yes_btn)
+	exit_no_btn.focus_neighbor_right = exit_no_btn.get_path_to(exit_yes_btn)
 
 	exit_content_vbox.add_child(exit_btn_hbox)
 	exit_panel.add_child(exit_content_vbox)
@@ -820,6 +829,9 @@ func _setup_hud() -> void:
 			if mulligan_confirm_dialog != null:
 				mulligan_confirm_dialog.visible = false
 			exit_confirm_dialog.visible = true
+			var no_b = exit_confirm_dialog.find_child("NoButton", true, false) as Button
+			if no_b != null:
+				no_b.call_deferred("grab_focus")
 			if has_node("/root/AnnouncerEngine"):
 				get_node("/root/AnnouncerEngine").call("SpeakHomeButtonHeckle")
 	)
@@ -865,6 +877,7 @@ func _setup_hud() -> void:
 	toggles_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	toggles_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	toggles_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	toggles_scroll.follow_focus = true
 	ThemeManager.apply_scroll_container_style(toggles_scroll, 28)
 	
 	var toggles_container = VBoxContainer.new()
@@ -1832,6 +1845,163 @@ func _setup_hud() -> void:
 	hud_overview.add_theme_stylebox_override("panel", overview_style)
 	margin.add_child(hud_overview)
 	_update_hud_tooltips()
+	call_deferred("_update_hud_focus_neighbors")
+
+
+func _update_hud_focus_neighbors() -> void:
+	var add_remove_btn: Control = null
+	var prev_shot_btn: Control = null
+	if range_ui != null and is_instance_valid(range_ui):
+		add_remove_btn = range_ui.get_node_or_null("GridCanvas/AddRemoveButton")
+		prev_shot_btn = range_ui.get_node_or_null("BottomBarContainer/PrevShotAnalysisButton")
+		if prev_shot_btn == null and "_prev_shot_btn" in range_ui:
+			prev_shot_btn = range_ui.get("_prev_shot_btn")
+
+	# Stats button (Bottom-Left)
+	if stats_btn != null and is_instance_valid(stats_btn):
+		if add_remove_btn != null and is_instance_valid(add_remove_btn):
+			stats_btn.focus_neighbor_top = stats_btn.get_path_to(add_remove_btn)
+		if grid_btn != null and is_instance_valid(grid_btn):
+			stats_btn.focus_neighbor_right = stats_btn.get_path_to(grid_btn)
+		if map_btn != null and is_instance_valid(map_btn):
+			stats_btn.focus_neighbor_left = stats_btn.get_path_to(map_btn)
+
+	# Slope Grid button (Bottom-Left next to stats)
+	if grid_btn != null and is_instance_valid(grid_btn):
+		if stats_btn != null and is_instance_valid(stats_btn):
+			grid_btn.focus_neighbor_left = grid_btn.get_path_to(stats_btn)
+		if prev_shot_btn != null and is_instance_valid(prev_shot_btn):
+			grid_btn.focus_neighbor_right = grid_btn.get_path_to(prev_shot_btn)
+		elif map_btn != null and is_instance_valid(map_btn):
+			grid_btn.focus_neighbor_right = grid_btn.get_path_to(map_btn)
+		if add_remove_btn != null and is_instance_valid(add_remove_btn):
+			grid_btn.focus_neighbor_top = grid_btn.get_path_to(add_remove_btn)
+
+	# Previous Shot button (Bottom-Center in RangeUI)
+	if prev_shot_btn != null and is_instance_valid(prev_shot_btn):
+		if grid_btn != null and is_instance_valid(grid_btn):
+			prev_shot_btn.focus_neighbor_left = prev_shot_btn.get_path_to(grid_btn)
+		elif stats_btn != null and is_instance_valid(stats_btn):
+			prev_shot_btn.focus_neighbor_left = prev_shot_btn.get_path_to(stats_btn)
+		
+		var right_target: Control = null
+		if forfeit_btn != null and is_instance_valid(forfeit_btn) and forfeit_btn.visible:
+			right_target = forfeit_btn
+		elif mulligan_btn != null and is_instance_valid(mulligan_btn) and mulligan_btn.visible:
+			right_target = mulligan_btn
+		elif map_btn != null and is_instance_valid(map_btn):
+			right_target = map_btn
+		if right_target != null:
+			prev_shot_btn.focus_neighbor_right = prev_shot_btn.get_path_to(right_target)
+		
+		if add_remove_btn != null and is_instance_valid(add_remove_btn):
+			prev_shot_btn.focus_neighbor_top = prev_shot_btn.get_path_to(add_remove_btn)
+		elif hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
+			prev_shot_btn.focus_neighbor_top = prev_shot_btn.get_path_to(hide_helpers_btn)
+
+	# Add/Remove button (Left middle in RangeUI)
+	if add_remove_btn != null and is_instance_valid(add_remove_btn):
+		if stats_btn != null and is_instance_valid(stats_btn):
+			add_remove_btn.focus_neighbor_bottom = add_remove_btn.get_path_to(stats_btn)
+		elif grid_btn != null and is_instance_valid(grid_btn):
+			add_remove_btn.focus_neighbor_bottom = add_remove_btn.get_path_to(grid_btn)
+		if prev_shot_btn != null and is_instance_valid(prev_shot_btn):
+			add_remove_btn.focus_neighbor_right = add_remove_btn.get_path_to(prev_shot_btn)
+		elif map_btn != null and is_instance_valid(map_btn):
+			add_remove_btn.focus_neighbor_right = add_remove_btn.get_path_to(map_btn)
+		if hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
+			add_remove_btn.focus_neighbor_top = add_remove_btn.get_path_to(hide_helpers_btn)
+
+	# Forfeit button (Bottom-Right)
+	if forfeit_btn != null and is_instance_valid(forfeit_btn) and forfeit_btn.visible:
+		if prev_shot_btn != null and is_instance_valid(prev_shot_btn):
+			forfeit_btn.focus_neighbor_left = forfeit_btn.get_path_to(prev_shot_btn)
+		elif grid_btn != null and is_instance_valid(grid_btn):
+			forfeit_btn.focus_neighbor_left = forfeit_btn.get_path_to(grid_btn)
+		var f_right: Control = mulligan_btn if (mulligan_btn != null and is_instance_valid(mulligan_btn) and mulligan_btn.visible) else map_btn
+		if f_right != null and is_instance_valid(f_right):
+			forfeit_btn.focus_neighbor_right = forfeit_btn.get_path_to(f_right)
+		if hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
+			forfeit_btn.focus_neighbor_top = forfeit_btn.get_path_to(hide_helpers_btn)
+
+	# Mulligan button (Bottom-Right)
+	if mulligan_btn != null and is_instance_valid(mulligan_btn) and mulligan_btn.visible:
+		var m_left: Control = forfeit_btn if (forfeit_btn != null and is_instance_valid(forfeit_btn) and forfeit_btn.visible) else prev_shot_btn
+		if m_left != null and is_instance_valid(m_left):
+			mulligan_btn.focus_neighbor_left = mulligan_btn.get_path_to(m_left)
+		if map_btn != null and is_instance_valid(map_btn):
+			mulligan_btn.focus_neighbor_right = mulligan_btn.get_path_to(map_btn)
+		if hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
+			mulligan_btn.focus_neighbor_top = mulligan_btn.get_path_to(hide_helpers_btn)
+
+	# Map button (Bottom-Right)
+	if map_btn != null and is_instance_valid(map_btn):
+		var map_left: Control = null
+		if mulligan_btn != null and is_instance_valid(mulligan_btn) and mulligan_btn.visible:
+			map_left = mulligan_btn
+		elif forfeit_btn != null and is_instance_valid(forfeit_btn) and forfeit_btn.visible:
+			map_left = forfeit_btn
+		elif prev_shot_btn != null and is_instance_valid(prev_shot_btn):
+			map_left = prev_shot_btn
+		if map_left != null:
+			map_btn.focus_neighbor_left = map_btn.get_path_to(map_left)
+		if stats_btn != null and is_instance_valid(stats_btn):
+			map_btn.focus_neighbor_right = map_btn.get_path_to(stats_btn) # wrap-around
+		if settings_btn != null and is_instance_valid(settings_btn):
+			map_btn.focus_neighbor_top = map_btn.get_path_to(settings_btn)
+
+	# Settings button (Top-Right)
+	if settings_btn != null and is_instance_valid(settings_btn):
+		if home_btn != null and is_instance_valid(home_btn):
+			settings_btn.focus_neighbor_left = settings_btn.get_path_to(home_btn)
+		if map_btn != null and is_instance_valid(map_btn):
+			settings_btn.focus_neighbor_bottom = settings_btn.get_path_to(map_btn)
+
+	# Home button (Top-Right)
+	if home_btn != null and is_instance_valid(home_btn):
+		if hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
+			home_btn.focus_neighbor_left = home_btn.get_path_to(hide_helpers_btn)
+		if settings_btn != null and is_instance_valid(settings_btn):
+			home_btn.focus_neighbor_right = home_btn.get_path_to(settings_btn)
+		if prev_shot_btn != null and is_instance_valid(prev_shot_btn):
+			home_btn.focus_neighbor_bottom = home_btn.get_path_to(prev_shot_btn)
+		elif map_btn != null and is_instance_valid(map_btn):
+			home_btn.focus_neighbor_bottom = home_btn.get_path_to(map_btn)
+
+	# Hide Helpers button (Top-Right)
+	if hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
+		if add_remove_btn != null and is_instance_valid(add_remove_btn):
+			hide_helpers_btn.focus_neighbor_left = hide_helpers_btn.get_path_to(add_remove_btn)
+		if home_btn != null and is_instance_valid(home_btn):
+			hide_helpers_btn.focus_neighbor_right = hide_helpers_btn.get_path_to(home_btn)
+		
+		var helpers_open = (toggles_scroll != null and is_instance_valid(toggles_scroll) and toggles_scroll.visible)
+		if helpers_open and announcer_btn != null and is_instance_valid(announcer_btn):
+			hide_helpers_btn.focus_neighbor_bottom = hide_helpers_btn.get_path_to(announcer_btn)
+		elif add_remove_btn != null and is_instance_valid(add_remove_btn):
+			hide_helpers_btn.focus_neighbor_bottom = hide_helpers_btn.get_path_to(add_remove_btn)
+
+	# Wire helper vertical list if open
+	if toggles_scroll != null and is_instance_valid(toggles_scroll) and toggles_scroll.visible:
+		var helper_buttons: Array[Button] = []
+		var container = toggles_scroll.get_node_or_null("TogglesContainer")
+		if container != null:
+			for ch in container.get_children():
+				if ch is Button and ch.visible:
+					helper_buttons.append(ch)
+		for i in range(helper_buttons.size()):
+			var h_btn = helper_buttons[i]
+			if i == 0 and hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
+				h_btn.focus_neighbor_top = h_btn.get_path_to(hide_helpers_btn)
+			elif i > 0:
+				h_btn.focus_neighbor_top = h_btn.get_path_to(helper_buttons[i - 1])
+			if i < helper_buttons.size() - 1:
+				h_btn.focus_neighbor_bottom = h_btn.get_path_to(helper_buttons[i + 1])
+			else:
+				if map_btn != null and is_instance_valid(map_btn):
+					h_btn.focus_neighbor_bottom = h_btn.get_path_to(map_btn)
+				elif prev_shot_btn != null and is_instance_valid(prev_shot_btn):
+					h_btn.focus_neighbor_bottom = h_btn.get_path_to(prev_shot_btn)
 
 
 func is_any_dialog_open() -> bool:
@@ -1953,8 +2123,8 @@ func _handle_mulligan_dialog_input(event: InputEvent) -> bool:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if ((event is InputEventKey and not event.echo) or event is InputEventJoypadButton) and event.is_pressed():
-		var is_escape = (event is InputEventKey and (event as InputEventKey).keycode == KEY_ESCAPE) or (event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == JOY_BUTTON_B)
+	if ((event is InputEventKey and not event.echo) or event is InputEventJoypadButton or event is InputEventJoypadMotion) and event.is_pressed():
+		var is_escape = (event is InputEventKey and (event as InputEventKey).keycode == KEY_ESCAPE) or event.is_action_pressed("ui_cancel")
 		var is_enter = (event is InputEventKey and ((event as InputEventKey).keycode == KEY_ENTER or (event as InputEventKey).keycode == KEY_KP_ENTER)) or (event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == JOY_BUTTON_A)
 
 		if mulligan_confirm_dialog != null and is_instance_valid(mulligan_confirm_dialog) and mulligan_confirm_dialog.visible:
@@ -1970,8 +2140,31 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if exit_confirm_dialog != null and is_instance_valid(exit_confirm_dialog) and exit_confirm_dialog.visible:
-			if is_escape:
+			var yes_btn = exit_confirm_dialog.find_child("YesButton", true, false) as Button
+			var no_btn = exit_confirm_dialog.find_child("NoButton", true, false) as Button
+			if is_escape or event.is_action_pressed("ui_cancel"):
 				exit_confirm_dialog.visible = false
+				get_viewport().set_input_as_handled()
+				return
+			if is_enter or event.is_action_pressed("ui_accept"):
+				var cur_focus = get_viewport().gui_get_focus_owner()
+				if cur_focus == yes_btn:
+					yes_btn.emit_signal("pressed")
+				elif no_btn != null:
+					no_btn.emit_signal("pressed")
+				else:
+					exit_confirm_dialog.visible = false
+				get_viewport().set_input_as_handled()
+				return
+			if event.is_action_pressed("ui_left") or event.is_action_pressed("ui_right") or \
+			   event.is_action_pressed("aim_left") or event.is_action_pressed("aim_right"):
+				var cur_focus = get_viewport().gui_get_focus_owner()
+				if cur_focus == yes_btn and no_btn != null:
+					no_btn.grab_focus()
+				elif yes_btn != null:
+					yes_btn.grab_focus()
+				get_viewport().set_input_as_handled()
+				return
 			get_viewport().set_input_as_handled()
 			return
 		if add_player_prompt_dialog != null and is_instance_valid(add_player_prompt_dialog) and add_player_prompt_dialog.visible:
@@ -1984,12 +2177,82 @@ func _unhandled_input(event: InputEvent) -> void:
 				resume_player_prompt_dialog.visible = false
 			get_viewport().set_input_as_handled()
 			return
+		if is_escape:
+			if hud_scorecard != null and is_instance_valid(hud_scorecard) and hud_scorecard.visible:
+				_stop_scorecard_countdown()
+				hud_scorecard.visible = false
+				_set_other_elements_visible(true)
+				get_viewport().set_input_as_handled()
+				return
+			if range_ui != null:
+				var replay_modal = range_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
+				if replay_modal != null and is_instance_valid(replay_modal):
+					range_ui.call("toggle_prev_shot_analysis")
+					get_viewport().set_input_as_handled()
+					return
+				if range_ui.has_node("SettingsLayer") and range_ui.get_node("SettingsLayer").visible:
+					range_ui.get_node("SettingsLayer").visible = false
+					get_viewport().set_input_as_handled()
+					return
 
 		if event.is_action_pressed("mulligan"):
 			if mulligan_btn != null and is_instance_valid(mulligan_btn) and mulligan_btn.visible and not mulligan_btn.disabled:
 				_on_mulligan_pressed()
 				get_viewport().set_input_as_handled()
 				return
+		elif event.is_action_pressed("home"):
+			if exit_confirm_dialog != null and is_instance_valid(exit_confirm_dialog):
+				exit_confirm_dialog.visible = true
+				var no_b = exit_confirm_dialog.find_child("NoButton", true, false) as Button
+				if no_b != null:
+					no_b.call_deferred("grab_focus")
+			elif range_ui != null and range_ui.has_method("_on_home_button_pressed"):
+				range_ui.call("_on_home_button_pressed")
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("settings"):
+			if range_ui != null and range_ui.has_method("_on_toggle_settings_requested"):
+				range_ui.call("_on_toggle_settings_requested")
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("green_grid"):
+			if grid_btn != null and is_instance_valid(grid_btn) and grid_btn.visible and not grid_btn.disabled:
+				grid_btn.emit_signal("pressed")
+			elif course_instance != null and course_instance.get("show_green_grid") != null:
+				var current_grid = course_instance.get("show_green_grid") as bool
+				course_instance.set("show_green_grid", not current_grid)
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("toggle_stats"):
+			if stats_btn != null and is_instance_valid(stats_btn) and stats_btn.visible and not stats_btn.disabled:
+				stats_btn.emit_signal("pressed")
+			elif range_ui != null:
+				range_ui.call("toggle_stats_visibility")
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("shot_analysis_toggle"):
+			if range_ui != null:
+				var new_v = not range_ui.call("is_shot_analysis_enabled")
+				range_ui.call("set_shot_analysis_enabled", new_v)
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("hit_shot"):
+			if course_instance != null:
+				var p = course_instance.get_node_or_null("Player")
+				if p != null:
+					if p.has_method("manual_hit_shot"):
+						p.manual_hit_shot()
+					elif p.has_method("_on_hit_button_pressed"):
+						p._on_hit_button_pressed()
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("reset_shot"):
+			if course_instance != null and course_instance.has_method("reset_ball"):
+				course_instance.call("reset_ball")
+			elif active_ball != null and is_instance_valid(active_ball) and active_ball.has_method("reset"):
+				active_ball.call("reset")
+			get_viewport().set_input_as_handled()
+			return
 		elif event.is_action_pressed("concede_hole"):
 			if forfeit_btn != null and is_instance_valid(forfeit_btn) and forfeit_btn.visible and not forfeit_btn.disabled:
 				_on_forfeit_pressed()
@@ -2049,6 +2312,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.is_action_pressed("suspense_toggle"):
 			if tension_btn != null and is_instance_valid(tension_btn) and tension_btn.visible and not tension_btn.disabled:
 				tension_btn.emit_signal("pressed")
+				get_viewport().set_input_as_handled()
+				return
+		elif event.is_action_pressed("prev_shot_analysis_toggle"):
+			if range_ui != null and range_ui.has_method("toggle_prev_shot_analysis"):
+				range_ui.call("toggle_prev_shot_analysis")
 				get_viewport().set_input_as_handled()
 				return
 
@@ -2791,6 +3059,9 @@ func _on_mulligan_pressed() -> void:
 		
 	mulligan_confirm_dialog.add_child(content_vbox)
 	mulligan_confirm_dialog.visible = true
+	var m_cancel = mulligan_confirm_dialog.find_child("CancelBtn", true, false) as Button
+	if m_cancel != null:
+		m_cancel.call_deferred("grab_focus")
 
 
 func _on_mulligan_confirmed() -> void:
@@ -3127,11 +3398,18 @@ func _on_forfeit_pressed() -> void:
 	cancel_btn.pressed.connect(func():
 		forfeit_confirm_dialog.visible = false
 	)
+	confirm_btn.name = "ConfirmBtn"
+	cancel_btn.name = "CancelBtn"
+	confirm_btn.focus_neighbor_right = confirm_btn.get_path_to(cancel_btn)
+	confirm_btn.focus_neighbor_left = confirm_btn.get_path_to(cancel_btn)
+	cancel_btn.focus_neighbor_left = cancel_btn.get_path_to(confirm_btn)
+	cancel_btn.focus_neighbor_right = cancel_btn.get_path_to(confirm_btn)
 	btn_hbox.add_child(cancel_btn)
 	
 	content_vbox.add_child(btn_hbox)
 	forfeit_confirm_dialog.add_child(content_vbox)
 	forfeit_confirm_dialog.visible = true
+	cancel_btn.call_deferred("grab_focus")
 
 
 func _on_forfeit_confirmed() -> void:
@@ -4110,10 +4388,18 @@ func apply_material_button_style(btn: Button, bg_color: Color):
 	var style_disabled = style_normal.duplicate()
 	style_disabled.bg_color = Color(0.3, 0.3, 0.3, 0.5)
 
+	var style_focus = style_normal.duplicate()
+	style_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	style_focus.border_width_left = 3
+	style_focus.border_width_top = 3
+	style_focus.border_width_right = 3
+	style_focus.border_width_bottom = 3
+
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_pressed)
 	btn.add_theme_stylebox_override("disabled", style_disabled)
+	btn.add_theme_stylebox_override("focus", style_focus)
 	btn.add_theme_color_override("font_color", Color.WHITE)
 	btn.add_theme_color_override("font_hover_color", Color.WHITE)
 	btn.add_theme_color_override("font_pressed_color", Color.WHITE)
@@ -4146,10 +4432,18 @@ func apply_circular_button_style(btn: Button, bg_color: Color):
 	var style_disabled = style_normal.duplicate()
 	style_disabled.bg_color = Color(0.2, 0.2, 0.2, 0.4)
 
+	var style_circ_focus = style_normal.duplicate()
+	style_circ_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	style_circ_focus.border_width_left = 3
+	style_circ_focus.border_width_top = 3
+	style_circ_focus.border_width_right = 3
+	style_circ_focus.border_width_bottom = 3
+
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_pressed)
 	btn.add_theme_stylebox_override("disabled", style_disabled)
+	btn.add_theme_stylebox_override("focus", style_circ_focus)
 
 
 func update_map_button_text(is_aerial: bool) -> void:
@@ -4182,6 +4476,7 @@ func _set_helpers_visible(is_vis: bool) -> void:
 			apply_circular_button_style(hide_helpers_btn, Color(0.25, 0.45, 0.7, 0.9))
 		else:
 			apply_circular_button_style(hide_helpers_btn, Color(0.15, 0.15, 0.15, 0.85))
+	_update_hud_focus_neighbors()
 
 
 func update_practice_ui_visibility(is_aerial: bool) -> void:
