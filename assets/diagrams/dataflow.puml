@@ -1,5 +1,5 @@
 @startuml
-title OpenShotGolf Launch Data Flow
+title HeckleGolfSim Launch Data Flow
 
 actor "Launch Monitor" as LM
 participant "TCPServer\naddons/launch_monitors/common/tcp_server/TcpServer.cs" as TCP

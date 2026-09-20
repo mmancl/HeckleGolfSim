@@ -538,7 +538,8 @@ func _on_layout_2d_draw() -> void:
 			"Black": Color(0.1, 0.1, 0.1),
 			"Blue": Color(0.2, 0.5, 0.9),
 			"White": Color(0.9, 0.9, 0.9),
-			"Red": Color(0.9, 0.2, 0.2)
+			"Red": Color(0.9, 0.2, 0.2),
+			"Gold": Color(0.85, 0.7, 0.2)
 		}
 
 		var t_idx = 0

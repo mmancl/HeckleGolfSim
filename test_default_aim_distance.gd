@@ -1,4 +1,4 @@
-﻿extends SceneTree
+extends SceneTree
 
 class MockBall extends Node3D:
 	signal rest
@@ -213,7 +213,48 @@ func _initialize():
 	assert(not range_instance._aim_is_manual, "_aim_is_manual must be reset to false on active player change")
 	print("  PASS: Manual aim is properly respected and reset.")
 
+	print("\n--- Test 10: SW to LW Approach Aim Stability ---")
+	# Position ball 75 yards from hole
+	var wedge_pos = range_instance.current_hole_location - Vector3(0, 0, 75.0 / 1.09361)
+	var aim_sw = range_instance.get_default_aim_target(wedge_pos, "Sw")
+	var aim_lw = range_instance.get_default_aim_target(wedge_pos, "Lw")
+	print("  SW aim: ", aim_sw, " | LW aim: ", aim_lw, " (Hole: ", range_instance.current_hole_location, ")")
+	assert(aim_sw.is_equal_approx(range_instance.current_hole_location), "SW at 75y should aim directly at hole")
+	assert(aim_lw.is_equal_approx(range_instance.current_hole_location), "LW at 75y should aim directly at hole, not twist away to fairway")
+	print("  PASS: SW and LW maintain consistent aim directly to pin on approach.")
+
+	print("\n--- Test 11: Smooth Camera Target Look (No step jump or pitch-down) ---")
+	var origin = Vector3(0, 0, 0)
+	var look_10m = range_instance.get_camera_target_look(Vector3(0, 0, 10), origin, false)
+	var look_40m = range_instance.get_camera_target_look(Vector3(0, 0, 40), origin, false)
+	var look_50m = range_instance.get_camera_target_look(Vector3(0, 0, 50), origin, false)
+	var look_150m = range_instance.get_camera_target_look(Vector3(0, 0, 150), origin, false)
+	print("  Look 10m: ", look_10m, " | Look 40m: ", look_40m, " | Look 50m: ", look_50m, " | Look 150m: ", look_150m)
+	assert(look_10m.y >= 1.0, "Short chip look target should stay at eye level (+1.0m)")
+	assert(look_40m.y >= 1.0 and look_50m.y >= 1.0, "Medium approach look targets should stay at eye level")
+	assert(abs(look_40m.z - 40.0) < 0.1, "40m look target should be at 40m")
+	assert(abs(look_50m.z - 50.0) < 0.1, "50m look target should be at 50m")
+	assert(abs(look_150m.z - 50.0) < 0.1, "150m look target distance should smoothly cap at 50m downrange")
+	print("\n--- Test 12: Driving Range Club and Target Preservation ---")
+	range_instance.is_driving_range = true
+	range_instance.current_hole_location = Vector3.ZERO
+	range_instance._user_custom_club = "7i"
+	var custom_target = Vector3(137.16, 0, 0)
+	range_instance.aim_target_pos = custom_target
+	range_instance._aim_is_manual = true
+
+	assert(range_instance._get_current_club() == "7i", "Current club must be 7i before shot")
+	assert(range_instance.aim_target_pos.is_equal_approx(custom_target), "Aim target must be custom_target before shot")
+
+	# Simulate shot rest event in driving range
+	await range_instance._on_golf_ball_rest({"Speed": 45.0, "TotalDistance": 160.0})
+
+	assert(range_instance._get_current_club() == "7i", "Current club MUST remain 7i after driving range shot rest")
+	assert(range_instance.aim_target_pos.is_equal_approx(custom_target), "Aim target MUST remain custom_target after driving range shot rest")
+	print("  PASS: Driving Range club and aim target are successfully preserved between shots.")
+
 	print("\n=======================================================")
 	print("ALL DEFAULT AIM DISTANCE & FAIRWAY TESTS PASSED!")
 	print("=======================================================\n")
 	quit(0)
+

@@ -1077,7 +1077,8 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 	var chicken_wing: bool = skeleton.get("impact_chicken_wing", false)
 
 	var spin_axis: float = _get_float_val(shot_data, ["SpinAxis"], 0.0)
-	var smash: float = _get_float_val(shot_data, ["SmashFactor"], 1.45)
+	var has_smash_data: bool = shot_data.has("SmashFactor") and float(shot_data.get("SmashFactor", 0.0)) > 0.5
+	var smash: float = _get_float_val(shot_data, ["SmashFactor"], 0.0)
 	var aoa: float = _get_float_val(shot_data, ["AttackAngle", "AngleOfAttack"], 999.0)
 	var ball_speed: float = _get_float_val(shot_data, ["Speed", "BallSpeed"], 0.0)
 	var carry: float = _get_float_val(shot_data, ["Carry", "CarryDistance"], 0.0)
@@ -1085,7 +1086,7 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 	var used_lm_types: Array[String] = []
 
 	# ─── CORRELATION 1: SMASH FACTOR LOSS + EARLY EXTENSION ───
-	var has_smash_issue: bool = (club_cat == "driver" and smash < 1.42) or (club_cat in ["wood", "hybrid"] and smash < 1.35) or (club_cat in ["mid_iron", "long_iron"] and smash < 1.30)
+	var has_smash_issue: bool = has_smash_data and ((club_cat == "driver" and smash < 1.42) or (club_cat in ["wood", "hybrid"] and smash < 1.35) or (club_cat in ["mid_iron", "long_iron"] and smash < 1.30))
 	var has_posture_loss: bool = early_ext > 1.8 or spine_loss > 6.0
 
 	if has_smash_issue and has_posture_loss:
@@ -1373,4 +1374,254 @@ static func _get_float_val(dict: Dictionary, keys: Array, default_val: float) ->
 					if not is_nan(parsed):
 						return parsed
 	return default_val
+
+
+## Returns detailed diagnostic metadata, causes, drills, and video guide for any issue name
+static func get_issue_info(issue_name: String) -> Dictionary:
+	var key: String = issue_name.strip_edges()
+	var lower: String = key.to_lower()
+	var info: Dictionary = {
+		"title": key,
+		"category": "SWING MECHANICS",
+		"severity": "HIGH",
+		"camera_flaw": "Swing mechanic deviation detected during shot execution.",
+		"launch_effect": "Negatively impacts ball flight accuracy, distance, and consistency.",
+		"fix_instruction": "Maintain consistent setup posture, smooth transition sequencing, and stable wrist angles through impact.",
+		"drill": "⛳ Gate & Alignment Drill: Set up two alignment sticks or tees to groove neutral swing path and centered clubface contact."
+	}
+	var video_key: String = "sim_improvement"
+
+	if "low smash" in lower or "sub-optimal smash" in lower or "smash factor" in lower:
+		info["category"] = "STRIKE EFFICIENCY & SMASH"
+		info["severity"] = "CRITICAL" if "low" in lower else "HIGH"
+		info["title"] = "Smash Factor & Strike Efficiency"
+		info["camera_flaw"] = "Off-center strike contact (toe/heel/high/low on the face) detected at impact."
+		info["launch_effect"] = "Reduces energy transfer from clubhead to ball, leaking 15–35 yards of potential carry distance."
+		info["fix_instruction"] = "Focus on centered face contact before swinging faster. Smooth out your transition and stabilize the lead wrist through impact."
+		info["drill"] = "⛳ HackMotion Impact Spray & Low Point Drill: Spray clubface with dry-shampoo or impact decal. Rehearse centered contact and ensure lead wrist remains stable through impact rather than scooping early."
+		video_key = "low_point"
+
+	elif "early extension contact loss" in lower:
+		info["category"] = "POSTURE & STRIKE EFFICIENCY"
+		info["severity"] = "CRITICAL"
+		info["title"] = "Early Extension Contact Loss"
+		info["camera_flaw"] = "Hips thrust forward toward the ball and spine inclination was lost prior to impact."
+		info["launch_effect"] = "Standing up out of posture pulls the sweet spot off the ball center, causing severe distance loss and erratic strikes."
+		info["fix_instruction"] = "Keep trail glute pressed back against an imaginary wall/chair through transition and impact zone."
+		info["drill"] = "⛳ HackMotion Low Point & Chair Drill: Touch lead hip to a chair behind you at address; keep hips in contact with chair until after impact to stabilize low point and smash factor."
+		video_key = "low_point"
+
+	elif "early extension" in lower:
+		info["category"] = "BIOMECHANICS & POSTURE"
+		info["severity"] = "HIGH"
+		info["title"] = "Early Extension Posture Loss"
+		info["camera_flaw"] = "Torso rises out of address posture inclination before ball strike."
+		info["launch_effect"] = "Forces hands to flip to reach the ball, destabilizing face angle control and strike quality."
+		info["fix_instruction"] = "Stay down through the shot. Feel your chest looking down at the turf until the ball is airborne."
+		info["drill"] = "⛳ Head-on-Wall Drill: Place forehead lightly against a soft cushion on a wall; rehearse slow-motion turn without lifting head."
+		video_key = "sim_improvement"
+
+	elif "over-the-top" in lower or "ott" in lower:
+		info["category"] = "SWING PLANE & KINEMATICS"
+		info["severity"] = "CRITICAL"
+		info["title"] = "Over-The-Top Swing Path"
+		info["camera_flaw"] = "Shoulders uncoiled ahead of hips on downswing, casting the club outside the target line."
+		info["launch_effect"] = "Forces club onto steep out-to-in delivery with open face relative to path, producing heavy slice spin."
+		info["fix_instruction"] = "Square shoulders parallel to target line at setup. Start downswing by shifting weight onto lead heel, letting arms drop inside."
+		info["drill"] = "⛳ HackMotion Barrier & Armpit Glove Drill: Place a barrier 5 inches outside ball and glove under trail armpit; hit balls keeping path inside-to-out."
+		video_key = "barrier_path"
+
+	elif "slice" in lower or "open face-to-path" in lower:
+		info["category"] = "CLUB FACE & SWING PATH"
+		info["severity"] = "CRITICAL"
+		info["title"] = "Slice / Open Face-to-Path"
+		info["camera_flaw"] = "Clubface delivered open relative to swing path at impact."
+		info["launch_effect"] = "Creates heavy clockwise sidespin, slicing the ball significantly offline to the right."
+		info["fix_instruction"] = "Strengthen lead hand grip slightly. At transition, shallow the club onto an inside delivery path and train lead wrist flexion into impact."
+		info["drill"] = "⛳ HackMotion Barrier Drill: Place a second ball or headcover 5 inches outside the ball to block the over-the-top path; pair with the Motorcycle Drill to flex lead wrist and square the face."
+		video_key = "barrier_path"
+
+	elif "fade" in lower or "open face" in lower:
+		info["category"] = "CLUB FACE & SWING PATH"
+		info["severity"] = "HIGH"
+		info["title"] = "Fade / Slightly Open Face"
+		info["camera_flaw"] = "Face delivered slightly open relative to swing path producing fade curvature."
+		info["launch_effect"] = "Gentle curve to the right; causes slight distance loss and weak push-fades into crosswinds."
+		info["fix_instruction"] = "Ensure clubface is square at address and maintain quiet, stable wrists through transition to keep face-to-path neutral."
+		info["drill"] = "⛳ HackMotion Alignment Gate & Barrier Drill: Practice launching ball along target line between alignment rods while keeping swing path within ±2° neutral."
+		video_key = "barrier_path"
+
+	elif "hook" in lower or "closed face-to-path" in lower:
+		info["category"] = "CLUB FACE & SWING PATH"
+		info["severity"] = "CRITICAL"
+		info["title"] = "Hook / Closed Face-to-Path"
+		info["camera_flaw"] = "Clubface delivered closed relative to swing path, causing rapid leftward curvature."
+		info["launch_effect"] = "Produces heavy counter-clockwise sidespin hook taking ball far left of the target."
+		info["fix_instruction"] = "Check that grip is not excessively strong. Rotate chest and torso through impact in sequence rather than rolling forearms and flipping hands early."
+		info["drill"] = "⛳ HackMotion Transition & Split-Hand Drill: Use the Transition Drill to train lower-to-upper body sequencing; hold grip with a 3-inch gap to rotate chest through without flipping wrists."
+		video_key = "downswing_sequence"
+
+	elif "draw" in lower or "closed face" in lower:
+		info["category"] = "CLUB FACE & SWING PATH"
+		info["severity"] = "MEDIUM"
+		info["title"] = "Draw / Closed Face Curvature"
+		info["camera_flaw"] = "Face delivered slightly closed relative to path."
+		info["launch_effect"] = "Ball draws left of intended flight line; monitor face angle to avoid over-hooking."
+		info["fix_instruction"] = "Keep trail wrist extended slightly longer through impact zone and rotate the torso through to the finish."
+		info["drill"] = "⛳ HackMotion Downswing Sequence Drill: Synchronize upper body rotation with hips through impact to prevent over-rotating the clubface closed."
+		video_key = "downswing_sequence"
+
+	elif "steep driver attack angle" in lower or ("steep" in lower and "driver" in lower and "tee" in lower):
+		info["category"] = "LAUNCH CONDITIONS & AOA"
+		info["severity"] = "HIGH"
+		info["title"] = "Negative Driver Attack Angle"
+		info["camera_flaw"] = "Hitting downward on driver off the tee steepens spin and robs carry distance."
+		info["launch_effect"] = "Adds 500–1200 RPM excessive backspin; hitting UP (+1° to +5°) unlocks +15 to +30 yards carry."
+		info["fix_instruction"] = "Tee ball forward off inside of lead heel. Tilt spine 6°–10° away from target at address to sweep upward on the teed ball."
+		info["drill"] = "⛳ HackMotion Low Point & Box Drill: Place an empty golf ball box 12 inches in front of tee; sweep upward through the ball without clipping the box to move low point behind ball."
+		video_key = "one_metric_aoa"
+
+	elif "level shoulders causing steep driver strike" in lower:
+		info["category"] = "SETUP & LAUNCH OPTIMIZATION"
+		info["severity"] = "HIGH"
+		info["title"] = "Flat Setup Driver Strike"
+		info["camera_flaw"] = "Shoulders were level at address rather than maintaining 8°–12° secondary spine tilt."
+		info["launch_effect"] = "Prevents sweeping upward on ball; causes downward strike that robs significant yardage."
+		info["fix_instruction"] = "At address, bump lead hip slightly toward target so spine tilts 8° away from target. Trail shoulder must sit lower than lead shoulder to hit upward on teed ball."
+		info["drill"] = "⛳ HackMotion Zipper Tilt Drill: Hold club vertically against sternum; tilt upper body away from target until shaft points at inside of trail knee."
+		video_key = "one_metric_aoa"
+
+	elif "steep driver off turf" in lower:
+		info["category"] = "LAUNCH CONDITIONS & AOA"
+		info["severity"] = "HIGH"
+		info["title"] = "Steep Driver Off Turf"
+		info["camera_flaw"] = "Chopping down into turf with driver off the deck."
+		info["launch_effect"] = "Driver off the deck requires a level sweep; chopping down causes severe distance loss and scuffs."
+		info["fix_instruction"] = "Sweep the ball cleanly off the grass with a level shoulder rotation. Do not hit down steeply."
+		info["drill"] = "⛳ HackMotion Level Sweep Drill: Practice clipping grass blades smoothly with a wide arc without gouging turf."
+		video_key = "one_metric_aoa"
+
+	elif "scooping wood" in lower or "hanging back on fairway wood" in lower:
+		info["category"] = "SETUP & FAIRWAY TURF SWEEP"
+		info["severity"] = "HIGH"
+		info["title"] = "Scooping / Hanging Back on Fairway Wood"
+		info["camera_flaw"] = "Body tilted backward and torso rose out of posture trying to lift ball off turf."
+		info["launch_effect"] = "Causes low-point to fall behind the ball, resulting in thin, topped, or chunked fairway wood shots."
+		info["fix_instruction"] = "Shift weight onto lead side during downswing. Keep your chest facing down toward the turf through impact and sweep the grass."
+		info["drill"] = "⛳ HackMotion Step-Through & Sweeping Coin Drill: Place a coin 2 inches ahead of ball; maintain slight forward shaft lean and brush coin forward along grass."
+		video_key = "shaft_lean"
+
+	elif "steep wood" in lower:
+		info["category"] = "LAUNCH CONDITIONS & AOA"
+		info["severity"] = "HIGH"
+		info["title"] = "Steep Attack Angle on Fairway Wood"
+		info["camera_flaw"] = "Downswing plane too steep into turf for a fairway wood."
+		info["launch_effect"] = "Digs into the turf, producing excessive spin ballooning and lost rollout."
+		info["fix_instruction"] = "Shallow out your transition. Keep shoulders level and feel the clubhead gliding through the turf rather than chopping into it."
+		info["drill"] = "⛳ HackMotion Low Point Turf Brush: Rehearse wide practice swings skimming the grass blades without disturbing the soil, shifting low point forward."
+		video_key = "one_metric_aoa"
+
+	elif "scooping hybrid" in lower:
+		info["category"] = "LAUNCH CONDITIONS & AOA"
+		info["severity"] = "HIGH"
+		info["title"] = "Scooping Hybrid Off Turf"
+		info["camera_flaw"] = "Trying to lift hybrid off turf instead of hitting down with forward compression."
+		info["launch_effect"] = "Thin contact, high weak flight, and lost compression."
+		info["fix_instruction"] = "Treat the hybrid like a 5-iron: maintain forward shaft lean and lead wrist flexion to compress the ball before brushing turf."
+		info["drill"] = "⛳ HackMotion Forward Shaft Lean Drill: Lay a towel 3 inches behind ball; strike ball with hands leading clubhead without touching towel."
+		video_key = "shaft_lean"
+
+	elif "steep hybrid" in lower:
+		info["category"] = "LAUNCH CONDITIONS & AOA"
+		info["severity"] = "HIGH"
+		info["title"] = "Steep Hybrid Strike"
+		info["camera_flaw"] = "Steep downswing angle causing fat contact or heavy divots."
+		info["launch_effect"] = "Excess spin and lost distance."
+		info["fix_instruction"] = "Widen your swing arc and shift weight smoothly onto lead side through impact."
+		info["drill"] = "⛳ HackMotion Shallow Sweep Drill: Make rhythm swings focusing on shallow turf interaction and proper low point distance 2-4 inches ahead of ball."
+		video_key = "one_metric_aoa"
+
+	elif "scooping" in lower or "upward" in lower:
+		info["category"] = "LAUNCH CONDITIONS & AOA"
+		info["severity"] = "HIGH"
+		info["title"] = "Scooping / Upward Iron & Wedge Attack Angle"
+		info["camera_flaw"] = "Hitting up on iron/wedge leads to thin contact and lost compression."
+		info["launch_effect"] = "Causes thin strikes, inconsistent turf interaction, and insufficient green-stopping spin."
+		info["fix_instruction"] = "Position ball center of stance, transfer 60% weight to lead foot at impact, and maintain forward shaft lean to compress the ball."
+		info["drill"] = "⛳ HackMotion Shaft Lean & Towel Drill: Lay a small towel 3 inches behind ball; strike ball crisply with forward shaft lean and flat lead wrist."
+		video_key = "shaft_lean"
+
+	elif "excessive driver spin" in lower or "excessive wood spin" in lower or "high hybrid spin" in lower:
+		info["category"] = "SPIN DYNAMICS"
+		info["severity"] = "MEDIUM"
+		info["title"] = "Excessive Backspin (Ballooning Flight)"
+		info["camera_flaw"] = "High spin rate produces steep climb and eliminates rollout."
+		info["launch_effect"] = "Ball balloons into the wind, losing 15–30 yards of total distance."
+		info["fix_instruction"] = "Strike higher on clubface and shallow approach path to deliver optimal dynamic loft."
+		info["drill"] = "⛳ HackMotion High Tee & Face Centering Drill: Tee ball up half a ball higher to encourage contact on upper equator of face, optimizing dynamic loft."
+		video_key = "shaft_lean"
+
+	elif "insufficient driver spin" in lower or "low wood spin" in lower or "low iron spin" in lower or "spin" in lower:
+		info["category"] = "SPIN DYNAMICS"
+		info["severity"] = "MEDIUM"
+		info["title"] = "Low Spin Rate (Knuckleball / Won't Hold Green)"
+		info["camera_flaw"] = "Insufficient backspin to maintain aerodynamic lift or hold greens on approach."
+		info["launch_effect"] = "Ball drops out of sky early or rolls completely off the green."
+		info["fix_instruction"] = "Check launch angle and strike height. Hit down on iron approach shots with forward shaft lean."
+		info["drill"] = "⛳ HackMotion Shaft Lean & Compression Bag Drill: Practice hitting into impact bag with hands leading clubhead to deliver optimal dynamic loft."
+		video_key = "shaft_lean"
+
+	elif "launch" in lower or "vla" in lower:
+		info["category"] = "LAUNCH WINDOW"
+		info["severity"] = "MEDIUM"
+		info["title"] = "Sub-Optimal Launch Angle Window"
+		info["camera_flaw"] = "Vertical launch angle outside optimal trajectory window."
+		info["launch_effect"] = "Limits apex height and total carry or causes ballooning pop-ups."
+		info["fix_instruction"] = "Adjust ball position and maintain flat lead wrist through impact."
+		info["drill"] = "⛳ HackMotion High Launch Gate: Imagine launching ball over a 15-foot crossbar 30 yards ahead with positive attack angle and proper dynamic loft."
+		video_key = "one_metric_aoa"
+
+	elif "launch direction" in lower or "direction deviation" in lower or "hla" in lower:
+		info["category"] = "AIM & ALIGNMENT"
+		info["severity"] = "MEDIUM"
+		info["title"] = "Horizontal Launch Direction Deviation (Push / Pull)"
+		info["camera_flaw"] = "Clubface oriented away from target line at moment of impact."
+		info["launch_effect"] = "Initial takeoff starts off-center before spin takes effect."
+		info["fix_instruction"] = "Verify stance and clubface alignment with target before beginning takeaway."
+		info["drill"] = "⛳ HackMotion Direction Game: Use simulator centerline as visual barrier; hit 10 consecutive shots keeping ball on target side."
+		video_key = "sim_improvement"
+
+	elif "restricted shoulder turn" in lower or "shoulder turn" in lower:
+		info["category"] = "POWER & ROTATIONAL COIL"
+		info["severity"] = "MEDIUM"
+		info["title"] = "Restricted Shoulder Rotation"
+		info["camera_flaw"] = "Measured less than 85° of shoulder turn at top of backswing."
+		info["launch_effect"] = "Shortens swing radius and limits coil energy, reducing potential ball speed."
+		info["fix_instruction"] = "Allow lead heel to float slightly if needed, and focus on turning lead shoulder fully behind the ball."
+		info["drill"] = "⛳ HackMotion Cross-Arm Coil Drill: Cross arms across shoulders and rotate until shaft points down toward ball line to build transition power."
+		video_key = "downswing_sequence"
+
+	elif "lateral hip sway" in lower or "hip sway" in lower:
+		info["category"] = "LOWER BODY STABILITY"
+		info["severity"] = "MEDIUM"
+		info["title"] = "Lateral Hip Sway"
+		info["camera_flaw"] = "Hips slid laterally instead of pivoting within foot foundation."
+		info["launch_effect"] = "Shifts swing low point unpredictably, causing fat or thin strikes."
+		info["fix_instruction"] = "Feel pressure on inside instep of trail foot. Turn around spine axis without sliding hips sideways."
+		info["drill"] = "⛳ HackMotion Foot Stability Drill: Place half a tennis ball under outside edge of trail foot during backswing to stabilize low point distance."
+		video_key = "one_metric_aoa"
+
+	elif "stalled hips" in lower or "hip clearance" in lower:
+		info["category"] = "IMPACT ROTATION"
+		info["severity"] = "MEDIUM"
+		info["title"] = "Stalled Hips at Impact"
+		info["camera_flaw"] = "Hips stopped turning into impact, leaving pelvis nearly square to target line."
+		info["launch_effect"] = "Forces hands and arms to take over through impact, making face control erratic."
+		info["fix_instruction"] = "Focus on clearing lead hip behind you as first downswing move. Belt buckle should face target by follow-through."
+		info["drill"] = "⛳ HackMotion Hip Clearance Step Drill: Focus on clearing lead hip 35°–45° open at impact; rehearse step-through finish to let body rotation lead swing."
+		video_key = "downswing_sequence"
+
+	_attach_video_metadata(info, video_key)
+	return info
+
 

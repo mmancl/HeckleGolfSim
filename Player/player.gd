@@ -217,11 +217,17 @@ func get_side_distance() -> float:
 	return ball.get_side_distance_meters() if ball != null else 0.0
 
 func validate_data(data: Dictionary) -> bool:
-	# TODO: implement data validation
-	if data:
-		return true
-	else:
+	if data == null or data.is_empty():
 		return false
+	var speed: float = float(data.get("BallSpeed", data.get("Speed", 0.0)))
+	if speed <= 0.1:
+		print("[player.gd] Shot ignored: ball speed is 0 or negligible (practice swing / ball didn't move).")
+		return false
+	var shot_type = data.get("ShotType", "")
+	if str(shot_type).to_lower() == "practice":
+		print("[player.gd] Shot ignored: practice swing detected.")
+		return false
+	return true
 
 
 func reset_ball():

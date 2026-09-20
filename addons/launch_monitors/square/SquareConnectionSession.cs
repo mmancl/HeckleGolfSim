@@ -410,6 +410,9 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
 
     private async Task HandleNotificationAsync(byte[] data)
     {
+        // Debug: log full packet hex for diagnosing club data byte layout
+        _logInfo($"Notification received: {data.Length} bytes, hex={Convert.ToHexString(data)}");
+
         if (SquareProtocol.TryParseStatus(data, out var statusCode))
         {
             _logInfo($"Square status packet received: 0x{statusCode:X2}");
@@ -458,7 +461,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         _isDetectBallActive = false;
         EmitReady(false);
         ShotReceived?.Invoke(metrics);
-        _logInfo($"Shot packet parsed. speed={metrics.BallSpeedMps} m/s, spin={metrics.TotalSpinRpm} rpm");
+        _logInfo($"Shot packet parsed. {data.Length} bytes, speed={metrics.BallSpeedMps} m/s, spin={metrics.TotalSpinRpm} rpm, faceAngle={metrics.FaceAngle}, clubPath={metrics.ClubPath}, attackAngle={metrics.AttackAngle}, dynamicLoft={metrics.DynamicLoft}");
         await _delayAsync(_options.ConnectionReadyDelay, CancellationToken.None);
         await SetReadyAsync();
     }

@@ -97,7 +97,11 @@ func _get_bridge():
 func _is_modal_active() -> bool:
 	if not is_inside_tree():
 		return false
-	return get_tree().root.find_child("SwingReplayModal", true, false) != null
+	var modals = get_tree().root.find_children("SwingReplayModal", "", true, false)
+	for m in modals:
+		if m != null and not m.get("is_detached"):
+			return true
+	return false
 
 
 func _process(_delta: float) -> void:

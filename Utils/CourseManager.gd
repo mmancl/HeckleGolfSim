@@ -5,7 +5,7 @@ const COURSE_INFO_KEY := "Course Info"
 const HOLE_INFO_KEY := "Hole Info"
 
 # Defaults applied when Course Info is missing keys
-const DEFAULT_TEE_COLORS: Array[String] = ["Black", "Blue", "White", "Red"]
+const DEFAULT_TEE_COLORS: Array[String] = ["Black", "Blue", "White", "Red", "Gold"]
 # TO be used in future implemenation at course hole level.
 const DEFAULT_TEXTURE_INDICES := {
 	"Green": [0],

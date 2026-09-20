@@ -2,6 +2,58 @@ extends Control
 
 const ClubDeliveryVisuals = preload("res://UI/GolferCamera/club_delivery_visuals.gd")
 
+const CLUB_CATEGORIES = [
+	{
+		"category": "Drivers & Fairway Woods",
+		"clubs": [
+			{"code": "Dr", "name": "Driver"},
+			{"code": "3w", "name": "3 Wood"},
+			{"code": "5w", "name": "5 Wood"}
+		]
+	},
+	{
+		"category": "Hybrids",
+		"clubs": [
+			{"code": "2H", "name": "2 Hybrid"},
+			{"code": "3H", "name": "3 Hybrid"},
+			{"code": "4H", "name": "4 Hybrid"}
+		]
+	},
+	{
+		"category": "Irons",
+		"clubs": [
+			{"code": "1i", "name": "1 Iron"},
+			{"code": "2i", "name": "2 Iron"},
+			{"code": "3i", "name": "3 Iron"},
+			{"code": "4i", "name": "4 Iron"},
+			{"code": "5i", "name": "5 Iron"},
+			{"code": "6i", "name": "6 Iron"},
+			{"code": "7i", "name": "7 Iron"},
+			{"code": "8i", "name": "8 Iron"},
+			{"code": "9i", "name": "9 Iron"}
+		]
+	},
+	{
+		"category": "Wedges",
+		"clubs": [
+			{"code": "Pw", "name": "Pitching Wedge"},
+			{"code": "Gw", "name": "Gap Wedge"},
+			{"code": "Sw", "name": "Sand Wedge"},
+			{"code": "Lw", "name": "Lob Wedge"}
+		]
+	},
+	{
+		"category": "Putters",
+		"clubs": [
+			{"code": "Pt", "name": "Putter"}
+		]
+	}
+]
+
+const STANDARD_14_BAG: Array[String] = [
+	"Dr", "3w", "5w", "4H", "5i", "6i", "7i", "8i", "9i", "Pw", "Gw", "Sw", "Lw", "Pt"
+]
+
 @onready var players_list_vbox = VBoxContainer.new()
 @onready var stats_panel = PanelContainer.new()
 @onready var new_player_input = LineEdit.new()
@@ -22,6 +74,7 @@ var last_active_tab_index: int = 0
 
 var new_player_avatar_path: String = ""
 var avatar_preview_btn: Button = Button.new()
+var new_player_tee_opt: OptionButton = OptionButton.new()
 var avatar_picker_callback: Callable
 var avatar_picker_selected_path: String = ""
 var avatar_picker_content: VBoxContainer = VBoxContainer.new()
@@ -30,6 +83,7 @@ var avatar_picker_buttons: Array = []
 var edit_profile_player_name: String = ""
 var edit_profile_email_input: LineEdit = LineEdit.new()
 var edit_profile_avatar_path: String = ""
+var edit_profile_tee_opt: OptionButton = OptionButton.new()
 var edit_profile_content: VBoxContainer = VBoxContainer.new()
 var edit_profile_avatar_preview_container: Control = null
 
@@ -154,6 +208,18 @@ func _ready() -> void:
 	new_player_email_input.text_submitted.connect(func(_t): _on_register_pressed())
 	reg_section.add_child(new_player_email_input)
 
+	new_player_tee_opt.clear()
+	new_player_tee_opt.add_item("Preferred Tee: None", 0)
+	new_player_tee_opt.add_item("Preferred Tee: Blue", 1)
+	new_player_tee_opt.add_item("Preferred Tee: Red", 2)
+	new_player_tee_opt.add_item("Preferred Tee: White", 3)
+	new_player_tee_opt.add_item("Preferred Tee: Black", 4)
+	new_player_tee_opt.add_item("Preferred Tee: Gold", 5)
+	new_player_tee_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	new_player_tee_opt.custom_minimum_size = Vector2(0, 50)
+	ThemeManager.apply_option_button_style(new_player_tee_opt, 17, Vector2(0, 50))
+	reg_section.add_child(new_player_tee_opt)
+
 	var reg_btn_hbox = HBoxContainer.new()
 	reg_btn_hbox.add_theme_constant_override("separation", 10)
 	reg_section.add_child(reg_btn_hbox)
@@ -224,7 +290,7 @@ func _ready() -> void:
 	
 	# Edit Profile Dialog
 	edit_profile_dialog.title = "Edit Player Profile"
-	edit_profile_dialog.min_size = Vector2(580, 420)
+	edit_profile_dialog.min_size = Vector2(580, 500)
 	ThemeManager.apply_dialog_style(edit_profile_dialog, Vector2(160, 52), 18)
 	edit_profile_dialog.confirmed.connect(_on_edit_profile_confirmed)
 	edit_profile_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -313,10 +379,15 @@ func _on_register_pressed() -> void:
 			return
 			
 	var email_text = new_player_email_input.text.strip_edges()
-	MultiplayerManager.register_player(name_text, email_text, new_player_avatar_path)
+	var pref_tee = ""
+	if new_player_tee_opt != null and new_player_tee_opt.selected > 0:
+		var raw_t = new_player_tee_opt.get_item_text(new_player_tee_opt.selected)
+		pref_tee = raw_t.replace("Preferred Tee: ", "").strip_edges()
+	MultiplayerManager.register_player(name_text, email_text, new_player_avatar_path, [], pref_tee)
 	new_player_input.clear()
 	new_player_email_input.clear()
 	new_player_avatar_path = ""
+	new_player_tee_opt.selected = 0
 	_update_new_player_avatar_preview()
 	_select_player(name_text)
 
@@ -544,7 +615,80 @@ func _open_edit_profile_dialog(player_name: String) -> void:
 	)
 	av_hbox.add_child(remove_av_btn)
 	
+	# Preferred Tee Section
+	var tee_sec = VBoxContainer.new()
+	tee_sec.add_theme_constant_override("separation", 6)
+	edit_profile_content.add_child(tee_sec)
+	
+	var tee_title = Label.new()
+	tee_title.text = "Preferred Tee Box (auto-selected during match setup):"
+	tee_title.add_theme_font_size_override("font_size", 15)
+	tee_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	tee_sec.add_child(tee_title)
+
+	edit_profile_tee_opt = OptionButton.new()
+	edit_profile_tee_opt.add_item("None (Default)", 0)
+	edit_profile_tee_opt.add_item("Blue", 1)
+	edit_profile_tee_opt.add_item("Red", 2)
+	edit_profile_tee_opt.add_item("White", 3)
+	edit_profile_tee_opt.add_item("Black", 4)
+	edit_profile_tee_opt.add_item("Gold", 5)
+	edit_profile_tee_opt.custom_minimum_size = Vector2(0, 50)
+	ThemeManager.apply_option_button_style(edit_profile_tee_opt, 18, Vector2(0, 50))
+	edit_profile_tee_opt.selected = 0
+	var cur_pref_tee = reg.get("preferred_tee", "")
+	for i in range(1, edit_profile_tee_opt.item_count):
+		if edit_profile_tee_opt.get_item_text(i).to_lower() == cur_pref_tee.to_lower():
+			edit_profile_tee_opt.selected = i
+			break
+	tee_sec.add_child(edit_profile_tee_opt)
+
+	# Bag Section
+	var bag_sec = VBoxContainer.new()
+	bag_sec.add_theme_constant_override("separation", 6)
+	edit_profile_content.add_child(bag_sec)
+	
+	var bag_title = Label.new()
+	bag_title.text = "Golf Bag Configuration:"
+	bag_title.add_theme_font_size_override("font_size", 15)
+	bag_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	bag_sec.add_child(bag_title)
+
+	var cur_bag = MultiplayerManager.get_player_bag(player_name)
+	var bag_status_str = "Default (All 20 clubs)" if cur_bag.is_empty() else "%d Clubs Configured" % cur_bag.size()
+	
+	var bag_hbox = HBoxContainer.new()
+	bag_hbox.add_theme_constant_override("separation", 14)
+	bag_sec.add_child(bag_hbox)
+
+	var bag_status_lbl = Label.new()
+	bag_status_lbl.text = "Current: " + bag_status_str
+	bag_status_lbl.add_theme_font_size_override("font_size", 16)
+	bag_status_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_GOLD)
+	bag_status_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bag_hbox.add_child(bag_status_lbl)
+
+	var open_bag_btn = Button.new()
+	open_bag_btn.text = "🎒 Build Your Bag..."
+	open_bag_btn.custom_minimum_size = Vector2(200, 48)
+	open_bag_btn.add_theme_font_size_override("font_size", 16)
+	ThemeManager.apply_primary_button_style(open_bag_btn, 6)
+	open_bag_btn.pressed.connect(func():
+		edit_profile_dialog.hide()
+		_switch_to_bag_tab()
+	)
+	bag_hbox.add_child(open_bag_btn)
+	
 	edit_profile_dialog.popup_centered()
+
+func _switch_to_bag_tab() -> void:
+	var tabs_node = stats_panel.find_child("TabContainer", true, false)
+	if tabs_node != null and tabs_node is TabContainer:
+		for i in range(tabs_node.get_tab_count()):
+			if "Bag" in tabs_node.get_tab_title(i):
+				tabs_node.current_tab = i
+				last_active_tab_index = i
+				break
 
 func _update_edit_profile_avatar_ui() -> void:
 	if edit_profile_avatar_preview_container == null:
@@ -599,7 +743,10 @@ func _on_edit_profile_confirmed() -> void:
 	if edit_profile_player_name.is_empty():
 		return
 	var new_email = edit_profile_email_input.text.strip_edges()
-	MultiplayerManager.update_player_profile(edit_profile_player_name, new_email, edit_profile_avatar_path)
+	var new_tee = ""
+	if edit_profile_tee_opt != null and edit_profile_tee_opt.selected > 0:
+		new_tee = edit_profile_tee_opt.get_item_text(edit_profile_tee_opt.selected)
+	MultiplayerManager.update_player_profile(edit_profile_player_name, new_email, edit_profile_avatar_path, new_tee)
 	_refresh_players_list()
 	_render_player_profile(edit_profile_player_name)
 
@@ -717,6 +864,24 @@ func _render_player_profile(player_name: String) -> void:
 	email_lbl.add_theme_font_size_override("font_size", 14)
 	info_vbox.add_child(email_lbl)
 
+	var p_tee = reg_p.get("preferred_tee", "")
+	var tee_lbl = Label.new()
+	if not p_tee.is_empty():
+		tee_lbl.text = "⛳ Preferred Tee: " + p_tee
+		var t_color = Color(0.8, 0.9, 1.0)
+		match p_tee.to_lower():
+			"blue": t_color = Color(0.4, 0.7, 1.0)
+			"red": t_color = Color(1.0, 0.45, 0.45)
+			"white": t_color = Color(0.95, 0.95, 0.95)
+			"black": t_color = Color(0.7, 0.7, 0.7)
+			"gold": t_color = Color(1.0, 0.85, 0.3)
+		tee_lbl.add_theme_color_override("font_color", t_color)
+	else:
+		tee_lbl.text = "⛳ Preferred Tee: None"
+		tee_lbl.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	tee_lbl.add_theme_font_size_override("font_size", 14)
+	info_vbox.add_child(tee_lbl)
+
 	var edit_profile_btn = Button.new()
 	edit_profile_btn.text = "✏️ Edit Profile"
 	edit_profile_btn.custom_minimum_size = Vector2(160, 50)
@@ -724,6 +889,13 @@ func _render_player_profile(player_name: String) -> void:
 	ThemeManager.apply_secondary_button_style(edit_profile_btn, 6)
 	edit_profile_btn.pressed.connect(func(): _open_edit_profile_dialog(player_name))
 	header_hbox.add_child(edit_profile_btn)
+
+	var build_bag_btn = Button.new()
+	build_bag_btn.text = "🎒 Build Bag"
+	build_bag_btn.custom_minimum_size = Vector2(160, 50)
+	build_bag_btn.add_theme_font_size_override("font_size", 17)
+	ThemeManager.apply_primary_button_style(build_bag_btn, 6)
+	header_hbox.add_child(build_bag_btn)
 	
 	# Divider
 	var divider = ColorRect.new()
@@ -733,10 +905,19 @@ func _render_player_profile(player_name: String) -> void:
 	
 	# TabContainer for Stats and Achievements
 	var tabs = TabContainer.new()
+	tabs.name = "TabContainer"
 	tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	tabs.add_theme_font_size_override("font_size", 16)
 	main_layout.add_child(tabs)
+
+	build_bag_btn.pressed.connect(func():
+		for i in range(tabs.get_tab_count()):
+			if "Bag" in tabs.get_tab_title(i):
+				tabs.current_tab = i
+				last_active_tab_index = i
+				break
+	)
 	
 	# --- TAB 1: Career Overview ---
 	var overview_vbox = VBoxContainer.new()
@@ -791,6 +972,7 @@ func _render_player_profile(player_name: String) -> void:
 	if stats["longest_drive"] > 0:
 		drive_str = "%.1f yds" % stats["longest_drive"]
 	add_stat_box.call("Longest Drive", drive_str)
+	add_stat_box.call("Preferred Tee", p_tee if not p_tee.is_empty() else "None")
 	
 	var records_lbl = Label.new()
 	records_lbl.text = "Best completed scores per course:"
@@ -827,7 +1009,11 @@ func _render_player_profile(player_name: String) -> void:
 	var club_vbox = _build_club_distances_tab(player_name)
 	tabs.add_child(club_vbox)
 
-	# --- TAB 3: Achievements Gallery ---
+	# --- TAB 3: Build Your Bag ---
+	var bag_vbox = _build_bag_tab(player_name)
+	tabs.add_child(bag_vbox)
+
+	# --- TAB 4: Achievements Gallery ---
 	var ach_vbox = VBoxContainer.new()
 	ach_vbox.name = "🏆 Achievements"
 	ach_vbox.add_theme_constant_override("separation", 12)
@@ -974,7 +1160,7 @@ func _render_player_profile(player_name: String) -> void:
 
 	if all_time_issues.is_empty():
 		var empty_swing_lbl = Label.new()
-		empty_swing_lbl.text = "No video swing recommendations recorded yet.\nTurn on Golfer Camera video during Driving Range, Course Play, or Practice to track swing fixes!"
+		empty_swing_lbl.text = "No swing recommendations recorded yet.\nTurn on Shot Analysis and/or Golfer Camera during Driving Range, Course Play, or Practice to track swing fixes!"
 		empty_swing_lbl.add_theme_font_size_override("font_size", 16)
 		empty_swing_lbl.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 		swing_content_vbox.add_child(empty_swing_lbl)
@@ -1058,29 +1244,46 @@ func _render_player_profile(player_name: String) -> void:
 	delete_btn.pressed.connect(func(): delete_confirm_dialog.popup_centered())
 	actions_hbox.add_child(delete_btn)
 
+func _exit_tree() -> void:
+	InAppVideoPlayer.stop_all_players()
+
 func _create_issue_card(issue_name: String, count: int, period_label: String) -> PanelContainer:
 	var card = PanelContainer.new()
-	card.custom_minimum_size = Vector2(260, 60)
+	card.custom_minimum_size = Vector2(260, 64)
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	card.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	card.tooltip_text = "Click to view swing explanation, causes, and drill guide for %s" % issue_name
 	
-	var card_style = StyleBoxFlat.new()
-	card_style.bg_color = Color(0.1, 0.14, 0.18, 0.8)
-	card_style.corner_radius_top_left = 8
-	card_style.corner_radius_top_right = 8
-	card_style.corner_radius_bottom_left = 8
-	card_style.corner_radius_bottom_right = 8
-	card_style.content_margin_left = 12
-	card_style.content_margin_top = 8
-	card_style.content_margin_right = 12
-	card_style.content_margin_bottom = 8
-	card_style.border_width_left = 2
-	card_style.border_color = Color(0.3, 0.7, 0.9, 0.6)
-	card.add_theme_stylebox_override("panel", card_style)
+	var normal_style = StyleBoxFlat.new()
+	normal_style.bg_color = Color(0.1, 0.14, 0.18, 0.85)
+	normal_style.corner_radius_top_left = 8
+	normal_style.corner_radius_top_right = 8
+	normal_style.corner_radius_bottom_left = 8
+	normal_style.corner_radius_bottom_right = 8
+	normal_style.content_margin_left = 12
+	normal_style.content_margin_top = 8
+	normal_style.content_margin_right = 12
+	normal_style.content_margin_bottom = 8
+	normal_style.border_width_left = 3
+	normal_style.border_color = Color(0.3, 0.7, 0.9, 0.7)
+	
+	var hover_style = normal_style.duplicate()
+	hover_style.bg_color = Color(0.15, 0.22, 0.28, 0.95)
+	hover_style.border_color = Color(0.4, 0.85, 1.0, 1.0)
+	hover_style.border_width_left = 4
+	
+	card.add_theme_stylebox_override("panel", normal_style)
+	
+	card.mouse_entered.connect(func(): card.add_theme_stylebox_override("panel", hover_style))
+	card.mouse_exited.connect(func(): card.add_theme_stylebox_override("panel", normal_style))
 	
 	var hbox = HBoxContainer.new()
+	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(hbox)
 	
 	var vbox = VBoxContainer.new()
+	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hbox.add_child(vbox)
 	
@@ -1088,21 +1291,323 @@ func _create_issue_card(issue_name: String, count: int, period_label: String) ->
 	name_lbl.text = issue_name
 	name_lbl.add_theme_font_size_override("font_size", 15)
 	name_lbl.add_theme_color_override("font_color", Color.WHITE)
+	name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(name_lbl)
 	
 	var sub_lbl = Label.new()
-	sub_lbl.text = period_label
+	sub_lbl.text = period_label + " • 🔍 Click for drill & fix"
 	sub_lbl.add_theme_font_size_override("font_size", 12)
-	sub_lbl.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	sub_lbl.add_theme_color_override("font_color", Color(0.3, 0.75, 1.0))
+	sub_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(sub_lbl)
 	
 	var cnt_lbl = Label.new()
 	cnt_lbl.text = str(count)
 	cnt_lbl.add_theme_font_size_override("font_size", 24)
 	cnt_lbl.add_theme_color_override("font_color", Color(1.0, 0.88, 0.45))
+	cnt_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hbox.add_child(cnt_lbl)
 	
+	card.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			_show_issue_detail_modal(issue_name)
+	)
+	
 	return card
+
+func _show_issue_detail_modal(issue_name: String) -> void:
+	var existing = get_node_or_null("IssueDetailModal")
+	if existing != null:
+		InAppVideoPlayer.stop_all_players()
+		existing.queue_free()
+	
+	var info = GolfSwingAnalyzer.get_issue_info(issue_name)
+	var modal = _create_issue_detail_modal(info)
+	add_child(modal)
+
+func _create_issue_detail_modal(info: Dictionary) -> Control:
+	var vp_size = get_viewport_rect().size
+	var root = Control.new()
+	root.name = "IssueDetailModal"
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	root.z_index = 50
+	
+	var dismiss_modal = func():
+		InAppVideoPlayer.stop_all_players()
+		root.queue_free()
+	
+	root.tree_exiting.connect(func():
+		InAppVideoPlayer.stop_all_players()
+	)
+	
+	# Backdrop dimmer
+	var dimmer = ColorRect.new()
+	dimmer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dimmer.color = Color(0.0, 0.0, 0.0, 0.75)
+	dimmer.mouse_filter = Control.MOUSE_FILTER_STOP
+	dimmer.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			dismiss_modal.call()
+	)
+	root.add_child(dimmer)
+	
+	# Centered Modal Panel
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(center)
+	
+	var is_mob: bool = (vp_size.x < 850 or vp_size.y > vp_size.x or OS.has_feature("mobile"))
+	var has_video: bool = not str(info.get("video_url", "")).is_empty()
+	var panel_w = clamp(vp_size.x * 0.94, 320, 840) if is_mob else (clamp(vp_size.x * 0.72, 700, 920) if has_video else clamp(vp_size.x * 0.62, 500, 850))
+	var panel_h = clamp(vp_size.y * 0.90, 360, 820) if is_mob else (clamp(vp_size.y * 0.88, 560, 780) if has_video else clamp(vp_size.y * 0.70, 400, 680))
+	
+	var panel = PanelContainer.new()
+	panel.custom_minimum_size = Vector2(panel_w, panel_h)
+	ThemeManager.apply_modal_style(panel, 14)
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	center.add_child(panel)
+	
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 22)
+	margin.add_theme_constant_override("margin_right", 22)
+	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_bottom", 18)
+	panel.add_child(margin)
+	
+	var outer_vbox = VBoxContainer.new()
+	outer_vbox.add_theme_constant_override("separation", 14)
+	margin.add_child(outer_vbox)
+	
+	# Header
+	var header = HBoxContainer.new()
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	
+	var title_vbox = VBoxContainer.new()
+	title_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	
+	var title_lbl = Label.new()
+	title_lbl.text = "🎯 " + str(info.get("title", "Swing Flaw Diagnostic"))
+	title_lbl.add_theme_font_size_override("font_size", 22)
+	title_lbl.add_theme_color_override("font_color", Color(1.0, 0.9, 0.55))
+	title_vbox.add_child(title_lbl)
+	
+	var sub_lbl = Label.new()
+	var sev = str(info.get("severity", "HIGH"))
+	var cat = str(info.get("category", "SWING MECHANICS"))
+	sub_lbl.text = "Category: %s  •  Priority: %s" % [cat, sev]
+	sub_lbl.add_theme_font_size_override("font_size", 14)
+	sub_lbl.add_theme_color_override("font_color", Color(0.75, 0.88, 0.98))
+	title_vbox.add_child(sub_lbl)
+	
+	header.add_child(title_vbox)
+	
+	var close_btn = Button.new()
+	close_btn.text = "✖"
+	close_btn.custom_minimum_size = Vector2(46, 46)
+	close_btn.add_theme_font_size_override("font_size", 22)
+	ThemeManager.apply_danger_button_style(close_btn, 6)
+	close_btn.pressed.connect(dismiss_modal)
+	header.add_child(close_btn)
+	
+	outer_vbox.add_child(header)
+	
+	var sep = HSeparator.new()
+	sep.add_theme_constant_override("separation", 4)
+	outer_vbox.add_child(sep)
+	
+	# Scrollable content
+	var scroll = ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	ThemeManager.apply_scroll_container_style(scroll, 28)
+	outer_vbox.add_child(scroll)
+	
+	var content_vbox = VBoxContainer.new()
+	content_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content_vbox.add_theme_constant_override("separation", 14)
+	scroll.add_child(content_vbox)
+	
+	# Section 1: Biomechanics / Setup Cause
+	var cam_flaw = str(info.get("camera_flaw", ""))
+	if not cam_flaw.is_empty():
+		var cam_panel = PanelContainer.new()
+		var cam_style = StyleBoxFlat.new()
+		cam_style.bg_color = Color(0.05, 0.09, 0.14, 0.95)
+		cam_style.corner_radius_top_left = 8
+		cam_style.corner_radius_top_right = 8
+		cam_style.corner_radius_bottom_left = 8
+		cam_style.corner_radius_bottom_right = 8
+		cam_style.border_width_left = 4
+		cam_style.border_color = Color(0.35, 0.85, 1.0, 0.9)
+		cam_style.content_margin_left = 16
+		cam_style.content_margin_top = 12
+		cam_style.content_margin_right = 16
+		cam_style.content_margin_bottom = 12
+		cam_panel.add_theme_stylebox_override("panel", cam_style)
+		
+		var c_vbox = VBoxContainer.new()
+		c_vbox.add_theme_constant_override("separation", 6)
+		var c_hdr = Label.new()
+		c_hdr.text = "🔍 What Causes It (Biomechanics & Delivery)"
+		c_hdr.add_theme_font_size_override("font_size", 17)
+		c_hdr.add_theme_color_override("font_color", Color(0.4, 0.85, 1.0))
+		c_vbox.add_child(c_hdr)
+		
+		var c_lbl = Label.new()
+		c_lbl.text = cam_flaw
+		c_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		c_lbl.add_theme_font_size_override("font_size", 15)
+		c_lbl.add_theme_color_override("font_color", Color(0.88, 0.94, 1.0))
+		c_vbox.add_child(c_lbl)
+		
+		cam_panel.add_child(c_vbox)
+		content_vbox.add_child(cam_panel)
+	
+	# Section 2: Launch Impact / Flight Consequence
+	var launch_effect = str(info.get("launch_effect", ""))
+	if not launch_effect.is_empty():
+		var eff_panel = PanelContainer.new()
+		var eff_style = StyleBoxFlat.new()
+		eff_style.bg_color = Color(0.10, 0.08, 0.05, 0.95)
+		eff_style.corner_radius_top_left = 8
+		eff_style.corner_radius_top_right = 8
+		eff_style.corner_radius_bottom_left = 8
+		eff_style.corner_radius_bottom_right = 8
+		eff_style.border_width_left = 4
+		eff_style.border_color = Color(1.0, 0.85, 0.40, 0.9)
+		eff_style.content_margin_left = 16
+		eff_style.content_margin_top = 12
+		eff_style.content_margin_right = 16
+		eff_style.content_margin_bottom = 12
+		eff_panel.add_theme_stylebox_override("panel", eff_style)
+		
+		var e_vbox = VBoxContainer.new()
+		e_vbox.add_theme_constant_override("separation", 6)
+		var e_hdr = Label.new()
+		e_hdr.text = "⚡ Launch Symptom & Distance Effect"
+		e_hdr.add_theme_font_size_override("font_size", 17)
+		e_hdr.add_theme_color_override("font_color", Color(1.0, 0.90, 0.55))
+		e_vbox.add_child(e_hdr)
+		
+		var e_lbl = Label.new()
+		e_lbl.text = launch_effect
+		e_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		e_lbl.add_theme_font_size_override("font_size", 15)
+		e_lbl.add_theme_color_override("font_color", Color(0.95, 0.92, 0.80))
+		e_vbox.add_child(e_lbl)
+		
+		eff_panel.add_child(e_vbox)
+		content_vbox.add_child(eff_panel)
+	
+	# Section 3: How to Fix
+	var fix_instruction = str(info.get("fix_instruction", ""))
+	if not fix_instruction.is_empty():
+		var fix_panel = PanelContainer.new()
+		var fix_style = StyleBoxFlat.new()
+		fix_style.bg_color = Color(0.04, 0.11, 0.08, 0.95)
+		fix_style.corner_radius_top_left = 8
+		fix_style.corner_radius_top_right = 8
+		fix_style.corner_radius_bottom_left = 8
+		fix_style.corner_radius_bottom_right = 8
+		fix_style.border_width_left = 4
+		fix_style.border_color = Color(0.35, 1.0, 0.65, 0.9)
+		fix_style.content_margin_left = 16
+		fix_style.content_margin_top = 12
+		fix_style.content_margin_right = 16
+		fix_style.content_margin_bottom = 12
+		fix_panel.add_theme_stylebox_override("panel", fix_style)
+		
+		var f_vbox = VBoxContainer.new()
+		f_vbox.add_theme_constant_override("separation", 6)
+		var f_hdr = Label.new()
+		f_hdr.text = "💡 How to Fix It (Swing Cue)"
+		f_hdr.add_theme_font_size_override("font_size", 17)
+		f_hdr.add_theme_color_override("font_color", Color(0.40, 1.0, 0.68))
+		f_vbox.add_child(f_hdr)
+		
+		var f_lbl = Label.new()
+		f_lbl.text = fix_instruction
+		f_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		f_lbl.add_theme_font_size_override("font_size", 15)
+		f_lbl.add_theme_color_override("font_color", Color(0.88, 0.98, 0.90))
+		f_vbox.add_child(f_lbl)
+		
+		fix_panel.add_child(f_vbox)
+		content_vbox.add_child(fix_panel)
+	
+	# Section 4: Practice Drill
+	var drill_str = str(info.get("drill", ""))
+	if not drill_str.is_empty():
+		var drill_panel = PanelContainer.new()
+		var drill_style = StyleBoxFlat.new()
+		drill_style.bg_color = Color(0.10, 0.06, 0.17, 0.95)
+		drill_style.corner_radius_top_left = 8
+		drill_style.corner_radius_top_right = 8
+		drill_style.corner_radius_bottom_left = 8
+		drill_style.corner_radius_bottom_right = 8
+		drill_style.border_width_left = 4
+		drill_style.border_color = Color(0.80, 0.55, 1.0, 0.95)
+		drill_style.content_margin_left = 16
+		drill_style.content_margin_top = 14
+		drill_style.content_margin_right = 16
+		drill_style.content_margin_bottom = 14
+		drill_panel.add_theme_stylebox_override("panel", drill_style)
+		
+		var d_vbox = VBoxContainer.new()
+		d_vbox.add_theme_constant_override("separation", 8)
+		var d_hdr = Label.new()
+		d_hdr.text = "🏋️ Prescribed Practice Drill"
+		d_hdr.add_theme_font_size_override("font_size", 17)
+		d_hdr.add_theme_color_override("font_color", Color(0.92, 0.82, 1.0))
+		d_vbox.add_child(d_hdr)
+		
+		var d_lbl = Label.new()
+		d_lbl.text = drill_str
+		d_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		d_lbl.add_theme_font_size_override("font_size", 15)
+		d_lbl.add_theme_color_override("font_color", Color(0.96, 0.90, 1.0))
+		d_vbox.add_child(d_lbl)
+		
+		drill_panel.add_child(d_vbox)
+		content_vbox.add_child(drill_panel)
+	
+	# Section 5: Video Tutorial
+	var video_url = str(info.get("video_url", ""))
+	if not video_url.is_empty():
+		var video_vbox = VBoxContainer.new()
+		video_vbox.add_theme_constant_override("separation", 8)
+		
+		var v_hdr = Label.new()
+		v_hdr.text = "▶ Video Drill Tutorial"
+		v_hdr.add_theme_font_size_override("font_size", 17)
+		v_hdr.add_theme_color_override("font_color", Color(1.0, 0.65, 0.65))
+		video_vbox.add_child(v_hdr)
+		
+		var player = InAppVideoPlayer.new()
+		player.setup(
+			video_url,
+			str(info.get("video_title", "HackMotion Video Drill Tutorial")),
+			drill_str,
+			str(info.get("category", "")),
+			is_mob
+		)
+		video_vbox.add_child(player)
+		content_vbox.add_child(video_vbox)
+	
+	# Footer
+	var footer_btn = Button.new()
+	footer_btn.text = "Close"
+	footer_btn.custom_minimum_size = Vector2(160, 46)
+	footer_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	footer_btn.add_theme_font_size_override("font_size", 16)
+	ThemeManager.apply_secondary_button_style(footer_btn, 6)
+	footer_btn.pressed.connect(dismiss_modal)
+	outer_vbox.add_child(footer_btn)
+	
+	return root
 
 func _build_club_distances_tab(player_name: String) -> VBoxContainer:
 	var tab_vbox = VBoxContainer.new()
@@ -1379,6 +1884,299 @@ func _build_club_distances_tab(player_name: String) -> VBoxContainer:
 				entry["card"].visible = true
 	)
 
+	return tab_vbox
+
+func _build_bag_tab(player_name: String) -> VBoxContainer:
+	var tab_vbox = VBoxContainer.new()
+	tab_vbox.name = "🎒 Build Bag"
+	tab_vbox.add_theme_constant_override("separation", 14)
+	tab_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tab_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+	var saved_bag = MultiplayerManager.get_player_bag(player_name)
+	var is_using_default = [saved_bag.is_empty()]
+	
+	# Current active clubs map: club_code -> bool
+	var active_map: Dictionary = {}
+	for std_code in MultiplayerManager.STANDARD_CLUBS:
+		if is_using_default[0]:
+			active_map[std_code] = true
+		else:
+			active_map[std_code] = saved_bag.has(std_code)
+
+	# --- Header panel with title, info, and controls ---
+	var header_panel = PanelContainer.new()
+	var hp_style = StyleBoxFlat.new()
+	hp_style.bg_color = Color(0.08, 0.12, 0.16, 0.7)
+	hp_style.corner_radius_top_left = 8
+	hp_style.corner_radius_top_right = 8
+	hp_style.corner_radius_bottom_left = 8
+	hp_style.corner_radius_bottom_right = 8
+	hp_style.content_margin_left = 16
+	hp_style.content_margin_top = 12
+	hp_style.content_margin_right = 16
+	hp_style.content_margin_bottom = 12
+	header_panel.add_theme_stylebox_override("panel", hp_style)
+	tab_vbox.add_child(header_panel)
+
+	var hp_vbox = VBoxContainer.new()
+	hp_vbox.add_theme_constant_override("separation", 10)
+	header_panel.add_child(hp_vbox)
+
+	var desc_lbl = Label.new()
+	desc_lbl.text = "Select what clubs you have in your bag. In Course Play, Driving Range, and Minigames, only your chosen clubs will be available to select.\nIf no custom bag is set (or 'Reset to Default' is selected), all 20 clubs will be available by default."
+	desc_lbl.add_theme_font_size_override("font_size", 14)
+	desc_lbl.add_theme_color_override("font_color", Color(0.8, 0.85, 0.9))
+	hp_vbox.add_child(desc_lbl)
+
+	# Toolbar: Count label, presets, save button
+	var toolbar_hbox = HBoxContainer.new()
+	toolbar_hbox.add_theme_constant_override("separation", 10)
+	hp_vbox.add_child(toolbar_hbox)
+
+	var count_lbl = Label.new()
+	count_lbl.add_theme_font_size_override("font_size", 16)
+	count_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_GOLD)
+	toolbar_hbox.add_child(count_lbl)
+
+	var toast_lbl = Label.new()
+	toast_lbl.text = ""
+	toast_lbl.add_theme_font_size_override("font_size", 14)
+	toast_lbl.add_theme_color_override("font_color", Color(0.35, 0.9, 0.45))
+	toolbar_hbox.add_child(toast_lbl)
+
+	var spacer_tb = Control.new()
+	spacer_tb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	toolbar_hbox.add_child(spacer_tb)
+
+	var standard_preset_btn = Button.new()
+	standard_preset_btn.text = "Standard 14"
+	standard_preset_btn.tooltip_text = "Quickly set standard 14-club bag"
+	standard_preset_btn.custom_minimum_size = Vector2(130, 42)
+	standard_preset_btn.add_theme_font_size_override("font_size", 14)
+	ThemeManager.apply_secondary_button_style(standard_preset_btn, 4)
+	toolbar_hbox.add_child(standard_preset_btn)
+
+	var select_all_btn = Button.new()
+	select_all_btn.text = "Select All"
+	select_all_btn.tooltip_text = "Select all 20 clubs"
+	select_all_btn.custom_minimum_size = Vector2(110, 42)
+	select_all_btn.add_theme_font_size_override("font_size", 14)
+	ThemeManager.apply_secondary_button_style(select_all_btn, 4)
+	toolbar_hbox.add_child(select_all_btn)
+
+	var clear_all_btn = Button.new()
+	clear_all_btn.text = "Clear All"
+	clear_all_btn.tooltip_text = "Deselect all clubs"
+	clear_all_btn.custom_minimum_size = Vector2(100, 42)
+	clear_all_btn.add_theme_font_size_override("font_size", 14)
+	ThemeManager.apply_secondary_button_style(clear_all_btn, 4)
+	toolbar_hbox.add_child(clear_all_btn)
+
+	var reset_default_btn = Button.new()
+	reset_default_btn.text = "Reset to Default"
+	reset_default_btn.tooltip_text = "Clear custom bag setting so simulator displays all 20 clubs by default"
+	reset_default_btn.custom_minimum_size = Vector2(150, 42)
+	reset_default_btn.add_theme_font_size_override("font_size", 14)
+	ThemeManager.apply_secondary_button_style(reset_default_btn, 4)
+	toolbar_hbox.add_child(reset_default_btn)
+
+	var save_btn = Button.new()
+	save_btn.text = "💾 Save Bag"
+	save_btn.custom_minimum_size = Vector2(130, 42)
+	save_btn.add_theme_font_size_override("font_size", 15)
+	ThemeManager.apply_primary_button_style(save_btn, 4)
+	toolbar_hbox.add_child(save_btn)
+
+	# --- ScrollContainer with Categorized Club Grids ---
+	var scroll = ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	ThemeManager.apply_scroll_container_style(scroll, 28)
+	tab_vbox.add_child(scroll)
+
+	var categories_vbox = VBoxContainer.new()
+	categories_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	categories_vbox.add_theme_constant_override("separation", 16)
+	scroll.add_child(categories_vbox)
+
+	var club_buttons_ref: Array[Dictionary] = [] # Array of {"code": String, "btn": Button, "status_lbl": Label}
+
+	var update_ui_state = func():
+		var active_count = 0
+		for c in MultiplayerManager.STANDARD_CLUBS:
+			if active_map.get(c, false):
+				active_count += 1
+				
+		if is_using_default[0]:
+			count_lbl.text = "⛳ Bag Status: Default (All 20 clubs available)"
+		else:
+			var suffix = " (Standard Limit: 14)" if active_count == 14 else ""
+			count_lbl.text = "⛳ Clubs in Bag: %d of 20%s" % [active_count, suffix]
+			
+		for item in club_buttons_ref:
+			var code = item["code"] as String
+			var btn = item["btn"] as Button
+			var s_lbl = item["status_lbl"] as Label
+			var is_in = active_map.get(code, false)
+			
+			var style = StyleBoxFlat.new()
+			style.corner_radius_top_left = 8
+			style.corner_radius_top_right = 8
+			style.corner_radius_bottom_left = 8
+			style.corner_radius_bottom_right = 8
+			style.content_margin_left = 14
+			style.content_margin_right = 14
+			style.content_margin_top = 8
+			style.content_margin_bottom = 8
+			
+			if is_in:
+				style.bg_color = Color(0.12, 0.28, 0.18, 0.85)
+				style.border_width_left = 2
+				style.border_width_top = 2
+				style.border_width_right = 2
+				style.border_width_bottom = 2
+				style.border_color = Color(0.35, 0.85, 0.45, 0.85)
+				s_lbl.text = "✓ In Bag"
+				s_lbl.add_theme_color_override("font_color", Color(0.4, 0.95, 0.5))
+			else:
+				style.bg_color = Color(0.08, 0.11, 0.14, 0.5)
+				style.border_width_left = 1
+				style.border_width_top = 1
+				style.border_width_right = 1
+				style.border_width_bottom = 1
+				style.border_color = Color(0.2, 0.28, 0.35, 0.4)
+				s_lbl.text = "✕ Out"
+				s_lbl.add_theme_color_override("font_color", Color(0.5, 0.55, 0.6))
+				
+			btn.add_theme_stylebox_override("normal", style)
+			var style_hover = style.duplicate()
+			style_hover.bg_color = style.bg_color.lightened(0.12)
+			btn.add_theme_stylebox_override("hover", style_hover)
+
+	var save_current_bag = func(show_toast: bool = true):
+		var bag_to_save: Array[String] = []
+		if not is_using_default[0]:
+			for c in MultiplayerManager.STANDARD_CLUBS:
+				if active_map.get(c, false):
+					bag_to_save.append(c)
+		MultiplayerManager.set_player_bag(player_name, bag_to_save)
+		if show_toast:
+			toast_lbl.text = "✓ Bag saved!"
+			var t = tab_vbox.get_tree().create_timer(2.5)
+			t.timeout.connect(func(): if is_instance_valid(toast_lbl): toast_lbl.text = "")
+
+	for cat in CLUB_CATEGORIES:
+		var cat_name = cat["category"] as String
+		var cat_clubs = cat["clubs"] as Array
+		
+		var cat_section = VBoxContainer.new()
+		cat_section.add_theme_constant_override("separation", 8)
+		categories_vbox.add_child(cat_section)
+		
+		var cat_title = Label.new()
+		cat_title.text = cat_name
+		cat_title.add_theme_font_size_override("font_size", 18)
+		cat_title.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
+		cat_section.add_child(cat_title)
+		
+		var grid = GridContainer.new()
+		grid.columns = 3
+		grid.add_theme_constant_override("h_separation", 12)
+		grid.add_theme_constant_override("v_separation", 10)
+		grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cat_section.add_child(grid)
+		
+		for club_info in cat_clubs:
+			var code = club_info["code"] as String
+			var full_name = club_info["name"] as String
+			
+			var btn = Button.new()
+			btn.custom_minimum_size = Vector2(180, 68)
+			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			btn.focus_mode = Control.FOCUS_NONE
+			
+			var btn_vbox = VBoxContainer.new()
+			btn_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			btn_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+			btn_vbox.add_theme_constant_override("separation", 2)
+			btn.add_child(btn_vbox)
+			
+			var top_row = HBoxContainer.new()
+			top_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			btn_vbox.add_child(top_row)
+			
+			var code_lbl = Label.new()
+			code_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			code_lbl.text = code
+			code_lbl.add_theme_font_size_override("font_size", 20)
+			code_lbl.add_theme_color_override("font_color", Color.WHITE)
+			top_row.add_child(code_lbl)
+			
+			var spacer_code = Control.new()
+			spacer_code.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			spacer_code.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			top_row.add_child(spacer_code)
+			
+			var s_lbl = Label.new()
+			s_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			s_lbl.add_theme_font_size_override("font_size", 13)
+			top_row.add_child(s_lbl)
+			
+			var name_lbl = Label.new()
+			name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			name_lbl.text = full_name
+			name_lbl.add_theme_font_size_override("font_size", 13)
+			name_lbl.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
+			btn_vbox.add_child(name_lbl)
+			
+			btn.pressed.connect(func():
+				is_using_default[0] = false
+				active_map[code] = not active_map.get(code, false)
+				update_ui_state.call()
+				save_current_bag.call(false)
+			)
+			
+			grid.add_child(btn)
+			club_buttons_ref.append({"code": code, "btn": btn, "status_lbl": s_lbl})
+
+	# Presets and action handlers
+	standard_preset_btn.pressed.connect(func():
+		is_using_default[0] = false
+		for c in MultiplayerManager.STANDARD_CLUBS:
+			active_map[c] = STANDARD_14_BAG.has(c)
+		update_ui_state.call()
+		save_current_bag.call(true)
+	)
+
+	select_all_btn.pressed.connect(func():
+		is_using_default[0] = false
+		for c in MultiplayerManager.STANDARD_CLUBS:
+			active_map[c] = true
+		update_ui_state.call()
+		save_current_bag.call(true)
+	)
+
+	clear_all_btn.pressed.connect(func():
+		is_using_default[0] = false
+		for c in MultiplayerManager.STANDARD_CLUBS:
+			active_map[c] = false
+		update_ui_state.call()
+		save_current_bag.call(true)
+	)
+
+	reset_default_btn.pressed.connect(func():
+		is_using_default[0] = true
+		for c in MultiplayerManager.STANDARD_CLUBS:
+			active_map[c] = true
+		update_ui_state.call()
+		save_current_bag.call(true)
+	)
+
+	save_btn.pressed.connect(func():
+		save_current_bag.call(true)
+	)
+
+	update_ui_state.call()
 	return tab_vbox
 
 func _email_player_profile_report(player_name: String) -> void:

@@ -28,10 +28,15 @@ var altitude_unit_label : Label = null
 var _stats_count_label : Label = null
 var _stat_limit_modal : Control = null
 var _key_buttons_by_action : Dictionary = {}
+var _joy_buttons_by_action : Dictionary = {}
 var _rebind_modal : Control = null
 var _rebind_action_name : String = ""
+var _rebind_mode : String = "key"
+var _controller_status_label : Label = null
 var _last_applied_graphics_quality: String = ""
 var _graphics_quality_changed: bool = false
+var _wind_slider : HSlider = null
+var _wind_slider_lbl : Label = null
 
 const SQUARE_UI_LOG_PREFIX := "[SquareUI]"
 const SQUARE_CLUBS := {
@@ -247,12 +252,98 @@ func _ready() -> void:
 		GlobalSettings.range_settings.shot_injector_enabled.value
 	)
 	_setup_displayed_stats_section()
+	if GlobalSettings and GlobalSettings.range_settings and "displayed_stats" in GlobalSettings.range_settings:
+		GlobalSettings.range_settings.displayed_stats.setting_changed.connect(func(_v):
+			_setup_displayed_stats_section()
+		)
 	_setup_square_monitor_section()
 	_setup_tcp_monitor_section()
 	_setup_hecklelinks_announcer_section()
 	_setup_keybindings_section()
 
 	var gameplay_vbox = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox
+
+	# Wind Simulation toggle in Gameplay tab
+	var wind_toggle_row = _create_toggle_setting_row("Wind Simulation", "wind_enabled")
+	gameplay_vbox.add_child(wind_toggle_row)
+
+	var wind_slider_container = VBoxContainer.new()
+	wind_slider_container.name = "WindSliderContainer"
+	wind_slider_container.add_theme_constant_override("separation", 6)
+	wind_slider_container.visible = bool(GlobalSettings.range_settings.wind_enabled.value)
+
+	var wind_slider_row = HBoxContainer.new()
+	wind_slider_row.name = "WindSliderRow"
+	wind_slider_row.custom_minimum_size = Vector2(0, 52)
+	wind_slider_row.add_theme_constant_override("separation", 10)
+
+	_wind_slider_lbl = Label.new()
+	var init_spd: float = GlobalSettings.current_wind_speed_mph
+	if init_spd <= 0.0:
+		_wind_slider_lbl.text = "Wind Speed: 0 MPH (Calm)"
+	else:
+		_wind_slider_lbl.text = "Wind Speed: %d MPH" % int(init_spd)
+	_wind_slider_lbl.add_theme_font_size_override("font_size", 19)
+	_wind_slider_lbl.custom_minimum_size = Vector2(300, 0)
+	_wind_slider_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	wind_slider_row.add_child(_wind_slider_lbl)
+
+	var wind_minus_btn = Button.new()
+	wind_minus_btn.text = "－"
+	wind_minus_btn.custom_minimum_size = Vector2(48, 48)
+	wind_minus_btn.add_theme_font_size_override("font_size", 20)
+	ThemeManager.apply_nav_button_style(wind_minus_btn, 8)
+	wind_slider_row.add_child(wind_minus_btn)
+
+	_wind_slider = HSlider.new()
+	_wind_slider.name = "WindSpeedSlider"
+	_wind_slider.min_value = 0.0
+	_wind_slider.max_value = 35.0
+	_wind_slider.step = 1.0
+	_wind_slider.value = init_spd
+	_wind_slider.custom_minimum_size = Vector2(180, 48)
+	_wind_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wind_slider_row.add_child(_wind_slider)
+
+	var wind_plus_btn = Button.new()
+	wind_plus_btn.text = "＋"
+	wind_plus_btn.custom_minimum_size = Vector2(48, 48)
+	wind_plus_btn.add_theme_font_size_override("font_size", 20)
+	ThemeManager.apply_nav_button_style(wind_plus_btn, 8)
+	wind_slider_row.add_child(wind_plus_btn)
+
+	wind_slider_container.add_child(wind_slider_row)
+
+	_wind_slider.value_changed.connect(func(val: float):
+		GlobalSettings.set_wind_speed_mph(val)
+		if _wind_slider_lbl != null:
+			if val <= 0.0:
+				_wind_slider_lbl.text = "Wind Speed: 0 MPH (Calm)"
+			else:
+				_wind_slider_lbl.text = "Wind Speed: %d MPH" % int(val)
+	)
+
+	wind_minus_btn.pressed.connect(func():
+		_wind_slider.value = clamp(_wind_slider.value - 1.0, _wind_slider.min_value, _wind_slider.max_value)
+	)
+	wind_plus_btn.pressed.connect(func():
+		_wind_slider.value = clamp(_wind_slider.value + 1.0, _wind_slider.min_value, _wind_slider.max_value)
+	)
+
+	for child in wind_toggle_row.get_children():
+		if child is CheckButton:
+			child.toggled.connect(func(toggled_on: bool):
+				wind_slider_container.visible = toggled_on
+				if toggled_on:
+					_sync_wind_slider()
+			)
+			break
+
+	GlobalSettings.wind_changed.connect(func(_spd: float, _dir: float):
+		_sync_wind_slider()
+	)
+
+	gameplay_vbox.add_child(wind_slider_container)
 
 	# Foam Ball Boost Mode section in Gameplay tab
 	var foam_sep = HSeparator.new()
@@ -420,10 +511,10 @@ func _ready() -> void:
 	var gs_sep = HSeparator.new()
 	gameplay_vbox.add_child(gs_sep)
 	
-	var green_speed_row = _create_slider_setting_row("Green Speed (Courses)", "green_speed", 1.0, 50.0, 1.0)
+	var green_speed_row = _create_slider_setting_row("Green Speed (Courses)", "green_speed", 6.0, 16.0, 0.5)
 	gameplay_vbox.add_child(green_speed_row)
 
-	var putting_green_speed_row = _create_slider_setting_row("Putting Minigame Green Speed", "putting_green_speed", 1.0, 50.0, 1.0)
+	var putting_green_speed_row = _create_slider_setting_row("Putting Minigame Green Speed", "putting_green_speed", 6.0, 16.0, 0.5)
 	gameplay_vbox.add_child(putting_green_speed_row)
 
 
@@ -549,8 +640,20 @@ func _on_settings_opened() -> void:
 	if now - _last_opened_msec < 500:
 		return
 	_last_opened_msec = now
+	_sync_wind_slider()
 	if has_node("/root/AnnouncerEngine"):
 		get_node("/root/AnnouncerEngine").call("SpeakSettingsOpened")
+
+
+func _sync_wind_slider() -> void:
+	if _wind_slider != null and GlobalSettings != null:
+		var spd: float = GlobalSettings.current_wind_speed_mph
+		_wind_slider.set_value_no_signal(spd)
+		if _wind_slider_lbl != null:
+			if spd <= 0.0:
+				_wind_slider_lbl.text = "Wind Speed: 0 MPH (Calm)"
+			else:
+				_wind_slider_lbl.text = "Wind Speed: %d MPH" % int(spd)
 
 
 func _on_header_close_button_pressed() -> void:
@@ -1038,6 +1141,19 @@ func _setup_tcp_monitor_section() -> void:
 	btn_ip_local.pressed.connect(func():
 		var current_p_val = int(GlobalSettings.range_settings.tcp_server_port.value) if "tcp_server_port" in GlobalSettings.range_settings else 49152
 		update_buttons_and_restart.call(current_p_val, "127.0.0.1")
+	)
+	ip_input.text_changed.connect(func(txt: String):
+		var current_p_val = int(GlobalSettings.range_settings.tcp_server_port.value) if "tcp_server_port" in GlobalSettings.range_settings else 49152
+		var trimmed = txt.strip_edges()
+		if trimmed.is_empty():
+			trimmed = "0.0.0.0"
+		if "tcp_server_ip" in GlobalSettings.range_settings:
+			GlobalSettings.range_settings.tcp_server_ip.set_value(trimmed)
+		GlobalSettings.save_settings()
+		update_status_text.call()
+		var scene_tcp = get_tree().root.find_child("TCPServer", true, false)
+		if scene_tcp != null and scene_tcp.has_method("Restart"):
+			scene_tcp.call("Restart", current_p_val, trimmed)
 	)
 	ip_input.text_submitted.connect(func(txt: String):
 		var current_p_val = int(GlobalSettings.range_settings.tcp_server_port.value) if "tcp_server_port" in GlobalSettings.range_settings else 49152
@@ -1830,7 +1946,7 @@ func _setup_displayed_stats_section() -> void:
 	header_vbox.add_child(header_top_hbox)
 	
 	var header_desc := Label.new()
-	header_desc.text = "Select up to 12 metrics to display in on-screen tiles during play. You can drag and drop tiles on the range to customize your layout. Only 12 stats can be enabled at a time."
+	header_desc.text = "Select up to %d metrics to display in on-screen tiles during play. You can drag and drop tiles on the range to customize your layout. Only %d stats can be enabled at a time." % [StatDefinitions.MAX_DISPLAYED_STATS, StatDefinitions.MAX_DISPLAYED_STATS]
 	header_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	header_desc.add_theme_font_size_override("font_size", 16)
 	header_desc.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
@@ -1970,7 +2086,7 @@ func _show_stat_limit_popup() -> void:
 	vbox.add_child(title)
 	
 	var msg := Label.new()
-	msg.text = "You can display a maximum of 12 stats on screen at a time.\n\nPlease disable one of your currently enabled stats before enabling this one to keep it at 12 total displayed stats."
+	msg.text = "You can display a maximum of %d stats on screen at a time.\n\nPlease disable one of your currently enabled stats before enabling this one to keep it at %d total displayed stats." % [StatDefinitions.MAX_DISPLAYED_STATS, StatDefinitions.MAX_DISPLAYED_STATS]
 	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	msg.add_theme_font_size_override("font_size", 17)
@@ -2010,9 +2126,14 @@ func _show_stat_limit_popup() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _rebind_modal != null and is_instance_valid(_rebind_modal):
-		if event is InputEventKey and event.pressed and not event.echo:
-			_handle_rebind_key_event(event, _rebind_action_name, _rebind_modal)
-			get_viewport().set_input_as_handled()
+		if _rebind_mode == "joy":
+			if (event is InputEventJoypadButton and event.pressed) or (event is InputEventKey and event.pressed and not event.echo):
+				_handle_rebind_joy_event(event, _rebind_action_name, _rebind_modal)
+				get_viewport().set_input_as_handled()
+		else:
+			if event is InputEventKey and event.pressed and not event.echo:
+				_handle_rebind_key_event(event, _rebind_action_name, _rebind_modal)
+				get_viewport().set_input_as_handled()
 
 
 func _setup_keybindings_section() -> void:
@@ -2037,6 +2158,7 @@ func _setup_keybindings_section() -> void:
 		c.queue_free()
 
 	_key_buttons_by_action.clear()
+	_joy_buttons_by_action.clear()
 
 	var margin = MarginContainer.new()
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2058,19 +2180,41 @@ func _setup_keybindings_section() -> void:
 	ThemeManager.apply_card_panel_style(header_card, true, 10, 16, 14, 16, 14)
 
 	var header_vbox := VBoxContainer.new()
-	header_vbox.add_theme_constant_override("separation", 8)
+	header_vbox.add_theme_constant_override("separation", 10)
 
 	var header_top_hbox := HBoxContainer.new()
 	var header_title := Label.new()
-	header_title.text = "⌨ PC Keyboard Controls & Keybindings"
+	header_title.text = "🎮 Controls & Keybindings"
 	header_title.add_theme_font_size_override("font_size", 20)
 	header_title.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
 	header_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header_top_hbox.add_child(header_title)
 
+	var reset_key_btn := Button.new()
+	reset_key_btn.text = "⌨ Reset Keys"
+	reset_key_btn.custom_minimum_size = Vector2(130, 42)
+	ThemeManager.apply_secondary_button_style(reset_key_btn, 8)
+	reset_key_btn.pressed.connect(func():
+		if has_node("/root/KeybindingManager"):
+			KeybindingManager.reset_keys_to_defaults()
+			_refresh_keybinding_buttons()
+	)
+	header_top_hbox.add_child(reset_key_btn)
+
+	var reset_joy_btn := Button.new()
+	reset_joy_btn.text = "🎮 Reset Controller"
+	reset_joy_btn.custom_minimum_size = Vector2(150, 42)
+	ThemeManager.apply_secondary_button_style(reset_joy_btn, 8)
+	reset_joy_btn.pressed.connect(func():
+		if has_node("/root/KeybindingManager"):
+			KeybindingManager.reset_joy_to_defaults()
+			_refresh_keybinding_buttons()
+	)
+	header_top_hbox.add_child(reset_joy_btn)
+
 	var reset_all_btn := Button.new()
-	reset_all_btn.text = "↺ Reset All to Defaults"
-	reset_all_btn.custom_minimum_size = Vector2(190, 42)
+	reset_all_btn.text = "↺ Reset All"
+	reset_all_btn.custom_minimum_size = Vector2(120, 42)
 	ThemeManager.apply_secondary_button_style(reset_all_btn, 8)
 	reset_all_btn.pressed.connect(func():
 		if has_node("/root/KeybindingManager"):
@@ -2080,10 +2224,30 @@ func _setup_keybindings_section() -> void:
 	header_top_hbox.add_child(reset_all_btn)
 	header_vbox.add_child(header_top_hbox)
 
+	# Controller Live Status Banner
+	var status_panel := PanelContainer.new()
+	ThemeManager.apply_card_panel_style(status_panel, false, 6, 12, 8, 12, 8)
+	var status_hbox := HBoxContainer.new()
+	status_hbox.add_theme_constant_override("separation", 10)
+	
+	_controller_status_label = Label.new()
+	_controller_status_label.add_theme_font_size_override("font_size", 16)
+	_controller_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_update_controller_status_label()
+	status_hbox.add_child(_controller_status_label)
+	status_panel.add_child(status_hbox)
+	header_vbox.add_child(status_panel)
+
+	# Connect signal for live controller plug/unplug updates
+	if has_node("/root/KeybindingManager"):
+		var km_node = get_node("/root/KeybindingManager")
+		if not km_node.controller_connection_changed.is_connected(_update_controller_status_label):
+			km_node.controller_connection_changed.connect(_update_controller_status_label)
+
 	var header_desc := Label.new()
-	header_desc.text = "Click any key binding button to rebind it. Press Escape to cancel, or Backspace to clear. Any changed keybindings are automatically saved for future sessions."
+	header_desc.text = "Customize your PC keyboard shortcuts and Bluetooth / Xbox / gamepad controller buttons. Click any button to rebind it. Both keyboard and controller can be used simultaneously."
 	header_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	header_desc.add_theme_font_size_override("font_size", 16)
+	header_desc.add_theme_font_size_override("font_size", 15)
 	header_desc.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
 	header_vbox.add_child(header_desc)
 
@@ -2131,10 +2295,26 @@ func _setup_keybindings_section() -> void:
 		root.add_child(cat_sep)
 
 
+func _update_controller_status_label(_connected: bool = false, _name: String = "") -> void:
+	if _controller_status_label == null or not is_instance_valid(_controller_status_label):
+		return
+	if not has_node("/root/KeybindingManager"):
+		return
+	var km = get_node("/root/KeybindingManager")
+	if km.is_controller_connected():
+		var c_name = km.get_connected_controller_name()
+		_controller_status_label.text = "🎮 Controller Connected: %s (Ready)" % c_name
+		_controller_status_label.add_theme_color_override("font_color", Color(0.3, 0.9, 0.4))
+	else:
+		_controller_status_label.text = "🎮 No controller detected (Connect an Xbox, PlayStation, or Bluetooth gamepad)"
+		_controller_status_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+
+
 func _create_keybinding_row(action_name: String, action_label: String) -> HBoxContainer:
 	var hbox := HBoxContainer.new()
 	hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hbox.custom_minimum_size = Vector2(0, 48)
+	hbox.add_theme_constant_override("separation", 12)
 
 	var name_lbl := Label.new()
 	name_lbl.text = action_label
@@ -2144,20 +2324,36 @@ func _create_keybinding_row(action_name: String, action_label: String) -> HBoxCo
 	name_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hbox.add_child(name_lbl)
 
+	var km = get_node_or_null("/root/KeybindingManager")
+
+	# Keyboard button
 	var key_btn := Button.new()
 	key_btn.name = "KeyBtn_" + action_name
-	var current_key_str = get_node("/root/KeybindingManager").get_action_key_name(action_name) if has_node("/root/KeybindingManager") else ""
-	key_btn.text = "[ %s ]" % current_key_str
-	key_btn.custom_minimum_size = Vector2(140, 44)
-	key_btn.add_theme_font_size_override("font_size", 16)
+	var current_key_str = km.get_action_key_name(action_name) if km != null else ""
+	key_btn.text = "⌨ " + current_key_str
+	key_btn.custom_minimum_size = Vector2(150, 44)
+	key_btn.add_theme_font_size_override("font_size", 15)
 	ThemeManager.apply_secondary_button_style(key_btn, 8)
-
 	key_btn.pressed.connect(func():
-		_open_rebind_modal(action_name, action_label, key_btn)
+		_open_rebind_modal(action_name, action_label, false)
 	)
-
 	hbox.add_child(key_btn)
 	_key_buttons_by_action[action_name] = key_btn
+
+	# Controller button
+	var joy_btn := Button.new()
+	joy_btn.name = "JoyBtn_" + action_name
+	var current_joy_str = km.get_action_joy_button_name(action_name) if km != null else ""
+	joy_btn.text = "🎮 " + current_joy_str
+	joy_btn.custom_minimum_size = Vector2(175, 44)
+	joy_btn.add_theme_font_size_override("font_size", 15)
+	ThemeManager.apply_secondary_button_style(joy_btn, 8)
+	joy_btn.pressed.connect(func():
+		_open_rebind_modal(action_name, action_label, true)
+	)
+	hbox.add_child(joy_btn)
+	_joy_buttons_by_action[action_name] = joy_btn
+
 	return hbox
 
 
@@ -2169,15 +2365,22 @@ func _refresh_keybinding_buttons() -> void:
 		var btn = _key_buttons_by_action[act_name] as Button
 		if btn != null and is_instance_valid(btn):
 			var k_name = km.get_action_key_name(act_name)
-			btn.text = "[ %s ]" % k_name
+			btn.text = "⌨ " + k_name
+	for act_name in _joy_buttons_by_action.keys():
+		var btn = _joy_buttons_by_action[act_name] as Button
+		if btn != null and is_instance_valid(btn):
+			var j_name = km.get_action_joy_button_name(act_name)
+			btn.text = "🎮 " + j_name
+	_update_controller_status_label()
 
 
-func _open_rebind_modal(action_name: String, action_label: String, _target_btn: Button) -> void:
+func _open_rebind_modal(action_name: String, action_label: String, is_joy: bool) -> void:
 	if _rebind_modal != null and is_instance_valid(_rebind_modal):
 		_rebind_modal.queue_free()
 		_rebind_modal = null
 
 	_rebind_action_name = action_name
+	_rebind_mode = "joy" if is_joy else "key"
 
 	var overlay := ColorRect.new()
 	overlay.name = "RebindOverlay"
@@ -2193,14 +2396,15 @@ func _open_rebind_modal(action_name: String, action_label: String, _target_btn: 
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 
 	var title_lbl := Label.new()
-	title_lbl.text = "⌨ Rebind Control"
+	title_lbl.text = "🎮 Rebind Controller Button" if is_joy else "⌨ Rebind Keyboard Key"
 	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title_lbl.add_theme_font_size_override("font_size", 24)
 	title_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_ACCENT)
 	vbox.add_child(title_lbl)
 
 	var target_lbl := Label.new()
-	target_lbl.text = "Press any key on your keyboard to assign to:\n\"%s\"" % action_label
+	var dev_prompt = "Press any button on your controller to assign to:\n\"%s\"" if is_joy else "Press any key on your keyboard to assign to:\n\"%s\""
+	target_lbl.text = dev_prompt % action_label
 	target_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	target_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	target_lbl.add_theme_font_size_override("font_size", 18)
@@ -2208,7 +2412,7 @@ func _open_rebind_modal(action_name: String, action_label: String, _target_btn: 
 	vbox.add_child(target_lbl)
 
 	var listening_lbl := Label.new()
-	listening_lbl.text = "● LISTENING FOR KEY PRESS..."
+	listening_lbl.text = "● LISTENING FOR CONTROLLER BUTTON PRESS..." if is_joy else "● LISTENING FOR KEY PRESS..."
 	listening_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	listening_lbl.add_theme_font_size_override("font_size", 18)
 	listening_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_GOLD)
@@ -2221,18 +2425,40 @@ func _open_rebind_modal(action_name: String, action_label: String, _target_btn: 
 	note_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
 	vbox.add_child(note_lbl)
 
+	var btn_hbox := HBoxContainer.new()
+	btn_hbox.add_theme_constant_override("separation", 14)
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+
+	var unbind_btn := Button.new()
+	unbind_btn.text = "Clear / Unbind"
+	unbind_btn.custom_minimum_size = Vector2(140, 44)
+	ThemeManager.apply_secondary_button_style(unbind_btn, 8)
+	unbind_btn.pressed.connect(func():
+		if has_node("/root/KeybindingManager"):
+			var km = get_node("/root/KeybindingManager")
+			if is_joy:
+				km.rebind_joy_button(action_name, -1)
+			else:
+				km.rebind_key(action_name, KEY_NONE)
+			_refresh_keybinding_buttons()
+		overlay.queue_free()
+		_rebind_modal = null
+		_rebind_action_name = ""
+	)
+	btn_hbox.add_child(unbind_btn)
+
 	var cancel_btn := Button.new()
 	cancel_btn.text = "Cancel"
 	cancel_btn.custom_minimum_size = Vector2(130, 44)
-	cancel_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	ThemeManager.apply_secondary_button_style(cancel_btn, 8)
 	cancel_btn.pressed.connect(func():
 		overlay.queue_free()
 		_rebind_modal = null
 		_rebind_action_name = ""
 	)
-	vbox.add_child(cancel_btn)
+	btn_hbox.add_child(cancel_btn)
 
+	vbox.add_child(btn_hbox)
 	modal.add_child(vbox)
 	overlay.add_child(modal)
 
@@ -2240,10 +2466,10 @@ func _open_rebind_modal(action_name: String, action_label: String, _target_btn: 
 	modal.anchor_top = 0.5
 	modal.anchor_right = 0.5
 	modal.anchor_bottom = 0.5
-	modal.offset_left = -250
-	modal.offset_top = -140
-	modal.offset_right = 250
-	modal.offset_bottom = 140
+	modal.offset_left = -270
+	modal.offset_top = -145
+	modal.offset_right = 270
+	modal.offset_bottom = 145
 
 	add_child(overlay)
 	_rebind_modal = overlay
@@ -2259,7 +2485,7 @@ func _handle_rebind_key_event(event: InputEventKey, action_name: String, overlay
 	if event.keycode == KEY_BACKSPACE:
 		if has_node("/root/KeybindingManager"):
 			var km = get_node("/root/KeybindingManager")
-			km.rebind_action(action_name, KEY_NONE)
+			km.rebind_key(action_name, KEY_NONE)
 			_refresh_keybinding_buttons()
 		overlay.queue_free()
 		_rebind_modal = null
@@ -2272,13 +2498,47 @@ func _handle_rebind_key_event(event: InputEventKey, action_name: String, overlay
 
 	if has_node("/root/KeybindingManager"):
 		var km = get_node("/root/KeybindingManager")
-		var conflict_action = km.get_conflict_action(chosen_key, action_name)
+		var conflict_action = km.get_conflict_key_action(chosen_key, action_name)
 		if not conflict_action.is_empty():
-			km.rebind_action(conflict_action, KEY_NONE)
+			km.rebind_key(conflict_action, KEY_NONE)
 
-		km.rebind_action(action_name, chosen_key)
+		km.rebind_key(action_name, chosen_key)
 		_refresh_keybinding_buttons()
 
 	overlay.queue_free()
 	_rebind_modal = null
 	_rebind_action_name = ""
+
+
+func _handle_rebind_joy_event(event: InputEvent, action_name: String, overlay: Control) -> void:
+	if event is InputEventKey:
+		var key_ev = event as InputEventKey
+		if key_ev.keycode == KEY_ESCAPE:
+			overlay.queue_free()
+			_rebind_modal = null
+			_rebind_action_name = ""
+			return
+		if key_ev.keycode == KEY_BACKSPACE:
+			if has_node("/root/KeybindingManager"):
+				var km = get_node("/root/KeybindingManager")
+				km.rebind_joy_button(action_name, -1)
+				_refresh_keybinding_buttons()
+			overlay.queue_free()
+			_rebind_modal = null
+			_rebind_action_name = ""
+			return
+
+	if event is InputEventJoypadButton and event.pressed:
+		var joy_btn = (event as InputEventJoypadButton).button_index
+		if has_node("/root/KeybindingManager"):
+			var km = get_node("/root/KeybindingManager")
+			var conflict_action = km.get_conflict_joy_action(joy_btn, action_name)
+			if not conflict_action.is_empty():
+				km.rebind_joy_button(conflict_action, -1)
+
+			km.rebind_joy_button(action_name, joy_btn)
+			_refresh_keybinding_buttons()
+
+		overlay.queue_free()
+		_rebind_modal = null
+		_rebind_action_name = ""

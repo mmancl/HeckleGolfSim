@@ -1,6 +1,6 @@
-﻿Microsoft Visual Studio Solution File, Format Version 12.00
+Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2012
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenShotGolf", "OpenShotGolf.csproj", "{EA4B6A13-10CB-427C-B30B-458C9B3AEAB0}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HeckleGolfSim", "HeckleGolfSim.csproj", "{EA4B6A13-10CB-427C-B30B-458C9B3AEAB0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

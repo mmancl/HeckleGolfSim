@@ -130,6 +130,60 @@ public partial class PhysicsParamsFactory : RefCounted
 		);
 	}
 
+	public PhysicsParams CreateParams(
+		float airDensity,
+		float airViscosity,
+		float dragScale,
+		float liftScale,
+		PhysicsEnums.SurfaceType surfaceType,
+		Vector3 floorNormal,
+		float rolloutImpactSpin,
+		float initialLaunchAngleDeg,
+		float launchSpeedMph,
+		float launchSpinRpm)
+	{
+		return CreateParams(
+			airDensity,
+			airViscosity,
+			dragScale,
+			liftScale,
+			surfaceType,
+			floorNormal,
+			rolloutImpactSpin,
+			initialLaunchAngleDeg,
+			launchSpeedMph,
+			launchSpinRpm,
+			false
+		);
+	}
+
+	public PhysicsParams CreateParams(
+		float airDensity,
+		float airViscosity,
+		float dragScale,
+		float liftScale,
+		int surfaceType,
+		Vector3 floorNormal,
+		float rolloutImpactSpin,
+		float initialLaunchAngleDeg,
+		float launchSpeedMph,
+		float launchSpinRpm)
+	{
+		return CreateParams(
+			airDensity,
+			airViscosity,
+			dragScale,
+			liftScale,
+			(PhysicsEnums.SurfaceType)surfaceType,
+			floorNormal,
+			rolloutImpactSpin,
+			initialLaunchAngleDeg,
+			launchSpeedMph,
+			launchSpinRpm,
+			false
+		);
+	}
+
 	public void ConfigureShot(
 		PhysicsParams parameters,
 		float airDensity,

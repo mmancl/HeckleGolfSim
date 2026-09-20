@@ -1363,6 +1363,12 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	if player.ball.state != PhysicsEnums.BallState.REST:
 		return # Ignore if shot in progress
 
+	var speed_val: float = float(data.get("BallSpeed", data.get("Speed", 0.0)))
+	var shot_type = str(data.get("ShotType", "")).to_lower()
+	if speed_val <= 0.1 or shot_type == "practice":
+		print("[Chipping] Practice swing or 0 ball speed ignored.")
+		return
+
 	FoamBallBoost.apply_boost(data)
 
 	if has_node("/root/TensionManager"):

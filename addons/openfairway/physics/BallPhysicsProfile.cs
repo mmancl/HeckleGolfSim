@@ -275,6 +275,7 @@ public sealed class BallPhysicsProfile
             FlightTangentialRetentionBase = TryFloat(el, "FlightTangentialRetentionBase", bp.FlightTangentialRetentionBase),
             FlightSpinFactorMin = TryFloat(el, "FlightSpinFactorMin", bp.FlightSpinFactorMin),
             FlightSpinFactorDivisor = TryFloat(el, "FlightSpinFactorDivisor", bp.FlightSpinFactorDivisor),
+            FlightLowSpinThreshold = TryFloat(el, "FlightLowSpinThreshold", bp.FlightLowSpinThreshold),
             ShallowImpactRetentionMin = TryFloat(el, "ShallowImpactRetentionMin", bp.ShallowImpactRetentionMin),
             ShallowImpactRetentionMax = TryFloat(el, "ShallowImpactRetentionMax", bp.ShallowImpactRetentionMax),
             RolloutLowSpinRetention = TryFloat(el, "RolloutLowSpinRetention", bp.RolloutLowSpinRetention),

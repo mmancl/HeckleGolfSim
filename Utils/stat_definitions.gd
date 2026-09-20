@@ -1,13 +1,13 @@
 class_name StatDefinitions
 extends Object
 
-const MAX_DISPLAYED_STATS := 12
+const MAX_DISPLAYED_STATS := 13
 
 const DEFAULT_ENABLED_STAT_IDS: Array[String] = [
 	"Distance",
 	"Carry",
 	"SpinAxis",
-	"Speed",
+	"BallSpeed",
 	"BackSpin",
 	"SideSpin",
 	"FaceAngle",
@@ -52,8 +52,9 @@ const STATS: Array[Dictionary] = [
 		"is_dynamic": true
 	},
 	{
-		"id": "Speed",
-		"short_label": "Speed",
+		"id": "BallSpeed",
+		"aliases": ["Speed"],
+		"short_label": "Ball Spd",
 		"name": "Ball Speed",
 		"category": "Ball Flight",
 		"description": "The exit velocity of the golf ball immediately after separating from the clubface at impact. Primary driver of overall distance.",
@@ -258,7 +259,11 @@ static var _stats_by_id: Dictionary = {}
 static func get_stat_by_id(stat_id: String) -> Dictionary:
 	if _stats_by_id.is_empty():
 		for stat in STATS:
-			_stats_by_id[str(stat.get("id", ""))] = stat
+			var id_str = str(stat.get("id", ""))
+			_stats_by_id[id_str] = stat
+			var aliases = stat.get("aliases", [])
+			for a in aliases:
+				_stats_by_id[str(a)] = stat
 	return _stats_by_id.get(stat_id, {})
 
 static func is_dynamic_stat(stat_id: String) -> bool:
@@ -268,6 +273,8 @@ static func get_all_stat_ids() -> Array[String]:
 	var ids: Array[String] = []
 	for stat in STATS:
 		ids.append(str(stat.get("id", "")))
+	if not ids.has("Speed"):
+		ids.append("Speed")
 	return ids
 
 static func get_default_enabled_stat_ids() -> Array[String]:

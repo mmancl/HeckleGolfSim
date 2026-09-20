@@ -96,6 +96,28 @@ public static class SquareProtocol
             _ => "unknown"
         };
 
+        // Parse club delivery data when the packet includes it (bytes 17+).
+        // Square Golf's camera system populates these when club marking stickers
+        // are detected on the club shaft. Uses the same Int16LE ÷100 pattern.
+        // The sentinel value -32768 (0x8000) indicates the field was not measured.
+        float clubPath = 0.0f;
+        float faceAngle = 0.0f;
+        float attackAngle = 0.0f;
+        float dynamicLoft = 0.0f;
+
+        if (data.Length >= 25)
+        {
+            var rawClubPath = BinaryPrimitives.ReadInt16LittleEndian(data[17..19]);
+            var rawFaceAngle = BinaryPrimitives.ReadInt16LittleEndian(data[19..21]);
+            var rawAttackAngle = BinaryPrimitives.ReadInt16LittleEndian(data[21..23]);
+            var rawDynamicLoft = BinaryPrimitives.ReadInt16LittleEndian(data[23..25]);
+
+            clubPath = rawClubPath == -32768 ? 0.0f : rawClubPath / 100.0f;
+            faceAngle = rawFaceAngle == -32768 ? 0.0f : rawFaceAngle / 100.0f;
+            attackAngle = rawAttackAngle == -32768 ? 0.0f : rawAttackAngle / 100.0f;
+            dynamicLoft = rawDynamicLoft == -32768 ? 0.0f : rawDynamicLoft / 100.0f;
+        }
+
         metrics = new SquareShotMetrics(
             speed,
             vla,
@@ -104,7 +126,11 @@ public static class SquareProtocol
             spinAxis,
             backSpin,
             sideSpin,
-            shotType);
+            shotType,
+            clubPath,
+            faceAngle,
+            attackAngle,
+            dynamicLoft);
 
         return IsPlausible(metrics);
     }

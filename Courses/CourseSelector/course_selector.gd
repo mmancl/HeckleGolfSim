@@ -93,6 +93,9 @@ func _ready() -> void:
 		var green_speed_selector = _create_green_speed_selector()
 		vbox.add_child(green_speed_selector)
 
+		var wind_selector = _create_wind_selector()
+		vbox.add_child(wind_selector)
+
 		# Add Footer with Play Course button
 		var footer_hbox = HBoxContainer.new()
 		footer_hbox.alignment = BoxContainer.ALIGNMENT_END
@@ -158,6 +161,9 @@ func _on_course_list_item_activated(index: int) -> void:
 					mp_mgr.practice_mode_active = true
 					mp_mgr.start_hole()
 					print("[PracticeMode] MultiplayerManager primed with single practice player")
+
+	if GlobalSettings != null:
+		GlobalSettings.start_round_wind(true)
 
 	SceneManager.load_course(scene_path, config_path)
 
@@ -492,6 +498,53 @@ func _create_green_speed_selector() -> PanelContainer:
 		GlobalSettings.range_settings.green_speed.set_value(val)
 		val_lbl.text = str(val)
 	)
+
+	return panel
+
+
+func _create_wind_selector() -> PanelContainer:
+	var panel = PanelContainer.new()
+	var panel_style = StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.1, 0.15, 0.2, 0.4)
+	panel_style.border_width_left = 1
+	panel_style.border_width_right = 1
+	panel_style.border_width_top = 1
+	panel_style.border_width_bottom = 1
+	panel_style.border_color = Color(0.3, 0.4, 0.5, 0.3)
+	panel_style.corner_radius_top_left = 8
+	panel_style.corner_radius_top_right = 8
+	panel_style.corner_radius_bottom_left = 8
+	panel_style.corner_radius_bottom_right = 8
+	panel_style.content_margin_left = 12
+	panel_style.content_margin_right = 12
+	panel_style.content_margin_top = 8
+	panel_style.content_margin_bottom = 8
+	panel.add_theme_stylebox_override("panel", panel_style)
+
+	var hbox = HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 15)
+	panel.add_child(hbox)
+
+	var lbl = Label.new()
+	lbl.text = "Wind Simulation:"
+	lbl.add_theme_font_size_override("font_size", 24)
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hbox.add_child(lbl)
+
+	var spacer = Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_child(spacer)
+
+	var check = CheckButton.new()
+	check.custom_minimum_size = Vector2(72, 48)
+	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("wind_enabled"):
+		check.set_pressed_no_signal(bool(GlobalSettings.range_settings.wind_enabled.value))
+	check.toggled.connect(func(enabled: bool):
+		if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("wind_enabled"):
+			GlobalSettings.range_settings.wind_enabled.set_value(enabled)
+			GlobalSettings.save_settings()
+	)
+	hbox.add_child(check)
 
 	return panel
 

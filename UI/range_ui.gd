@@ -9,6 +9,8 @@ signal skip_flight_requested
 signal stats_visibility_changed(is_visible: bool)
 signal golfer_cam_modal_state_changed(is_open: bool)
 signal golfer_cam_enabled_changed(is_enabled: bool)
+signal putting_cam_enabled_changed(is_enabled: bool)
+signal player_profile_changed(player_name: String)
 
 
 var _avg_carry: Label
@@ -20,7 +22,10 @@ var _prev_shot_popup: Panel
 var _prev_shot_data_label: Label
 var _last_shot_data: Dictionary = {}
 var _averages_panel: PanelContainer = null
+var _profile_option: OptionButton = null
 var _prev_shot_btn: Button = null
+var _detached_window: Window = null
+var _detached_modal: Control = null
 var _right_panel: VBoxContainer = null
 var _home_btn: Button = null
 var _exit_confirm_dialog: Control = null
@@ -32,6 +37,7 @@ var _announcer_btn: Button = null
 var _tension_btn: Button = null
 var _dist_btn: Button = null
 var _golfer_cam_btn: Button = null
+var _putting_cam_btn: Button = null
 var _shot_analysis_btn: Button = null
 var _golfer_cam_panel: PanelContainer = null
 var _camera_feed_rect: TextureRect = null
@@ -41,6 +47,21 @@ var _camera_minimize_btn: Button = null
 var _camera_restore_pill: Button = null
 var _is_golfer_cam_enabled: bool = false
 var _is_golfer_cam_minimized: bool = false
+var _is_putting_cam_enabled: bool = false
+var _is_putting_cam_minimized: bool = false
+var _current_selected_club: String = ""
+var _putting_overlay: Control = null
+var _putting_state_machine: Node = null
+var _camera_rotate_btn: Button = null
+var _camera_rotation_deg: int:
+	get:
+		if has_node("/root/GlobalSettings"):
+			return int(GlobalSettings.range_settings.putting_camera_rotation.value)
+		return 0
+	set(val):
+		if has_node("/root/GlobalSettings"):
+			GlobalSettings.range_settings.putting_camera_rotation.set_value(val % 360)
+			GlobalSettings.save_settings()
 var _stats_were_visible_before_cam: bool = true
 var _phone_cam_url: String:
 	get:
@@ -72,10 +93,16 @@ func _ready() -> void:
 	_setup_averages_ui()
 	_setup_prev_shot_ui()
 	_setup_golfer_camera_ui()
+	_setup_profile_selector()
+	
+	var eb = _get_autoload("EventBus")
+	if eb != null and eb.has_signal("club_selected"):
+		if not eb.is_connected("club_selected", Callable(self, "_on_club_selected")):
+			eb.connect("club_selected", Callable(self, "_on_club_selected"))
 	
 	if CameraServer.has_signal("camera_feed_added"):
 		CameraServer.connect("camera_feed_added", func(_id):
-			if is_golfer_camera_enabled() and not _use_phone_stream:
+			if (is_golfer_camera_enabled() or _is_putting_cam_enabled) and not _use_phone_stream:
 				_update_camera_feed(true)
 		)
 
@@ -319,6 +346,24 @@ func _ready() -> void:
 		toggles_container.add_child(golfer_cam_btn)
 		_golfer_cam_btn = golfer_cam_btn
 
+		# Putting Camera Toggle Button
+		var putting_cam_btn = Button.new()
+		putting_cam_btn.name = "PuttingCamButton"
+		putting_cam_btn.text = "🎯 Putting Cam: OFF"
+		putting_cam_btn.tooltip_text = "Toggle Putting Camera (Ball tracking for putt speed & direction)"
+		putting_cam_btn.custom_minimum_size = Vector2(180, 56)
+		apply_material_button_style(putting_cam_btn, Color(0.35, 0.35, 0.35, 0.85))
+		putting_cam_btn.pressed.connect(func():
+			if not is_putting_camera_enabled():
+				set_putting_camera_visible(true)
+			elif is_putting_camera_minimized():
+				restore_putting_camera()
+			else:
+				set_putting_camera_visible(false)
+		)
+		toggles_container.add_child(putting_cam_btn)
+		_putting_cam_btn = putting_cam_btn
+
 		# Shot Analysis Toggle Button
 		var shot_analysis_btn = Button.new()
 		shot_analysis_btn.name = "ShotAnalysisButton"
@@ -446,7 +491,7 @@ func _ready() -> void:
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(_delta: float) -> void:
-	if is_golfer_camera_enabled():
+	if is_golfer_camera_enabled() or _is_putting_cam_enabled:
 		if _camera_feed_rect != null and _camera_feed_rect.texture == null:
 			if not _use_phone_stream and CameraServer.get_feed_count() > 0:
 				_update_camera_feed(true)
@@ -459,7 +504,7 @@ func set_data(data: Dictionary, is_final_rest: bool = false) -> void:
 	var grid = get_node_or_null("GridCanvas")
 	if grid != null:
 		for child in grid.get_children():
-			if child.name == "ClubSelector":
+			if child.name == "ClubSelector" or child.name == "AddRemoveButton":
 				continue
 			var stat_id = child.name
 			# During in-flight live updates, only update dynamic flight metrics
@@ -475,19 +520,109 @@ func set_data(data: Dictionary, is_final_rest: bool = false) -> void:
 				child.call("set_units", u_str)
 
 			var val = data.get(stat_id, "---")
+			if str(val) == "---" and stat_id == "BallSpeed":
+				val = data.get("Speed", "---")
+			elif str(val) == "---" and stat_id == "Speed":
+				val = data.get("BallSpeed", "---")
 			if stat_id == "VLA" or stat_id == "HLA":
 				val = _format_angle(val)
 			if child.has_method("set_data"):
 				child.call("set_data", str(val))
 
+	if is_final_rest:
+		var cam_active: bool = is_golfer_camera_enabled()
+		var analysis_active: bool = is_shot_analysis_enabled()
+		if cam_active or analysis_active:
+			var is_suggestions_only: bool = not cam_active and analysis_active
+			var recorded_frames: Array[Dictionary] = []
+			if not is_suggestions_only:
+				if not _saved_swing_frames.is_empty():
+					recorded_frames = _saved_swing_frames.duplicate()
+				elif _swing_frame_buffer != null:
+					recorded_frames = _swing_frame_buffer.get_captured_frames()
+			var modal_data = _prepare_modal_shot_data(data)
+			var p_name = str(modal_data.get("player", ""))
+			if p_name.is_empty():
+				p_name = get_selected_player_name()
+				modal_data["player"] = p_name
+
+			# 1. Detached window active: update it
+			if _detached_modal != null and is_instance_valid(_detached_modal) and _detached_modal.get("is_detached"):
+				_detached_modal.update_shot_data(modal_data, recorded_frames, is_suggestions_only)
+			# 2. Attached modal active in overlay: update it
+			elif has_node("OverlayLayer/SwingReplayModal"):
+				var attached_modal = get_node("OverlayLayer/SwingReplayModal")
+				if is_instance_valid(attached_modal) and attached_modal.has_method("update_shot_data"):
+					attached_modal.update_shot_data(modal_data, recorded_frames, is_suggestions_only)
+			# 3. No modal actively open: evaluate launch monitor recommendations and record to player profile
+			else:
+				var recs = GolfSwingAnalyzer.analyze_launch_monitor(modal_data)
+				if not recs.is_empty():
+					var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+					if mp_mgr != null and mp_mgr.has_method("record_player_swing_issues"):
+						mp_mgr.record_player_swing_issues(p_name, recs)
+						modal_data["_recommendations_recorded"] = true
+						_last_shot_data["_recommendations_recorded"] = true
+
+
+func _exit_tree() -> void:
+	_close_detached_window()
+
 
 func on_ball_hit() -> void:
 	if is_golfer_camera_enabled() and _swing_frame_buffer != null:
+		_saved_swing_frames.clear()
 		# Continue capturing for 1.2s to capture impact and follow-through, then save snapshot
 		get_tree().create_timer(1.2).timeout.connect(func():
 			if _swing_frame_buffer != null:
 				_saved_swing_frames = _swing_frame_buffer.get_captured_frames()
+				if _detached_modal != null and is_instance_valid(_detached_modal) and _detached_modal.get("is_detached"):
+					if not _last_shot_data.is_empty():
+						var cam_active: bool = is_golfer_camera_enabled()
+						var analysis_active: bool = is_shot_analysis_enabled()
+						var is_suggestions_only: bool = not cam_active and analysis_active
+						var modal_data = _prepare_modal_shot_data(_last_shot_data)
+						_detached_modal.update_shot_data(modal_data, _saved_swing_frames, is_suggestions_only)
 		)
+
+
+func _prepare_modal_shot_data(data: Dictionary) -> Dictionary:
+	var modal_data: Dictionary = data.duplicate()
+	var player_node = get_parent().get_node_or_null("Player") if get_parent() != null else null
+
+	if not modal_data.has("player") or str(modal_data["player"]).is_empty():
+		var p_name = ""
+		if get_parent() != null and get_parent().has_method("_get_current_player_name"):
+			p_name = get_parent()._get_current_player_name()
+		if p_name.is_empty():
+			p_name = get_selected_player_name()
+		modal_data["player"] = p_name
+
+	if not modal_data.has("Club") or str(modal_data["Club"]).is_empty():
+		var club_sel = find_child("ClubSelector", true, false)
+		if club_sel != null and "current_club" in club_sel and club_sel.current_club != null and not club_sel.current_club.text.is_empty():
+			modal_data["Club"] = club_sel.current_club.text
+		elif get_parent() != null and get_parent().has_method("_get_selected_club"):
+			modal_data["Club"] = get_parent()._get_selected_club()
+		elif get_parent() != null and get_parent().has_method("_get_current_club"):
+			modal_data["Club"] = get_parent()._get_current_club()
+		elif player_node != null:
+			if player_node.get("ball") != null and "current_selected_club" in player_node.ball:
+				modal_data["Club"] = player_node.ball.current_selected_club
+
+	if not modal_data.has("is_tee") or not modal_data.has("lie_type"):
+		if player_node != null and player_node.get("ball") != null and "lie_type" in player_node.ball:
+			var ball_lie = str(player_node.ball.lie_type)
+			if not modal_data.has("lie_type"):
+				modal_data["lie_type"] = ball_lie
+			if not modal_data.has("is_tee"):
+				modal_data["is_tee"] = (ball_lie.to_lower() == "teebox")
+		else:
+			if not modal_data.has("is_tee"):
+				modal_data["is_tee"] = (str(modal_data.get("lie_type", "")).to_lower() == "teebox")
+			if not modal_data.has("lie_type"):
+				modal_data["lie_type"] = "teebox" if modal_data.get("is_tee", false) else "fairway"
+	return modal_data
 
 
 func trigger_swing_replay_modal(data: Dictionary) -> void:
@@ -511,7 +646,21 @@ func trigger_swing_replay_modal(data: Dictionary) -> void:
 	if float(speed_str) <= 0.0 or float(dist_str) <= 0.0:
 		return
 
-	# Do not overwrite if replay modal is already open
+	# If detached window is already open, focus it and update shot data
+	if _detached_window != null and is_instance_valid(_detached_window) and _detached_modal != null and is_instance_valid(_detached_modal):
+		_detached_window.grab_focus()
+		var is_suggestions_only: bool = not cam_active and analysis_active
+		var recorded_frames: Array[Dictionary] = []
+		if not is_suggestions_only:
+			if not _saved_swing_frames.is_empty():
+				recorded_frames = _saved_swing_frames.duplicate()
+			elif _swing_frame_buffer != null:
+				recorded_frames = _swing_frame_buffer.get_captured_frames()
+		var modal_data = _prepare_modal_shot_data(data)
+		_detached_modal.update_shot_data(modal_data, recorded_frames, is_suggestions_only)
+		return
+
+	# Do not overwrite if attached replay modal is already open
 	var existing = $OverlayLayer.get_node_or_null("SwingReplayModal")
 	if existing != null:
 		return
@@ -520,7 +669,9 @@ func trigger_swing_replay_modal(data: Dictionary) -> void:
 	if modal_script != null:
 		var modal = modal_script.new()
 		modal.name = "SwingReplayModal"
-		$OverlayLayer.add_child(modal)
+		modal.detach_requested.connect(func(): _detach_swing_replay_modal(modal))
+		modal.attach_requested.connect(func(): _attach_swing_replay_modal(modal))
+
 		var recorded_frames: Array[Dictionary] = []
 		var is_suggestions_only: bool = not cam_active and analysis_active
 		if not is_suggestions_only:
@@ -529,32 +680,142 @@ func trigger_swing_replay_modal(data: Dictionary) -> void:
 			elif _swing_frame_buffer != null:
 				recorded_frames = _swing_frame_buffer.get_captured_frames()
 		
-		var modal_data: Dictionary = data.duplicate()
-		var player_node = get_parent().get_node_or_null("Player") if get_parent() != null else null
-		if not modal_data.has("Club") or str(modal_data["Club"]).is_empty():
-			var club_sel = find_child("ClubSelector", true, false)
-			if club_sel != null and "current_club" in club_sel and club_sel.current_club != null and not club_sel.current_club.text.is_empty():
-				modal_data["Club"] = club_sel.current_club.text
-			elif get_parent() != null and get_parent().has_method("_get_selected_club"):
-				modal_data["Club"] = get_parent()._get_selected_club()
-			elif player_node != null:
-				if player_node.get("ball") != null and "current_selected_club" in player_node.ball:
-					modal_data["Club"] = player_node.ball.current_selected_club
+		var modal_data = _prepare_modal_shot_data(data)
+		var should_detach = false
+		if has_node("/root/GlobalSettings") and GlobalSettings.range_settings.replay_window_detached.value and modal_script.is_detach_supported():
+			should_detach = true
 
-		if not modal_data.has("is_tee") or not modal_data.has("lie_type"):
-			if player_node != null and player_node.get("ball") != null and "lie_type" in player_node.ball:
-				var ball_lie = str(player_node.ball.lie_type)
-				if not modal_data.has("lie_type"):
-					modal_data["lie_type"] = ball_lie
-				if not modal_data.has("is_tee"):
-					modal_data["is_tee"] = (ball_lie.to_lower() == "teebox")
-			else:
-				if not modal_data.has("is_tee"):
-					modal_data["is_tee"] = (str(modal_data.get("lie_type", "")).to_lower() == "teebox")
-				if not modal_data.has("lie_type"):
-					modal_data["lie_type"] = "teebox" if modal_data.get("is_tee", false) else "fairway"
+		if should_detach:
+			modal.setup_modal(modal_data, recorded_frames, is_suggestions_only)
+			_detach_swing_replay_modal(modal)
+		else:
+			$OverlayLayer.add_child(modal)
+			modal.setup_modal(modal_data, recorded_frames, is_suggestions_only)
 
-		modal.setup_modal(modal_data, recorded_frames, is_suggestions_only)
+
+func _detach_swing_replay_modal(modal: Control) -> void:
+	var modal_script = load("res://UI/GolferCamera/swing_replay_modal.gd")
+	if modal_script == null or not modal_script.is_detach_supported():
+		return
+	if _detached_window != null and is_instance_valid(_detached_window):
+		return
+
+	var p = modal.get_parent()
+	if p != null:
+		p.remove_child(modal)
+
+	if DisplayServer.has_feature(DisplayServer.FEATURE_SUBWINDOWS):
+		get_tree().root.gui_embed_subwindows = false
+
+	var win = Window.new()
+	win.name = "DetachedSwingReplayWindow"
+	win.title = "⛳ Heckle Golf Sim - Shot Analysis & Swing Replay"
+	win.transient = false
+	win.exclusive = false
+	win.unresizable = false
+	win.borderless = false
+	win.always_on_top = false
+	win.min_size = Vector2i(760, 520)
+
+	var saved_w = int(GlobalSettings.range_settings.replay_window_width.value) if has_node("/root/GlobalSettings") else 1100
+	var saved_h = int(GlobalSettings.range_settings.replay_window_height.value) if has_node("/root/GlobalSettings") else 750
+	win.size = Vector2i(maxi(760, saved_w), maxi(520, saved_h))
+
+	var saved_x = int(GlobalSettings.range_settings.replay_window_position_x.value) if has_node("/root/GlobalSettings") else -1
+	var saved_y = int(GlobalSettings.range_settings.replay_window_position_y.value) if has_node("/root/GlobalSettings") else -1
+
+	if saved_x >= 0 and saved_y >= 0:
+		win.position = Vector2i(saved_x, saved_y)
+	else:
+		var screen_count = DisplayServer.get_screen_count()
+		var cur_screen = DisplayServer.window_get_current_screen()
+		var target_screen = 1 if (screen_count > 1 and cur_screen == 0) else (0 if screen_count > 1 else cur_screen)
+		var s_rect = DisplayServer.screen_get_usable_rect(target_screen)
+		var pos_x = s_rect.position.x + 40
+		var pos_y = s_rect.position.y + 40
+		win.position = Vector2i(pos_x, pos_y)
+
+	win.close_requested.connect(func():
+		_close_detached_window()
+	)
+
+	var save_win_rect = func():
+		if win != null and is_instance_valid(win) and has_node("/root/GlobalSettings"):
+			GlobalSettings.range_settings.replay_window_position_x.value = win.position.x
+			GlobalSettings.range_settings.replay_window_position_y.value = win.position.y
+			GlobalSettings.range_settings.replay_window_width.value = win.size.x
+			GlobalSettings.range_settings.replay_window_height.value = win.size.y
+
+	win.focus_exited.connect(save_win_rect)
+	win.size_changed.connect(save_win_rect)
+	win.size_changed.connect(func():
+		if modal != null and is_instance_valid(modal):
+			modal._recenter_modal()
+	)
+
+	modal.is_detached = true
+	_detached_window = win
+	_detached_modal = modal
+
+	win.add_child(modal)
+	get_tree().root.add_child(win)
+
+	if has_node("/root/GlobalSettings"):
+		GlobalSettings.range_settings.replay_window_detached.value = true
+
+	# Emit closed signal so range simulation unblocks immediately without waiting for Next Shot
+	modal.emit_signal("closed")
+
+	modal._recenter_modal()
+	modal._build_ui()
+	modal._update_playback_frame()
+	if not modal.get("_is_analysis_complete") and not modal.get("_is_suggestions_only"):
+		modal._start_background_wireframe_analysis()
+	win.show()
+	win.grab_focus()
+
+
+func _attach_swing_replay_modal(modal: Control) -> void:
+	if _detached_window != null and is_instance_valid(_detached_window):
+		if has_node("/root/GlobalSettings"):
+			GlobalSettings.range_settings.replay_window_position_x.value = _detached_window.position.x
+			GlobalSettings.range_settings.replay_window_position_y.value = _detached_window.position.y
+			GlobalSettings.range_settings.replay_window_width.value = _detached_window.size.x
+			GlobalSettings.range_settings.replay_window_height.value = _detached_window.size.y
+			GlobalSettings.range_settings.replay_window_detached.value = false
+
+		if modal.get_parent() == _detached_window:
+			_detached_window.remove_child(modal)
+		_detached_window.queue_free()
+		_detached_window = null
+
+	_detached_modal = null
+	modal.is_detached = false
+	if not modal.is_inside_tree():
+		$OverlayLayer.add_child(modal)
+
+	modal._recenter_modal()
+	modal._build_ui()
+	modal._update_playback_frame()
+	if not modal.get("_is_analysis_complete") and not modal.get("_is_suggestions_only"):
+		modal._start_background_wireframe_analysis()
+
+
+func _close_detached_window() -> void:
+	if _detached_window != null and is_instance_valid(_detached_window):
+		if has_node("/root/GlobalSettings"):
+			GlobalSettings.range_settings.replay_window_position_x.value = _detached_window.position.x
+			GlobalSettings.range_settings.replay_window_position_y.value = _detached_window.position.y
+			GlobalSettings.range_settings.replay_window_width.value = _detached_window.size.x
+			GlobalSettings.range_settings.replay_window_height.value = _detached_window.size.y
+			GlobalSettings.range_settings.replay_window_detached.value = false
+
+		if _detached_modal != null and is_instance_valid(_detached_modal):
+			_detached_modal._close_active_video_players()
+			_detached_modal.queue_free()
+		_detached_window.queue_free()
+		_detached_window = null
+		_detached_modal = null
 
 
 func _format_angle(value) -> String:
@@ -583,8 +844,135 @@ func _on_session_recorder_recording_state(value: bool) -> void:
 			rec_btn.tooltip_text = "Start Recording Range Session"
 
 
+static func _get_scaled_avatar_texture(avatar_path: String, target_size: Vector2i = Vector2i(28, 28)) -> Texture2D:
+	var path_to_load = avatar_path
+	if path_to_load.is_empty() or not ResourceLoader.exists(path_to_load):
+		path_to_load = "res://assets/images/avatars/avatar_1.svg"
+	
+	if not ResourceLoader.exists(path_to_load):
+		return null
+		
+	var raw_tex = load(path_to_load)
+	if raw_tex == null:
+		return null
+	var img = raw_tex.get_image()
+	if img == null:
+		return raw_tex
+	var scaled_img = img.duplicate()
+	scaled_img.resize(target_size.x, target_size.y, Image.INTERPOLATE_LANCZOS)
+	return ImageTexture.create_from_image(scaled_img)
+
+func _setup_profile_selector() -> void:
+	if not has_node("HBoxContainer"):
+		return
+	
+	if has_node("HBoxContainer/PlayerName"):
+		$HBoxContainer/PlayerName.visible = false
+	
+	_profile_option = OptionButton.new()
+	_profile_option.name = "ProfileOptionButton"
+	_profile_option.tooltip_text = "Select Active Player Profile"
+	_profile_option.mouse_filter = Control.MOUSE_FILTER_STOP
+	_profile_option.expand_icon = true
+	_profile_option.add_theme_constant_override("icon_max_width", 28)
+	ThemeManager.apply_option_button_style(_profile_option, 18, Vector2(190, 44))
+	
+	$HBoxContainer.add_child(_profile_option)
+	$HBoxContainer.move_child(_profile_option, 0)
+	
+	_populate_profile_selector()
+	_profile_option.item_selected.connect(_on_profile_option_selected)
+
+func _populate_profile_selector(preferred_selection: String = "") -> void:
+	if _profile_option == null or not is_instance_valid(_profile_option):
+		return
+	
+	_profile_option.clear()
+	
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	var registered = mp_mgr.get_registered_players() if mp_mgr != null else []
+	
+	if registered.is_empty():
+		var def_icon = _get_scaled_avatar_texture("")
+		if def_icon != null:
+			_profile_option.add_icon_item(def_icon, "Player 1", 0)
+		else:
+			_profile_option.add_item("Player 1", 0)
+	else:
+		for i in range(registered.size()):
+			var p = registered[i]
+			var p_name = str(p.get("name", "Player " + str(i + 1)))
+			var p_avatar = str(p.get("avatar", ""))
+			var icon_tex = _get_scaled_avatar_texture(p_avatar)
+			if icon_tex != null:
+				_profile_option.add_icon_item(icon_tex, p_name, i)
+			else:
+				_profile_option.add_item(p_name, i)
+	
+	var target_name = preferred_selection
+	if target_name.is_empty():
+		target_name = mp_mgr.get_default_range_profile_name() if mp_mgr != null else "Player 1"
+	
+	var sel_idx = 0
+	for i in range(_profile_option.item_count):
+		if _profile_option.get_item_text(i).to_lower() == target_name.to_lower():
+			sel_idx = i
+			break
+			
+	_profile_option.selected = sel_idx
+	var active_name = _profile_option.get_item_text(sel_idx)
+	if has_node("HBoxContainer/PlayerName"):
+		$HBoxContainer/PlayerName.text = active_name
+	_update_club_selector_bag(active_name)
+
+func _update_club_selector_bag(player_name: String) -> void:
+	var club_sel = find_child("ClubSelector", true, false)
+	if club_sel != null and club_sel.has_method("update_bag_for_player"):
+		club_sel.update_bag_for_player(player_name)
+
+func _refresh_profile_selector() -> void:
+	if _profile_option == null or not is_instance_valid(_profile_option):
+		return
+	var current_sel = get_selected_player_name()
+	_populate_profile_selector(current_sel)
+
+func _on_profile_option_selected(_idx: int) -> void:
+	var p_name = get_selected_player_name()
+	if has_node("HBoxContainer/PlayerName"):
+		$HBoxContainer/PlayerName.text = p_name
+	_update_club_selector_bag(p_name)
+	emit_signal("player_profile_changed", p_name)
+
+func get_selected_player_name() -> String:
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and not mp_mgr.players.is_empty() and not mp_mgr.hole_ids.is_empty():
+		var active_p = mp_mgr.get_active_player()
+		if not active_p.is_empty() and not str(active_p.get("name", "")).is_empty():
+			return str(active_p.get("name", "Player 1"))
+	if _profile_option != null and is_instance_valid(_profile_option) and _profile_option.selected >= 0 and _profile_option.selected < _profile_option.item_count:
+		return _profile_option.get_item_text(_profile_option.selected)
+	if has_node("HBoxContainer/PlayerName") and not $HBoxContainer/PlayerName.text.is_empty():
+		return $HBoxContainer/PlayerName.text
+	return "Player 1"
+
+func set_selected_player_name(player_name: String) -> void:
+	if _profile_option != null and is_instance_valid(_profile_option):
+		for i in range(_profile_option.item_count):
+			if _profile_option.get_item_text(i).to_lower() == player_name.to_lower():
+				_profile_option.selected = i
+				if has_node("HBoxContainer/PlayerName"):
+					$HBoxContainer/PlayerName.text = _profile_option.get_item_text(i)
+				_update_club_selector_bag(_profile_option.get_item_text(i))
+				emit_signal("player_profile_changed", _profile_option.get_item_text(i))
+				return
+	if has_node("HBoxContainer/PlayerName"):
+		$HBoxContainer/PlayerName.text = player_name
+	_update_club_selector_bag(player_name)
+	emit_signal("player_profile_changed", player_name)
+
+
 func _on_session_pop_up_dir_selected(dir: String, player_name: String) -> void:
-	$HBoxContainer/PlayerName.text = player_name
+	set_selected_player_name(player_name)
 	emit_signal("set_session", dir, player_name)
 	pass # Replace with function body.
 
@@ -596,7 +984,7 @@ func _on_session_pop_up_cancelled() -> void:
 
 
 func _on_session_recorder_set_session(user: String, dir: String) -> void:
-	$HBoxContainer/PlayerName.text = user
+	set_selected_player_name(user)
 	$SessionPopUp.set_session_data(user, dir)
 
 
@@ -622,6 +1010,7 @@ func _on_close_settings_requested() -> void:
 	var rs = get_node_or_null("SettingsLayer/Container/RangeSettings")
 	if rs != null:
 		rs.visible = false
+	_refresh_profile_selector()
 
 
 func set_total_distance(text: String) -> void:
@@ -737,10 +1126,14 @@ func update_average_stats(avg_data: Dictionary) -> void:
 	else:
 		speed *= 0.44704
 	
-	_avg_carry.text = "Avg Carry: %.1f %s" % [carry, u_label]
-	_avg_speed.text = "Avg Speed: %.1f %s" % [speed, s_label]
-	_avg_spin.text = "Avg Spin: %.0f rpm" % spin
-	_avg_offline.text = "Avg Offline: %.1f %s" % [offline, u_label]
+	if _avg_carry != null:
+		_avg_carry.text = "Avg Carry: %.1f %s" % [carry, u_label]
+	if _avg_speed != null:
+		_avg_speed.text = "Avg Speed: %.1f %s" % [speed, s_label]
+	if _avg_spin != null:
+		_avg_spin.text = "Avg Spin: %.0f rpm" % spin
+	if _avg_offline != null:
+		_avg_offline.text = "Avg Offline: %.1f %s" % [offline, u_label]
 	
 	if _avg_target_diff != null:
 		var sign_char := "+" if target_diff >= 0.0 else ""
@@ -748,10 +1141,14 @@ func update_average_stats(avg_data: Dictionary) -> void:
 
 
 func reset_average_stats() -> void:
-	_avg_carry.text = "Avg Carry: ---"
-	_avg_speed.text = "Avg Speed: ---"
-	_avg_spin.text = "Avg Spin: ---"
-	_avg_offline.text = "Avg Offline: ---"
+	if _avg_carry != null:
+		_avg_carry.text = "Avg Carry: ---"
+	if _avg_speed != null:
+		_avg_speed.text = "Avg Speed: ---"
+	if _avg_spin != null:
+		_avg_spin.text = "Avg Spin: ---"
+	if _avg_offline != null:
+		_avg_offline.text = "Avg Offline: ---"
 	if _avg_target_diff != null:
 		_avg_target_diff.text = "Avg +/- Target: ---"
 
@@ -1070,8 +1467,8 @@ func _setup_golfer_camera_ui() -> void:
 	_golfer_cam_panel.name = "GolferCameraPanel"
 	_golfer_cam_panel.visible = false
 	_golfer_cam_panel.position = Vector2(30, 352)
-	_golfer_cam_panel.custom_minimum_size = Vector2(332, 588)
-	_golfer_cam_panel.size = Vector2(332, 588)
+	_golfer_cam_panel.custom_minimum_size = Vector2(380, 590)
+	_golfer_cam_panel.size = Vector2(380, 590)
 	_golfer_cam_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 
 	# Glassmorphic card styling
@@ -1100,9 +1497,10 @@ func _setup_golfer_camera_ui() -> void:
 	# Header bar
 	var header = HBoxContainer.new()
 	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_theme_constant_override("separation", 8)
+	header.add_theme_constant_override("separation", 6)
 	
 	var title = Label.new()
+	title.name = "PanelTitleLabel"
 	title.text = "📹 GOLFER CAM"
 	title.add_theme_font_size_override("font_size", 14)
 	title.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0))
@@ -1112,19 +1510,27 @@ func _setup_golfer_camera_ui() -> void:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(spacer)
 
-	# Setup & Flip Camera Buttons
+	# Setup, Rotate & Flip Camera Buttons
 	var header_setup_btn = Button.new()
 	header_setup_btn.name = "HeaderSetupButton"
 	header_setup_btn.text = "⚙️ Setup"
-	header_setup_btn.custom_minimum_size = Vector2(88, 48)
+	header_setup_btn.custom_minimum_size = Vector2(80, 48)
 	apply_material_button_style(header_setup_btn, Color(0.2, 0.45, 0.65, 0.9))
 	header_setup_btn.pressed.connect(_open_camera_setup_dialog)
 	header.add_child(header_setup_btn)
 
+	_camera_rotate_btn = Button.new()
+	_camera_rotate_btn.name = "RotateCameraButton"
+	_camera_rotate_btn.custom_minimum_size = Vector2(74, 48)
+	_update_camera_rotate_button_text()
+	apply_material_button_style(_camera_rotate_btn, Color(0.2, 0.48, 0.4, 0.9))
+	_camera_rotate_btn.pressed.connect(_on_rotate_camera_pressed)
+	header.add_child(_camera_rotate_btn)
+
 	_camera_flip_btn = Button.new()
 	_camera_flip_btn.name = "FlipCameraButton"
 	_camera_flip_btn.text = "🔄 Flip"
-	_camera_flip_btn.custom_minimum_size = Vector2(80, 48)
+	_camera_flip_btn.custom_minimum_size = Vector2(74, 48)
 	apply_material_button_style(_camera_flip_btn, Color(0.2, 0.4, 0.6, 0.9))
 	_camera_flip_btn.pressed.connect(_on_flip_camera_pressed)
 	header.add_child(_camera_flip_btn)
@@ -1138,10 +1544,10 @@ func _setup_golfer_camera_ui() -> void:
 	_camera_minimize_btn = Button.new()
 	_camera_minimize_btn.name = "MinimizeCameraButton"
 	_camera_minimize_btn.text = "🗕"
-	_camera_minimize_btn.tooltip_text = "Minimize Golfer Cam (Keeps recording in background)"
+	_camera_minimize_btn.tooltip_text = "Minimize Camera (Keeps running in background)"
 	_camera_minimize_btn.custom_minimum_size = Vector2(44, 48)
 	apply_material_button_style(_camera_minimize_btn, Color(0.25, 0.35, 0.45, 0.9))
-	_camera_minimize_btn.pressed.connect(minimize_golfer_camera)
+	_camera_minimize_btn.pressed.connect(minimize_camera)
 	header.add_child(_camera_minimize_btn)
 	
 	main_vbox.add_child(header)
@@ -1264,7 +1670,7 @@ func _setup_golfer_camera_ui() -> void:
 	pill_pressed.bg_color = Color(0.08, 0.35, 0.3, 0.95)
 	_camera_restore_pill.add_theme_stylebox_override("pressed", pill_pressed)
 	
-	_camera_restore_pill.pressed.connect(restore_golfer_camera)
+	_camera_restore_pill.pressed.connect(restore_camera)
 	$OverlayLayer.add_child(_camera_restore_pill)
 
 
@@ -1278,7 +1684,7 @@ func set_hud_elements_visible(is_vis: bool) -> void:
 		if not is_vis:
 			_golfer_cam_panel.visible = false
 		else:
-			_golfer_cam_panel.visible = is_golfer_camera_modal_open()
+			_golfer_cam_panel.visible = is_camera_modal_open()
 	if _stats_btn != null and is_instance_valid(_stats_btn):
 		_stats_btn.visible = is_vis
 	if _map_btn != null and is_instance_valid(_map_btn):
@@ -1287,7 +1693,97 @@ func set_hud_elements_visible(is_vis: bool) -> void:
 
 func _update_restore_pill_visibility() -> void:
 	if _camera_restore_pill != null and is_instance_valid(_camera_restore_pill):
-		_camera_restore_pill.visible = _is_golfer_cam_minimized and not _hud_elements_suppressed
+		_camera_restore_pill.visible = (_is_golfer_cam_minimized or _is_putting_cam_minimized) and not _hud_elements_suppressed
+
+
+func _get_autoload(autoload_name: String) -> Node:
+	if is_inside_tree() and has_node("/root/" + autoload_name):
+		return get_node("/root/" + autoload_name)
+	var loop = Engine.get_main_loop() as SceneTree
+	if loop != null and loop.root != null:
+		return loop.root.get_node_or_null(autoload_name)
+	return null
+
+
+func _get_current_club() -> String:
+	if not _current_selected_club.is_empty():
+		return _current_selected_club
+	var gs = _get_autoload("GlobalSettings")
+	if gs != null and "current_selected_club" in gs and not str(gs.current_selected_club).is_empty():
+		return str(gs.current_selected_club)
+	return _current_selected_club
+
+
+func set_current_club(club_name: String) -> void:
+	_on_club_selected(club_name)
+
+
+func _is_putter_selected() -> bool:
+	var club = _get_current_club().strip_edges().to_lower()
+	return club == "pt" or club.contains("putt")
+
+
+func _should_camera_feed_be_active() -> bool:
+	if is_golfer_camera_enabled():
+		return true
+	if _is_putting_cam_enabled:
+		return _is_putter_selected()
+	return false
+
+
+func _sync_camera_feed_consumption() -> void:
+	var should_be_active = _should_camera_feed_be_active()
+	if _use_phone_stream:
+		if should_be_active:
+			if not _is_requesting_frame and not _phone_cam_url.is_empty():
+				_request_next_phone_frame()
+	else:
+		var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
+		if should_be_active:
+			if bridge != null and bridge.has_method("resume_desktop_camera"):
+				bridge.resume_desktop_camera()
+			CameraServer.set_monitoring_feeds(true)
+			var feeds = CameraServer.feeds()
+			if _current_camera_feed_index >= 0 and _current_camera_feed_index < feeds.size():
+				var feed = feeds[_current_camera_feed_index]
+				if feed != null:
+					feed.feed_is_active = true
+		else:
+			if bridge != null and bridge.has_method("pause_desktop_camera"):
+				bridge.pause_desktop_camera()
+			if CameraServer.is_monitoring_feeds():
+				var feeds = CameraServer.feeds()
+				for feed in feeds:
+					if feed != null:
+						feed.feed_is_active = false
+			CameraServer.set_monitoring_feeds(false)
+
+
+func _on_club_selected(club_name: String) -> void:
+	_current_selected_club = club_name
+	if not _is_putting_cam_enabled:
+		return
+	if _is_putter_selected():
+		if _is_putting_cam_minimized:
+			restore_putting_camera()
+		_sync_camera_feed_consumption()
+	else:
+		if not _is_putting_cam_minimized:
+			minimize_putting_camera()
+		_sync_camera_feed_consumption()
+
+
+func is_camera_modal_open() -> bool:
+	var cam_active = (_is_golfer_cam_enabled and not _is_golfer_cam_minimized) or (_is_putting_cam_enabled and not _is_putting_cam_minimized)
+	return cam_active and _golfer_cam_panel != null and _golfer_cam_panel.visible
+
+
+func is_golfer_camera_modal_open() -> bool:
+	return is_camera_modal_open()
+
+
+func is_putting_camera_modal_open() -> bool:
+	return is_camera_modal_open() and _is_putting_cam_enabled
 
 
 func is_golfer_camera_enabled() -> bool:
@@ -1302,8 +1798,30 @@ func is_golfer_camera_visible() -> bool:
 	return _golfer_cam_panel.visible if _golfer_cam_panel != null else false
 
 
-func is_golfer_camera_modal_open() -> bool:
-	return _is_golfer_cam_enabled and not _is_golfer_cam_minimized and _golfer_cam_panel != null and _golfer_cam_panel.visible
+func is_putting_camera_enabled() -> bool:
+	return _is_putting_cam_enabled
+
+
+func is_putting_camera_minimized() -> bool:
+	return _is_putting_cam_minimized
+
+
+func is_putting_camera_visible() -> bool:
+	return _is_putting_cam_enabled and not _is_putting_cam_minimized and _golfer_cam_panel != null and _golfer_cam_panel.visible
+
+
+func minimize_camera() -> void:
+	if _is_putting_cam_enabled:
+		minimize_putting_camera()
+	elif _is_golfer_cam_enabled:
+		minimize_golfer_camera()
+
+
+func restore_camera() -> void:
+	if _is_putting_cam_enabled:
+		restore_putting_camera()
+	elif _is_golfer_cam_enabled:
+		restore_golfer_camera()
 
 
 func minimize_golfer_camera() -> void:
@@ -1312,6 +1830,9 @@ func minimize_golfer_camera() -> void:
 	_is_golfer_cam_minimized = true
 	if _golfer_cam_panel != null:
 		_golfer_cam_panel.visible = false
+	if _camera_restore_pill != null and is_instance_valid(_camera_restore_pill):
+		_camera_restore_pill.text = "📹 Golfer Cam [REC] 🗖"
+		_camera_restore_pill.tooltip_text = "Golfer Cam is recording in background. Click to expand preview."
 	_update_restore_pill_visibility()
 	_update_golfer_cam_button_state()
 	_update_button_shifts()
@@ -1331,6 +1852,34 @@ func restore_golfer_camera() -> void:
 	golfer_cam_modal_state_changed.emit(true)
 
 
+func minimize_putting_camera() -> void:
+	if not _is_putting_cam_enabled:
+		return
+	_is_putting_cam_minimized = true
+	if _golfer_cam_panel != null:
+		_golfer_cam_panel.visible = false
+	if _camera_restore_pill != null and is_instance_valid(_camera_restore_pill):
+		_camera_restore_pill.text = "🎯 Putting Cam [REC] 🗖"
+		_camera_restore_pill.tooltip_text = "Putting Cam is tracking in background. Click to expand preview."
+	_update_restore_pill_visibility()
+	_update_putting_cam_button_state()
+	_update_button_shifts()
+	golfer_cam_modal_state_changed.emit(false)
+
+
+func restore_putting_camera() -> void:
+	if not _is_putting_cam_enabled:
+		set_putting_camera_visible(true)
+		return
+	_is_putting_cam_minimized = false
+	if _golfer_cam_panel != null:
+		_golfer_cam_panel.visible = not _hud_elements_suppressed
+	_update_restore_pill_visibility()
+	_update_putting_cam_button_state()
+	_update_button_shifts()
+	golfer_cam_modal_state_changed.emit(true)
+
+
 func _update_golfer_cam_button_state() -> void:
 	if _golfer_cam_btn != null and is_instance_valid(_golfer_cam_btn):
 		if not _is_golfer_cam_enabled:
@@ -1344,8 +1893,21 @@ func _update_golfer_cam_button_state() -> void:
 			apply_material_button_style(_golfer_cam_btn, Color(0.15, 0.6, 0.5, 0.85))
 
 
+func _update_putting_cam_button_state() -> void:
+	if _putting_cam_btn != null and is_instance_valid(_putting_cam_btn):
+		if not _is_putting_cam_enabled:
+			_putting_cam_btn.text = "🎯 Putting Cam: OFF"
+			apply_material_button_style(_putting_cam_btn, Color(0.35, 0.35, 0.35, 0.85))
+		elif _is_putting_cam_minimized:
+			_putting_cam_btn.text = "🎯 Putting Cam: MIN [REC]"
+			apply_material_button_style(_putting_cam_btn, Color(0.2, 0.55, 0.5, 0.85))
+		else:
+			_putting_cam_btn.text = "🎯 Putting Cam: ON"
+			apply_material_button_style(_putting_cam_btn, Color(0.15, 0.6, 0.3, 0.85))
+
+
 func _update_button_shifts() -> void:
-	var modal_open = is_golfer_camera_modal_open()
+	var modal_open = is_camera_modal_open()
 	if _stats_btn != null and is_instance_valid(_stats_btn):
 		if modal_open:
 			_stats_btn.offset_left = 495
@@ -1354,9 +1916,20 @@ func _update_button_shifts() -> void:
 			_stats_btn.offset_left = 30
 			_stats_btn.offset_right = 94
 
+	var grid = get_node_or_null("GridCanvas")
+	if grid != null:
+		if grid.has_method("set_golfer_camera_active"):
+			grid.call("set_golfer_camera_active", modal_open)
+		else:
+			grid.position.x = 350.0 if modal_open else 0.0
+
 
 func set_golfer_camera_visible(enabled: bool) -> void:
 	if enabled:
+		# MUTUAL EXCLUSIVITY: Disable Putting Camera if it's active
+		if is_putting_camera_enabled():
+			set_putting_camera_visible(false)
+
 		_is_golfer_cam_enabled = true
 		_is_golfer_cam_minimized = false
 		_stats_were_visible_before_cam = is_stats_visible()
@@ -1373,20 +1946,191 @@ func set_golfer_camera_visible(enabled: bool) -> void:
 		_update_camera_feed(enabled)
 	
 	_update_restore_pill_visibility()
-	
 	_update_golfer_cam_button_state()
 	_update_button_shifts()
 	golfer_cam_enabled_changed.emit(_is_golfer_cam_enabled)
-	golfer_cam_modal_state_changed.emit(is_golfer_camera_modal_open())
-
-	var grid = get_node_or_null("GridCanvas")
-	if grid != null:
-		if grid.has_method("set_golfer_camera_active"):
-			grid.call("set_golfer_camera_active", enabled)
-		else:
-			grid.position.x = 350.0 if enabled else 0.0
-	
+	golfer_cam_modal_state_changed.emit(is_camera_modal_open())
 	_update_prev_shot_analysis_visibility()
+
+
+func set_putting_camera_visible(enabled: bool) -> void:
+	if enabled:
+		# MUTUAL EXCLUSIVITY: Disable Golfer Camera if it's active
+		if is_golfer_camera_enabled():
+			set_golfer_camera_visible(false)
+
+		_is_putting_cam_enabled = true
+		_stats_were_visible_before_cam = is_stats_visible()
+		if is_stats_visible():
+			set_stats_visible(false)
+
+		var is_putt = _is_putter_selected()
+		_is_putting_cam_minimized = not is_putt
+		_show_putting_camera_overlay(true)
+		_update_camera_feed(true)
+
+		if not is_putt:
+			minimize_putting_camera()
+		else:
+			if _golfer_cam_panel != null:
+				_golfer_cam_panel.visible = not _hud_elements_suppressed
+			_update_restore_pill_visibility()
+			_update_putting_cam_button_state()
+			_update_button_shifts()
+			golfer_cam_modal_state_changed.emit(is_camera_modal_open())
+		_sync_camera_feed_consumption()
+	else:
+		_is_putting_cam_enabled = false
+		_is_putting_cam_minimized = false
+		_show_putting_camera_overlay(false)
+		if _stats_were_visible_before_cam and not is_stats_visible():
+			set_stats_visible(true)
+
+		# Only stop camera feed if golfer cam is also off
+		if not is_golfer_camera_enabled():
+			_update_camera_feed(false)
+		_sync_camera_feed_consumption()
+
+		_update_restore_pill_visibility()
+		_update_putting_cam_button_state()
+		_update_button_shifts()
+		golfer_cam_modal_state_changed.emit(false)
+
+	putting_cam_enabled_changed.emit(_is_putting_cam_enabled)
+	if is_inside_tree() and has_node("/root/GlobalSettings"):
+		GlobalSettings.range_settings.putting_camera_enabled.set_value(_is_putting_cam_enabled)
+		GlobalSettings.save_settings()
+
+
+func _show_putting_camera_overlay(enabled: bool) -> void:
+	if enabled:
+		if _golfer_cam_panel != null and not _is_putting_cam_minimized:
+			_golfer_cam_panel.visible = not _hud_elements_suppressed
+
+		var skel = _golfer_cam_panel.find_child("LiveGolferSkeletonOverlay", true, false) if _golfer_cam_panel != null else null
+		if skel != null:
+			skel.visible = false
+
+		if _putting_overlay == null:
+			var overlay_script = load("res://UI/PuttingCamera/putting_camera_overlay.gd")
+			if overlay_script != null:
+				_putting_overlay = overlay_script.new()
+				_putting_overlay.name = "PuttingCameraOverlay"
+				_putting_overlay.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				_putting_overlay.size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+		if _golfer_cam_panel != null:
+			var feed_rect = _golfer_cam_panel.find_child("CameraFeedRect", true, false)
+			if feed_rect != null:
+				var parent = feed_rect.get_parent()
+				if _putting_overlay.get_parent() != parent:
+					if _putting_overlay.get_parent() != null:
+						_putting_overlay.get_parent().remove_child(_putting_overlay)
+					parent.add_child(_putting_overlay)
+
+		if _putting_overlay != null:
+			_putting_overlay.visible = true
+
+		if _putting_state_machine == null:
+			var sm_script = load("res://UI/PuttingCamera/putting_camera_state_machine.gd")
+			if sm_script != null:
+				_putting_state_machine = sm_script.new()
+				_putting_state_machine.name = "PuttingCameraStateMachine"
+				add_child(_putting_state_machine)
+				_putting_state_machine.putt_detected.connect(_on_putt_detected)
+
+		if _putting_state_machine != null:
+			_putting_state_machine.overlay = _putting_overlay
+			_putting_state_machine.reset()
+			_apply_putting_camera_fps()
+
+		if _golfer_cam_panel != null:
+			var title_label = _golfer_cam_panel.find_child("PanelTitleLabel", true, false)
+			if title_label is Label:
+				title_label.text = "🎯 PUTTING CAM"
+			if _camera_minimize_btn != null:
+				_camera_minimize_btn.tooltip_text = "Minimize Putting Cam (Keeps tracking in background)"
+	else:
+		if _putting_overlay != null:
+			_putting_overlay.visible = false
+		if _putting_state_machine != null:
+			_putting_state_machine.reset()
+
+		var skel = _golfer_cam_panel.find_child("LiveGolferSkeletonOverlay", true, false) if _golfer_cam_panel != null else null
+		if skel != null:
+			skel.visible = true
+
+		if _golfer_cam_panel != null:
+			var title_label = _golfer_cam_panel.find_child("PanelTitleLabel", true, false)
+			if title_label is Label:
+				title_label.text = "📹 GOLFER CAM"
+			if _camera_minimize_btn != null:
+				_camera_minimize_btn.tooltip_text = "Minimize Golfer Cam (Keeps recording in background)"
+			if not is_golfer_camera_enabled():
+				_golfer_cam_panel.visible = false
+
+
+func _apply_putting_camera_fps() -> void:
+	if _putting_state_machine == null:
+		return
+
+	var has_gs = is_inside_tree() and has_node("/root/GlobalSettings")
+	var fps_mode: String = GlobalSettings.range_settings.putting_camera_fps_mode.value if has_gs else "Auto"
+	var fps: float = 30.0
+
+	match fps_mode:
+		"Auto":
+			fps = _detect_camera_fps()
+		"30":
+			fps = 30.0
+		"60":
+			fps = 60.0
+		"120":
+			fps = 120.0
+		"Custom":
+			fps = float(GlobalSettings.range_settings.putting_camera_fps.value) if has_gs else 30.0
+		_:
+			fps = 30.0
+
+	_putting_state_machine.set_fps(fps)
+	print("[PuttingCam] Active FPS set to: %.1f (%s mode)" % [fps, fps_mode])
+
+
+func _detect_camera_fps() -> float:
+	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
+	if pose_bridge != null and "FRAME_INTERVAL" in pose_bridge:
+		var interval: float = float(pose_bridge.FRAME_INTERVAL)
+		if interval > 0.001:
+			return 1.0 / interval
+
+	var feeds = CameraServer.feeds()
+	if feeds.size() > 0:
+		return 30.0
+
+	return 30.0
+
+
+func _on_putt_detected(speed_mph: float, hla_deg: float) -> void:
+	var putt_data: Dictionary = {
+		"Speed": speed_mph,
+		"BallSpeed": speed_mph,
+		"VLA": 0.0,
+		"HLA": hla_deg,
+		"TotalSpin": 0.0,
+		"SpinAxis": 0.0,
+		"BackSpin": 0.0,
+		"SideSpin": 0.0,
+		"Club": "Pt",
+		"ShotType": "putt",
+		"Source": "PuttingCamera",
+	}
+	print("[PuttingCam] Dispatching putt: %s" % str(putt_data))
+	emit_signal("hit_shot", putt_data)
+
+
+func on_next_shot_started() -> void:
+	if _putting_state_machine != null and _putting_state_machine.current_state == PuttingCameraStateMachine.State.EXECUTION:
+		_putting_state_machine._transition_to(PuttingCameraStateMachine.State.IDLE)
 
 
 func is_shot_analysis_enabled() -> bool:
@@ -1408,7 +2152,7 @@ func set_shot_analysis_enabled(enabled: bool) -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_RESUMED or what == NOTIFICATION_WM_WINDOW_FOCUS_IN:
-		if is_golfer_camera_enabled() and not _use_phone_stream:
+		if (is_golfer_camera_enabled() or _is_putting_cam_enabled) and not _use_phone_stream:
 			var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
 			var is_desk_active = bridge != null and bridge.has_method("is_desktop_camera_active") and bridge.is_desktop_camera_active()
 			if not is_desk_active:
@@ -1416,7 +2160,7 @@ func _notification(what: int) -> void:
 
 
 func _on_desktop_cameras_updated(cams: Array) -> void:
-	if is_golfer_camera_enabled() and not _use_phone_stream:
+	if (is_golfer_camera_enabled() or _is_putting_cam_enabled) and not _use_phone_stream:
 		if _camera_feed_rect != null and _camera_feed_rect.texture == null and cams.size() > 0:
 			var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
 			if bridge != null and bridge.has_method("select_desktop_camera"):
@@ -1428,25 +2172,73 @@ func _on_desktop_cameras_updated(cams: Array) -> void:
 				_update_status_overlay("", false)
 
 
+func _update_camera_rotate_button_text() -> void:
+	if _camera_rotate_btn != null and is_instance_valid(_camera_rotate_btn):
+		_camera_rotate_btn.text = "🔁 %d°" % _camera_rotation_deg
+		_camera_rotate_btn.tooltip_text = "Rotate Camera Feed 90° (Current: %d°). Align feed with putting roll direction." % _camera_rotation_deg
+
+
+func _on_rotate_camera_pressed() -> void:
+	_camera_rotation_deg = (_camera_rotation_deg + 90) % 360
+	_update_camera_rotate_button_text()
+	if _putting_state_machine != null:
+		_putting_state_machine.reset()
+	print("[RangeUI] Camera rotation set to: %d°" % _camera_rotation_deg)
+
+
+func _apply_image_rotation(img: Image, rotation_deg: int) -> Image:
+	if img == null:
+		return null
+	match rotation_deg:
+		90:
+			img.rotate_90(CLOCKWISE)
+		180:
+			img.rotate_180()
+		270:
+			img.rotate_90(COUNTERCLOCKWISE)
+		_:
+			pass
+	return img
+
+
 func _on_desktop_frame_received(_img: Image, tex: Texture2D, _landmarks: Dictionary) -> void:
+	if not _should_camera_feed_be_active():
+		return
+
+	var active_img: Image = _img
+	var active_tex: Texture2D = tex
+	if _camera_rotation_deg != 0 and _img != null:
+		active_img = _img.duplicate()
+		_apply_image_rotation(active_img, _camera_rotation_deg)
+		active_tex = ImageTexture.create_from_image(active_img)
+
 	if is_golfer_camera_enabled() and not _use_phone_stream:
 		if _camera_feed_rect != null:
 			_camera_feed_rect.material = null
-			_camera_feed_rect.texture = tex
+			_camera_feed_rect.texture = active_tex
 		_update_status_overlay("", false)
+
+	if _is_putting_cam_enabled and not _use_phone_stream:
+		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
+			_camera_feed_rect.texture = active_tex
+		_update_status_overlay("", false)
+		if _putting_state_machine != null and active_img != null:
+			_putting_state_machine.process_frame(active_img)
 
 
 func _update_camera_feed(active: bool) -> void:
-	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
+	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
 
 	if not active:
 		if pose_bridge != null and pose_bridge.has_method("stop_desktop_camera"):
 			pose_bridge.stop_desktop_camera()
+		if CameraServer.is_monitoring_feeds():
+			var feeds = CameraServer.feeds()
+			for feed in feeds:
+				if feed != null:
+					feed.feed_is_active = false
 		CameraServer.set_monitoring_feeds(false)
-		var feeds = CameraServer.feeds()
-		for feed in feeds:
-			if feed != null:
-				feed.feed_is_active = false
 		if _camera_feed_rect != null:
 			_camera_feed_rect.material = null
 			_camera_feed_rect.texture = null
@@ -1475,7 +2267,7 @@ func _update_camera_feed(active: bool) -> void:
 				_camera_feed_rect.texture = null
 			# Re-check after user grants permission
 			get_tree().create_timer(1.5).timeout.connect(func():
-				if is_golfer_camera_enabled():
+				if is_golfer_camera_enabled() or _is_putting_cam_enabled:
 					_update_camera_feed(true)
 			)
 			return
@@ -1508,23 +2300,24 @@ func _update_camera_feed(active: bool) -> void:
 		if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
 			pose_bridge.fetch_desktop_cameras()
 		# Schedule asynchronous re-scan
-		get_tree().create_timer(0.6).timeout.connect(func():
-			if is_golfer_camera_enabled() and not _use_phone_stream:
-				var rescan_feeds = CameraServer.feeds()
-				if rescan_feeds.size() > 0:
-					var sel_idx = _find_default_camera_index(rescan_feeds)
-					_current_camera_feed_index = sel_idx
-					_activate_camera_feed_index(sel_idx)
-				elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
-					var sel_idx = clamp(_current_camera_feed_index, 0, pose_bridge.desktop_cameras.size() - 1)
-					_current_camera_feed_index = sel_idx
-					if _camera_feed_rect != null:
-						_camera_feed_rect.material = null
-					pose_bridge.select_desktop_camera(sel_idx)
-					_update_status_overlay("", false)
-				elif _phone_cam_url.is_empty():
-					_update_status_overlay("NO LOCAL WEBCAM DETECTED\n[ Click ⚙️ Connect Camera for Phone WiFi Stream ]", true)
-		)
+		if get_tree() != null:
+			get_tree().create_timer(0.6).timeout.connect(func():
+				if (is_golfer_camera_enabled() or _is_putting_cam_enabled) and not _use_phone_stream:
+					var rescan_feeds = CameraServer.feeds()
+					if rescan_feeds.size() > 0:
+						var sel_idx = _find_default_camera_index(rescan_feeds)
+						_current_camera_feed_index = sel_idx
+						_activate_camera_feed_index(sel_idx)
+					elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
+						var sel_idx = clamp(_current_camera_feed_index, 0, pose_bridge.desktop_cameras.size() - 1)
+						_current_camera_feed_index = sel_idx
+						if _camera_feed_rect != null:
+							_camera_feed_rect.material = null
+						pose_bridge.select_desktop_camera(sel_idx)
+						_update_status_overlay("", false)
+					elif _phone_cam_url.is_empty():
+						_update_status_overlay("NO LOCAL WEBCAM DETECTED\n[ Click ⚙️ Connect Camera for Phone WiFi Stream ]", true)
+			)
 
 
 func _update_status_overlay(msg: String, is_visible: bool) -> void:
@@ -1534,7 +2327,7 @@ func _update_status_overlay(msg: String, is_visible: bool) -> void:
 	if status_vbox != null:
 		status_vbox.visible = is_visible
 	var label = _golfer_cam_panel.find_child("FeedStatusLabel", true, false)
-	if label != null and not msg.is_empty():
+	if label is Label and not msg.is_empty():
 		label.text = msg
 
 
@@ -1666,7 +2459,7 @@ func _open_camera_setup_dialog() -> void:
 	var popup = PanelContainer.new()
 	popup.name = "CameraSetupDialog"
 	popup.z_index = 100
-	popup.custom_minimum_size = Vector2(500, 440)
+	popup.custom_minimum_size = Vector2(500, 600)
 	popup.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	popup.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	popup.anchor_left = 0.5
@@ -1674,9 +2467,9 @@ func _open_camera_setup_dialog() -> void:
 	popup.anchor_right = 0.5
 	popup.anchor_bottom = 0.5
 	popup.offset_left = -250
-	popup.offset_top = -220
+	popup.offset_top = -300
 	popup.offset_right = 250
-	popup.offset_bottom = 220
+	popup.offset_bottom = 300
 
 	var style = StyleBoxFlat.new()
 	style.bg_color = Color(0.1, 0.12, 0.16, 0.96)
@@ -1719,6 +2512,8 @@ func _open_camera_setup_dialog() -> void:
 	vbox.add_child(cam_option)
 
 	var populate_feeds = func():
+		if not is_instance_valid(popup) or not is_instance_valid(webcams_label) or not is_instance_valid(cam_option):
+			return
 		var feeds = CameraServer.feeds()
 		var desk_cams: Array = pose_bridge.desktop_cameras if (pose_bridge != null and "desktop_cameras" in pose_bridge) else []
 		var total_count = max(feeds.size(), desk_cams.size())
@@ -1758,9 +2553,15 @@ func _open_camera_setup_dialog() -> void:
 	# Populate immediately and schedule polling scans
 	populate_feeds.call()
 
-	if pose_bridge != null and pose_bridge.has_signal("desktop_cameras_updated"):
-		pose_bridge.desktop_cameras_updated.connect(func(_cams):
+	var on_cameras_updated = func(_cams):
+		if is_instance_valid(popup) and is_instance_valid(webcams_label):
 			populate_feeds.call()
+
+	if pose_bridge != null and pose_bridge.has_signal("desktop_cameras_updated"):
+		pose_bridge.desktop_cameras_updated.connect(on_cameras_updated)
+		popup.tree_exited.connect(func():
+			if is_instance_valid(pose_bridge) and pose_bridge.is_connected("desktop_cameras_updated", on_cameras_updated):
+				pose_bridge.desktop_cameras_updated.disconnect(on_cameras_updated)
 		)
 
 	var scan_timer = Timer.new()
@@ -1768,7 +2569,10 @@ func _open_camera_setup_dialog() -> void:
 	scan_timer.wait_time = 0.3
 	scan_timer.autostart = true
 	popup.add_child(scan_timer)
-	scan_timer.timeout.connect(populate_feeds)
+	scan_timer.timeout.connect(func():
+		if is_instance_valid(popup) and is_instance_valid(webcams_label):
+			populate_feeds.call()
+	)
 
 	var cam_btn_hbox = HBoxContainer.new()
 	cam_btn_hbox.add_theme_constant_override("separation", 8)
@@ -1779,8 +2583,9 @@ func _open_camera_setup_dialog() -> void:
 	connect_local_btn.custom_minimum_size = Vector2(0, 36)
 	apply_material_button_style(connect_local_btn, Color(0.24, 0.46, 0.72, 0.9))
 	connect_local_btn.pressed.connect(func():
+		var sel_idx = cam_option.get_selected_id() if is_instance_valid(cam_option) else 0
+		popup.queue_free()
 		_use_phone_stream = false
-		var sel_idx = cam_option.get_selected_id()
 		_current_camera_feed_index = sel_idx
 		var feeds = CameraServer.feeds()
 		if feeds.size() > 0:
@@ -1791,7 +2596,6 @@ func _open_camera_setup_dialog() -> void:
 					_camera_feed_rect.material = null
 				pose_bridge.select_desktop_camera(sel_idx)
 				_update_status_overlay("", false)
-		popup.queue_free()
 	)
 	cam_btn_hbox.add_child(connect_local_btn)
 
@@ -1800,6 +2604,8 @@ func _open_camera_setup_dialog() -> void:
 	rescan_btn.custom_minimum_size = Vector2(80, 36)
 	apply_material_button_style(rescan_btn, Color(0.3, 0.35, 0.45, 0.9))
 	rescan_btn.pressed.connect(func():
+		if not is_instance_valid(popup) or not is_instance_valid(webcams_label):
+			return
 		CameraServer.set_monitoring_feeds(true)
 		if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
 			pose_bridge.fetch_desktop_cameras()
@@ -1832,6 +2638,8 @@ func _open_camera_setup_dialog() -> void:
 	connect_phone_btn.custom_minimum_size = Vector2(0, 36)
 	apply_material_button_style(connect_phone_btn, Color(0.2, 0.6, 0.4, 0.9))
 	connect_phone_btn.pressed.connect(func():
+		var url_to_connect = ip_input.text if is_instance_valid(ip_input) else _phone_cam_url
+		popup.queue_free()
 		var local_feeds = CameraServer.feeds()
 		for feed in local_feeds:
 			if feed != null:
@@ -1839,8 +2647,7 @@ func _open_camera_setup_dialog() -> void:
 		if pose_bridge != null and pose_bridge.has_method("stop_desktop_camera"):
 			pose_bridge.stop_desktop_camera()
 		_use_phone_stream = true
-		_start_phone_camera_stream(ip_input.text)
-		popup.queue_free()
+		_start_phone_camera_stream(url_to_connect)
 	)
 	vbox.add_child(connect_phone_btn)
 
@@ -1852,6 +2659,103 @@ func _open_camera_setup_dialog() -> void:
 		ai_status_label.add_theme_color_override("font_color", Color(0.4, 0.9, 0.5))
 		ai_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		vbox.add_child(ai_status_label)
+
+	# Section 3: Putting Camera Framerate
+	var fps_sep = HSeparator.new()
+	fps_sep.add_theme_constant_override("separation", 8)
+	vbox.add_child(fps_sep)
+
+	var fps_label = Label.new()
+	fps_label.text = "3. Putting Camera Framerate:"
+	fps_label.add_theme_font_size_override("font_size", 13)
+	vbox.add_child(fps_label)
+
+	var fps_hbox = HBoxContainer.new()
+	fps_hbox.add_theme_constant_override("separation", 8)
+
+	var fps_option = OptionButton.new()
+	fps_option.name = "FPSOptionButton"
+	fps_option.custom_minimum_size = Vector2(140, 36)
+	fps_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fps_option.add_item("Auto-Detect", 0)
+	fps_option.add_item("30 FPS", 1)
+	fps_option.add_item("60 FPS", 2)
+	fps_option.add_item("120 FPS", 3)
+	fps_option.add_item("Custom", 4)
+
+	var current_mode: String = GlobalSettings.range_settings.putting_camera_fps_mode.value if has_node("/root/GlobalSettings") else "Auto"
+	match current_mode:
+		"Auto": fps_option.select(0)
+		"30": fps_option.select(1)
+		"60": fps_option.select(2)
+		"120": fps_option.select(3)
+		"Custom": fps_option.select(4)
+
+	var custom_fps_spin = SpinBox.new()
+	custom_fps_spin.name = "CustomFPSSpinBox"
+	custom_fps_spin.min_value = 15
+	custom_fps_spin.max_value = 240
+	custom_fps_spin.step = 1
+	custom_fps_spin.value = float(GlobalSettings.range_settings.putting_camera_fps.value) if has_node("/root/GlobalSettings") else 30
+	custom_fps_spin.custom_minimum_size = Vector2(80, 36)
+	custom_fps_spin.visible = (current_mode == "Custom")
+	custom_fps_spin.suffix = " Hz"
+
+	fps_option.item_selected.connect(func(idx: int):
+		var modes = ["Auto", "30", "60", "120", "Custom"]
+		var mode = modes[idx] if idx < modes.size() else "Auto"
+		if has_node("/root/GlobalSettings"):
+			GlobalSettings.range_settings.putting_camera_fps_mode.set_value(mode)
+			GlobalSettings.save_settings()
+		custom_fps_spin.visible = (mode == "Custom")
+		_apply_putting_camera_fps()
+	)
+
+	custom_fps_spin.value_changed.connect(func(val: float):
+		if has_node("/root/GlobalSettings"):
+			GlobalSettings.range_settings.putting_camera_fps.set_value(int(val))
+			GlobalSettings.save_settings()
+		_apply_putting_camera_fps()
+	)
+
+	fps_hbox.add_child(fps_option)
+	fps_hbox.add_child(custom_fps_spin)
+	vbox.add_child(fps_hbox)
+
+	var fps_note = Label.new()
+	fps_note.text = "⚠️ Wi-Fi cams may drop frames. Lock FPS manually for consistent putt speed readings."
+	fps_note.add_theme_font_size_override("font_size", 11)
+	fps_note.add_theme_color_override("font_color", Color(0.8, 0.65, 0.3))
+	fps_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(fps_note)
+
+	# Section 4: Camera Orientation Rotation
+	var rot_sep = HSeparator.new()
+	rot_sep.add_theme_constant_override("separation", 8)
+	vbox.add_child(rot_sep)
+
+	var rot_label = Label.new()
+	rot_label.text = "4. Camera Orientation Rotation:"
+	rot_label.add_theme_font_size_override("font_size", 13)
+	vbox.add_child(rot_label)
+
+	var rot_hbox = HBoxContainer.new()
+	rot_hbox.add_theme_constant_override("separation", 8)
+	for deg in [0, 90, 180, 270]:
+		var r_btn = Button.new()
+		r_btn.text = "%d°" % deg
+		r_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		r_btn.custom_minimum_size = Vector2(0, 34)
+		apply_material_button_style(r_btn, Color(0.22, 0.45, 0.55, 0.9) if _camera_rotation_deg == deg else Color(0.2, 0.25, 0.32, 0.8))
+		r_btn.pressed.connect(func(d=deg):
+			_camera_rotation_deg = d
+			_update_camera_rotate_button_text()
+			if _putting_state_machine != null:
+				_putting_state_machine.reset()
+			popup.queue_free()
+		)
+		rot_hbox.add_child(r_btn)
+	vbox.add_child(rot_hbox)
 
 	var close_btn = Button.new()
 	close_btn.text = "Close Setup"
@@ -1962,14 +2866,14 @@ func _normalize_phone_url(raw_url: String) -> String:
 
 
 func _request_next_phone_frame() -> void:
-	if not is_golfer_camera_enabled() or _phone_cam_url.is_empty() or _http_req == null or _is_requesting_frame:
+	if not _should_camera_feed_be_active() or _phone_cam_url.is_empty() or _http_req == null or _is_requesting_frame:
 		return
 
 	_is_requesting_frame = true
 	var headers = PackedStringArray([
 		"User-Agent: HeckleGolfSim/1.0",
 		"Accept: image/jpeg, image/*, */*",
-		"Connection: close"
+		"Connection: keep-alive"
 	])
 	var err = _http_req.request(_phone_cam_url, headers)
 	if err != OK:
@@ -1989,17 +2893,21 @@ func _on_phone_cam_frame_received(result: int, response_code: int, _headers: Pac
 		if err == OK:
 			_phone_stream_failed_count = 0
 			_stream_established = true
+			if _camera_rotation_deg != 0:
+				_apply_image_rotation(img, _camera_rotation_deg)
 			var tex = ImageTexture.create_from_image(img)
 			if _camera_feed_rect != null:
 				_camera_feed_rect.texture = tex
 			_update_status_overlay("", false)
+			if _is_putting_cam_enabled and _putting_state_machine != null:
+				_putting_state_machine.process_frame(img)
 		else:
 			_try_fallback_endpoint_or_error(result, response_code, "Invalid image encoding received")
 	else:
 		_try_fallback_endpoint_or_error(result, response_code, "")
 
-	if is_golfer_camera_enabled() and not _phone_cam_url.is_empty():
-		var delay = 0.033 if _phone_stream_failed_count == 0 else clamp(0.4 * _phone_stream_failed_count, 0.4, 2.0)
+	if _should_camera_feed_be_active() and not _phone_cam_url.is_empty():
+		var delay = 0.005 if _phone_stream_failed_count == 0 else clamp(0.4 * _phone_stream_failed_count, 0.4, 2.0)
 		get_tree().create_timer(delay).timeout.connect(_request_next_phone_frame)
 
 
@@ -2054,23 +2962,25 @@ func _update_tooltips() -> void:
 		return
 	var km = get_node("/root/KeybindingManager")
 	if _stats_btn != null and is_instance_valid(_stats_btn):
-		_stats_btn.tooltip_text = "Toggle Stats (Show/Hide) [%s]" % km.get_action_key_name("toggle_stats")
+		_stats_btn.tooltip_text = "Toggle Stats (Show/Hide) [%s]" % km.get_action_summary_str("toggle_stats")
 	if _map_btn != null and is_instance_valid(_map_btn):
-		_map_btn.tooltip_text = "Toggle Map View [%s]" % km.get_action_key_name("aerial_aim")
+		_map_btn.tooltip_text = "Toggle Map View [%s]" % km.get_action_summary_str("aerial_aim")
 	if _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
-		_hide_helpers_btn.tooltip_text = "Toggle Helpers (Show/Hide) [%s]" % km.get_action_key_name("toggle_helpers")
+		_hide_helpers_btn.tooltip_text = "Toggle Helpers (Show/Hide) [%s]" % km.get_action_summary_str("toggle_helpers")
 	if _skip_btn != null and is_instance_valid(_skip_btn):
-		_skip_btn.tooltip_text = "Skip Flight [%s]" % km.get_action_key_name("skip_flight")
+		_skip_btn.tooltip_text = "Skip Flight [%s]" % km.get_action_summary_str("skip_flight")
 	if _announcer_btn != null and is_instance_valid(_announcer_btn):
-		_announcer_btn.tooltip_text = "Toggle Announcer Commentary [%s]" % km.get_action_key_name("announcer_toggle")
+		_announcer_btn.tooltip_text = "Toggle Announcer Commentary [%s]" % km.get_action_summary_str("announcer_toggle")
 	if _tension_btn != null and is_instance_valid(_tension_btn):
-		_tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision [%s]" % km.get_action_key_name("suspense_toggle")
+		_tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision [%s]" % km.get_action_summary_str("suspense_toggle")
 	if _golfer_cam_btn != null and is_instance_valid(_golfer_cam_btn):
-		_golfer_cam_btn.tooltip_text = "Toggle Golfer Camera [%s]" % km.get_action_key_name("golfer_cam_toggle")
+		_golfer_cam_btn.tooltip_text = "Toggle Golfer Camera [%s]" % km.get_action_summary_str("golfer_cam_toggle")
+	if _putting_cam_btn != null and is_instance_valid(_putting_cam_btn):
+		_putting_cam_btn.tooltip_text = "Toggle Putting Camera [%s]" % km.get_action_summary_str("putting_cam_toggle")
 	if _shot_analysis_btn != null and is_instance_valid(_shot_analysis_btn):
-		_shot_analysis_btn.tooltip_text = "Toggle Shot Suggestions & Flaw Analysis [%s]" % km.get_action_key_name("shot_analysis_toggle")
+		_shot_analysis_btn.tooltip_text = "Toggle Shot Suggestions & Flaw Analysis [%s]" % km.get_action_summary_str("shot_analysis_toggle")
 	if _dist_btn != null and is_instance_valid(_dist_btn):
-		_dist_btn.tooltip_text = "Hit Distance Menu [%s]" % km.get_action_key_name("distance_menu_toggle")
+		_dist_btn.tooltip_text = "Hit Distance Menu [%s]" % km.get_action_summary_str("distance_menu_toggle")
 
 
 func update_announcer_button_state() -> void:

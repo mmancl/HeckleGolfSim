@@ -51,8 +51,22 @@ if (-not $DotNetRoot -or -not (Test-Path $DotNetRoot)) {
 }
 if ($DotNetRoot -and (Test-Path $DotNetRoot)) {
     $env:DOTNET_ROOT = $DotNetRoot
+    $env:DOTNET_ROOT_X64 = $DotNetRoot
+    $env:DOTNET_MULTILEVEL_LOOKUP = "0"
     $env:PATH = "$DotNetRoot;$env:PATH"
     Write-Host ".NET Root:      $DotNetRoot" -ForegroundColor Gray
+}
+
+# Ensure Godot ignores build, dist, and native build folders during project scanning and export
+@("build", "dist", "android\build") | ForEach-Object {
+    $targetDir = Join-Path $RepoRoot $_
+    if (-not (Test-Path $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    }
+    $gdignorePath = Join-Path $targetDir ".gdignore"
+    if (-not (Test-Path $gdignorePath)) {
+        New-Item -ItemType File -Path $gdignorePath -Force | Out-Null
+    }
 }
 
 # 3. Locate Godot Console Executable
@@ -104,9 +118,10 @@ if ($dotnetProc.ExitCode -ne 0) {
 }
 
 Write-Host "[2/2] Exporting macOS Universal App (.app) via Godot..." -ForegroundColor Green
+Write-Host "      Compiling dual ARM64 + x86_64 binaries, packing assets, and building ZIP (takes ~45s)..." -ForegroundColor Gray
 & $GodotExe --headless --path $RepoRoot --export-release "macOS" $ZipOutput
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $ZipOutput)) {
-    throw "Godot export failed with exit code $LASTEXITCODE"
+    throw "Godot export failed with exit code $LASTEXITCODE. Expected output at $ZipOutput"
 }
 
 # Verify / inject NSBluetoothAlwaysUsageDescription into Info.plist inside the zip

@@ -21,12 +21,11 @@ public static class SquareShotDataMapper
         }
 
         var speedMph = metrics.BallSpeedMps * MetersPerSecondToMph;
-        var clubSpeedMph = metrics.ClubSpeedMps > 0 ? metrics.ClubSpeedMps * MetersPerSecondToMph : (speedMph > 0 ? speedMph / 1.45f : 0.0f);
-        var smash = metrics.SmashFactor > 0 ? metrics.SmashFactor : (clubSpeedMph > 0 ? speedMph / clubSpeedMph : 1.45f);
 
-        return new Dictionary<string, object>
+        var data = new Dictionary<string, object>
         {
             { "Speed", speedMph },
+            { "BallSpeed", speedMph },
             { "VLA", metrics.VerticalAngle },
             { "HLA", metrics.HorizontalAngle },
             { "TotalSpin", totalSpin },
@@ -34,13 +33,35 @@ public static class SquareShotDataMapper
             { "BackSpin", backSpin },
             { "SideSpin", sideSpin },
             { "ShotType", metrics.ShotType },
-            { "ClubPath", metrics.ClubPath },
-            { "FaceAngle", metrics.FaceAngle },
-            { "AttackAngle", metrics.AttackAngle },
-            { "DynamicLoft", metrics.DynamicLoft },
-            { "ClubSpeed", clubSpeedMph },
-            { "SmashFactor", smash },
-            { "FaceToPath", metrics.FaceAngle - metrics.ClubPath }
         };
+
+        if (metrics.ClubSpeedMps > 0)
+        {
+            var clubSpeedMph = metrics.ClubSpeedMps * MetersPerSecondToMph;
+            data["ClubSpeed"] = clubSpeedMph;
+            if (metrics.SmashFactor > 0)
+                data["SmashFactor"] = metrics.SmashFactor;
+            else if (clubSpeedMph > 0 && speedMph > 0)
+                data["SmashFactor"] = speedMph / clubSpeedMph;
+        }
+        else if (metrics.SmashFactor > 0)
+        {
+            data["SmashFactor"] = metrics.SmashFactor;
+        }
+
+        // Only include club delivery metrics when the hardware actually measured them.
+        // Square Golf's camera system provides these when club stickers are detected.
+        if (MathF.Abs(metrics.FaceAngle) > 0.001f)
+            data["FaceAngle"] = metrics.FaceAngle;
+        if (MathF.Abs(metrics.ClubPath) > 0.001f)
+            data["ClubPath"] = metrics.ClubPath;
+        if (MathF.Abs(metrics.AttackAngle) > 0.001f)
+            data["AttackAngle"] = metrics.AttackAngle;
+        if (metrics.DynamicLoft > 0.001f)
+            data["DynamicLoft"] = metrics.DynamicLoft;
+        if (data.ContainsKey("FaceAngle") && data.ContainsKey("ClubPath"))
+            data["FaceToPath"] = metrics.FaceAngle - metrics.ClubPath;
+
+        return data;
     }
 }

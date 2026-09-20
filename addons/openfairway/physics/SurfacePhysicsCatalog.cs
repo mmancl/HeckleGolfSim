@@ -62,7 +62,7 @@ public static class SurfacePhysicsCatalog
     private static readonly SurfacePhysicsSettings Green = new(
         PhysicsEnums.SurfaceType.Green,
         kineticFriction: 0.58f,
-        rollingFriction: 0.028f,
+        rollingFriction: 0.056f,
         grassViscosity: 0.0009f,
         criticalAngle: 0.36f,
         spinbackResponseScale: 1.12f,

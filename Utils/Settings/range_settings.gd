@@ -31,8 +31,8 @@ var golf_clap_enabled := Setting.new(true)
 var ambient_sound_enabled := Setting.new(true)
 var menu_music_enabled := Setting.new(true)
 var minigame_music_enabled := Setting.new(true)
-var green_speed := Setting.new(10.0, 1.0, 50.0)
-var putting_green_speed := Setting.new(10.0, 1.0, 50.0)
+var green_speed := Setting.new(10.0, 6.0, 16.0)
+var putting_green_speed := Setting.new(10.0, 6.0, 16.0)
 var phone_cam_url := Setting.new("")
 var use_phone_stream := Setting.new(false)
 var tension_effects_enabled := Setting.new(true)
@@ -42,7 +42,20 @@ var foam_ball_boost_enabled := Setting.new(false)
 var foam_ball_boost_percent := Setting.new(20.0, 0.0, 100.0)
 var tcp_server_ip := Setting.new("0.0.0.0")
 var tcp_server_port := Setting.new(49152, 1, 65535)
+var launch_monitor_tab := Setting.new(0, 0, 1)
+var gspro_selected_device := Setting.new("mlm2pro")
 var graphics_quality := Setting.new(MobilePerformance.get_default_graphics_quality())
+var wind_enabled := Setting.new(false)
+var wind_speed := Setting.new(10.0, 0.0, 35.0)
+var replay_window_detached := Setting.new(false)
+var replay_window_position_x := Setting.new(-1)
+var replay_window_position_y := Setting.new(-1)
+var replay_window_width := Setting.new(1100)
+var replay_window_height := Setting.new(750)
+var putting_camera_enabled := Setting.new(false)
+var putting_camera_fps := Setting.new(30, 15, 120)
+var putting_camera_fps_mode := Setting.new("Auto")
+var putting_camera_rotation := Setting.new(0)
 
 func _init():
 	init({
@@ -87,7 +100,20 @@ func _init():
 		"foam_ball_boost_percent": foam_ball_boost_percent,
 		"tcp_server_ip": tcp_server_ip,
 		"tcp_server_port": tcp_server_port,
+		"launch_monitor_tab": launch_monitor_tab,
+		"gspro_selected_device": gspro_selected_device,
 		"graphics_quality": graphics_quality,
+		"wind_enabled": wind_enabled,
+		"wind_speed": wind_speed,
+		"replay_window_detached": replay_window_detached,
+		"replay_window_position_x": replay_window_position_x,
+		"replay_window_position_y": replay_window_position_y,
+		"replay_window_width": replay_window_width,
+		"replay_window_height": replay_window_height,
+		"putting_camera_enabled": putting_camera_enabled,
+		"putting_camera_fps": putting_camera_fps,
+		"putting_camera_fps_mode": putting_camera_fps_mode,
+		"putting_camera_rotation": putting_camera_rotation,
 	})
 
 

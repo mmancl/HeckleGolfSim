@@ -38,6 +38,9 @@ var quality_low_btn: Button
 var quality_high_btn: Button
 var quality_desc_lbl: Label
 
+var wind_off_btn: Button
+var wind_on_btn: Button
+
 func _ready() -> void:
 	# Build the setup screen dynamically
 	name = "CoursePlaySetup"
@@ -150,20 +153,28 @@ func _ready() -> void:
 	
 	refresh_player_select.call()
 	
-	player_select_opt.item_selected.connect(func(index):
-		if index == 0:
-			name_input.visible = true
-		else:
-			name_input.visible = false
-	)
-	
 	var tee_opt = OptionButton.new()
 	tee_opt.add_item("Blue", 0)
 	tee_opt.add_item("Red", 1)
 	tee_opt.add_item("White", 2)
 	tee_opt.add_item("Black", 3)
+	tee_opt.add_item("Gold", 4)
 	ThemeManager.apply_option_button_style(tee_opt, 22, Vector2(160, 56))
 	add_row.add_child(tee_opt)
+	
+	player_select_opt.item_selected.connect(func(index):
+		if index == 0:
+			name_input.visible = true
+		else:
+			name_input.visible = false
+			var p_name = player_select_opt.get_item_text(index)
+			var pref_tee = MultiplayerManager.get_player_preferred_tee(p_name)
+			if not pref_tee.is_empty():
+				for t_i in range(tee_opt.item_count):
+					if tee_opt.get_item_text(t_i).to_lower() == pref_tee.to_lower():
+						tee_opt.selected = t_i
+						break
+	)
 	
 	var add_btn = Button.new()
 	add_btn.text = "Add Player"
@@ -195,18 +206,28 @@ func _ready() -> void:
 	var player_scroll = ScrollContainer.new()
 	player_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	player_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	player_scroll.custom_minimum_size = Vector2(0, 220)
+	player_scroll.custom_minimum_size = Vector2(0, 140)
 	ThemeManager.apply_scroll_container_style(player_scroll, 16)
 	player_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	player_list_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	player_scroll.add_child(player_list_vbox)
 	left_vbox.add_child(player_scroll)
+
+	# Left Column Game Settings: Turn Order, Graphics Quality, Game Mode
+	var turn_order_selector = _create_turn_order_selector()
+	left_vbox.add_child(turn_order_selector)
+
+	var quality_selector = _create_quality_selector()
+	left_vbox.add_child(quality_selector)
+
+	var game_mode_selector = _create_game_mode_selector()
+	left_vbox.add_child(game_mode_selector)
 	
 	# Right Column: Course Select & Play
 	var right_vbox = VBoxContainer.new()
 	right_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right_vbox.size_flags_stretch_ratio = 1.0
-	right_vbox.add_theme_constant_override("separation", 20)
+	right_vbox.add_theme_constant_override("separation", 14)
 	main_hbox.add_child(right_vbox)
 	
 	var course_title = Label.new()
@@ -220,7 +241,7 @@ func _ready() -> void:
 	# Course list (expands to fill vertical room)
 	course_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	course_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	course_list.custom_minimum_size = Vector2(0, 220)
+	course_list.custom_minimum_size = Vector2(0, 260)
 	course_list.add_theme_font_size_override("font_size", 24)
 	course_list.add_theme_constant_override("v_separation", 16)
 	ThemeManager.apply_item_list_style(course_list)
@@ -293,45 +314,32 @@ func _ready() -> void:
 	
 	right_vbox.add_child(action_row)
 
-	# Bottom Section: 2 Columns for Game Options & Settings (matching mockup)
-	var bottom_hbox = HBoxContainer.new()
-	bottom_hbox.add_theme_constant_override("separation", 50)
-	bottom_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	main_vbox.add_child(bottom_hbox)
-
-	# Bottom Left Column: Turn Order & Graphics Quality
-	var bottom_left_vbox = VBoxContainer.new()
-	bottom_left_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bottom_left_vbox.add_theme_constant_override("separation", 14)
-	bottom_hbox.add_child(bottom_left_vbox)
-
-	var turn_order_selector = _create_turn_order_selector()
-	bottom_left_vbox.add_child(turn_order_selector)
-
-	var quality_selector = _create_quality_selector()
-	bottom_left_vbox.add_child(quality_selector)
-
-	# Bottom Right Column: Game Mode & Hole Selection
-	var bottom_right_vbox = VBoxContainer.new()
-	bottom_right_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bottom_right_vbox.add_theme_constant_override("separation", 14)
-	bottom_hbox.add_child(bottom_right_vbox)
-
-	var game_mode_selector = _create_game_mode_selector()
-	bottom_right_vbox.add_child(game_mode_selector)
-
+	# Right Column Settings: Hole Selection & Wind Simulation
 	var length_selector = _create_length_selector()
-	bottom_right_vbox.add_child(length_selector)
+	right_vbox.add_child(length_selector)
+
+	var wind_selector = _create_wind_selector()
+	right_vbox.add_child(wind_selector)
 	
-	# Add default Player 1
-	_add_player_ui("Player 1", "Blue")
+	# Add default initial player (player with biggest play history, first in list, or 'Player 1' fallback)
+	var default_player = MultiplayerManager.get_default_player_name()
+	var def_tee = MultiplayerManager.get_player_preferred_tee(default_player)
+	if def_tee.is_empty():
+		def_tee = "Blue"
+	_add_player_ui(default_player, def_tee)
 
 
-func _add_player_ui(p_name: String, tee: String) -> void:
+
+func _add_player_ui(p_name: String, tee: String = "") -> void:
 	var idx = players_to_add.size()
 	var avatar_path = MultiplayerManager.get_player_avatar(p_name)
 	var email = MultiplayerManager.get_player_email(p_name)
-	var player_data = {"name": p_name, "tee": tee, "avatar": avatar_path, "email": email}
+	var resolved_tee = tee
+	if resolved_tee.is_empty():
+		resolved_tee = MultiplayerManager.get_player_preferred_tee(p_name)
+		if resolved_tee.is_empty():
+			resolved_tee = "Blue"
+	var player_data = {"name": p_name, "tee": resolved_tee, "avatar": avatar_path, "email": email}
 	players_to_add.append(player_data)
 	
 	var row = HBoxContainer.new()
@@ -377,8 +385,10 @@ func _add_player_ui(p_name: String, tee: String) -> void:
 	player_tee_opt.add_item("Red", 1)
 	player_tee_opt.add_item("White", 2)
 	player_tee_opt.add_item("Black", 3)
+	player_tee_opt.add_item("Gold", 4)
+	player_tee_opt.selected = 0
 	for t_idx in range(player_tee_opt.item_count):
-		if player_tee_opt.get_item_text(t_idx).to_lower() == tee.to_lower():
+		if player_tee_opt.get_item_text(t_idx).to_lower() == resolved_tee.to_lower():
 			player_tee_opt.selected = t_idx
 			break
 	ThemeManager.apply_option_button_style(player_tee_opt, 20, Vector2(160, 52))
@@ -613,11 +623,19 @@ func _on_start_pressed() -> void:
 		return
 		
 	# Setup MultiplayerManager
-	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.turn_order_mode != null:
-		GlobalSettings.range_settings.turn_order_mode.set_value(selected_turn_order)
+	if GlobalSettings != null:
+		if GlobalSettings.range_settings != null and GlobalSettings.range_settings.turn_order_mode != null:
+			GlobalSettings.range_settings.turn_order_mode.set_value(selected_turn_order)
+		GlobalSettings.start_round_wind(true)
 	get_node("/root/MultiplayerManager").setup_game(players_to_add, parsed, scene_path, config_path, selected_length, selected_game_mode, team_assignments, selected_turn_order)
 	get_node("/root/MultiplayerManager").start_hole()
 	
+	# Ready launch monitor for course play
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("set_ready"):
+			lm.call("set_ready")
+
 	# Load course
 	SceneManager.load_course(scene_path, config_path)
 
@@ -950,6 +968,71 @@ func _select_quality(q_name: String) -> void:
 		quality_desc_lbl.text = "Low (Fast): Stylized stippled turf with clear high-contrast slope shading. Optimized for mobile and systems with < 8GB RAM."
 	else:
 		quality_desc_lbl.text = "High (PBR): Photorealistic 27-texture PBR terrain splatting, depth water, and 4-split cascaded shadows."
+
+
+func _create_wind_selector() -> PanelContainer:
+	var panel = PanelContainer.new()
+	var panel_style = StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.08, 0.12, 0.15, 0.65)
+	panel_style.border_width_left = 1
+	panel_style.border_width_right = 1
+	panel_style.border_width_top = 1
+	panel_style.border_width_bottom = 1
+	panel_style.border_color = Color(0.2, 0.28, 0.35, 0.4)
+	panel_style.corner_radius_top_left = 8
+	panel_style.corner_radius_top_right = 8
+	panel_style.corner_radius_bottom_left = 8
+	panel_style.corner_radius_bottom_right = 8
+	panel_style.content_margin_left = 14
+	panel_style.content_margin_right = 14
+	panel_style.content_margin_top = 10
+	panel_style.content_margin_bottom = 10
+	panel.add_theme_stylebox_override("panel", panel_style)
+
+	var hbox = HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 15)
+	panel.add_child(hbox)
+
+	var lbl = Label.new()
+	lbl.text = "Wind Simulation:"
+	lbl.add_theme_font_size_override("font_size", 20)
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hbox.add_child(lbl)
+
+	var seg_hbox = HBoxContainer.new()
+	seg_hbox.add_theme_constant_override("separation", 0)
+	hbox.add_child(seg_hbox)
+
+	wind_off_btn = Button.new()
+	wind_off_btn.text = "Disabled"
+	wind_off_btn.custom_minimum_size = Vector2(95, 44)
+	wind_off_btn.add_theme_font_size_override("font_size", 16)
+	seg_hbox.add_child(wind_off_btn)
+
+	wind_on_btn = Button.new()
+	wind_on_btn.text = "Enabled"
+	wind_on_btn.custom_minimum_size = Vector2(95, 44)
+	wind_on_btn.add_theme_font_size_override("font_size", 16)
+	seg_hbox.add_child(wind_on_btn)
+
+	wind_off_btn.pressed.connect(func(): _select_wind(false))
+	wind_on_btn.pressed.connect(func(): _select_wind(true))
+
+	var current_wind = false
+	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("wind_enabled"):
+		current_wind = bool(GlobalSettings.range_settings.wind_enabled.value)
+	_select_wind(current_wind)
+	return panel
+
+
+func _select_wind(enabled: bool) -> void:
+	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("wind_enabled"):
+		GlobalSettings.range_settings.wind_enabled.set_value(enabled)
+		GlobalSettings.save_settings()
+
+	if wind_off_btn != null and wind_on_btn != null:
+		_style_seg_button(wind_off_btn, "left", not enabled)
+		_style_seg_button(wind_on_btn, "right", enabled)
 
 
 func _style_seg_button(btn: Button, position: String, active: bool) -> void:

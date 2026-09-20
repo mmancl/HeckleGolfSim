@@ -48,7 +48,7 @@ echo ".NET: $(dotnet --version)"
 
 # 3. Build C# Solution
 echo "Compiling C# .NET solution..."
-dotnet build OpenShotGolf.csproj -c Release
+dotnet build HeckleGolfSim.csproj -c Release
 
 # 4. Check Templates
 TEMPLATES_DIR="$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono"

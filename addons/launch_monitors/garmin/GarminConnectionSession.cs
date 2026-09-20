@@ -201,6 +201,8 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
                     await Task.Delay(300, timeoutToken);
                     await RequestStatusAsync(timeoutToken);
                 }
+
+                await SetReadyAsync(timeoutToken);
             }
             finally
             {
@@ -646,12 +648,21 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
 
             _processedShotIds.Add(shotId);
 
+            var isPractice = notification.Metrics.HasShotType && notification.Metrics.ShotType == Metrics.Types.ShotType.Practice;
             var ball = notification.Metrics.BallMetrics;
             var club = notification.Metrics.ClubMetrics;
+            var ballSpeed = ball?.BallSpeed ?? 0.0f;
+
+            // If it's a practice swing or the ball didn't move (no ball metrics or negligible ball speed), do not count as a shot
+            if (isPractice || ball == null || ballSpeed <= 0.1f)
+            {
+                _logInfo($"Practice swing or unhit ball detected for shot {shotId} (isPractice={isPractice}, ballSpeed={ballSpeed * 2.23694f:F1} mph). Swing ignored (not counting as shot).");
+                return;
+            }
 
             var shotMetrics = new GarminShotMetrics(
                 ShotId: shotId,
-                BallSpeedMps: ball?.BallSpeed ?? 0.0f,
+                BallSpeedMps: ballSpeed,
                 VerticalLaunchAngle: ball?.LaunchAngle ?? 0.0f,
                 HorizontalLaunchAngle: ball?.LaunchDirection ?? 0.0f,
                 TotalSpinRpm: ball?.TotalSpin ?? 0.0f,

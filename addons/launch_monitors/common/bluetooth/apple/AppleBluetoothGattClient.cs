@@ -154,11 +154,14 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         IntPtr cbCentralManagerClass = ObjCRuntime.objc_getClass("CBCentralManager");
         IntPtr allocCentral = ObjCRuntime.objc_msgSend(cbCentralManagerClass, ObjCRuntime.sel_registerName("alloc"));
 
-        // [[CBCentralManager alloc] initWithDelegate:delegate queue:nil options:nil]
-        _centralManager = ObjCRuntime.objc_msgSend(allocCentral, ObjCRuntime.sel_registerName("initWithDelegate:queue:options:"), _centralDelegate, IntPtr.Zero, IntPtr.Zero);
+        // Dedicated dispatch queue ensures CoreBluetooth delegate callbacks run smoothly and are not blocked by the main thread
+        IntPtr dispatchQueue = ObjCRuntime.dispatch_queue_create("com.hecklegolf.ble", IntPtr.Zero);
+
+        // [[CBCentralManager alloc] initWithDelegate:delegate queue:dispatchQueue options:nil]
+        _centralManager = ObjCRuntime.objc_msgSend(allocCentral, ObjCRuntime.sel_registerName("initWithDelegate:queue:options:"), _centralDelegate, dispatchQueue, IntPtr.Zero);
         ObjCRuntime.Retain(_centralManager);
 
-        GD.Print($"{LogPrefix} CBCentralManager instantiated.");
+        GD.Print($"{LogPrefix} CBCentralManager instantiated with dedicated dispatch queue.");
     }
 
     private async Task EnsureCentralReadyAsync(CancellationToken cancellationToken)
@@ -166,8 +169,17 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         if (_centralState == 5) return; // 5 = CBManagerStatePoweredOn
         if (_statePoweredOnTcs != null)
         {
-            using var reg = cancellationToken.Register(() => _statePoweredOnTcs.TrySetCanceled());
-            await _statePoweredOnTcs.Task;
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+            using var reg = linkedCts.Token.Register(() => _statePoweredOnTcs.TrySetCanceled());
+            try
+            {
+                await _statePoweredOnTcs.Task;
+            }
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException("Bluetooth initialization timed out. Please verify Bluetooth is powered on and authorized in macOS/iOS System Settings.");
+            }
         }
     }
 
@@ -204,10 +216,10 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         }
         else if (Guid.TryParse(deviceId, out var guid))
         {
-            // Attempt retrievePeripheralsWithIdentifiers:
-            IntPtr cbUuid = ObjCRuntime.CreateCBUUID(guid);
+            // CoreBluetooth retrievePeripheralsWithIdentifiers: expects an NSArray of NSUUID instances
+            IntPtr nsUuid = ObjCRuntime.CreateNSUUID(guid);
             IntPtr nsArrayClass = ObjCRuntime.objc_getClass("NSArray");
-            IntPtr idArray = ObjCRuntime.objc_msgSend(nsArrayClass, ObjCRuntime.sel_registerName("arrayWithObject:"), cbUuid);
+            IntPtr idArray = ObjCRuntime.objc_msgSend(nsArrayClass, ObjCRuntime.sel_registerName("arrayWithObject:"), nsUuid);
             IntPtr retrievedArray = ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("retrievePeripheralsWithIdentifiers:"), idArray);
             int count = (int)(long)ObjCRuntime.objc_msgSend(retrievedArray, ObjCRuntime.sel_registerName("count"));
             if (count > 0)
@@ -252,9 +264,10 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
 
     public async Task<byte[]> ReadCharacteristicAsync(Guid characteristicUuid, CancellationToken cancellationToken)
     {
+        // Match WindowsBluetoothGattClient: return empty array if characteristic is not present
         if (!_characteristics.TryGetValue(characteristicUuid, out var characteristic) || _activePeripheral == IntPtr.Zero)
         {
-            throw new InvalidOperationException($"Characteristic {characteristicUuid} not found or not connected.");
+            return Array.Empty<byte>();
         }
 
         var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -263,25 +276,53 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         // [peripheral readValueForCharacteristic:characteristic]
         ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("readValueForCharacteristic:"), characteristic);
 
-        using var reg = cancellationToken.Register(() => tcs.TrySetCanceled());
-        return await tcs.Task;
+        // Bound read with a 3-second timeout so unacknowledged reads (like firmware) do not hang the connection
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        using var reg = linkedCts.Token.Register(() => tcs.TrySetCanceled());
+
+        try
+        {
+            return await tcs.Task;
+        }
+        catch (OperationCanceledException)
+        {
+            _readTcsMap.TryRemove(characteristicUuid, out _);
+            return Array.Empty<byte>();
+        }
+        catch (Exception ex)
+        {
+            _readTcsMap.TryRemove(characteristicUuid, out _);
+            GD.Print($"{LogPrefix} ReadCharacteristicAsync exception for {characteristicUuid}: {ex.Message}");
+            return Array.Empty<byte>();
+        }
     }
 
     public async Task SubscribeToCharacteristicAsync(Guid characteristicUuid, CancellationToken cancellationToken)
     {
         if (!_characteristics.TryGetValue(characteristicUuid, out var characteristic) || _activePeripheral == IntPtr.Zero)
         {
-            throw new InvalidOperationException($"Characteristic {characteristicUuid} not found or not connected.");
+            return;
         }
 
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _subscribeTcsMap[characteristicUuid] = tcs;
 
         // [peripheral setNotifyValue:YES forCharacteristic:characteristic]
-        ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("setNotifyValue:forCharacteristic:"), true, characteristic);
+        ObjCRuntime.objc_msgSend_bool(_activePeripheral, ObjCRuntime.sel_registerName("setNotifyValue:forCharacteristic:"), 1, characteristic);
 
-        using var reg = cancellationToken.Register(() => tcs.TrySetCanceled());
-        await tcs.Task;
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        using var reg = linkedCts.Token.Register(() => tcs.TrySetCanceled());
+
+        try
+        {
+            await tcs.Task;
+        }
+        catch (OperationCanceledException)
+        {
+            _subscribeTcsMap.TryRemove(characteristicUuid, out _);
+        }
     }
 
     public async Task WriteCharacteristicAsync(
@@ -296,7 +337,7 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         }
 
         IntPtr nsData = ObjCRuntime.CreateNSData(value);
-        int writeType = writeMode == BluetoothWriteMode.WithResponse ? 0 : 1; // 0 = CBCharacteristicWriteWithResponse, 1 = CBCharacteristicWriteWithoutResponse
+        IntPtr writeType = writeMode == BluetoothWriteMode.WithResponse ? (IntPtr)0 : (IntPtr)1; // 0 = CBCharacteristicWriteWithResponse, 1 = CBCharacteristicWriteWithoutResponse
 
         if (writeMode == BluetoothWriteMode.WithResponse)
         {
@@ -304,14 +345,16 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             _writeTcsMap[characteristicUuid] = tcs;
 
             // [peripheral writeValue:nsData forCharacteristic:characteristic type:writeType]
-            ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, writeType);
+            ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, writeType);
 
-            using var reg = cancellationToken.Register(() => tcs.TrySetCanceled());
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+            using var reg = linkedCts.Token.Register(() => tcs.TrySetCanceled());
             await tcs.Task;
         }
         else
         {
-            ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, writeType);
+            ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, writeType);
         }
     }
 
@@ -377,6 +420,12 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         else if (state == 1) // CBManagerStateUnauthorized
         {
             GD.PrintErr($"{LogPrefix} Bluetooth permission denied by user / OS. Please check System Settings -> Privacy & Security -> Bluetooth.");
+            client._statePoweredOnTcs?.TrySetException(new UnauthorizedAccessException("Bluetooth permission denied by macOS/iOS. Please check System Settings -> Privacy & Security -> Bluetooth."));
+        }
+        else if (state == 4) // CBManagerStatePoweredOff
+        {
+            GD.PrintErr($"{LogPrefix} Bluetooth is powered off. Please turn on Bluetooth in System Settings.");
+            client._statePoweredOnTcs?.TrySetException(new InvalidOperationException("Bluetooth is turned off. Please turn on Bluetooth in System Settings."));
         }
     }
 
@@ -407,14 +456,43 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             client._discoveredPeripherals[deviceId] = peripheral;
         }
 
-        if (!string.IsNullOrEmpty(client._scanOptions.DeviceNamePrefix) &&
-            !name.StartsWith(client._scanOptions.DeviceNamePrefix, StringComparison.OrdinalIgnoreCase))
+        if (!IsDeviceNameMatch(name, client._scanOptions.DeviceNamePrefix))
         {
             return;
         }
 
         GD.Print($"{LogPrefix} Device discovered: {name} ({deviceId}) RSSI={rssiVal}");
         client.DeviceDiscovered?.Invoke(new BluetoothDevice(deviceId, name, rssiVal));
+    }
+
+    private static bool IsDeviceNameMatch(string name, string? prefix)
+    {
+        if (string.IsNullOrWhiteSpace(prefix)) return true;
+        if (string.IsNullOrWhiteSpace(name) || name == "Unknown") return false;
+
+        // 1. Direct prefix or contains check
+        if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+            name.Contains(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // 2. Whitespace/dash stripped comparison (e.g. "Square Golf" vs "SquareGolf")
+        var normName = name.Replace(" ", "").Replace("-", "").Replace("_", "");
+        var normPrefix = prefix.Replace(" ", "").Replace("-", "").Replace("_", "");
+        if (normName.Contains(normPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // 3. Special handling for Square Golf: match any name containing "Square"
+        if (normPrefix.Contains("square", StringComparison.OrdinalIgnoreCase) &&
+            normName.Contains("square", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static void Central_DidConnectPeripheral(IntPtr self, IntPtr _cmd, IntPtr central, IntPtr peripheral)

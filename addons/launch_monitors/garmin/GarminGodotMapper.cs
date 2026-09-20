@@ -19,29 +19,38 @@ public static class GarminGodotMapper
         var sideSpin = (int)MathF.Round(totalSpin * MathF.Sin(spinAxisRadians));
 
         var speedMph = metrics.BallSpeedMps * MetersPerSecondToMph;
-        var clubSpeedMph = metrics.ClubSpeedMps > 0
-            ? metrics.ClubSpeedMps * MetersPerSecondToMph
-            : (speedMph > 0 ? speedMph / 1.45f : 0.0f);
-        var smash = clubSpeedMph > 0 ? speedMph / clubSpeedMph : 1.45f;
 
         var data = new GodotDictionary
         {
             ["Speed"] = Variant.From(speedMph),
+            ["BallSpeed"] = Variant.From(speedMph),
             ["VLA"] = Variant.From(metrics.VerticalLaunchAngle),
             ["HLA"] = Variant.From(metrics.HorizontalLaunchAngle),
             ["TotalSpin"] = Variant.From(totalSpin),
             ["SpinAxis"] = Variant.From(spinAxis),
             ["BackSpin"] = Variant.From(backSpin),
             ["SideSpin"] = Variant.From(sideSpin),
-            ["ShotType"] = Variant.From(0),
-            ["ClubPath"] = Variant.From(metrics.ClubPathDeg),
-            ["FaceAngle"] = Variant.From(metrics.FaceAngleDeg),
-            ["AttackAngle"] = Variant.From(metrics.AttackAngleDeg),
-            ["DynamicLoft"] = Variant.From(0.0f),
-            ["ClubSpeed"] = Variant.From(clubSpeedMph),
-            ["SmashFactor"] = Variant.From(smash),
-            ["FaceToPath"] = Variant.From(metrics.FaceAngleDeg - metrics.ClubPathDeg)
+            ["ShotType"] = Variant.From(0)
         };
+
+        if (metrics.ClubSpeedMps > 0)
+        {
+            var clubSpeedMph = metrics.ClubSpeedMps * MetersPerSecondToMph;
+            data["ClubSpeed"] = Variant.From(clubSpeedMph);
+            if (clubSpeedMph > 0 && speedMph > 0)
+            {
+                data["SmashFactor"] = Variant.From(speedMph / clubSpeedMph);
+            }
+        }
+
+        if (MathF.Abs(metrics.ClubPathDeg) > 0.001f)
+            data["ClubPath"] = Variant.From(metrics.ClubPathDeg);
+        if (MathF.Abs(metrics.FaceAngleDeg) > 0.001f)
+            data["FaceAngle"] = Variant.From(metrics.FaceAngleDeg);
+        if (MathF.Abs(metrics.AttackAngleDeg) > 0.001f)
+            data["AttackAngle"] = Variant.From(metrics.AttackAngleDeg);
+        if (data.ContainsKey("FaceAngle") && data.ContainsKey("ClubPath"))
+            data["FaceToPath"] = Variant.From(metrics.FaceAngleDeg - metrics.ClubPathDeg);
 
         return data;
     }

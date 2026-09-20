@@ -106,86 +106,86 @@ units = "yd"
 
 [node name="Carry" parent="GridCanvas" unique_id=2040593933 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 430.0
-offset_right = 100.0
-offset_bottom = 494.0
+offset_left = 106.0
+offset_top = 360.0
+offset_right = 206.0
+offset_bottom = 424.0
 label = "Carry"
 units = "yd"
 
 [node name="SpinAxis" parent="GridCanvas" unique_id=850043213 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 500.0
+offset_top = 430.0
 offset_right = 100.0
-offset_bottom = 564.0
+offset_bottom = 494.0
 label = "SpinAxis"
 units = "deg"
 
 [node name="Speed" parent="GridCanvas" unique_id=156075773 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 570.0
-offset_right = 100.0
-offset_bottom = 634.0
-label = "Speed"
+offset_left = 106.0
+offset_top = 430.0
+offset_right = 206.0
+offset_bottom = 494.0
+label = "Ball Spd"
 units = "mph"
 
 [node name="BackSpin" parent="GridCanvas" unique_id=212846167 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 640.0
+offset_top = 500.0
 offset_right = 100.0
-offset_bottom = 704.0
+offset_bottom = 564.0
 label = "BackSpin"
 units = "rpm"
 
 [node name="SideSpin" parent="GridCanvas" unique_id=38660713 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_top = 710.0
-offset_right = 100.0
-offset_bottom = 774.0
+offset_left = 106.0
+offset_top = 500.0
+offset_right = 206.0
+offset_bottom = 564.0
 label = "SideSpin"
 units = "rpm"
 
 [node name="FaceAngle" parent="GridCanvas" unique_id=1999999999 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_left = 106.0
-offset_top = 360.0
-offset_right = 206.0
-offset_bottom = 424.0
+offset_top = 570.0
+offset_right = 100.0
+offset_bottom = 634.0
 label = "Face Ang"
 units = "deg"
 
 [node name="ClubPath" parent="GridCanvas" unique_id=486822729 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_left = 106.0
-offset_top = 430.0
+offset_top = 570.0
 offset_right = 206.0
-offset_bottom = 494.0
+offset_bottom = 634.0
 label = "Club Path"
 units = "deg"
 
 [node name="FaceToPath" parent="GridCanvas" unique_id=1703626966 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_left = 106.0
-offset_top = 500.0
-offset_right = 206.0
-offset_bottom = 564.0
+offset_top = 640.0
+offset_right = 100.0
+offset_bottom = 704.0
 label = "Face-Path"
 units = "deg"
 
 [node name="ClubSpeed" parent="GridCanvas" unique_id=1199759367 instance=ExtResource("1_q72xt")]
 layout_mode = 0
 offset_left = 106.0
-offset_top = 570.0
+offset_top = 640.0
 offset_right = 206.0
-offset_bottom = 634.0
+offset_bottom = 704.0
 label = "Club Spd"
 units = "mph"
 
 [node name="SmashFactor" parent="GridCanvas" unique_id=1786497158 instance=ExtResource("1_q72xt")]
 layout_mode = 0
-offset_left = 106.0
-offset_top = 640.0
-offset_right = 206.0
-offset_bottom = 704.0
+offset_top = 710.0
+offset_right = 100.0
+offset_bottom = 774.0
 label = "Smash"
 units = "ratio"
 
@@ -197,6 +197,14 @@ offset_right = 206.0
 offset_bottom = 774.0
 label = "Offline"
 units = "yd"
+
+[node name="AddRemoveButton" type="Button" parent="GridCanvas" unique_id=892348712]
+layout_mode = 0
+offset_top = 780.0
+offset_right = 100.0
+offset_bottom = 844.0
+text = "＋ / －
+Add/Remove"
 
 [node name="ClubSelector" parent="GridCanvas" unique_id=1107551091 instance=ExtResource("3_crlyb")]
 layout_mode = 0

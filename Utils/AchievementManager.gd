@@ -303,7 +303,7 @@ func check_hole_achievements(player_name: String, hole_par: int, strokes: int, l
 func check_shot_achievements(player_name: String, club_name: String, total_yards: float, prev_longest_drive: float = -1.0) -> void:
 	if player_name.is_empty():
 		return
-	var is_driver = (club_name.begins_with("Dr") or club_name.to_lower() == "driver")
+	var is_driver = (club_name.begins_with("Dr") or club_name.to_lower() in ["driver", "1w", "dr"])
 	if total_yards >= 300.0 and is_driver:
 		unlock_achievement(player_name, "long_drive")
 		
@@ -312,7 +312,9 @@ func check_shot_achievements(player_name: String, club_name: String, total_yards
 		var prev_best = prev_longest_drive
 		if prev_best < 0.0 and has_node("/root/MultiplayerManager"):
 			var mp_mgr = get_node("/root/MultiplayerManager")
-			if mp_mgr.has_method("calculate_player_stats"):
+			if mp_mgr.has_method("get_player_longest_drive"):
+				prev_best = mp_mgr.get_player_longest_drive(player_name)
+			elif mp_mgr.has_method("calculate_player_stats"):
 				var stats = mp_mgr.calculate_player_stats(player_name)
 				prev_best = float(stats.get("longest_drive", 0.0))
 		

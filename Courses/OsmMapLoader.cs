@@ -148,14 +148,17 @@ public partial class OsmMapLoader : Node
     {
         GD.Print($"{LogPrefix} Downloading OSM data for course '{courseName}' around {lat}, {lon}...");
         // Reduced radius to 1000 to prevent Gateway Timeout on Overpass API, query timeout to 60s, and removed natural=tree since we scan satellite imagery
+        // Use FormattableString.Invariant to ensure lat/lon always use '.' as decimal separator regardless of system locale
+        string latStr = lat.ToString(CultureInfo.InvariantCulture);
+        string lonStr = lon.ToString(CultureInfo.InvariantCulture);
         string query = $@"
         [out:json][timeout:60];
         (
-          nwr(around:1000, {lat}, {lon})[""leisure""=""golf_course""];
-          nwr(around:1000, {lat}, {lon})[""golf""];
-          nwr(around:1000, {lat}, {lon})[""natural""=""water""];
-          nwr(around:1000, {lat}, {lon})[""natural""=""wood""];
-          nwr(around:1000, {lat}, {lon})[""landuse""=""forest""];
+          nwr(around:1000, {latStr}, {lonStr})[""leisure""=""golf_course""];
+          nwr(around:1000, {latStr}, {lonStr})[""golf""];
+          nwr(around:1000, {latStr}, {lonStr})[""natural""=""water""];
+          nwr(around:1000, {latStr}, {lonStr})[""natural""=""wood""];
+          nwr(around:1000, {latStr}, {lonStr})[""landuse""=""forest""];
         );
         out body;
         >;
@@ -170,7 +173,8 @@ public partial class OsmMapLoader : Node
 
             try
             {
-                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(35));
+                // Timeout must exceed Overpass [timeout:60] to avoid cancelling before server responds
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(65));
                 var content = new FormUrlEncodedContent(new[] { new KeyValuePair<string, string>("data", query) });
                 var response = await HttpClient.PostAsync(endpoint, content, cts.Token);
 
@@ -215,6 +219,7 @@ public partial class OsmMapLoader : Node
         string globalJsonPath = ProjectSettings.GlobalizePath(jsonPath);
         string globalCourseDir = Path.GetDirectoryName(globalJsonPath) ?? "";
         bool isMobilePlatform = OS.GetName() == "Android" || OS.GetName() == "iOS";
+        bool isComputerPlatform = OS.GetName() == "Windows" || OS.GetName() == "macOS" || OS.GetName() == "Linux";
 
         Image? satImage = null;
         if (satImageBytes != null && satImageBytes.Length > 0)
@@ -972,6 +977,65 @@ public partial class OsmMapLoader : Node
                 }
             }
 
+            // Distance calculation to closest fairway polygon (or hole corridor if no fairways parsed)
+            Func<Vector2, float> getDistToFairway = (pt) =>
+            {
+                float minD = float.MaxValue;
+                if (fairwayPolys.Count > 0)
+                {
+                    for (int i = 0; i < fairwayPolys.Count; i++)
+                    {
+                        var fw = fairwayPolys[i];
+                        float dx = 0f;
+                        if (pt.X < fw.MinX) dx = fw.MinX - pt.X;
+                        else if (pt.X > fw.MaxX) dx = pt.X - fw.MaxX;
+
+                        float dy = 0f;
+                        if (pt.Y < fw.MinY) dy = fw.MinY - pt.Y;
+                        else if (pt.Y > fw.MaxY) dy = pt.Y - fw.MaxY;
+
+                        if (dx >= minD || dy >= minD) continue;
+                        if (dx * dx + dy * dy >= minD * minD) continue;
+
+                        float d = DistanceToPolygon(pt, fw.Polygon);
+                        if (d < minD) minD = d;
+                    }
+                }
+                else if (lineOfPlayPaths.Count > 0)
+                {
+                    for (int pIdx = 0; pIdx < lineOfPlayPaths.Count; pIdx++)
+                    {
+                        var path = lineOfPlayPaths[pIdx];
+                        for (int i = 0; i < path.Count - 1; i++)
+                        {
+                            float d = DistanceToSegment(pt, path[i], path[i + 1]);
+                            if (d < minD) minD = d;
+                        }
+                    }
+                    minD = Math.Max(0f, minD - 16.0f);
+                }
+                return minD;
+            };
+
+            // Tuned fairway proximity filter:
+            // Keeps some trees close to fairways for natural hazard variety, but tunes down the frequency
+            // so they don't crowd or wall off the edges of fairways.
+            Func<Vector2, bool> shouldKeepNearFairway = (pt) =>
+            {
+                if (!isComputerPlatform) return true;
+
+                float dist = getDistToFairway(pt);
+                if (dist >= 14.0f) return true;
+
+                int hash = (int)(pt.X * 73856093) ^ (int)(pt.Y * 19349663);
+                float roll = ((hash & 0x7fffffff) % 1000) / 1000.0f;
+
+                if (dist < 2.5f) return roll < 0.08f;
+                if (dist < 6.0f) return roll < 0.22f;
+                if (dist < 10.0f) return roll < 0.45f;
+                return roll < 0.75f;
+            };
+
             // Scan satellite imagery for additional trees
             if (satImage != null)
             {
@@ -982,8 +1046,8 @@ public partial class OsmMapLoader : Node
                 int satWidth = satImage.GetWidth();
                 int satHeight = satImage.GetHeight();
                 var candidatePoints = new List<Vector2>();
-                float spacing = isMobilePlatform ? 8.0f : 6.5f; // Grid spacing in meters
-                float minDistanceBetweenTrees = 8.5f; // Minimum distance to keep trees apart
+                float spacing = isComputerPlatform ? 5.0f : (isMobilePlatform ? 8.0f : 6.5f); // Grid spacing in meters
+                float minDistanceBetweenTrees = isComputerPlatform ? 6.5f : 8.5f; // Minimum distance to keep trees apart
 
                 var gridPoints = new List<Vector2>();
                 for (float rx = courseMinX; rx <= courseMaxX; rx += spacing)
@@ -1022,6 +1086,9 @@ public partial class OsmMapLoader : Node
                             }
                         }
                         if (insideExclusion) return;
+
+                        // On computer, tune down frequency of trees close to fairways
+                        if (!shouldKeepNearFairway(pt)) return;
 
                         // Check line of play safety zone (skip if inside a forest polygon)
                         bool tooCloseToLineOfPlay = false;
@@ -1073,7 +1140,7 @@ public partial class OsmMapLoader : Node
 
                 GD.Print($"{LogPrefix} Found {candidatePoints.Count} tree candidate locations from satellite imagery.");
 
-                int maxSatelliteTrees = isMobilePlatform ? 1000 : 1500; // Capped at 1000 on mobile, 1500 on desktop
+                int maxSatelliteTrees = isComputerPlatform ? 3000 : (isMobilePlatform ? 1000 : 1500); // Capped at 1000 on mobile, 3000 on computer, 1500 on desktop
                 var selectedPoints = new List<Vector2>();
                 if (candidatePoints.Count > maxSatelliteTrees)
                 {
@@ -1123,10 +1190,11 @@ public partial class OsmMapLoader : Node
                     float width = maxX - minX;
                     float height = maxY - minY;
                     float area = width * height;
-                    int targetForestTrees = Mathf.Clamp((int)(area / (isMobilePlatform ? 250f : 180f)), 3, isMobilePlatform ? 60 : 80);
+                    int targetForestTrees = Mathf.Clamp((int)(area / (isComputerPlatform ? 90f : (isMobilePlatform ? 250f : 180f))), 3, isComputerPlatform ? 160 : (isMobilePlatform ? 60 : 80));
 
                     var fRnd = new Random((int)(minX * 100f) ^ (int)(minY * 100f));
                     int forestSpawned = 0;
+                    float forestMinDist = isComputerPlatform ? 5.0f : 7.0f;
                     for (int attempt = 0; attempt < targetForestTrees * 5 && forestSpawned < targetForestTrees; attempt++)
                     {
                         float rx = minX + (float)fRnd.NextDouble() * width;
@@ -1134,10 +1202,12 @@ public partial class OsmMapLoader : Node
                         var rp = new Vector2(rx, rz);
                         if (Geometry2D.IsPointInPolygon(rp, forestPoly))
                         {
+                            if (!shouldKeepNearFairway(rp)) continue;
+
                             bool tooClose = false;
                             for (int i = 0; i < placedTreePositions.Count; i++)
                             {
-                                if (rp.DistanceTo(placedTreePositions[i]) < 7.0f)
+                                if (rp.DistanceTo(placedTreePositions[i]) < forestMinDist)
                                 {
                                     tooClose = true;
                                     break;
@@ -1154,14 +1224,17 @@ public partial class OsmMapLoader : Node
             }
 
             // Guaranteed procedural tree placement fallback if tree count is too low or satellite scan yielded few/no trees
-            int targetTreeCount = isMobilePlatform
-                ? Math.Clamp(Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 24, 100, 1000)
-                : Math.Max(120, Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 28);
+            int targetTreeCount = isComputerPlatform
+                ? Math.Max(240, Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 56)
+                : (isMobilePlatform
+                    ? Math.Clamp(Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 24, 100, 1000)
+                    : Math.Max(120, Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 28));
             if (placedTreePositions.Count < targetTreeCount)
             {
                 GD.Print($"{LogPrefix} Tree count ({placedTreePositions.Count}) is below target ({targetTreeCount}). Generating procedural tree placement fallback...");
                 var procRnd = new Random(54321);
 
+                float minProcTreeDist = isComputerPlatform ? 6.5f : 8.5f;
                 Func<Vector2, bool> isProceduralPointValid = (pt) =>
                 {
                     if (!isPointInMainCourse(pt)) return false;
@@ -1176,6 +1249,8 @@ public partial class OsmMapLoader : Node
                         }
                     }
 
+                    if (!shouldKeepNearFairway(pt)) return false;
+
                     for (int pIdx = 0; pIdx < lineOfPlayPaths.Count; pIdx++)
                     {
                         var path = lineOfPlayPaths[pIdx];
@@ -1188,7 +1263,7 @@ public partial class OsmMapLoader : Node
 
                     for (int i = 0; i < placedTreePositions.Count; i++)
                     {
-                        if (pt.DistanceTo(placedTreePositions[i]) < 8.5f)
+                        if (pt.DistanceTo(placedTreePositions[i]) < minProcTreeDist)
                             return false;
                     }
 
@@ -1196,6 +1271,9 @@ public partial class OsmMapLoader : Node
                 };
 
                 // Pass A: Hole corridor fairway framing stands
+                float stepA = isComputerPlatform ? 12f : 15f;
+                float[] leftOffsets = isComputerPlatform ? new float[] { -26f, -34f, -42f, -50f } : new float[] { -22f, -32f, -42f };
+                float[] rightOffsets = isComputerPlatform ? new float[] { 26f, 34f, 42f, 50f } : new float[] { 22f, 32f, 42f };
                 foreach (var path in lineOfPlayPaths)
                 {
                     if (path.Count < 2) continue;
@@ -1203,7 +1281,7 @@ public partial class OsmMapLoader : Node
                     for (int i = 0; i < path.Count - 1; i++) totalLength += path[i].DistanceTo(path[i + 1]);
                     if (totalLength < 40f) continue;
 
-                    for (float d = 25f; d < totalLength - 20f; d += 15f)
+                    for (float d = 25f; d < totalLength - 20f; d += stepA)
                     {
                         var centerPt = GetPointOnPolyline(path, d);
                         var nextPt = GetPointOnPolyline(path, Math.Min(d + 5f, totalLength));
@@ -1212,7 +1290,6 @@ public partial class OsmMapLoader : Node
                         var perp = new Vector2(-fwd.Y, fwd.X);
 
                         // Left stands
-                        float[] leftOffsets = new float[] { -22f, -32f, -42f };
                         foreach (var off in leftOffsets)
                         {
                             var cand = centerPt + perp * (off + (float)(procRnd.NextDouble() * 8.0 - 4.0)) + fwd * (float)(procRnd.NextDouble() * 6.0 - 3.0);
@@ -1223,7 +1300,6 @@ public partial class OsmMapLoader : Node
                         }
 
                         // Right stands
-                        float[] rightOffsets = new float[] { 22f, 32f, 42f };
                         foreach (var off in rightOffsets)
                         {
                             var cand = centerPt + perp * (off + (float)(procRnd.NextDouble() * 8.0 - 4.0)) + fwd * (float)(procRnd.NextDouble() * 6.0 - 3.0);
@@ -1236,12 +1312,13 @@ public partial class OsmMapLoader : Node
                 }
 
                 // Pass B: Green backdrop clusters
+                int greenAttempts = isComputerPlatform ? 32 : 16;
                 foreach (var kp in holeInfo)
                 {
                     if (kp.Value.HoleLocation == null || kp.Value.HoleLocation.Length < 2) continue;
                     var pinPos = new Vector2(kp.Value.HoleLocation[0], kp.Value.HoleLocation[1]);
 
-                    for (int attempt = 0; attempt < 16; attempt++)
+                    for (int attempt = 0; attempt < greenAttempts; attempt++)
                     {
                         float angle = (float)(procRnd.NextDouble() * Math.PI * 2.0);
                         float dist = 18f + (float)procRnd.NextDouble() * 16f;
@@ -1254,6 +1331,7 @@ public partial class OsmMapLoader : Node
                 }
 
                 // Pass C: Tee backdrops
+                int teeAttempts = isComputerPlatform ? 12 : 6;
                 foreach (var kp in holeInfo)
                 {
                     if (kp.Value.TeeBoxes != null)
@@ -1263,7 +1341,7 @@ public partial class OsmMapLoader : Node
                             if (teeKvp.Value == null || teeKvp.Value.Length < 2) continue;
                             var teePos = new Vector2(teeKvp.Value[0], teeKvp.Value[1]);
 
-                            for (int attempt = 0; attempt < 6; attempt++)
+                            for (int attempt = 0; attempt < teeAttempts; attempt++)
                             {
                                 float angle = (float)(procRnd.NextDouble() * Math.PI * 2.0);
                                 float dist = 12f + (float)procRnd.NextDouble() * 14f;
@@ -1280,9 +1358,10 @@ public partial class OsmMapLoader : Node
                 // Pass D: Open rough filler if still below target
                 if (placedTreePositions.Count < targetTreeCount)
                 {
-                    for (float rx = courseMinX + 15f; rx <= courseMaxX - 15f && placedTreePositions.Count < targetTreeCount; rx += 18f)
+                    float stepD = isComputerPlatform ? 12f : 18f;
+                    for (float rx = courseMinX + 15f; rx <= courseMaxX - 15f && placedTreePositions.Count < targetTreeCount; rx += stepD)
                     {
-                        for (float rz = courseMinZ + 15f; rz <= courseMaxZ - 15f && placedTreePositions.Count < targetTreeCount; rz += 18f)
+                        for (float rz = courseMinZ + 15f; rz <= courseMaxZ - 15f && placedTreePositions.Count < targetTreeCount; rz += stepD)
                         {
                             var cand = new Vector2(
                                 rx + (float)(procRnd.NextDouble() * 10.0 - 5.0),
@@ -1321,22 +1400,23 @@ public partial class OsmMapLoader : Node
             }
             GD.Print($"{LogPrefix} Placed {placedTreePositions.Count} trees total.");
 
-            // Spawn random bushes clustered around a subset of trees (capped at 100 on mobile)
+            // Spawn random bushes clustered around a subset of trees (capped at 100 on mobile, 2400 on computer, 1200 on desktop)
             if (placedTreePositions.Count > 0)
             {
                 GD.Print($"{LogPrefix} Placing bushes clustered around trees...");
                 var bushRnd = new Random(99);
                 int bushCount = 0;
-                int maxBushes = isMobilePlatform ? 100 : 1200;
+                int maxBushes = isComputerPlatform ? 2400 : (isMobilePlatform ? 100 : 1200);
                 var placedBushPositions = new List<Vector2>();
 
                 var treeIndices = Enumerable.Range(0, placedTreePositions.Count).OrderBy(x => bushRnd.Next()).ToList();
-                int treesWithBushesCount = (int)(placedTreePositions.Count * 0.35);
+                int treesWithBushesCount = (int)(placedTreePositions.Count * (isComputerPlatform ? 0.70 : 0.35));
+                float minBushDist = isComputerPlatform ? 0.9f : 1.2f;
 
                 for (int tIdx = 0; tIdx < treesWithBushesCount && bushCount < maxBushes; tIdx++)
                 {
                     var treePos = placedTreePositions[treeIndices[tIdx]];
-                    int numBushesAroundTree = bushRnd.Next(1, 4);
+                    int numBushesAroundTree = bushRnd.Next(1, isComputerPlatform ? 5 : 4);
 
                     for (int b = 0; b < numBushesAroundTree && bushCount < maxBushes; b++)
                     {
@@ -1393,7 +1473,7 @@ public partial class OsmMapLoader : Node
                         bool tooCloseToBush = false;
                         foreach (var bushPos in placedBushPositions)
                         {
-                            if (pt.DistanceTo(bushPos) < 1.2f)
+                            if (pt.DistanceTo(bushPos) < minBushDist)
                             {
                                 tooCloseToBush = true;
                                 break;

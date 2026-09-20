@@ -74,6 +74,7 @@ var map_btn: Button = null
 var mulligan_btn: Button = null
 var forfeit_btn: Button = null
 var golfer_cam_btn: Button = null
+var putting_cam_btn: Button = null
 var announcer_btn: Button = null
 var tension_btn: Button = null
 var club_selector_node: Control = null
@@ -139,6 +140,10 @@ func _ready() -> void:
 
 	# Start first player's turn
 	_on_active_player_changed(MultiplayerManager.get_active_player())
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("set_ready"):
+			lm.call("set_ready")
 
 
 func _setup_hud() -> void:
@@ -157,6 +162,8 @@ func _setup_hud() -> void:
 				range_ui.stats_visibility_changed.connect(_on_stats_visibility_changed)
 			if range_ui.has_signal("golfer_cam_enabled_changed") and not range_ui.golfer_cam_enabled_changed.is_connected(_on_golfer_cam_enabled_changed):
 				range_ui.golfer_cam_enabled_changed.connect(_on_golfer_cam_enabled_changed)
+			if range_ui.has_signal("putting_cam_enabled_changed") and not range_ui.putting_cam_enabled_changed.is_connected(_on_putting_cam_enabled_changed):
+				range_ui.putting_cam_enabled_changed.connect(_on_putting_cam_enabled_changed)
 
 	var canvas = CanvasLayer.new()
 	canvas.layer = 15 # Render on top of VignetteLayer (layer 10)
@@ -979,6 +986,31 @@ func _setup_hud() -> void:
 	toggles_container.add_child(golfer_cam_btn)
 	_update_course_golfer_cam_btn_state()
 
+	# Putting Cam Toggle Button
+	putting_cam_btn = Button.new()
+	putting_cam_btn.name = "PuttingCamButton"
+	putting_cam_btn.text = "🎯 Putting Cam: OFF"
+	putting_cam_btn.tooltip_text = "Toggle Putting Camera"
+	putting_cam_btn.custom_minimum_size = Vector2(180, 56)
+	apply_material_button_style(putting_cam_btn, Color(0.35, 0.35, 0.35, 0.85))
+	putting_cam_btn.pressed.connect(func():
+		if range_ui != null and range_ui.has_method("is_putting_camera_enabled"):
+			var enabled = range_ui.call("is_putting_camera_enabled")
+			var minimized = range_ui.call("is_putting_camera_minimized") if range_ui.has_method("is_putting_camera_minimized") else false
+			if not enabled:
+				range_ui.call("set_putting_camera_visible", true)
+			elif minimized:
+				if range_ui.has_method("restore_putting_camera"):
+					range_ui.call("restore_putting_camera")
+				else:
+					range_ui.call("set_putting_camera_visible", true)
+			else:
+				range_ui.call("set_putting_camera_visible", false)
+		_update_course_putting_cam_btn_state()
+	)
+	toggles_container.add_child(putting_cam_btn)
+	_update_course_putting_cam_btn_state()
+
 	# Shot Analysis Toggle Button
 	var shot_analysis_btn = Button.new()
 	shot_analysis_btn.name = "ShotAnalysisButton"
@@ -1697,20 +1729,28 @@ func _setup_hud() -> void:
 	m_name_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_row.add_child(m_name_input)
 	
-	m_player_select_opt.item_selected.connect(func(index):
-		if index == 0:
-			m_name_input.visible = true
-		else:
-			m_name_input.visible = false
-	)
-	
 	var m_tee_opt = OptionButton.new()
 	m_tee_opt.name = "TeeOpt"
 	m_tee_opt.add_item("Blue", 0)
 	m_tee_opt.add_item("Red", 1)
 	m_tee_opt.add_item("White", 2)
 	m_tee_opt.add_item("Black", 3)
+	m_tee_opt.add_item("Gold", 4)
 	add_row.add_child(m_tee_opt)
+
+	m_player_select_opt.item_selected.connect(func(index):
+		if index == 0:
+			m_name_input.visible = true
+		else:
+			m_name_input.visible = false
+			var p_name = m_player_select_opt.get_item_text(index)
+			var pref_tee = MultiplayerManager.get_player_preferred_tee(p_name)
+			if not pref_tee.is_empty():
+				for t_i in range(m_tee_opt.item_count):
+					if m_tee_opt.get_item_text(t_i).to_lower() == pref_tee.to_lower():
+						m_tee_opt.selected = t_i
+						break
+	)
 	
 	var m_add_btn = Button.new()
 	m_add_btn.name = "AddBtn"
@@ -1870,16 +1910,19 @@ func _update_mulligan_selection_highlight() -> void:
 			_mulligan_scroll.ensure_control_visible(btn)
 
 
-func _handle_mulligan_dialog_input(event: InputEventKey) -> bool:
+func _handle_mulligan_dialog_input(event: InputEvent) -> bool:
 	if mulligan_confirm_dialog == null or not mulligan_confirm_dialog.visible:
 		return false
 
-	if event.keycode == KEY_ESCAPE:
+	var is_cancel = (event is InputEventKey and (event as InputEventKey).keycode == KEY_ESCAPE) or (event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == JOY_BUTTON_B)
+	var is_enter = (event is InputEventKey and ((event as InputEventKey).keycode == KEY_ENTER or (event as InputEventKey).keycode == KEY_KP_ENTER)) or (event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == JOY_BUTTON_A)
+
+	if is_cancel:
 		mulligan_confirm_dialog.visible = false
 		return true
 
 	if not _mulligan_is_selection_mode:
-		if event.is_action_pressed("mulligan") or event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
+		if event.is_action_pressed("mulligan") or is_enter:
 			mulligan_confirm_dialog.visible = false
 			_on_mulligan_confirmed()
 			return true
@@ -1888,17 +1931,17 @@ func _handle_mulligan_dialog_input(event: InputEventKey) -> bool:
 			mulligan_confirm_dialog.visible = false
 			_on_mulligan_confirmed()
 			return true
-		elif event.keycode == KEY_DOWN or event.is_action_pressed("aim_backward"):
+		elif (event is InputEventKey and (event as InputEventKey).keycode == KEY_DOWN) or event.is_action_pressed("aim_backward"):
 			if not _mulligan_option_buttons.is_empty():
 				_mulligan_selected_idx = mini(_mulligan_selected_idx + 1, _mulligan_option_buttons.size() - 1)
 				_update_mulligan_selection_highlight()
 			return true
-		elif event.keycode == KEY_UP or event.is_action_pressed("aim_forward"):
+		elif (event is InputEventKey and (event as InputEventKey).keycode == KEY_UP) or event.is_action_pressed("aim_forward"):
 			if not _mulligan_option_buttons.is_empty():
 				_mulligan_selected_idx = maxi(_mulligan_selected_idx - 1, 0)
 				_update_mulligan_selection_highlight()
 			return true
-		elif event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
+		elif is_enter:
 			mulligan_confirm_dialog.visible = false
 			if _mulligan_selected_idx == 0:
 				_on_mulligan_confirmed()
@@ -1910,31 +1953,34 @@ func _handle_mulligan_dialog_input(event: InputEventKey) -> bool:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
+	if ((event is InputEventKey and not event.echo) or event is InputEventJoypadButton) and event.is_pressed():
+		var is_escape = (event is InputEventKey and (event as InputEventKey).keycode == KEY_ESCAPE) or (event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == JOY_BUTTON_B)
+		var is_enter = (event is InputEventKey and ((event as InputEventKey).keycode == KEY_ENTER or (event as InputEventKey).keycode == KEY_KP_ENTER)) or (event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == JOY_BUTTON_A)
+
 		if mulligan_confirm_dialog != null and is_instance_valid(mulligan_confirm_dialog) and mulligan_confirm_dialog.visible:
 			_handle_mulligan_dialog_input(event)
 			get_viewport().set_input_as_handled()
 			return
 		if forfeit_confirm_dialog != null and is_instance_valid(forfeit_confirm_dialog) and forfeit_confirm_dialog.visible:
-			if event.keycode == KEY_ESCAPE:
+			if is_escape:
 				forfeit_confirm_dialog.visible = false
-			elif event.is_action_pressed("concede_hole") or event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER:
+			elif event.is_action_pressed("concede_hole") or is_enter:
 				forfeit_confirm_dialog.visible = false
 				_on_forfeit_confirmed()
 			get_viewport().set_input_as_handled()
 			return
 		if exit_confirm_dialog != null and is_instance_valid(exit_confirm_dialog) and exit_confirm_dialog.visible:
-			if event.keycode == KEY_ESCAPE:
+			if is_escape:
 				exit_confirm_dialog.visible = false
 			get_viewport().set_input_as_handled()
 			return
 		if add_player_prompt_dialog != null and is_instance_valid(add_player_prompt_dialog) and add_player_prompt_dialog.visible:
-			if event.keycode == KEY_ESCAPE:
+			if is_escape:
 				add_player_prompt_dialog.visible = false
 			get_viewport().set_input_as_handled()
 			return
 		if resume_player_prompt_dialog != null and is_instance_valid(resume_player_prompt_dialog) and resume_player_prompt_dialog.visible:
-			if event.keycode == KEY_ESCAPE:
+			if is_escape:
 				resume_player_prompt_dialog.visible = false
 			get_viewport().set_input_as_handled()
 			return
@@ -1971,6 +2017,30 @@ func _unhandled_input(event: InputEvent) -> void:
 				_update_course_golfer_cam_btn_state()
 				get_viewport().set_input_as_handled()
 				return
+		elif event.is_action_pressed("putting_cam_toggle"):
+			if range_ui != null and range_ui.has_method("is_putting_camera_enabled"):
+				var enabled = range_ui.call("is_putting_camera_enabled")
+				var minimized = range_ui.call("is_putting_camera_minimized") if range_ui.has_method("is_putting_camera_minimized") else false
+				if not enabled:
+					range_ui.call("set_putting_camera_visible", true)
+				elif minimized:
+					if range_ui.has_method("restore_putting_camera"):
+						range_ui.call("restore_putting_camera")
+					else:
+						range_ui.call("set_putting_camera_visible", true)
+				else:
+					range_ui.call("set_putting_camera_visible", false)
+			_update_course_putting_cam_btn_state()
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("next_club"):
+			_cycle_club(true)
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("prev_club"):
+			_cycle_club(false)
+			get_viewport().set_input_as_handled()
+			return
 		elif event.is_action_pressed("announcer_toggle"):
 			if announcer_btn != null and is_instance_valid(announcer_btn) and announcer_btn.visible and not announcer_btn.disabled:
 				announcer_btn.emit_signal("pressed")
@@ -1983,32 +2053,53 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 
 
+func _cycle_club(longer: bool) -> void:
+	var club_sel = club_selector_node
+	if club_sel == null and course_instance != null and course_instance.has_method("get_club_selector"):
+		club_sel = course_instance.call("get_club_selector")
+	if club_sel == null:
+		var current_scene = get_tree().current_scene
+		if current_scene != null:
+			club_sel = current_scene.find_child("ClubSelector", true, false)
+	if club_sel != null and is_instance_valid(club_sel):
+		if longer:
+			club_sel.call("select_next_club")
+		else:
+			club_sel.call("select_prev_club")
+
+
 func _update_hud_tooltips() -> void:
 	if not has_node("/root/KeybindingManager"):
 		return
 	var km = get_node("/root/KeybindingManager")
 	if stats_btn != null and is_instance_valid(stats_btn):
-		stats_btn.tooltip_text = "Toggle Stats (Show/Hide) [%s]" % km.get_action_key_name("toggle_stats")
+		stats_btn.tooltip_text = "Toggle Stats (Show/Hide) [%s]" % km.get_action_summary_str("toggle_stats")
 	if grid_btn != null and is_instance_valid(grid_btn):
-		grid_btn.tooltip_text = "Toggle Slope Grid (Show/Hide) [%s]" % km.get_action_key_name("green_grid")
+		grid_btn.tooltip_text = "Toggle Slope Grid (Show/Hide) [%s]" % km.get_action_summary_str("green_grid")
 	if golfer_cam_btn != null and is_instance_valid(golfer_cam_btn):
-		golfer_cam_btn.tooltip_text = "Toggle Golfer Camera [%s]" % km.get_action_key_name("golfer_cam_toggle")
+		golfer_cam_btn.tooltip_text = "Toggle Golfer Camera [%s]" % km.get_action_summary_str("golfer_cam_toggle")
+	if putting_cam_btn != null and is_instance_valid(putting_cam_btn):
+		putting_cam_btn.tooltip_text = "Toggle Putting Camera [%s]" % km.get_action_summary_str("putting_cam_toggle")
 	if map_btn != null and is_instance_valid(map_btn):
 		var is_aerial = course_instance.get("is_aerial_view") as bool if course_instance != null and course_instance.get("is_aerial_view") != null else false
 		if is_aerial:
-			map_btn.tooltip_text = "Return to Player [%s]" % km.get_action_key_name("aerial_aim")
+			map_btn.tooltip_text = "Return to Player [%s]" % km.get_action_summary_str("aerial_aim")
 		else:
-			map_btn.tooltip_text = "Toggle Map View [%s]" % km.get_action_key_name("aerial_aim")
+			map_btn.tooltip_text = "Toggle Map View [%s]" % km.get_action_summary_str("aerial_aim")
 	if mulligan_btn != null and is_instance_valid(mulligan_btn):
-		mulligan_btn.tooltip_text = "Mulligan (Undo Shot) [%s]" % km.get_action_key_name("mulligan")
+		mulligan_btn.tooltip_text = "Mulligan (Undo Shot) [%s]" % km.get_action_summary_str("mulligan")
 	if forfeit_btn != null and is_instance_valid(forfeit_btn):
-		forfeit_btn.tooltip_text = "White Flag (Concede Hole) [%s]" % km.get_action_key_name("concede_hole")
+		forfeit_btn.tooltip_text = "White Flag (Concede Hole) [%s]" % km.get_action_summary_str("concede_hole")
 	if hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
-		hide_helpers_btn.tooltip_text = "Toggle Helpers (Show/Hide) [%s]" % km.get_action_key_name("toggle_helpers")
+		hide_helpers_btn.tooltip_text = "Toggle Helpers (Show/Hide) [%s]" % km.get_action_summary_str("toggle_helpers")
 	if announcer_btn != null and is_instance_valid(announcer_btn):
-		announcer_btn.tooltip_text = "Toggle Announcer Commentary [%s]" % km.get_action_key_name("announcer_toggle")
+		announcer_btn.tooltip_text = "Toggle Announcer Commentary [%s]" % km.get_action_summary_str("announcer_toggle")
 	if tension_btn != null and is_instance_valid(tension_btn):
-		tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision [%s]" % km.get_action_key_name("suspense_toggle")
+		tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision [%s]" % km.get_action_summary_str("suspense_toggle")
+	if club_selector_node != null and is_instance_valid(club_selector_node):
+		var club_btn = club_selector_node.get("club_button") as Button
+		if club_btn != null and is_instance_valid(club_btn):
+			club_btn.tooltip_text = "Select Club [Prev: %s, Next: %s]" % [km.get_action_summary_str("prev_club"), km.get_action_summary_str("next_club")]
 
 
 func _on_golfer_cam_modal_state_changed(is_open: bool) -> void:
@@ -2038,6 +2129,12 @@ func _on_stats_visibility_changed(is_vis: bool) -> void:
 
 func _on_golfer_cam_enabled_changed(_is_enabled: bool) -> void:
 	_update_course_golfer_cam_btn_state()
+	_update_course_putting_cam_btn_state()
+
+
+func _on_putting_cam_enabled_changed(_is_enabled: bool) -> void:
+	_update_course_putting_cam_btn_state()
+	_update_course_golfer_cam_btn_state()
 
 
 func _update_course_golfer_cam_btn_state() -> void:
@@ -2055,6 +2152,23 @@ func _update_course_golfer_cam_btn_state() -> void:
 		else:
 			golfer_cam_btn.text = "📹 Golfer Cam: ON"
 			apply_material_button_style(golfer_cam_btn, Color(0.15, 0.6, 0.5, 0.85))
+
+
+func _update_course_putting_cam_btn_state() -> void:
+	if putting_cam_btn == null or not is_instance_valid(putting_cam_btn):
+		return
+	if range_ui != null:
+		var enabled = range_ui.call("is_putting_camera_enabled") if range_ui.has_method("is_putting_camera_enabled") else false
+		var minimized = range_ui.call("is_putting_camera_minimized") if range_ui.has_method("is_putting_camera_minimized") else false
+		if not enabled:
+			putting_cam_btn.text = "🎯 Putting Cam: OFF"
+			apply_material_button_style(putting_cam_btn, Color(0.35, 0.35, 0.35, 0.85))
+		elif minimized:
+			putting_cam_btn.text = "🎯 Putting Cam: MIN [REC]"
+			apply_material_button_style(putting_cam_btn, Color(0.2, 0.55, 0.5, 0.85))
+		else:
+			putting_cam_btn.text = "🎯 Putting Cam: ON"
+			apply_material_button_style(putting_cam_btn, Color(0.15, 0.6, 0.3, 0.85))
 
 
 func _get_current_green_vertices() -> PackedVector3Array:
@@ -2257,14 +2371,23 @@ func _on_active_player_changed(player: Dictionary) -> void:
 	var active_hole = MultiplayerManager.hole_info.get(hole_id, {})
 	_update_top_hud(player)
 
+	if range_ui != null:
+		var club_sel = range_ui.find_child("ClubSelector", true, false)
+		if club_sel != null and club_sel.has_method("update_bag_for_player"):
+			club_sel.update_bag_for_player(player.get("name", ""))
+
 	
 	if course_instance != null:
 		if "_aim_is_manual" in course_instance:
 			course_instance.set("_aim_is_manual", false)
-		course_instance.current_hole_name = active_hole.get("Name", hole_id)
+		var hole_name = active_hole.get("Name", hole_id)
+		var cur_hole_name = course_instance.get("current_hole_name")
+		var is_new_hole = (cur_hole_name != hole_name) or (course_instance.get("current_hole_location") != null and course_instance.current_hole_location.is_zero_approx())
+		
+		course_instance.current_hole_name = hole_name
 		course_instance.current_hole_par = active_hole.get("Par", 4)
 		var hole_loc = active_hole.get("Hole Location")
-		if hole_loc != null:
+		if hole_loc != null and is_new_hole:
 			course_instance.current_hole_location = Vector3(hole_loc[0], course_instance.get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
 			
 			if course_instance.has_node("PinMarker"):
@@ -2294,7 +2417,8 @@ func _on_active_player_changed(player: Dictionary) -> void:
 		course_instance.call("_update_hole_info_label", player["strokes"] > 0)
 		
 		# Update outline
-		course_instance.call("update_hole_outline")
+		if is_new_hole:
+			course_instance.call("update_hole_outline")
 
 	if active_ball != null:
 		var is_practice = course_instance != null and course_instance.get("practice_mode_active")
@@ -2361,22 +2485,16 @@ func _on_active_player_changed(player: Dictionary) -> void:
 					if camera != null:
 						camera.follow_mode = PhantomCamera3D.FollowMode.NONE
 						camera.look_at_mode = PhantomCamera3D.LookAtMode.NONE
-						var is_on_green = false
-						if active_ball != null:
-							var lie = str(active_ball.get("lie_type")).to_lower()
-							is_on_green = (lie == "green")
-							if not is_on_green and course_instance != null:
-								if course_instance.has_method("is_ball_on_green"):
-									is_on_green = course_instance.call("is_ball_on_green")
+						var is_putting = is_default_club_putter() or is_player_on_green() or is_player_on_fringe()
 						var cam_pos: Vector3
 						if course_instance != null and course_instance.has_method("get_address_camera_position"):
-							cam_pos = course_instance.call("get_address_camera_position", ball_pos, -angle_rad, is_on_green)
+							cam_pos = course_instance.call("get_address_camera_position", ball_pos, -angle_rad, is_putting)
 						else:
 							var cam_dist = GlobalSettings.range_settings.camera_distance.value
 							var cam_height = GlobalSettings.range_settings.camera_height.value
-							var local_offset = Vector3(-1.05, 0.6, 0) if is_on_green else Vector3(-cam_dist, cam_height, 0)
+							var local_offset = Vector3(-1.05, 0.6, 0) if is_putting else Vector3(-cam_dist, cam_height, 0)
 							if course_instance != null and course_instance.has_method("get_camera_local_offset"):
-								local_offset = course_instance.call("get_camera_local_offset", is_on_green)
+								local_offset = course_instance.call("get_camera_local_offset", is_putting)
 							var rotated_offset = local_offset.rotated(Vector3.UP, -angle_rad)
 							cam_pos = ball_pos + rotated_offset
 							if course_instance != null and course_instance.has_method("clamp_camera_position"):
@@ -2385,8 +2503,8 @@ func _on_active_player_changed(player: Dictionary) -> void:
 						
 						var target_look: Vector3
 						if course_instance.has_method("get_camera_target_look"):
-							target_look = course_instance.call("get_camera_target_look", target_aim, ball_pos, is_on_green)
-						elif is_on_green:
+							target_look = course_instance.call("get_camera_target_look", target_aim, ball_pos, is_putting)
+						elif is_putting:
 							var dist = ball_pos.distance_to(target_aim)
 							var look_dist = clamp(dist * 0.4, 2.0, 6.0)
 							if dist < 2.0:
@@ -2394,14 +2512,14 @@ func _on_active_player_changed(player: Dictionary) -> void:
 							var fraction = clamp(look_dist / max(dist, 0.001), 0.0, 1.0)
 							target_look = ball_pos.lerp(target_aim, fraction)
 						else:
-							var dist = ball_pos.distance_to(target_aim)
-							if dist < 45.0:
-								target_look = target_aim + Vector3.UP * 0.35
-							else:
-								var aim_dir = (target_aim - ball_pos).normalized()
-								if aim_dir.is_zero_approx():
-									aim_dir = Vector3.RIGHT.rotated(Vector3.UP, deg_to_rad(active_ball.aim_yaw_offset_deg))
-								target_look = ball_pos + aim_dir * 50.0 + Vector3.UP * 1.0
+							var dist = ball_pos.distance_to(target_aim) if not target_aim.is_zero_approx() else 50.0
+							var aim_dir = (target_aim - ball_pos).normalized() if not target_aim.is_zero_approx() else Vector3.ZERO
+							if aim_dir.is_zero_approx():
+								aim_dir = Vector3.RIGHT.rotated(Vector3.UP, deg_to_rad(active_ball.aim_yaw_offset_deg))
+							var look_dist = clampf(dist, 10.0, 50.0)
+							var t = clampf(look_dist / maxf(dist, 0.001), 0.0, 1.0)
+							var base_look_pos = ball_pos.lerp(target_aim, t) if not target_aim.is_zero_approx() else (ball_pos + aim_dir * 50.0)
+							target_look = base_look_pos + Vector3.UP * 1.0
 						camera.look_at(target_look)
 						if camera.camera_3d_resource != null:
 							camera.camera_3d_resource.fov = GlobalSettings.range_settings.camera_fov.value
@@ -2421,20 +2539,13 @@ func _on_active_player_changed(player: Dictionary) -> void:
 		if course_instance != null and course_instance.has_method("update_auto_club"):
 			course_instance.call("update_auto_club", true)
 
-		# Evaluate if the active player is actually on the green
-		var active_on_green = false
-		if active_ball != null:
-			active_on_green = (str(active_ball.get("lie_type")).to_lower() == "green")
-		if not active_on_green and course_instance != null and course_instance.has_method("is_ball_on_green"):
-			active_on_green = bool(course_instance.call("is_ball_on_green"))
-		if not active_on_green and not player.is_empty():
-			if player.get("lie_type", "").to_lower() == "green":
-				active_on_green = true
+		# Evaluate if the active player's default club is putter (e.g. on green or on fringe within putting distance)
+		var is_default_putter = is_default_club_putter()
 
 		# Synchronize green grid view strictly for the active player
 		if course_instance != null and "show_green_grid" in course_instance:
-			course_instance.show_green_grid = active_on_green
-			_update_grid_button_state(active_on_green)
+			course_instance.show_green_grid = is_default_putter
+			_update_grid_button_state(is_default_putter)
 
 		# Recalculate zoom zone and minimap zoom for the newly active player
 		_minimap_zoom_dirty = true
@@ -2442,7 +2553,7 @@ func _on_active_player_changed(player: Dictionary) -> void:
 		var target_zoom = get_zoom_for_zone(new_zone)
 		minimap_zoom = target_zoom
 		_last_zoom_zone = new_zone
-		_last_was_on_green = active_on_green
+		_last_was_on_green = is_default_putter
 		if _minimap_camera != null:
 			_minimap_camera.size = minimap_zoom
 		if course_instance != null and "aerial_zoom" in course_instance:
@@ -2455,6 +2566,10 @@ func _on_active_player_changed(player: Dictionary) -> void:
 
 	if not player.get("holed_out", false):
 		is_player_turn_ready = true
+		if has_node("/root/LaunchMonitorManager"):
+			var lm = get_node("/root/LaunchMonitorManager")
+			if lm != null and lm.has_method("set_ready") and not lm.get("is_ready"):
+				lm.call("set_ready")
 
 
 
@@ -3219,7 +3334,72 @@ func is_player_in_teebox() -> bool:
 	return false
 
 
+func is_player_on_green() -> bool:
+	var ball = active_ball
+	if ball == null and course_instance != null:
+		var player_node = course_instance.get_node_or_null("Player")
+		if player_node != null:
+			ball = player_node.get("ball")
+	if ball != null:
+		var lie_str = str(ball.get("lie_type")).to_lower()
+		if lie_str == "green":
+			return true
+	if course_instance != null and course_instance.has_method("is_ball_on_green"):
+		if bool(course_instance.call("is_ball_on_green")):
+			return true
+	if has_node("/root/MultiplayerManager"):
+		var mp_mgr = get_node("/root/MultiplayerManager")
+		if not mp_mgr.players.is_empty():
+			var ap = mp_mgr.get_active_player()
+			if ap.get("lie_type", "").to_lower() == "green":
+				return true
+	return false
+
+
+func is_player_on_fringe() -> bool:
+	var ball = active_ball
+	if ball == null and course_instance != null:
+		var player_node = course_instance.get_node_or_null("Player")
+		if player_node != null:
+			ball = player_node.get("ball")
+	if ball != null:
+		var lie_str = str(ball.get("lie_type")).to_lower()
+		if lie_str == "fringe":
+			return true
+	if course_instance != null and course_instance.has_method("is_ball_on_fringe"):
+		if bool(course_instance.call("is_ball_on_fringe")):
+			return true
+	if has_node("/root/MultiplayerManager"):
+		var mp_mgr = get_node("/root/MultiplayerManager")
+		if not mp_mgr.players.is_empty():
+			var ap = mp_mgr.get_active_player()
+			if ap.get("lie_type", "").to_lower() == "fringe":
+				return true
+	return false
+
+
+func is_default_club_putter() -> bool:
+	if course_instance != null and course_instance.has_method("is_default_club_putter"):
+		return bool(course_instance.call("is_default_club_putter"))
+	if course_instance != null and course_instance.has_method("get_default_club"):
+		var def_c = str(course_instance.call("get_default_club")).to_lower()
+		return def_c in ["pt", "putt", "putter"]
+	if is_player_on_green():
+		return true
+	if is_player_on_fringe():
+		var ball = active_ball
+		if ball != null and course_instance != null:
+			var pin_pos = course_instance.get("current_hole_location")
+			if pin_pos != null and not pin_pos.is_zero_approx():
+				var dist_yards = ball.global_position.distance_to(pin_pos) * 1.09361
+				return dist_yards <= 35.0
+		return true
+	return false
+
+
 func is_player_close_to_green() -> bool:
+	if is_player_on_green() or is_player_on_fringe():
+		return true
 	if course_instance != null and course_instance.has_method("is_ball_close_to_green"):
 		return course_instance.call("is_ball_close_to_green")
 	var ball = active_ball
@@ -3229,7 +3409,7 @@ func is_player_close_to_green() -> bool:
 			ball = player_node.get("ball")
 	if ball != null:
 		var lie_str = str(ball.get("lie_type")).to_lower()
-		if lie_str == "green":
+		if lie_str == "green" or lie_str == "fringe":
 			return true
 		if course_instance != null:
 			var pin_pos = course_instance.get("current_hole_location")
@@ -3240,7 +3420,8 @@ func is_player_close_to_green() -> bool:
 		var mp_mgr = get_node("/root/MultiplayerManager")
 		if not mp_mgr.players.is_empty():
 			var ap = mp_mgr.get_active_player()
-			if ap.get("lie_type", "").to_lower() == "green":
+			var a_lie = ap.get("lie_type", "").to_lower()
+			if a_lie == "green" or a_lie == "fringe":
 				return true
 	return false
 
@@ -3360,18 +3541,14 @@ func _update_minimap() -> void:
 				if aerial_cam != null:
 					aerial_cam.size = target_zoom
 			
-			# Auto-toggle green slope grid only when actually on the green
-			var on_green = false
-			if ball != null:
-				on_green = (str(ball.get("lie_type")).to_lower() == "green")
-			if not on_green and course_instance != null and course_instance.has_method("is_ball_on_green"):
-				on_green = bool(course_instance.call("is_ball_on_green"))
+			# Auto-toggle green slope grid when putter is the default selected club (green or fringe)
+			var should_show_grid = is_default_club_putter()
 			if course_instance != null and course_instance.get("show_green_grid") != null:
-				course_instance.set("show_green_grid", on_green)
-				_update_grid_button_state(on_green)
+				course_instance.set("show_green_grid", should_show_grid)
+				_update_grid_button_state(should_show_grid)
 				
 			_last_zoom_zone = current_zone
-			_last_was_on_green = on_green
+			_last_was_on_green = should_show_grid
 	
 	if is_aerial:
 		if _minimap_flag_icon != null:
@@ -3452,21 +3629,11 @@ func _update_minimap() -> void:
 			# Distance to hole
 			var dist_hole = ball_pos.distance_to(pin_pos)
 			
-			# Check if putting / on the green
-			var is_on_green = false
-			if ball != null:
-				var lie = str(ball.get("lie_type")).to_lower()
-				is_on_green = (lie == "green")
-			if not is_on_green and course_instance != null:
-				if course_instance.has_method("is_ball_on_green"):
-					is_on_green = course_instance.call("is_ball_on_green")
-			if not is_on_green and MultiplayerManager.players.size() > 0:
-				var ap = MultiplayerManager.get_active_player()
-				if ap.get("lie_type", "").to_lower() == "green":
-					is_on_green = true
+			# Check if putting / on the green or fringe
+			var is_putting = is_default_club_putter() or is_player_on_green() or is_player_on_fringe()
 
-			if is_on_green:
-				# Display as feet when putting on the green
+			if is_putting:
+				# Display as feet when putting on the green or fringe
 				var dist_back_ft = int(round(max_proj_dist * 3.28084))
 				var dist_hole_ft = int(round(dist_hole * 3.28084))
 				var dist_front_ft = int(round(min_proj_dist * 3.28084))
@@ -3541,8 +3708,8 @@ func _update_minimap_flag_marker(pin_pos: Variant, current_zone: int, ball: Node
 		_minimap_flag_icon.visible = false
 		return
 		
-	# Check if player is on the green or putting (or green heatmap is active)
-	var is_on_green_or_putting = (current_zone == 2)
+	# Check if player is on the green, fringe, or putting (or green heatmap is active)
+	var is_on_green_or_putting = (current_zone == 2) or is_default_club_putter() or is_player_on_green() or is_player_on_fringe()
 	if not is_on_green_or_putting and course_instance != null and course_instance.has_method("is_ball_on_green"):
 		is_on_green_or_putting = bool(course_instance.call("is_ball_on_green"))
 	if not is_on_green_or_putting and ball != null:
@@ -3633,8 +3800,8 @@ func _update_minimap_ball_marker(ball_pos: Vector3, current_zone: int, ball: Nod
 		_minimap_ball_icon.visible = false
 		return
 		
-	# Check if player is on the green or putting (or green heatmap is active)
-	var is_on_green_or_putting = (current_zone == 2)
+	# Check if player is on the green, fringe, or putting (or green heatmap is active)
+	var is_on_green_or_putting = (current_zone == 2) or is_default_club_putter() or is_player_on_green() or is_player_on_fringe()
 	if not is_on_green_or_putting and course_instance != null and course_instance.has_method("is_ball_on_green"):
 		is_on_green_or_putting = bool(course_instance.call("is_ball_on_green"))
 	if not is_on_green_or_putting and ball != null:
@@ -3887,14 +4054,14 @@ func aim_at_world_position(target_pos: Vector3) -> void:
 			var fraction = clamp(look_dist / max(dist, 0.001), 0.0, 1.0)
 			target_look = ball_pos.lerp(target_pos, fraction)
 		else:
-			var dist = ball_pos.distance_to(target_pos)
-			if dist < 45.0:
-				target_look = target_pos + Vector3.UP * 0.35
-			else:
-				var aim_dir = (target_pos - ball_pos).normalized()
-				if aim_dir.is_zero_approx():
-					aim_dir = Vector3.RIGHT.rotated(Vector3.UP, deg_to_rad(aim_yaw))
-				target_look = ball_pos + aim_dir * 50.0 + Vector3.UP * 1.0
+			var dist = ball_pos.distance_to(target_pos) if not target_pos.is_zero_approx() else 50.0
+			var aim_dir = (target_pos - ball_pos).normalized() if not target_pos.is_zero_approx() else Vector3.ZERO
+			if aim_dir.is_zero_approx():
+				aim_dir = Vector3.RIGHT.rotated(Vector3.UP, deg_to_rad(aim_yaw))
+			var look_dist = clampf(dist, 10.0, 50.0)
+			var t = clampf(look_dist / maxf(dist, 0.001), 0.0, 1.0)
+			var base_look_pos = ball_pos.lerp(target_pos, t) if not target_pos.is_zero_approx() else (ball_pos + aim_dir * 50.0)
+			target_look = base_look_pos + Vector3.UP * 1.0
 		camera.look_at(target_look)
 		if camera.camera_3d_resource != null:
 			camera.camera_3d_resource.fov = GlobalSettings.range_settings.camera_fov.value
@@ -3996,7 +4163,7 @@ func update_map_button_text(is_aerial: bool) -> void:
 				
 	if target_btn != null:
 		target_btn.text = ""
-		var key_str = KeybindingManager.get_action_key_name("aerial_aim") if has_node("/root/KeybindingManager") else "A"
+		var key_str = KeybindingManager.get_action_summary_str("aerial_aim") if has_node("/root/KeybindingManager") else "A"
 		if is_aerial:
 			target_btn.tooltip_text = "Return to Player [%s]" % key_str
 			apply_circular_button_style(target_btn, Color(0.2, 0.7, 0.35, 0.95))
@@ -5513,7 +5680,8 @@ func _draw_ball_overlays(overlay: Control) -> void:
 	if is_any_dialog_open():
 		return
 	var root = get_tree().root
-	if root.find_child("CameraSetupDialog", true, false) != null or root.find_child("SwingReplayModal", true, false) != null:
+	var replay_modal = root.find_child("SwingReplayModal", true, false)
+	if root.find_child("CameraSetupDialog", true, false) != null or (replay_modal != null and not replay_modal.get("is_detached")):
 		return
 		
 	var is_aerial = false

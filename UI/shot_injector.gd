@@ -65,14 +65,22 @@ func _apply_payload(_payload_path: String) -> void:
 func _on_button_pressed() -> void:
 	# Inject the spinboxes values within the shot data
 	var data := {}
-	data["Speed"] = $SpeedSpinBox.value
+	var ball_speed: float = $SpeedSpinBox.value
+	data["Speed"] = ball_speed
+	data["BallSpeed"] = ball_speed
 	data["SpinAxis"] = $SpinAxisSpinBox.value
 	data["TotalSpin"] = $TotalSpinSpinBox.value
 	data["HLA"] = $HLASpinBox.value
 	data["VLA"] = $VLASpinBox.value
 	
 	for k in _club_data.keys():
-		data[k] = _club_data[k]
+		if str(k).to_lower() == "speed":
+			data["ClubSpeed"] = _club_data[k]
+		else:
+			data[k] = _club_data[k]
+	
+	if _club_data.has("Speed") and not data.has("ClubSpeed"):
+		data["ClubSpeed"] = _club_data["Speed"]
 	
 	print("Local shot injection payload: ", JSON.stringify(data))
 	

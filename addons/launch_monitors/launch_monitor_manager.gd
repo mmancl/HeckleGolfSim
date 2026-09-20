@@ -32,6 +32,9 @@ const TRANSIENT_CONNECT_ERROR_MARKERS := [
 var devices: Dictionary = {}
 var status := "Disconnected"
 var battery_level := -1
+var _session_warned_battery_25 := false
+var _session_warned_battery_10 := false
+var _battery_warning_modal: Node = null
 var firmware := ""
 var is_ready := false
 var last_sensor_data := {"pos_x": 0, "pos_y": 0, "pos_z": 0, "ready": false, "detected": false}
@@ -63,6 +66,13 @@ var _current_club_name := ""
 var _ready_audio_player: AudioStreamPlayer = null
 var _ready_hud: CanvasLayer = null
 var _is_manual_connect := false
+var _is_auto_connecting_default := false
+var _fallback_scan_active := false
+var _fallback_scan_timer: Timer = null
+const FALLBACK_SCAN_TIMEOUT_SECONDS := 12.0
+var _default_connect_timer: Timer = null
+const DEFAULT_CONNECT_TIMEOUT_SECONDS := 4.5
+
 
 
 func _ready() -> void:
@@ -83,6 +93,7 @@ func _ready() -> void:
 	
 	if EventBus.has_signal("club_selected"):
 		EventBus.club_selected.connect(_on_club_selected)
+	battery_changed.connect(_check_battery_warning)
 
 
 func _setup_audio_player() -> void:
@@ -178,10 +189,11 @@ func is_square_device_name(name: String) -> bool:
 	return n.begins_with(SQUARE_DEVICE_PREFIX) or n.contains("square")
 
 
+func is_auto_connecting() -> bool:
+	return _is_auto_connecting_default or _fallback_scan_active
+
+
 func detect_device_type(device_id: String, device_name: String = "") -> String:
-	var explicit_type := str(settings.get("device_type", "auto"))
-	if explicit_type == "square" or explicit_type == "garmin":
-		return explicit_type
 	if device_name != "":
 		if is_garmin_device_name(device_name):
 			return "garmin"
@@ -190,13 +202,16 @@ func detect_device_type(device_id: String, device_name: String = "") -> String:
 	if devices.has(device_id):
 		var dev: Dictionary = devices[device_id]
 		var dev_type := str(dev.get("type", ""))
-		if dev_type != "":
+		if dev_type == "garmin" or dev_type == "square":
 			return dev_type
 		var dname := str(dev.get("name", ""))
 		if is_garmin_device_name(dname):
 			return "garmin"
 		if is_square_device_name(dname):
 			return "square"
+	var explicit_type := str(settings.get("device_type", "auto"))
+	if explicit_type == "square" or explicit_type == "garmin":
+		return explicit_type
 	return "square"
 
 
@@ -215,6 +230,7 @@ func start_scan() -> void:
 
 
 func stop_scan() -> void:
+	_cancel_default_connect_timer()
 	_cancel_linux_auto_connect_scan()
 	_stop_square_scan()
 	_stop_garmin_scan()
@@ -226,6 +242,9 @@ func connect_to_device(device_id: String, is_auto: bool = false) -> void:
 	_is_manual_connect = not is_auto
 	if _is_manual_connect:
 		_auto_reconnect_attempts = 0
+		_is_auto_connecting_default = false
+	_cancel_default_connect_timer()
+	_stop_fallback_scan()
 	_cancel_linux_auto_connect_scan()
 	_debug_log("connect_to_device requested for %s (auto=%s)" % [device_id, str(is_auto)])
 	settings["device_id"] = device_id
@@ -249,7 +268,8 @@ func connect_to_device(device_id: String, is_auto: bool = false) -> void:
 		if device_name == "":
 			device_name = "Garmin Approach R10"
 			settings["device_name"] = device_name
-		settings["device_type"] = "garmin"
+		if str(settings.get("device_type", "auto")) != "auto":
+			settings["device_type"] = "garmin"
 		_save_settings()
 		if not devices.has(device_id):
 			devices[device_id] = { "name": device_name, "rssi": 0, "type": "garmin" }
@@ -282,8 +302,11 @@ func connect_to_device(device_id: String, is_auto: bool = false) -> void:
 
 
 func disconnect_device() -> void:
+	_cancel_default_connect_timer()
 	_cancel_linux_auto_connect_scan()
 	_cancel_auto_reconnect()
+	_stop_fallback_scan()
+	_is_auto_connecting_default = false
 	_auto_reconnect_attempts = 0
 	settings["enabled"] = false
 	_save_settings()
@@ -370,16 +393,26 @@ func set_ready() -> void:
 	_debug_log("set_ready requested")
 	if _active_driver == "garmin" and _garmin != null:
 		_garmin.call("SetReady")
-	elif _square != null:
+	elif _active_driver == "square" and _square != null:
 		_square.call("SetReady")
+	else:
+		if _garmin != null:
+			_garmin.call("SetReady")
+		if _square != null:
+			_square.call("SetReady")
 
 
 func rearm() -> void:
 	_debug_log("rearm requested")
 	if _active_driver == "garmin" and _garmin != null:
 		_garmin.call("SetReady")
-	elif _square != null:
+	elif _active_driver == "square" and _square != null:
 		_square.call("SetReady")
+	else:
+		if _garmin != null:
+			_garmin.call("SetReady")
+		if _square != null:
+			_square.call("SetReady")
 
 
 func calibrate_garmin_tilt() -> void:
@@ -507,7 +540,7 @@ func _save_settings() -> void:
 
 
 func _on_square_device_discovered(device_id: String, name: String, rssi: int) -> void:
-	if str(settings.get("device_type", "auto")) == "garmin":
+	if not _fallback_scan_active and str(settings.get("device_type", "auto")) == "garmin":
 		return
 	if not is_square_device_name(name):
 		return
@@ -515,7 +548,8 @@ func _on_square_device_discovered(device_id: String, name: String, rssi: int) ->
 	devices[device_id] = {
 		"name": name,
 		"rssi": rssi,
-		"type": "square"
+		"type": "square",
+		"is_discovered": true
 	}
 	if is_new:
 		_debug_log("Square device discovered: %s (%s) RSSI=%d" % [name, device_id, rssi])
@@ -523,20 +557,27 @@ func _on_square_device_discovered(device_id: String, name: String, rssi: int) ->
 			settings["device_name"] = name
 			_save_settings()
 		emit_signal("device_discovered", device_id, name, rssi)
+		if _fallback_scan_active:
+			_debug_log("Fallback auto-discovery found Square device: %s (%s). Auto-connecting..." % [name, device_id])
+			_stop_fallback_scan()
+			_set_status("Found %s. Connecting..." % name)
+			connect_to_device(device_id, true)
+			return
 		if _is_linux_auto_connect_match(device_id):
 			_debug_log("saved Linux Square discovered; connecting automatically")
 			connect_to_device(device_id, true)
 
 
 func _on_garmin_device_discovered(device_id: String, name: String, rssi: int) -> void:
-	if str(settings.get("device_type", "auto")) == "square":
+	if not _fallback_scan_active and str(settings.get("device_type", "auto")) == "square":
 		return
 	var display_name := name if name.strip_edges() != "" else "Garmin Approach R10"
 	var is_new := not devices.has(device_id)
 	devices[device_id] = {
 		"name": display_name,
 		"rssi": rssi,
-		"type": "garmin"
+		"type": "garmin",
+		"is_discovered": true
 	}
 	if is_new:
 		_debug_log("Garmin device discovered: %s (%s) RSSI=%d" % [display_name, device_id, rssi])
@@ -544,6 +585,12 @@ func _on_garmin_device_discovered(device_id: String, name: String, rssi: int) ->
 			settings["device_name"] = display_name
 			_save_settings()
 		emit_signal("device_discovered", device_id, display_name, rssi)
+		if _fallback_scan_active:
+			_debug_log("Fallback auto-discovery found Garmin device: %s (%s). Auto-connecting..." % [display_name, device_id])
+			_stop_fallback_scan()
+			_set_status("Found %s. Connecting..." % display_name)
+			connect_to_device(device_id, true)
+			return
 		if _is_linux_auto_connect_match(device_id):
 			_debug_log("saved Linux Garmin discovered; connecting automatically")
 			connect_to_device(device_id, true)
@@ -553,31 +600,50 @@ func _on_square_status_changed(value: String) -> void:
 	if _active_driver != "square" and _active_driver != "":
 		return
 	_set_status(value)
-	if value == "Disconnected" and bool(settings.get("enabled", false)) and str(settings.get("device_id", "")) != "" and _active_driver == "square":
-		_schedule_auto_reconnect()
+	if value == "Disconnected":
+		_cancel_default_connect_timer()
+		if _is_auto_connecting_default:
+			_is_auto_connecting_default = false
+			_start_fallback_auto_discovery()
+		elif bool(settings.get("enabled", false)) and str(settings.get("device_id", "")) != "" and _active_driver == "square" and not _fallback_scan_active:
+			_schedule_auto_reconnect()
 	elif value == "Connected" or value == "Connecting" or value == "Ready":
 		_cancel_auto_reconnect()
-		if value == "Connected":
+		if value == "Connected" or value == "Ready":
+			_cancel_default_connect_timer()
 			_auto_reconnect_attempts = 0
+			_is_auto_connecting_default = false
+			_stop_fallback_scan()
 
 
 func _on_garmin_status_changed(value: String) -> void:
 	if _active_driver != "garmin" and _active_driver != "":
 		return
 	_set_status(value)
-	if value == "Disconnected" and bool(settings.get("enabled", false)) and str(settings.get("device_id", "")) != "" and _active_driver == "garmin":
-		_schedule_auto_reconnect()
+	if value == "Disconnected":
+		_cancel_default_connect_timer()
+		if _is_auto_connecting_default:
+			_is_auto_connecting_default = false
+			_start_fallback_auto_discovery()
+		elif bool(settings.get("enabled", false)) and str(settings.get("device_id", "")) != "" and _active_driver == "garmin" and not _fallback_scan_active:
+			_schedule_auto_reconnect()
 	elif value == "Connected" or value == "Connecting" or value == "Ready":
 		_cancel_auto_reconnect()
-		if value == "Connected":
+		if value == "Connected" or value == "Ready":
+			_cancel_default_connect_timer()
 			_auto_reconnect_attempts = 0
+			_is_auto_connecting_default = false
+			_stop_fallback_scan()
 
 
 func _on_garmin_error_occurred(message: String) -> void:
 	if _active_driver != "garmin" and _active_driver != "":
 		return
-	_debug_error("Garmin runtime error: %s" % message)
 	_cancel_auto_reconnect()
+	if _is_auto_connecting_default or _fallback_scan_active:
+		_debug_log("Garmin auto-connect suppressed error during startup/fallback: %s" % message)
+		return
+	_debug_error("Garmin runtime error: %s" % message)
 	emit_signal("error_occurred", message)
 
 
@@ -615,8 +681,23 @@ func _on_garmin_ready_changed(value: bool) -> void:
 	_update_hud_display()
 
 
+func _is_valid_shot_data(data: Dictionary) -> bool:
+	if data.is_empty():
+		return false
+	var speed: float = float(data.get("BallSpeed", data.get("Speed", 0.0)))
+	if speed <= 0.1:
+		return false
+	var shot_type = data.get("ShotType", "")
+	if str(shot_type).to_lower() == "practice":
+		return false
+	return true
+
+
 func _on_garmin_shot_received(data: Dictionary) -> void:
 	if _active_driver != "garmin":
+		return
+	if not _is_valid_shot_data(data):
+		_debug_log("Garmin practice swing or stationary ball ignored (speed=%.1f mph)" % float(data.get("BallSpeed", data.get("Speed", 0.0))))
 		return
 	_debug_log("Garmin shot received with %d fields" % data.size())
 	FoamBallBoost.apply_boost(data, _current_club_name)
@@ -664,6 +745,9 @@ func _cancel_auto_reconnect() -> void:
 func _on_square_error_occurred(message: String) -> void:
 	if _active_driver != "square" and _active_driver != "":
 		return
+	if _is_auto_connecting_default or _fallback_scan_active:
+		_debug_log("Square auto-connect suppressed error during startup/fallback: %s" % message)
+		return
 	var is_transient := _is_transient_square_connect_error(message)
 	if not _is_manual_connect and is_transient:
 		_debug_log("Square auto-connect suppressed error: %s" % message)
@@ -681,6 +765,64 @@ func _on_square_battery_changed(level: int) -> void:
 	_debug_log("battery changed: %d%%" % level)
 	battery_level = level
 	emit_signal("battery_changed", level)
+
+
+func _check_battery_warning(level: int) -> void:
+	if level < 0 or level > 100:
+		return
+
+	if level <= 10:
+		if not _session_warned_battery_10:
+			_session_warned_battery_10 = true
+			_session_warned_battery_25 = true
+			_show_battery_warning_modal(level)
+	elif level <= 25:
+		if not _session_warned_battery_25:
+			_session_warned_battery_25 = true
+			_show_battery_warning_modal(level)
+
+
+func _show_battery_warning_modal(level: int) -> void:
+	call_deferred("_deferred_show_battery_warning_modal", level)
+
+
+func _deferred_show_battery_warning_modal(level: int) -> void:
+	if _battery_warning_modal != null and is_instance_valid(_battery_warning_modal):
+		if _battery_warning_modal.has_method("set_battery_level"):
+			_battery_warning_modal.call("set_battery_level", level)
+		return
+
+	var modal_scene = load("res://UI/BatteryWarningModal/battery_warning_modal.tscn")
+	if modal_scene == null:
+		push_error("Could not load battery_warning_modal.tscn")
+		return
+
+	var modal = modal_scene.instantiate()
+	if modal == null:
+		return
+
+	modal.name = "BatteryWarningModal"
+	if modal.has_method("set_battery_level"):
+		modal.call("set_battery_level", level)
+
+	_battery_warning_modal = modal
+	var tree := get_tree()
+	if tree != null and tree.root != null:
+		tree.root.add_child(modal)
+	else:
+		add_child(modal)
+
+
+func reset_battery_warning_session() -> void:
+	_session_warned_battery_25 = false
+	_session_warned_battery_10 = false
+	if _battery_warning_modal != null and is_instance_valid(_battery_warning_modal):
+		_battery_warning_modal.queue_free()
+		_battery_warning_modal = null
+
+
+func trigger_test_battery_warning(level: int) -> void:
+	_check_battery_warning(level)
 
 
 func _on_square_firmware_changed(value: String) -> void:
@@ -727,6 +869,9 @@ func _on_square_sensor_data_received(pos_x: int, pos_y: int, pos_z: int, ready: 
 func _on_square_shot_received(data: Dictionary) -> void:
 	if _active_driver != "square":
 		return
+	if not _is_valid_shot_data(data):
+		_debug_log("Square practice swing or stationary ball ignored (speed=%.1f mph)" % float(data.get("BallSpeed", data.get("Speed", 0.0))))
+		return
 	_debug_log("shot received with %d fields" % data.size())
 	FoamBallBoost.apply_boost(data, _current_club_name)
 	notify_shot_started()
@@ -744,6 +889,8 @@ func _missing_support_message() -> String:
 
 func _connect_saved_device_on_startup(device_id: String) -> void:
 	if device_id == "":
+		_debug_log("Launch monitor enabled on startup with no saved device_id. Starting auto-discovery...")
+		_start_fallback_auto_discovery()
 		return
 	var saved_name := str(settings.get("device_name", ""))
 	var saved_type := str(settings.get("device_type", "auto"))
@@ -753,19 +900,57 @@ func _connect_saved_device_on_startup(device_id: String) -> void:
 		devices[device_id] = {
 			"name": saved_name,
 			"rssi": 0,
-			"type": saved_type if saved_type != "auto" else detect_device_type(device_id, saved_name)
+			"type": saved_type if saved_type != "auto" else detect_device_type(device_id, saved_name),
+			"is_discovered": false
 		}
+	_is_auto_connecting_default = true
+	_start_default_connect_timer()
 	if OS.get_name() != "Linux":
 		connect_to_device(device_id, true)
 		return
 	_start_linux_auto_connect_scan(device_id)
 
 
+func _start_default_connect_timer() -> void:
+	_cancel_default_connect_timer()
+	_default_connect_timer = Timer.new()
+	_default_connect_timer.name = "DefaultConnectTimer"
+	_default_connect_timer.one_shot = true
+	_default_connect_timer.wait_time = DEFAULT_CONNECT_TIMEOUT_SECONDS
+	_default_connect_timer.timeout.connect(_on_default_connect_timeout)
+	add_child(_default_connect_timer)
+	_default_connect_timer.start()
+
+
+func _on_default_connect_timeout() -> void:
+	if not _is_auto_connecting_default:
+		return
+	_debug_log("Default launch monitor connection timed out (%.1fs). Starting fallback auto-discovery..." % DEFAULT_CONNECT_TIMEOUT_SECONDS)
+	_is_auto_connecting_default = false
+	_cancel_default_connect_timer()
+	if _square != null:
+		_square.call("DisconnectFromDevice")
+	if _garmin != null:
+		_garmin.call("DisconnectFromDevice")
+	_active_driver = ""
+	_start_fallback_auto_discovery()
+
+
+func _cancel_default_connect_timer() -> void:
+	if _default_connect_timer != null:
+		if _default_connect_timer.timeout.is_connected(_on_default_connect_timeout):
+			_default_connect_timer.timeout.disconnect(_on_default_connect_timeout)
+		_default_connect_timer.stop()
+		_default_connect_timer.queue_free()
+		_default_connect_timer = null
+
+
 func _start_linux_auto_connect_scan(device_id: String) -> void:
 	_cancel_linux_auto_connect_scan()
 	var target_address := _normalize_bluetooth_address(device_id)
 	if target_address == "":
-		_debug_log("saved Linux Bluetooth id cannot be matched automatically")
+		_debug_log("saved Linux Bluetooth id cannot be matched automatically; starting fallback auto-discovery")
+		_start_fallback_auto_discovery()
 		return
 	_linux_auto_connect_active = true
 	_linux_auto_connect_target_address = target_address
@@ -787,13 +972,75 @@ func _start_linux_auto_connect_timer() -> void:
 func _on_linux_auto_connect_timeout() -> void:
 	if not _linux_auto_connect_active:
 		return
-	_debug_log("saved Linux Square was not found during startup scan")
+	_debug_log("saved Linux launch monitor was not found during startup scan")
 	_linux_auto_connect_active = false
 	_linux_auto_connect_target_address = ""
 	_clear_linux_auto_connect_timer()
 	_stop_square_scan()
-	if status == "Scanning":
+	if _is_auto_connecting_default:
+		_is_auto_connecting_default = false
+		_start_fallback_auto_discovery()
+	elif status == "Scanning":
 		_set_status("Disconnected")
+
+
+func _start_fallback_auto_discovery() -> void:
+	_stop_fallback_scan()
+	_cancel_auto_reconnect()
+	_cancel_default_connect_timer()
+	_auto_reconnect_attempts = 0
+
+	if not bool(settings.get("enabled", false)):
+		return
+	if status == "Connected" or status == "Ready" or is_ready:
+		return
+
+	var saved_name := str(settings.get("device_name", "Default Launch Monitor"))
+	_debug_log("Default launch monitor '%s' not found. Starting auto-discovery for alternative launch monitors..." % saved_name)
+
+	_fallback_scan_active = true
+	_set_status("Default monitor not found. Searching for available launch monitors...")
+
+	devices.clear()
+	# Always scan all supported monitor types in fallback mode
+	_start_square_scan()
+	_start_garmin_scan()
+
+	_start_fallback_scan_timer()
+
+
+func _start_fallback_scan_timer() -> void:
+	_clear_fallback_scan_timer()
+	_fallback_scan_timer = Timer.new()
+	_fallback_scan_timer.name = "FallbackScanTimer"
+	_fallback_scan_timer.one_shot = true
+	_fallback_scan_timer.wait_time = FALLBACK_SCAN_TIMEOUT_SECONDS
+	_fallback_scan_timer.timeout.connect(_on_fallback_scan_timeout)
+	add_child(_fallback_scan_timer)
+	_fallback_scan_timer.start()
+
+
+func _on_fallback_scan_timeout() -> void:
+	if not _fallback_scan_active:
+		return
+	_debug_log("Fallback auto-discovery scan timed out. No active launch monitors found.")
+	_stop_fallback_scan()
+	stop_scan()
+	_set_status("No launch monitors found")
+
+
+func _stop_fallback_scan() -> void:
+	_fallback_scan_active = false
+	_clear_fallback_scan_timer()
+
+
+func _clear_fallback_scan_timer() -> void:
+	if _fallback_scan_timer != null:
+		if _fallback_scan_timer.timeout.is_connected(_on_fallback_scan_timeout):
+			_fallback_scan_timer.timeout.disconnect(_on_fallback_scan_timeout)
+		_fallback_scan_timer.stop()
+		_fallback_scan_timer.queue_free()
+		_fallback_scan_timer = null
 
 
 func _cancel_linux_auto_connect_scan() -> void:

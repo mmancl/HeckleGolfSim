@@ -142,22 +142,84 @@ public partial class TcpServer : Node
 				&& _shotData.TryGetValue("BallData", out var ballDataVar)
 				&& ballDataVar.VariantType == Variant.Type.Dictionary)
 			{
-				var hitData = ballDataVar.AsGodotDictionary().Duplicate();
+				var ballData = ballDataVar.AsGodotDictionary();
+				var hitData = ballData.Duplicate();
+
+				float ballSpeed = 0f;
+				if (ballData.TryGetValue("Speed", out var bsVar))
+				{
+					ballSpeed = Convert.ToSingle(bsVar);
+				}
+				else if (ballData.TryGetValue("BallSpeed", out var bsVar2))
+				{
+					ballSpeed = Convert.ToSingle(bsVar2);
+				}
+
+				float clubSpeed = 0f;
 				if (_shotData.TryGetValue("ClubData", out var clubDataVar)
 					&& clubDataVar.VariantType == Variant.Type.Dictionary)
 				{
 					var clubData = clubDataVar.AsGodotDictionary();
+					if (clubData.TryGetValue("Speed", out var csVar))
+					{
+						clubSpeed = Convert.ToSingle(csVar);
+					}
+					else if (clubData.TryGetValue("ClubSpeed", out var csVar2))
+					{
+						clubSpeed = Convert.ToSingle(csVar2);
+					}
+
 					foreach (var kvp in clubData)
 					{
+						var key = kvp.Key.AsString();
+						// Do NOT allow ClubData's "Speed" to overwrite BallData's "Speed"
+						if (key.Equals("Speed", StringComparison.OrdinalIgnoreCase))
+						{
+							continue;
+						}
 						hitData[kvp.Key] = kvp.Value;
 					}
-					if (clubData.TryGetValue("Speed", out var cs)) hitData["ClubSpeed"] = cs;
+
 					if (clubData.TryGetValue("AngleOfAttack", out var aoa)) hitData["AttackAngle"] = aoa;
 					if (clubData.TryGetValue("FaceToTarget", out var ft)) hitData["FaceAngle"] = ft;
 					if (clubData.TryGetValue("Path", out var cp)) hitData["ClubPath"] = cp;
 					if (clubData.TryGetValue("FaceToPath", out var ftp)) hitData["FaceToPath"] = ftp;
 					if (clubData.TryGetValue("SmashFactor", out var sf)) hitData["SmashFactor"] = sf;
 					if (clubData.TryGetValue("DynamicLoft", out var dl)) hitData["DynamicLoft"] = dl;
+				}
+
+				// Check if ball speed and club speed were inverted by an external connector/bridge.
+				// In golf full swings (clubSpeed > 30 mph), ball speed is always significantly higher than club speed.
+				if (ballSpeed > 0f && clubSpeed > 30f && ballSpeed < clubSpeed * 0.85f)
+				{
+					GD.PushWarning($"[TcpServer] Detected inverted BallSpeed ({ballSpeed:F1}) and ClubSpeed ({clubSpeed:F1}). Auto-swapping.");
+					float temp = ballSpeed;
+					ballSpeed = clubSpeed;
+					clubSpeed = temp;
+				}
+
+				hitData["Speed"] = ballSpeed;
+				hitData["BallSpeed"] = ballSpeed;
+				if (clubSpeed > 0f)
+				{
+					hitData["ClubSpeed"] = clubSpeed;
+				}
+
+				// Compute SmashFactor if missing or invalid
+				float smash = 0f;
+				if (hitData.TryGetValue("SmashFactor", out var sfCheck))
+				{
+					try { smash = Convert.ToSingle(sfCheck); } catch { smash = 0f; }
+				}
+				if (smash <= 0.05f && ballSpeed > 0f && clubSpeed > 0f)
+				{
+					hitData["SmashFactor"] = ballSpeed / clubSpeed;
+				}
+
+				if (ballSpeed <= 0.1f)
+				{
+					GD.Print($"[TcpServer] Ignored practice swing or stationary ball ({ballSpeed:F1} mph).");
+					return;
 				}
 
 				EmitSignal(SignalName.HitBall, hitData);

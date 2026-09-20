@@ -115,6 +115,8 @@ func _ready() -> void:
 		tab_container.add_theme_stylebox_override("tab_hovered", _create_tab_style(ThemeManager.COLOR_NAV_HOVER, Color(1, 1, 1, 0.3)))
 		tab_container.set_tab_title(0, "📶 Bluetooth")
 		tab_container.set_tab_title(1, "🌐 Other (GSPro / Network)")
+		tab_container.current_tab = _get_saved_tab()
+		tab_container.tab_changed.connect(_on_tab_changed)
 
 	# Apply touch scroll styling
 	if bluetooth_tab != null:
@@ -163,6 +165,9 @@ func _ready() -> void:
 
 	_refresh_devices()
 	_update_status_display()
+
+	if _launch_monitor != null and (_launch_monitor.status == "Disconnected" or _launch_monitor.status.contains("No launch monitors found")):
+		_launch_monitor.start_scan()
 
 
 func _create_tab_style(bg_color: Color, border_color: Color) -> StyleBoxFlat:
@@ -217,6 +222,25 @@ func _on_device_type_selected(index: int) -> void:
 	var selected_type := str(device_type_option.get_item_metadata(index))
 	_launch_monitor.set_device_type(selected_type)
 	_refresh_devices()
+	if _launch_monitor.status == "Scanning" or _launch_monitor.status.contains("Searching"):
+		_launch_monitor.stop_scan()
+		_launch_monitor.start_scan()
+
+
+func _get_saved_tab() -> int:
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.get("range_settings") != null and "launch_monitor_tab" in gs.range_settings:
+			return clampi(int(gs.range_settings.launch_monitor_tab.value), 0, 1)
+	return 0
+
+
+func _on_tab_changed(tab_index: int) -> void:
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.get("range_settings") != null and "launch_monitor_tab" in gs.range_settings:
+			gs.range_settings.launch_monitor_tab.set_value(tab_index)
+			gs.save_settings()
 
 
 func _setup_other_devices_dropdown() -> void:
@@ -225,14 +249,24 @@ func _setup_other_devices_dropdown() -> void:
 	
 	other_device_option.clear()
 	var keys = ["mlm2pro", "garmin_r10", "flightscope", "uneekor", "bushnell", "pitrac", "shot_injector"]
+	var saved_device := "mlm2pro"
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.get("range_settings") != null and "gspro_selected_device" in gs.range_settings:
+			saved_device = str(gs.range_settings.gspro_selected_device.value)
+
+	var selected_idx := 0
 	for i in range(keys.size()):
 		var key = keys[i]
 		var info = OTHER_DEVICE_GUIDES[key]
 		other_device_option.add_item(info["name"], i)
 		other_device_option.set_item_metadata(i, key)
+		if key == saved_device:
+			selected_idx = i
 
 	other_device_option.item_selected.connect(_on_other_device_selected)
-	_on_other_device_selected(0)
+	other_device_option.select(selected_idx)
+	_on_other_device_selected(selected_idx)
 
 
 func _setup_network_config() -> void:
@@ -251,6 +285,7 @@ func _setup_network_config() -> void:
 	if network_ip_input != null:
 		ThemeManager.apply_input_style(network_ip_input, 6)
 		network_ip_input.text = _get_configured_ip()
+		network_ip_input.text_changed.connect(_on_ip_text_changed)
 		network_ip_input.text_submitted.connect(func(new_text: String): _set_configured_ip(new_text))
 		network_ip_input.focus_exited.connect(func(): _set_configured_ip(network_ip_input.text))
 	if network_port_spin_box != null:
@@ -264,6 +299,22 @@ func _setup_network_config() -> void:
 		network_port_spin_box.value_changed.connect(func(val: float): _set_configured_port(int(val)))
 	
 	_update_network_display()
+
+
+func _on_ip_text_changed(new_text: String) -> void:
+	var trimmed = new_text.strip_edges()
+	if trimmed.is_empty():
+		trimmed = "0.0.0.0"
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.get("range_settings") != null and "tcp_server_ip" in gs.range_settings:
+			gs.range_settings.tcp_server_ip.set_value(trimmed)
+			gs.save_settings()
+	_notify_active_tcp_server()
+	if other_device_option != null and other_device_option.selected >= 0:
+		var key = str(other_device_option.get_item_metadata(other_device_option.selected))
+		if instructions_text != null:
+			instructions_text.text = _format_guide_text(key)
 
 
 func _update_network_display() -> void:
@@ -374,6 +425,27 @@ func _set_configured_ip(new_ip: String) -> void:
 	_update_network_display()
 
 
+func _save_network_preferences() -> void:
+	if network_ip_input != null:
+		var ip_val = network_ip_input.text.strip_edges()
+		if ip_val.is_empty():
+			ip_val = "0.0.0.0"
+		if has_node("/root/GlobalSettings"):
+			var gs = get_node("/root/GlobalSettings")
+			if gs.get("range_settings") != null and "tcp_server_ip" in gs.range_settings:
+				gs.range_settings.tcp_server_ip.set_value(ip_val)
+	if network_port_spin_box != null:
+		var port_val = clampi(int(network_port_spin_box.value), 1, 65535)
+		if has_node("/root/GlobalSettings"):
+			var gs = get_node("/root/GlobalSettings")
+			if gs.get("range_settings") != null and "tcp_server_port" in gs.range_settings:
+				gs.range_settings.tcp_server_port.set_value(port_val)
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		gs.save_settings()
+	_notify_active_tcp_server()
+
+
 func _notify_active_tcp_server() -> void:
 	var root = get_tree().root
 	var tcp_server = root.find_child("TCPServer", true, false)
@@ -393,6 +465,11 @@ func _on_other_device_selected(index: int) -> void:
 		return
 	var key = str(other_device_option.get_item_metadata(index))
 	instructions_text.text = _format_guide_text(key)
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.get("range_settings") != null and "gspro_selected_device" in gs.range_settings:
+			gs.range_settings.gspro_selected_device.set_value(key)
+			gs.save_settings()
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -403,12 +480,14 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _on_skip_pressed() -> void:
+	_save_network_preferences()
 	skipped.emit()
 	closed.emit()
 	queue_free()
 
 
 func _on_continue_pressed() -> void:
+	_save_network_preferences()
 	connected_and_continued.emit()
 	closed.emit()
 	queue_free()
@@ -465,11 +544,13 @@ func _on_device_option_selected(index: int) -> void:
 	_launch_monitor._save_settings()
 
 
-func _refresh_devices() -> void:
+func _refresh_devices(preferred_device_id: String = "") -> void:
 	if device_option == null or _launch_monitor == null:
 		return
 
-	var selected_device := str(_launch_monitor.settings.get("device_id", ""))
+	var selected_device := preferred_device_id
+	if selected_device == "":
+		selected_device = str(_launch_monitor.settings.get("device_id", ""))
 	var saved_name := str(_launch_monitor.settings.get("device_name", ""))
 	var saved_type := str(_launch_monitor.settings.get("device_type", "auto"))
 	if saved_name == "":
@@ -479,7 +560,8 @@ func _refresh_devices() -> void:
 		_launch_monitor.devices[selected_device] = {
 			"name": saved_name,
 			"rssi": 0,
-			"type": saved_type if saved_type != "auto" else _launch_monitor.detect_device_type(selected_device, saved_name)
+			"type": saved_type if saved_type != "auto" else _launch_monitor.detect_device_type(selected_device, saved_name),
+			"is_discovered": false
 		}
 
 	var filter_type := "auto"
@@ -507,19 +589,56 @@ func _refresh_devices() -> void:
 		connect_button.disabled = true
 		return
 
-	# Auto-select discovered device if none previously selected or previous device not found
-	if (selected_device == "" or not matching_keys.has(selected_device)) and matching_keys.size() > 0:
-		selected_device = str(matching_keys[0])
+	# Sort matching keys: live discovered devices first (highest RSSI first), then offline devices
+	matching_keys.sort_custom(func(a, b):
+		var dev_a = _launch_monitor.devices[a]
+		var dev_b = _launch_monitor.devices[b]
+		var live_a = bool(dev_a.get("is_discovered", false))
+		var live_b = bool(dev_b.get("is_discovered", false))
+		if live_a != live_b:
+			return live_a
+		var rssi_a = int(dev_a.get("rssi", 0))
+		var rssi_b = int(dev_b.get("rssi", 0))
+		return rssi_a > rssi_b
+	)
+
+	# Prioritize preferred device or actively discovered live devices
+	var active_live_keys: Array = []
+	for k in matching_keys:
+		if bool(_launch_monitor.devices[k].get("is_discovered", false)):
+			active_live_keys.append(k)
+
+	if preferred_device_id != "" and matching_keys.has(preferred_device_id):
+		selected_device = preferred_device_id
+	else:
+		var current_is_live := matching_keys.has(selected_device) and bool(_launch_monitor.devices[selected_device].get("is_discovered", false))
+		if not current_is_live and not active_live_keys.is_empty():
+			selected_device = str(active_live_keys[0])
+		elif (selected_device == "" or not matching_keys.has(selected_device)) and matching_keys.size() > 0:
+			selected_device = str(matching_keys[0])
+
+	if selected_device != "":
 		_launch_monitor.settings["device_id"] = selected_device
-		var dev = _launch_monitor.devices[selected_device]
-		_launch_monitor.settings["device_name"] = str(dev.get("name", ""))
+		if _launch_monitor.devices.has(selected_device):
+			var dev = _launch_monitor.devices[selected_device]
+			_launch_monitor.settings["device_name"] = str(dev.get("name", ""))
 		_launch_monitor._save_settings()
 
-	# Avoid clearing/rebuilding OptionButton if items match to prevent closing the popup
+	# Rebuild OptionButton items if count, ids, or labels (e.g. offline -> live) changed
 	var already_matches := (device_option.item_count == matching_keys.size())
 	if already_matches:
 		for i in range(matching_keys.size()):
-			if str(device_option.get_item_metadata(i)) != str(matching_keys[i]):
+			var dev_id = str(matching_keys[i])
+			var device = _launch_monitor.devices[dev_id]
+			var dev_name: String = str(device.get("name", "Launch Monitor"))
+			var dev_type: String = str(device.get("type", ""))
+			var is_live: bool = bool(device.get("is_discovered", false))
+			var prefix := ""
+			if filter_type == "auto":
+				prefix = "[Garmin R10] " if dev_type == "garmin" else "[Square] "
+			var live_suffix := " 📶" if is_live else " (Offline)"
+			var expected_label := prefix + dev_name + live_suffix
+			if str(device_option.get_item_metadata(i)) != dev_id or device_option.get_item_text(i) != expected_label:
 				already_matches = false
 				break
 
@@ -529,19 +648,34 @@ func _refresh_devices() -> void:
 			var device = _launch_monitor.devices[dev_id]
 			var dev_name: String = str(device.get("name", "Launch Monitor"))
 			var dev_type: String = str(device.get("type", ""))
+			var is_live: bool = bool(device.get("is_discovered", false))
 			var prefix := ""
 			if filter_type == "auto":
 				prefix = "[Garmin R10] " if dev_type == "garmin" else "[Square] "
-			var label := prefix + dev_name
+			var live_suffix := " 📶" if is_live else " (Offline)"
+			var label := prefix + dev_name + live_suffix
 			var idx := device_option.item_count
 			device_option.add_item(label, idx)
 			device_option.set_item_metadata(idx, dev_id)
 
-	connect_button.disabled = false
+	var target_index := -1
 	for i in range(device_option.item_count):
 		if str(device_option.get_item_metadata(i)) == selected_device:
-			device_option.select(i)
+			target_index = i
 			break
+
+	if target_index < 0 and device_option.item_count > 0:
+		target_index = 0
+		selected_device = str(device_option.get_item_metadata(0))
+		_launch_monitor.settings["device_id"] = selected_device
+		if _launch_monitor.devices.has(selected_device):
+			_launch_monitor.settings["device_name"] = str(_launch_monitor.devices[selected_device].get("name", ""))
+		_launch_monitor._save_settings()
+
+	if target_index >= 0:
+		device_option.select(target_index)
+
+	connect_button.disabled = (device_option.item_count == 0 or str(device_option.get_item_metadata(device_option.selected)) == "")
 
 
 func _update_status_display() -> void:
@@ -551,25 +685,28 @@ func _update_status_display() -> void:
 	var current_status: String = str(_launch_monitor.status)
 	scan_button.text = "🔍 Scan"
 
-	match current_status:
-		"Connected", "Ready":
-			status_label.text = "Status: Connected (%s)" % current_status
-			status_label.add_theme_color_override("font_color", Color(0.35, 0.85, 0.45))
-			continue_button.text = "Continue to Main Menu ➔"
-		"Scanning":
-			status_label.text = "Status: Scanning for devices..."
-			status_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
-			scan_button.text = "🔄 Scanning..."
-		"Connecting":
-			status_label.text = "Status: Connecting..."
-			status_label.add_theme_color_override("font_color", Color(0.4, 0.75, 0.95))
-		"Disconnected":
-			status_label.text = "Status: Disconnected"
-			status_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
-			continue_button.text = "Continue to Main Menu"
-		_:
-			status_label.text = "Status: %s" % current_status
-			status_label.add_theme_color_override("font_color", Color(1.0, 0.42, 0.42))
+	if current_status == "Connected" or current_status == "Ready":
+		status_label.text = "Status: Connected (%s)" % current_status
+		status_label.add_theme_color_override("font_color", Color(0.35, 0.85, 0.45))
+		continue_button.text = "Continue to Main Menu ➔"
+	elif current_status.contains("Scanning") or current_status.contains("Searching"):
+		status_label.text = "Status: %s" % current_status
+		status_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
+		scan_button.text = "🔄 Scanning..."
+	elif current_status.contains("Connecting") or current_status.contains("Found"):
+		status_label.text = "Status: %s" % current_status
+		status_label.add_theme_color_override("font_color", Color(0.4, 0.75, 0.95))
+	elif current_status == "Disconnected":
+		status_label.text = "Status: Disconnected"
+		status_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+		continue_button.text = "Continue to Main Menu"
+	elif current_status.contains("No launch monitors found"):
+		status_label.text = "Status: %s" % current_status
+		status_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
+		continue_button.text = "Continue to Main Menu"
+	else:
+		status_label.text = "Status: %s" % current_status
+		status_label.add_theme_color_override("font_color", Color(1.0, 0.42, 0.42))
 
 	if battery_label != null:
 		if int(_launch_monitor.battery_level) >= 0:
@@ -580,10 +717,11 @@ func _update_status_display() -> void:
 			battery_label.visible = false
 
 
-func _on_device_discovered(_device_id: String, _name: String, _rssi: int) -> void:
-	_refresh_devices()
-	if _launch_monitor != null and _launch_monitor.status == "Scanning":
-		status_label.text = "Status: Device found! Ready to connect."
+func _on_device_discovered(device_id: String, name: String, _rssi: int) -> void:
+	_refresh_devices(device_id)
+	if _launch_monitor != null and (_launch_monitor.status == "Scanning" or _launch_monitor.status.contains("Searching")):
+		var display_name := name if name != "" else "Launch Monitor"
+		status_label.text = "Status: Found %s! Ready to connect." % display_name
 		status_label.add_theme_color_override("font_color", Color(0.35, 0.85, 0.45))
 
 
@@ -606,6 +744,7 @@ func _on_ready_changed(_is_ready: bool) -> void:
 
 
 func _exit_tree() -> void:
+	_save_network_preferences()
 	if _launch_monitor != null:
 		if _launch_monitor.device_discovered.is_connected(_on_device_discovered):
 			_launch_monitor.device_discovered.disconnect(_on_device_discovered)

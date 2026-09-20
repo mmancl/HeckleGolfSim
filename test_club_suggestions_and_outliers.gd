@@ -36,28 +36,31 @@ func _on_frame():
 	var sample_shots = [
 		{"TotalDistance": 145.0},
 		{"TotalDistance": 150.0},
+		{"TotalDistance": 150.0},
+		{"TotalDistance": 150.0},
 		{"TotalDistance": 155.0}
 	]
 	var stats = mp.calculate_shots_mean_and_std_dev(sample_shots)
 	assert(is_equal_approx(stats["mean"], 150.0), "Mean must be 150.0")
-	# Population std dev of [145, 150, 155] is sqrt((25 + 0 + 25) / 3) = sqrt(50/3) = ~4.082
-	assert(stats["std_dev"] > 4.0 and stats["std_dev"] < 4.2, "Std dev must be approx 4.08")
-	assert(stats["effective_std_dev"] >= 3.0, "Effective std dev must be >= 3.0")
+	# Population std dev of [145, 150, 150, 150, 155] is sqrt((25 + 0 + 0 + 0 + 25) / 5) = sqrt(10) = ~3.162
+	assert(stats["std_dev"] > 3.1 and stats["std_dev"] < 3.2, "Std dev must be approx 3.16")
+	assert(stats["effective_std_dev"] >= 15.0, "Effective std dev must be >= 15.0")
 	print("  PASS: Mean and StdDev calculation correct.")
 	
 	# TEST 4: Outlier detection
-	print("\n--- Test 4: Outlier Detection (2 Standard Deviations) ---")
-	# When shots < 3, no outlier rejection
-	assert(not mp.is_shot_outlier([{"TotalDistance": 150.0}], {"TotalDistance": 10.0}), "Cannot reject outliers with < 3 shots")
+	print("\n--- Test 4: Outlier Detection (2 Standard Deviations, Minimum 5 Shots) ---")
+	# When shots < 5, no outlier rejection
+	assert(not mp.is_shot_outlier([{"TotalDistance": 150.0}], {"TotalDistance": 10.0}), "Cannot reject outliers with < 5 shots")
+	assert(not mp.is_shot_outlier([{"TotalDistance": 150.0}, {"TotalDistance": 150.0}, {"TotalDistance": 150.0}, {"TotalDistance": 150.0}], {"TotalDistance": 10.0}), "Cannot reject outliers with < 5 shots")
 	
-	# With sample_shots: mean = 150, effective_std_dev = 4.082. 2 * sigma = 8.165. Acceptable range: ~[141.8, 158.2]
+	# With sample_shots (5 shots): mean = 150, effective_std_dev = 15.0m (min bound). 2 * sigma = 30.0m. Acceptable range: [120.0, 180.0]
 	# Normal shot (152m)
 	assert(not mp.is_shot_outlier(sample_shots, {"TotalDistance": 152.0}), "152m should NOT be outlier")
 	# Extreme mishit / duff (20m)
 	assert(mp.is_shot_outlier(sample_shots, {"TotalDistance": 20.0}), "20m duff MUST be outlier")
 	# Glitch shot (300m)
 	assert(mp.is_shot_outlier(sample_shots, {"TotalDistance": 300.0}), "300m glitch MUST be outlier")
-	print("  PASS: Outlier detection accurately flags shots outside 2 std devs.")
+	print("  PASS: Outlier detection accurately flags shots outside 2 std devs when >= 5 shots.")
 	
 	# TEST 5: Effective distance with < 10 vs >= 10 shots
 	print("\n--- Test 5: Effective Distance (10-Shot Threshold) ---")
@@ -201,5 +204,40 @@ func _on_frame():
 	assert(mp.get_active_player()["name"] == "Alice", "Alice SHOULD stay up on green when all players are on green")
 	print("  PASS: Dynamic Stay Up 35% threshold, teebox & green rules verified.")
 	
+	# TEST 9: Longest Drive Progressive Tracking & Achievement signals
+	print("\n--- Test 9: Progressive Longest Drive Record Updates ---")
+	var drive_tester = "__DriveTester__"
+	mp.clear_player_club_shot_data(drive_tester, "Dr")
+	assert(mp.get_player_longest_drive(drive_tester) == 0.0, "Initial longest drive must be 0")
+	
+	# Shot 1: 120 yards (109.728 m)
+	var prev_1 = mp.get_player_longest_drive(drive_tester)
+	assert(prev_1 == 0.0, "Before shot 1, prev should be 0")
+	mp.record_global_shot(drive_tester, "Driver", {"TotalDistance": 109.728})
+	assert(is_equal_approx(mp.get_player_longest_drive(drive_tester), 120.0), "Longest drive should now be 120 yards")
+	
+	# Shot 2: 150 yards (137.16 m)
+	var prev_2 = mp.get_player_longest_drive(drive_tester)
+	assert(is_equal_approx(prev_2, 120.0), "Before shot 2, prev must be 120.0")
+	mp.record_global_shot(drive_tester, "Dr", {"TotalDistance": 137.16})
+	assert(is_equal_approx(mp.get_player_longest_drive(drive_tester), 150.0), "Longest drive should now be 150 yards")
+	
+	# Shot 3: 200 yards (182.88 m)
+	var prev_3 = mp.get_player_longest_drive(drive_tester)
+	assert(is_equal_approx(prev_3, 150.0), "Before shot 3, prev must be 150.0, NOT 120.0")
+	mp.record_global_shot(drive_tester, "1w", {"TotalDistance": 182.88})
+	assert(is_equal_approx(mp.get_player_longest_drive(drive_tester), 200.0), "Longest drive should now be 200 yards")
+	
+	# Shots 4 & 5 to reach minimum 5 baseline shots before outlier filtering kicks in
+	mp.record_global_shot(drive_tester, "Dr", {"TotalDistance": 164.592}) # ~180 yds
+	mp.record_global_shot(drive_tester, "Dr", {"TotalDistance": 173.736}) # ~190 yds
+
+	# Shot 6: Outlier drive (350m / ~382.76 yds) when baseline average is much lower
+	# The shot should be excluded from regular club average dispersion array, but ALWAYS included in Longest Drive
+	var recorded_6 = mp.record_global_shot(drive_tester, "Dr", {"TotalDistance": 350.0})
+	assert(not recorded_6, "350m drive should be flagged as outlier for dispersion array")
+	assert(is_equal_approx(mp.get_player_longest_drive(drive_tester), 350.0 * 1.09361), "Longest drive MUST still be updated to 350m (~382.8 yds)")
+	print("  PASS: Progressive Longest Drive updates verified across Driver, Dr, 1w, and outlier exclusion.")
+
 	print("\nALL TESTS PASSED SUCCESSFULLY! 🎉")
 	quit(0)

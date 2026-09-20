@@ -8,8 +8,8 @@ signal tension_stopped()
 
 const PUTT_THRESHOLD_METERS := 3.048   # 10 feet in meters (10.0 * 0.3048)
 const CHIP_THRESHOLD_METERS := 7.62    # 25 feet in meters (25.0 * 0.3048)
-const PUTT_MIN_SUSPENSE_DISTANCE_METERS := 1.8288  # 6 feet in meters (don't trigger on trivial tap-ins)
-const CHIP_MIN_SUSPENSE_DISTANCE_METERS := 4.572   # 15 feet in meters (don't trigger on trivial fringe tap-ins)
+const PUTT_MIN_SUSPENSE_DISTANCE_METERS := 6.096   # 20 feet in meters (20.0 * 0.3048)
+const CHIP_MIN_SUSPENSE_DISTANCE_METERS := 30.48   # 100 feet in meters (100.0 * 0.3048)
 const MAX_PROJECTED_LANDING_DISTANCE_METERS := 18.288 # 20 yards in meters (20.0 * 0.9144)
 const PAST_HOLE_THRESHOLD_METERS := 0.3048         # 1 foot past the hole in meters (1.0 * 0.3048)
 const CYCLE_DURATION := 0.80          # ~75 BPM double-thump heartbeat cycle
@@ -247,16 +247,17 @@ func is_course_play_active() -> bool:
 
 # ---------------- SUSPENSE ELIGIBILITY ----------------
 
-func is_shot_eligible_for_suspense(start_pos: Vector3, target_pos: Vector3, is_putt: bool, is_sand: bool = false) -> bool:
+func is_shot_eligible_for_suspense(start_pos: Vector3, target_pos: Vector3, is_putt: bool, _is_sand: bool = false) -> bool:
 	if not is_course_play_active() or _shot_suspense_locked_out or _tree_hit_this_shot:
 		return false
-	if target_pos.is_zero_approx():
+	if target_pos.is_zero_approx() or start_pos.is_zero_approx():
 		return false
 	var dist_2d = Vector2(start_pos.x, start_pos.z).distance_to(Vector2(target_pos.x, target_pos.z))
+	# Use small epsilon (0.01m / ~0.4 in) to avoid floating point precision rounding dropouts
 	if is_putt:
-		return dist_2d > PUTT_MIN_SUSPENSE_DISTANCE_METERS
+		return (dist_2d + 0.01) >= PUTT_MIN_SUSPENSE_DISTANCE_METERS
 	else:
-		return is_sand or (dist_2d > CHIP_MIN_SUSPENSE_DISTANCE_METERS)
+		return (dist_2d + 0.01) >= CHIP_MIN_SUSPENSE_DISTANCE_METERS
 
 # ---------------- TRAJECTORY PREDICTION ----------------
 
@@ -502,9 +503,8 @@ func check_ball_proximity(
 		return false
 	if target_pos.is_zero_approx():
 		return false
-	if not shot_start_pos.is_zero_approx():
-		if not is_shot_eligible_for_suspense(shot_start_pos, target_pos, is_putt, is_sand):
-			return false
+	if shot_start_pos.is_zero_approx() or not is_shot_eligible_for_suspense(shot_start_pos, target_pos, is_putt, is_sand):
+		return false
 
 	var ball_pos_2d = Vector2(ball_pos.x, ball_pos.z)
 	var hole_pos_2d = Vector2(target_pos.x, target_pos.z)

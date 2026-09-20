@@ -85,7 +85,9 @@ public partial class BounceCalculator : RefCounted
 
         if (currentState == PhysicsEnums.BallState.Flight)
         {
-            tangentSpinFactor = Mathf.Clamp(1.0f - (currentSpinRpm / bp.FlightSpinFactorDivisor), bp.FlightSpinFactorMin, 1.0f);
+            float excessSpin = Mathf.Max(0.0f, currentSpinRpm - bp.FlightLowSpinThreshold);
+            float spinReduction = excessSpin / bp.FlightSpinFactorDivisor;
+            tangentSpinFactor = Mathf.Clamp(1.0f - spinReduction * (1.0f - bp.FlightSpinFactorMin), bp.FlightSpinFactorMin, 1.0f);
             tangentialRetention = bp.FlightTangentialRetentionBase * tangentSpinFactor;
         }
         else
@@ -119,10 +121,13 @@ public partial class BounceCalculator : RefCounted
             float criticalAngleDeg = Mathf.RadToDeg(effectiveCriticalAngle);
             bool isSteepImpact = impactAngle >= effectiveCriticalAngle;
 
-            bool shouldUsePenner = isSteepImpact && (impactSpeed >= bp.PennerLowEnergyThreshold || hasSpinbackSurface);
+            bool canSpinback = hasSpinbackSurface && currentSpinRpm >= 4000.0f;
+            bool shouldUsePenner = isSteepImpact && (impactSpeed >= bp.PennerLowEnergyThreshold || canSpinback);
 
             if (!shouldUsePenner)
             {
+                float lowEnergyScale = Mathf.Clamp(impactSpeed / bp.PennerLowEnergyThreshold, 0.45f, 1.0f);
+
                 if (!isSteepImpact)
                 {
                     float angleRatio = effectiveCriticalAngle > 0.001f
@@ -136,12 +141,12 @@ public partial class BounceCalculator : RefCounted
                         baseRetention *= vlaFactor;
                     }
 
-                    newTangentSpeed = speedTangent * baseRetention * tangentSpinFactor;
-                    PhysicsLogger.Verbose($"  Bounce: Shallow angle ({impactAngleDeg:F2}° < {criticalAngleDeg:F2}°, retention={baseRetention * tangentSpinFactor:F3}) - newTangentSpeed={newTangentSpeed:F2} m/s");
+                    newTangentSpeed = speedTangent * baseRetention * tangentSpinFactor * lowEnergyScale;
+                    PhysicsLogger.Verbose($"  Bounce: Shallow angle ({impactAngleDeg:F2}° < {criticalAngleDeg:F2}°, retention={baseRetention * tangentSpinFactor * lowEnergyScale:F3}) - newTangentSpeed={newTangentSpeed:F2} m/s");
                 }
                 else
                 {
-                    newTangentSpeed = speedTangent * tangentialRetention;
+                    newTangentSpeed = speedTangent * tangentialRetention * lowEnergyScale;
                     if (impactSpeed < bp.PennerLowEnergyThreshold && !hasSpinbackSurface)
                         PhysicsLogger.Verbose($"  Bounce: Low energy ({impactSpeed:F2} m/s < {bp.PennerLowEnergyThreshold:F1} m/s) - using simple retention");
                     else
@@ -151,9 +156,27 @@ public partial class BounceCalculator : RefCounted
             }
             else
             {
+                float forwardTurfSpeed = Mathf.Max(0.0f, vel.Length() * Mathf.Cos(impactAngle + effectiveCriticalAngle));
+                float forwardSpeed = Mathf.Min(speedTangent, forwardTurfSpeed);
                 float spinbackTerm = 2.0f * BallPhysics.RADIUS * omegaTangentMagnitude * Mathf.Max(parameters.SpinbackResponseScale, 0.0f) / 7.0f;
-                newTangentSpeed = tangentialRetention * vel.Length() * Mathf.Sin(impactAngle - effectiveCriticalAngle) -
-                    spinbackTerm;
+                newTangentSpeed = forwardSpeed * bp.FlightTangentialRetentionBase * tangentSpinFactor - spinbackTerm;
+
+                if (!hasSpinbackSurface)
+                {
+                    // Non-spinback surfaces (fairway, rough, firm, bunker) never bounce backwards in mid-air
+                    newTangentSpeed = Mathf.Max(0.0f, newTangentSpeed);
+                }
+                else if (speedTangent > 2.0f)
+                {
+                    // Forward momentum carries the ball forward or checks on first bounce; rollout handles spinback
+                    newTangentSpeed = Mathf.Max(0.0f, newTangentSpeed);
+                }
+                else
+                {
+                    // Nearly vertical flop shot can have a gentle check backwards, bounded
+                    newTangentSpeed = Mathf.Max(-0.75f, newTangentSpeed);
+                }
+
                 PhysicsLogger.Verbose($"  Bounce: Penner model ({parameters.SurfaceType}) speed={impactSpeed:F2} m/s angle={impactAngleDeg:F2}° crit={criticalAngleDeg:F2}°");
                 PhysicsLogger.Verbose($"    speedTangent={speedTangent:F2} m/s, spinbackScale={parameters.SpinbackResponseScale:F2}, newTangentSpeed={newTangentSpeed:F2} m/s");
             }
@@ -185,7 +208,7 @@ public partial class BounceCalculator : RefCounted
         else
         {
             velTangent = velTangent.LengthSquared() > 0.0001f
-                ? velTangent.LimitLength(newTangentSpeed)
+                ? velTangent.Normalized() * newTangentSpeed
                 : Vector3.Zero;
         }
 

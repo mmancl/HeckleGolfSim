@@ -99,6 +99,13 @@ static func apply_data_panel_style(panel: Control, is_highlighted: bool = false)
 	if panel is PanelContainer or panel is Panel:
 		panel.add_theme_stylebox_override("panel", style)
 
+static func apply_add_remove_tile_style(btn: Button) -> void:
+	var corner_radius = 8
+	var normal_box = _create_stylebox(COLOR_GLASS_PANEL, Color(0.30, 0.55, 0.80, 0.6), corner_radius, 1, 6, 4, 6, 4)
+	var hover_box = _create_stylebox(Color(0.12, 0.20, 0.30, 0.92), Color(0.45, 0.75, 1.0, 0.9), corner_radius, 1, 6, 4, 6, 4)
+	var pressed_box = _create_stylebox(Color(0.08, 0.14, 0.22, 0.95), Color(0.25, 0.50, 0.75, 0.9), corner_radius, 1, 6, 4, 6, 4)
+	_apply_button_styles(btn, normal_box, hover_box, pressed_box, COLOR_TEXT_WHITE)
+
 static func apply_modal_style(panel: Control, corner_radius: int = 12) -> void:
 	var style = _create_stylebox(COLOR_GLASS_PANEL, COLOR_GLASS_BORDER, corner_radius, 1, 20, 20, 20, 20)
 	style.shadow_color = Color(0, 0, 0, 0.6)
@@ -306,6 +313,8 @@ static func apply_option_button_style(opt: OptionButton, font_size: int = 20, mi
 		return
 	opt.custom_minimum_size = min_size
 	opt.add_theme_font_size_override("font_size", font_size)
+	opt.expand_icon = true
+	opt.add_theme_constant_override("icon_max_width", 28)
 	apply_secondary_button_style(opt, 8)
 
 	var popup = opt.get_popup()
@@ -316,9 +325,9 @@ static func style_popup_menu(popup: PopupMenu, font_size: int = 20) -> void:
 	if popup == null:
 		return
 	popup.add_theme_font_size_override("font_size", font_size)
-	popup.add_theme_constant_override("v_separation", 14)
-	popup.add_theme_constant_override("item_start_padding", 20)
-	popup.add_theme_constant_override("item_end_padding", 20)
+	popup.add_theme_constant_override("v_separation", 8)
+	popup.add_theme_constant_override("item_start_padding", 14)
+	popup.add_theme_constant_override("item_end_padding", 14)
 	popup.add_theme_color_override("font_color", COLOR_TEXT_WHITE)
 	popup.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0))
 	

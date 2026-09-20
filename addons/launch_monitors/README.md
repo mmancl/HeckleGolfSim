@@ -1,6 +1,6 @@
 # addons/launch_monitors
 
-Launch-monitor integrations for OpenShotGolf. Each monitor is a Godot `Node` that emits `hit_ball(Dictionary)` and related lifecycle signals; the autoload `launch_monitor_manager.gd` orchestrates connections and forwards shot data to the gameplay layer.
+Launch-monitor integrations for HeckleGolfSim. Each monitor is a Godot `Node` that emits `hit_ball(Dictionary)` and related lifecycle signals; the autoload `launch_monitor_manager.gd` orchestrates connections and forwards shot data to the gameplay layer.
 
 ## Layout
 
@@ -48,14 +48,14 @@ Cross-platform BLE GATT abstraction. `BluetoothGattClientFactory.Create()` picks
 - **macOS & iOS** → `AppleBluetoothGattClient` via Apple's `CoreBluetooth` framework using native Objective-C runtime P/Invoke.
 - **Android** → `AndroidBluetoothGattClient` via Godot's JavaClassWrapper and Android `BluetoothGatt`.
 - **Linux** → `LinuxBluetoothGattClient` via BlueZ over D-Bus. Requires the BlueZ daemon to be running.
-- **Windows** → `WindowsBluetoothGattClient` via WinRT (loaded reflectively; compiled only when `GodotTargetPlatform == windows`). The exclusion lives in `OpenShotGolf.csproj`.
+- **Windows** → `WindowsBluetoothGattClient` via WinRT (loaded reflectively; compiled only when `GodotTargetPlatform == windows`). The exclusion lives in `HeckleGolfSim.csproj`.
 - **Other** → `UnsupportedBluetoothGattClient` (throws on use).
 
 `IBluetoothGattClient` is the seam unit tests mock against.
 
 ### `common/tcp_server/`
 
-`TcpServer` is a Godot `Node` that listens on TCP port `49152` for GSPro-format JSON payloads and emits `hit_ball(Dictionary)`. It is attached to `Courses/Range/range.tscn` and `Courses/UserCourses/Airways/course.tscn`. This is how OpenShotGolf accepts shots from external monitors (PiTrac, MLM2Pro, etc.) over the network.
+`TcpServer` is a Godot `Node` that listens on TCP port `49152` for GSPro-format JSON payloads and emits `hit_ball(Dictionary)`. It is attached to `Courses/Range/range.tscn` and `Courses/UserCourses/Airways/course.tscn`. This is how HeckleGolfSim accepts shots from external monitors (PiTrac, MLM2Pro, etc.) over the network.
 
 ## Adding a new launch monitor
 
@@ -65,4 +65,4 @@ Cross-platform BLE GATT abstraction. `BluetoothGattClientFactory.Create()` picks
 
 ## Adding a new transport under `common/`
 
-Mirror the `bluetooth/` shape: an `I<Transport>Client.cs` interface, a `<Transport>ClientFactory.cs` that picks the platform impl, and per-platform subfolders (`linux/`, `windows/`, …) with the conditional-compile exclusion added to `OpenShotGolf.csproj` if needed. Namespace under `LaunchMonitors.Common.<Transport>`.
+Mirror the `bluetooth/` shape: an `I<Transport>Client.cs` interface, a `<Transport>ClientFactory.cs` that picks the platform impl, and per-platform subfolders (`linux/`, `windows/`, …) with the conditional-compile exclusion added to `HeckleGolfSim.csproj` if needed. Namespace under `LaunchMonitors.Common.<Transport>`.

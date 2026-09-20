@@ -1104,6 +1104,12 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	if is_shot_in_progress:
 		return # Ignore if shot already in flight
 
+	var speed_val: float = float(data.get("BallSpeed", data.get("Speed", 0.0)))
+	var shot_type = str(data.get("ShotType", "")).to_lower()
+	if speed_val <= 0.1 or shot_type == "practice":
+		print("[ShapePractice] Practice swing or 0 ball speed ignored.")
+		return
+
 	FoamBallBoost.apply_boost(data)
 
 	is_shot_in_progress = true

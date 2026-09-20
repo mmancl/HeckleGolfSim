@@ -14,8 +14,9 @@ public sealed class BounceProfile
 
     // --- Tangential retention (first bounce from flight) ---
     public float FlightTangentialRetentionBase { get; init; } = 0.60f;
-    public float FlightSpinFactorMin { get; init; } = 0.40f;
-    public float FlightSpinFactorDivisor { get; init; } = 8000.0f;
+    public float FlightSpinFactorMin { get; init; } = 0.15f;
+    public float FlightSpinFactorDivisor { get; init; } = 6500.0f;
+    public float FlightLowSpinThreshold { get; init; } = 2500.0f;
     public float ShallowImpactRetentionMin { get; init; } = 0.32f;
     public float ShallowImpactRetentionMax { get; init; } = 0.48f;
 

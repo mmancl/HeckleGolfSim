@@ -1,6 +1,7 @@
 extends Node
 
 signal settings_changed
+signal wind_changed(speed_mph: float, direction_rad: float)
 
 # Range Settings
 var range_settings := RangeSettings.new()
@@ -9,6 +10,11 @@ var practice_mode_primed : bool = false
 var is_chipping_minigame : bool = false
 var is_putting_minigame : bool = false
 var current_selected_club : String = "Dr"
+
+# Wind Simulation state
+var current_wind_speed_mph: float = 0.0
+var current_wind_direction_rad: float = 0.0
+var wind_initialized_for_round: bool = false
 
 
 var _loaded_announcer_settings := {}
@@ -32,6 +38,7 @@ func _ready() -> void:
 		
 	# Connect save_settings to settings_changed signal
 	range_settings.settings_changed.connect(save_settings)
+	range_settings.wind_enabled.setting_changed.connect(_on_wind_enabled_changed)
 
 
 func _on_club_selected(club_name: String) -> void:
@@ -61,6 +68,8 @@ func _apply_announcer_settings(announcer: Node) -> void:
 
 func resett_defaults():
 	range_settings.reset_defaults()
+	wind_initialized_for_round = false
+	current_wind_speed_mph = 0.0
 	if has_node("/root/KeybindingManager"):
 		get_node("/root/KeybindingManager").reset_to_defaults()
 	var announcer = get_node_or_null("/root/AnnouncerEngine")
@@ -106,6 +115,14 @@ func load_settings() -> void:
 		range_settings.ball_reset_timer.set_value(1.5)
 		migrated = true
 	
+	# Migration / validation for green speeds (clamp out-of-bounds legacy settings like 30.0/50.0 to standard 10.0)
+	if range_settings.green_speed.value < 6.0 or range_settings.green_speed.value > 16.0:
+		range_settings.green_speed.set_value(10.0)
+		migrated = true
+	if range_settings.putting_green_speed.value < 6.0 or range_settings.putting_green_speed.value > 16.0:
+		range_settings.putting_green_speed.set_value(10.0)
+		migrated = true
+	
 	# Migration / validation for displayed_stats
 	var stats_val = range_settings.displayed_stats.value
 	var legacy_default_stats = [
@@ -120,6 +137,8 @@ func load_settings() -> void:
 		var cleaned_stats: Array[String] = []
 		for s in stats_val:
 			var s_str = str(s)
+			if s_str == "Speed":
+				s_str = "BallSpeed"
 			if valid_ids.has(s_str) and not cleaned_stats.has(s_str) and cleaned_stats.size() < StatDefinitions.MAX_DISPLAYED_STATS:
 				cleaned_stats.append(s_str)
 		if cleaned_stats.is_empty():
@@ -140,6 +159,21 @@ func load_settings() -> void:
 	var ip_val = range_settings.tcp_server_ip.value
 	if typeof(ip_val) != TYPE_STRING or str(ip_val).strip_edges().is_empty():
 		range_settings.tcp_server_ip.set_value("0.0.0.0")
+		migrated = true
+
+	# Validation for Launch Monitor Tab & Guide Device preferences
+	var tab_val = range_settings.launch_monitor_tab.value
+	if typeof(tab_val) != TYPE_INT and typeof(tab_val) != TYPE_FLOAT:
+		range_settings.launch_monitor_tab.set_value(0)
+		migrated = true
+	elif int(tab_val) < 0 or int(tab_val) > 1:
+		range_settings.launch_monitor_tab.set_value(0)
+		migrated = true
+
+	var gspro_device_val = str(range_settings.gspro_selected_device.value).strip_edges()
+	var valid_gspro_devices := ["mlm2pro", "garmin_r10", "flightscope", "uneekor", "bushnell", "pitrac", "shot_injector"]
+	if not valid_gspro_devices.has(gspro_device_val):
+		range_settings.gspro_selected_device.set_value("mlm2pro")
 		migrated = true
 
 	if migrated:
@@ -463,6 +497,144 @@ func update_audio_state() -> void:
 		else:
 			if _ambient_player.playing:
 				_ambient_player.stop()
+
+
+# -----------------------------------------------------------------------------
+# Wind Simulation Helpers
+# -----------------------------------------------------------------------------
+
+func _on_wind_enabled_changed(enabled: bool) -> void:
+	if enabled:
+		if not wind_initialized_for_round or current_wind_speed_mph <= 0.0:
+			generate_new_wind()
+		else:
+			wind_changed.emit(current_wind_speed_mph, current_wind_direction_rad)
+	else:
+		wind_changed.emit(0.0, current_wind_direction_rad)
+
+
+func is_driving_range_scene() -> bool:
+	var scene := _get_active_scene()
+	if scene == null:
+		return false
+	if "is_driving_range" in scene and bool(scene.get("is_driving_range")):
+		return true
+	var scene_name := str(scene.name).to_lower()
+	var script: Script = scene.get_script()
+	var script_path := str(script.resource_path).to_lower() if script != null else ""
+	var file_path := str(scene.scene_file_path).to_lower() if "scene_file_path" in scene else ""
+	var full_id := (scene_name + " " + script_path + " " + file_path).to_lower()
+
+	if scene.has_node("CoursePlay") or full_id.contains("course_play") or full_id.contains("courseplaysetup") or full_id.contains("course_selector"):
+		return false
+
+	return (scene_name == "range" or file_path.ends_with("range.tscn") or file_path.ends_with("range.scn"))
+
+
+func is_wind_enabled() -> bool:
+	if is_driving_range_scene():
+		return false
+	if range_settings != null and range_settings.settings.has("wind_enabled"):
+		return bool(range_settings.wind_enabled.value)
+	return false
+
+
+func generate_new_wind() -> void:
+	current_wind_direction_rad = randf_range(0.0, TAU)
+	current_wind_speed_mph = _pick_weighted_random_wind_speed()
+	if range_settings != null and range_settings.settings.has("wind_speed"):
+		range_settings.wind_speed.set_value(current_wind_speed_mph)
+	wind_initialized_for_round = true
+	wind_changed.emit(current_wind_speed_mph, current_wind_direction_rad)
+	print("[GlobalSettings] Wind generated for course: %.1f MPH @ %.1f°" % [current_wind_speed_mph, rad_to_deg(current_wind_direction_rad)])
+
+
+func _pick_weighted_random_wind_speed() -> float:
+	# Weighted buckets for realistic golf wind distribution:
+	# - 6-12 MPH: Most frequent (55% total)
+	# - 2-5 MPH: Next most frequent (20% total)
+	# - 13-15 MPH: Next most frequent (15% total)
+	# - 1 MPH: Very infrequent (2% total)
+	# - 16-20 MPH: Very infrequent (8% total)
+	var roll := randf() * 100.0
+	if roll < 55.0:
+		return float(randi_range(6, 12))
+	elif roll < 75.0:
+		return float(randi_range(2, 5))
+	elif roll < 90.0:
+		return float(randi_range(13, 15))
+	elif roll < 92.0:
+		return 1.0
+	else:
+		return float(randi_range(16, 20))
+
+
+func set_wind_speed_mph(speed: float) -> void:
+	current_wind_speed_mph = clampf(speed, 0.0, 50.0)
+	if range_settings != null and range_settings.settings.has("wind_speed"):
+		range_settings.wind_speed.set_value(current_wind_speed_mph)
+	wind_changed.emit(current_wind_speed_mph, current_wind_direction_rad)
+
+
+func start_round_wind(force_new: bool = true) -> void:
+	if is_wind_enabled():
+		if force_new or not wind_initialized_for_round or current_wind_speed_mph <= 0.0:
+			generate_new_wind()
+	else:
+		wind_initialized_for_round = false
+
+
+func get_wind_vector_mps() -> Vector3:
+	if not is_wind_enabled() or current_wind_speed_mph <= 0.0:
+		return Vector3.ZERO
+	var speed_mps: float = current_wind_speed_mph * 0.44704
+	# In Godot 3D, +X is East, +Z is South. Horizontal plane wind:
+	return Vector3(cos(current_wind_direction_rad), 0.0, sin(current_wind_direction_rad)) * speed_mps
+
+
+func get_relative_wind_arrow_and_angle(ball_pos: Vector3, aim_target_pos: Vector3, fallback_forward: Vector3 = Vector3.ZERO) -> Dictionary:
+	var fwd_h: Vector3 = aim_target_pos - ball_pos
+	fwd_h.y = 0.0
+	if fwd_h.length_squared() < 0.001:
+		fwd_h = fallback_forward
+		fwd_h.y = 0.0
+		if fwd_h.length_squared() < 0.001:
+			fwd_h = Vector3.RIGHT
+	fwd_h = fwd_h.normalized()
+	var right_h: Vector3 = fwd_h.cross(Vector3.UP).normalized()
+
+	var world_wind_dir := Vector3(cos(current_wind_direction_rad), 0.0, sin(current_wind_direction_rad))
+	var w_fwd: float = world_wind_dir.dot(fwd_h)
+	var w_right: float = world_wind_dir.dot(right_h)
+	var angle_rad: float = atan2(w_right, w_fwd)
+	var deg: float = rad_to_deg(angle_rad)
+
+	var arrow: String = "↑"
+	if deg >= -22.5 and deg < 22.5:
+		arrow = "↑"
+	elif deg >= 22.5 and deg < 67.5:
+		arrow = "↗"
+	elif deg >= 67.5 and deg < 112.5:
+		arrow = "→"
+	elif deg >= 112.5 and deg < 157.5:
+		arrow = "↘"
+	elif deg >= 157.5 or deg < -157.5:
+		arrow = "↓"
+	elif deg >= -157.5 and deg < -112.5:
+		arrow = "↙"
+	elif deg >= -112.5 and deg < -67.5:
+		arrow = "←"
+	elif deg >= -67.5 and deg < -22.5:
+		arrow = "↖"
+
+	return {
+		"arrow": arrow,
+		"angle_deg": deg,
+		"w_fwd": w_fwd,
+		"w_right": w_right,
+		"speed_mph": current_wind_speed_mph
+	}
+
 
 
 

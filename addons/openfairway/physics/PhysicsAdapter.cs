@@ -161,6 +161,10 @@ public partial class PhysicsAdapter : RefCounted
                 float preImpactSpeed = velocity.Length();
                 float preImpactNormalSpeed = Mathf.Abs(velocity.Dot(contactNormal));
                 Vector3 preImpactTangent = velocity - contactNormal * velocity.Dot(contactNormal);
+                if (!carryRecorded)
+                {
+                    parameters.RolloutImpactSpin = omega.Length() / ShotSetup.RAD_PER_RPM;
+                }
                 var bounce = _physics.CalculateBounce(velocity, omega, contactNormal, state, parameters);
                 velocity = bounce.NewVelocity;
                 omega = bounce.NewOmega;

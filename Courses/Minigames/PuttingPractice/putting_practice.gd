@@ -53,6 +53,8 @@ var made_val_lbl = null
 var dist_25_val_lbl = null
 var banner_lbl = null
 var grid_toggle_btn = null
+var putting_cam_btn: Button = null
+var putting_cam_widget = null
 var music_toggle_btn = null
 var stats_btn = null
 var mode_toggle_btn: Button = null
@@ -120,6 +122,12 @@ func _ready() -> void:
 	
 	# Select first hole by default
 	_select_hole(0)
+
+	if has_node("/root/GlobalSettings") and GlobalSettings.range_settings.putting_camera_enabled.value:
+		_setup_putting_camera()
+		if putting_cam_widget != null:
+			putting_cam_widget.set_camera_active(true)
+		_update_putting_cam_button_label()
 	
 	if has_node("/root/EventBus"):
 		var eb = get_node("/root/EventBus")
@@ -896,6 +904,39 @@ func _update_grid_button_state() -> void:
 			grid_toggle_btn.text = "📊 Grid: OFF"
 			_apply_btn_style(grid_toggle_btn, Color(0.25, 0.25, 0.25), Color(0.35, 0.35, 0.35))
 
+
+func _toggle_putting_camera() -> void:
+	if putting_cam_widget == null:
+		_setup_putting_camera()
+	var new_active = not putting_cam_widget.is_camera_active()
+	putting_cam_widget.set_camera_active(new_active)
+	if has_node("/root/GlobalSettings"):
+		GlobalSettings.range_settings.putting_camera_enabled.set_value(new_active)
+		GlobalSettings.save_settings()
+	_update_putting_cam_button_label()
+
+
+func _update_putting_cam_button_label() -> void:
+	if putting_cam_btn == null:
+		return
+	var is_act = putting_cam_widget != null and putting_cam_widget.is_camera_active()
+	putting_cam_btn.text = "🎯 Putting Cam: ON" if is_act else "🎯 Putting Cam: OFF"
+	if is_act:
+		_apply_btn_style(putting_cam_btn, Color(0.14, 0.45, 0.65), Color(0.20, 0.58, 0.82))
+	else:
+		_apply_btn_style(putting_cam_btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
+
+
+func _setup_putting_camera() -> void:
+	if putting_cam_widget != null:
+		return
+	var widget_script = load("res://UI/PuttingCamera/putting_camera_widget.gd")
+	if widget_script != null:
+		putting_cam_widget = widget_script.new()
+		putting_cam_widget.name = "PuttingCameraWidget"
+		hud_control.add_child(putting_cam_widget)
+		putting_cam_widget.putt_detected.connect(_on_launch_monitor_hit_ball)
+
 # ----------------- PLAYER SETUP -----------------
 
 func _setup_player() -> void:
@@ -1094,11 +1135,17 @@ func _teleport_ball(pos: Vector3) -> void:
 	# Recompute camera and orientation
 	_update_aim_and_camera()
 	_update_hole_button_labels()
+
+	if putting_cam_widget != null:
+		putting_cam_widget.on_next_shot_started()
 	
 	if has_node("/root/LaunchMonitorManager"):
 		var lm = get_node("/root/LaunchMonitorManager")
-		if lm != null and lm.has_method("notify_ball_at_rest"):
-			lm.notify_ball_at_rest()
+		if lm != null:
+			if lm.has_method("notify_ball_at_rest"):
+				lm.notify_ball_at_rest()
+			if lm.has_method("_update_hud_display"):
+				lm.call("_update_hud_display")
 
 func _update_aim_and_camera() -> void:
 	if selected_hole_index < 0 or selected_hole_index >= holes.size():
@@ -1196,6 +1243,12 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	if player.ball.state != PhysicsEnums.BallState.REST:
 		return # Ignore if putt in progress
 
+	var speed_val: float = float(data.get("BallSpeed", data.get("Speed", 0.0)))
+	var shot_type = str(data.get("ShotType", "")).to_lower()
+	if speed_val <= 0.1 or shot_type == "practice":
+		print("[Putting] Practice swing or 0 ball speed ignored.")
+		return
+
 	FoamBallBoost.apply_boost(data, "Pt")
 
 	if has_node("/root/TensionManager"):
@@ -1257,6 +1310,8 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 		var lm = get_node("/root/LaunchMonitorManager")
 		if lm != null and lm.has_method("notify_ball_at_rest"):
 			lm.notify_ball_at_rest()
+	if putting_cam_widget != null:
+		putting_cam_widget.on_next_shot_started()
 	raw_ball_data = _shot_data.duplicate()
 	_update_stats_display(true)
 	var final_pos = player.ball.global_position
@@ -1497,15 +1552,15 @@ func _setup_ui() -> void:
 	
 	# --- BOTTOM CONTROLS PANEL ---
 	var ctrl_panel = PanelContainer.new()
-	ctrl_panel.custom_minimum_size = Vector2(850, 76)
+	ctrl_panel.custom_minimum_size = Vector2(1040, 76)
 	ctrl_panel.anchor_left = 0.5
 	ctrl_panel.anchor_right = 0.5
 	ctrl_panel.anchor_top = 1.0
 	ctrl_panel.anchor_bottom = 1.0
 	ctrl_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	ctrl_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	ctrl_panel.offset_left = -425
-	ctrl_panel.offset_right = 425
+	ctrl_panel.offset_left = -520
+	ctrl_panel.offset_right = 520
 	ctrl_panel.offset_top = -94
 	ctrl_panel.offset_bottom = -18
 	hud_control.add_child(ctrl_panel)
@@ -1539,6 +1594,15 @@ func _setup_ui() -> void:
 	_apply_btn_style(grid_toggle_btn, Color(0.25, 0.25, 0.25), Color(0.35, 0.35, 0.35))
 	grid_toggle_btn.pressed.connect(_toggle_green_grid)
 	ctrl_hbox.add_child(grid_toggle_btn)
+
+	# Putting Camera Toggle Button
+	putting_cam_btn = Button.new()
+	putting_cam_btn.name = "PuttingCamButton"
+	putting_cam_btn.custom_minimum_size = Vector2(175, 52)
+	putting_cam_btn.add_theme_font_size_override("font_size", 15)
+	_update_putting_cam_button_label()
+	putting_cam_btn.pressed.connect(_toggle_putting_camera)
+	ctrl_hbox.add_child(putting_cam_btn)
 	
 	# 2. Reset Button
 	var reset_btn = Button.new()
@@ -2027,8 +2091,8 @@ func _toggle_green_speed_popup() -> void:
 	vbox.add_child(slider_hbox)
 	
 	green_speed_slider = HSlider.new()
-	green_speed_slider.min_value = 4.0
-	green_speed_slider.max_value = 20.0
+	green_speed_slider.min_value = 6.0
+	green_speed_slider.max_value = 16.0
 	green_speed_slider.step = 0.5
 	green_speed_slider.value = cur_val
 	green_speed_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2158,3 +2222,8 @@ func _close_settings() -> void:
 	if hud_layer != null and is_instance_valid(hud_layer):
 		hud_layer.visible = true
 	_update_green_speed_button_label()
+
+	if has_node("/root/LaunchMonitorManager"):
+		var launch_monitor = get_node("/root/LaunchMonitorManager")
+		if launch_monitor != null and launch_monitor.has_method("_update_hud_display"):
+			launch_monitor.call("_update_hud_display")

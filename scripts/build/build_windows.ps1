@@ -56,8 +56,22 @@ if (-not $DotNetRoot -or -not (Test-Path $DotNetRoot)) {
 }
 if ($DotNetRoot -and (Test-Path $DotNetRoot)) {
     $env:DOTNET_ROOT = $DotNetRoot
+    $env:DOTNET_ROOT_X64 = $DotNetRoot
+    $env:DOTNET_MULTILEVEL_LOOKUP = "0"
     $env:PATH = "$DotNetRoot;$env:PATH"
     Write-Host ".NET Root:      $DotNetRoot" -ForegroundColor Gray
+}
+
+# Ensure Godot ignores build, dist, and native build folders during project scanning and export
+@("build", "dist", "android\build") | ForEach-Object {
+    $targetDir = Join-Path $RepoRoot $_
+    if (-not (Test-Path $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    }
+    $gdignorePath = Join-Path $targetDir ".gdignore"
+    if (-not (Test-Path $gdignorePath)) {
+        New-Item -ItemType File -Path $gdignorePath -Force | Out-Null
+    }
 }
 
 # 3. Locate Godot Console Executable
@@ -113,17 +127,12 @@ if ($dotnetProc.ExitCode -ne 0) {
 
 Write-Host "[2/3] Exporting Windows Desktop release via Godot..." -ForegroundColor Green
 & $GodotExe --headless --path $RepoRoot --export-release "Windows Desktop" $TargetExe
-
-if (-not (Test-Path $TargetExe)) {
-    throw "Godot export failed. Target executable not found at $TargetExe"
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $TargetExe)) {
+    throw "Godot export failed with exit code $LASTEXITCODE. Target executable not found at $TargetExe"
 }
 
 # Ensure .NET data folder is present and accessible
-$openShotData = Join-Path $StagingRoot "data_OpenShotGolf_windows_x86_64"
 $heckleData = Join-Path $StagingRoot "data_HeckleGolfSim_windows_x86_64"
-if ((Test-Path $openShotData) -and -not (Test-Path $heckleData)) {
-    Copy-Item -Path $openShotData -Destination $heckleData -Recurse -Force
-}
 
 # Clean any leftover temporary export files
 Get-ChildItem -Path $StagingRoot -Filter "*.tmp" -ErrorAction SilentlyContinue | Remove-Item -Force

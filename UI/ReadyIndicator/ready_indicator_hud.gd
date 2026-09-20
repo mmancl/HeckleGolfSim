@@ -236,7 +236,11 @@ func _process(delta: float) -> void:
 		_check_timer = 0.0
 		var layout := _detect_current_gameplay_screen()
 		if layout != _current_layout:
+			var prev_layout = _current_layout
 			_apply_layout(layout)
+			if prev_layout == ScreenLayout.HIDDEN and layout != ScreenLayout.HIDDEN:
+				if _is_device_connected() and not _is_ready:
+					trigger_manual_rearm()
 		_update_display(false)
 
 
@@ -676,7 +680,8 @@ func _detect_current_gameplay_screen() -> ScreenLayout:
 		or full_id.contains("putt") or scene_name.contains("putt") \
 		or full_id.contains("shape") or scene_name.contains("shape") \
 		or full_id.contains("loft") or scene_name.contains("loft") \
-		or full_id.contains("/minigames/") or full_id.contains("minigame"):
+		or full_id.contains("/minigames/") or full_id.contains("minigame") \
+		or (has_node("/root/GlobalSettings") and GlobalSettings.is_putting_minigame):
 		return ScreenLayout.TOP_LEFT
 
 	# Driving Range, Course Play, CourseManager, and all loaded course scenes -> TOP_CENTER_UNDER_AIM
@@ -844,7 +849,7 @@ func _check_menu_overlay_in_subtree(node: Node) -> bool:
 	# Check Settings CanvasLayers (RangeUI.$SettingsLayer, minigames _settings_layer)
 	if node is CanvasLayer:
 		var cl_name := str(node.name).to_lower()
-		if cl_name == "settingslayer" or cl_name == "settingsmodallayer":
+		if cl_name == "settingslayer" or cl_name == "settingsmodallayer" or cl_name == "batterywarningmodal":
 			if (node as CanvasLayer).visible:
 				return true
 
@@ -870,7 +875,10 @@ func _check_menu_overlay_in_subtree(node: Node) -> bool:
 			return true
 
 		# Swing Replay & Pause Modals
-		if n_lower == "swingreplaymodal" or n_lower == "pausemenu":
+		if n_lower == "swingreplaymodal":
+			if not node.get("is_detached"):
+				return true
+		elif n_lower == "pausemenu":
 			return true
 
 	for child in node.get_children():
@@ -1043,7 +1051,8 @@ func _update_display(instant: bool = false) -> void:
 
 	var visibility_just_enabled := not visible
 	visible = true
-	_panel.modulate.a = 1.0
+	if _panel != null:
+		_panel.modulate.a = 1.0
 	if _placement_panel != null and is_instance_valid(_placement_panel):
 		_placement_panel.visible = _placement_guide_enabled
 		_placement_panel.modulate.a = 1.0
@@ -1053,18 +1062,21 @@ func _update_display(instant: bool = false) -> void:
 
 	if ready_state_changed:
 		_last_rendered_ready = _is_ready
-		var dot_style = _dot_panel.get_theme_stylebox("panel") as StyleBoxFlat
+		var dot_style = _dot_panel.get_theme_stylebox("panel") as StyleBoxFlat if _dot_panel != null else null
 
 		if _is_ready:
 			_rearm_feedback_timer = 0.0
-			_status_label.text = "BALL READY"
-			_sub_label.text = "READY TO HIT"
-			_status_label.add_theme_color_override("font_color", Color(0.95, 1.0, 0.95))
-			_sub_label.add_theme_color_override("font_color", Color(0.4, 0.95, 0.6))
+			if _status_label != null:
+				_status_label.text = "BALL READY"
+				_status_label.add_theme_color_override("font_color", Color(0.95, 1.0, 0.95))
+			if _sub_label != null:
+				_sub_label.text = "READY TO HIT"
+				_sub_label.add_theme_color_override("font_color", Color(0.4, 0.95, 0.6))
 			
-			_glow_style.bg_color = Color(0.05, 0.16, 0.09, 0.92)
-			_glow_style.border_color = Color(0.2, 0.9, 0.45, 0.9)
-			_glow_style.shadow_color = Color(0.1, 0.8, 0.3, 0.35)
+			if _glow_style != null:
+				_glow_style.bg_color = Color(0.05, 0.16, 0.09, 0.92)
+				_glow_style.border_color = Color(0.2, 0.9, 0.45, 0.9)
+				_glow_style.shadow_color = Color(0.1, 0.8, 0.3, 0.35)
 			if dot_style:
 				dot_style.bg_color = Color(0.2, 0.95, 0.45)
 			
@@ -1076,18 +1088,23 @@ func _update_display(instant: bool = false) -> void:
 			_show_rearming_feedback()
 		else:
 			_stop_pulse_animation()
-			if not _placement_guide_enabled:
-				_status_label.text = "LAUNCH MONITOR"
-				_sub_label.text = "WAITING FOR RADAR"
-			else:
-				_status_label.text = "PLACE BALL IN ZONE"
-				_sub_label.text = "WAITING FOR BALL"
-			_status_label.add_theme_color_override("font_color", Color(0.98, 0.95, 0.9))
-			_sub_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
+			if _status_label != null:
+				if not _placement_guide_enabled:
+					_status_label.text = "LAUNCH MONITOR"
+				else:
+					_status_label.text = "PLACE BALL IN ZONE"
+				_status_label.add_theme_color_override("font_color", Color(0.98, 0.95, 0.9))
+			if _sub_label != null:
+				if not _placement_guide_enabled:
+					_sub_label.text = "WAITING FOR RADAR"
+				else:
+					_sub_label.text = "WAITING FOR BALL"
+				_sub_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
 			
-			_glow_style.bg_color = Color(0.12, 0.1, 0.05, 0.85)
-			_glow_style.border_color = Color(0.9, 0.65, 0.2, 0.7)
-			_glow_style.shadow_color = Color(0, 0, 0, 0.3)
+			if _glow_style != null:
+				_glow_style.bg_color = Color(0.12, 0.1, 0.05, 0.85)
+				_glow_style.border_color = Color(0.9, 0.65, 0.2, 0.7)
+				_glow_style.shadow_color = Color(0, 0, 0, 0.3)
 			if dot_style:
 				dot_style.bg_color = Color(0.95, 0.65, 0.15)
 
@@ -1116,22 +1133,25 @@ func trigger_manual_rearm() -> void:
 
 
 func _show_rearming_feedback() -> void:
-	_status_label.text = "RE-ARMING MONITOR..."
-	_sub_label.text = "CLICK / 'R' TO WAKE"
-	_status_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.38))
-	_sub_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
-	_glow_style.bg_color = Color(0.14, 0.11, 0.05, 0.92)
-	_glow_style.border_color = Color(0.95, 0.7, 0.2, 0.85)
-	_glow_style.shadow_color = Color(0.4, 0.3, 0.05, 0.3)
-	var dot_style = _dot_panel.get_theme_stylebox("panel") as StyleBoxFlat
+	if _status_label != null:
+		_status_label.text = "RE-ARMING MONITOR..."
+		_status_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.38))
+	if _sub_label != null:
+		_sub_label.text = "CLICK / 'R' TO WAKE"
+		_sub_label.add_theme_color_override("font_color", Color(1.0, 0.82, 0.32))
+	if _glow_style != null:
+		_glow_style.bg_color = Color(0.14, 0.11, 0.05, 0.92)
+		_glow_style.border_color = Color(0.95, 0.7, 0.2, 0.85)
+		_glow_style.shadow_color = Color(0.4, 0.3, 0.05, 0.3)
+	var dot_style = _dot_panel.get_theme_stylebox("panel") as StyleBoxFlat if _dot_panel != null else null
 	if dot_style:
 		dot_style.bg_color = Color(0.95, 0.7, 0.2)
 	_trigger_pop_animation()
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
-		if (event as InputEventKey).keycode == KEY_R:
+	if ((event is InputEventKey and not event.echo) or event is InputEventJoypadButton) and event.is_pressed():
+		if event.is_action_pressed("reset_shot") or (event is InputEventKey and (event as InputEventKey).keycode == KEY_R):
 			var scene := _get_active_scene()
 			if scene != null and not _is_menu_screen(scene) and not _is_menu_overlay_open(scene) and not is_ball_in_flight():
 				var focus_owner = get_viewport().gui_get_focus_owner()

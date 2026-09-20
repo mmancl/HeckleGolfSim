@@ -131,7 +131,21 @@ $destination = if ([System.IO.Path]::IsPathRooted($OutputPath)) {
 $UserDotnet = Join-Path $env:USERPROFILE ".dotnet"
 if (Test-Path $UserDotnet) {
     $env:DOTNET_ROOT = $UserDotnet
+    $env:DOTNET_ROOT_X64 = $UserDotnet
+    $env:DOTNET_MULTILEVEL_LOOKUP = "0"
     $env:PATH = "$UserDotnet;$env:PATH"
+}
+
+# Ensure Godot ignores build, dist, and native build folders
+@("build", "dist", "android\build") | ForEach-Object {
+    $targetDir = Join-Path $RepoRoot $_
+    if (-not (Test-Path $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    }
+    $gdignorePath = Join-Path $targetDir ".gdignore"
+    if (-not (Test-Path $gdignorePath)) {
+        New-Item -ItemType File -Path $gdignorePath -Force | Out-Null
+    }
 }
 
 Write-Host "Compiling C# .NET solution for Android (ExportRelease)..." -ForegroundColor Green

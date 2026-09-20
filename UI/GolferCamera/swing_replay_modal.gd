@@ -9,6 +9,11 @@ class_name SwingReplayModal
 const ClubDeliveryVisuals = preload("res://UI/GolferCamera/club_delivery_visuals.gd")
 
 signal closed()
+signal detach_requested()
+signal attach_requested()
+
+# Detached Window State
+var is_detached: bool = false
 
 # Nodes
 var _skeleton_overlay: GolferSkeletonOverlay = null
@@ -55,7 +60,20 @@ var _right_vbox: VBoxContainer = null
 var _mobile_active_tab: int = 1 # 0: Video, 1: Fixes & Analysis
 
 
+static func is_detach_supported() -> bool:
+	var os_name = OS.get_name().to_lower()
+	if os_name == "ios" or os_name == "android":
+		return false
+	if OS.has_feature("mobile"):
+		return false
+	if not DisplayServer.has_feature(DisplayServer.FEATURE_SUBWINDOWS):
+		return false
+	return true
+
+
 func _is_mobile_view() -> bool:
+	if is_detached:
+		return false
 	var vp_size = get_viewport_rect().size
 	return vp_size.x < 850 or vp_size.y > vp_size.x or OS.has_feature("mobile")
 
@@ -74,6 +92,15 @@ func _on_viewport_resized() -> void:
 
 func _recenter_modal() -> void:
 	var vp_size = get_viewport_rect().size
+	if is_detached:
+		position = Vector2.ZERO
+		size = vp_size
+		custom_minimum_size = vp_size
+		var win = get_window()
+		if win != null and not win.size_changed.is_connected(_on_viewport_resized):
+			win.size_changed.connect(_on_viewport_resized)
+		return
+
 	var is_mob = _is_mobile_view()
 	var modal_w: float
 	var modal_h: float
@@ -128,6 +155,34 @@ func setup_modal(data: Dictionary, frames: Array = [], suggestions_only: bool = 
 	else:
 		_record_swing_recommendations()
 
+
+func update_shot_data(data: Dictionary, frames: Array = [], suggestions_only: bool = false) -> void:
+	_analysis_cancelled = true
+	_close_active_video_players()
+	shot_data = data.duplicate()
+	_is_suggestions_only = suggestions_only
+	_recorded_frames = [] if suggestions_only else frames.duplicate()
+	current_time = 0.0
+	is_playing = true
+	if not _recorded_frames.is_empty():
+		total_duration = max(1.0, _recorded_frames.size() * 0.066)
+		var initial_phases = GolfSwingAnalyzer.detect_key_phases(_recorded_frames)
+		if initial_phases.get("has_phases", false):
+			_checkpoint_progress["Top (P4)"] = initial_phases.get("top_progress", 0.35)
+			_checkpoint_progress["Impact (P7)"] = initial_phases.get("impact_progress", 0.65)
+	_is_analysis_complete = suggestions_only
+	_analysis_cancelled = false
+
+	recommendations = GolfSwingAnalyzer.analyze_launch_monitor(shot_data)
+
+	_recenter_modal()
+	_build_ui()
+	if not _is_suggestions_only:
+		_start_background_wireframe_analysis()
+	else:
+		_record_swing_recommendations()
+
+
 func _build_ui() -> void:
 	# Clear existing children if any
 	for c in get_children():
@@ -137,18 +192,18 @@ func _build_ui() -> void:
 
 	# Glassmorphic Modal Container Style
 	var modal_style = StyleBoxFlat.new()
-	modal_style.bg_color = Color(0.06, 0.08, 0.12, 0.96) # Dark obsidian
-	modal_style.corner_radius_top_left = 14 if is_mob else 16
-	modal_style.corner_radius_top_right = 14 if is_mob else 16
-	modal_style.corner_radius_bottom_left = 14 if is_mob else 16
-	modal_style.corner_radius_bottom_right = 14 if is_mob else 16
-	modal_style.border_width_left = 2
-	modal_style.border_width_top = 2
-	modal_style.border_width_right = 2
-	modal_style.border_width_bottom = 2
+	modal_style.bg_color = Color(0.06, 0.08, 0.12, 0.98 if is_detached else 0.96) # Dark obsidian
+	modal_style.corner_radius_top_left = 0 if is_detached else (14 if is_mob else 16)
+	modal_style.corner_radius_top_right = 0 if is_detached else (14 if is_mob else 16)
+	modal_style.corner_radius_bottom_left = 0 if is_detached else (14 if is_mob else 16)
+	modal_style.corner_radius_bottom_right = 0 if is_detached else (14 if is_mob else 16)
+	modal_style.border_width_left = 0 if is_detached else 2
+	modal_style.border_width_top = 0 if is_detached else 2
+	modal_style.border_width_right = 0 if is_detached else 2
+	modal_style.border_width_bottom = 0 if is_detached else 2
 	modal_style.border_color = Color(0.2, 0.6, 0.8, 0.8)
-	modal_style.shadow_color = Color(0, 0, 0, 0.6)
-	modal_style.shadow_size = 16 if is_mob else 20
+	modal_style.shadow_color = Color(0, 0, 0, 0.0 if is_detached else 0.6)
+	modal_style.shadow_size = 0 if is_detached else (16 if is_mob else 20)
 	modal_style.content_margin_left = 10 if is_mob else 16
 	modal_style.content_margin_top = 10 if is_mob else 16
 	modal_style.content_margin_right = 10 if is_mob else 16
@@ -493,6 +548,7 @@ void fragment() {
 	if not is_mob:
 		var r_header = HBoxContainer.new()
 		r_header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		r_header.add_theme_constant_override("separation", 10)
 		
 		var r_title = Label.new()
 		r_title.text = "🎯 RECOMMENDED FIXES (PRIORITIZED)"
@@ -500,19 +556,61 @@ void fragment() {
 		r_title.add_theme_color_override("font_color", Color(1.0, 0.9, 0.55))
 		r_header.add_child(r_title)
 
+		if is_detached:
+			var badge = Label.new()
+			badge.text = "🟢 DETACHED (ALWAYS OPEN)"
+			badge.add_theme_font_size_override("font_size", 12)
+			badge.add_theme_color_override("font_color", Color(0.4, 0.95, 0.6))
+			r_header.add_child(badge)
+
 		var r_spacer = Control.new()
 		r_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		r_header.add_child(r_spacer)
 
-		var close_btn = Button.new()
-		close_btn.name = "ResumePracticeButton"
-		close_btn.text = "✖ NEXT SHOT" if is_match else "✖ RESUME PRACTICE"
-		close_btn.custom_minimum_size = Vector2(175, 42)
-		close_btn.add_theme_font_size_override("font_size", 15)
-		close_btn.mouse_filter = Control.MOUSE_FILTER_STOP
-		_apply_btn_style(close_btn, Color(0.75, 0.2, 0.2))
-		close_btn.pressed.connect(_on_close_button_pressed)
-		r_header.add_child(close_btn)
+		if is_detached:
+			var dock_btn = Button.new()
+			dock_btn.name = "DockToGameButton"
+			dock_btn.text = "↙ DOCK TO GAME"
+			dock_btn.custom_minimum_size = Vector2(140, 42)
+			dock_btn.add_theme_font_size_override("font_size", 14)
+			dock_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+			_apply_btn_style(dock_btn, Color(0.2, 0.45, 0.65))
+			dock_btn.tooltip_text = "Attach this window back into the main game screen"
+			dock_btn.pressed.connect(func(): emit_signal("attach_requested"))
+			r_header.add_child(dock_btn)
+
+			var close_btn = Button.new()
+			close_btn.name = "CloseDetachedButton"
+			close_btn.text = "✖ CLOSE"
+			close_btn.custom_minimum_size = Vector2(100, 42)
+			close_btn.add_theme_font_size_override("font_size", 14)
+			close_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+			_apply_btn_style(close_btn, Color(0.75, 0.2, 0.2))
+			close_btn.pressed.connect(_on_close_button_pressed)
+			r_header.add_child(close_btn)
+		else:
+			if is_detach_supported():
+				var popout_btn = Button.new()
+				popout_btn.name = "PopoutWindowButton"
+				popout_btn.text = "↗ POP OUT"
+				popout_btn.custom_minimum_size = Vector2(120, 42)
+				popout_btn.add_theme_font_size_override("font_size", 14)
+				popout_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+				_apply_btn_style(popout_btn, Color(0.18, 0.45, 0.65))
+				popout_btn.tooltip_text = "Detach window to move to a 2nd screen and keep open without needing to click Next Shot"
+				popout_btn.pressed.connect(func(): emit_signal("detach_requested"))
+				r_header.add_child(popout_btn)
+
+			var close_btn = Button.new()
+			close_btn.name = "ResumePracticeButton"
+			close_btn.text = "✖ NEXT SHOT" if is_match else "✖ RESUME PRACTICE"
+			close_btn.custom_minimum_size = Vector2(175, 42)
+			close_btn.add_theme_font_size_override("font_size", 15)
+			close_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+			_apply_btn_style(close_btn, Color(0.75, 0.2, 0.2))
+			close_btn.pressed.connect(_on_close_button_pressed)
+			r_header.add_child(close_btn)
+
 		_right_vbox.add_child(r_header)
 
 	# Shot Telemetry Bar (Mobile Responsive Chips)
@@ -633,6 +731,8 @@ void fragment() {
 		main_hbox.add_child(_right_vbox)
 		add_child(main_hbox)
 
+	_update_playback_frame()
+
 
 func _show_mobile_tab(tab_idx: int) -> void:
 	_mobile_active_tab = tab_idx
@@ -666,6 +766,13 @@ func _build_suggestions_only_ui() -> void:
 	title.add_theme_color_override("font_color", Color(1.0, 0.9, 0.55))
 	header.add_child(title)
 
+	if is_detached:
+		var badge = Label.new()
+		badge.text = "🟢 DETACHED (ALWAYS OPEN)"
+		badge.add_theme_font_size_override("font_size", 12)
+		badge.add_theme_color_override("font_color", Color(0.4, 0.95, 0.6))
+		header.add_child(badge)
+
 	var spacer = Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(spacer)
@@ -675,15 +782,50 @@ func _build_suggestions_only_ui() -> void:
 	if mp_mgr != null and not mp_mgr.players.is_empty() and not mp_mgr.practice_mode_active:
 		is_match = true
 
-	var close_btn = Button.new()
-	close_btn.name = "ResumePracticeButton"
-	close_btn.text = "✖ NEXT SHOT" if is_match else "✖ RESUME PRACTICE"
-	close_btn.custom_minimum_size = Vector2(140 if is_mob else 180, 44)
-	close_btn.add_theme_font_size_override("font_size", 15)
-	close_btn.mouse_filter = Control.MOUSE_FILTER_STOP
-	_apply_btn_style(close_btn, Color(0.75, 0.2, 0.2))
-	close_btn.pressed.connect(_on_close_button_pressed)
-	header.add_child(close_btn)
+	if is_detached:
+		var dock_btn = Button.new()
+		dock_btn.name = "DockToGameButton"
+		dock_btn.text = "↙ DOCK TO GAME"
+		dock_btn.custom_minimum_size = Vector2(140, 44)
+		dock_btn.add_theme_font_size_override("font_size", 14)
+		dock_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+		_apply_btn_style(dock_btn, Color(0.2, 0.45, 0.65))
+		dock_btn.tooltip_text = "Attach this window back into the main game screen"
+		dock_btn.pressed.connect(func(): emit_signal("attach_requested"))
+		header.add_child(dock_btn)
+
+		var close_btn = Button.new()
+		close_btn.name = "CloseDetachedButton"
+		close_btn.text = "✖ CLOSE"
+		close_btn.custom_minimum_size = Vector2(100, 44)
+		close_btn.add_theme_font_size_override("font_size", 14)
+		close_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+		_apply_btn_style(close_btn, Color(0.75, 0.2, 0.2))
+		close_btn.pressed.connect(_on_close_button_pressed)
+		header.add_child(close_btn)
+	else:
+		if is_detach_supported():
+			var popout_btn = Button.new()
+			popout_btn.name = "PopoutWindowButton"
+			popout_btn.text = "↗ POP OUT"
+			popout_btn.custom_minimum_size = Vector2(120, 44)
+			popout_btn.add_theme_font_size_override("font_size", 14)
+			popout_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+			_apply_btn_style(popout_btn, Color(0.18, 0.45, 0.65))
+			popout_btn.tooltip_text = "Detach window to move to a 2nd screen and keep open without needing to click Next Shot"
+			popout_btn.pressed.connect(func(): emit_signal("detach_requested"))
+			header.add_child(popout_btn)
+
+		var close_btn = Button.new()
+		close_btn.name = "ResumePracticeButton"
+		close_btn.text = "✖ NEXT SHOT" if is_match else "✖ RESUME PRACTICE"
+		close_btn.custom_minimum_size = Vector2(140 if is_mob else 180, 44)
+		close_btn.add_theme_font_size_override("font_size", 15)
+		close_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+		_apply_btn_style(close_btn, Color(0.75, 0.2, 0.2))
+		close_btn.pressed.connect(_on_close_button_pressed)
+		header.add_child(close_btn)
+
 	vbox.add_child(header)
 
 	# Shot Telemetry Bar (Mobile Responsive Chips)
@@ -936,10 +1078,16 @@ func _update_playback_frame() -> void:
 		var frame_idx: int = clamp(int((current_time / total_duration) * (_recorded_frames.size() - 1)), 0, _recorded_frames.size() - 1)
 		var frame_data: Dictionary = _recorded_frames[frame_idx]
 		
-		var img: Image = frame_data.get("image")
-		if img != null and not img.is_empty() and _replay_feed_rect != null:
+		var tex: Texture2D = frame_data.get("texture")
+		if tex == null:
+			var img: Image = frame_data.get("image")
+			if img != null and not img.is_empty():
+				tex = ImageTexture.create_from_image(img)
+				frame_data["texture"] = tex
+		
+		if tex != null and _replay_feed_rect != null:
 			_replay_feed_rect.material = null
-			_replay_feed_rect.texture = ImageTexture.create_from_image(img)
+			_replay_feed_rect.texture = tex
 			
 		var lms: Dictionary = frame_data.get("landmarks", {})
 		if _skeleton_overlay != null:
@@ -1055,8 +1203,12 @@ func _start_background_wireframe_analysis() -> void:
 	var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
 
 	for i in range(total_keyframes):
-		if _analysis_cancelled or not is_inside_tree():
+		if _analysis_cancelled:
 			return
+		if not is_inside_tree():
+			await ready
+			if _analysis_cancelled:
+				return
 
 		var k_idx: int = keyframe_indices[i]
 		var frame_data: Dictionary = _recorded_frames[k_idx]
@@ -1073,8 +1225,12 @@ func _start_background_wireframe_analysis() -> void:
 		if bridge != null and bridge.has_method("detect_pose_for_image_async") and img != null and not img.is_empty():
 			landmarks = await bridge.detect_pose_for_image_async(img)
 
-		if _analysis_cancelled or not is_inside_tree():
+		if _analysis_cancelled:
 			return
+		if not is_inside_tree():
+			await ready
+			if _analysis_cancelled:
+				return
 
 		frame_data["landmarks"] = landmarks
 		frame_data["is_keyframe"] = true
@@ -1082,8 +1238,12 @@ func _start_background_wireframe_analysis() -> void:
 		# Yield one frame so rendering loop and video playback stay buttery smooth
 		await get_tree().process_frame
 
-	if _analysis_cancelled or not is_inside_tree():
+	if _analysis_cancelled:
 		return
+	if not is_inside_tree():
+		await ready
+		if _analysis_cancelled:
+			return
 
 	if _analysis_progress_bar != null and is_instance_valid(_analysis_progress_bar):
 		_analysis_progress_bar.value = 100.0
@@ -1201,12 +1361,23 @@ func _on_analysis_finished() -> void:
 func _record_swing_recommendations() -> void:
 	if recommendations.is_empty():
 		return
+	if shot_data.get("_recommendations_recorded", false) and _is_suggestions_only:
+		return
+	var player_name = str(shot_data.get("player", shot_data.get("Player", "")))
 	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
-	if mp_mgr != null and mp_mgr.has_method("get_active_player"):
+	if player_name.is_empty() and mp_mgr != null and mp_mgr.has_method("get_active_player"):
 		var active_player = mp_mgr.get_active_player()
-		var player_name = active_player.get("name", "Player 1") if not active_player.is_empty() else "Player 1"
-		if mp_mgr.has_method("record_player_swing_issues"):
-			mp_mgr.record_player_swing_issues(player_name, recommendations)
+		if not active_player.is_empty():
+			player_name = str(active_player.get("name", ""))
+	if player_name.is_empty():
+		var r_ui = get_tree().root.find_child("RangeUI", true, false)
+		if r_ui != null and r_ui.has_method("get_selected_player_name"):
+			player_name = r_ui.get_selected_player_name()
+	if player_name.is_empty():
+		player_name = "Player 1"
+	if mp_mgr != null and mp_mgr.has_method("record_player_swing_issues"):
+		mp_mgr.record_player_swing_issues(player_name, recommendations)
+		shot_data["_recommendations_recorded"] = true
 
 
 func _refresh_recommendation_cards() -> void:
@@ -1441,7 +1612,7 @@ func _create_detail_modal(rec: Dictionary, modal_type: String) -> Control:
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	if is_video:
+	if is_video and not is_mob:
 		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	ThemeManager.apply_scroll_container_style(scroll, 28)
 
