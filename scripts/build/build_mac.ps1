@@ -57,6 +57,11 @@ if ($DotNetRoot -and (Test-Path $DotNetRoot)) {
     Write-Host ".NET Root:      $DotNetRoot" -ForegroundColor Gray
 }
 
+# Disable MSBuild node reuse and background compilation server to prevent persistent worker processes from holding console handles
+$env:UseSharedCompilation = "false"
+$env:MSBUILDDISABLENODEREUSE = "1"
+$env:DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER = "1"
+
 # Ensure Godot ignores build, dist, and native build folders during project scanning and export
 @("build", "dist", "android\build") | ForEach-Object {
     $targetDir = Join-Path $RepoRoot $_
@@ -112,9 +117,9 @@ if ($Clean -and (Test-Path $ZipOutput)) {
 
 Write-Host ""
 Write-Host "[1/2] Pre-compiling C# .NET solution for macOS (ExportRelease)..." -ForegroundColor Green
-$dotnetProc = Start-Process -FilePath "dotnet" -ArgumentList @("build", "-c", "ExportRelease", "-p:GodotTargetPlatform=macos") -WorkingDirectory $RepoRoot -Wait -NoNewWindow -PassThru
-if ($dotnetProc.ExitCode -ne 0) {
-    throw "dotnet build failed with exit code $($dotnetProc.ExitCode)"
+& dotnet build -c ExportRelease -p:GodotTargetPlatform=macos -p:UseSharedCompilation=false -nr:false
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet build failed with exit code $LASTEXITCODE"
 }
 
 Write-Host "[2/2] Exporting macOS Universal App (.app) via Godot..." -ForegroundColor Green

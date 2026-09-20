@@ -136,6 +136,16 @@ if (Test-Path $UserDotnet) {
     $env:PATH = "$UserDotnet;$env:PATH"
 }
 
+# Disable MSBuild node reuse and background compilation server to prevent persistent worker processes from holding console handles
+$env:UseSharedCompilation = "false"
+$env:MSBUILDDISABLENODEREUSE = "1"
+$env:DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER = "1"
+
+# Pre-start ADB server independently so Godot does not spawn a child ADB daemon that inherits console handles
+if (Get-Command "adb" -ErrorAction SilentlyContinue) {
+    cmd /c "adb start-server >nul 2>&1"
+}
+
 # Ensure Godot ignores build, dist, and native build folders
 @("build", "dist", "android\build") | ForEach-Object {
     $targetDir = Join-Path $RepoRoot $_
@@ -160,13 +170,26 @@ $GodotExe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Objec
 if (-not $GodotExe) {
     throw "Godot executable not found! Please install Godot 4.7 Mono or set GODOT_BIN environment variable."
 }
-Write-Host "Godot Binary:   $GodotExe" -ForegroundColor Gray
+Write-Host ""
+Write-Host "Pre-compiling C# .NET solution for Android (ExportRelease)..." -ForegroundColor Green
+& dotnet build -c ExportRelease -p:GodotTargetPlatform=android -p:UseSharedCompilation=false -nr:false
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet build failed with exit code $LASTEXITCODE"
+}
 
+Write-Host ""
 Write-Host "Exporting latest project assets & compiling Release AAB via Godot..." -ForegroundColor Green
 Write-Host "Package: $PackageName | Version: $VersionName (code: $VersionCode)" -ForegroundColor Gray
 Write-Host "Running .NET export, asset sync, and Gradle R8 bundling (takes ~60-80s)..." -ForegroundColor Gray
 
+$env:GRADLE_OPTS = "-Dorg.gradle.daemon=false"
 & $GodotExe --headless --path $RepoRoot --export-release "Android" $destination
+
+# Clean up any orphaned or deadlocked ADB daemon left behind by Godot's shutdown
+if (Get-Command "adb" -ErrorAction SilentlyContinue) {
+    cmd /c "adb kill-server >nul 2>&1"
+    cmd /c "adb start-server >nul 2>&1"
+}
 
 $buildSuccess = ($LASTEXITCODE -eq 0 -and (Test-Path $destination))
 if (-not $buildSuccess) {

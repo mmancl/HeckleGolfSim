@@ -95,6 +95,16 @@ if ($UserDotnet -and (Test-Path $UserDotnet)) {
     $env:PATH = "$UserDotnet;$env:PATH"
 }
 
+# Disable MSBuild node reuse and background compilation server to prevent persistent worker processes from holding console handles
+$env:UseSharedCompilation = "false"
+$env:MSBUILDDISABLENODEREUSE = "1"
+$env:DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER = "1"
+
+# Pre-start ADB server independently so child ADB daemons do not hold console handles
+if (Get-Command "adb" -ErrorAction SilentlyContinue) {
+    & adb start-server 2>&1 | Out-Null
+}
+
 # Ensure Godot ignores build, dist, and native build folders
 @("build", "dist", "android\build") | ForEach-Object {
     $targetDir = Join-Path $RepoRoot $_
@@ -109,9 +119,9 @@ if ($UserDotnet -and (Test-Path $UserDotnet)) {
 
 if ($Edition -eq "mono") {
     Write-Host "[1/2] Compiling C# .NET Solution for Android (ExportRelease)..." -ForegroundColor Green
-    $dotnetProc = Start-Process -FilePath "dotnet" -ArgumentList @("build", "-c", "ExportRelease", "-p:GodotTargetPlatform=android") -WorkingDirectory $RepoRoot -Wait -NoNewWindow -PassThru
-    if ($dotnetProc.ExitCode -ne 0) {
-        throw "dotnet build failed with exit code $($dotnetProc.ExitCode)"
+    & dotnet build -c ExportRelease -p:GodotTargetPlatform=android -p:UseSharedCompilation=false -nr:false
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet build failed with exit code $LASTEXITCODE"
     }
 }
 

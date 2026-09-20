@@ -6,6 +6,7 @@
     <EnableWindowsTargeting Condition=" '$(GodotTargetPlatform)' == 'windows' Or ('$(GodotTargetPlatform)' == '' And '$(OS)' == 'Windows_NT') ">true</EnableWindowsTargeting>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <Nullable>enable</Nullable>
+    <NoWarn>$(NoWarn);CS0618;CS8600;CS8602;CS8604;CS8618;CS8619;CS8625;CS0067;CS0414</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

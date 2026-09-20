@@ -104,6 +104,16 @@ if ($UserDotnet -and (Test-Path $UserDotnet)) {
     $env:PATH = "$UserDotnet;$env:PATH"
 }
 
+# Disable MSBuild node reuse and background compilation server to prevent persistent worker processes from holding console handles
+$env:UseSharedCompilation = "false"
+$env:MSBUILDDISABLENODEREUSE = "1"
+$env:DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER = "1"
+
+# Pre-start ADB server independently so Godot does not spawn a child ADB daemon that inherits console handles
+if (Get-Command "adb" -ErrorAction SilentlyContinue) {
+    cmd /c "adb start-server >nul 2>&1"
+}
+
 # Ensure Godot ignores build, dist, and native build folders
 @("build", "dist", "android\build") | ForEach-Object {
     $targetDir = Join-Path $RepoRoot $_
@@ -116,7 +126,17 @@ if ($UserDotnet -and (Test-Path $UserDotnet)) {
     }
 }
 
-# Step 1b: Locate Godot Console Executable
+# Step 1b: Pre-compile C# .NET solution for Android
+if ($Edition -eq "mono") {
+    Write-Host ""
+    Write-Host "[1/4] Pre-compiling C# .NET Solution for Android (ExportRelease)..." -ForegroundColor Green
+    & dotnet build -c ExportRelease -p:GodotTargetPlatform=android -p:UseSharedCompilation=false -nr:false
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet build failed with exit code $LASTEXITCODE"
+    }
+}
+
+# Step 1c: Locate Godot Console Executable
 $candidates = @(
     $env:GODOT_BIN,
     "C:\Users\micha\Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe",
@@ -131,11 +151,18 @@ if (-not $GodotExe) {
 Write-Host "Godot Binary:   $GodotExe" -ForegroundColor Gray
 
 Write-Host ""
-Write-Host "[1/3] Exporting latest project assets & compiling Release AAB via Godot..." -ForegroundColor Green
+Write-Host "[2/4] Exporting latest project assets & compiling Release AAB via Godot..." -ForegroundColor Green
 Write-Host "      Package: $PackageName | Version: $VersionName (code: $VersionCode)" -ForegroundColor Gray
 Write-Host "      Running .NET export, asset sync, and Gradle R8 bundling (takes ~60-80s)..." -ForegroundColor Gray
 
+$env:GRADLE_OPTS = "-Dorg.gradle.daemon=false"
 & $GodotExe --headless --path $RepoRoot --export-release "Android" $AabFullPath
+
+# Clean up any orphaned or deadlocked ADB daemon left behind by Godot's shutdown
+if (Get-Command "adb" -ErrorAction SilentlyContinue) {
+    cmd /c "adb kill-server >nul 2>&1"
+    cmd /c "adb start-server >nul 2>&1"
+}
 
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $AabFullPath)) {
     # If Godot exported to Gradle output instead of dist directly, check Gradle directory
@@ -160,13 +187,13 @@ if (-not $DeviceId -and $ConnectedDevices.Count -gt 0) {
     }
 }
 
-# Step 2: Generate APKS set using bundletool
+# Step 3: Generate APKS set using bundletool
 $ApksOutputDir = Join-Path $AndroidBuildDir "build\outputs\bundle"
 if (-not (Test-Path $ApksOutputDir)) { New-Item -ItemType Directory -Path $ApksOutputDir -Force | Out-Null }
 $ApksOutput = Join-Path $ApksOutputDir "app.apks"
 if (Test-Path $ApksOutput) { Remove-Item -Force $ApksOutput }
 
-Write-Host "[2/3] Generating APK set with bundletool..." -ForegroundColor Green
+Write-Host "[3/4] Generating APK set with bundletool..." -ForegroundColor Green
 
 $Keystore = Join-Path $env:USERPROFILE ".android\debug.keystore"
 $BuildApksArgs = @(
@@ -187,20 +214,20 @@ if ($DeviceId) {
     $BuildApksArgs += @("--connected-device", "--device-id=$DeviceId")
 }
 
-$proc = Start-Process -FilePath "java" -ArgumentList $BuildApksArgs -Wait -NoNewWindow -PassThru
-if ($proc.ExitCode -ne 0 -or -not (Test-Path $ApksOutput)) {
+& java @BuildApksArgs
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $ApksOutput)) {
     Write-Error "bundletool failed to generate $ApksOutput"
 }
 Write-Host "[OK] APKS set generated successfully: $ApksOutput" -ForegroundColor Green
 
-# Step 3: Deploy to connected Android device
+# Step 4: Deploy to connected Android device
 if ($DeviceId) {
-    Write-Host "[3/3] Deploying AAB APK set to Android device via bundletool ($DeviceId)..." -ForegroundColor Green
+    Write-Host "[4/4] Deploying AAB APK set to Android device via bundletool ($DeviceId)..." -ForegroundColor Green
     
     $InstallApksArgs = @("-jar", $BundleTool, "install-apks", "--apks=$ApksOutput", "--allow-downgrade", "--allow-test-only", "--device-id=$DeviceId")
-    $installProc = Start-Process -FilePath "java" -ArgumentList $InstallApksArgs -Wait -NoNewWindow -PassThru
+    & java @InstallApksArgs
 
-    if ($installProc.ExitCode -eq 0) {
+    if ($LASTEXITCODE -eq 0) {
         Write-Host "==================================================" -ForegroundColor Cyan
         Write-Host " SUCCESS! AAB Release Build Deployed to Device!   " -ForegroundColor Green
         Write-Host "==================================================" -ForegroundColor Cyan

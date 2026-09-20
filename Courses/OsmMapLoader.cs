@@ -16,7 +16,6 @@ namespace HeckleLinks.Courses;
 public partial class OsmMapLoader : Node
 {
     private static readonly string LogPrefix = "[OsmMapLoader]";
-    private static readonly string OverpassUrl = "https://overpass-api.de/api/interpreter";
     private static readonly string[] OverpassEndpoints = new[]
     {
         "https://lz4.overpass-api.de/api/interpreter",
