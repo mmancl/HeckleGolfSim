@@ -81,10 +81,30 @@ $ApkRelativePath = if ($Edition -eq "mono") {
 }
 $ApkFullPath = Join-Path $AndroidBuildDir $ApkRelativePath
 
-$UserDotnet = Join-Path $env:USERPROFILE ".dotnet"
-if (Test-Path $UserDotnet) {
+$UserDotnet = $env:DOTNET_ROOT
+if (-not $UserDotnet -or -not (Test-Path $UserDotnet)) {
+    $defaultDotnet = Join-Path $env:USERPROFILE ".dotnet"
+    if (Test-Path $defaultDotnet) {
+        $UserDotnet = $defaultDotnet
+    }
+}
+if ($UserDotnet -and (Test-Path $UserDotnet)) {
     $env:DOTNET_ROOT = $UserDotnet
+    $env:DOTNET_ROOT_X64 = $UserDotnet
+    $env:DOTNET_MULTILEVEL_LOOKUP = "0"
     $env:PATH = "$UserDotnet;$env:PATH"
+}
+
+# Ensure Godot ignores build, dist, and native build folders
+@("build", "dist", "android\build") | ForEach-Object {
+    $targetDir = Join-Path $RepoRoot $_
+    if (-not (Test-Path $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    }
+    $gdignorePath = Join-Path $targetDir ".gdignore"
+    if (-not (Test-Path $gdignorePath)) {
+        New-Item -ItemType File -Path $gdignorePath -Force | Out-Null
+    }
 }
 
 if ($Edition -eq "mono") {
@@ -95,8 +115,9 @@ if ($Edition -eq "mono") {
     }
 }
 
-Write-Host "[1/2] Compiling R8-Optimized Release APK via Gradle ($TaskName)..." -ForegroundColor Green
+Write-Host "[2/2] Compiling R8-Optimized Release APK via Gradle ($TaskName)..." -ForegroundColor Green
 Write-Host "      Package: $PackageName | Version: $VersionName (code: $VersionCode)" -ForegroundColor Gray
+Write-Host "      Running R8 optimization and assembling APK (takes ~60s)..." -ForegroundColor Gray
 
 $gradleArgs = @(
     $TaskName,
