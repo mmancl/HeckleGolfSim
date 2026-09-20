@@ -61,7 +61,7 @@ jobs:
 
       - name: Build C# Solution
         run: |
-          dotnet build OpenShotGolf.csproj -c Release
+          dotnet build HeckleGolfSim.csproj -c Release
 
       - name: Export iOS Preset via Godot
         run: |

@@ -61,12 +61,10 @@ jobs:
 
     - name: Resolve project file
       run: |
-        if [[ -f "OpenShotGolf.csproj" ]]; then
-          echo "PROJECT_FILE=OpenShotGolf.csproj" >> "$GITHUB_ENV"
-        elif [[ -f "OpenShotGolf.csproj" ]]; then
-          echo "PROJECT_FILE=OpenShotGolf.csproj" >> "$GITHUB_ENV"
+        if [[ -f "HeckleGolfSim.csproj" ]]; then
+          echo "PROJECT_FILE=HeckleGolfSim.csproj" >> "$GITHUB_ENV"
         else
-          echo "Error: No root project file found (expected OpenShotGolf.csproj or OpenShotGolf.csproj)."
+          echo "Error: No root project file found (expected HeckleGolfSim.csproj)."
           ls -la
           exit 1
         fi
