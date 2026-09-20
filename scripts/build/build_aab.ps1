@@ -148,25 +148,32 @@ if (Test-Path $UserDotnet) {
     }
 }
 
-Write-Host "Compiling C# .NET solution for Android (ExportRelease)..." -ForegroundColor Green
-$dotnetProc = Start-Process -FilePath "dotnet" -ArgumentList @("build", "-c", "ExportRelease", "-p:GodotTargetPlatform=android") -WorkingDirectory $RepoRoot -Wait -NoNewWindow -PassThru
-if ($dotnetProc.ExitCode -ne 0) {
-    throw "dotnet build failed with exit code $($dotnetProc.ExitCode)"
-}
+# Locate Godot Console Executable
+$candidates = @(
+    $env:GODOT_BIN,
+    "C:\Users\micha\Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe",
+    "C:\Users\micha\Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64.exe",
+    (Get-Command "godot" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
+)
+$GodotExe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 
-Write-Host "Compiling R8-Optimized Release AAB Bundle via Gradle (bundleMonoRelease)..." -ForegroundColor Green
-Push-Location $androidBuildDir
-try {
-    & .\gradlew.bat @gradleArgs
-    $buildSuccess = ($LASTEXITCODE -eq 0)
-} finally {
-    Pop-Location
+if (-not $GodotExe) {
+    throw "Godot executable not found! Please install Godot 4.7 Mono or set GODOT_BIN environment variable."
 }
+Write-Host "Godot Binary:   $GodotExe" -ForegroundColor Gray
 
-if ($buildSuccess) {
+Write-Host "Exporting latest project assets & compiling Release AAB via Godot..." -ForegroundColor Green
+Write-Host "Package: $PackageName | Version: $VersionName (code: $VersionCode)" -ForegroundColor Gray
+Write-Host "Running .NET export, asset sync, and Gradle R8 bundling (takes ~60-80s)..." -ForegroundColor Gray
+
+& $GodotExe --headless --path $RepoRoot --export-release "Android" $destination
+
+$buildSuccess = ($LASTEXITCODE -eq 0 -and (Test-Path $destination))
+if (-not $buildSuccess) {
     $bundleSource = Join-Path $androidBuildDir "build\outputs\bundle\monoRelease\build-mono-release.aab"
     if (Test-Path $bundleSource) {
         Copy-Item -Path $bundleSource -Destination $destination -Force
+        $buildSuccess = (Test-Path $destination)
     }
 }
 

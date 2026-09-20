@@ -116,47 +116,38 @@ if ($UserDotnet -and (Test-Path $UserDotnet)) {
     }
 }
 
-if ($Edition -eq "mono") {
-    Write-Host "[1/3] Compiling C# .NET Solution for Android (ExportRelease)..." -ForegroundColor Green
-    $dotnetProc = Start-Process -FilePath "dotnet" -ArgumentList @("build", "-c", "ExportRelease", "-p:GodotTargetPlatform=android") -WorkingDirectory $RepoRoot -Wait -NoNewWindow -PassThru
-    if ($dotnetProc.ExitCode -ne 0) {
-        throw "dotnet build failed with exit code $($dotnetProc.ExitCode)"
-    }
-}
-
-Write-Host "[2/3] Compiling R8-Optimized Release AAB Bundle via Gradle ($TaskName)..." -ForegroundColor Green
-Write-Host "      Package: $PackageName | Version: $VersionName (code: $VersionCode)" -ForegroundColor Gray
-Write-Host "      Running R8 optimization and packaging bundle (takes ~60s)..." -ForegroundColor Gray
-
-$gradleArgs = @(
-    $TaskName,
-    "-Pexport_package_name=$PackageName",
-    "-Pexport_version_name=$VersionName",
-    "-Pexport_version_code=$VersionCode",
-    "-Pexport_version_min_sdk=$minSdk",
-    "-Pexport_version_target_sdk=$targetSdk",
-    "-Pexport_format=aab",
-    "-Pexport_edition=$Edition",
-    "-Pexport_build_type=release"
+# Step 1b: Locate Godot Console Executable
+$candidates = @(
+    $env:GODOT_BIN,
+    "C:\Users\micha\Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe",
+    "C:\Users\micha\Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64.exe",
+    (Get-Command "godot" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
 )
+$GodotExe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 
-Push-Location $AndroidBuildDir
-try {
-    & .\gradlew.bat @gradleArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "Gradle build failed with exit code $LASTEXITCODE"
-    }
+if (-not $GodotExe) {
+    throw "Godot executable not found! Please install Godot 4.7 Mono or set GODOT_BIN environment variable."
+}
+Write-Host "Godot Binary:   $GodotExe" -ForegroundColor Gray
+
+Write-Host ""
+Write-Host "[1/3] Exporting latest project assets & compiling Release AAB via Godot..." -ForegroundColor Green
+Write-Host "      Package: $PackageName | Version: $VersionName (code: $VersionCode)" -ForegroundColor Gray
+Write-Host "      Running .NET export, asset sync, and Gradle R8 bundling (takes ~60-80s)..." -ForegroundColor Gray
+
+& $GodotExe --headless --path $RepoRoot --export-release "Android" $AabFullPath
+
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $AabFullPath)) {
+    # If Godot exported to Gradle output instead of dist directly, check Gradle directory
     if (Test-Path $GradleAabPath) {
         Copy-Item -Path $GradleAabPath -Destination $AabFullPath -Force
     }
-} finally {
-    Pop-Location
 }
 
 if (-not (Test-Path $AabFullPath)) {
     Write-Error "AAB output file not found at $AabFullPath"
 }
-Write-Host "[OK] AAB compiled successfully: $AabFullPath" -ForegroundColor Green
+Write-Host "[OK] AAB compiled and packaged successfully: $AabFullPath" -ForegroundColor Green
 
 # Resolve target ADB device upfront
 $ConnectedDevices = @(& adb devices 2>$null | Select-String -Pattern "\tdevice$")
