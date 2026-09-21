@@ -56,6 +56,8 @@ var putting_camera_enabled := Setting.new(false)
 var putting_camera_fps := Setting.new(30, 15, 120)
 var putting_camera_fps_mode := Setting.new("Auto")
 var putting_camera_rotation := Setting.new(0)
+var windowed_fullscreen := Setting.new(true)
+var shot_curve_sensitivity := Setting.new(1.0, 0.5, 2.0)
 
 func _init():
 	init({
@@ -114,6 +116,8 @@ func _init():
 		"putting_camera_fps": putting_camera_fps,
 		"putting_camera_fps_mode": putting_camera_fps_mode,
 		"putting_camera_rotation": putting_camera_rotation,
+		"windowed_fullscreen": windowed_fullscreen,
+		"shot_curve_sensitivity": shot_curve_sensitivity,
 	})
 
 

@@ -587,7 +587,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         _isDetectBallActive = false;
         EmitReady(false);
         ShotReceived?.Invoke(metrics);
-        _logInfo($"Shot emitted. speed={metrics.BallSpeedMps} m/s, spin={metrics.TotalSpinRpm} rpm, hasClubData={metrics.HasClubData}, faceAngle={metrics.FaceAngle}, clubPath={metrics.ClubPath}, attackAngle={metrics.AttackAngle}, dynamicLoft={metrics.DynamicLoft}");
+        _logInfo($"Shot emitted. speed={metrics.BallSpeedMps:F2} m/s ({metrics.BallSpeedMps * 2.23694f:F1} mph), vla={metrics.VerticalAngle:F1}°, hla={metrics.HorizontalAngle:F1}°, spin={metrics.TotalSpinRpm} rpm, spinAxis={metrics.SpinAxis:F1}°, backSpin={metrics.BackSpinRpm}, sideSpin={metrics.SideSpinRpm}, type={metrics.ShotType}, hasClubData={metrics.HasClubData}, faceAngle={metrics.FaceAngle}, clubPath={metrics.ClubPath}");
         await _delayAsync(_options.ConnectionReadyDelay, CancellationToken.None);
         await SetReadyAsync();
     }

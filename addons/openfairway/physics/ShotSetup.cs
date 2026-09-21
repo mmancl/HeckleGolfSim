@@ -56,18 +56,20 @@ public partial class ShotSetup : RefCounted
         // Derive components from total + axis
         if (hasTotal && hasAxis)
         {
-            if (!hasBackspin)
+            if (!hasBackspin || (Mathf.Abs(spinAxis) > 0.001f && Mathf.Abs(sidespin) < 0.001f))
             {
                 backspin = totalSpin * Mathf.Cos(Mathf.DegToRad(spinAxis));
             }
-            if (!hasSidespin)
+            if (!hasSidespin || (Mathf.Abs(spinAxis) > 0.001f && Mathf.Abs(sidespin) < 0.001f))
             {
                 sidespin = totalSpin * Mathf.Sin(Mathf.DegToRad(spinAxis));
             }
         }
 
         // Validate consistency: if all three are present, components are ground truth
-        // (launch monitors measure backspin/sidespin directly; TotalSpin is derived)
+        // (radar launch monitors measure backspin/sidespin directly; TotalSpin is derived).
+        // If an explicit non-zero SpinAxis was provided (common for camera launch monitors like Square Golf),
+        // we keep the measured SpinAxis and TotalSpin as ground truth and align the components.
         if (hasBackspin && hasSidespin && hasTotal)
         {
             float computedTotal = Mathf.Sqrt(backspin * backspin + sidespin * sidespin);
@@ -75,10 +77,18 @@ public partial class ShotSetup : RefCounted
             {
                 if (emitConsistencyWarnings)
                 {
-                    PhysicsLogger.Info($"  Spin data inconsistent: TotalSpin={totalSpin:F0} but sqrt(BS²+SS²)={computedTotal:F0}, using computed value");
+                    PhysicsLogger.Info($"  Spin data inconsistent: TotalSpin={totalSpin:F0} but sqrt(BS²+SS²)={computedTotal:F0}, resolving consistency");
                 }
-                totalSpin = computedTotal;
-                spinAxis = Mathf.RadToDeg(Mathf.Atan2(sidespin, backspin));
+                if (hasAxis && Mathf.Abs(spinAxis) > 0.001f)
+                {
+                    backspin = totalSpin * Mathf.Cos(Mathf.DegToRad(spinAxis));
+                    sidespin = totalSpin * Mathf.Sin(Mathf.DegToRad(spinAxis));
+                }
+                else
+                {
+                    totalSpin = computedTotal;
+                    spinAxis = Mathf.RadToDeg(Mathf.Atan2(sidespin, backspin));
+                }
             }
         }
 

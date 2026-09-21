@@ -15,7 +15,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="Heckle Golf Simulator"
-config/version="0.73.5"
+config/version="0.75.4"
 run/main_scene="uid://dgyd437dgyv0y"
 config/features=PackedStringArray("4.7", "C#", "Mobile")
 boot_splash/image="res://assets/images/heckle_splash.png"
@@ -39,6 +39,7 @@ PoseDetectionBridge="*res://UI/GolferCamera/pose_detection_bridge.gd"
 
 window/size/viewport_width=1728
 window/size/viewport_height=972
+window/size/mode="fullscreen"
 window/subwindows/embed_subwindows=false
 window/stretch/mode="canvas_items"
 

@@ -71,7 +71,7 @@ var _fallback_scan_active := false
 var _fallback_scan_timer: Timer = null
 const FALLBACK_SCAN_TIMEOUT_SECONDS := 12.0
 var _default_connect_timer: Timer = null
-const DEFAULT_CONNECT_TIMEOUT_SECONDS := 4.5
+const DEFAULT_CONNECT_TIMEOUT_SECONDS := 12.0
 
 
 
@@ -872,7 +872,15 @@ func _on_square_shot_received(data: Dictionary) -> void:
 	if not _is_valid_shot_data(data):
 		_debug_log("Square practice swing or stationary ball ignored (speed=%.1f mph)" % float(data.get("BallSpeed", data.get("Speed", 0.0))))
 		return
-	_debug_log("shot received with %d fields" % data.size())
+	_debug_log("Square shot received: speed=%.1f mph, VLA=%.1f°, HLA=%.1f°, TotalSpin=%.0f rpm, SpinAxis=%.1f°, BackSpin=%.0f rpm, SideSpin=%.0f rpm" % [
+		float(data.get("BallSpeed", data.get("Speed", 0.0))),
+		float(data.get("VLA", 0.0)),
+		float(data.get("HLA", 0.0)),
+		float(data.get("TotalSpin", 0.0)),
+		float(data.get("SpinAxis", 0.0)),
+		float(data.get("BackSpin", 0.0)),
+		float(data.get("SideSpin", 0.0))
+	])
 	FoamBallBoost.apply_boost(data, _current_club_name)
 	notify_shot_started()
 	emit_signal("hit_ball", data)

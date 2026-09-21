@@ -95,20 +95,38 @@ func _grab_initial_focus() -> void:
 		km.focus_first_control(self)
 
 
+func _input(event: InputEvent) -> void:
+	_process_close_input(event)
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	_process_close_input(event)
+
+
+func _process_close_input(event: InputEvent) -> void:
 	if not is_visible_in_tree():
 		return
-	var is_cancel = event.is_action_pressed("ui_cancel") or event.is_action_pressed("prev_shot_analysis_toggle") or \
-		(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE)
+	if not event.is_pressed():
+		return
+	if event is InputEventKey and event.echo:
+		return
+
+	var is_cancel: bool = event.is_action_pressed("ui_cancel") or \
+		event.is_action_pressed("prev_shot_analysis_toggle") or \
+		event.is_action_pressed("shot_analysis_toggle") or \
+		(event is InputEventKey and (event.keycode == KEY_ESCAPE or event.keycode == KEY_V or event.keycode == KEY_Y)) or \
+		(event is InputEventJoypadButton and (event.button_index == JOY_BUTTON_B or event.button_index == JOY_BUTTON_Y))
+
 	if is_cancel:
+		var vp = get_viewport()
+		if vp != null:
+			vp.set_input_as_handled()
 		var detail_modal = get_node_or_null("DetailModal")
-		if detail_modal != null:
+		if detail_modal != null and is_instance_valid(detail_modal):
 			InAppVideoPlayer.stop_all_players()
 			detail_modal.queue_free()
-			get_viewport().set_input_as_handled()
 			return
 		_on_close_button_pressed()
-		get_viewport().set_input_as_handled()
 
 
 func _on_viewport_resized() -> void:
@@ -1215,12 +1233,8 @@ func _start_background_wireframe_analysis() -> void:
 	var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
 
 	for i in range(total_keyframes):
-		if _analysis_cancelled:
+		if _analysis_cancelled or not is_inside_tree():
 			return
-		if not is_inside_tree():
-			await ready
-			if _analysis_cancelled:
-				return
 
 		var k_idx: int = keyframe_indices[i]
 		var frame_data: Dictionary = _recorded_frames[k_idx]
@@ -1237,25 +1251,19 @@ func _start_background_wireframe_analysis() -> void:
 		if bridge != null and bridge.has_method("detect_pose_for_image_async") and img != null and not img.is_empty():
 			landmarks = await bridge.detect_pose_for_image_async(img)
 
-		if _analysis_cancelled:
+		if _analysis_cancelled or not is_inside_tree():
 			return
-		if not is_inside_tree():
-			await ready
-			if _analysis_cancelled:
-				return
 
 		frame_data["landmarks"] = landmarks
 		frame_data["is_keyframe"] = true
 
 		# Yield one frame so rendering loop and video playback stay buttery smooth
+		if get_tree() == null:
+			return
 		await get_tree().process_frame
 
-	if _analysis_cancelled:
+	if _analysis_cancelled or not is_inside_tree():
 		return
-	if not is_inside_tree():
-		await ready
-		if _analysis_cancelled:
-			return
 
 	if _analysis_progress_bar != null and is_instance_valid(_analysis_progress_bar):
 		_analysis_progress_bar.value = 100.0
@@ -1411,10 +1419,13 @@ func _refresh_recommendation_cards() -> void:
 func _on_close_button_pressed() -> void:
 	_analysis_cancelled = true
 	_close_active_video_players()
+	visible = false
+	var vp = get_viewport()
+	if vp != null:
+		var cur_f = vp.gui_get_focus_owner()
+		if cur_f != null and is_ancestor_of(cur_f):
+			cur_f.release_focus()
 	emit_signal("closed")
-	var p = get_parent()
-	if p != null:
-		p.remove_child(self)
 	queue_free()
 
 

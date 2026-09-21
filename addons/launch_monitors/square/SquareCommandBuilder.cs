@@ -12,9 +12,13 @@ public static class SquareCommandBuilder
         return FromHex($"1183{sequence:X2}0000000000");
     }
 
-    public static byte[] DetectBall(byte sequence, int mode, int spinMode)
+    public static byte[] DetectBall(byte sequence, int mode = 1, int spinMode = 1)
     {
-        return FromHex($"1181{sequence:X2}0{mode}0{spinMode}00000000");
+        // Byte 4 is the ball spin tracking mode:
+        // 0x11 = Dotted / marked ball mode (hardware enables camera dot tracking for real spin axis and sidespin measurement)
+        // 0x01 = Unmarked ball mode (hardware uses estimated spin with 0 spin axis)
+        var spinHex = spinMode == 0 ? "01" : "11";
+        return FromHex($"1181{sequence:X2}0{mode}{spinHex}00000000");
     }
 
     public static byte[] Club(byte sequence, string clubCode, int handedness)

@@ -23,7 +23,9 @@ public static class SquareGodotMapper
         return value switch
         {
             float floatValue => Variant.From(floatValue),
+            double doubleValue => Variant.From((float)doubleValue),
             int intValue => Variant.From(intValue),
+            bool boolValue => Variant.From(boolValue),
             string stringValue => Variant.From(stringValue),
             _ => Variant.From(value.ToString() ?? string.Empty)
         };

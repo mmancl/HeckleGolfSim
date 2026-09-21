@@ -2005,6 +2005,14 @@ func _update_hud_focus_neighbors() -> void:
 
 
 func is_any_dialog_open() -> bool:
+	if range_ui != null:
+		if range_ui.has_method("get_active_swing_replay_modal"):
+			var modal = range_ui.call("get_active_swing_replay_modal")
+			if modal != null and is_instance_valid(modal) and modal.visible:
+				return true
+		var replay_modal = range_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
+		if replay_modal != null and is_instance_valid(replay_modal) and replay_modal.visible:
+			return true
 	if mulligan_confirm_dialog != null and is_instance_valid(mulligan_confirm_dialog) and mulligan_confirm_dialog.visible:
 		return true
 	if forfeit_confirm_dialog != null and is_instance_valid(forfeit_confirm_dialog) and forfeit_confirm_dialog.visible:
@@ -2185,8 +2193,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 			if range_ui != null:
-				var replay_modal = range_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
-				if replay_modal != null and is_instance_valid(replay_modal):
+				var replay_modal = range_ui.call("get_active_swing_replay_modal") if range_ui.has_method("get_active_swing_replay_modal") else range_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
+				if replay_modal != null and is_instance_valid(replay_modal) and replay_modal.visible:
 					range_ui.call("toggle_prev_shot_analysis")
 					get_viewport().set_input_as_handled()
 					return
@@ -2314,7 +2322,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				tension_btn.emit_signal("pressed")
 				get_viewport().set_input_as_handled()
 				return
-		elif event.is_action_pressed("prev_shot_analysis_toggle"):
+		elif event.is_action_pressed("prev_shot_analysis_toggle") or \
+			(event is InputEventJoypadButton and event.button_index == JOY_BUTTON_Y):
 			if range_ui != null and range_ui.has_method("toggle_prev_shot_analysis"):
 				range_ui.call("toggle_prev_shot_analysis")
 				get_viewport().set_input_as_handled()

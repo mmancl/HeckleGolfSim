@@ -30,7 +30,7 @@ public static class GarminGodotMapper
             ["SpinAxis"] = Variant.From(spinAxis),
             ["BackSpin"] = Variant.From(backSpin),
             ["SideSpin"] = Variant.From(sideSpin),
-            ["ShotType"] = Variant.From(0)
+            ["ShotType"] = Variant.From("normal")
         };
 
         if (metrics.ClubSpeedMps > 0)

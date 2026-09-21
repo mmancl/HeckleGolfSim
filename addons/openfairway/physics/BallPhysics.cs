@@ -15,7 +15,8 @@ public partial class BallPhysics : RefCounted
     public const float MOMENT_OF_INERTIA = 0.4f * MASS * RADIUS * RADIUS;  // kg*m²
     public const float SIMULATION_HZ = 120.0f;  // shared integration rate for runtime + headless
     public const float SIMULATION_DT = 1.0f / SIMULATION_HZ;
-    public const float SPIN_DECAY_TAU = 5.0f;  // Spin decay time constant (seconds)
+    public const float SPIN_DECAY_TAU = 35.0f;  // Spin decay time constant (seconds)
+    public const float LATERAL_MAGNUS_SCALE = 1.65f; // Lateral Magnus scaling for realistic slice/hook curvature
     public static float SPIN_DRAG_MULTIPLIER_COEFF => FlightAerodynamicsModel.SpinDragMultiplierCoeff;
     public static float SPIN_DRAG_MULTIPLIER_MAX => FlightAerodynamicsModel.SpinDragMultiplierMax;
     public static float SPIN_DRAG_MULTIPLIER_HIGH_SPIN_MAX => FlightAerodynamicsModel.SpinDragMultiplierHighSpinMax;
@@ -30,6 +31,7 @@ public partial class BallPhysics : RefCounted
     [Export] public float SimulationHz { get => SIMULATION_HZ; private set { } }
     [Export] public float SimulationDt { get => SIMULATION_DT; private set { } }
     [Export] public float SpinDecayTau { get => SPIN_DECAY_TAU; private set { } }
+    [Export] public float LateralMagnusScale { get => LATERAL_MAGNUS_SCALE; private set { } }
     [Export] public float SpinDragMultiplierMax { get => SPIN_DRAG_MULTIPLIER_MAX; private set { } }
     [Export] public float SpinDragMultiplierHighSpinMax { get => SPIN_DRAG_MULTIPLIER_HIGH_SPIN_MAX; private set { } }
 
@@ -164,6 +166,18 @@ public partial class BallPhysics : RefCounted
         {
             Vector3 omegaCrossVel = omega.Cross(velocity);
             magnus = 0.5f * airSample.LiftCoefficient * parameters.AirDensity * CROSS_SECTION * omegaCrossVel * airSample.Speed / omegaLen;
+
+            // Apply lateral curve scaling for spin-axis induced fade/slice/draw/hook
+            Vector3 horizVel = new Vector3(velocity.X, 0.0f, velocity.Z);
+            if (horizVel.LengthSquared() > 0.001f)
+            {
+                Vector3 vForward = horizVel.Normalized();
+                Vector3 vLateral = vForward.Cross(Vector3.Up);
+                float lateralMag = magnus.Dot(vLateral);
+                Vector3 lateralForce = vLateral * lateralMag;
+                float scale = (parameters != null ? parameters.LateralCurveScale : 1.0f) * LATERAL_MAGNUS_SCALE;
+                magnus = (magnus - lateralForce) + (lateralForce * scale);
+            }
         }
 
         return drag + magnus;

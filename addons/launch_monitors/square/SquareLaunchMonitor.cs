@@ -109,6 +109,7 @@ public partial class SquareLaunchMonitor : Node
 
     private void OnShotReceived(SquareShotMetrics metrics)
     {
+        LogInfo($"Dispatching shot to GDScript: Speed={metrics.BallSpeedMps * 2.23694f:F1}mph, TotalSpin={metrics.TotalSpinRpm}rpm, SpinAxis={metrics.SpinAxis:F1}°, BackSpin={metrics.BackSpinRpm}, SideSpin={metrics.SideSpinRpm}, ShotType={metrics.ShotType}");
         EmitShot(SquareGodotMapper.ToBallData(metrics));
     }
 

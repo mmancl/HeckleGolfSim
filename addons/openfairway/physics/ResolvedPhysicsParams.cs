@@ -24,7 +24,8 @@ public sealed class ResolvedPhysicsParams(
     float spinbackSpeedEndMps,
     float initialLaunchAngleDeg,
     FlightProfile flightProfile = null,
-    bool isPutt = false)
+    bool isPutt = false,
+    float lateralCurveScale = 1.0f)
 {
     public float AirDensity { get; } = airDensity;
     public float AirViscosity { get; } = airViscosity;
@@ -46,6 +47,7 @@ public sealed class ResolvedPhysicsParams(
     public float InitialLaunchAngleDeg { get; } = initialLaunchAngleDeg;
     public FlightProfile FlightProfile { get; } = flightProfile ?? FlightProfile.Default;
     public bool IsPutt { get; } = isPutt;
+    public float LateralCurveScale { get; } = lateralCurveScale;
 
     public PhysicsParams ToPhysicsParams()
     {
@@ -70,7 +72,8 @@ public sealed class ResolvedPhysicsParams(
             InitialLaunchAngleDeg,
             FlightProfile,
             isInSand: SurfaceType == PhysicsEnums.SurfaceType.Bunker,
-            isPutt: IsPutt
+            isPutt: IsPutt,
+            lateralCurveScale: LateralCurveScale
         );
     }
 }

@@ -528,6 +528,7 @@ func _create_physics_params():
 	_set_openfairway_property(_params, &"slope_force_scale", &"SlopeForceScale", slope_force_scale)
 	_set_openfairway_property(_params, &"initial_launch_angle_deg", &"InitialLaunchAngleDeg", 0.0)
 	_set_openfairway_property(_params, &"is_putt", &"IsPutt", false)
+	_set_openfairway_property(_params, &"lateral_curve_scale", &"LateralCurveScale", 1.0)
 	
 	params = _params
 
@@ -1690,17 +1691,22 @@ func hit_from_data(data: Dictionary) -> void:
 		elif global_position.y < (GROUND_CENTER_HEIGHT + 0.005):
 			global_position.y = GROUND_CENTER_HEIGHT + 0.005
 
+	var lateral_curve_scale: float = 1.0
+	if GlobalSettings != null and GlobalSettings.range_settings != null and "shot_curve_sensitivity" in GlobalSettings.range_settings:
+		lateral_curve_scale = float(GlobalSettings.range_settings.shot_curve_sensitivity.value)
+
 	if params != null:
 		if _physics_params_factory != null:
 			_call_openfairway_method(
 				_physics_params_factory,
 				&"configure_shot",
 				&"ConfigureShot",
-				[params, _air_density, _air_viscosity, _drag_scale, _lift_scale, vla_deg, speed_mph, total_spin, is_putt]
+				[params, _air_density, _air_viscosity, _drag_scale, _lift_scale, vla_deg, speed_mph, total_spin, is_putt, lateral_curve_scale]
 			)
 		else:
 			_set_openfairway_property(params, &"initial_launch_angle_deg", &"InitialLaunchAngleDeg", vla_deg)
 			_set_openfairway_property(params, &"is_putt", &"IsPutt", is_putt)
+			_set_openfairway_property(params, &"lateral_curve_scale", &"LateralCurveScale", lateral_curve_scale)
 
 	velocity = launch_velocity
 	omega = launch_omega
@@ -1771,7 +1777,8 @@ func _print_launch_debug(data: Dictionary, speed_mps: float, vla: float, hla: fl
 
 	var eff_drag: float = float(_get_openfairway_property(params, &"drag_scale", &"DragScale", _drag_scale))
 	var eff_lift: float = float(_get_openfairway_property(params, &"lift_scale", &"LiftScale", _lift_scale))
-	print("drag_scale: %.3f, lift_scale: %.3f (base: %.2f, %.2f)" % [eff_drag, eff_lift, _drag_scale, _lift_scale])
+	var eff_curve: float = float(_get_openfairway_property(params, &"lateral_curve_scale", &"LateralCurveScale", 1.0))
+	print("drag_scale: %.3f, lift_scale: %.3f, lateral_curve_scale: %.2f (base: %.2f, %.2f)" % [eff_drag, eff_lift, eff_curve, _drag_scale, _lift_scale])
 
 	if _physics_params_factory != null:
 		var regime_info = _call_openfairway_method(

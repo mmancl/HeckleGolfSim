@@ -640,23 +640,30 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
         if (notification.Metrics != null)
         {
             var shotId = notification.Metrics.ShotId;
-            if (_processedShotIds.Contains(shotId))
+            if (shotId > 0)
             {
-                _logInfo($"Ignoring duplicate shot id {shotId}");
-                return;
+                if (_processedShotIds.Contains(shotId))
+                {
+                    _logInfo($"Ignoring duplicate shot id {shotId}");
+                    return;
+                }
+
+                _processedShotIds.Add(shotId);
+                if (_processedShotIds.Count > 100)
+                {
+                    _processedShotIds.Clear();
+                    _processedShotIds.Add(shotId);
+                }
             }
 
-            _processedShotIds.Add(shotId);
-
-            var isPractice = notification.Metrics.HasShotType && notification.Metrics.ShotType == Metrics.Types.ShotType.Practice;
             var ball = notification.Metrics.BallMetrics;
             var club = notification.Metrics.ClubMetrics;
             var ballSpeed = ball?.BallSpeed ?? 0.0f;
 
-            // If it's a practice swing or the ball didn't move (no ball metrics or negligible ball speed), do not count as a shot
-            if (isPractice || ball == null || ballSpeed <= 0.1f)
+            // If the ball didn't move (no ball metrics or negligible ball speed), do not count as a shot
+            if (ball == null || ballSpeed <= 0.1f)
             {
-                _logInfo($"Practice swing or unhit ball detected for shot {shotId} (isPractice={isPractice}, ballSpeed={ballSpeed * 2.23694f:F1} mph). Swing ignored (not counting as shot).");
+                _logInfo($"Practice swing or unhit ball detected for shot {shotId} (ballSpeed={ballSpeed * 2.23694f:F1} mph). Swing ignored (not counting as shot).");
                 return;
             }
 
@@ -880,6 +887,7 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
         _header = 0x00;
         _protoRequestCounter = 0;
         _readBuffer.Clear();
+        _processedShotIds.Clear();
 
         await _bluetoothClient.DisconnectAsync(cancellationToken);
     }

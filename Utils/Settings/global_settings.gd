@@ -2,6 +2,7 @@ extends Node
 
 signal settings_changed
 signal wind_changed(speed_mph: float, direction_rad: float)
+signal fullscreen_changed(is_fullscreen: bool)
 
 # Range Settings
 var range_settings := RangeSettings.new()
@@ -40,6 +41,13 @@ func _ready() -> void:
 	range_settings.settings_changed.connect(save_settings)
 	range_settings.wind_enabled.setting_changed.connect(_on_wind_enabled_changed)
 
+	# Fullscreen setup for Windows, macOS, and desktop platforms
+	if is_fullscreen_supported():
+		range_settings.windowed_fullscreen.setting_changed.connect(_on_windowed_fullscreen_setting_changed)
+		if range_settings.windowed_fullscreen.value:
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+		get_tree().root.size_changed.connect(_on_root_window_resized)
+
 
 func _on_club_selected(club_name: String) -> void:
 	current_selected_club = club_name
@@ -66,10 +74,82 @@ func _apply_announcer_settings(announcer: Node) -> void:
 		announcer.set(key, _loaded_announcer_settings[key])
 
 
+func is_fullscreen_supported() -> bool:
+	var os_name = OS.get_name()
+	return os_name in ["Windows", "macOS", "Linux", "FreeBSD", "NetBSD", "OpenBSD", "BSD"]
+
+
+func is_fullscreen() -> bool:
+	if not is_fullscreen_supported():
+		return false
+	var mode = DisplayServer.window_get_mode()
+	return mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
+
+
+func set_fullscreen(enabled: bool) -> void:
+	if not is_fullscreen_supported():
+		return
+	var target_mode = DisplayServer.WINDOW_MODE_FULLSCREEN if enabled else DisplayServer.WINDOW_MODE_WINDOWED
+	if DisplayServer.window_get_mode() != target_mode:
+		DisplayServer.window_set_mode(target_mode)
+	if range_settings.windowed_fullscreen.value != enabled:
+		range_settings.windowed_fullscreen.set_value(enabled)
+		save_settings()
+	emit_signal("fullscreen_changed", enabled)
+
+
+func toggle_fullscreen() -> void:
+	set_fullscreen(not is_fullscreen())
+
+
+func _on_windowed_fullscreen_setting_changed(val: Variant) -> void:
+	var enabled = bool(val)
+	var target_mode = DisplayServer.WINDOW_MODE_FULLSCREEN if enabled else DisplayServer.WINDOW_MODE_WINDOWED
+	if DisplayServer.window_get_mode() != target_mode:
+		DisplayServer.window_set_mode(target_mode)
+	emit_signal("fullscreen_changed", enabled)
+
+
+func _on_root_window_resized() -> void:
+	if not is_fullscreen_supported():
+		return
+	var current_fs = is_fullscreen()
+	if range_settings.windowed_fullscreen.value != current_fs:
+		range_settings.windowed_fullscreen.set_value(current_fs)
+		save_settings()
+		emit_signal("fullscreen_changed", current_fs)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_fullscreen_supported():
+		return
+	if event.is_action_pressed("toggle_fullscreen"):
+		toggle_fullscreen()
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventKey and event.pressed and not event.echo:
+		# Windows / PC: Alt + Enter or F11
+		if event.alt_pressed and (event.keycode == KEY_ENTER or event.physical_keycode == KEY_ENTER):
+			toggle_fullscreen()
+			get_viewport().set_input_as_handled()
+			return
+		elif event.keycode == KEY_F11 or event.physical_keycode == KEY_F11:
+			toggle_fullscreen()
+			get_viewport().set_input_as_handled()
+			return
+		# macOS: Command + F or Control + Command + F
+		elif event.meta_pressed and (event.keycode == KEY_F or event.physical_keycode == KEY_F):
+			toggle_fullscreen()
+			get_viewport().set_input_as_handled()
+			return
+
+
 func resett_defaults():
 	range_settings.reset_defaults()
 	wind_initialized_for_round = false
 	current_wind_speed_mph = 0.0
+	if is_fullscreen_supported():
+		set_fullscreen(true)
 	if has_node("/root/KeybindingManager"):
 		get_node("/root/KeybindingManager").reset_to_defaults()
 	var announcer = get_node_or_null("/root/AnnouncerEngine")

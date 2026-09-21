@@ -38,6 +38,7 @@ var _last_applied_graphics_quality: String = ""
 var _graphics_quality_changed: bool = false
 var _wind_slider : HSlider = null
 var _wind_slider_lbl : Label = null
+var _fullscreen_check : CheckButton = null
 
 const SQUARE_UI_LOG_PREFIX := "[SquareUI]"
 const SQUARE_CLUBS := {
@@ -448,6 +449,80 @@ func _ready() -> void:
 	
 	gameplay_vbox.add_child(foam_slider_container)
 
+	# Shot Shape Sensitivity section in Gameplay tab
+	var curve_sep = HSeparator.new()
+	gameplay_vbox.add_child(curve_sep)
+
+	var curve_title = Label.new()
+	curve_title.text = "Shot Shape Sensitivity (Slice / Hook)"
+	curve_title.add_theme_font_size_override("font_size", 22)
+	curve_title.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
+	gameplay_vbox.add_child(curve_title)
+
+	var curve_desc = Label.new()
+	curve_desc.text = "Adjusts flight curvature produced by spin axis tilt (fades, slices, draws, hooks). 1.0x is calibrated to TrackMan/PGA Tour radar dispersion (~60 yards on a 20° driver slice)."
+	curve_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	curve_desc.add_theme_font_size_override("font_size", 16)
+	curve_desc.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	gameplay_vbox.add_child(curve_desc)
+
+	var curve_slider_container = VBoxContainer.new()
+	curve_slider_container.name = "ShotShapeSensitivityContainer"
+	curve_slider_container.add_theme_constant_override("separation", 6)
+
+	var curve_setting = GlobalSettings.range_settings.shot_curve_sensitivity
+	var curve_slider_row = HBoxContainer.new()
+	curve_slider_row.name = "ShotShapeSensitivityRow"
+	curve_slider_row.custom_minimum_size = Vector2(0, 52)
+	curve_slider_row.add_theme_constant_override("separation", 10)
+
+	var curve_slider_lbl = Label.new()
+	curve_slider_lbl.text = "Curvature: %.2fx" % curve_setting.value
+	curve_slider_lbl.add_theme_font_size_override("font_size", 19)
+	curve_slider_lbl.custom_minimum_size = Vector2(300, 0)
+	curve_slider_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	curve_slider_row.add_child(curve_slider_lbl)
+
+	var curve_minus_btn = Button.new()
+	curve_minus_btn.text = "－"
+	curve_minus_btn.custom_minimum_size = Vector2(48, 48)
+	curve_minus_btn.add_theme_font_size_override("font_size", 20)
+	ThemeManager.apply_nav_button_style(curve_minus_btn, 8)
+	curve_slider_row.add_child(curve_minus_btn)
+
+	var curve_slider = HSlider.new()
+	curve_slider.name = "ShotCurveSensitivitySlider"
+	curve_slider.min_value = 0.5
+	curve_slider.max_value = 2.0
+	curve_slider.step = 0.05
+	curve_slider.value = curve_setting.value
+	curve_slider.custom_minimum_size = Vector2(180, 48)
+	curve_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	curve_slider_row.add_child(curve_slider)
+
+	var curve_plus_btn = Button.new()
+	curve_plus_btn.text = "＋"
+	curve_plus_btn.custom_minimum_size = Vector2(48, 48)
+	curve_plus_btn.add_theme_font_size_override("font_size", 20)
+	ThemeManager.apply_nav_button_style(curve_plus_btn, 8)
+	curve_slider_row.add_child(curve_plus_btn)
+
+	curve_slider_container.add_child(curve_slider_row)
+
+	curve_slider.value_changed.connect(func(val: float):
+		curve_setting.set_value(val)
+		curve_slider_lbl.text = "Curvature: %.2fx" % val
+	)
+
+	curve_minus_btn.pressed.connect(func():
+		curve_slider.value = clamp(curve_slider.value - 0.05, curve_slider.min_value, curve_slider.max_value)
+	)
+	curve_plus_btn.pressed.connect(func():
+		curve_slider.value = clamp(curve_slider.value + 0.05, curve_slider.min_value, curve_slider.max_value)
+	)
+
+	gameplay_vbox.add_child(curve_slider_container)
+
 	# Create and insert Gimme Range configuration settings rows in the Gameplay tab
 	var gimme_sep = HSeparator.new()
 	gameplay_vbox.add_child(gimme_sep)
@@ -547,6 +622,10 @@ func _ready() -> void:
 	var graphics_row = _create_option_setting_row("Graphics Quality", "graphics_quality", ["Low", "High"])
 	camera_vbox.add_child(graphics_row)
 	
+	if GlobalSettings != null and GlobalSettings.has_method("is_fullscreen_supported") and GlobalSettings.is_fullscreen_supported():
+		var fs_row = _create_fullscreen_setting_row("Windowed Full Screen")
+		camera_vbox.add_child(fs_row)
+	
 	# DOF toggle
 	var dof_row = _create_toggle_setting_row("Depth of Field", "dof_enabled")
 	camera_vbox.add_child(dof_row)
@@ -642,6 +721,7 @@ func _on_settings_opened() -> void:
 		return
 	_last_opened_msec = now
 	_sync_wind_slider()
+	_sync_fullscreen_toggle()
 	if has_node("/root/AnnouncerEngine"):
 		get_node("/root/AnnouncerEngine").call("SpeakSettingsOpened")
 	call_deferred("_focus_initial_control")
@@ -669,6 +749,11 @@ func _sync_wind_slider() -> void:
 				_wind_slider_lbl.text = "Wind Speed: 0 MPH (Calm)"
 			else:
 				_wind_slider_lbl.text = "Wind Speed: %d MPH" % int(spd)
+
+
+func _sync_fullscreen_toggle() -> void:
+	if _fullscreen_check != null and is_instance_valid(_fullscreen_check) and GlobalSettings != null and GlobalSettings.has_method("is_fullscreen"):
+		_fullscreen_check.set_pressed_no_signal(GlobalSettings.is_fullscreen())
 
 
 func _on_header_close_button_pressed() -> void:
@@ -1826,6 +1911,34 @@ func _create_toggle_setting_row(label_text: String, setting_name: String) -> HBo
 	)
 	row.add_child(check)
 	
+	return row
+
+
+func _create_fullscreen_setting_row(label_text: String) -> HBoxContainer:
+	var row = HBoxContainer.new()
+	row.name = label_text.replace(" ", "")
+	row.custom_minimum_size = Vector2(0, 52)
+	
+	var label = Label.new()
+	label.text = label_text
+	label.add_theme_font_size_override("font_size", 19)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(label)
+	
+	_fullscreen_check = CheckButton.new()
+	_fullscreen_check.custom_minimum_size = Vector2(72, 48)
+	_fullscreen_check.focus_mode = Control.FOCUS_ALL
+	_fullscreen_check.set_pressed_no_signal(GlobalSettings.is_fullscreen())
+	_fullscreen_check.toggled.connect(func(on: bool):
+		GlobalSettings.set_fullscreen(on)
+	)
+	if GlobalSettings.has_signal("fullscreen_changed"):
+		GlobalSettings.fullscreen_changed.connect(func(is_fs: bool):
+			if is_instance_valid(_fullscreen_check):
+				_fullscreen_check.set_pressed_no_signal(is_fs)
+		)
+	row.add_child(_fullscreen_check)
 	return row
 
 

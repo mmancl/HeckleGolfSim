@@ -112,6 +112,7 @@ func _init_action_definitions() -> void:
 	_register_def("golfer_cam_toggle", "Golfer Camera Toggle", CATEGORY_HUD, KEY_C, -1)
 	_register_def("putting_cam_toggle", "Putting Camera Toggle", CATEGORY_HUD, KEY_P, -1)
 	_register_def("distance_menu_toggle", "Hit Distance Menu", CATEGORY_HUD, KEY_D, -1)
+	_register_def("toggle_fullscreen", "Toggle Full Screen", CATEGORY_HUD, KEY_F11, -1)
 
 	# --- Category 4: Individual Stat Toggles ---
 	# Defaults assigned across number row and function keys for quick access

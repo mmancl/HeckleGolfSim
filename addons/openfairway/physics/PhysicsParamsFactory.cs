@@ -32,7 +32,8 @@ public partial class PhysicsParamsFactory : RefCounted
 		float initialLaunchAngleDeg = 0.0f,
 		float launchSpeedMph = 0.0f,
 		float launchSpinRpm = 0.0f,
-		bool isPutt = false)
+		bool isPutt = false,
+		float lateralCurveScale = 1.0f)
 	{
 		BallPhysicsProfile profile = ballProfile ?? _ballProfile ?? new BallPhysicsProfile();
 		SurfacePhysicsSettings surface = SurfacePhysicsCatalog.Get(surfaceType);
@@ -69,7 +70,8 @@ public partial class PhysicsParamsFactory : RefCounted
 			surface.SpinbackSpeedEndMps,
 			initialLaunchAngleDeg,
 			profile.ResolvedFlight,
-			isPutt: isPutt
+			isPutt: isPutt,
+			lateralCurveScale: lateralCurveScale
 		);
 	}
 
@@ -84,7 +86,8 @@ public partial class PhysicsParamsFactory : RefCounted
 		float initialLaunchAngleDeg = 0.0f,
 		float launchSpeedMph = 0.0f,
 		float launchSpinRpm = 0.0f,
-		bool isPutt = false)
+		bool isPutt = false,
+		float lateralCurveScale = 1.0f)
 	{
 		return Create(
 			airDensity,
@@ -98,7 +101,8 @@ public partial class PhysicsParamsFactory : RefCounted
 			initialLaunchAngleDeg,
 			launchSpeedMph,
 			launchSpinRpm,
-			isPutt
+			isPutt,
+			lateralCurveScale
 		).ToPhysicsParams();
 	}
 
@@ -113,7 +117,8 @@ public partial class PhysicsParamsFactory : RefCounted
 		float initialLaunchAngleDeg = 0.0f,
 		float launchSpeedMph = 0.0f,
 		float launchSpinRpm = 0.0f,
-		bool isPutt = false)
+		bool isPutt = false,
+		float lateralCurveScale = 1.0f)
 	{
 		return CreateParams(
 			airDensity,
@@ -126,7 +131,8 @@ public partial class PhysicsParamsFactory : RefCounted
 			initialLaunchAngleDeg,
 			launchSpeedMph,
 			launchSpinRpm,
-			isPutt
+			isPutt,
+			lateralCurveScale
 		);
 	}
 
@@ -195,6 +201,32 @@ public partial class PhysicsParamsFactory : RefCounted
 		float launchSpinRpm,
 		bool isPutt = false)
 	{
+		ConfigureShot(
+			parameters,
+			airDensity,
+			airViscosity,
+			dragScale,
+			liftScale,
+			initialLaunchAngleDeg,
+			launchSpeedMph,
+			launchSpinRpm,
+			isPutt,
+			1.0f
+		);
+	}
+
+	public void ConfigureShot(
+		PhysicsParams parameters,
+		float airDensity,
+		float airViscosity,
+		float dragScale,
+		float liftScale,
+		float initialLaunchAngleDeg,
+		float launchSpeedMph,
+		float launchSpinRpm,
+		bool isPutt,
+		float lateralCurveScale)
+	{
 		if (parameters == null)
 			return;
 
@@ -218,6 +250,7 @@ public partial class PhysicsParamsFactory : RefCounted
 		parameters.LiftScale = liftScale * _ballProfile.LiftScaleMultiplier * regimeScale.LiftScaleMultiplier;
 		parameters.FlightProfile = _ballProfile.ResolvedFlight;
 		parameters.IsPutt = isPutt;
+		parameters.LateralCurveScale = lateralCurveScale;
 	}
 
 	public Godot.Collections.Dictionary GetRegimeInfo(float launchSpeedMph, float launchAngleDeg, float launchSpinRpm)

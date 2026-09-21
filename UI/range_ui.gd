@@ -1216,10 +1216,26 @@ func _on_prev_shot_analysis_pressed() -> void:
 	trigger_swing_replay_modal(_last_shot_data)
 
 
+func get_active_swing_replay_modal() -> Control:
+	if _detached_modal != null and is_instance_valid(_detached_modal) and _detached_modal.is_inside_tree() and not _detached_modal.is_queued_for_deletion():
+		return _detached_modal
+	var m = $OverlayLayer.get_node_or_null("SwingReplayModal") if has_node("OverlayLayer") else null
+	if m != null and is_instance_valid(m) and not m.is_queued_for_deletion():
+		return m
+	var found = find_child("SwingReplayModal", true, false)
+	if found != null and is_instance_valid(found) and not found.is_queued_for_deletion():
+		return found as Control
+	if get_tree() != null and get_tree().root != null:
+		found = get_tree().root.find_child("SwingReplayModal", true, false)
+		if found != null and is_instance_valid(found) and not found.is_queued_for_deletion():
+			return found as Control
+	return null
+
+
 func toggle_prev_shot_analysis() -> void:
 	# 1. If attached SwingReplayModal is open, close it
-	var modal = $OverlayLayer.get_node_or_null("SwingReplayModal")
-	if modal != null and is_instance_valid(modal):
+	var modal = get_active_swing_replay_modal()
+	if modal != null and is_instance_valid(modal) and modal.visible:
 		if modal.has_method("_on_close_button_pressed"):
 			modal.call("_on_close_button_pressed")
 		else:

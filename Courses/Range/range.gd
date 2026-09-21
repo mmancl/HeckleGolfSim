@@ -906,8 +906,23 @@ var place_ball_mode: bool = false
 
 
 func is_any_dialog_open() -> bool:
-	if has_node("RangeUI") and $RangeUI.has_node("SettingsLayer") and $RangeUI.get_node("SettingsLayer").visible:
-		return true
+	if has_node("RangeUI"):
+		var r_ui = $RangeUI
+		if r_ui.has_node("SettingsLayer") and r_ui.get_node("SettingsLayer").visible:
+			return true
+		if r_ui.has_method("get_active_swing_replay_modal"):
+			var modal = r_ui.get_active_swing_replay_modal()
+			if modal != null and is_instance_valid(modal) and modal.visible:
+				return true
+		var modal = r_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
+		if modal != null and is_instance_valid(modal) and modal.visible:
+			return true
+		if r_ui.get("_detached_window") != null and is_instance_valid(r_ui.get("_detached_window")) and r_ui.get("_detached_window").visible:
+			return true
+		if r_ui.get("_prev_shot_popup") != null and is_instance_valid(r_ui.get("_prev_shot_popup")) and r_ui.get("_prev_shot_popup").visible:
+			return true
+		if r_ui.get("_exit_confirm_dialog") != null and is_instance_valid(r_ui.get("_exit_confirm_dialog")) and r_ui.get("_exit_confirm_dialog").visible:
+			return true
 	var cp = get_node_or_null("MultiplayerController")
 	if cp != null and cp.has_method("is_any_dialog_open") and cp.call("is_any_dialog_open"):
 		return true
@@ -915,6 +930,45 @@ func is_any_dialog_open() -> bool:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# 1. Close active review screens / popups on Escape or Cancel (B / Circle)
+	var is_escape = (event is InputEventKey and not event.echo and (event as InputEventKey).keycode == KEY_ESCAPE) or \
+		event.is_action_pressed("ui_cancel") or \
+		(event is InputEventJoypadButton and event.is_pressed() and event.button_index == JOY_BUTTON_B and is_any_dialog_open())
+
+	if is_escape:
+		if is_aerial_view:
+			_on_map_button_pressed()
+			get_viewport().set_input_as_handled()
+			return
+		if has_node("RangeUI"):
+			var r_ui = $RangeUI
+			var modal = r_ui.get_active_swing_replay_modal() if r_ui.has_method("get_active_swing_replay_modal") else r_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
+			if modal != null and is_instance_valid(modal) and modal.visible:
+				r_ui.toggle_prev_shot_analysis()
+				get_viewport().set_input_as_handled()
+				return
+			if r_ui.has_node("SettingsLayer") and r_ui.get_node("SettingsLayer").visible:
+				r_ui.get_node("SettingsLayer").visible = false
+				get_viewport().set_input_as_handled()
+				return
+			if r_ui.get("_prev_shot_popup") != null and is_instance_valid(r_ui.get("_prev_shot_popup")) and r_ui.get("_prev_shot_popup").visible:
+				r_ui.get("_prev_shot_popup").visible = false
+				get_viewport().set_input_as_handled()
+				return
+			if r_ui.get("_detached_window") != null and is_instance_valid(r_ui.get("_detached_window")):
+				r_ui.call("_close_detached_window")
+				get_viewport().set_input_as_handled()
+				return
+
+	# 2. Previous Shot Analysis Menu Toggle (Xbox Y / PS Triangle / V key)
+	if event.is_action_pressed("prev_shot_analysis_toggle") or \
+		(event is InputEventJoypadButton and event.is_pressed() and event.button_index == JOY_BUTTON_Y):
+		if has_node("RangeUI"):
+			$RangeUI.toggle_prev_shot_analysis()
+		get_viewport().set_input_as_handled()
+		return
+
+	# 3. Block gameplay shortcuts if any modal/dialog is actively open
 	if is_any_dialog_open():
 		return
 
@@ -953,22 +1007,6 @@ func _unhandled_input(event: InputEvent) -> void:
 				$RangeUI.on_next_shot_started()
 			get_viewport().set_input_as_handled()
 			return
-		elif (event is InputEventKey and (event as InputEventKey).keycode == KEY_ESCAPE) or event.is_action_pressed("ui_cancel"):
-			if is_aerial_view:
-				_on_map_button_pressed()
-				get_viewport().set_input_as_handled()
-				return
-			if has_node("RangeUI"):
-				var r_ui = $RangeUI
-				var modal = r_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
-				if modal != null and is_instance_valid(modal):
-					r_ui.toggle_prev_shot_analysis()
-					get_viewport().set_input_as_handled()
-					return
-				if r_ui.has_node("SettingsLayer") and r_ui.get_node("SettingsLayer").visible:
-					r_ui.get_node("SettingsLayer").visible = false
-					get_viewport().set_input_as_handled()
-					return
 		elif event.is_action_pressed("green_grid"):
 			show_green_grid = not show_green_grid
 			var course_play_node = get_node_or_null("MultiplayerController")
@@ -1052,11 +1090,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		elif event.is_action_pressed("shot_analysis_toggle"):
 			if has_node("RangeUI"):
-				var new_v = not $RangeUI.is_shot_analysis_enabled()
-				$RangeUI.set_shot_analysis_enabled(new_v)
+				var r_ui = $RangeUI
+				var modal = r_ui.get_active_swing_replay_modal() if r_ui.has_method("get_active_swing_replay_modal") else r_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
+				if modal != null and is_instance_valid(modal) and modal.visible:
+					r_ui.toggle_prev_shot_analysis()
+				else:
+					var new_v = not $RangeUI.is_shot_analysis_enabled()
+					$RangeUI.set_shot_analysis_enabled(new_v)
 			get_viewport().set_input_as_handled()
 			return
-		elif event.is_action_pressed("prev_shot_analysis_toggle"):
+		elif event.is_action_pressed("prev_shot_analysis_toggle") or \
+			(event is InputEventJoypadButton and event.button_index == JOY_BUTTON_Y):
 			if has_node("RangeUI"):
 				$RangeUI.toggle_prev_shot_analysis()
 			get_viewport().set_input_as_handled()
