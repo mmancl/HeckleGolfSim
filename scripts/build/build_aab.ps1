@@ -141,10 +141,6 @@ $env:UseSharedCompilation = "false"
 $env:MSBUILDDISABLENODEREUSE = "1"
 $env:DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER = "1"
 
-# Pre-start ADB server independently so Godot does not spawn a child ADB daemon that inherits console handles
-if (Get-Command "adb" -ErrorAction SilentlyContinue) {
-    cmd /c "adb start-server >nul 2>&1"
-}
 
 # Ensure Godot ignores build, dist, and native build folders
 @("build", "dist", "android\build") | ForEach-Object {
@@ -185,11 +181,6 @@ Write-Host "Running .NET export, asset sync, and Gradle R8 bundling (takes ~60-8
 $env:GRADLE_OPTS = "-Dorg.gradle.daemon=false"
 & $GodotExe --headless --path $RepoRoot --export-release "Android" $destination
 
-# Clean up any orphaned or deadlocked ADB daemon left behind by Godot's shutdown
-if (Get-Command "adb" -ErrorAction SilentlyContinue) {
-    cmd /c "adb kill-server >nul 2>&1"
-    cmd /c "adb start-server >nul 2>&1"
-}
 
 $buildSuccess = ($LASTEXITCODE -eq 0 -and (Test-Path $destination))
 if (-not $buildSuccess) {

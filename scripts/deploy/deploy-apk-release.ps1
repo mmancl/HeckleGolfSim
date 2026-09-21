@@ -100,9 +100,45 @@ $env:UseSharedCompilation = "false"
 $env:MSBUILDDISABLENODEREUSE = "1"
 $env:DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER = "1"
 
-# Pre-start ADB server independently so child ADB daemons do not hold console handles
+function Get-ConnectedAdbDevices {
+    if (-not (Get-Command "adb" -ErrorAction SilentlyContinue)) { return @() }
+    $raw = @(cmd /c "adb devices" 2>$null | Select-String -Pattern "\tdevice$")
+    $devs = @()
+    foreach ($line in $raw) {
+        $devs += ($line.Line -split "\t")[0].Trim()
+    }
+    return ,$devs
+}
+
+$cachedDeviceFile = Join-Path $AndroidBuildDir ".last_connected_device"
+
+# Detect connected target device upfront before build so paired wireless session is remembered
 if (Get-Command "adb" -ErrorAction SilentlyContinue) {
-    & adb start-server 2>&1 | Out-Null
+    if (-not $DeviceId) {
+        $ConnectedDevices = @(Get-ConnectedAdbDevices)
+        if ($ConnectedDevices.Count -gt 0) {
+            $DeviceId = [string]$ConnectedDevices[0]
+            if ($ConnectedDevices.Count -gt 1) {
+                Write-Host "[NOTICE] Multiple devices connected ($($ConnectedDevices.Count) devices). Automatically targeting: $DeviceId" -ForegroundColor Yellow
+            } else {
+                Write-Host "[NOTICE] Connected device detected upfront: $DeviceId" -ForegroundColor Cyan
+            }
+        } elseif (Test-Path $cachedDeviceFile) {
+            $cached = (Get-Content $cachedDeviceFile -Raw).Trim()
+            if ($cached -match "^.+:\d+$") {
+                Write-Host "[NOTICE] Attempting to reconnect to last paired device: $cached..." -ForegroundColor Yellow
+                cmd /c "adb connect $cached" 2>$null | Out-Null
+                $ConnectedDevices = @(Get-ConnectedAdbDevices)
+                if ($ConnectedDevices -contains $cached) {
+                    $DeviceId = $cached
+                    Write-Host "[OK] Connected to paired device: $DeviceId" -ForegroundColor Green
+                }
+            }
+        }
+    }
+    if ($DeviceId) {
+        Set-Content -Path $cachedDeviceFile -Value $DeviceId -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # Ensure Godot ignores build, dist, and native build folders
@@ -156,14 +192,37 @@ if (-not (Test-Path $ApkFullPath)) {
 }
 Write-Host "[OK] APK compiled successfully: $ApkFullPath" -ForegroundColor Green
 
-# Step 2: Check connected ADB devices and install
-$ConnectedDevices = @(& adb devices 2>$null | Select-String -Pattern "\tdevice$")
-if (-not $DeviceId -and $ConnectedDevices.Count -gt 0) {
-    $DeviceId = ($ConnectedDevices[0].Line -split "\t")[0]
-    if ($ConnectedDevices.Count -gt 1) {
-        Write-Host "[NOTICE] Multiple devices connected ($($ConnectedDevices.Count) devices). Automatically targeting: $DeviceId" -ForegroundColor Yellow
+# Step 2: Check connected ADB devices and install (reconnect if wireless connection dropped during build)
+if (Get-Command "adb" -ErrorAction SilentlyContinue) {
+    if ($DeviceId) {
+        $currentDevices = @(Get-ConnectedAdbDevices)
+        if ($currentDevices -notcontains $DeviceId -and $DeviceId -match "^.+:\d+$") {
+            Write-Host "[NOTICE] Wireless connection to $DeviceId dropped during build. Reconnecting..." -ForegroundColor Yellow
+            cmd /c "adb connect $DeviceId" 2>$null | Out-Null
+            $currentDevices = @(Get-ConnectedAdbDevices)
+        }
+        if ($currentDevices -notcontains $DeviceId) {
+            Write-Host "[WARNING] Target device $DeviceId is not reachable after build." -ForegroundColor Yellow
+            if ($currentDevices.Count -gt 0) {
+                $DeviceId = [string]$currentDevices[0]
+                Write-Host "[NOTICE] Falling back to connected device: $DeviceId" -ForegroundColor Cyan
+            } else {
+                $DeviceId = ""
+            }
+        }
     } else {
-        Write-Host "[NOTICE] Connected device detected: $DeviceId" -ForegroundColor Gray
+        $currentDevices = @(Get-ConnectedAdbDevices)
+        if ($currentDevices.Count -gt 0) {
+            $DeviceId = [string]$currentDevices[0]
+            if ($currentDevices.Count -gt 1) {
+                Write-Host "[NOTICE] Multiple devices connected ($($currentDevices.Count) devices). Automatically targeting: $DeviceId" -ForegroundColor Yellow
+            } else {
+                Write-Host "[NOTICE] Connected device detected: $DeviceId" -ForegroundColor Gray
+            }
+        }
+    }
+    if ($DeviceId) {
+        Set-Content -Path $cachedDeviceFile -Value $DeviceId -Force -ErrorAction SilentlyContinue
     }
 }
 
