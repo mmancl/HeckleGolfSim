@@ -11,6 +11,7 @@ signal golfer_cam_modal_state_changed(is_open: bool)
 signal golfer_cam_enabled_changed(is_enabled: bool)
 signal putting_cam_enabled_changed(is_enabled: bool)
 signal player_profile_changed(player_name: String)
+signal shot_traces_toggled(enabled: bool)
 
 
 var _avg_carry: Label
@@ -39,6 +40,9 @@ var _dist_btn: Button = null
 var _golfer_cam_btn: Button = null
 var _putting_cam_btn: Button = null
 var _shot_analysis_btn: Button = null
+var _shot_traces_btn: Button = null
+var _shot_traces_active: bool = false
+var _dispersion_overlay: Control = null
 var _golfer_cam_panel: PanelContainer = null
 var _camera_feed_rect: TextureRect = null
 var _current_camera_feed_index: int = 0
@@ -52,6 +56,65 @@ var _is_putting_cam_minimized: bool = false
 var _current_selected_club: String = ""
 var _putting_overlay: Control = null
 var _putting_state_machine: Node = null
+var _putting_align_container: PanelContainer = null
+var _putting_align_slider: HSlider = null
+var _panel_footer_label: Label = null
+var _camera_color_pick_btn: Button = null
+
+enum PuttingPickerMode { NONE, PICK_BALL, PICK_BACKGROUND }
+var _putting_picker_mode: PuttingPickerMode = PuttingPickerMode.NONE
+var _color_profile_inst: PuttingColorProfile = null
+var _color_profile: PuttingColorProfile:
+	get:
+		if _color_profile_inst == null:
+			var profile_script = load("res://UI/PuttingCamera/putting_color_profile.gd")
+			if profile_script != null:
+				_color_profile_inst = profile_script.new()
+				_color_profile_inst.load_from_settings()
+		return _color_profile_inst
+	set(v):
+		_color_profile_inst = v
+var _last_putting_feed_image: Image = null
+
+var putting_min_speed_mph: float:
+	get:
+		if is_inside_tree() and has_node("/root/GlobalSettings"):
+			if GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("putting_min_speed_mph"):
+				return float(GlobalSettings.range_settings.putting_min_speed_mph.value)
+		return 1.5
+	set(val):
+		if is_inside_tree() and has_node("/root/GlobalSettings"):
+			GlobalSettings.range_settings.putting_min_speed_mph.set_value(val)
+			GlobalSettings.save_settings()
+		if _putting_state_machine != null:
+			_putting_state_machine.min_putt_speed_mph = val
+
+var putting_max_speed_mph: float:
+	get:
+		if is_inside_tree() and has_node("/root/GlobalSettings"):
+			if GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("putting_max_speed_mph"):
+				return float(GlobalSettings.range_settings.putting_max_speed_mph.value)
+		return 20.0
+	set(val):
+		if is_inside_tree() and has_node("/root/GlobalSettings"):
+			GlobalSettings.range_settings.putting_max_speed_mph.set_value(val)
+			GlobalSettings.save_settings()
+		if _putting_state_machine != null:
+			_putting_state_machine.max_putt_speed_mph = val
+
+var putting_mishit_filter_enabled: bool:
+	get:
+		if is_inside_tree() and has_node("/root/GlobalSettings"):
+			if GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("putting_mishit_filter_enabled"):
+				return bool(GlobalSettings.range_settings.putting_mishit_filter_enabled.value)
+		return true
+	set(val):
+		if is_inside_tree() and has_node("/root/GlobalSettings"):
+			GlobalSettings.range_settings.putting_mishit_filter_enabled.set_value(val)
+			GlobalSettings.save_settings()
+		if _putting_state_machine != null:
+			_putting_state_machine.mishit_filter_enabled = val
+
 var _camera_rotate_btn: Button = null
 var _camera_rotation_deg: int:
 	get:
@@ -70,9 +133,13 @@ var _phone_cam_url: String:
 		GlobalSettings.range_settings.phone_cam_url.set_value(val)
 var _use_phone_stream: bool:
 	get:
-		return GlobalSettings.range_settings.use_phone_stream.value
+		if has_node("/root/GlobalSettings"):
+			return GlobalSettings.range_settings.use_phone_stream.value
+		return false
 	set(val):
-		GlobalSettings.range_settings.use_phone_stream.set_value(val)
+		if has_node("/root/GlobalSettings"):
+			GlobalSettings.range_settings.use_phone_stream.set_value(val)
+			GlobalSettings.save_settings()
 var _http_req: HTTPRequest = null
 var _phone_cam_poll_timer: Timer = null
 var _swing_frame_buffer: SwingFrameBuffer = null
@@ -94,6 +161,11 @@ func _ready() -> void:
 	_setup_prev_shot_ui()
 	_setup_golfer_camera_ui()
 	_setup_profile_selector()
+
+	var profile_script = load("res://UI/PuttingCamera/putting_color_profile.gd")
+	if profile_script != null:
+		_color_profile = profile_script.new()
+		_color_profile.load_from_settings()
 	
 	var eb = _get_autoload("EventBus")
 	if eb != null and eb.has_signal("club_selected"):
@@ -318,6 +390,10 @@ func _ready() -> void:
 						menu.current_ball_node = p.get_node("Player").get("ball")
 					if p and "aim_target_pos" in p:
 						menu.aim_target_node = p.get("aim_target_pos")
+				else:
+					var vp = get_viewport()
+					if vp != null:
+						vp.gui_release_focus()
 		)
 		toggles_container.add_child(dist_btn)
 		_dist_btn = dist_btn
@@ -333,6 +409,7 @@ func _ready() -> void:
 		var golfer_cam_btn = Button.new()
 		golfer_cam_btn.name = "GolferCamButton"
 		golfer_cam_btn.text = "📹 Golfer Cam: OFF"
+		golfer_cam_btn.tooltip_text = "Toggle Golfer Camera (Right-click for Setup)"
 		golfer_cam_btn.custom_minimum_size = Vector2(180, 56)
 		apply_material_button_style(golfer_cam_btn, Color(0.2, 0.45, 0.45, 0.85))
 		golfer_cam_btn.pressed.connect(func():
@@ -343,6 +420,11 @@ func _ready() -> void:
 			else:
 				set_golfer_camera_visible(false)
 		)
+		golfer_cam_btn.gui_input.connect(func(ev: InputEvent):
+			if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_RIGHT:
+				open_camera_setup(false)
+				get_viewport().set_input_as_handled()
+		)
 		toggles_container.add_child(golfer_cam_btn)
 		_golfer_cam_btn = golfer_cam_btn
 
@@ -350,7 +432,7 @@ func _ready() -> void:
 		var putting_cam_btn = Button.new()
 		putting_cam_btn.name = "PuttingCamButton"
 		putting_cam_btn.text = "🎯 Putting Cam: OFF"
-		putting_cam_btn.tooltip_text = "Toggle Putting Camera (Ball tracking for putt speed & direction)"
+		putting_cam_btn.tooltip_text = "Toggle Putting Camera (Ball tracking for putt speed & direction, Right-click for Setup)"
 		putting_cam_btn.custom_minimum_size = Vector2(180, 56)
 		apply_material_button_style(putting_cam_btn, Color(0.35, 0.35, 0.35, 0.85))
 		putting_cam_btn.pressed.connect(func():
@@ -360,6 +442,11 @@ func _ready() -> void:
 				restore_putting_camera()
 			else:
 				set_putting_camera_visible(false)
+		)
+		putting_cam_btn.gui_input.connect(func(ev: InputEvent):
+			if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_RIGHT:
+				open_camera_setup(true)
+				get_viewport().set_input_as_handled()
 		)
 		toggles_container.add_child(putting_cam_btn)
 		_putting_cam_btn = putting_cam_btn
@@ -387,6 +474,19 @@ func _ready() -> void:
 		)
 		toggles_container.add_child(shot_analysis_btn)
 		_shot_analysis_btn = shot_analysis_btn
+
+		# Shot Traces Overlay Toggle Button (HotKey: T)
+		var shot_traces_btn = Button.new()
+		shot_traces_btn.name = "ShotTracesButton"
+		shot_traces_btn.text = "📈 Shot Traces: OFF"
+		shot_traces_btn.tooltip_text = "Toggle Flight Arc Traces & Dispersion View for current club (Hotkey: T)"
+		shot_traces_btn.custom_minimum_size = Vector2(180, 56)
+		apply_material_button_style(shot_traces_btn, Color(0.3, 0.35, 0.45, 0.85))
+		shot_traces_btn.pressed.connect(func():
+			toggle_shot_traces()
+		)
+		toggles_container.add_child(shot_traces_btn)
+		_shot_traces_btn = shot_traces_btn
 
 
 		# Position ClubSelector directly underneath SettingsButton and HideHelpersButton
@@ -1324,6 +1424,7 @@ func apply_material_button_style(btn: Button, bg_color: Color):
 	style_focus.border_width_right = 3
 	style_focus.border_width_bottom = 3
 
+	btn.focus_mode = Control.FOCUS_NONE
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_pressed)
@@ -1363,6 +1464,7 @@ func apply_circular_button_style(btn: Button, bg_color: Color):
 	style_focus.border_width_right = 3
 	style_focus.border_width_bottom = 3
 
+	btn.focus_mode = Control.FOCUS_NONE
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_pressed)
@@ -1620,8 +1722,18 @@ func _setup_golfer_camera_ui() -> void:
 	header_setup_btn.text = "⚙️ Setup"
 	header_setup_btn.custom_minimum_size = Vector2(80, 48)
 	apply_material_button_style(header_setup_btn, Color(0.2, 0.45, 0.65, 0.9))
-	header_setup_btn.pressed.connect(_open_camera_setup_dialog)
+	header_setup_btn.pressed.connect(func(): _open_camera_setup_dialog(_is_putting_cam_enabled))
 	header.add_child(header_setup_btn)
+
+	_camera_color_pick_btn = Button.new()
+	_camera_color_pick_btn.name = "ColorPickButton"
+	_camera_color_pick_btn.text = "🎨"
+	_camera_color_pick_btn.tooltip_text = "Pick Ball or Mat/Background Color from Video Feed"
+	_camera_color_pick_btn.custom_minimum_size = Vector2(52, 48)
+	apply_material_button_style(_camera_color_pick_btn, Color(0.48, 0.28, 0.58, 0.9))
+	_camera_color_pick_btn.pressed.connect(_open_color_picker_menu)
+	_camera_color_pick_btn.visible = false
+	header.add_child(_camera_color_pick_btn)
 
 	_camera_rotate_btn = Button.new()
 	_camera_rotate_btn.name = "RotateCameraButton"
@@ -1675,6 +1787,8 @@ func _setup_golfer_camera_ui() -> void:
 	_camera_feed_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	_camera_feed_rect.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_camera_feed_rect.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_camera_feed_rect.mouse_filter = Control.MOUSE_FILTER_PASS
+	_camera_feed_rect.gui_input.connect(_on_feed_gui_input)
 	feed_container.add_child(_camera_feed_rect)
 
 	# Stick Skeleton & Golf Club Path Overlay
@@ -1715,19 +1829,102 @@ func _setup_golfer_camera_ui() -> void:
 	setup_btn.custom_minimum_size = Vector2(160, 38)
 	setup_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	apply_material_button_style(setup_btn, Color(0.2, 0.45, 0.65, 0.9))
-	setup_btn.pressed.connect(_open_camera_setup_dialog)
+	setup_btn.pressed.connect(func(): _open_camera_setup_dialog(_is_putting_cam_enabled))
 	overlay_vbox.add_child(setup_btn)
 
 	feed_container.add_child(overlay_vbox)
 	main_vbox.add_child(feed_container)
 
+	# Putting Camera Track Line Alignment Controls (visible when putting cam is active)
+	_putting_align_container = PanelContainer.new()
+	_putting_align_container.name = "PuttingAlignContainer"
+	_putting_align_container.visible = false
+	var align_style = StyleBoxFlat.new()
+	align_style.bg_color = Color(0.06, 0.08, 0.11, 0.9)
+	align_style.corner_radius_bottom_left = 6
+	align_style.corner_radius_bottom_right = 6
+	align_style.corner_radius_top_left = 6
+	align_style.corner_radius_top_right = 6
+	align_style.content_margin_left = 8
+	align_style.content_margin_top = 4
+	align_style.content_margin_right = 8
+	align_style.content_margin_bottom = 4
+	_putting_align_container.add_theme_stylebox_override("panel", align_style)
+
+	var align_hbox = HBoxContainer.new()
+	align_hbox.add_theme_constant_override("separation", 6)
+	align_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+
+	var line_lbl = Label.new()
+	var is_mob: bool = MobilePerformance.is_mobile()
+	line_lbl.text = "🎯 Line:"
+	line_lbl.add_theme_font_size_override("font_size", 13 if is_mob else 12)
+	line_lbl.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0))
+	align_hbox.add_child(line_lbl)
+
+	var left_btn = Button.new()
+	left_btn.text = "◀"
+	left_btn.tooltip_text = "Move Ball Circle & Track Line Left"
+	left_btn.custom_minimum_size = Vector2(42, 44) if is_mob else Vector2(30, 28)
+	left_btn.add_theme_font_size_override("font_size", 18 if is_mob else 14)
+	apply_material_button_style(left_btn, Color(0.2, 0.35, 0.45, 0.85))
+	left_btn.pressed.connect(func():
+		if _putting_overlay != null:
+			_putting_overlay.set_circle_x(_putting_overlay.circle_center.x - 0.03, true)
+	)
+	align_hbox.add_child(left_btn)
+
+	_putting_align_slider = HSlider.new()
+	_putting_align_slider.name = "PuttingAlignSlider"
+	_putting_align_slider.min_value = 0.15
+	_putting_align_slider.max_value = 0.85
+	_putting_align_slider.step = 0.01
+	_putting_align_slider.value = 0.50
+	_putting_align_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_putting_align_slider.custom_minimum_size = Vector2(70, 48 if is_mob else 36)
+	_putting_align_slider.tooltip_text = "Move Track Line left or right (avoids camera stand obstruction)"
+	ThemeManager.apply_slider_style(_putting_align_slider, 48 if is_mob else 36, 70)
+	_putting_align_slider.value_changed.connect(func(val: float):
+		if _putting_overlay != null:
+			_putting_overlay.set_circle_x(val, true)
+	)
+	align_hbox.add_child(_putting_align_slider)
+
+	var right_btn = Button.new()
+	right_btn.text = "▶"
+	right_btn.tooltip_text = "Move Ball Circle & Track Line Right"
+	right_btn.custom_minimum_size = Vector2(42, 44) if is_mob else Vector2(30, 28)
+	right_btn.add_theme_font_size_override("font_size", 18 if is_mob else 14)
+	apply_material_button_style(right_btn, Color(0.2, 0.35, 0.45, 0.85))
+	right_btn.pressed.connect(func():
+		if _putting_overlay != null:
+			_putting_overlay.set_circle_x(_putting_overlay.circle_center.x + 0.03, true)
+	)
+	align_hbox.add_child(right_btn)
+
+	var center_btn = Button.new()
+	center_btn.text = "Center"
+	center_btn.tooltip_text = "Reset Track Line to Center (50%)"
+	center_btn.custom_minimum_size = Vector2(60, 44) if is_mob else Vector2(50, 28)
+	center_btn.add_theme_font_size_override("font_size", 13 if is_mob else 11)
+	apply_material_button_style(center_btn, Color(0.25, 0.4, 0.35, 0.85))
+	center_btn.pressed.connect(func():
+		if _putting_overlay != null:
+			_putting_overlay.reset_circle_x()
+	)
+	align_hbox.add_child(center_btn)
+
+	_putting_align_container.add_child(align_hbox)
+	main_vbox.add_child(_putting_align_container)
+
 	# Footer info
-	var footer = Label.new()
-	footer.text = "Position camera behind ball facing target line"
-	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	footer.add_theme_font_size_override("font_size", 11)
-	footer.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
-	main_vbox.add_child(footer)
+	_panel_footer_label = Label.new()
+	_panel_footer_label.name = "PanelFooterLabel"
+	_panel_footer_label.text = "Position camera behind ball facing target line"
+	_panel_footer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_panel_footer_label.add_theme_font_size_override("font_size", 11)
+	_panel_footer_label.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	main_vbox.add_child(_panel_footer_label)
 
 	_golfer_cam_panel.add_child(main_vbox)
 	$OverlayLayer.add_child(_golfer_cam_panel)
@@ -1831,7 +2028,7 @@ func _should_camera_feed_be_active() -> bool:
 	if is_golfer_camera_enabled():
 		return true
 	if _is_putting_cam_enabled:
-		return _is_putter_selected()
+		return not _is_putting_cam_minimized or _is_putter_selected()
 	return false
 
 
@@ -2122,6 +2319,7 @@ func _show_putting_camera_overlay(enabled: bool) -> void:
 				_putting_overlay.name = "PuttingCameraOverlay"
 				_putting_overlay.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 				_putting_overlay.size_flags_vertical = Control.SIZE_EXPAND_FILL
+				_putting_overlay.gui_input.connect(_on_overlay_gui_input)
 
 		if _golfer_cam_panel != null:
 			var feed_rect = _golfer_cam_panel.find_child("CameraFeedRect", true, false)
@@ -2135,6 +2333,12 @@ func _show_putting_camera_overlay(enabled: bool) -> void:
 		if _putting_overlay != null:
 			_putting_overlay.visible = true
 
+		if _color_profile == null:
+			var profile_script = load("res://UI/PuttingCamera/putting_color_profile.gd")
+			if profile_script != null:
+				_color_profile = profile_script.new()
+				_color_profile.load_from_settings()
+
 		if _putting_state_machine == null:
 			var sm_script = load("res://UI/PuttingCamera/putting_camera_state_machine.gd")
 			if sm_script != null:
@@ -2142,11 +2346,30 @@ func _show_putting_camera_overlay(enabled: bool) -> void:
 				_putting_state_machine.name = "PuttingCameraStateMachine"
 				add_child(_putting_state_machine)
 				_putting_state_machine.putt_detected.connect(_on_putt_detected)
+				if _putting_state_machine.has_signal("putt_rejected"):
+					_putting_state_machine.putt_rejected.connect(func(reason, spd):
+						print("[RangeUI] Putting shot rejected (%s): %.1f mph" % [reason, spd])
+					)
 
 		if _putting_state_machine != null:
 			_putting_state_machine.overlay = _putting_overlay
+			if _putting_state_machine.detector != null and _color_profile != null:
+				_putting_state_machine.detector.color_profile = _color_profile
 			_putting_state_machine.reset()
 			_apply_putting_camera_fps()
+			_sync_overlay_color_swatches()
+
+		if _camera_color_pick_btn != null:
+			_camera_color_pick_btn.visible = true
+
+		if _putting_align_container != null:
+			_putting_align_container.visible = true
+			if _putting_overlay != null and _putting_align_slider != null:
+				_putting_align_slider.set_value_no_signal(_putting_overlay.circle_center.x)
+				if _putting_overlay.has_signal("circle_position_changed") and not _putting_overlay.circle_position_changed.is_connected(_on_putting_circle_pos_changed):
+					_putting_overlay.circle_position_changed.connect(_on_putting_circle_pos_changed)
+		if _panel_footer_label != null:
+			_panel_footer_label.text = "Drag circle/line or use slider to adjust for camera stand"
 
 		if _golfer_cam_panel != null:
 			var title_label = _golfer_cam_panel.find_child("PanelTitleLabel", true, false)
@@ -2155,6 +2378,17 @@ func _show_putting_camera_overlay(enabled: bool) -> void:
 			if _camera_minimize_btn != null:
 				_camera_minimize_btn.tooltip_text = "Minimize Putting Cam (Keeps tracking in background)"
 	else:
+		if _camera_color_pick_btn != null:
+			_camera_color_pick_btn.visible = false
+		_putting_picker_mode = PuttingPickerMode.NONE
+		if _putting_overlay != null:
+			_putting_overlay.picker_active = false
+
+		if _putting_align_container != null:
+			_putting_align_container.visible = false
+		if _panel_footer_label != null:
+			_panel_footer_label.text = "Position camera behind ball facing target line"
+
 		if _putting_overlay != null:
 			_putting_overlay.visible = false
 		if _putting_state_machine != null:
@@ -2172,6 +2406,11 @@ func _show_putting_camera_overlay(enabled: bool) -> void:
 				_camera_minimize_btn.tooltip_text = "Minimize Golfer Cam (Keeps recording in background)"
 			if not is_golfer_camera_enabled():
 				_golfer_cam_panel.visible = false
+
+
+func _on_putting_circle_pos_changed(new_pos: Vector2) -> void:
+	if _putting_align_slider != null:
+		_putting_align_slider.set_value_no_signal(new_pos.x)
 
 
 func _apply_putting_camera_fps() -> void:
@@ -2264,6 +2503,9 @@ func _notification(what: int) -> void:
 
 
 func _on_desktop_cameras_updated(cams: Array) -> void:
+	if _use_phone_stream:
+		_stop_local_camera_stream()
+		return
 	if (is_golfer_camera_enabled() or _is_putting_cam_enabled) and not _use_phone_stream:
 		if _camera_feed_rect != null and _camera_feed_rect.texture == null and cams.size() > 0:
 			var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
@@ -2327,35 +2569,107 @@ func _on_desktop_frame_received(_img: Image, tex: Texture2D, _landmarks: Diction
 			_camera_feed_rect.material = null
 			_camera_feed_rect.texture = active_tex
 		_update_status_overlay("", false)
+		if active_img != null:
+			_last_putting_feed_image = active_img
 		if _putting_state_machine != null and active_img != null:
 			_putting_state_machine.process_frame(active_img)
+
+
+func _stop_local_camera_stream() -> void:
+	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
+	if pose_bridge != null:
+		if pose_bridge.has_method("stop_desktop_camera"):
+			pose_bridge.stop_desktop_camera()
+		if pose_bridge.has_method("stop_android_camera"):
+			pose_bridge.stop_android_camera()
+	if CameraServer.is_monitoring_feeds():
+		for feed in CameraServer.feeds():
+			if feed != null:
+				feed.feed_is_active = false
+		CameraServer.set_monitoring_feeds(false)
+	else:
+		for feed in CameraServer.feeds():
+			if feed != null:
+				feed.feed_is_active = false
+
+
+func _stop_phone_camera_stream() -> void:
+	_is_requesting_frame = false
+	if _http_req != null and _http_req.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		_http_req.cancel_request()
+	if _phone_cam_poll_timer != null:
+		_phone_cam_poll_timer.stop()
+
+
+func _connect_local_camera(sel_idx: int) -> void:
+	_stop_phone_camera_stream()
+	_use_phone_stream = false
+	_current_camera_feed_index = sel_idx
+	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android"
+	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
+
+	if is_android:
+		# Deactivate any CameraServer feeds if any were registered
+		if CameraServer.is_monitoring_feeds():
+			for f in CameraServer.feeds():
+				if f != null:
+					f.feed_is_active = false
+			CameraServer.set_monitoring_feeds(false)
+		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
+		if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
+			pose_bridge.select_desktop_camera(sel_idx)
+			_update_status_overlay("", false)
+		return
+
+	var feeds = CameraServer.feeds()
+	if feeds.size() > 0:
+		_activate_camera_feed_index(sel_idx)
+	elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
+		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
+		pose_bridge.select_desktop_camera(sel_idx)
+		_update_status_overlay("", false)
+	else:
+		_activate_camera_feed_index(sel_idx)
 
 
 func _update_camera_feed(active: bool) -> void:
 	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
 
 	if not active:
-		if pose_bridge != null and pose_bridge.has_method("stop_desktop_camera"):
-			pose_bridge.stop_desktop_camera()
-		if CameraServer.is_monitoring_feeds():
-			var feeds = CameraServer.feeds()
-			for feed in feeds:
-				if feed != null:
-					feed.feed_is_active = false
-		CameraServer.set_monitoring_feeds(false)
+		_stop_local_camera_stream()
+		_stop_phone_camera_stream()
 		if _camera_feed_rect != null:
 			_camera_feed_rect.material = null
 			_camera_feed_rect.texture = null
 		_update_status_overlay("GOLFER CAMERA FEED\n[ Click ⚙️ Setup to connect ]", true)
 		return
 
+	# If WiFi phone stream is selected, stop all local/device cameras immediately
+	if _use_phone_stream:
+		_stop_local_camera_stream()
+		if not _phone_cam_url.is_empty():
+			_start_phone_camera_stream(_phone_cam_url)
+		else:
+			if _camera_feed_rect != null:
+				_camera_feed_rect.material = null
+				_camera_feed_rect.texture = null
+			_update_status_overlay("NO PHONE STREAM URL\n[ Click ⚙️ Connect Camera for Phone WiFi Stream ]", true)
+		return
+
+	# Stop any phone stream polling before starting local camera
+	_stop_phone_camera_stream()
+
 	# If desktop camera is already actively streaming, maintain it without restarting
 	if pose_bridge != null and pose_bridge.has_method("is_desktop_camera_active") and pose_bridge.is_desktop_camera_active():
 		_update_status_overlay("", false)
 		return
 
+	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android"
+
 	# Request permission on mobile OS if needed
-	if OS.has_feature("android") or OS.has_feature("ios"):
+	if is_android or OS.has_feature("ios"):
 		var permissions: Variant = OS.call("get_granted_permissions") if OS.has_method("get_granted_permissions") else []
 		var has_cam_perm: bool = false
 		if permissions is PackedStringArray or permissions is Array:
@@ -2376,11 +2690,11 @@ func _update_camera_feed(active: bool) -> void:
 			)
 			return
 
-	CameraServer.set_monitoring_feeds(true)
-
-	if _use_phone_stream and not _phone_cam_url.is_empty():
-		_start_phone_camera_stream(_phone_cam_url)
+	if is_android:
+		_connect_local_camera(_current_camera_feed_index)
 		return
+
+	CameraServer.set_monitoring_feeds(true)
 
 	var feeds = CameraServer.feeds()
 	var count = feeds.size()
@@ -2523,34 +2837,191 @@ void fragment() {
 
 func _on_flip_camera_pressed() -> void:
 	if _use_phone_stream:
+		_stop_phone_camera_stream()
 		_use_phone_stream = false
 	
-	var feeds = CameraServer.feeds()
-	var count = feeds.size()
+	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android"
 	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
 	var desk_cams: Array = pose_bridge.desktop_cameras if (pose_bridge != null and "desktop_cameras" in pose_bridge) else []
+	var feeds = CameraServer.feeds()
+	var total_count = max(feeds.size(), desk_cams.size())
+	if is_android and total_count < 2:
+		total_count = 2
 
-	if count > 1:
-		if _current_camera_feed_index < count:
-			var current_feed = feeds[_current_camera_feed_index]
-			if current_feed != null:
-				current_feed.feed_is_active = false
-		_current_camera_feed_index = (_current_camera_feed_index + 1) % count
-		_activate_camera_feed_index(_current_camera_feed_index)
-	elif desk_cams.size() > 1:
-		_current_camera_feed_index = (_current_camera_feed_index + 1) % desk_cams.size()
-		pose_bridge.select_desktop_camera(_current_camera_feed_index)
-		_update_status_overlay("", false)
-	elif count == 1:
-		_activate_camera_feed_index(0)
-	elif desk_cams.size() == 1:
-		pose_bridge.select_desktop_camera(0)
-		_update_status_overlay("", false)
+	if total_count > 1:
+		_current_camera_feed_index = (_current_camera_feed_index + 1) % total_count
+		_connect_local_camera(_current_camera_feed_index)
+	elif total_count == 1:
+		_connect_local_camera(0)
 	else:
-		_open_camera_setup_dialog()
+		_open_camera_setup_dialog(_is_putting_cam_enabled)
 
 
-func _open_camera_setup_dialog() -> void:
+func open_camera_setup(is_putting: bool = false) -> void:
+	_open_camera_setup_dialog(is_putting)
+
+
+func _sync_overlay_color_swatches() -> void:
+	if _putting_overlay == null or _color_profile == null:
+		return
+
+	_putting_overlay.ball_color_configured = _color_profile.ball_configured
+	if _color_profile.ball_configured:
+		_putting_overlay.ball_color_swatch = Color.from_hsv(_color_profile.ball_hsv.x / 360.0, _color_profile.ball_hsv.y, _color_profile.ball_hsv.z)
+
+	_putting_overlay.bg_color_configured = _color_profile.bg_configured
+	if _color_profile.bg_configured:
+		_putting_overlay.bg_color_swatch = Color.from_hsv(_color_profile.bg_hsv.x / 360.0, _color_profile.bg_hsv.y, _color_profile.bg_hsv.z)
+
+
+func _update_color_profile() -> void:
+	if _color_profile != null:
+		_color_profile.load_from_settings()
+		if _putting_state_machine != null and _putting_state_machine.detector != null:
+			_putting_state_machine.detector.color_profile = _color_profile
+			_putting_state_machine.reset()
+	_sync_overlay_color_swatches()
+
+
+func _open_color_picker_menu() -> void:
+	if not is_putting_camera_enabled():
+		set_putting_camera_visible(true)
+	elif is_putting_camera_minimized():
+		restore_putting_camera()
+
+	var existing = $OverlayLayer.get_node_or_null("ColorPickerMenu")
+	if existing != null:
+		existing.queue_free()
+
+	var menu = PopupMenu.new()
+	menu.name = "ColorPickerMenu"
+	menu.add_item("🏐 Pick Ball Color (Click Ball on Feed)", 0)
+	menu.add_item("🟩 Pick Mat/Background Color (Click Mat)", 1)
+	menu.add_separator()
+	menu.add_item("🔄 Reset to Auto-Detect (Default)", 2)
+	menu.id_pressed.connect(func(id: int):
+		match id:
+			0:
+				_putting_picker_mode = PuttingPickerMode.PICK_BALL
+				if _putting_overlay != null:
+					_putting_overlay.picker_active = true
+				_show_picker_instructions("👉 CLICK ON THE BALL in the video feed below")
+			1:
+				_putting_picker_mode = PuttingPickerMode.PICK_BACKGROUND
+				if _putting_overlay != null:
+					_putting_overlay.picker_active = true
+				_show_picker_instructions("👉 CLICK ON THE MAT/BACKGROUND in the video feed below")
+			2:
+				if _color_profile != null:
+					_color_profile.ball_configured = false
+					_color_profile.bg_configured = false
+					_color_profile.save_to_settings()
+				_update_color_profile()
+				_show_picker_instructions("Reset to auto-detect ball mode")
+		menu.queue_free()
+	)
+	$OverlayLayer.add_child(menu)
+	ThemeManager.style_popup_menu(menu, 18 if MobilePerformance.is_mobile() else 15)
+	menu.popup_centered()
+
+
+func _show_picker_instructions(msg: String) -> void:
+	_update_status_overlay(msg, true)
+	get_tree().create_timer(3.5).timeout.connect(func():
+		if _putting_picker_mode == PuttingPickerMode.NONE:
+			_update_status_overlay("", false)
+	)
+
+
+func _on_overlay_gui_input(event: InputEvent) -> void:
+	if _putting_picker_mode != PuttingPickerMode.NONE:
+		_on_feed_gui_input(event)
+
+
+func _on_feed_gui_input(event: InputEvent) -> void:
+	if _putting_picker_mode == PuttingPickerMode.NONE:
+		return
+
+	if event is InputEventMouseMotion and _putting_overlay != null:
+		_putting_overlay.picker_cursor_pos = event.position
+		return
+
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+		return
+
+	var img_to_sample = _last_putting_feed_image
+	if img_to_sample == null and _camera_feed_rect != null and _camera_feed_rect.texture != null:
+		img_to_sample = _camera_feed_rect.texture.get_image()
+
+	if img_to_sample == null or _camera_feed_rect == null:
+		_putting_picker_mode = PuttingPickerMode.NONE
+		if _putting_overlay != null:
+			_putting_overlay.picker_active = false
+		return
+
+	var feed_sz = _camera_feed_rect.size
+	var img_w = img_to_sample.get_width()
+	var img_h = img_to_sample.get_height()
+	if feed_sz.x <= 1.0 or feed_sz.y <= 1.0 or img_w < 2 or img_h < 2:
+		return
+
+	# Account for STRETCH_KEEP_ASPECT_COVERED
+	var scale_x = float(img_w) / feed_sz.x
+	var scale_y = float(img_h) / feed_sz.y
+	var scale_factor = minf(scale_x, scale_y)
+
+	var visible_w = feed_sz.x * scale_factor
+	var visible_h = feed_sz.y * scale_factor
+	var offset_x = (float(img_w) - visible_w) * 0.5
+	var offset_y = (float(img_h) - visible_h) * 0.5
+
+	var click_pos = event.position
+	var img_x = int(offset_x + click_pos.x * scale_factor)
+	var img_y = int(offset_y + click_pos.y * scale_factor)
+
+	img_x = clampi(img_x, 0, img_w - 1)
+	img_y = clampi(img_y, 0, img_h - 1)
+
+	# Sample 7x7 patch around click point
+	var h_list: Array[float] = []
+	var s_list: Array[float] = []
+	var v_list: Array[float] = []
+
+	var patch_r: int = 3
+	for py in range(maxi(0, img_y - patch_r), mini(img_h, img_y + patch_r + 1)):
+		for px in range(maxi(0, img_x - patch_r), mini(img_w, img_x + patch_r + 1)):
+			var c: Color = img_to_sample.get_pixel(px, py)
+			var hsv: Vector3 = PuttingBallDetector._rgb_to_hsv(c)
+			h_list.append(hsv.x)
+			s_list.append(hsv.y)
+			v_list.append(hsv.z)
+
+	if h_list.size() > 0 and _color_profile != null:
+		h_list.sort()
+		s_list.sort()
+		v_list.sort()
+		var mid: int = h_list.size() / 2
+		var sampled_hsv = Vector3(h_list[mid], s_list[mid], v_list[mid])
+
+		match _putting_picker_mode:
+			PuttingPickerMode.PICK_BALL:
+				_color_profile.ball_hsv = sampled_hsv
+				_color_profile.ball_configured = true
+				_show_picker_instructions("✅ Ball Color Set (H: %.0f°, S: %.2f, V: %.2f)" % [sampled_hsv.x, sampled_hsv.y, sampled_hsv.z])
+			PuttingPickerMode.PICK_BACKGROUND:
+				_color_profile.bg_hsv = sampled_hsv
+				_color_profile.bg_configured = true
+				_show_picker_instructions("✅ Mat Color Set (H: %.0f°, S: %.2f, V: %.2f)" % [sampled_hsv.x, sampled_hsv.y, sampled_hsv.z])
+
+		_color_profile.save_to_settings()
+		_update_color_profile()
+
+	_putting_picker_mode = PuttingPickerMode.NONE
+	if _putting_overlay != null:
+		_putting_overlay.picker_active = false
+
+
+func _open_camera_setup_dialog(for_putting: Variant = null) -> void:
 	CameraServer.set_monitoring_feeds(true)
 	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
 	if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
@@ -2558,22 +3029,32 @@ func _open_camera_setup_dialog() -> void:
 
 	var existing = $OverlayLayer.get_node_or_null("CameraSetupDialog")
 	if existing != null:
+		$OverlayLayer.remove_child(existing)
 		existing.queue_free()
+
+	var is_putting: bool = _is_putting_cam_enabled if for_putting == null else bool(for_putting)
+	var is_mob: bool = MobilePerformance.is_mobile()
 
 	var popup = PanelContainer.new()
 	popup.name = "CameraSetupDialog"
+	popup.tree_exited.connect(func():
+		if _use_phone_stream:
+			_stop_local_camera_stream()
+	)
 	popup.z_index = 100
-	popup.custom_minimum_size = Vector2(500, 600)
+
+	var dialog_h: float = 720.0 if is_putting else 560.0
+	popup.custom_minimum_size = Vector2(520, dialog_h)
 	popup.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	popup.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	popup.anchor_left = 0.5
 	popup.anchor_top = 0.5
 	popup.anchor_right = 0.5
 	popup.anchor_bottom = 0.5
-	popup.offset_left = -250
-	popup.offset_top = -300
-	popup.offset_right = 250
-	popup.offset_bottom = 300
+	popup.offset_left = -260
+	popup.offset_top = -dialog_h * 0.5
+	popup.offset_right = 260
+	popup.offset_bottom = dialog_h * 0.5
 
 	var style = StyleBoxFlat.new()
 	style.bg_color = Color(0.1, 0.12, 0.16, 0.96)
@@ -2592,15 +3073,28 @@ func _open_camera_setup_dialog() -> void:
 	style.content_margin_bottom = 20
 	popup.add_theme_stylebox_override("panel", style)
 
-	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 12)
+	var outer_vbox = VBoxContainer.new()
+	outer_vbox.add_theme_constant_override("separation", 10)
+	outer_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	outer_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
 	var title = Label.new()
-	title.text = "📷 Golfer Camera Setup"
+	title.text = "🎯 Putting Camera Setup" if is_putting else "📷 Golfer Camera Setup"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 18)
 	title.add_theme_color_override("font_color", Color.WHITE)
-	vbox.add_child(title)
+	outer_vbox.add_child(title)
+
+	var scroll = ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	ThemeManager.apply_scroll_container_style(scroll, 24)
+	outer_vbox.add_child(scroll)
+
+	var vbox = VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 12)
+	scroll.add_child(vbox)
 
 	# Section 1: System / Built-in Webcams
 	var webcams_label = Label.new()
@@ -2615,17 +3109,34 @@ func _open_camera_setup_dialog() -> void:
 	cam_option.disabled = true
 	vbox.add_child(cam_option)
 
+	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android"
+	var prev_detected_count: int = -1
+
 	var populate_feeds = func():
 		if not is_instance_valid(popup) or not is_instance_valid(webcams_label) or not is_instance_valid(cam_option):
 			return
 		var feeds = CameraServer.feeds()
 		var desk_cams: Array = pose_bridge.desktop_cameras if (pose_bridge != null and "desktop_cameras" in pose_bridge) else []
 		var total_count = max(feeds.size(), desk_cams.size())
+		if is_android and total_count < 2:
+			total_count = 2
 		
+		# Prevent wiping and rebuilding OptionButton if count hasn't changed
+		if total_count == prev_detected_count and cam_option.item_count > 0:
+			return
+		prev_detected_count = total_count
+
 		webcams_label.text = "1. Local / Built-in Webcams (%d detected):" % total_count
 		cam_option.clear()
 		
-		if feeds.size() > 0:
+		if is_android:
+			cam_option.disabled = false
+			cam_option.add_item("Camera 0 (Back Camera)", 0)
+			cam_option.add_item("Camera 1 (Front Camera)", 1)
+			for i in range(2, total_count):
+				cam_option.add_item("Camera %d (Device)" % i, i)
+			cam_option.select(clamp(_current_camera_feed_index, 0, cam_option.item_count - 1))
+		elif feeds.size() > 0:
 			cam_option.disabled = false
 			for i in range(feeds.size()):
 				var feed = feeds[i]
@@ -2641,7 +3152,6 @@ func _open_camera_setup_dialog() -> void:
 					else:
 						feed_name = "Camera %d%s" % [i, pos_name]
 				cam_option.add_item(feed_name, i)
-			
 			cam_option.select(clamp(_current_camera_feed_index, 0, feeds.size() - 1))
 		elif desk_cams.size() > 0:
 			cam_option.disabled = false
@@ -2657,6 +3167,12 @@ func _open_camera_setup_dialog() -> void:
 	# Populate immediately and schedule polling scans
 	populate_feeds.call()
 
+	# Connect item_selected so clicking a camera in the dropdown switches to it immediately!
+	cam_option.item_selected.connect(func(idx: int):
+		_current_camera_feed_index = idx
+		_connect_local_camera(idx)
+	)
+
 	var on_cameras_updated = func(_cams):
 		if is_instance_valid(popup) and is_instance_valid(webcams_label):
 			populate_feeds.call()
@@ -2670,7 +3186,7 @@ func _open_camera_setup_dialog() -> void:
 
 	var scan_timer = Timer.new()
 	scan_timer.name = "WebcamScanTimer"
-	scan_timer.wait_time = 0.3
+	scan_timer.wait_time = 2.0
 	scan_timer.autostart = true
 	popup.add_child(scan_timer)
 	scan_timer.timeout.connect(func():
@@ -2687,19 +3203,11 @@ func _open_camera_setup_dialog() -> void:
 	connect_local_btn.custom_minimum_size = Vector2(0, 36)
 	apply_material_button_style(connect_local_btn, Color(0.24, 0.46, 0.72, 0.9))
 	connect_local_btn.pressed.connect(func():
-		var sel_idx = cam_option.get_selected_id() if is_instance_valid(cam_option) else 0
+		var sel_idx = cam_option.get_selected_id() if is_instance_valid(cam_option) else _current_camera_feed_index
+		if sel_idx < 0:
+			sel_idx = 0
 		popup.queue_free()
-		_use_phone_stream = false
-		_current_camera_feed_index = sel_idx
-		var feeds = CameraServer.feeds()
-		if feeds.size() > 0:
-			_activate_camera_feed_index(sel_idx)
-		else:
-			if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
-				if _camera_feed_rect != null:
-					_camera_feed_rect.material = null
-				pose_bridge.select_desktop_camera(sel_idx)
-				_update_status_overlay("", false)
+		_connect_local_camera(sel_idx)
 	)
 	cam_btn_hbox.add_child(connect_local_btn)
 
@@ -2732,144 +3240,410 @@ func _open_camera_setup_dialog() -> void:
 	vbox.add_child(phone_label)
 
 	var ip_input = LineEdit.new()
+	ip_input.name = "PhoneCameraIpInput"
 	ip_input.placeholder_text = "e.g. 192.168.1.100:8080 or 192.168.1.100:4747"
 	ip_input.text = _phone_cam_url
-	ip_input.custom_minimum_size = Vector2(0, 36)
+	ip_input.custom_minimum_size = Vector2(0, 48)
+	ip_input.add_theme_font_size_override("font_size", 16)
+	ThemeManager.apply_input_style(ip_input)
+	ip_input.gui_input.connect(func(ev: InputEvent):
+		if has_node("/root/VirtualKeyboardManager"):
+			var vkm = get_node("/root/VirtualKeyboardManager")
+			if vkm.is_controller_mode_active():
+				if (ev is InputEventJoypadButton and ev.pressed and ev.button_index == JOY_BUTTON_A) or ev.is_action_pressed("ui_accept"):
+					vkm.open_for(ip_input, true)
+					get_viewport().set_input_as_handled()
+	)
+	var connect_phone_btn = Button.new()
+
+	ip_input.text_submitted.connect(func(_t):
+		if is_instance_valid(connect_phone_btn):
+			connect_phone_btn.grab_focus()
+	)
 	vbox.add_child(ip_input)
 
-	var connect_phone_btn = Button.new()
 	connect_phone_btn.text = "📡 Connect Phone Stream"
 	connect_phone_btn.custom_minimum_size = Vector2(0, 36)
 	apply_material_button_style(connect_phone_btn, Color(0.2, 0.6, 0.4, 0.9))
 	connect_phone_btn.pressed.connect(func():
 		var url_to_connect = ip_input.text if is_instance_valid(ip_input) else _phone_cam_url
 		popup.queue_free()
-		var local_feeds = CameraServer.feeds()
-		for feed in local_feeds:
-			if feed != null:
-				feed.feed_is_active = false
-		if pose_bridge != null and pose_bridge.has_method("stop_desktop_camera"):
-			pose_bridge.stop_desktop_camera()
+		_stop_local_camera_stream()
 		_use_phone_stream = true
 		_start_phone_camera_stream(url_to_connect)
 	)
 	vbox.add_child(connect_phone_btn)
 
-	# On Android, show local MediaPipe AI status badge if native plugin is detected
-	if Engine.has_singleton("MediaPipePosePlugin"):
-		var ai_status_label = Label.new()
-		ai_status_label.text = "⚡ On-Device MediaPipe AI Active (100% Mobile GPU Accelerated)"
-		ai_status_label.add_theme_font_size_override("font_size", 12)
-		ai_status_label.add_theme_color_override("font_color", Color(0.4, 0.9, 0.5))
-		ai_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		vbox.add_child(ai_status_label)
+	if not is_putting:
+		# On Android, show local MediaPipe AI status badge if native plugin is detected
+		if Engine.has_singleton("MediaPipePosePlugin"):
+			var ai_status_label = Label.new()
+			ai_status_label.text = "⚡ On-Device MediaPipe AI Active (100% Mobile GPU Accelerated)"
+			ai_status_label.add_theme_font_size_override("font_size", 12)
+			ai_status_label.add_theme_color_override("font_color", Color(0.4, 0.9, 0.5))
+			ai_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			vbox.add_child(ai_status_label)
 
-	# Section 3: Putting Camera Framerate
-	var fps_sep = HSeparator.new()
-	fps_sep.add_theme_constant_override("separation", 8)
-	vbox.add_child(fps_sep)
+		# Section 3: Camera Orientation Rotation
+		var rot_sep = HSeparator.new()
+		rot_sep.add_theme_constant_override("separation", 8)
+		vbox.add_child(rot_sep)
 
-	var fps_label = Label.new()
-	fps_label.text = "3. Putting Camera Framerate:"
-	fps_label.add_theme_font_size_override("font_size", 13)
-	vbox.add_child(fps_label)
+		var rot_label = Label.new()
+		rot_label.text = "3. Camera Orientation Rotation:"
+		rot_label.add_theme_font_size_override("font_size", 13)
+		vbox.add_child(rot_label)
 
-	var fps_hbox = HBoxContainer.new()
-	fps_hbox.add_theme_constant_override("separation", 8)
+		var rot_hbox = HBoxContainer.new()
+		rot_hbox.add_theme_constant_override("separation", 8)
+		for deg in [0, 90, 180, 270]:
+			var r_btn = Button.new()
+			r_btn.text = "%d°" % deg
+			r_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			r_btn.custom_minimum_size = Vector2(0, 34)
+			apply_material_button_style(r_btn, Color(0.22, 0.45, 0.55, 0.9) if _camera_rotation_deg == deg else Color(0.2, 0.25, 0.32, 0.8))
+			r_btn.pressed.connect(func(d=deg):
+				_camera_rotation_deg = d
+				_update_camera_rotate_button_text()
+				popup.queue_free()
+			)
+			rot_hbox.add_child(r_btn)
+		vbox.add_child(rot_hbox)
+	else:
+		# Section 3: Putting Camera Framerate
+		var fps_sep = HSeparator.new()
+		fps_sep.add_theme_constant_override("separation", 8)
+		vbox.add_child(fps_sep)
 
-	var fps_option = OptionButton.new()
-	fps_option.name = "FPSOptionButton"
-	fps_option.custom_minimum_size = Vector2(140, 36)
-	fps_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	fps_option.add_item("Auto-Detect", 0)
-	fps_option.add_item("30 FPS", 1)
-	fps_option.add_item("60 FPS", 2)
-	fps_option.add_item("120 FPS", 3)
-	fps_option.add_item("Custom", 4)
+		var fps_label = Label.new()
+		fps_label.text = "3. Putting Camera Framerate:"
+		fps_label.add_theme_font_size_override("font_size", 13)
+		vbox.add_child(fps_label)
 
-	var current_mode: String = GlobalSettings.range_settings.putting_camera_fps_mode.value if has_node("/root/GlobalSettings") else "Auto"
-	match current_mode:
-		"Auto": fps_option.select(0)
-		"30": fps_option.select(1)
-		"60": fps_option.select(2)
-		"120": fps_option.select(3)
-		"Custom": fps_option.select(4)
+		var fps_hbox = HBoxContainer.new()
+		fps_hbox.add_theme_constant_override("separation", 8)
 
-	var custom_fps_spin = SpinBox.new()
-	custom_fps_spin.name = "CustomFPSSpinBox"
-	custom_fps_spin.min_value = 15
-	custom_fps_spin.max_value = 240
-	custom_fps_spin.step = 1
-	custom_fps_spin.value = float(GlobalSettings.range_settings.putting_camera_fps.value) if has_node("/root/GlobalSettings") else 30
-	custom_fps_spin.custom_minimum_size = Vector2(80, 36)
-	custom_fps_spin.visible = (current_mode == "Custom")
-	custom_fps_spin.suffix = " Hz"
+		var fps_option = OptionButton.new()
+		fps_option.name = "FPSOptionButton"
+		fps_option.custom_minimum_size = Vector2(140, 36)
+		fps_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		fps_option.add_item("Auto-Detect", 0)
+		fps_option.add_item("30 FPS", 1)
+		fps_option.add_item("60 FPS", 2)
+		fps_option.add_item("120 FPS", 3)
+		fps_option.add_item("Custom", 4)
 
-	fps_option.item_selected.connect(func(idx: int):
-		var modes = ["Auto", "30", "60", "120", "Custom"]
-		var mode = modes[idx] if idx < modes.size() else "Auto"
-		if has_node("/root/GlobalSettings"):
-			GlobalSettings.range_settings.putting_camera_fps_mode.set_value(mode)
-			GlobalSettings.save_settings()
-		custom_fps_spin.visible = (mode == "Custom")
-		_apply_putting_camera_fps()
-	)
+		var current_mode: String = GlobalSettings.range_settings.putting_camera_fps_mode.value if has_node("/root/GlobalSettings") else "Auto"
+		match current_mode:
+			"Auto": fps_option.select(0)
+			"30": fps_option.select(1)
+			"60": fps_option.select(2)
+			"120": fps_option.select(3)
+			"Custom": fps_option.select(4)
 
-	custom_fps_spin.value_changed.connect(func(val: float):
-		if has_node("/root/GlobalSettings"):
-			GlobalSettings.range_settings.putting_camera_fps.set_value(int(val))
-			GlobalSettings.save_settings()
-		_apply_putting_camera_fps()
-	)
+		var custom_fps_spin = SpinBox.new()
+		custom_fps_spin.name = "CustomFPSSpinBox"
+		custom_fps_spin.min_value = 15
+		custom_fps_spin.max_value = 240
+		custom_fps_spin.step = 1
+		custom_fps_spin.value = float(GlobalSettings.range_settings.putting_camera_fps.value) if has_node("/root/GlobalSettings") else 30
+		custom_fps_spin.custom_minimum_size = Vector2(80, 36)
+		custom_fps_spin.visible = (current_mode == "Custom")
+		custom_fps_spin.suffix = " Hz"
 
-	fps_hbox.add_child(fps_option)
-	fps_hbox.add_child(custom_fps_spin)
-	vbox.add_child(fps_hbox)
+		fps_option.item_selected.connect(func(idx: int):
+			var modes = ["Auto", "30", "60", "120", "Custom"]
+			var mode = modes[idx] if idx < modes.size() else "Auto"
+			if has_node("/root/GlobalSettings"):
+				GlobalSettings.range_settings.putting_camera_fps_mode.set_value(mode)
+				GlobalSettings.save_settings()
+			custom_fps_spin.visible = (mode == "Custom")
+			_apply_putting_camera_fps()
+		)
 
-	var fps_note = Label.new()
-	fps_note.text = "⚠️ Wi-Fi cams may drop frames. Lock FPS manually for consistent putt speed readings."
-	fps_note.add_theme_font_size_override("font_size", 11)
-	fps_note.add_theme_color_override("font_color", Color(0.8, 0.65, 0.3))
-	fps_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vbox.add_child(fps_note)
+		custom_fps_spin.value_changed.connect(func(val: float):
+			if has_node("/root/GlobalSettings"):
+				GlobalSettings.range_settings.putting_camera_fps.set_value(int(val))
+				GlobalSettings.save_settings()
+			_apply_putting_camera_fps()
+		)
 
-	# Section 4: Camera Orientation Rotation
-	var rot_sep = HSeparator.new()
-	rot_sep.add_theme_constant_override("separation", 8)
-	vbox.add_child(rot_sep)
+		fps_hbox.add_child(fps_option)
+		fps_hbox.add_child(custom_fps_spin)
+		vbox.add_child(fps_hbox)
 
-	var rot_label = Label.new()
-	rot_label.text = "4. Camera Orientation Rotation:"
-	rot_label.add_theme_font_size_override("font_size", 13)
-	vbox.add_child(rot_label)
+		var fps_note = Label.new()
+		fps_note.text = "⚠️ Wi-Fi cams may drop frames. Lock FPS manually for consistent putt speed readings."
+		fps_note.add_theme_font_size_override("font_size", 11)
+		fps_note.add_theme_color_override("font_color", Color(0.8, 0.65, 0.3))
+		fps_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		vbox.add_child(fps_note)
 
-	var rot_hbox = HBoxContainer.new()
-	rot_hbox.add_theme_constant_override("separation", 8)
-	for deg in [0, 90, 180, 270]:
-		var r_btn = Button.new()
-		r_btn.text = "%d°" % deg
-		r_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		r_btn.custom_minimum_size = Vector2(0, 34)
-		apply_material_button_style(r_btn, Color(0.22, 0.45, 0.55, 0.9) if _camera_rotation_deg == deg else Color(0.2, 0.25, 0.32, 0.8))
-		r_btn.pressed.connect(func(d=deg):
-			_camera_rotation_deg = d
-			_update_camera_rotate_button_text()
-			if _putting_state_machine != null:
-				_putting_state_machine.reset()
+		# Section 4: Camera Orientation Rotation
+		var rot_sep = HSeparator.new()
+		rot_sep.add_theme_constant_override("separation", 8)
+		vbox.add_child(rot_sep)
+
+		var rot_label = Label.new()
+		rot_label.text = "4. Camera Orientation Rotation:"
+		rot_label.add_theme_font_size_override("font_size", 13)
+		vbox.add_child(rot_label)
+
+		var rot_hbox = HBoxContainer.new()
+		rot_hbox.add_theme_constant_override("separation", 8)
+		for deg in [0, 90, 180, 270]:
+			var r_btn = Button.new()
+			r_btn.text = "%d°" % deg
+			r_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			r_btn.custom_minimum_size = Vector2(0, 34)
+			apply_material_button_style(r_btn, Color(0.22, 0.45, 0.55, 0.9) if _camera_rotation_deg == deg else Color(0.2, 0.25, 0.32, 0.8))
+			r_btn.pressed.connect(func(d=deg):
+				_camera_rotation_deg = d
+				_update_camera_rotate_button_text()
+				if _putting_state_machine != null:
+					_putting_state_machine.reset()
+				popup.queue_free()
+			)
+			rot_hbox.add_child(r_btn)
+		vbox.add_child(rot_hbox)
+
+		# Section 5: Ball & Background Color Detection
+		var color_sep = HSeparator.new()
+		color_sep.add_theme_constant_override("separation", 8)
+		vbox.add_child(color_sep)
+
+		var color_lbl = Label.new()
+		color_lbl.text = "5. Ball & Background Color Detection:"
+		color_lbl.add_theme_font_size_override("font_size", 13)
+		vbox.add_child(color_lbl)
+
+		var color_info = Label.new()
+		if _color_profile != null and _color_profile.ball_configured:
+			color_info.text = "Ball: H=%.0f° S=%.0f%% V=%.0f%%" % [
+				_color_profile.ball_hsv.x,
+				_color_profile.ball_hsv.y * 100.0,
+				_color_profile.ball_hsv.z * 100.0
+			]
+		else:
+			color_info.text = "Ball: Auto-detect (white ball default)"
+		color_info.add_theme_font_size_override("font_size", 12)
+		color_info.add_theme_color_override("font_color", Color(0.75, 0.85, 0.95))
+		vbox.add_child(color_info)
+
+		var pick_ball_btn = Button.new()
+		pick_ball_btn.text = "🏐 Click to Pick Ball Color from Feed"
+		pick_ball_btn.custom_minimum_size = Vector2(0, 36)
+		apply_material_button_style(pick_ball_btn, Color(0.45, 0.28, 0.55, 0.9))
+		pick_ball_btn.pressed.connect(func():
+			_putting_picker_mode = PuttingPickerMode.PICK_BALL
+			if _putting_overlay != null:
+				_putting_overlay.picker_active = true
+			_show_picker_instructions("👉 CLICK ON THE BALL in the video feed below")
 			popup.queue_free()
 		)
-		rot_hbox.add_child(r_btn)
-	vbox.add_child(rot_hbox)
+		vbox.add_child(pick_ball_btn)
+
+		var pick_bg_btn = Button.new()
+		pick_bg_btn.text = "🟩 Click to Pick Mat/Background Color"
+		pick_bg_btn.custom_minimum_size = Vector2(0, 36)
+		apply_material_button_style(pick_bg_btn, Color(0.20, 0.45, 0.30, 0.9))
+		pick_bg_btn.pressed.connect(func():
+			_putting_picker_mode = PuttingPickerMode.PICK_BACKGROUND
+			if _putting_overlay != null:
+				_putting_overlay.picker_active = true
+			_show_picker_instructions("👉 CLICK ON THE MAT/BACKGROUND in the video feed below")
+			popup.queue_free()
+		)
+		vbox.add_child(pick_bg_btn)
+
+		var reset_color_btn = Button.new()
+		reset_color_btn.text = "🔄 Reset to Auto-Detect Colors"
+		reset_color_btn.custom_minimum_size = Vector2(0, 32)
+		apply_material_button_style(reset_color_btn, Color(0.30, 0.35, 0.40, 0.8))
+		reset_color_btn.pressed.connect(func():
+			if _color_profile != null:
+				_color_profile.ball_configured = false
+				_color_profile.bg_configured = false
+				_color_profile.save_to_settings()
+			_update_color_profile()
+			popup.queue_free()
+		)
+		vbox.add_child(reset_color_btn)
+
+		# Tolerance Slider
+		var tol_card = VBoxContainer.new()
+		tol_card.add_theme_constant_override("separation", 4)
+
+		var tol_header = HBoxContainer.new()
+		var tol_label = Label.new()
+		tol_label.text = "Color Tolerance:"
+		tol_label.add_theme_font_size_override("font_size", 13)
+		tol_label.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0))
+		tol_header.add_child(tol_label)
+
+		var tol_spacer = Control.new()
+		tol_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tol_header.add_child(tol_spacer)
+
+		var tol_val_lbl = Label.new()
+		tol_val_lbl.text = "%.0f°" % (_color_profile.ball_hue_tolerance if _color_profile != null else 30.0)
+		tol_val_lbl.add_theme_font_size_override("font_size", 13)
+		tol_val_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_ACCENT)
+		tol_header.add_child(tol_val_lbl)
+		tol_card.add_child(tol_header)
+
+		var tol_slider = HSlider.new()
+		tol_slider.min_value = 10.0
+		tol_slider.max_value = 90.0
+		tol_slider.step = 5.0
+		tol_slider.value = _color_profile.ball_hue_tolerance if _color_profile != null else 30.0
+		tol_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tol_slider.custom_minimum_size = Vector2(0, 38)
+		ThemeManager.apply_slider_style(tol_slider, 38)
+		tol_slider.value_changed.connect(func(v: float):
+			tol_val_lbl.text = "%.0f°" % v
+			if _color_profile != null:
+				_color_profile.ball_hue_tolerance = v
+				_color_profile.save_to_settings()
+				_update_color_profile()
+		)
+		tol_card.add_child(tol_slider)
+		vbox.add_child(tol_card)
+
+		# Section 6: Speed Validation & Outlier / Mishit Filtering
+		var spd_sep = HSeparator.new()
+		spd_sep.add_theme_constant_override("separation", 8)
+		vbox.add_child(spd_sep)
+
+		var speed_filter_lbl = Label.new()
+		speed_filter_lbl.text = "6. Speed Validation & Mishit Filtering:"
+		speed_filter_lbl.add_theme_font_size_override("font_size", 13)
+		vbox.add_child(speed_filter_lbl)
+
+		var mishit_check = CheckButton.new()
+		mishit_check.text = "Auto-Reject Mishits & Tracking Glitches"
+		mishit_check.button_pressed = putting_mishit_filter_enabled
+		mishit_check.custom_minimum_size = Vector2(0, 36)
+		mishit_check.add_theme_font_size_override("font_size", 13)
+		mishit_check.toggled.connect(func(val: bool):
+			putting_mishit_filter_enabled = val
+		)
+		vbox.add_child(mishit_check)
+
+		# Min Speed Slider (Mishits)
+		var min_spd_card = VBoxContainer.new()
+		min_spd_card.add_theme_constant_override("separation", 4)
+
+		var min_spd_hdr = HBoxContainer.new()
+		var min_spd_lbl = Label.new()
+		min_spd_lbl.text = "Min Speed (Mishit Cutoff):"
+		min_spd_lbl.add_theme_font_size_override("font_size", 13)
+		min_spd_lbl.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0))
+		min_spd_hdr.add_child(min_spd_lbl)
+
+		var min_spd_spacer = Control.new()
+		min_spd_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		min_spd_hdr.add_child(min_spd_spacer)
+
+		var min_spd_val_lbl = Label.new()
+		min_spd_val_lbl.text = "%.1f mph" % putting_min_speed_mph
+		min_spd_val_lbl.add_theme_font_size_override("font_size", 13)
+		min_spd_val_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_ACCENT)
+		min_spd_hdr.add_child(min_spd_val_lbl)
+		min_spd_card.add_child(min_spd_hdr)
+
+		var min_spd_slider = HSlider.new()
+		min_spd_slider.min_value = 0.5
+		min_spd_slider.max_value = 4.0
+		min_spd_slider.step = 0.1
+		min_spd_slider.value = putting_min_speed_mph
+		min_spd_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		min_spd_slider.custom_minimum_size = Vector2(0, 38)
+		ThemeManager.apply_slider_style(min_spd_slider, 38)
+		min_spd_slider.value_changed.connect(func(v: float):
+			min_spd_val_lbl.text = "%.1f mph" % v
+			putting_min_speed_mph = v
+		)
+		min_spd_card.add_child(min_spd_slider)
+
+		var min_spd_hint = Label.new()
+		min_spd_hint.text = "Accidental taps and practice waggles under this speed are ignored."
+		min_spd_hint.add_theme_font_size_override("font_size", 11)
+		min_spd_hint.add_theme_color_override("font_color", Color(0.65, 0.7, 0.75))
+		min_spd_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		min_spd_card.add_child(min_spd_hint)
+		vbox.add_child(min_spd_card)
+
+		# Max Speed Slider (Tracking Glitches)
+		var max_spd_card = VBoxContainer.new()
+		max_spd_card.add_theme_constant_override("separation", 4)
+
+		var max_spd_hdr = HBoxContainer.new()
+		var max_spd_lbl = Label.new()
+		max_spd_lbl.text = "Max Speed (Glitch Cutoff):"
+		max_spd_lbl.add_theme_font_size_override("font_size", 13)
+		max_spd_lbl.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0))
+		max_spd_hdr.add_child(max_spd_lbl)
+
+		var max_spd_spacer = Control.new()
+		max_spd_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		max_spd_hdr.add_child(max_spd_spacer)
+
+		var max_spd_val_lbl = Label.new()
+		max_spd_val_lbl.text = "%.1f mph" % putting_max_speed_mph
+		max_spd_val_lbl.add_theme_font_size_override("font_size", 13)
+		max_spd_val_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_ACCENT)
+		max_spd_hdr.add_child(max_spd_val_lbl)
+		max_spd_card.add_child(max_spd_hdr)
+
+		var max_spd_slider = HSlider.new()
+		max_spd_slider.min_value = 10.0
+		max_spd_slider.max_value = 30.0
+		max_spd_slider.step = 0.5
+		max_spd_slider.value = putting_max_speed_mph
+		max_spd_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		max_spd_slider.custom_minimum_size = Vector2(0, 38)
+		ThemeManager.apply_slider_style(max_spd_slider, 38)
+		max_spd_slider.value_changed.connect(func(v: float):
+			max_spd_val_lbl.text = "%.1f mph" % v
+			putting_max_speed_mph = v
+		)
+		max_spd_card.add_child(max_spd_slider)
+
+		var max_spd_hint = Label.new()
+		max_spd_hint.text = "Speeds exceeding this are ignored as tracking glitches/anomalies."
+		max_spd_hint.add_theme_font_size_override("font_size", 11)
+		max_spd_hint.add_theme_color_override("font_color", Color(0.65, 0.7, 0.75))
+		max_spd_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		max_spd_card.add_child(max_spd_hint)
+		vbox.add_child(max_spd_card)
 
 	var close_btn = Button.new()
 	close_btn.text = "Close Setup"
 	close_btn.custom_minimum_size = Vector2(0, 36)
 	apply_material_button_style(close_btn, Color(0.4, 0.4, 0.4, 0.8))
 	close_btn.pressed.connect(func(): popup.queue_free())
-	vbox.add_child(close_btn)
+	outer_vbox.add_child(close_btn)
 
-	popup.add_child(vbox)
+	popup.add_child(outer_vbox)
 	$OverlayLayer.add_child(popup)
+
+	# Focus neighbors & controller auto-focus
+	if is_instance_valid(connect_local_btn) and is_instance_valid(ip_input):
+		connect_local_btn.focus_neighbor_bottom = ip_input.get_path()
+		ip_input.focus_neighbor_top = connect_local_btn.get_path()
+	if is_instance_valid(ip_input) and is_instance_valid(connect_phone_btn):
+		ip_input.focus_neighbor_bottom = connect_phone_btn.get_path()
+		connect_phone_btn.focus_neighbor_top = ip_input.get_path()
+
+	if has_node("/root/VirtualKeyboardManager"):
+		var vkm = get_node("/root/VirtualKeyboardManager")
+		if vkm.is_controller_mode_active():
+			var local_feeds = CameraServer.feeds()
+			if local_feeds.is_empty():
+				ip_input.call_deferred("grab_focus")
+			elif is_instance_valid(cam_option):
+				cam_option.call_deferred("grab_focus")
 
 
 var _phone_stream_failed_count: int = 0
@@ -2878,6 +3652,7 @@ var _alt_endpoint_idx: int = 0
 var _stream_established: bool = false
 
 func _start_phone_camera_stream(url_str: String) -> void:
+	_stop_local_camera_stream()
 	_phone_cam_url = _normalize_phone_url(url_str)
 	if _phone_cam_url.is_empty():
 		_update_status_overlay("INVALID PHONE STREAM URL\n[ Enter IP e.g. 192.168.1.100:8080 ]", true)
@@ -3003,8 +3778,10 @@ func _on_phone_cam_frame_received(result: int, response_code: int, _headers: Pac
 			if _camera_feed_rect != null:
 				_camera_feed_rect.texture = tex
 			_update_status_overlay("", false)
-			if _is_putting_cam_enabled and _putting_state_machine != null:
-				_putting_state_machine.process_frame(img)
+			if _is_putting_cam_enabled:
+				_last_putting_feed_image = img
+				if _putting_state_machine != null:
+					_putting_state_machine.process_frame(img)
 		else:
 			_try_fallback_endpoint_or_error(result, response_code, "Invalid image encoding received")
 	else:
@@ -3087,6 +3864,8 @@ func _update_tooltips() -> void:
 		_prev_shot_btn.tooltip_text = "View analysis and recommendations for your previous shot [%s]" % km.get_action_summary_str("prev_shot_analysis_toggle")
 	if _dist_btn != null and is_instance_valid(_dist_btn):
 		_dist_btn.tooltip_text = "Hit Distance Menu [%s]" % km.get_action_summary_str("distance_menu_toggle")
+	if _shot_traces_btn != null and is_instance_valid(_shot_traces_btn):
+		_shot_traces_btn.tooltip_text = "Toggle Flight Arc Traces & Dispersion View for current club [%s]" % km.get_action_summary_str("shot_traces_toggle")
 
 
 func update_announcer_button_state() -> void:
@@ -3117,3 +3896,50 @@ func update_suspense_button_state() -> void:
 func toggle_distance_menu() -> void:
 	if _dist_btn != null and is_instance_valid(_dist_btn):
 		_dist_btn.emit_signal("pressed")
+
+
+func toggle_shot_traces() -> void:
+	_shot_traces_active = not _shot_traces_active
+	if _shot_traces_btn != null and is_instance_valid(_shot_traces_btn):
+		if _shot_traces_active:
+			_shot_traces_btn.text = "📈 Shot Traces: ON"
+			apply_material_button_style(_shot_traces_btn, Color(0.15, 0.65, 0.85, 0.85))
+		else:
+			_shot_traces_btn.text = "📈 Shot Traces: OFF"
+			apply_material_button_style(_shot_traces_btn, Color(0.3, 0.35, 0.45, 0.85))
+
+	shot_traces_toggled.emit(_shot_traces_active)
+	if not _shot_traces_active and _dispersion_overlay != null:
+		_dispersion_overlay.visible = false
+
+
+func is_shot_traces_active() -> bool:
+	return _shot_traces_active
+
+
+func show_dispersion(shots: Array[Dictionary], club_name: String) -> void:
+	if not _shot_traces_active:
+		return
+	if _dispersion_overlay == null:
+		var overlay_script = load("res://UI/dispersion_overlay.gd")
+		_dispersion_overlay = Control.new()
+		_dispersion_overlay.set_script(overlay_script)
+		_dispersion_overlay.name = "DispersionOverlay"
+		_dispersion_overlay.anchor_left = 0.0
+		_dispersion_overlay.anchor_right = 0.0
+		_dispersion_overlay.anchor_top = 0.0
+		_dispersion_overlay.anchor_bottom = 0.0
+		# Place on the left where the minimap sits in course play: below Player Profile (y=90) and above stats (y=360)
+		_dispersion_overlay.offset_left = 20.0
+		_dispersion_overlay.offset_top = 90.0
+		_dispersion_overlay.offset_right = 236.0
+		_dispersion_overlay.offset_bottom = 326.0
+		$OverlayLayer.add_child(_dispersion_overlay)
+
+	_dispersion_overlay.visible = true
+	_dispersion_overlay.update_data(shots, club_name)
+
+
+func hide_dispersion() -> void:
+	if _dispersion_overlay != null:
+		_dispersion_overlay.visible = false

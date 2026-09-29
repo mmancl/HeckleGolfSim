@@ -52,19 +52,38 @@ var display_data: Dictionary = {}
 var sfx_applause_player: AudioStreamPlayer = null
 
 # PvP Mode State
+const MinigamePlayerModal = preload("res://Courses/Minigames/minigame_player_modal.gd")
 var pvp_mode: bool = false
-var active_player_index: int = 0 # 0: Player 1, 1: Player 2
+var active_player_index: int = 0
+var players_list: Array[Dictionary] = []
 var p1_name: String = "Player 1"
 var p2_name: String = "Player 2"
 var p1_completed: Array[bool] = [false, false, false, false, false, false, false]
 var p2_completed: Array[bool] = [false, false, false, false, false, false, false]
 var p1_shots: int = 0
 var p2_shots: int = 0
-var pvp_winner: int = -1 # -1: in play, 0: p1, 1: p2
+var pvp_winner: int = -1 # -1: in play, >=0: winner index
 var shot_in_progress: bool = false
+var players_btn: Button = null
+var _player_modal_instance: CanvasLayer = null
 
 const P1_COLOR = Color(0.2, 0.9, 1.0) # Neon Cyan
 const P2_COLOR = Color(1.0, 0.75, 0.25) # Radiant Amber/Gold
+
+func get_active_player_name() -> String:
+	if players_list.is_empty():
+		return "Player 1"
+	return str(players_list[active_player_index % players_list.size()].get("name", "Player %d" % (active_player_index + 1)))
+
+func get_active_player_color() -> Color:
+	if players_list.is_empty():
+		return P1_COLOR
+	return players_list[active_player_index % players_list.size()].get("color", P1_COLOR)
+
+func get_player_color_at(idx: int) -> Color:
+	if idx < players_list.size():
+		return players_list[idx].get("color", MinigamePlayerModal.get_player_color(idx))
+	return MinigamePlayerModal.get_player_color(idx)
 
 # Materials
 var green_mat: StandardMaterial3D
@@ -147,16 +166,14 @@ func _ready() -> void:
 
 
 func _init_player_names() -> void:
-	p1_name = "Player 1"
-	p2_name = "Player 2"
-	if has_node("/root/MultiplayerManager"):
-		var mp = get_node("/root/MultiplayerManager")
-		if mp.players.size() >= 2:
-			p1_name = mp.players[0].get("name", "Player 1")
-			p2_name = mp.players[1].get("name", "Player 2")
-		elif mp.players.size() == 1:
-			p1_name = mp.players[0].get("name", "Player 1")
-			p2_name = "Player 2"
+	if players_list.is_empty():
+		players_list = MinigamePlayerModal.init_default_players(7)
+	if players_list.size() < 2:
+		var p2 = MinigamePlayerModal.create_player("Player 2", 1, 7)
+		players_list.append(p2)
+	p1_name = players_list[0].get("name", "Player 1")
+	p2_name = players_list[1].get("name", "Player 2") if players_list.size() > 1 else "Player 2"
+	_update_players_button_label()
 
 
 func _toggle_pvp_mode() -> void:
@@ -169,6 +186,8 @@ func _toggle_pvp_mode() -> void:
 		else:
 			mode_toggle_btn.text = "⚔️ PvP Mode: OFF"
 			_apply_btn_style(mode_toggle_btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
+	if players_btn != null:
+		players_btn.visible = pvp_mode
 	_reset_game()
 
 
@@ -180,21 +199,87 @@ func _reset_game() -> void:
 	pvp_winner = -1
 	p1_shots = 0
 	p2_shots = 0
+	for p in players_list:
+		p["shots"] = 0
+		if not p.has("completed") or p["completed"].size() != 7:
+			var c_arr: Array[bool] = []
+			for k in range(7):
+				c_arr.append(false)
+			p["completed"] = c_arr
+		else:
+			for k in range(7):
+				p["completed"][k] = false
+	if players_list.size() > 0:
+		p1_completed = players_list[0]["completed"]
+	if players_list.size() > 1:
+		p2_completed = players_list[1]["completed"]
 	for i in range(7):
-		p1_completed[i] = false
-		p2_completed[i] = false
 		island_stats[i] = {"Attempts": 0, "Hits": 0}
 	total_greens_hit = 0
 	_select_target_island(0, true)
 	_update_hud()
+	_update_island_buttons()
+	_update_players_button_label()
 
 
 func _get_next_uncompleted_island(player_idx: int) -> int:
-	var completed = p1_completed if player_idx == 0 else p2_completed
+	if player_idx < 0 or player_idx >= players_list.size():
+		return selected_island_index
+	var completed = players_list[player_idx].get("completed", [])
 	for i in range(completed.size()):
 		if not completed[i]:
 			return i
 	return selected_island_index
+
+
+func _open_players_modal() -> void:
+	if _player_modal_instance != null and is_instance_valid(_player_modal_instance):
+		_player_modal_instance.queue_free()
+		_player_modal_instance = null
+		
+	var modal = MinigamePlayerModal.new()
+	modal.name = "MinigamePlayerModal"
+	add_child(modal)
+	_player_modal_instance = modal
+	modal.open(players_list, 2, 7, active_player_index)
+	modal.players_changed.connect(func(new_players):
+		players_list = new_players
+		if active_player_index >= players_list.size():
+			active_player_index = 0
+		p1_name = players_list[0].get("name", "Player 1")
+		p2_name = players_list[1].get("name", "Player 2") if players_list.size() > 1 else "Player 2"
+		if players_list.size() > 0:
+			p1_completed = players_list[0]["completed"]
+		if players_list.size() > 1:
+			p2_completed = players_list[1]["completed"]
+		_update_players_button_label()
+		_update_island_buttons()
+		_update_target_ring_color()
+		_update_hud()
+	)
+	modal.reset_match_requested.connect(func():
+		_reset_game()
+	)
+	modal.modal_closed.connect(func():
+		_player_modal_instance = null
+		_update_hud()
+	)
+
+
+func _update_players_button_label() -> void:
+	if players_btn != null and is_instance_valid(players_btn):
+		players_btn.text = "👥 Players (%d)" % players_list.size()
+
+
+func _update_target_ring_color() -> void:
+	for i in range(island_positions.size()):
+		var island_node = get_node_or_null("GreenIsland_%d" % i)
+		if island_node:
+			var ring = island_node.get_node_or_null("TargetRing")
+			if ring and ring.material_override is StandardMaterial3D:
+				var ring_col = get_active_player_color() if pvp_mode else Color(0.0, 0.85, 1.0)
+				ring.material_override.albedo_color = Color(ring_col.r, ring_col.g, ring_col.b, 0.7)
+				ring.material_override.emission = ring_col
 
 # ========================================
 # MATERIAL INITIALIZATION
@@ -1093,13 +1178,20 @@ func _build_wall_collision_faces(outer_poly: PackedVector2Array, top_y: float, b
 
 ## Plant evergreen pine trees & shrubs on island edge / mulch
 func _plant_trees_on_island(island: Node3D, tree_positions: Array[Vector3], scale_multiplier: float = 1.0) -> void:
-	var tree_paths = [
+	var standard_tree_paths = [
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-1-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-2-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-1-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-2-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-1-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-2-staticbody.tscn"
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-2-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-birch-1-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-pine-1-staticbody.tscn",
+	]
+	var willow_paths = [
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-willow-1-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-willow-2-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-willow-3-staticbody.tscn",
 	]
 	
 	var trees_folder = Node3D.new()
@@ -1109,9 +1201,16 @@ func _plant_trees_on_island(island: Node3D, tree_positions: Array[Vector3], scal
 	var rng = RandomNumberGenerator.new()
 	rng.seed = island.name.hash()
 	
+	var max_willows = 2 if (tree_positions.size() >= 4 and rng.randf() < 0.20) else 1
+	var willow_count = 0
+	
 	for t_idx in range(tree_positions.size()):
 		var t_pos = tree_positions[t_idx]
-		var path = tree_paths[rng.randi() % tree_paths.size()]
+		var is_willow = (willow_count < max_willows and rng.randf() < 0.15)
+		if is_willow:
+			willow_count += 1
+		var pool = willow_paths if is_willow else standard_tree_paths
+		var path = pool[rng.randi() % pool.size()]
 		if ResourceLoader.exists(path):
 			var scene = load(path)
 			if scene:
@@ -1207,7 +1306,7 @@ func _select_target_island(index: int, reset_ball: bool = true) -> void:
 				ring_mesh.ring_segments = 8
 				ring.mesh = ring_mesh
 				
-				var ring_col = (P1_COLOR if active_player_index == 0 else P2_COLOR) if pvp_mode else Color(0.0, 0.85, 1.0)
+				var ring_col = get_active_player_color() if pvp_mode else Color(0.0, 0.85, 1.0)
 				var ring_mat = StandardMaterial3D.new()
 				ring_mat.albedo_color = Color(ring_col.r, ring_col.g, ring_col.b, 0.7)
 				ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -1227,7 +1326,7 @@ func _select_target_island(index: int, reset_ball: bool = true) -> void:
 	_update_hud()
 	
 	if pvp_mode:
-		var cur_name = p1_name if active_player_index == 0 else p2_name
+		var cur_name = get_active_player_name()
 		_show_banner("🎯 %s's Target: %d Yards" % [cur_name, dist_yards])
 	else:
 		_show_banner("Target: %d Yards — Hit chip on Launch Monitor onto the green!" % dist_yards)
@@ -1237,11 +1336,16 @@ func _update_island_buttons() -> void:
 	for i in range(island_buttons.size()):
 		var prefix = "▶ " if i == selected_island_index else "  "
 		if pvp_mode:
-			var p1_mark = "✓" if p1_completed[i] else "○"
-			var p2_mark = "✓" if p2_completed[i] else "○"
-			island_buttons[i].text = "%s%d YDS [%s|%s]" % [prefix, island_distances_yards[i], p1_mark, p2_mark]
+			var marks: Array[String] = []
+			for p in players_list:
+				var is_done = false
+				if p.has("completed") and i < p["completed"].size():
+					is_done = p["completed"][i]
+				marks.append("✓" if is_done else "○")
+			var marks_str = "|".join(marks)
+			island_buttons[i].text = "%s%d YDS [%s]" % [prefix, island_distances_yards[i], marks_str]
 			if i == selected_island_index:
-				var active_col = P1_COLOR if active_player_index == 0 else P2_COLOR
+				var active_col = get_active_player_color()
 				island_buttons[i].add_theme_color_override("font_color", active_col)
 			else:
 				island_buttons[i].remove_theme_color_override("font_color")
@@ -1377,11 +1481,11 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 		get_node("/root/LaunchMonitorManager").call("notify_shot_started")
 
 	shot_in_progress = true
-	if pvp_mode:
-		if active_player_index == 0:
-			p1_shots += 1
-		else:
-			p2_shots += 1
+	if pvp_mode and not players_list.is_empty():
+		var cur_p = players_list[active_player_index % players_list.size()]
+		cur_p["shots"] = cur_p.get("shots", 0) + 1
+		p1_shots = players_list[0].get("shots", 0) if players_list.size() > 0 else 0
+		p2_shots = players_list[1].get("shots", 0) if players_list.size() > 1 else 0
 
 	# Connect to the player's launch monitor shot handler
 	player._on_tcp_client_hit_ball(data)
@@ -1394,7 +1498,7 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	var speed_mph = data.get("Speed", 0.0)
 	var vla = data.get("VLA", 0.0)
 	if pvp_mode:
-		var cur_name = p1_name if active_player_index == 0 else p2_name
+		var cur_name = get_active_player_name()
 		_show_banner("%s Chipped! Speed: %.1f mph | Loft: %.1f°" % [cur_name, speed_mph, vla])
 	else:
 		_show_banner("Chipped (Launch Monitor)! Speed: %.1f mph | Loft: %.1f°" % [speed_mph, vla])
@@ -1436,13 +1540,15 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 	var target_dist_yds = island_distances_yards[selected_island_index]
 
 	if pvp_mode:
-		var cur_completed = p1_completed if active_player_index == 0 else p2_completed
-		var cur_name = p1_name if active_player_index == 0 else p2_name
+		var cur_player = players_list[active_player_index % players_list.size()]
+		var cur_completed = cur_player.get("completed", [])
+		var cur_name = cur_player.get("name", "Player %d" % (active_player_index + 1))
 		
 		if player.ball.is_in_water:
 			_show_banner("💦 SPLASH! %s landed in the water hazard." % cur_name)
 		elif dist_to_target <= target_data["green_radius"]:
-			cur_completed[selected_island_index] = true
+			if selected_island_index < cur_completed.size():
+				cur_completed[selected_island_index] = true
 			var count = cur_completed.count(true)
 			if sfx_applause_player:
 				sfx_applause_player.play()
@@ -1464,7 +1570,7 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 					landed_on_other = i
 					break
 			if landed_on_other >= 0:
-				if not cur_completed[landed_on_other]:
+				if landed_on_other < cur_completed.size() and not cur_completed[landed_on_other]:
 					cur_completed[landed_on_other] = true
 					var count = cur_completed.count(true)
 					if sfx_applause_player:
@@ -1513,10 +1619,10 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 	if pvp_mode and pvp_winner == -1:
 		if shot_in_progress:
 			shot_in_progress = false
-			active_player_index = 1 - active_player_index
+			active_player_index = (active_player_index + 1) % players_list.size()
 			var next_target = _get_next_uncompleted_island(active_player_index)
 			_select_target_island(next_target, false)
-			var next_name = p1_name if active_player_index == 0 else p2_name
+			var next_name = get_active_player_name()
 			_show_banner("🎯 %s's Turn! Target: %d YDS" % [next_name, island_distances_yards[next_target]])
 	_reset_ball_position()
 
@@ -1760,15 +1866,15 @@ func _setup_ui() -> void:
 	
 	# Controls Panel
 	var ctrl_panel = PanelContainer.new()
-	ctrl_panel.custom_minimum_size = Vector2(560, 76)
+	ctrl_panel.custom_minimum_size = Vector2(760, 76)
 	ctrl_panel.anchor_left = 0.5
 	ctrl_panel.anchor_right = 0.5
 	ctrl_panel.anchor_top = 1.0
 	ctrl_panel.anchor_bottom = 1.0
 	ctrl_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	ctrl_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	ctrl_panel.offset_left = -280
-	ctrl_panel.offset_right = 280
+	ctrl_panel.offset_left = -380
+	ctrl_panel.offset_right = 380
 	ctrl_panel.offset_top = -94
 	ctrl_panel.offset_bottom = -18
 	hud_control.add_child(ctrl_panel)
@@ -1792,6 +1898,16 @@ func _setup_ui() -> void:
 	_apply_btn_style(mode_toggle_btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
 	mode_toggle_btn.pressed.connect(_toggle_pvp_mode)
 	ctrl_hbox.add_child(mode_toggle_btn)
+
+	# Players Manage Button
+	players_btn = Button.new()
+	players_btn.text = "👥 Players (%d)" % players_list.size()
+	players_btn.custom_minimum_size = Vector2(145, 52)
+	players_btn.add_theme_font_size_override("font_size", 15)
+	_apply_btn_style(players_btn, Color(0.18, 0.34, 0.50), Color(0.24, 0.44, 0.65))
+	players_btn.pressed.connect(_open_players_modal)
+	players_btn.visible = pvp_mode
+	ctrl_hbox.add_child(players_btn)
 	
 	var reset_btn = Button.new()
 	reset_btn.text = "RESET (R)"
@@ -1974,56 +2090,83 @@ func _update_hud() -> void:
 	if att > 0:
 		acc = int((float(hits) / float(att)) * 100.0)
 		
-	if pvp_mode:
-		var p1_count = p1_completed.count(true)
-		var p2_count = p2_completed.count(true)
+	if pvp_mode and not players_list.is_empty():
+		var cur_p = players_list[active_player_index % players_list.size()]
+		var cur_name = cur_p.get("name", "Player %d" % (active_player_index + 1))
+		var cur_col = get_active_player_color()
 		
 		if target_title_lbl:
 			target_title_lbl.text = "CURRENT TURN"
 		if target_info_lbl:
 			if pvp_winner != -1:
-				var win_name = p1_name if pvp_winner == 0 else p2_name
+				var win_name = players_list[pvp_winner]["name"] if pvp_winner < players_list.size() else cur_name
 				target_info_lbl.text = "🏆 %s WINS!" % win_name
 				target_info_lbl.add_theme_color_override("font_color", Color(0.3, 1.0, 0.5))
 			else:
-				var cur_name = p1_name if active_player_index == 0 else p2_name
 				target_info_lbl.text = "%s (P%d)" % [cur_name, active_player_index + 1]
-				target_info_lbl.add_theme_color_override("font_color", P1_COLOR if active_player_index == 0 else P2_COLOR)
+				target_info_lbl.add_theme_color_override("font_color", cur_col)
 				
 		if attempts_title_lbl:
 			attempts_title_lbl.text = "ISLANDS HIT"
 		if attempts_lbl:
-			attempts_lbl.text = "P1: %d/7 | P2: %d/7" % [p1_count, p2_count]
+			if players_list.size() == 2:
+				var c0 = players_list[0]["completed"].count(true) if players_list[0].has("completed") else 0
+				var c1 = players_list[1]["completed"].count(true) if players_list[1].has("completed") else 0
+				attempts_lbl.text = "P1: %d/7 | P2: %d/7" % [c0, c1]
+			elif players_list.size() == 3:
+				var c0 = players_list[0]["completed"].count(true) if players_list[0].has("completed") else 0
+				var c1 = players_list[1]["completed"].count(true) if players_list[1].has("completed") else 0
+				var c2 = players_list[2]["completed"].count(true) if players_list[2].has("completed") else 0
+				attempts_lbl.text = "P1:%d P2:%d P3:%d (/7)" % [c0, c1, c2]
+			else:
+				var c_cur = cur_p["completed"].count(true) if cur_p.has("completed") else 0
+				var max_c = 0
+				for p in players_list:
+					var pc = p["completed"].count(true) if p.has("completed") else 0
+					if pc > max_c:
+						max_c = pc
+				attempts_lbl.text = "P%d: %d/7 (Leader: %d)" % [active_player_index + 1, c_cur, max_c]
 			attempts_lbl.add_theme_color_override("font_color", Color.WHITE)
 			
 		if hits_title_lbl:
 			hits_title_lbl.text = "MATCH STATUS"
 		if hits_lbl:
-			var diff = p1_count - p2_count
 			if pvp_winner != -1:
 				hits_lbl.text = "GAME OVER"
 				hits_lbl.add_theme_color_override("font_color", Color(0.3, 1.0, 0.5))
-			elif diff > 0:
-				hits_lbl.text = "P1 +%d" % diff
-				hits_lbl.add_theme_color_override("font_color", P1_COLOR)
-			elif diff < 0:
-				hits_lbl.text = "P2 +%d" % -diff
-				hits_lbl.add_theme_color_override("font_color", P2_COLOR)
 			else:
-				hits_lbl.text = "TIED"
-				hits_lbl.add_theme_color_override("font_color", Color(1.0, 0.9, 0.4))
+				var max_c = -1
+				var leader_idx = -1
+				var second_c = -1
+				var is_tie = false
+				for i in range(players_list.size()):
+					var c = players_list[i]["completed"].count(true) if players_list[i].has("completed") else 0
+					if c > max_c:
+						second_c = max_c
+						max_c = c
+						leader_idx = i
+						is_tie = false
+					elif c == max_c:
+						is_tie = true
+				if max_c == 0 or is_tie:
+					hits_lbl.text = "TIED (%d/7)" % max_c
+					hits_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WARNING)
+				else:
+					var lead_diff = max_c - second_c
+					hits_lbl.text = "P%d +%d" % [leader_idx + 1, lead_diff]
+					hits_lbl.add_theme_color_override("font_color", get_player_color_at(leader_idx))
 				
 		if acc_title_lbl:
 			acc_title_lbl.text = "TOTAL SHOTS"
 		if accuracy_lbl:
-			accuracy_lbl.text = "P1: %d | P2: %d" % [p1_shots, p2_shots]
+			accuracy_lbl.text = "P%d: %d shots" % [active_player_index + 1, cur_p.get("shots", 0)]
 			accuracy_lbl.add_theme_color_override("font_color", Color.WHITE)
 			
 		if tot_title_lbl:
 			tot_title_lbl.text = "TARGET YARDS"
 		if total_hits_lbl:
 			total_hits_lbl.text = "%d YDS" % island_distances_yards[selected_island_index]
-			total_hits_lbl.add_theme_color_override("font_color", Color(0.5, 0.85, 1.0))
+			total_hits_lbl.add_theme_color_override("font_color", cur_col)
 	else:
 		if target_title_lbl:
 			target_title_lbl.text = "TARGET"
@@ -2055,7 +2198,7 @@ func _trigger_victory(winner_name: String) -> void:
 	if sfx_applause_player:
 		sfx_applause_player.play()
 	GlobalSettings.play_golf_clap()
-	var win_color = P1_COLOR if pvp_winner == 0 else P2_COLOR
+	var win_color = get_active_player_color()
 	_show_game_over_banner(
 		"🎉 %s WINS!" % winner_name.to_upper(),
 		"First golfer to conquer all 7 floating island greens!",
@@ -2067,15 +2210,15 @@ func _show_game_over_banner(title: String, subtitle: String, theme_color: Color)
 		
 	game_over_panel = PanelContainer.new()
 	game_over_panel.name = "GameOverBanner"
-	game_over_panel.custom_minimum_size = Vector2(620, 240)
+	game_over_panel.custom_minimum_size = Vector2(640, 260)
 	game_over_panel.anchor_left = 0.5
 	game_over_panel.anchor_right = 0.5
 	game_over_panel.anchor_top = 0.5
 	game_over_panel.anchor_bottom = 0.5
-	game_over_panel.offset_left = -310
-	game_over_panel.offset_right = 310
-	game_over_panel.offset_top = -120
-	game_over_panel.offset_bottom = 120
+	game_over_panel.offset_left = -320
+	game_over_panel.offset_right = 320
+	game_over_panel.offset_top = -130
+	game_over_panel.offset_bottom = 130
 	
 	var style = StyleBoxFlat.new()
 	style.bg_color = Color(0.03, 0.07, 0.12, 0.95)
@@ -2118,11 +2261,14 @@ func _show_game_over_banner(title: String, subtitle: String, theme_color: Color)
 	sub_lbl.add_theme_color_override("font_color", Color(0.85, 0.9, 0.95))
 	vbox.add_child(sub_lbl)
 
+	var stat_lines: Array[String] = []
+	for i in range(players_list.size()):
+		var p = players_list[i]
+		var c_count = p["completed"].count(true) if p.has("completed") else 0
+		var s_count = p.get("shots", 0)
+		stat_lines.append("P%d %s: %d/7 islands (%d shots)" % [i + 1, p.get("name", "Player %d" % (i + 1)), c_count, s_count])
 	var stats_lbl = Label.new()
-	stats_lbl.text = "%s: %d/7 islands in %d shots\n%s: %d/7 islands in %d shots" % [
-		p1_name, p1_completed.count(true), p1_shots,
-		p2_name, p2_completed.count(true), p2_shots
-	]
+	stats_lbl.text = "\n".join(stat_lines)
 	stats_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	stats_lbl.add_theme_font_size_override("font_size", 15)
 	stats_lbl.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0))

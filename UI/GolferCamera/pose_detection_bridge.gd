@@ -51,7 +51,7 @@ const FRAME_INTERVAL: float = 0.04  # ~25 FPS cap for desktop camera streaming
 
 
 func _ready() -> void:
-	_is_android = OS.get_name() == "Android"
+	_is_android = OS.get_name() == "Android" or OS.has_feature("android")
 	
 	if _is_android:
 		_init_android_plugin()
@@ -79,10 +79,12 @@ func _init_android_plugin() -> void:
 			_plugin.call("setLiveInferenceEnabled", false)
 		print("[PoseDetectionBridge] Android On-Device MediaPipe plugin loaded. (Model ready: %s, GPU: %s, Live inference: deferred)" % [is_loaded, is_gpu])
 		server_ready.emit()
+		fetch_desktop_cameras()
 	else:
 		print("[PoseDetectionBridge] Android native MediaPipe plugin not found.")
 		_server_is_ready = false
 		pose_lost.emit()
+		fetch_desktop_cameras()
 
 
 func _on_android_pose_result(json_str: String) -> void:
@@ -117,8 +119,32 @@ func _on_android_camera_frame(jpg_bytes: PackedByteArray, json_str: String) -> v
 	desktop_frame_received.emit(img, tex, landmarks)
 
 
+func request_camera_permission_if_needed() -> bool:
+	if not (OS.has_feature("android") or OS.has_feature("ios") or _is_android):
+		return true
+	var permissions: Variant = OS.call("get_granted_permissions") if OS.has_method("get_granted_permissions") else []
+	var has_cam_perm: bool = false
+	if permissions is PackedStringArray or permissions is Array:
+		has_cam_perm = "android.permission.CAMERA" in permissions
+	if not has_cam_perm:
+		if OS.has_method("request_permission"):
+			OS.call("request_permission", "android.permission.CAMERA")
+		elif OS.has_method("request_permissions"):
+			OS.call("request_permissions")
+		return false
+	return true
+
+
 func start_android_camera(facing: int = 0) -> void:
 	if _is_android and _plugin != null and _plugin.has_method("startCamera"):
+		if not request_camera_permission_if_needed():
+			# Retry shortly in case user just accepted permission dialog
+			if is_inside_tree():
+				get_tree().create_timer(1.2).timeout.connect(func():
+					if active_desktop_camera_index >= 0 and not is_android_camera_active():
+						_plugin.call("startCamera", facing)
+				)
+			return
 		_plugin.call("startCamera", facing)
 
 
@@ -309,7 +335,23 @@ func _on_health_response(_result: int, response_code: int, _headers: PackedStrin
 # ─── Desktop System Camera Controls ──────────────────────────────────────────
 
 func fetch_desktop_cameras() -> void:
-	if _is_android or not _server_is_ready:
+	if _is_android:
+		desktop_cameras = []
+		var count: int = 2
+		if _plugin != null and _plugin.has_method("getCameraCount"):
+			var plugin_count: int = _plugin.call("getCameraCount")
+			if plugin_count > 0:
+				count = plugin_count
+		desktop_cameras.append({"id": 0, "name": "Back Camera (Device)", "facing": 0})
+		if count > 1:
+			desktop_cameras.append({"id": 1, "name": "Front Camera (Device)", "facing": 1})
+		for i in range(2, count):
+			desktop_cameras.append({"id": i, "name": "Camera %d (Device)" % i, "facing": i})
+		print("[PoseDetectionBridge] Android cameras detected (%d available)." % desktop_cameras.size())
+		desktop_cameras_updated.emit(desktop_cameras)
+		return
+	
+	if not _server_is_ready:
 		desktop_cameras_updated.emit([])
 		return
 	
@@ -343,10 +385,24 @@ func _on_scan_cameras_response(_result: int, response_code: int, _headers: Packe
 
 
 func select_desktop_camera(index: int) -> void:
-	if _is_android or not _server_is_ready:
+	active_desktop_camera_index = index
+	if _is_android:
+		if index >= 0:
+			var facing: int = 0
+			if index < desktop_cameras.size():
+				facing = desktop_cameras[index].get("facing", index)
+			else:
+				facing = index
+			print("[PoseDetectionBridge] Starting Android camera index %d (facing %d)..." % [index, facing])
+			start_android_camera(facing)
+		else:
+			print("[PoseDetectionBridge] Stopping Android camera...")
+			stop_android_camera()
 		return
 	
-	active_desktop_camera_index = index
+	if not _server_is_ready:
+		return
+	
 	if index < 0:
 		_desktop_polling_active = false
 		_desktop_polling_in_flight = false
@@ -378,13 +434,26 @@ func select_desktop_camera(index: int) -> void:
 
 
 func pause_desktop_camera() -> void:
+	if _is_android:
+		if is_android_camera_active():
+			stop_android_camera()
+		print("[PoseDetectionBridge] Android camera paused.")
+		return
 	_desktop_polling_active = false
 	_desktop_polling_in_flight = false
 	print("[PoseDetectionBridge] Desktop camera stream polling paused.")
 
 
 func resume_desktop_camera() -> void:
-	if _is_android or not _server_is_ready or active_desktop_camera_index < 0:
+	if _is_android:
+		if active_desktop_camera_index >= 0 and not is_android_camera_active():
+			print("[PoseDetectionBridge] Resuming Android camera %d..." % active_desktop_camera_index)
+			var facing: int = 0
+			if active_desktop_camera_index < desktop_cameras.size():
+				facing = desktop_cameras[active_desktop_camera_index].get("facing", active_desktop_camera_index)
+			start_android_camera(facing)
+		return
+	if not _server_is_ready or active_desktop_camera_index < 0:
 		return
 	print("[PoseDetectionBridge] Resuming desktop camera stream polling (camera %d)..." % active_desktop_camera_index)
 	_desktop_polling_active = true
@@ -393,12 +462,20 @@ func resume_desktop_camera() -> void:
 
 
 func is_desktop_camera_active() -> bool:
+	if _is_android:
+		return is_android_camera_active()
 	return _desktop_polling_active and active_desktop_camera_index >= 0
 
 
 func stop_desktop_camera() -> void:
 	_desktop_polling_active = false
 	_desktop_polling_in_flight = false
+	active_desktop_camera_index = -1
+	if _cam_capture_req != null and _cam_capture_req.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		_cam_capture_req.cancel_request()
+	if _is_android:
+		stop_android_camera()
+		return
 	select_desktop_camera(-1)
 
 
@@ -427,6 +504,8 @@ func _poll_desktop_camera_frame() -> void:
 
 func _on_cam_capture_response(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	_desktop_polling_in_flight = false
+	if not _desktop_polling_active or active_desktop_camera_index < 0:
+		return
 	
 	if response_code == 200 and body.size() > 0:
 		var json = JSON.new()

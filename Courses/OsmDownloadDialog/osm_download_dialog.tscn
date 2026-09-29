@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3 uid="uid://cbp1q8x4jdx5y"]
+[gd_scene load_steps=9 format=3 uid="uid://cbp1q8x4jdx5y"]
 
 [ext_resource type="Script" path="res://Courses/OsmDownloadDialog/osm_download_dialog.gd" id="1_dialog"]
 [ext_resource type="Script" path="res://UI/LoadingSpinner.gd" id="2_spinner"]
@@ -55,6 +55,38 @@ content_margin_top = 10
 content_margin_right = 14
 content_margin_bottom = 10
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_warn"]
+bg_color = Color(0.24, 0.14, 0.08, 0.9)
+border_width_left = 3
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.9, 0.65, 0.2, 0.85)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 12
+content_margin_top = 8
+content_margin_right = 12
+content_margin_bottom = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_card"]
+bg_color = Color(0.07, 0.11, 0.16, 0.85)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.24, 0.44, 0.65, 0.4)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+content_margin_left = 14
+content_margin_top = 10
+content_margin_right = 14
+content_margin_bottom = 10
+
 [node name="OsmDownloadDialog" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -97,12 +129,29 @@ theme_override_constants/margin_bottom = 24
 layout_mode = 2
 theme_override_constants/separation = 16
 
-[node name="Title" type="Label" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
+[node name="HeaderHBox" type="HBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
 layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="HeaderSpacer" type="Control" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/HeaderHBox"]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+
+[node name="Title" type="Label" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/HeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_colors/font_color = Color(1, 1, 1, 1)
 theme_override_font_sizes/font_size = 28
 text = "Download Golf Course from OpenStreetMap"
 horizontal_alignment = 1
+
+[node name="SettingsButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/HeaderHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+tooltip_text = "Search & Filter Settings"
+icon_alignment = 1
+expand_icon = true
 
 [node name="SearchHBox" type="HBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
 layout_mode = 2
@@ -191,3 +240,194 @@ theme_override_styles/normal = SubResource("StyleBoxFlat_btn_normal")
 theme_override_styles/hover = SubResource("StyleBoxFlat_btn_hover")
 disabled = true
 text = "Download & Generate"
+
+[node name="SettingsOverlay" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="SettingsDimmer" type="ColorRect" parent="SettingsOverlay"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.65)
+
+[node name="SettingsCenter" type="CenterContainer" parent="SettingsOverlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="SettingsPanel" type="PanelContainer" parent="SettingsOverlay/SettingsCenter"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(740, 520)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_bg")
+
+[node name="SettingsMargin" type="MarginContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 20
+
+[node name="SettingsVBox" type="VBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="SettingsHeaderHBox" type="HBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="SettingsTitle" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsHeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 22
+text = "⚙ Course Search & Filter Settings"
+
+[node name="SettingsCloseButton" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsHeaderHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+tooltip_text = "Close Settings (Esc)"
+text = "✕"
+
+[node name="WarningBanner" type="PanelContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_warn")
+
+[node name="WarningLabel" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/WarningBanner"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.84, 0.45, 1)
+theme_override_font_sizes/font_size = 13
+text = "⚠️ Warning: There is no guarantee that a course found with changed filters will work properly. The default filters are in place to ensure a well-defined course with complete 9 or 18 hole layouts is selected."
+autowrap_mode = 2
+
+[node name="HoleCountCard" type="PanelContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="HoleCountVBox" type="VBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="HoleCountTitle" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard/HoleCountVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.82, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "Hole Count Filter"
+
+[node name="HoleCountDesc" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard/HoleCountVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 13
+text = "Select course sizes to include. Selecting 'All' includes any course regardless of detected holes."
+
+[node name="HoleButtonsHBox" type="HBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard/HoleCountVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Btn9Hole" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard/HoleCountVBox/HoleButtonsHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(140, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+toggle_mode = true
+button_pressed = true
+text = "9 Holes"
+
+[node name="Btn18Hole" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard/HoleCountVBox/HoleButtonsHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(140, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+toggle_mode = true
+button_pressed = true
+text = "18 Holes"
+
+[node name="BtnAllHoles" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard/HoleCountVBox/HoleButtonsHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(220, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+toggle_mode = true
+button_pressed = false
+text = "All (Exclude Hole Filter)"
+
+[node name="TagFilterCard" type="PanelContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="TagFilterVBox" type="VBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TagFilterTitle" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.82, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "OpenStreetMap Tag Filtering"
+
+[node name="TagFilterDesc" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 13
+text = "Configure the tag filters used during search. Disable 'leisure=golf_course' or supply custom labels."
+
+[node name="LeisureGolfCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+button_pressed = true
+text = " Filter by 'leisure=golf_course'"
+
+[node name="CustomTagsLabel" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 13
+text = "Custom OSM Tags / Labels (comma-separated, e.g. leisure=golf_course, sport=golf):"
+
+[node name="CustomTagsInput" type="LineEdit" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+placeholder_text = "e.g. leisure=golf_course, sport=golf, golf=course"
+clear_button_enabled = true
+
+[node name="SettingsFooterHBox" type="HBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="ResetDefaultsButton" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsFooterHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Reset to Defaults"
+
+[node name="SettingsFooterSpacer" type="Control" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsFooterHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SettingsDoneButton" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsFooterHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 44)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Apply & Close"
+

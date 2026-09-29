@@ -226,7 +226,10 @@ func start_scan() -> void:
 		_start_square_scan()
 	else:
 		_start_square_scan()
-		_start_garmin_scan()
+		if OS.get_name() == "Android":
+			get_tree().create_timer(0.2).timeout.connect(_start_garmin_scan)
+		else:
+			_start_garmin_scan()
 
 
 func stop_scan() -> void:
@@ -265,6 +268,8 @@ func connect_to_device(device_id: String, is_auto: bool = false) -> void:
 	stop_scan()
 
 	if detected_type == "garmin":
+		if _square != null:
+			_square.call("DisconnectFromDevice")
 		if device_name == "":
 			device_name = "Garmin Approach R10"
 			settings["device_name"] = device_name
@@ -282,6 +287,8 @@ func connect_to_device(device_id: String, is_auto: bool = false) -> void:
 		_update_garmin_weather_config()
 		_garmin.call("ConnectToDevice", device_id)
 	else:
+		if _garmin != null:
+			_garmin.call("DisconnectFromDevice")
 		if device_name == "":
 			device_name = "Square Golf"
 			settings["device_name"] = device_name
@@ -544,26 +551,32 @@ func _on_square_device_discovered(device_id: String, name: String, rssi: int) ->
 		return
 	if not is_square_device_name(name):
 		return
+	var is_live := (rssi != 0)
 	var is_new := not devices.has(device_id)
+	var prev_live := bool(devices.get(device_id, {}).get("is_discovered", false)) if not is_new else false
 	devices[device_id] = {
 		"name": name,
 		"rssi": rssi,
 		"type": "square",
-		"is_discovered": true
+		"is_discovered": is_live
 	}
-	if is_new:
-		_debug_log("Square device discovered: %s (%s) RSSI=%d" % [name, device_id, rssi])
+	if is_new or (is_live and not prev_live):
+		_debug_log("Square device discovered: %s (%s) RSSI=%d live=%s" % [name, device_id, rssi, str(is_live)])
 		if device_id == str(settings.get("device_id", "")):
 			settings["device_name"] = name
 			_save_settings()
 		emit_signal("device_discovered", device_id, name, rssi)
 		if _fallback_scan_active:
-			_debug_log("Fallback auto-discovery found Square device: %s (%s). Auto-connecting..." % [name, device_id])
-			_stop_fallback_scan()
-			_set_status("Found %s. Connecting..." % name)
-			connect_to_device(device_id, true)
-			return
-		if _is_linux_auto_connect_match(device_id):
+			var saved_id := str(settings.get("device_id", ""))
+			if device_id == saved_id and not is_live:
+				_debug_log("Fallback scan ignoring offline cached default device %s" % device_id)
+			elif is_live:
+				_debug_log("Fallback auto-discovery found Square device: %s (%s). Auto-connecting..." % [name, device_id])
+				_stop_fallback_scan()
+				_set_status("Found %s. Connecting..." % name)
+				connect_to_device(device_id, true)
+				return
+		if _is_linux_auto_connect_match(device_id) and is_live:
 			_debug_log("saved Linux Square discovered; connecting automatically")
 			connect_to_device(device_id, true)
 
@@ -571,27 +584,35 @@ func _on_square_device_discovered(device_id: String, name: String, rssi: int) ->
 func _on_garmin_device_discovered(device_id: String, name: String, rssi: int) -> void:
 	if not _fallback_scan_active and str(settings.get("device_type", "auto")) == "square":
 		return
+	if name.strip_edges() != "" and not is_garmin_device_name(name):
+		return
 	var display_name := name if name.strip_edges() != "" else "Garmin Approach R10"
+	var is_live := (rssi != 0)
 	var is_new := not devices.has(device_id)
+	var prev_live := bool(devices.get(device_id, {}).get("is_discovered", false)) if not is_new else false
 	devices[device_id] = {
 		"name": display_name,
 		"rssi": rssi,
 		"type": "garmin",
-		"is_discovered": true
+		"is_discovered": is_live
 	}
-	if is_new:
-		_debug_log("Garmin device discovered: %s (%s) RSSI=%d" % [display_name, device_id, rssi])
+	if is_new or (is_live and not prev_live):
+		_debug_log("Garmin device discovered: %s (%s) RSSI=%d live=%s" % [display_name, device_id, rssi, str(is_live)])
 		if device_id == str(settings.get("device_id", "")):
 			settings["device_name"] = display_name
 			_save_settings()
 		emit_signal("device_discovered", device_id, display_name, rssi)
 		if _fallback_scan_active:
-			_debug_log("Fallback auto-discovery found Garmin device: %s (%s). Auto-connecting..." % [display_name, device_id])
-			_stop_fallback_scan()
-			_set_status("Found %s. Connecting..." % display_name)
-			connect_to_device(device_id, true)
-			return
-		if _is_linux_auto_connect_match(device_id):
+			var saved_id := str(settings.get("device_id", ""))
+			if device_id == saved_id and not is_live:
+				_debug_log("Fallback scan ignoring offline cached default device %s" % device_id)
+			elif is_live:
+				_debug_log("Fallback auto-discovery found Garmin device: %s (%s). Auto-connecting..." % [display_name, device_id])
+				_stop_fallback_scan()
+				_set_status("Found %s. Connecting..." % display_name)
+				connect_to_device(device_id, true)
+				return
+		if _is_linux_auto_connect_match(device_id) and is_live:
 			_debug_log("saved Linux Garmin discovered; connecting automatically")
 			connect_to_device(device_id, true)
 
@@ -652,6 +673,8 @@ func _on_garmin_battery_changed(level: int) -> void:
 		return
 	_debug_log("Garmin battery changed: %d%%" % level)
 	battery_level = level
+	if status == "Connecting" or status.begins_with("Found"):
+		_set_status("Connected")
 	emit_signal("battery_changed", level)
 
 
@@ -660,6 +683,8 @@ func _on_garmin_firmware_changed(value: String) -> void:
 		return
 	_debug_log("Garmin firmware changed: %s" % value)
 	firmware = value
+	if status == "Connecting" or status.begins_with("Found"):
+		_set_status("Connected")
 	emit_signal("firmware_changed", value)
 
 
@@ -669,6 +694,8 @@ func _on_garmin_ready_changed(value: bool) -> void:
 	_debug_log("Garmin ready changed: %s" % str(value))
 	var became_ready := value and not is_ready
 	is_ready = value
+	if value and (status == "Connecting" or status.begins_with("Found") or status == "Disconnected"):
+		_set_status("Connected")
 	if became_ready:
 		if is_ball_in_flight():
 			_pending_ready_ding = true
@@ -699,6 +726,8 @@ func _on_garmin_shot_received(data: Dictionary) -> void:
 	if not _is_valid_shot_data(data):
 		_debug_log("Garmin practice swing or stationary ball ignored (speed=%.1f mph)" % float(data.get("BallSpeed", data.get("Speed", 0.0))))
 		return
+	if status == "Connecting" or status.begins_with("Found") or status == "Disconnected":
+		_set_status("Connected")
 	_debug_log("Garmin shot received with %d fields" % data.size())
 	FoamBallBoost.apply_boost(data, _current_club_name)
 	notify_shot_started()

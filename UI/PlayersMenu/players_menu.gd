@@ -86,6 +86,8 @@ var edit_profile_avatar_path: String = ""
 var edit_profile_tee_opt: OptionButton = OptionButton.new()
 var edit_profile_content: VBoxContainer = VBoxContainer.new()
 var edit_profile_avatar_preview_container: Control = null
+var back_btn: Button = null
+var register_btn: Button = null
 
 func _ready() -> void:
 	name = "PlayersMenu"
@@ -143,7 +145,8 @@ func _ready() -> void:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header_hbox.add_child(spacer)
 	
-	var back_btn = Button.new()
+	back_btn = Button.new()
+	back_btn.name = "BackBtn"
 	back_btn.text = "Main Menu"
 	back_btn.icon = load("res://UI/MainMenu/images/menu.svg")
 	back_btn.expand_icon = true
@@ -192,22 +195,41 @@ func _ready() -> void:
 	reg_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	reg_section.add_child(reg_lbl)
 	
+	new_player_input.name = "NewPlayerInput"
 	new_player_input.placeholder_text = "New Player Name"
 	new_player_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	new_player_input.custom_minimum_size = Vector2(0, 50)
 	new_player_input.add_theme_font_size_override("font_size", 18)
 	ThemeManager.apply_input_style(new_player_input)
-	new_player_input.text_submitted.connect(func(_t): _on_register_pressed())
+	new_player_input.text_submitted.connect(func(_t): new_player_email_input.grab_focus())
+	new_player_input.gui_input.connect(func(ev: InputEvent):
+		if has_node("/root/VirtualKeyboardManager"):
+			var vkm = get_node("/root/VirtualKeyboardManager")
+			if vkm.is_controller_mode_active():
+				if (ev is InputEventJoypadButton and ev.pressed and ev.button_index == JOY_BUTTON_A) or ev.is_action_pressed("ui_accept"):
+					vkm.open_for(new_player_input, true)
+					get_viewport().set_input_as_handled()
+	)
 	reg_section.add_child(new_player_input)
 
+	new_player_email_input.name = "NewPlayerEmailInput"
 	new_player_email_input.placeholder_text = "Optional Email Address"
 	new_player_email_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	new_player_email_input.custom_minimum_size = Vector2(0, 50)
 	new_player_email_input.add_theme_font_size_override("font_size", 18)
 	ThemeManager.apply_input_style(new_player_email_input)
-	new_player_email_input.text_submitted.connect(func(_t): _on_register_pressed())
+	new_player_email_input.text_submitted.connect(func(_t): new_player_tee_opt.grab_focus())
+	new_player_email_input.gui_input.connect(func(ev: InputEvent):
+		if has_node("/root/VirtualKeyboardManager"):
+			var vkm = get_node("/root/VirtualKeyboardManager")
+			if vkm.is_controller_mode_active():
+				if (ev is InputEventJoypadButton and ev.pressed and ev.button_index == JOY_BUTTON_A) or ev.is_action_pressed("ui_accept"):
+					vkm.open_for(new_player_email_input, true)
+					get_viewport().set_input_as_handled()
+	)
 	reg_section.add_child(new_player_email_input)
 
+	new_player_tee_opt.name = "NewPlayerTeeOpt"
 	new_player_tee_opt.clear()
 	new_player_tee_opt.add_item("Preferred Tee: None", 0)
 	new_player_tee_opt.add_item("Preferred Tee: Blue", 1)
@@ -224,6 +246,7 @@ func _ready() -> void:
 	reg_btn_hbox.add_theme_constant_override("separation", 10)
 	reg_section.add_child(reg_btn_hbox)
 
+	avatar_preview_btn.name = "AvatarPreviewBtn"
 	avatar_preview_btn.text = "Avatar: None"
 	avatar_preview_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	avatar_preview_btn.custom_minimum_size = Vector2(0, 50)
@@ -237,7 +260,8 @@ func _ready() -> void:
 	)
 	reg_btn_hbox.add_child(avatar_preview_btn)
 	
-	var register_btn = Button.new()
+	register_btn = Button.new()
+	register_btn.name = "RegisterBtn"
 	register_btn.text = "Register"
 	register_btn.custom_minimum_size = Vector2(120, 50)
 	register_btn.add_theme_font_size_override("font_size", 18)
@@ -308,6 +332,13 @@ func _ready() -> void:
 func _grab_initial_focus() -> void:
 	if not is_visible_in_tree():
 		return
+	if has_node("/root/VirtualKeyboardManager"):
+		var vkm = get_node("/root/VirtualKeyboardManager")
+		if vkm.is_controller_mode_active():
+			var registered = MultiplayerManager.get_registered_players()
+			if registered.is_empty():
+				new_player_input.call_deferred("grab_focus")
+				return
 	if has_node("/root/KeybindingManager"):
 		var km = get_node("/root/KeybindingManager")
 		km.focus_first_control(self)
@@ -357,6 +388,7 @@ func _refresh_players_list() -> void:
 		empty_lbl.add_theme_font_size_override("font_size", 16)
 		empty_lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
 		players_list_vbox.add_child(empty_lbl)
+		call_deferred("_update_controller_focus_navigation")
 		return
 		
 	for p in registered:
@@ -400,6 +432,44 @@ func _refresh_players_list() -> void:
 			
 		btn.pressed.connect(func(): _select_player(p_name))
 		players_list_vbox.add_child(btn)
+
+	call_deferred("_update_controller_focus_navigation")
+
+
+func _update_controller_focus_navigation() -> void:
+	if not is_instance_valid(back_btn) or not is_instance_valid(new_player_input):
+		return
+
+	var player_buttons: Array[Button] = []
+	for child in players_list_vbox.get_children():
+		if child is Button and child.is_visible_in_tree():
+			player_buttons.append(child)
+
+	if player_buttons.is_empty():
+		back_btn.focus_neighbor_bottom = new_player_input.get_path()
+		back_btn.focus_neighbor_left = new_player_input.get_path()
+		new_player_input.focus_neighbor_top = back_btn.get_path()
+	else:
+		back_btn.focus_neighbor_bottom = player_buttons[0].get_path()
+		back_btn.focus_neighbor_left = player_buttons[0].get_path()
+		player_buttons[0].focus_neighbor_top = back_btn.get_path()
+		for i in range(player_buttons.size() - 1):
+			player_buttons[i].focus_neighbor_bottom = player_buttons[i + 1].get_path()
+			player_buttons[i + 1].focus_neighbor_top = player_buttons[i].get_path()
+		player_buttons.back().focus_neighbor_bottom = new_player_input.get_path()
+		new_player_input.focus_neighbor_top = player_buttons.back().get_path()
+
+	new_player_input.focus_neighbor_bottom = new_player_email_input.get_path()
+	new_player_email_input.focus_neighbor_top = new_player_input.get_path()
+	new_player_email_input.focus_neighbor_bottom = new_player_tee_opt.get_path()
+	new_player_tee_opt.focus_neighbor_top = new_player_email_input.get_path()
+	new_player_tee_opt.focus_neighbor_bottom = avatar_preview_btn.get_path()
+	avatar_preview_btn.focus_neighbor_top = new_player_tee_opt.get_path()
+	avatar_preview_btn.focus_neighbor_right = register_btn.get_path()
+	register_btn.focus_neighbor_left = avatar_preview_btn.get_path()
+	register_btn.focus_neighbor_top = new_player_tee_opt.get_path()
+	register_btn.focus_neighbor_bottom = back_btn.get_path()
+
 
 func _select_player(player_name: String) -> void:
 	selected_player_name = player_name
@@ -605,10 +675,13 @@ func _open_edit_profile_dialog(player_name: String) -> void:
 	email_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
 	email_sec.add_child(email_title)
 	
+	edit_profile_email_input.name = "EditProfileEmailInput"
 	edit_profile_email_input.placeholder_text = "e.g. golfer@example.com"
 	edit_profile_email_input.custom_minimum_size = Vector2(0, 50)
 	edit_profile_email_input.add_theme_font_size_override("font_size", 18)
 	ThemeManager.apply_input_style(edit_profile_email_input)
+	if not edit_profile_email_input.gui_input.is_connected(_on_edit_profile_email_gui_input):
+		edit_profile_email_input.gui_input.connect(_on_edit_profile_email_gui_input)
 	if edit_profile_email_input.get_parent() != null:
 		edit_profile_email_input.get_parent().remove_child(edit_profile_email_input)
 	email_sec.add_child(edit_profile_email_input)
@@ -722,6 +795,17 @@ func _open_edit_profile_dialog(player_name: String) -> void:
 	bag_hbox.add_child(open_bag_btn)
 	
 	edit_profile_dialog.popup_centered()
+	edit_profile_email_input.call_deferred("grab_focus")
+
+
+func _on_edit_profile_email_gui_input(ev: InputEvent) -> void:
+	if has_node("/root/VirtualKeyboardManager"):
+		var vkm = get_node("/root/VirtualKeyboardManager")
+		if vkm.is_controller_mode_active():
+			if (ev is InputEventJoypadButton and ev.pressed and ev.button_index == JOY_BUTTON_A) or ev.is_action_pressed("ui_accept"):
+				vkm.open_for(edit_profile_email_input, true)
+				get_viewport().set_input_as_handled()
+
 
 func _switch_to_bag_tab() -> void:
 	var tabs_node = stats_panel.find_child("TabContainer", true, false)

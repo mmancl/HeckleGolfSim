@@ -11,8 +11,8 @@ var altitude := Setting.new(0.0, -1000.0, 10000.0)
 var surface_type := Setting.new(PhysicsEnums.SurfaceType.FAIRWAY)
 var shot_tracer_count := Setting.new(1, 0, 4)
 var ball_type := Setting.new(0)
-var camera_height := Setting.new(2.4, 0.5, 10.0)
-var camera_distance := Setting.new(15.0, 1.0, 30.0)
+var camera_height := Setting.new(1.65, 0.5, 10.0)
+var camera_distance := Setting.new(5.2, 1.0, 30.0)
 var camera_fov := Setting.new(55.0, 1.0, 90.0)
 var camera_far := Setting.new(1000.0, 100.0, 1000.0)
 var dof_enabled := Setting.new(false)
@@ -32,7 +32,6 @@ var ambient_sound_enabled := Setting.new(true)
 var menu_music_enabled := Setting.new(true)
 var minigame_music_enabled := Setting.new(true)
 var green_speed := Setting.new(10.0, 6.0, 16.0)
-var putting_green_speed := Setting.new(10.0, 6.0, 16.0)
 var phone_cam_url := Setting.new("")
 var use_phone_stream := Setting.new(false)
 var tension_effects_enabled := Setting.new(true)
@@ -56,6 +55,13 @@ var putting_camera_enabled := Setting.new(false)
 var putting_camera_fps := Setting.new(30, 15, 120)
 var putting_camera_fps_mode := Setting.new("Auto")
 var putting_camera_rotation := Setting.new(0)
+var putting_camera_circle_x := Setting.new(0.5, 0.15, 0.85)
+var putting_ball_color_hsv := Setting.new("")
+var putting_ball_color_tolerance := Setting.new(30.0, 10.0, 90.0)
+var putting_bg_color_hsv := Setting.new("")
+var putting_min_speed_mph := Setting.new(1.5, 0.5, 5.0)
+var putting_max_speed_mph := Setting.new(20.0, 10.0, 30.0)
+var putting_mishit_filter_enabled := Setting.new(true)
 var windowed_fullscreen := Setting.new(true)
 var shot_curve_sensitivity := Setting.new(1.0, 0.5, 2.0)
 
@@ -92,7 +98,6 @@ func _init():
 		"menu_music_enabled": menu_music_enabled,
 		"minigame_music_enabled": minigame_music_enabled,
 		"green_speed": green_speed,
-		"putting_green_speed": putting_green_speed,
 		"phone_cam_url": phone_cam_url,
 		"use_phone_stream": use_phone_stream,
 		"tension_effects_enabled": tension_effects_enabled,
@@ -116,6 +121,13 @@ func _init():
 		"putting_camera_fps": putting_camera_fps,
 		"putting_camera_fps_mode": putting_camera_fps_mode,
 		"putting_camera_rotation": putting_camera_rotation,
+		"putting_camera_circle_x": putting_camera_circle_x,
+		"putting_ball_color_hsv": putting_ball_color_hsv,
+		"putting_ball_color_tolerance": putting_ball_color_tolerance,
+		"putting_bg_color_hsv": putting_bg_color_hsv,
+		"putting_min_speed_mph": putting_min_speed_mph,
+		"putting_max_speed_mph": putting_max_speed_mph,
+		"putting_mishit_filter_enabled": putting_mishit_filter_enabled,
 		"windowed_fullscreen": windowed_fullscreen,
 		"shot_curve_sensitivity": shot_curve_sensitivity,
 	})

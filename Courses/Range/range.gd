@@ -273,12 +273,12 @@ func sample_elevation(x: float, z: float) -> float:
 
 
 func _generate_ground_terrain() -> void:
-	var min_x := -45.72   # -50 yards
-	var max_x := 457.2    # 500 yards
-	var min_z := -228.6   # -250 yards
-	var max_z := 228.6    # 250 yards
-	var subdiv_x := 160
-	var subdiv_z := 120
+	var min_x := -150.0   # Covers under mountain backdrop behind tee
+	var max_x := 490.0    # Covers under mountain backdrop down range
+	var min_z := -450.0   # Covers lateral mountain boundary
+	var max_z := 450.0
+	var subdiv_x := 180
+	var subdiv_z := 150
 	
 	var cell_w := (max_x - min_x) / subdiv_x
 	var cell_d := (max_z - min_z) / subdiv_z
@@ -287,29 +287,28 @@ func _generate_ground_terrain() -> void:
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	
 	var mat := ShaderMaterial.new()
-	var shader = load("res://Courses/Environments/shaders/parallax_turf.gdshader")
+	var shader = load("res://Courses/Environments/shaders/driving_range_turf.gdshader")
 	if shader:
 		mat.shader = shader
-		mat.set_shader_parameter("albedo_tex", load("res://Courses/Environments/grassy-meadow1-bl/grassy-meadow1_albedo.png"))
-		mat.set_shader_parameter("normal_tex", load("res://Courses/Environments/grassy-meadow1-bl/grassy-meadow1_normal-ogl.png"))
-		mat.set_shader_parameter("ao_tex", load("res://Courses/Environments/grassy-meadow1-bl/grassy-meadow1_ao.png"))
+		mat.set_shader_parameter("tex_fairway", load("res://Courses/Environments/grass-fairway/albedo.png"))
+		mat.set_shader_parameter("normal_fairway", load("res://Courses/Environments/grass-fairway/normal.png"))
+		mat.set_shader_parameter("ao_fairway", load("res://Courses/Environments/grass-fairway/ao.png"))
+		mat.set_shader_parameter("roughness_fairway", load("res://Courses/Environments/grass-fairway/roughness.png"))
 		
-		# Generate procedural Simplex noise texture for volumetric turf details
-		var noise = FastNoiseLite.new()
-		noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
-		noise.frequency = 0.4
+		mat.set_shader_parameter("tex_rough", load("res://Courses/Environments/grass-rough/albedo.png"))
+		mat.set_shader_parameter("normal_rough", load("res://Courses/Environments/grass-rough/normal.png"))
+		mat.set_shader_parameter("ao_rough", load("res://Courses/Environments/grass-rough/ao.png"))
+		mat.set_shader_parameter("roughness_rough", load("res://Courses/Environments/grass-rough/roughness.png"))
 		
-		var noise_tex = NoiseTexture2D.new()
-		noise_tex.noise = noise
-		noise_tex.seamless = true
-		
-		mat.set_shader_parameter("noise_texture", noise_tex)
-		mat.set_shader_parameter("layers", MobilePerformance.get_parallax_layers())
-		mat.set_shader_parameter("depth_scale", MobilePerformance.get_parallax_depth_scale())
-		mat.set_shader_parameter("depth_strength", 0.4)
-		mat.set_shader_parameter("grass_color_tint", Color(0.9, 0.9, 0.9))
-		mat.set_shader_parameter("roughness", 0.8)
-		mat.set_shader_parameter("normal_depth", 0.85)
+		mat.set_shader_parameter("corridor_half_width", 26.0)
+		mat.set_shader_parameter("blend_margin", 0.85)
+		mat.set_shader_parameter("tee_start_x", -12.0)
+		mat.set_shader_parameter("tee_blend_x", 4.0)
+		mat.set_shader_parameter("max_range_dist", 320.04)
+		mat.set_shader_parameter("uv_scale_fairway", 0.12)
+		mat.set_shader_parameter("uv_scale_rough", 0.08)
+		mat.set_shader_parameter("normal_depth", 0.65)
+		mat.set_shader_parameter("stripe_strength", 0.70)
 	st.set_material(mat)
 	
 	for z in range(subdiv_z):
@@ -367,7 +366,8 @@ func _generate_ground_terrain() -> void:
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
-	is_driving_range = (name == "Range" and (scene_file_path.is_empty() or scene_file_path.ends_with("Range/range.tscn") or scene_file_path.ends_with("Range/range.scn")))
+	var p_path = scene_file_path.to_lower()
+	is_driving_range = (name.to_lower() == "range" or p_path.ends_with("range/range.tscn") or p_path.ends_with("range.tscn") or p_path.ends_with("range.scn"))
 	if is_driving_range:
 		var mp_mgr = get_node_or_null("/root/MultiplayerManager")
 		if mp_mgr != null:
@@ -417,15 +417,23 @@ func _ready() -> void:
 			$RangeUI.skip_flight_requested.connect(_on_skip_flight_requested)
 		if $RangeUI.has_signal("player_profile_changed") and not $RangeUI.player_profile_changed.is_connected(_on_player_profile_changed):
 			$RangeUI.player_profile_changed.connect(_on_player_profile_changed)
+		if $RangeUI.has_signal("shot_traces_toggled") and not $RangeUI.shot_traces_toggled.is_connected(_on_shot_traces_toggled):
+			$RangeUI.shot_traces_toggled.connect(_on_shot_traces_toggled)
 		if has_node("SessionRecorder") and $RangeUI.has_method("get_selected_player_name"):
 			$SessionRecorder.username = $RangeUI.get_selected_player_name()
+
+	_setup_shot_trace_overlay()
 			
 	# Visual effects setup
 	if has_node("Sky3D"):
 		MobilePerformance.optimize_sky3d($Sky3D)
 	MobilePerformance.optimize_scene(self)
-	var range_quality = "Low" if (GlobalSettings != null and GlobalSettings.is_low_graphics()) else "High"
-	MobilePerformance.apply_graphics_quality(self, range_quality)
+	# Driving range always uses high quality graphics
+	if is_driving_range:
+		MobilePerformance.apply_graphics_quality(self, "High")
+	else:
+		var range_quality = "Low" if (GlobalSettings != null and GlobalSettings.is_low_graphics()) else "High"
+		MobilePerformance.apply_graphics_quality(self, range_quality)
 	setup_depth_of_field()
 	setup_vignette()
 	setup_atmospheric_fog()
@@ -652,11 +660,15 @@ func _ready() -> void:
 	canvas.add_child(badge)
 
 	# Create AimDistanceLabel (path remains MapCanvas/AimDistanceLabel!)
-	var aim_lbl = Label.new()
+	var aim_lbl = RichTextLabel.new()
 	aim_lbl.name = "AimDistanceLabel"
-	aim_lbl.text = "🎯 Aim: --- | ⛰️ Elevation: 0 Feet | 🟢 Fairway"
-	aim_lbl.add_theme_font_size_override("font_size", 18)
-	aim_lbl.add_theme_color_override("font_color", Color(0.96, 0.98, 1.0))
+	aim_lbl.bbcode_enabled = true
+	aim_lbl.scroll_active = false
+	aim_lbl.autowrap_mode = TextServer.AUTOWRAP_OFF
+	aim_lbl.text = "[center]🎯 Aim: --- | ⛰️ Elevation: 0 Feet | 🟢 Fairway[/center]"
+	aim_lbl.add_theme_font_size_override("normal_font_size", 18)
+	aim_lbl.add_theme_font_size_override("bold_font_size", 28)
+	aim_lbl.add_theme_color_override("default_color", Color(0.96, 0.98, 1.0))
 	aim_lbl.add_theme_constant_override("outline_size", 4)
 	aim_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
 	aim_lbl.anchor_left = 0.5
@@ -665,8 +677,6 @@ func _ready() -> void:
 	aim_lbl.offset_top = 20
 	aim_lbl.offset_right = 260
 	aim_lbl.offset_bottom = 60
-	aim_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	aim_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	aim_lbl.visible = true
 	canvas.add_child(aim_lbl)
 
@@ -906,9 +916,28 @@ var place_ball_mode: bool = false
 
 
 func is_any_dialog_open() -> bool:
+	# Check UIFocusGuard: dropdown or manual lock active
+	if has_node("/root/UIFocusGuard"):
+		var guard = get_node("/root/UIFocusGuard")
+		if guard.is_dropdown_open() or guard.is_locked():
+			return true
+	# Check if any UI control currently has focus that is actively editing or inside a dialog
+	var vp := get_viewport()
+	if vp != null:
+		var focused := vp.gui_get_focus_owner()
+		if focused != null and is_instance_valid(focused) and focused.is_visible_in_tree():
+			if focused is LineEdit or focused is TextEdit:
+				return true
+			if focused is Range or (focused is Control and (focused.get_parent() is SpinBox or focused is SpinBox)):
+				return true
+			if _is_control_in_dialog(focused):
+				return true
 	if has_node("RangeUI"):
 		var r_ui = $RangeUI
 		if r_ui.has_node("SettingsLayer") and r_ui.get_node("SettingsLayer").visible:
+			return true
+		var dist_m = r_ui.find_child("DistanceMenu", true, false)
+		if dist_m != null and is_instance_valid(dist_m) and dist_m.visible:
 			return true
 		if r_ui.has_method("get_active_swing_replay_modal"):
 			var modal = r_ui.get_active_swing_replay_modal()
@@ -929,6 +958,20 @@ func is_any_dialog_open() -> bool:
 	return false
 
 
+func _is_control_in_dialog(ctrl: Control) -> bool:
+	var cur: Node = ctrl
+	while cur != null and cur != self and cur != get_tree().root:
+		if cur is Popup or cur is AcceptDialog or cur is ConfirmationDialog or cur is Window:
+			return true
+		var c_name := str(cur.name).to_lower()
+		if c_name.contains("modal") or c_name.contains("dialog") or c_name.contains("popup") \
+			or c_name == "distancemenu" or c_name == "settingslayer" or c_name == "settingsmodallayer" \
+			or c_name == "scorecardpanel" or c_name == "manageplayerspanel":
+			return true
+		cur = cur.get_parent()
+	return false
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	# 1. Close active review screens / popups on Escape or Cancel (B / Circle)
 	var is_escape = (event is InputEventKey and not event.echo and (event as InputEventKey).keycode == KEY_ESCAPE) or \
@@ -942,21 +985,31 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if has_node("RangeUI"):
 			var r_ui = $RangeUI
+			var dist_m = r_ui.find_child("DistanceMenu", true, false)
+			if dist_m != null and is_instance_valid(dist_m) and dist_m.visible:
+				dist_m.visible = false
+				get_viewport().gui_release_focus()
+				get_viewport().set_input_as_handled()
+				return
 			var modal = r_ui.get_active_swing_replay_modal() if r_ui.has_method("get_active_swing_replay_modal") else r_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
 			if modal != null and is_instance_valid(modal) and modal.visible:
 				r_ui.toggle_prev_shot_analysis()
+				get_viewport().gui_release_focus()
 				get_viewport().set_input_as_handled()
 				return
 			if r_ui.has_node("SettingsLayer") and r_ui.get_node("SettingsLayer").visible:
 				r_ui.get_node("SettingsLayer").visible = false
+				get_viewport().gui_release_focus()
 				get_viewport().set_input_as_handled()
 				return
 			if r_ui.get("_prev_shot_popup") != null and is_instance_valid(r_ui.get("_prev_shot_popup")) and r_ui.get("_prev_shot_popup").visible:
 				r_ui.get("_prev_shot_popup").visible = false
+				get_viewport().gui_release_focus()
 				get_viewport().set_input_as_handled()
 				return
 			if r_ui.get("_detached_window") != null and is_instance_valid(r_ui.get("_detached_window")):
 				r_ui.call("_close_detached_window")
+				get_viewport().gui_release_focus()
 				get_viewport().set_input_as_handled()
 				return
 
@@ -1109,19 +1162,35 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_distance_menu()
 			get_viewport().set_input_as_handled()
 			return
+		elif event.is_action_pressed("shot_traces_toggle"):
+			_toggle_shot_traces()
+			get_viewport().set_input_as_handled()
+			return
 		elif event.is_action_pressed("aim_left"):
+			var vp := get_viewport()
+			if vp != null and vp.gui_get_focus_owner() != null and not _is_control_in_dialog(vp.gui_get_focus_owner()):
+				vp.gui_release_focus()
 			_apply_aim_step(-1.5, 0.0)
 			get_viewport().set_input_as_handled()
 			return
 		elif event.is_action_pressed("aim_right"):
+			var vp := get_viewport()
+			if vp != null and vp.gui_get_focus_owner() != null and not _is_control_in_dialog(vp.gui_get_focus_owner()):
+				vp.gui_release_focus()
 			_apply_aim_step(1.5, 0.0)
 			get_viewport().set_input_as_handled()
 			return
 		elif event.is_action_pressed("aim_forward"):
+			var vp := get_viewport()
+			if vp != null and vp.gui_get_focus_owner() != null and not _is_control_in_dialog(vp.gui_get_focus_owner()):
+				vp.gui_release_focus()
 			_apply_aim_step(0.0, 2.0)
 			get_viewport().set_input_as_handled()
 			return
 		elif event.is_action_pressed("aim_backward"):
+			var vp := get_viewport()
+			if vp != null and vp.gui_get_focus_owner() != null and not _is_control_in_dialog(vp.gui_get_focus_owner()):
+				vp.gui_release_focus()
 			_apply_aim_step(0.0, -2.0)
 			get_viewport().set_input_as_handled()
 			return
@@ -1448,6 +1517,10 @@ func _process_keyboard_aiming(delta: float) -> void:
 	if turn_input == 0.0 and dist_input == 0.0:
 		return
 
+	var vp := get_viewport()
+	if vp != null and vp.gui_get_focus_owner() != null and not _is_control_in_dialog(vp.gui_get_focus_owner()):
+		vp.gui_release_focus()
+
 	var ball_pos = $Player.ball.global_position
 	var diff = aim_target_pos - ball_pos
 	var dist_xz = Vector2(diff.x, diff.z).length()
@@ -1592,6 +1665,11 @@ func _toggle_suspense() -> void:
 func _toggle_distance_menu() -> void:
 	if has_node("RangeUI"):
 		$RangeUI.call("toggle_distance_menu")
+
+
+func _toggle_shot_traces() -> void:
+	if has_node("RangeUI"):
+		$RangeUI.call("toggle_shot_traces")
 
 
 func _on_tcp_client_hit_ball(data: Dictionary) -> void:
@@ -1764,6 +1842,7 @@ func _process(delta: float) -> void:
 var shot_history: Array[Dictionary] = []
 var _shot_sequence_id: int = 0
 var _shot_transition_active: bool = false
+var _shot_trace_overlay: Node3D = null
 
 func is_shot_transition_active() -> bool:
 	return _shot_transition_active
@@ -1815,7 +1894,41 @@ func _on_golf_ball_rest(_ball_data) -> void:
 		var club_name = _get_current_club()
 		raw_ball_data["player"] = p_name
 		raw_ball_data["club"] = club_name
+
+		# Ensure downrange TotalDistance, CarryDistance, and lateral SideDistance are properly captured
+		if has_node("Player"):
+			var p_node = get_node("Player")
+			if not raw_ball_data.has("TotalDistance") or float(raw_ball_data.get("TotalDistance", 0.0)) == 0.0:
+				if p_node.has_method("get_distance"):
+					raw_ball_data["TotalDistance"] = p_node.get_distance()
+			if not raw_ball_data.has("CarryDistance") or float(raw_ball_data.get("CarryDistance", 0.0)) == 0.0:
+				if "carry" in p_node and float(p_node.carry) > 0.0:
+					raw_ball_data["CarryDistance"] = p_node.carry
+				elif raw_ball_data.has("TotalDistance"):
+					raw_ball_data["CarryDistance"] = raw_ball_data["TotalDistance"]
+			if not raw_ball_data.has("SideDistance") or float(raw_ball_data.get("SideDistance", 0.0)) == 0.0:
+				if p_node.has_method("get_side_distance"):
+					raw_ball_data["SideDistance"] = p_node.get_side_distance()
+
+			# Capture flight tracer points from the Player's current_tracer
+			var tracer = p_node.get("current_tracer")
+			if tracer != null and is_instance_valid(tracer) and "points" in tracer and not tracer.points.is_empty():
+				raw_ball_data["tracer_points"] = tracer.points.duplicate()
+				# If SideDistance was 0 (or not reported by sensor/injector), extract lateral offset from tracer endpoint
+				if float(raw_ball_data.get("SideDistance", 0.0)) == 0.0 and tracer.points.size() >= 2:
+					var p_start: Vector3 = tracer.points[0]
+					var p_end: Vector3 = tracer.points[-1]
+					var p_delta = p_end - p_start
+					if p_node.ball != null and p_node.ball.has_method("get_target_right"):
+						var right_vec: Vector3 = p_node.ball.get_target_right()
+						raw_ball_data["SideDistance"] = p_delta.dot(right_vec)
+					else:
+						raw_ball_data["SideDistance"] = p_delta.z
+
 		shot_history.append(raw_ball_data.duplicate())
+
+		# Notify shot trace overlay and dispersion map if active
+		_notify_shot_trace_overlay(raw_ball_data)
 		
 		# Only defer to MultiplayerManager.record_shot if in an active multiplayer course match with hole ids
 		var mp_mgr = get_node_or_null("/root/MultiplayerManager")
@@ -2381,6 +2494,9 @@ func _reset_display_data() -> void:
 	display_data["VLA"] = "---"
 	display_data["HLA"] = "---"
 	display_data["Speed"] = "---"
+	display_data["BallSpeed"] = "---"
+	display_data["ClubSpeed"] = "---"
+	display_data["SmashFactor"] = "---"
 	display_data["BackSpin"] = "---"
 	display_data["SideSpin"] = "---"
 	display_data["TotalSpin"] = "---"
@@ -2647,6 +2763,23 @@ func _spawn_flag_pin() -> void:
 	pole.material_override = pole_mat
 	pole.position = Vector3(0, 1.5, 0)
 	pin.add_child(pole)
+
+	# Flagpole 3D collider (typical collision, disabled when putting)
+	var flag_body = StaticBody3D.new()
+	flag_body.name = "FlagstickCollider"
+	flag_body.set_meta("is_flagstick", true)
+	flag_body.set_meta("is_obstacle", true)
+	flag_body.collision_layer = 1
+	flag_body.collision_mask = 0
+	var col_shape = CollisionShape3D.new()
+	col_shape.name = "CollisionShape"
+	var cyl = CylinderShape3D.new()
+	cyl.radius = 0.025
+	cyl.height = 3.0
+	col_shape.shape = cyl
+	col_shape.position = Vector3(0, 1.5, 0)
+	flag_body.add_child(col_shape)
+	pin.add_child(flag_body)
 	
 	# Flag: small red prism/box mesh
 	var flag = MeshInstance3D.new()
@@ -2694,6 +2827,14 @@ func _spawn_flag_pin() -> void:
 	
 	print("[CoursePlay] FlagPin and PinMarker spawned at: ", current_hole_location)
 	update_gimme_circles()
+	update_flagstick_collision(is_default_club_putter())
+
+
+func update_flagstick_collision(is_putt: bool) -> void:
+	if has_node("FlagPin/FlagstickCollider/CollisionShape"):
+		var col = get_node("FlagPin/FlagstickCollider/CollisionShape") as CollisionShape3D
+		if col != null:
+			col.disabled = is_putt
 
 
 func _on_shot_initiated() -> void:
@@ -2709,6 +2850,12 @@ func _on_shot_initiated() -> void:
 	_last_aim_yaw_offset_deg = $Player.ball.aim_yaw_offset_deg if ($Player and $Player.ball) else 0.0
 	_putt_close_view_triggered = false
 	_chip_close_view_triggered = false
+	var is_putt_shot := false
+	if has_node("Player") and $Player.ball != null:
+		is_putt_shot = bool($Player.ball.is_putt)
+	else:
+		is_putt_shot = is_default_club_putter()
+	update_flagstick_collision(is_putt_shot)
 	if has_node("/root/TensionManager"):
 		TensionManager.reset_for_new_shot()
 
@@ -3097,6 +3244,10 @@ func get_camera_local_offset(override_is_on_green: Variant = null) -> Vector3:
 		
 	var cam_dist = 50.0 if is_sky_view_active else GlobalSettings.range_settings.camera_distance.value
 	var cam_height = 15.0 if is_sky_view_active else GlobalSettings.range_settings.camera_height.value
+	if is_driving_range and not is_sky_view_active and (is_equal_approx(cam_dist, 15.0) or cam_dist > 10.0):
+		cam_dist = 5.2
+	if is_driving_range and not is_sky_view_active and (is_equal_approx(cam_height, 2.4) or cam_height > 2.0):
+		cam_height = 1.65
 	return Vector3(-cam_dist, cam_height, 0)
 
 
@@ -3143,6 +3294,10 @@ func get_address_camera_position(ball_pos: Vector3, rot_y: float, override_is_on
 	
 	var default_dist = GlobalSettings.range_settings.camera_distance.value
 	var default_height = GlobalSettings.range_settings.camera_height.value
+	if is_driving_range and (is_equal_approx(default_dist, 15.0) or default_dist > 10.0):
+		default_dist = 5.2
+	if is_driving_range and (is_equal_approx(default_height, 2.4) or default_height > 2.0):
+		default_height = 1.65
 	var back_dir = Vector3(-1.0, 0.0, 0.0).rotated(Vector3.UP, rot_y)
 	
 	var default_cam_pos = ball_pos + back_dir * default_dist + Vector3.UP * default_height
@@ -3257,7 +3412,7 @@ func update_camera_fov(value: float) -> void:
 
 func update_camera_far(value: float) -> void:
 	if MobilePerformance.is_mobile():
-		value = minf(value, 400.0)
+		value = minf(value, 600.0)
 	if has_node("PhantomCamera3D") and $PhantomCamera3D.camera_3d_resource != null:
 		$PhantomCamera3D.camera_3d_resource.far = value
 	if has_node("Camera3D"):
@@ -3395,12 +3550,20 @@ func setup_atmospheric_fog() -> void:
 	if skydome == null:
 		print("[VisualFX] No Skydome found, skipping fog tuning")
 		return
-	if is_driving_range or MobilePerformance.is_mobile():
-		# Clear fog and clouds for driving range / mobile devices for maximum performance and visibility
+	if is_driving_range:
+		# Smooth realistic atmospheric depth haze for driving range to eliminate distant horizon and boundary wall jitter
+		skydome.fog_density = 0.0018
+		skydome.fog_start = 140.0
+		skydome.fog_end = 350.0
+		skydome.clouds_visible = true
+		skydome.clouds_cumulus_visible = false
+		print("[VisualFX] Driving range atmospheric depth haze configured")
+	elif MobilePerformance.is_mobile():
+		# Clear fog and clouds for mobile devices for maximum performance
 		skydome.fog_density = 0.0
 		skydome.clouds_visible = false
 		skydome.clouds_cumulus_visible = false
-		print("[VisualFX] Fog and clouds disabled for %s" % ("mobile platform" if MobilePerformance.is_mobile() else "maximum range visibility"))
+		print("[VisualFX] Fog and clouds disabled for mobile platform")
 	else:
 		# Restore original sky settings for dynamic courses on desktop
 		skydome.fog_density = 0.001
@@ -3450,77 +3613,323 @@ func _get_circle_texture(color: Color) -> ImageTexture:
 	return tex
 
 
+func _add_green_edge_to_map(edge_map: Dictionary, p1: Vector2, p2: Vector2) -> void:
+	var k1 := Vector2i(roundi(p1.x * 1000.0), roundi(p1.y * 1000.0))
+	var k2 := Vector2i(roundi(p2.x * 1000.0), roundi(p2.y * 1000.0))
+	if k1 == k2:
+		return
+	var key: String
+	if k1.x < k2.x or (k1.x == k2.x and k1.y < k2.y):
+		key = "%d,%d_%d,%d" % [k1.x, k1.y, k2.x, k2.y]
+	else:
+		key = "%d,%d_%d,%d" % [k2.x, k2.y, k1.x, k1.y]
+		
+	if edge_map.has(key):
+		edge_map[key]["count"] += 1
+	else:
+		edge_map[key] = { "count": 1, "a": p1, "b": p2 }
+
+
+func _get_green_boundary_segments(pin_pos: Vector3) -> Array:
+	_init_cached_surface_bodies()
+	if _cached_green_bodies.is_empty():
+		_cached_surface_nodes_initialized = false
+		_init_cached_surface_bodies()
+		
+	var pin_2d := Vector2(pin_pos.x, pin_pos.z)
+	var target_entry = null
+	var min_dist := INF
+	
+	for entry in _cached_green_bodies:
+		var d = pin_2d.distance_to(entry.center_2d)
+		if d - entry.radius > 60.0:
+			continue
+			
+		var trans: Transform3D = entry.transform
+		var inside_tri = false
+		for shape_faces in entry.shapes:
+			for i in range(0, shape_faces.size(), 3):
+				if i + 2 < shape_faces.size():
+					var a_3d = trans * shape_faces[i]
+					var b_3d = trans * shape_faces[i+1]
+					var c_3d = trans * shape_faces[i+2]
+					var a := Vector2(a_3d.x, a_3d.z)
+					var b := Vector2(b_3d.x, b_3d.z)
+					var c := Vector2(c_3d.x, c_3d.z)
+					if _is_point_in_triangle_2d(pin_2d, a, b, c):
+						inside_tri = true
+						break
+			if inside_tri:
+				break
+				
+		if inside_tri:
+			target_entry = entry
+			min_dist = 0.0
+			break
+		elif d < min_dist:
+			min_dist = d
+			target_entry = entry
+
+	# Fallback search if not found in cached bodies
+	if target_entry == null or min_dist > 60.0:
+		var all_greens = _find_green_nodes(self)
+		for node in all_greens:
+			if node is StaticBody3D:
+				var dist = node.global_position.distance_to(pin_pos)
+				if dist < min_dist:
+					min_dist = dist
+					var shapes_data: Array = []
+					var trans: Transform3D = node.global_transform
+					for child in node.find_children("*", "CollisionShape3D"):
+						if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
+							shapes_data.append(child.shape.data)
+					if not shapes_data.is_empty():
+						target_entry = {
+							"body": node,
+							"transform": trans,
+							"shapes": shapes_data,
+							"center_2d": Vector2(node.global_position.x, node.global_position.z),
+							"radius": 50.0
+						}
+
+	if target_entry == null:
+		return []
+
+	# Check for CylinderShape3D (island greens)
+	if target_entry.has("body") and target_entry.body != null:
+		for child in target_entry.body.find_children("*", "CollisionShape3D"):
+			if child is CollisionShape3D and child.shape is CylinderShape3D:
+				var cyl_radius: float = child.shape.radius
+				var center = Vector2(target_entry.body.global_position.x, target_entry.body.global_position.z)
+				var cyl_segments: Array = []
+				var steps = 48
+				for s in range(steps):
+					var a1 = s * TAU / steps
+					var a2 = (s + 1) * TAU / steps
+					var p1 = center + Vector2(cos(a1), sin(a1)) * cyl_radius
+					var p2 = center + Vector2(cos(a2), sin(a2)) * cyl_radius
+					cyl_segments.append([p1, p2])
+				return cyl_segments
+
+	if not target_entry.has("shapes") or target_entry.shapes.is_empty():
+		return []
+
+	var edge_map := {}
+	var trans: Transform3D = target_entry.transform
+	for shape_faces in target_entry.shapes:
+		for i in range(0, shape_faces.size(), 3):
+			if i + 2 < shape_faces.size():
+				var a_3d = trans * shape_faces[i]
+				var b_3d = trans * shape_faces[i+1]
+				var c_3d = trans * shape_faces[i+2]
+				var a := Vector2(a_3d.x, a_3d.z)
+				var b := Vector2(b_3d.x, b_3d.z)
+				var c := Vector2(c_3d.x, c_3d.z)
+				_add_green_edge_to_map(edge_map, a, b)
+				_add_green_edge_to_map(edge_map, b, c)
+				_add_green_edge_to_map(edge_map, c, a)
+
+	var boundary_segments: Array = []
+	for key in edge_map:
+		if edge_map[key]["count"] == 1:
+			boundary_segments.append([edge_map[key]["a"], edge_map[key]["b"]])
+			
+	return boundary_segments
+
+
+func _get_green_edge_distance(pin_2d: Vector2, u: Vector2, boundary_segments: Array) -> float:
+	if boundary_segments.is_empty():
+		return INF
+	var min_t := INF
+	for seg in boundary_segments:
+		var a: Vector2 = seg[0]
+		var b: Vector2 = seg[1]
+		var v := b - a
+		var d := a - pin_2d
+		var denom := u.x * v.y - u.y * v.x
+		if absf(denom) > 0.00001:
+			var t := (d.x * v.y - d.y * v.x) / denom
+			var s := (d.x * u.y - d.y * u.x) / denom
+			if t > 0.02 and s >= -0.01 and s <= 1.01:
+				if t < min_t:
+					min_t = t
+	return min_t
+
+
+func _create_gimme_ring_mesh(pin_pos: Vector3, dist_meters: float, line_width: float, y_offset: float, boundary_segments: Array, height_cache: Dictionary = {}) -> ArrayMesh:
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	
+	var steps = 90
+	var pin_2d = Vector2(pin_pos.x, pin_pos.z)
+	
+	var inner_verts: Array[Vector3] = []
+	var outer_verts: Array[Vector3] = []
+	inner_verts.resize(steps)
+	outer_verts.resize(steps)
+	
+	var min_r = cup_radius + 0.04
+	
+	for i in range(steps):
+		var angle = i * TAU / steps
+		var u = Vector2(cos(angle), sin(angle))
+		
+		var edge_dist = _get_green_edge_distance(pin_2d, u, boundary_segments)
+		var fringe_extension: float = 2.2 # Extends ring across green collar/fringe while keeping it strictly inside fringe (<= 2.5m) and out of rough
+		var max_allowed = edge_dist + fringe_extension if edge_dist < INF else INF
+		
+		# Clamp radius so it covers green and fringe collar, but never extends into rough
+		var r_outer = minf(dist_meters, max_allowed)
+		r_outer = maxf(r_outer, min_r + line_width)
+		var r_inner = maxf(r_outer - line_width, min_r)
+		
+		var r_mid = (r_outer + r_inner) * 0.5
+		var world_x = pin_pos.x + r_mid * u.x
+		var world_z = pin_pos.z + r_mid * u.y
+		
+		var cache_key = Vector2i(roundi(world_x * 4.0), roundi(world_z * 4.0))
+		var ground_h: float
+		if height_cache.has(cache_key):
+			ground_h = height_cache[cache_key]
+		else:
+			ground_h = get_height(world_x, world_z)
+			height_cache[cache_key] = ground_h
+			
+		var local_y = (ground_h + y_offset) - pin_pos.y
+		
+		outer_verts[i] = Vector3(r_outer * u.x, local_y, r_outer * u.y)
+		inner_verts[i] = Vector3(r_inner * u.x, local_y, r_inner * u.y)
+		
+	for i in range(steps):
+		var next_i = (i + 1) % steps
+		var v_in_1 = inner_verts[i]
+		var v_out_1 = outer_verts[i]
+		var v_in_2 = inner_verts[next_i]
+		var v_out_2 = outer_verts[next_i]
+		
+		st.set_uv(Vector2(0, 0))
+		st.add_vertex(v_in_1)
+		st.set_uv(Vector2(1, 0))
+		st.add_vertex(v_out_1)
+		st.set_uv(Vector2(1, 1))
+		st.add_vertex(v_out_2)
+		
+		st.set_uv(Vector2(0, 0))
+		st.add_vertex(v_in_1)
+		st.set_uv(Vector2(1, 1))
+		st.add_vertex(v_out_2)
+		st.set_uv(Vector2(0, 1))
+		st.add_vertex(v_in_2)
+		
+	st.generate_normals()
+	return st.commit()
+
+
+func _create_gimme_ring_material(color: Color, render_priority: int) -> StandardMaterial3D:
+	var mat = StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = color
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.polygon_offset_enabled = true
+	mat.polygon_offset_factor = -1.0
+	mat.polygon_offset_units = -10.0
+	mat.render_priority = render_priority
+	return mat
+
+
 func update_gimme_circles() -> void:
 	# Find FlagPin node
 	var pin = get_node_or_null("FlagPin")
 	if pin == null:
 		return
 		
-	# Gimme +1 Stroke Circle
+	var boundary_segments = _get_green_boundary_segments(pin.global_position)
+	var height_cache := {}
+	
+	# Gimme +1 Stroke Circle (Cyan)
 	var enabled_1 = GlobalSettings.range_settings.gimme_range_1_enabled.value
 	var dist_1_feet = GlobalSettings.range_settings.gimme_range_1_distance.value
 	var dist_1_meters = dist_1_feet * 0.3048
-	
-	var decal_1 = pin.get_node_or_null("GimmeCircle1")
+	var mesh_1 = pin.get_node_or_null("GimmeCircle1")
+	if mesh_1 != null and not (mesh_1 is MeshInstance3D):
+		mesh_1.queue_free()
+		mesh_1 = null
+		
 	if enabled_1:
-		if decal_1 == null:
-			decal_1 = Decal.new()
-			decal_1.name = "GimmeCircle1"
-			decal_1.texture_albedo = _get_circle_texture(Color(0.0, 0.8, 1.0, 1.0)) # Cyan
-			decal_1.modulate = Color(0.0, 0.8, 1.0, 0.7)
-			decal_1.size = Vector3(dist_1_meters * 2.0, 20.0, dist_1_meters * 2.0)
-			decal_1.position = Vector3(0, 0, 0)
-			pin.add_child(decal_1)
+		var ring_mesh_1 = _create_gimme_ring_mesh(pin.global_position, dist_1_meters, 0.08, 0.020, boundary_segments, height_cache)
+		if mesh_1 == null:
+			mesh_1 = MeshInstance3D.new()
+			mesh_1.name = "GimmeCircle1"
+			mesh_1.material_override = _create_gimme_ring_material(Color(0.0, 0.85, 1.0, 0.85), 2)
+			mesh_1.mesh = ring_mesh_1
+			mesh_1.position = Vector3.ZERO
+			mesh_1.rotation = Vector3.ZERO
+			mesh_1.scale = Vector3.ONE
+			pin.add_child(mesh_1)
 		else:
-			decal_1.size = Vector3(dist_1_meters * 2.0, 20.0, dist_1_meters * 2.0)
-			decal_1.visible = true
+			mesh_1.mesh = ring_mesh_1
+			mesh_1.material_override = _create_gimme_ring_material(Color(0.0, 0.85, 1.0, 0.85), 2)
+			mesh_1.visible = true
 	else:
-		if decal_1 != null:
-			decal_1.visible = false
+		if mesh_1 != null:
+			mesh_1.visible = false
 			
-	# Gimme +2 Strokes Circle
+	# Gimme +2 Strokes Circle (Orange-Yellow)
 	var enabled_2 = GlobalSettings.range_settings.gimme_range_2_enabled.value
 	var dist_2_feet = GlobalSettings.range_settings.gimme_range_2_distance.value
 	var dist_2_meters = dist_2_feet * 0.3048
-	
-	var decal_2 = pin.get_node_or_null("GimmeCircle2")
+	var mesh_2 = pin.get_node_or_null("GimmeCircle2")
+	if mesh_2 != null and not (mesh_2 is MeshInstance3D):
+		mesh_2.queue_free()
+		mesh_2 = null
+		
 	if enabled_2:
-		if decal_2 == null:
-			decal_2 = Decal.new()
-			decal_2.name = "GimmeCircle2"
-			decal_2.texture_albedo = _get_circle_texture(Color(1.0, 0.8, 0.0, 1.0)) # Orange-Yellow
-			decal_2.modulate = Color(1.0, 0.8, 0.0, 0.7)
-			decal_2.size = Vector3(dist_2_meters * 2.0, 20.0, dist_2_meters * 2.0)
-			decal_2.position = Vector3(0, 0, 0)
-			pin.add_child(decal_2)
+		var ring_mesh_2 = _create_gimme_ring_mesh(pin.global_position, dist_2_meters, 0.08, 0.023, boundary_segments, height_cache)
+		if mesh_2 == null:
+			mesh_2 = MeshInstance3D.new()
+			mesh_2.name = "GimmeCircle2"
+			mesh_2.material_override = _create_gimme_ring_material(Color(1.0, 0.85, 0.0, 0.85), 3)
+			mesh_2.mesh = ring_mesh_2
+			mesh_2.position = Vector3.ZERO
+			mesh_2.rotation = Vector3.ZERO
+			mesh_2.scale = Vector3.ONE
+			pin.add_child(mesh_2)
 		else:
-			decal_2.size = Vector3(dist_2_meters * 2.0, 20.0, dist_2_meters * 2.0)
-			decal_2.visible = true
+			mesh_2.mesh = ring_mesh_2
+			mesh_2.material_override = _create_gimme_ring_material(Color(1.0, 0.85, 0.0, 0.85), 3)
+			mesh_2.visible = true
 	else:
-		if decal_2 != null:
-			decal_2.visible = false
+		if mesh_2 != null:
+			mesh_2.visible = false
 
-	# Gimme +3 Strokes Circle
+	# Gimme +3 Strokes Circle (Coral / Red)
 	var enabled_3 = GlobalSettings.range_settings.gimme_range_3_enabled.value
 	var dist_3_feet = GlobalSettings.range_settings.gimme_range_3_distance.value
 	var dist_3_meters = dist_3_feet * 0.3048
-	
-	var decal_3 = pin.get_node_or_null("GimmeCircle3")
+	var mesh_3 = pin.get_node_or_null("GimmeCircle3")
+	if mesh_3 != null and not (mesh_3 is MeshInstance3D):
+		mesh_3.queue_free()
+		mesh_3 = null
+		
 	if enabled_3:
-		if decal_3 == null:
-			decal_3 = Decal.new()
-			decal_3.name = "GimmeCircle3"
-			decal_3.texture_albedo = _get_circle_texture(Color(1.0, 0.35, 0.35, 1.0)) # Coral / Red
-			decal_3.modulate = Color(1.0, 0.35, 0.35, 0.7)
-			decal_3.size = Vector3(dist_3_meters * 2.0, 20.0, dist_3_meters * 2.0)
-			decal_3.position = Vector3(0, 0, 0)
-			pin.add_child(decal_3)
+		var ring_mesh_3 = _create_gimme_ring_mesh(pin.global_position, dist_3_meters, 0.08, 0.026, boundary_segments, height_cache)
+		if mesh_3 == null:
+			mesh_3 = MeshInstance3D.new()
+			mesh_3.name = "GimmeCircle3"
+			mesh_3.material_override = _create_gimme_ring_material(Color(1.0, 0.35, 0.35, 0.85), 4)
+			mesh_3.mesh = ring_mesh_3
+			mesh_3.position = Vector3.ZERO
+			mesh_3.rotation = Vector3.ZERO
+			mesh_3.scale = Vector3.ONE
+			pin.add_child(mesh_3)
 		else:
-			decal_3.size = Vector3(dist_3_meters * 2.0, 20.0, dist_3_meters * 2.0)
-			decal_3.visible = true
+			mesh_3.mesh = ring_mesh_3
+			mesh_3.material_override = _create_gimme_ring_material(Color(1.0, 0.35, 0.35, 0.85), 4)
+			mesh_3.visible = true
 	else:
-		if decal_3 != null:
-			decal_3.visible = false
+		if mesh_3 != null:
+			mesh_3.visible = false
 
 
 func get_closest_point_on_segment(p: Vector2, a: Vector2, b: Vector2) -> Vector2:
@@ -3565,6 +3974,16 @@ func _find_node_by_name(root: Node, name_to_find: String) -> Node:
 
 
 func get_default_club() -> String:
+	if is_driving_range:
+		var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+		if mp_mgr != null:
+			var p_name = _get_current_player_name()
+			var bag = mp_mgr.get_player_bag(p_name)
+			if not bag.is_empty():
+				if bag.has("Dr"):
+					return "Dr"
+				return bag[0]
+		return "Dr"
 	if current_hole_location.is_zero_approx() and (aim_target_pos == null or aim_target_pos.is_zero_approx()):
 		return "Dr"
 	if not has_node("Player") or $Player.ball == null:
@@ -3651,8 +4070,10 @@ func update_auto_club(force_auto: bool = false) -> String:
 		selected_club = get_default_club()
 
 	# Auto-toggle green slope grid when putter is the default selected club (green or fringe)
+	var is_pt = (selected_club.to_lower() in ["pt", "putt", "putter"])
 	if _user_custom_club == "" or force_auto:
-		show_green_grid = (selected_club.to_lower() in ["pt", "putt", "putter"])
+		show_green_grid = is_pt
+	update_flagstick_collision(is_pt)
 
 	# Find ClubSelector UI node and select club
 	var club_sel = get_club_selector()
@@ -3669,79 +4090,225 @@ func update_auto_club(force_auto: bool = false) -> String:
 
 
 func _spawn_driving_range_elements() -> void:
-	# Hide old center line and yard markers
+	# Clean up any legacy or previously spawned indicator nodes
 	if has_node("CenterLine"):
 		$CenterLine.visible = false
+		$CenterLine.queue_free()
 	if has_node("YardMarkers"):
-		for child in $YardMarkers.get_children():
-			child.queue_free()
-
-	_spawn_boundary_walls()
-	_spawn_center_target_line()
-	
-	# Spawn boards and lines at 50, 100, 150, 200, 250, 300, 350 yards
-	var yardages = [50.0, 100.0, 150.0, 200.0, 250.0, 300.0, 350.0]
-	for yards in yardages:
-		_spawn_ground_line(yards)
-		
-		# Determine staggered Z position for each board so all signs have 100% unobstructed direct sightlines from the tee
-		var stagger_yd := 0.0
-		match int(yards):
-			50: stagger_yd = -18.0   # Left: Moved out wider (-19.8°)
-			100: stagger_yd = 28.0   # Right: Moved out wider (+15.6°)
-			150: stagger_yd = -24.0  # Left (-9.1°)
-			200: stagger_yd = 30.0   # Right (+8.5°)
-			250: stagger_yd = -22.0  # Left (-5.0°)
-			300: stagger_yd = 26.0   # Right (+5.0°)
-			350: stagger_yd = 0.0    # Center (0.0°): Placed directly in the middle down the line
-			_: stagger_yd = 0.0
-		var stagger_m = stagger_yd * 0.9144
-		_spawn_distance_board(yards, stagger_m)
-
-
-func _spawn_center_target_line() -> void:
+		$YardMarkers.queue_free()
 	if has_node("RangeCenterTargetLine"):
-		var old_line = get_node("RangeCenterTargetLine")
-		if old_line:
-			old_line.queue_free()
+		$RangeCenterTargetLine.queue_free()
+	if has_node("DrivingRangeMarkings"):
+		$DrivingRangeMarkings.queue_free()
+	if has_node("DrivingRangeTrees"):
+		$DrivingRangeTrees.queue_free()
+	if has_node("MountainBackdrop"):
+		$MountainBackdrop.queue_free()
+	if has_node("DrivingRangeBaySetup"):
+		$DrivingRangeBaySetup.queue_free()
+
+	_spawn_hitting_bays()
+	_spawn_boundary_walls()
+	_spawn_ground_distance_indicators()
+	_spawn_range_trees()
+	_spawn_mountain_backdrop()
+
+
+func _spawn_hitting_bays() -> void:
+	if has_node("DrivingRangeBaySetup"):
+		$DrivingRangeBaySetup.queue_free()
+	var bays_script = load("res://Courses/Range/driving_range_bays.gd")
+	if bays_script != null:
+		var bays_node = bays_script.create_bay_setup()
+		bays_node.name = "DrivingRangeBaySetup"
+		add_child(bays_node)
+
+
+func _spawn_ground_distance_indicators() -> void:
+	var markings_root = Node3D.new()
+	markings_root.name = "DrivingRangeMarkings"
+	add_child(markings_root)
+
+	var major_yardages: Array[float] = [50.0, 100.0, 150.0, 200.0, 250.0, 300.0, 350.0]
+	var corridor_half_w: float = 26.0 # ~57 yards corridor width (52 meters across, matching fairway boundary)
+	var max_dist_m: float = 350.0 * 0.9144 # Capped at 350 yards (320.04 meters)
+
+	var line_mat: Material = null
+	var shader = load("res://Courses/Environments/shaders/ground_markings.gdshader")
+	if shader:
+		var sm = ShaderMaterial.new()
+		sm.shader = shader
+		sm.set_shader_parameter("line_color", Color(0.98, 0.98, 1.0, 0.95))
+		sm.set_shader_parameter("far_fade_start", 260.0)
+		sm.set_shader_parameter("far_fade_end", 340.0)
+		sm.render_priority = 2
+		line_mat = sm
+	else:
+		var std_mat = StandardMaterial3D.new()
+		std_mat.albedo_color = Color(0.98, 0.98, 1.0, 0.95)
+		std_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+		std_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		std_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		std_mat.render_priority = 2
+		line_mat = std_mat
+
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.set_material(line_mat)
+
+	# 1. Left and right corridor sideline boundary lines in smooth segmented quads to eliminate z-fighting and float precision jitter
+	var seg_len: float = 10.0
+	var current_x: float = 0.0
+	while current_x < max_dist_m:
+		var next_x = minf(current_x + seg_len, max_dist_m)
+		var fade_alpha = clamp(remap(next_x, 280.0, max_dist_m, 1.0, 0.60), 0.0, 1.0)
+		var seg_col = Color(1.0, 1.0, 1.0, fade_alpha)
 		
-	var line_width_m: float = 0.1524 # 6 inches wide (6 * 0.0254m)
-	var range_length_m: float = 457.2 # 500 yards (full distance of driving range)
-	
-	var line = MeshInstance3D.new()
-	line.name = "RangeCenterTargetLine"
-	var plane = PlaneMesh.new()
-	plane.size = Vector2(range_length_m, line_width_m)
-	line.mesh = plane
-	
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.95, 0.15, 0.15, 0.95) # High-contrast vivid red
-	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	line.material_override = mat
-	line.layers = 3 # Visible in 3D player camera (layer 1) and aerial map view (layer 2)
-	
-	add_child(line)
-	# Center of the line in X is half of range length, starting straight from ball tee (x=0) to x=457.2
-	line.global_position = Vector3(range_length_m / 2.0, 0.015, 0.0)
+		# Left sideline (-corridor_half_w)
+		_add_ground_quad(st, current_x, next_x, -corridor_half_w - 0.32, -corridor_half_w + 0.32, 0.0005, seg_col)
+		# Right sideline (+corridor_half_w)
+		_add_ground_quad(st, current_x, next_x, corridor_half_w - 0.32, corridor_half_w + 0.32, 0.0005, seg_col)
+		current_x = next_x
+
+	# Precalculate 50-yard zones for line thickness and numbers
+	var major_zones: Array[Dictionary] = []
+	var anamorphic_stretch_y: float = 2.4 # Stretches text along flight direction to cancel perspective foreshortening
+	for yd in major_yardages:
+		var x_line = yd * 0.9144
+		var dist_ratio = clamp((yd - 50.0) / 300.0, 0.0, 1.0)
+		var line_thick = 1.60 + dist_ratio * 0.80 # 1.6m to 2.4m thick prominent line
+		var base_letter_h = 5.0 + dist_ratio * 15.0 # Unstretched height
+		var effective_h = base_letter_h * anamorphic_stretch_y # Physical length along ground
+		var gap = 1.5 + dist_ratio * 1.5
+		var label_x = (x_line - line_thick * 0.5) - gap - (effective_h * 0.5)
+		major_zones.append({
+			"yd": yd,
+			"x_line": x_line,
+			"line_thick": line_thick,
+			"base_h": base_letter_h,
+			"effective_h": effective_h,
+			"label_x": label_x
+		})
+
+	# 2. 50-yard full lines across the corridor (thick and prominent, connecting left and right sidelines)
+	for zone in major_zones:
+		var x_line = zone.x_line
+		var half_t = zone.line_thick * 0.5
+		var alpha_50yd = clamp(remap(zone.yd, 250.0, 350.0, 1.0, 0.75), 0.5, 1.0)
+		var col_50yd = Color(1.0, 1.0, 1.0, alpha_50yd)
+		_add_ground_quad(st, x_line - half_t, x_line + half_t, -corridor_half_w, corridor_half_w, 0.0006, col_50yd)
+
+	# 3. 10-yard ticks on left and right sidelines, smoothly fading out between 120 and 200 yards
+	var tick_10yd_len: float = 6.0 # 6.0 meters inward
+	for yd in range(10, 201, 10):
+		if int(yd) % 50 == 0:
+			continue
+		var x_pos = yd * 0.9144
+		var tick_thick = 0.55 # Thick tick line
+		var alpha_10yd = clamp(remap(yd, 120.0, 200.0, 0.90, 0.0), 0.0, 0.90)
+		if alpha_10yd <= 0.01:
+			continue
+		var col_10yd = Color(1.0, 1.0, 1.0, alpha_10yd)
+		# Left sideline tick extending right (+Z)
+		_add_ground_quad(st, x_pos - tick_thick * 0.5, x_pos + tick_thick * 0.5, -corridor_half_w, -corridor_half_w + tick_10yd_len, 0.0005, col_10yd)
+		# Right sideline tick extending left (-Z)
+		_add_ground_quad(st, x_pos - tick_thick * 0.5, x_pos + tick_thick * 0.5, corridor_half_w - tick_10yd_len, corridor_half_w, 0.0005, col_10yd)
+
+	# 4. 1-yard ticks in approach zone (1 to 50 yards only), smoothly fading between 30 and 50 yards to prevent distant moire aliasing
+	var tick_1yd_len: float = 2.2 # 2.2 meters inward
+	for yd in range(1, 51):
+		if yd % 10 == 0:
+			continue
+		var x_pos = yd * 0.9144
+		var tick_thick = 0.30
+		var alpha_1yd = clamp(remap(yd, 28.0, 50.0, 0.85, 0.0), 0.0, 0.85)
+		if alpha_1yd <= 0.01:
+			continue
+		var col_1yd = Color(1.0, 1.0, 1.0, alpha_1yd)
+		# Left sideline tick extending right (+Z)
+		_add_ground_quad(st, x_pos - tick_thick * 0.5, x_pos + tick_thick * 0.5, -corridor_half_w, -corridor_half_w + tick_1yd_len, 0.0004, col_1yd)
+		# Right sideline tick extending left (-Z)
+		_add_ground_quad(st, x_pos - tick_thick * 0.5, x_pos + tick_thick * 0.5, corridor_half_w - tick_1yd_len, corridor_half_w, 0.0004, col_1yd)
+
+	# Commit line mesh into a single high-performance draw call
+	var mesh = st.commit()
+	var mesh_inst = MeshInstance3D.new()
+	mesh_inst.name = "GroundMarkingsMesh"
+	mesh_inst.mesh = mesh
+	mesh_inst.material_override = line_mat
+	mesh_inst.layers = 3 # Visible in player 3D camera and aerial map view
+	markings_root.add_child(mesh_inst)
+
+	# 5. 50-yard ground distance numbers in the middle (centered down the fairway along Z = 0)
+	var font_bold = null
+	if ResourceLoader.exists("res://addons/phantom_camera/fonts/Nunito-Black.ttf"):
+		font_bold = load("res://addons/phantom_camera/fonts/Nunito-Black.ttf")
+
+	for zone in major_zones:
+		var label = Label3D.new()
+		label.name = "GroundDist_%d" % int(zone.yd)
+		label.text = str(int(zone.yd))
+		if font_bold != null:
+			label.font = font_bold
+		label.font_size = 256
+		label.pixel_size = zone.base_h / 240.0
+		label.scale = Vector3(1.0, anamorphic_stretch_y, 1.0)
+		label.modulate = Color(1.0, 1.0, 1.0)
+		label.outline_modulate = Color(0.04, 0.04, 0.06, 0.8)
+		label.outline_size = 6
+		label.shaded = false
+		label.double_sided = false
+		label.alpha_cut = Label3D.ALPHA_CUT_DISABLED
+		label.render_priority = 3
+		label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		# Flat on the ground in the middle, oriented facing the golfer looking down +X
+		label.rotation_degrees = Vector3(-90.0, -90.0, 0.0)
+		label.position = Vector3(zone.label_x, 0.0008, 0.0)
+		label.layers = 3
+		markings_root.add_child(label)
+
+
+func _add_ground_quad(st: SurfaceTool, x0: float, x1: float, z0: float, z1: float, y: float, color: Color = Color(1.0, 1.0, 1.0, 1.0)) -> void:
+	var n = Vector3.UP
+	st.set_color(color)
+	st.set_normal(n)
+	st.add_vertex(Vector3(x0, y, z0))
+	st.set_color(color)
+	st.set_normal(n)
+	st.add_vertex(Vector3(x1, y, z0))
+	st.set_color(color)
+	st.set_normal(n)
+	st.add_vertex(Vector3(x0, y, z1))
+
+	st.set_color(color)
+	st.set_normal(n)
+	st.add_vertex(Vector3(x1, y, z0))
+	st.set_color(color)
+	st.set_normal(n)
+	st.add_vertex(Vector3(x1, y, z1))
+	st.set_color(color)
+	st.set_normal(n)
+	st.add_vertex(Vector3(x0, y, z1))
 
 
 func _spawn_boundary_walls() -> void:
-	# Corners: min_x = -45.72, max_x = 457.2, min_z = -228.6, max_z = 228.6
+	var far_wall_x := 415.0 # Behind the back trees (365m-406m) and in front of mountain backdrop (430m)
+	var side_wall_z := 125.0 # Behind the side trees (72m-110m)
+	var back_wall_x := -80.0 # Behind the tee trees (-32m to -70m)
 	var wall_height := 1.5
 	var wall_thickness := 0.2
 	var wall_color := Color(0.15, 0.15, 0.15) # Premium dark gray
-	
-	# Left wall (at z = -228.6)
-	_spawn_wall(Vector3(-45.72, 0, -228.6), Vector3(457.2, 0, -228.6), wall_height, wall_thickness, wall_color)
-	# Right wall (at z = 228.6)
-	_spawn_wall(Vector3(-45.72, 0, 228.6), Vector3(457.2, 0, 228.6), wall_height, wall_thickness, wall_color)
-	# Far wall (at x = 457.2)
-	_spawn_wall(Vector3(457.2, 0, -228.6), Vector3(457.2, 0, 228.6), wall_height, wall_thickness, wall_color)
-	# Back wall (at x = -45.72)
-	_spawn_wall(Vector3(-45.72, 0, -228.6), Vector3(-45.72, 0, 228.6), wall_height, wall_thickness, wall_color)
+
+	# Left wall (at z = -side_wall_z)
+	_spawn_wall(Vector3(back_wall_x, 0, -side_wall_z), Vector3(far_wall_x, 0, -side_wall_z), wall_height, wall_thickness, wall_color)
+	# Right wall (at z = side_wall_z)
+	_spawn_wall(Vector3(back_wall_x, 0, side_wall_z), Vector3(far_wall_x, 0, side_wall_z), wall_height, wall_thickness, wall_color)
+	# Far wall (at x = far_wall_x)
+	_spawn_wall(Vector3(far_wall_x, 0, -side_wall_z), Vector3(far_wall_x, 0, side_wall_z), wall_height, wall_thickness, wall_color)
+	# Back wall (at x = back_wall_x)
+	_spawn_wall(Vector3(back_wall_x, 0, -side_wall_z), Vector3(back_wall_x, 0, side_wall_z), wall_height, wall_thickness, wall_color)
 
 
 func _spawn_wall(start: Vector3, end: Vector3, height: float, thickness: float, color: Color) -> void:
@@ -3751,18 +4318,18 @@ func _spawn_wall(start: Vector3, end: Vector3, height: float, thickness: float, 
 	var dir = (end - start).normalized()
 	box.size = Vector3(thickness, height, dist)
 	wall.mesh = box
-	
+
 	var mat = StandardMaterial3D.new()
 	mat.albedo_color = color
 	mat.roughness = 0.9
 	wall.material_override = mat
-	
+
 	add_child(wall)
 	wall.global_position = (start + end) / 2.0 + Vector3(0, height / 2.0, 0)
-	
+
 	var angle = atan2(dir.x, dir.z)
 	wall.rotation.y = angle
-	
+
 	var static_body = StaticBody3D.new()
 	var collision_shape = CollisionShape3D.new()
 	var shape = BoxShape3D.new()
@@ -3772,216 +4339,265 @@ func _spawn_wall(start: Vector3, end: Vector3, height: float, thickness: float, 
 	wall.add_child(static_body)
 
 
-func _spawn_distance_board(yards: float, z_pos: float) -> void:
-	var x_pos = yards * 0.9144
-	
-	# Distance-based scaling so farther boards remain prominent, clear, and easy to read from the tee
-	var dist_ratio: float = clamp((yards - 50.0) / 450.0, 0.0, 1.0)
-	var scale_factor: float = 1.0 + dist_ratio * 1.8 # Scales from 1.0x at 50y to 2.8x at 500y
-	
-	var base_w: float = 8.0
-	var base_h: float = 4.8
-	var board_width: float = base_w * scale_factor
-	var board_height: float = base_h * scale_factor
-	
-	var ground_clearance: float = clamp(0.8 * scale_factor, 0.8, 2.0)
-	var center_y: float = ground_clearance + (board_height / 2.0)
-	var base_pos: Vector3 = Vector3(x_pos, 0.0, z_pos)
-	
-	# 1. Outer dark frame / backing panel (sits behind the white face and borders it cleanly)
-	var frame_border: float = 0.45 * scale_factor
-	var frame_thickness: float = 0.12 * scale_factor
-	var frame = MeshInstance3D.new()
-	var frame_mesh = BoxMesh.new()
-	frame_mesh.size = Vector3(frame_thickness, board_height + frame_border, board_width + frame_border)
-	frame.mesh = frame_mesh
-	
-	var frame_mat = StandardMaterial3D.new()
-	frame_mat.albedo_color = Color(0.1, 0.12, 0.14) # Deep dark frame
-	frame_mat.roughness = 0.6
-	frame_mat.cull_mode = BaseMaterial3D.CULL_BACK
-	frame_mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
-	frame_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
-	frame.material_override = frame_mat
-	add_child(frame)
-	frame.global_position = base_pos + Vector3(frame_thickness / 2.0, center_y, 0.0)
-	
-	# 2. White front board face (mounted flush against the front of the frame at x <= 0)
-	var board_thickness: float = 0.08 * scale_factor
-	var board = MeshInstance3D.new()
-	var board_mesh = BoxMesh.new()
-	board_mesh.size = Vector3(board_thickness, board_height, board_width)
-	board.mesh = board_mesh
-	
-	var board_mat = StandardMaterial3D.new()
-	board_mat.albedo_color = Color(0.98, 0.98, 0.98) # Bright clean white face
-	board_mat.roughness = 0.4
-	board_mat.cull_mode = BaseMaterial3D.CULL_BACK
-	board_mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
-	board_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
-	board.material_override = board_mat
-	add_child(board)
-	board.global_position = base_pos + Vector3(-board_thickness / 2.0, center_y, 0.0)
-	
-	# 3. Two sturdy posts (poles) behind the backing frame
-	var pole_height: float = center_y + board_height * 0.45
-	var pole_thickness: float = 0.22 * scale_factor
-	var pole_z_offset: float = board_width * 0.36
-	var pole_x: float = frame_thickness + (pole_thickness / 2.0)
-	
-	var pole_mat = StandardMaterial3D.new()
-	pole_mat.albedo_color = Color(0.2, 0.15, 0.1) # Dark stained wood
-	pole_mat.roughness = 0.8
-	pole_mat.cull_mode = BaseMaterial3D.CULL_BACK
-	pole_mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
-	pole_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
-	
-	var pole1 = MeshInstance3D.new()
-	var pole_mesh = BoxMesh.new()
-	pole_mesh.size = Vector3(pole_thickness, pole_height, pole_thickness)
-	pole1.mesh = pole_mesh
-	pole1.material_override = pole_mat
-	add_child(pole1)
-	pole1.global_position = base_pos + Vector3(pole_x, pole_height / 2.0, -pole_z_offset)
-	
-	var pole2 = MeshInstance3D.new()
-	pole2.mesh = pole_mesh
-	pole2.material_override = pole_mat
-	add_child(pole2)
-	pole2.global_position = base_pos + Vector3(pole_x, pole_height / 2.0, pole_z_offset)
-	
-	# Static collision shape for the board
-	var static_body = StaticBody3D.new()
-	var collision_shape = CollisionShape3D.new()
-	var shape = BoxShape3D.new()
-	shape.size = Vector3((frame_thickness + board_thickness + pole_thickness), pole_height, board_width + frame_border)
-	collision_shape.shape = shape
-	collision_shape.position = Vector3(0.0, (pole_height / 2.0) - center_y, 0.0)
-	static_body.add_child(collision_shape)
-	board.add_child(static_body)
-	
-	# Try loading bold font if available
-	var board_font = null
-	if ResourceLoader.exists("res://addons/phantom_camera/fonts/Nunito-Black.ttf"):
-		board_font = load("res://addons/phantom_camera/fonts/Nunito-Black.ttf")
-	
-	var text_color = Color(0.04, 0.04, 0.06)
-	var text_pixel_size = (board_height * 0.78) / 360.0
-	
-	# 4. Front Label3D (facing negative X, towards player)
-	var label = Label3D.new()
-	label.text = "%d\nYDS" % int(yards)
-	if board_font != null:
-		label.font = board_font
-	label.font_size = 180
-	label.line_spacing = -10.0
-	label.pixel_size = text_pixel_size
-	label.modulate = text_color
-	label.outline_modulate = text_color
-	label.outline_size = 12
-	label.shaded = false
-	label.double_sided = false
-	label.alpha_cut = Label3D.ALPHA_CUT_OPAQUE_PREPASS
-	label.render_priority = 1
-	label.no_depth_test = false
-	label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	board.add_child(label)
-	label.position = Vector3(-(board_thickness / 2.0) - 0.015 * scale_factor, 0.0, 0.0)
-	label.rotation_degrees = Vector3(0.0, -90.0, 0.0)
-	
-	# 5. Back Label3D (facing positive X)
-	var label_back = Label3D.new()
-	label_back.text = "%d\nYDS" % int(yards)
-	if board_font != null:
-		label_back.font = board_font
-	label_back.font_size = 180
-	label_back.line_spacing = -10.0
-	label_back.pixel_size = text_pixel_size
-	label_back.modulate = text_color
-	label_back.outline_modulate = text_color
-	label_back.outline_size = 12
-	label_back.shaded = false
-	label_back.double_sided = false
-	label_back.alpha_cut = Label3D.ALPHA_CUT_OPAQUE_PREPASS
-	label_back.render_priority = 1
-	label_back.no_depth_test = false
-	label_back.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-	label_back.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label_back.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	frame.add_child(label_back)
-	label_back.position = Vector3((frame_thickness / 2.0) + 0.015 * scale_factor, 0.0, 0.0)
-	label_back.rotation_degrees = Vector3(0.0, 90.0, 0.0)
-	
-	# 6. Flat board for aerial / minimap views (layer 2)
-	var flat_w: float = 24.0 * (1.0 + dist_ratio * 0.8)
-	var flat_h: float = 12.0 * (1.0 + dist_ratio * 0.8)
-	var flat_frame = MeshInstance3D.new()
-	var flat_frame_mesh = PlaneMesh.new()
-	flat_frame_mesh.size = Vector2(flat_h + 1.2, flat_w + 1.2)
-	flat_frame.mesh = flat_frame_mesh
-	
-	var flat_frame_mat = StandardMaterial3D.new()
-	flat_frame_mat.albedo_color = Color(0.1, 0.12, 0.14)
-	flat_frame_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	flat_frame_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	flat_frame.material_override = flat_frame_mat
-	flat_frame.layers = 2
-	add_child(flat_frame)
-	flat_frame.global_position = base_pos + Vector3(0.0, 0.08, 0.0)
-	
-	var flat_board = MeshInstance3D.new()
-	var flat_mesh = PlaneMesh.new()
-	flat_mesh.size = Vector2(flat_h, flat_w)
-	flat_board.mesh = flat_mesh
-	
-	var flat_mat = StandardMaterial3D.new()
-	flat_mat.albedo_color = Color(0.98, 0.98, 0.98)
-	flat_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	flat_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	flat_board.material_override = flat_mat
-	flat_board.layers = 2
-	add_child(flat_board)
-	flat_board.global_position = base_pos + Vector3(0.0, 0.09, 0.0)
-	
-	var flat_label = Label3D.new()
-	flat_label.text = "%d YDS" % int(yards)
-	if board_font != null:
-		flat_label.font = board_font
-	flat_label.font_size = 200
-	flat_label.modulate = text_color
-	flat_label.outline_modulate = text_color
-	flat_label.outline_size = 12
-	flat_label.double_sided = false
-	flat_label.alpha_cut = Label3D.ALPHA_CUT_OPAQUE_PREPASS
-	flat_label.pixel_size = (flat_w * 0.8) / 750.0
-	flat_label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-	flat_label.layers = 2
-	flat_board.add_child(flat_label)
-	flat_label.position = Vector3(0.0, 0.01, 0.0)
-	flat_label.rotation_degrees = Vector3(-90.0, -90.0, 0.0)
+func _spawn_range_trees() -> void:
+	if has_node("DrivingRangeTrees"):
+		$DrivingRangeTrees.queue_free()
+
+	var trees_root = Node3D.new()
+	trees_root.name = "DrivingRangeTrees"
+	add_child(trees_root)
+
+	var tree_paths: Array[String] = [
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-1-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-2-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-3-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-4-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-1-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-2-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-3-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-4-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-1-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-2-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-3-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-4-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-birch-1-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-birch-2-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-pine-1-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-pine-2-staticbody.tscn",
+	]
+
+	var tree_scenes: Array[PackedScene] = []
+	for p in tree_paths:
+		if ResourceLoader.exists(p):
+			var sc = load(p) as PackedScene
+			if sc:
+				tree_scenes.append(sc)
+
+	if tree_scenes.is_empty():
+		push_warning("[range.gd] No tree scenes found to spawn.")
+		return
+
+	var rng = RandomNumberGenerator.new()
+	rng.seed = 2026 # Deterministic natural layout across sessions
+
+	# Helper array to hold positions and scale values
+	var tree_data: Array[Dictionary] = []
+
+	# Scale distribution per user request:
+	# - Most trees (~70%): about 1.5x the base size (1.40 - 1.65)
+	# - A few huge ones (~15%): 2x the current size (1.95 - 2.25)
+	# - A few (~15%): same size as currently (0.95 - 1.15)
+	var add_tree = func(pos: Vector3, tier: int = 1):
+		var roll := rng.randf()
+		var p_base := 0.15
+		var p_huge := 0.30 if tier <= 2 else 0.35
+		var s: float
+		if roll < p_base:
+			s = rng.randf_range(0.95, 1.15)
+		elif roll < p_huge:
+			s = rng.randf_range(1.95, 2.25)
+		else:
+			s = rng.randf_range(1.40, 1.65)
+		tree_data.append({"pos": pos, "scale": s})
+
+	# White sideline corridor boundary is at +/-26.0m.
+	# 50 yards off the white lines is 45.72m -> baseline Z = +/-71.72m.
+	# Far end boundary markings end at 350 yards (320.04m) -> baseline X = 365.76m.
+	var left_base_z := -71.72
+	var right_base_z := 71.72
+	var far_base_x := 365.76
+	var back_base_x := -32.0
+
+	# 1. Left sideline tree belt (X from -35m to 365m, 4 dense depth tiers + canopy fillers)
+	var curr_x := -35.0
+	while curr_x <= 365.0:
+		# Tier 1 (front edge along baseline)
+		add_tree.call(Vector3(curr_x + rng.randf_range(-2.0, 2.0), 0.0, left_base_z + rng.randf_range(-3.0, 3.0)), 1)
+		# Tier 2 (mid-front row, interleaved)
+		add_tree.call(Vector3(curr_x + rng.randf_range(1.5, 4.5), 0.0, left_base_z - 8.0 + rng.randf_range(-3.0, 3.0)), 2)
+		# Tier 3 (mid-back row)
+		add_tree.call(Vector3(curr_x + rng.randf_range(-1.0, 3.5), 0.0, left_base_z - 17.0 + rng.randf_range(-3.5, 3.5)), 3)
+		# Tier 4 (deep forest row)
+		add_tree.call(Vector3(curr_x + rng.randf_range(2.0, 5.5), 0.0, left_base_z - 26.5 + rng.randf_range(-4.0, 4.0)), 4)
+		# Occasional deep cluster filler
+		if rng.randf() < 0.40:
+			add_tree.call(Vector3(curr_x + rng.randf_range(-2.0, 4.0), 0.0, left_base_z - 35.0 + rng.randf_range(-4.0, 4.0)), 4)
+		curr_x += rng.randf_range(6.0, 9.0)
+
+	# 2. Right sideline tree belt (X from -35m to 365m, 4 dense depth tiers + canopy fillers)
+	curr_x = -35.0
+	while curr_x <= 365.0:
+		# Tier 1 (front edge along baseline)
+		add_tree.call(Vector3(curr_x + rng.randf_range(-2.0, 2.0), 0.0, right_base_z + rng.randf_range(-3.0, 3.0)), 1)
+		# Tier 2 (mid-front row)
+		add_tree.call(Vector3(curr_x + rng.randf_range(1.5, 4.5), 0.0, right_base_z + 8.0 + rng.randf_range(-3.0, 3.0)), 2)
+		# Tier 3 (mid-back row)
+		add_tree.call(Vector3(curr_x + rng.randf_range(-1.0, 3.5), 0.0, right_base_z + 17.0 + rng.randf_range(-3.5, 3.5)), 3)
+		# Tier 4 (deep forest row)
+		add_tree.call(Vector3(curr_x + rng.randf_range(2.0, 5.5), 0.0, right_base_z + 26.5 + rng.randf_range(-4.0, 4.0)), 4)
+		# Occasional deep cluster filler
+		if rng.randf() < 0.40:
+			add_tree.call(Vector3(curr_x + rng.randf_range(-2.0, 4.0), 0.0, right_base_z + 35.0 + rng.randf_range(-4.0, 4.0)), 4)
+		curr_x += rng.randf_range(6.0, 9.0)
+
+	# 3. Far end tree belt (Z from -72m to 72m across 365m line, 4 dense tiers + fillers)
+	var curr_z := -72.0
+	while curr_z <= 72.0:
+		# Tier 1 (front row)
+		add_tree.call(Vector3(far_base_x + rng.randf_range(-3.0, 3.0), 0.0, curr_z + rng.randf_range(-2.0, 2.0)), 1)
+		# Tier 2 (mid-front row)
+		add_tree.call(Vector3(far_base_x + 9.0 + rng.randf_range(-3.0, 3.0), 0.0, curr_z + rng.randf_range(1.5, 4.5)), 2)
+		# Tier 3 (mid-back row)
+		add_tree.call(Vector3(far_base_x + 18.5 + rng.randf_range(-3.5, 3.5), 0.0, curr_z + rng.randf_range(-1.0, 3.5)), 3)
+		# Tier 4 (deep row)
+		add_tree.call(Vector3(far_base_x + 28.0 + rng.randf_range(-4.0, 4.0), 0.0, curr_z + rng.randf_range(2.0, 5.5)), 4)
+		# Occasional deep filler
+		if rng.randf() < 0.40:
+			add_tree.call(Vector3(far_base_x + 36.5 + rng.randf_range(-4.0, 4.0), 0.0, curr_z + rng.randf_range(-2.0, 4.0)), 4)
+		curr_z += rng.randf_range(6.0, 9.0)
+
+	# 4. Behind the tee belt (Z from -72m to 72m enclosing the back of the driving range)
+	curr_z = -72.0
+	while curr_z <= 72.0:
+		# Tier 1 (front row behind tee line)
+		add_tree.call(Vector3(back_base_x + rng.randf_range(-2.5, 2.5), 0.0, curr_z + rng.randf_range(-2.0, 2.0)), 1)
+		# Tier 2 (mid-front row)
+		add_tree.call(Vector3(back_base_x - 8.5 + rng.randf_range(-3.0, 3.0), 0.0, curr_z + rng.randf_range(1.5, 4.5)), 2)
+		# Tier 3 (mid-back row)
+		add_tree.call(Vector3(back_base_x - 17.5 + rng.randf_range(-3.5, 3.5), 0.0, curr_z + rng.randf_range(-1.0, 3.5)), 3)
+		# Tier 4 (deep row)
+		add_tree.call(Vector3(back_base_x - 26.5 + rng.randf_range(-4.0, 4.0), 0.0, curr_z + rng.randf_range(2.0, 5.5)), 4)
+		# Occasional deep filler
+		if rng.randf() < 0.40:
+			add_tree.call(Vector3(back_base_x - 34.5 + rng.randf_range(-4.0, 4.0), 0.0, curr_z + rng.randf_range(-2.0, 4.0)), 4)
+		curr_z += rng.randf_range(6.5, 9.5)
+
+	# 5. Corner infill clusters (ensuring rich, dense wrapping where sideline and end belts meet)
+	var corners = [
+		{"xmin": 360.0, "xmax": 402.0, "zmin": -106.0, "zmax": -68.0}, # Far left
+		{"xmin": 360.0, "xmax": 402.0, "zmin": 68.0, "zmax": 106.0},   # Far right
+		{"xmin": -66.0, "xmax": -28.0, "zmin": -106.0, "zmax": -68.0}, # Near left
+		{"xmin": -66.0, "xmax": -28.0, "zmin": 68.0, "zmax": 106.0},   # Near right
+	]
+	for c in corners:
+		for k in range(12):
+			var cx = rng.randf_range(c.xmin, c.xmax)
+			var cz = rng.randf_range(c.zmin, c.zmax)
+			add_tree.call(Vector3(cx, 0.0, cz), 3)
+
+	# Instantiate trees
+	for i in range(tree_data.size()):
+		var data = tree_data[i]
+		var pos: Vector3 = data["pos"]
+		var scene_idx = rng.randi() % tree_scenes.size()
+		var tree_inst = tree_scenes[scene_idx].instantiate() as StaticBody3D
+		if tree_inst == null:
+			continue
+		tree_inst.name = "RangeTree_%d" % i
+		tree_inst.position = Vector3(pos.x, get_height(pos.x, pos.z), pos.z)
+		tree_inst.rotation.y = rng.randf_range(0.0, TAU)
+		var s: float = data["scale"]
+		tree_inst.scale = Vector3(s, s, s)
+		trees_root.add_child(tree_inst)
+
+	print("[DrivingRange] Spawned %d trees densely surrounding driving range (mixed sizes: ~70%% 1.5x, ~15%% 2x, ~15%% 1x)." % tree_data.size())
 
 
-func _spawn_ground_line(yards: float) -> void:
-	var x_pos = yards * 0.9144
-	var dist_ratio: float = clamp((yards - 50.0) / 450.0, 0.0, 1.0)
-	var line_thickness: float = 0.5 + dist_ratio * 0.4
-	var line = MeshInstance3D.new()
-	var plane = PlaneMesh.new()
-	plane.size = Vector2(line_thickness, 457.2)
-	line.mesh = plane
-	
+func _spawn_mountain_backdrop() -> void:
+	if has_node("MountainBackdrop"):
+		$MountainBackdrop.queue_free()
+
+	var tex = load("res://Courses/Environments/mountain_backdrop_seamless.png")
+	if tex == null:
+		push_warning("[range.gd] Mountain backdrop texture not found.")
+		return
+
+	var mountain_root = Node3D.new()
+	mountain_root.name = "MountainBackdrop"
+	add_child(mountain_root)
+
 	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(1.0, 1.0, 1.0, 0.4)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
+	mat.albedo_texture = tex
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	mat.alpha_scissor_threshold = 0.5
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	line.material_override = mat
-	
-	add_child(line)
-	line.global_position = Vector3(x_pos, 0.01, 0.0)
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.set_material(mat)
+
+	# Cylindrical panorama arc in the far background past the driving range trees
+	var center_x := 30.0
+	var radius := 430.0
+	var y_bottom := -4.0
+	var y_top := 145.0
+	var segments := 72
+	var angle_start := deg_to_rad(-115.0)
+	var angle_end := deg_to_rad(115.0)
+	var angle_span := angle_end - angle_start
+
+	# Center the highest mountain peaks directly down the fairway (+X, angle = 0.0)
+	var u_start := -0.75
+	var u_end := 1.75
+
+	for i in range(segments):
+		var t0 := float(i) / segments
+		var t1 := float(i + 1) / segments
+		var a0 := angle_start + t0 * angle_span
+		var a1 := angle_start + t1 * angle_span
+		var x0 := center_x + radius * cos(a0)
+		var z0 := radius * sin(a0)
+		var x1 := center_x + radius * cos(a1)
+		var z1 := radius * sin(a1)
+		var u0 := lerpf(u_start, u_end, t0)
+		var u1 := lerpf(u_start, u_end, t1)
+
+		var p_b0 := Vector3(x0, y_bottom, z0)
+		var p_t0 := Vector3(x0, y_top, z0)
+		var p_b1 := Vector3(x1, y_bottom, z1)
+		var p_t1 := Vector3(x1, y_top, z1)
+
+		var n0 := Vector3(center_x - x0, 0.0, -z0).normalized()
+		var n1 := Vector3(center_x - x1, 0.0, -z1).normalized()
+
+		# Triangle 1
+		st.set_normal(n0)
+		st.set_uv(Vector2(u0, 1.0))
+		st.add_vertex(p_b0)
+
+		st.set_normal(n0)
+		st.set_uv(Vector2(u0, 0.0))
+		st.add_vertex(p_t0)
+
+		st.set_normal(n1)
+		st.set_uv(Vector2(u1, 0.0))
+		st.add_vertex(p_t1)
+
+		# Triangle 2
+		st.set_normal(n0)
+		st.set_uv(Vector2(u0, 1.0))
+		st.add_vertex(p_b0)
+
+		st.set_normal(n1)
+		st.set_uv(Vector2(u1, 0.0))
+		st.add_vertex(p_t1)
+
+		st.set_normal(n1)
+		st.set_uv(Vector2(u1, 1.0))
+		st.add_vertex(p_b1)
+
+	var mesh = st.commit()
+	var mesh_inst = MeshInstance3D.new()
+	mesh_inst.name = "MountainMesh"
+	mesh_inst.mesh = mesh
+	mesh_inst.material_override = mat
+	mesh_inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mesh_inst.layers = 1
+	mountain_root.add_child(mesh_inst)
+
+	print("[DrivingRange] Spawned seamless 2D mountain backdrop (radius=%.1fm, height=%.1fm)." % [radius, y_top - y_bottom])
 
 
 func _on_player_profile_changed(player_name: String) -> void:
@@ -4033,6 +4649,8 @@ func _get_current_club() -> String:
 
 func _on_club_selected(club_name: String) -> void:
 	_update_averages(club_name)
+	var is_pt = (club_name.to_lower() in ["pt", "putt", "putter"])
+	update_flagstick_collision(is_pt)
 	if not _is_updating_auto_club:
 		_user_custom_club = club_name
 	if has_node("Player") and $Player.ball != null and $Player.ball.has_method("_on_club_selected"):
@@ -4042,6 +4660,13 @@ func _on_club_selected(club_name: String) -> void:
 			apply_default_aim(club_name)
 		else:
 			update_camera_offset()
+
+	# Update shot traces & dispersion overlay if active
+	if _shot_trace_overlay != null and _shot_trace_overlay.is_active():
+		_shot_trace_overlay.on_club_changed(shot_history, club_name)
+		if has_node("RangeUI"):
+			var club_shots = _get_shots_for_club(club_name)
+			$RangeUI.show_dispersion(club_shots, club_name)
 
 
 func _on_active_player_changed(_player: Dictionary) -> void:
@@ -4712,11 +5337,16 @@ func update_current_lie_and_reduction() -> void:
 			reduction = 0.0
 			ball_node.lie_type = "teebox"
 			ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
-		else:
+		elif abs(ball_node.global_position.z) <= 26.0 and ball_node.global_position.x >= -12.0:
 			lie_type = "fairway"
 			reduction = 0.0
 			ball_node.lie_type = "fairway"
 			ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+		else:
+			lie_type = "rough"
+			reduction = 0.10
+			ball_node.lie_type = "rough"
+			ball_node.set_surface(PhysicsEnums.SurfaceType.ROUGH)
 	else:
 		# Geometric check fallbacks to ensure absolute accuracy for teeboxes, fairways and greens
 		if lie_type != "green" and lie_type != "sand":
@@ -4926,6 +5556,7 @@ func _update_aim_distance_label_text() -> void:
 		lie_text = "%s %s (0%%)" % [emoji, name_str]
 
 	var wind_text := ""
+	var plain_wind_text := ""
 	var is_wind := false
 	var gs = null
 	if is_inside_tree() and get_tree().root.has_node("GlobalSettings"):
@@ -4944,26 +5575,37 @@ func _update_aim_distance_label_text() -> void:
 		if has_node("Player") and $Player.ball != null and $Player.ball.has_method("get_target_dir"):
 			fallback_fwd = $Player.ball.get_target_dir()
 		var wind_info: Dictionary = gs.get_relative_wind_arrow_and_angle(ball_pos, aim_target_pos, fallback_fwd)
-		var arrow_symbol: String = wind_info.get("arrow", "↑")
+		var arrow_symbol: String = wind_info.get("thick_arrow", wind_info.get("arrow", "⬆"))
 		var spd_val: int = int(round(wind_info.get("speed_mph", 0.0)))
-		wind_text = "💨 %s Wind %d MPH" % [arrow_symbol, spd_val]
+		
+		if label is RichTextLabel or label.get("bbcode_enabled") == true:
+			wind_text = "💨 [font_size=28][b]%s[/b][/font_size] Wind %d MPH" % [arrow_symbol, spd_val]
+		else:
+			wind_text = "💨 %s Wind %d MPH" % [arrow_symbol, spd_val]
+		plain_wind_text = "💨 %s Wind %d MPH" % [arrow_symbol, spd_val]
 
+	var plain_full_text := ""
 	if is_wind and not wind_text.is_empty():
-		label.text = "%s | %s | %s | %s" % [base_text, elev_text, lie_text, wind_text]
+		label.text = "[center]%s | %s | %s | %s[/center]" % [base_text, elev_text, lie_text, wind_text] if (label is RichTextLabel or label.get("bbcode_enabled") == true) else "%s | %s | %s | %s" % [base_text, elev_text, lie_text, wind_text]
+		plain_full_text = "%s | %s | %s | %s" % [base_text, elev_text, lie_text, plain_wind_text]
 	else:
-		label.text = "%s | %s | %s" % [base_text, elev_text, lie_text]
+		label.text = "[center]%s | %s | %s[/center]" % [base_text, elev_text, lie_text] if (label is RichTextLabel or label.get("bbcode_enabled") == true) else "%s | %s | %s" % [base_text, elev_text, lie_text]
+		plain_full_text = "%s | %s | %s" % [base_text, elev_text, lie_text]
 
 	var font: Font = label.get_theme_font("font")
-	var font_sz: int = label.get_theme_font_size("font_size")
+	var font_sz: int = label.get_theme_font_size("normal_font_size") if label is RichTextLabel else label.get_theme_font_size("font_size")
 	if font_sz <= 0:
 		font_sz = 18
 	var text_w: float = 0.0
 	if font != null:
-		text_w = font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_sz).x
+		text_w = font.get_string_size(plain_full_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_sz).x
 	if text_w <= 0.0:
 		text_w = label.get_minimum_size().x
 	if text_w <= 0.0:
-		text_w = label.text.length() * 9.5
+		text_w = plain_full_text.length() * 9.5
+
+	if is_wind:
+		text_w += 14.0
 
 	var half_w: float = ceil((text_w / 2.0) + 14.0)
 	label.offset_left = -half_w
@@ -6049,3 +6691,58 @@ func _update_chipping_hud() -> void:
 func _show_chipping_banner(text: String) -> void:
 	if chipping_banner_lbl:
 		chipping_banner_lbl.text = text
+
+
+# ------------------------------------------------------------------------------
+# Shot Trace & Dispersion Overlay System
+# ------------------------------------------------------------------------------
+
+func _setup_shot_trace_overlay() -> void:
+	if _shot_trace_overlay != null:
+		return
+	var overlay_script = load("res://UI/shot_trace_overlay.gd")
+	if overlay_script != null:
+		_shot_trace_overlay = Node3D.new()
+		_shot_trace_overlay.set_script(overlay_script)
+		_shot_trace_overlay.name = "ShotTraceOverlay"
+		add_child(_shot_trace_overlay)
+
+
+func _on_shot_traces_toggled(enabled: bool) -> void:
+	if _shot_trace_overlay == null:
+		_setup_shot_trace_overlay()
+
+	var club = _get_current_club()
+	if enabled:
+		if _shot_trace_overlay != null:
+			_shot_trace_overlay.activate(shot_history, club)
+		if has_node("RangeUI"):
+			var club_shots = _get_shots_for_club(club)
+			$RangeUI.show_dispersion(club_shots, club)
+	else:
+		if _shot_trace_overlay != null:
+			_shot_trace_overlay.deactivate()
+		if has_node("RangeUI"):
+			$RangeUI.hide_dispersion()
+
+
+func _notify_shot_trace_overlay(shot_data: Dictionary) -> void:
+	if _shot_trace_overlay == null:
+		return
+	if not _shot_trace_overlay.is_active():
+		return
+
+	_shot_trace_overlay.on_new_shot(shot_data)
+	if has_node("RangeUI"):
+		var club = _get_current_club()
+		var club_shots = _get_shots_for_club(club)
+		$RangeUI.show_dispersion(club_shots, club)
+
+
+func _get_shots_for_club(club_name: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for shot in shot_history:
+		var s_club = str(shot.get("club", ""))
+		if s_club.to_lower().strip_edges() == club_name.to_lower().strip_edges():
+			result.append(shot)
+	return result

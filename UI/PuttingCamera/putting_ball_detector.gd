@@ -15,6 +15,13 @@ const MIN_PEAK_LUMINANCE: float = 0.44                # Minimum peak brightness 
 const MIN_BLOB_PIXELS: int = 6                        # Min pixels for ball blob
 const MAX_BLOB_PIXELS: int = 400                      # Max pixels (reject whole surfaces/walls/shoes/putters)
 
+## Optional configured color profile
+var color_profile: PuttingColorProfile = null
+
+## Ball Identity Locking
+var _reference_color_hsv: Vector3 = Vector3(-1, -1, -1)
+var _reference_color_valid: bool = false
+
 ## Detection state
 var ball_found: bool = false
 var ball_center_norm: Vector2 = Vector2.ZERO
@@ -25,6 +32,26 @@ var _prev_center: Vector2 = Vector2.ZERO
 var _smoothed_center: Vector2 = Vector2.ZERO
 var _resting_anchor: Vector2 = Vector2.ZERO
 var is_tracking: bool = false                         # Set to true when ball has launched
+
+
+## Convert RGB Color to HSV Vector3(hue_0_360, sat_0_1, val_0_1)
+static func _rgb_to_hsv(c: Color) -> Vector3:
+	var max_c: float = maxf(c.r, maxf(c.g, c.b))
+	var min_c: float = minf(c.r, minf(c.g, c.b))
+	var delta: float = max_c - min_c
+	var h: float = 0.0
+	var s: float = 0.0 if max_c < 0.001 else delta / max_c
+	var v: float = max_c
+	if delta > 0.001:
+		if max_c == c.r:
+			h = 60.0 * fmod((c.g - c.b) / delta, 6.0)
+		elif max_c == c.g:
+			h = 60.0 * ((c.b - c.r) / delta + 2.0)
+		else:
+			h = 60.0 * ((c.r - c.g) / delta + 4.0)
+		if h < 0.0:
+			h += 360.0
+	return Vector3(h, s, v)
 
 
 ## Analyze a single Image frame and detect the golf ball.
@@ -103,35 +130,58 @@ func detect_ball(image: Image, circle_center_norm: Vector2, circle_radius_norm: 
 	var avg_mat_lum: float = sum_lum / float(roi_pixel_count)
 	var contrast: float = max_lum - avg_mat_lum
 
+	var use_color_filter: bool = color_profile != null and color_profile.ball_configured
+
 	# If there is no bright object contrasting against the surface, no ball is present
-	var min_contrast = 0.10 if is_tracking else MIN_BALL_CONTRAST
-	var min_peak = 0.38 if is_tracking else MIN_PEAK_LUMINANCE
-	if contrast < min_contrast or max_lum < min_peak:
-		return _not_found()
+	# (Only enforce strict white-ball luminance gates when not using a custom ball color profile)
+	if not use_color_filter:
+		var min_contrast = 0.10 if is_tracking else MIN_BALL_CONTRAST
+		var min_peak = 0.38 if is_tracking else MIN_PEAK_LUMINANCE
+		if contrast < min_contrast or max_lum < min_peak:
+			return _not_found()
 
 	# Adaptive brightness threshold: ball sits above the mat brightness
 	var ball_lum_threshold: float = avg_mat_lum + contrast * (0.45 if is_tracking else 0.52)
 	ball_lum_threshold = clampf(ball_lum_threshold, 0.42, 0.95)
 
-	# 3. Label White Candidate Pixels in the ROI
-	var white_grid: PackedByteArray = PackedByteArray()
-	white_grid.resize(w * h)
+	# 3. Label Candidate Pixels in the ROI
+	var candidate_grid: PackedByteArray = PackedByteArray()
+	candidate_grid.resize(w * h)
 
 	for y in range(roi_min_y, roi_max_y + 1):
 		var row_offset: int = y * w
 		for x in range(roi_min_x, roi_max_x + 1):
 			var c: Color = scaled_img.get_pixel(x, y)
 			var lum: float = (c.r + c.g + c.b) / 3.0
-			if lum < ball_lum_threshold:
-				continue
 
-			var max_c: float = maxf(c.r, maxf(c.g, c.b))
-			var min_c: float = minf(c.r, minf(c.g, c.b))
-			var sat: float = (max_c - min_c) / max_c if max_c > 0.01 else 0.0
-
-			# White ball has low saturation (rejects green turf, yellow, blue, red)
-			if sat <= MAX_BALL_SATURATION:
-				white_grid[row_offset + x] = 1
+			# Path 1: Active tracking with a locked reference color signature
+			if is_tracking and _reference_color_valid:
+				var pixel_hsv = _rgb_to_hsv(c)
+				var hue_diff = minf(absf(pixel_hsv.x - _reference_color_hsv.x), 360.0 - absf(pixel_hsv.x - _reference_color_hsv.x))
+				if _reference_color_hsv.y < 0.18:
+					# Ball is white/off-white: low saturation and adequate brightness
+					if pixel_hsv.y <= 0.32 and pixel_hsv.z >= maxf(0.35, _reference_color_hsv.z - 0.30):
+						candidate_grid[row_offset + x] = 1
+				else:
+					# Colored ball: check hue match and moderate sat/val tolerances
+					if hue_diff <= 35.0 and absf(pixel_hsv.y - _reference_color_hsv.y) <= 0.30 and absf(pixel_hsv.z - _reference_color_hsv.z) <= 0.35:
+						candidate_grid[row_offset + x] = 1
+			# Path 2: User-configured color profile
+			elif use_color_filter:
+				var pixel_hsv = _rgb_to_hsv(c)
+				if color_profile.matches_ball(pixel_hsv):
+					var bg_val = color_profile.bg_hsv.z if color_profile.bg_configured else avg_mat_lum
+					if absf(lum - bg_val) > 0.05 or lum >= ball_lum_threshold * 0.65:
+						candidate_grid[row_offset + x] = 1
+			# Path 3: Standard white-ball detector
+			else:
+				if lum < ball_lum_threshold:
+					continue
+				var max_c: float = maxf(c.r, maxf(c.g, c.b))
+				var min_c: float = minf(c.r, minf(c.g, c.b))
+				var sat: float = (max_c - min_c) / max_c if max_c > 0.01 else 0.0
+				if sat <= MAX_BALL_SATURATION:
+					candidate_grid[row_offset + x] = 1
 
 	# 4. Connected Component (Blob) Clustering
 	var visited: PackedByteArray = PackedByteArray()
@@ -145,7 +195,7 @@ func detect_ball(image: Image, circle_center_norm: Vector2, circle_radius_norm: 
 		var row_offset: int = y * w
 		for x in range(roi_min_x, roi_max_x + 1):
 			var idx: int = row_offset + x
-			if white_grid[idx] == 0 or visited[idx] == 1:
+			if candidate_grid[idx] == 0 or visited[idx] == 1:
 				continue
 
 			# Flood fill blob
@@ -182,19 +232,19 @@ func detect_ball(image: Image, circle_center_norm: Vector2, circle_radius_norm: 
 				# Neighbors
 				if cx > roi_min_x:
 					var left = cur_idx - 1
-					if white_grid[left] == 1 and visited[left] == 0:
+					if candidate_grid[left] == 1 and visited[left] == 0:
 						visited[left] = 1; queue[q_tail] = left; q_tail += 1
 				if cx < roi_max_x:
 					var right = cur_idx + 1
-					if white_grid[right] == 1 and visited[right] == 0:
+					if candidate_grid[right] == 1 and visited[right] == 0:
 						visited[right] = 1; queue[q_tail] = right; q_tail += 1
 				if cy > roi_min_y:
 					var up = cur_idx - w
-					if white_grid[up] == 1 and visited[up] == 0:
+					if candidate_grid[up] == 1 and visited[up] == 0:
 						visited[up] = 1; queue[q_tail] = up; q_tail += 1
 				if cy < roi_max_y:
 					var down = cur_idx + w
-					if white_grid[down] == 1 and visited[down] == 0:
+					if candidate_grid[down] == 1 and visited[down] == 0:
 						visited[down] = 1; queue[q_tail] = down; q_tail += 1
 
 			# Size filter
@@ -222,11 +272,14 @@ func detect_ball(image: Image, circle_center_norm: Vector2, circle_radius_norm: 
 			var blob_cx: float = b_sum_x / float(b_count)
 			var blob_cy: float = b_sum_y / float(b_count)
 
-			# 3D Spherical Profile Check (only enforced when ball is stationary / entering READY)
-			if not is_tracking:
-				var core_x: int = clampi(int(round(blob_cx)), 0, w - 1)
-				var core_y: int = clampi(int(round(blob_cy)), 0, h - 1)
-				var core_c: Color = scaled_img.get_pixel(core_x, core_y)
+			# Sample blob center color and HSV
+			var core_x: int = clampi(int(round(blob_cx)), 0, w - 1)
+			var core_y: int = clampi(int(round(blob_cy)), 0, h - 1)
+			var core_c: Color = scaled_img.get_pixel(core_x, core_y)
+			var core_hsv: Vector3 = _rgb_to_hsv(core_c)
+
+			# 3D Spherical Profile Check (only enforced for white balls when stationary / entering READY)
+			if not is_tracking and not use_color_filter:
 				var core_lum: float = (core_c.r + core_c.g + core_c.b) / 3.0
 
 				var border_lum_sum: float = 0.0
@@ -252,6 +305,7 @@ func detect_ball(image: Image, circle_center_norm: Vector2, circle_radius_norm: 
 				"radius": sqrt(float(b_count) / PI) / float(w),
 				"roundness": roundness,
 				"fill": fill,
+				"hsv": core_hsv,
 			})
 
 	# 5. Candidate Evaluation
@@ -275,6 +329,22 @@ func detect_ball(image: Image, circle_center_norm: Vector2, circle_radius_norm: 
 		var round_score: float = float(b["roundness"])
 
 		var score: float = proximity_score * 4.0 + round_score * 2.0 + size_score
+
+		# Color match score against reference or configured color profile
+		if _reference_color_valid:
+			var blob_hsv: Vector3 = b.get("hsv", Vector3.ZERO)
+			var hue_diff = minf(absf(blob_hsv.x - _reference_color_hsv.x), 360.0 - absf(blob_hsv.x - _reference_color_hsv.x)) / 180.0
+			var sat_diff = absf(blob_hsv.y - _reference_color_hsv.y)
+			var val_diff = absf(blob_hsv.z - _reference_color_hsv.z)
+			var color_match = 1.0 - clampf((hue_diff * 0.5) + sat_diff + val_diff, 0.0, 1.0)
+			score += color_match * 3.5
+		elif use_color_filter:
+			var blob_hsv: Vector3 = b.get("hsv", Vector3.ZERO)
+			var hue_diff = minf(absf(blob_hsv.x - color_profile.ball_hsv.x), 360.0 - absf(blob_hsv.x - color_profile.ball_hsv.x)) / 180.0
+			var sat_diff = absf(blob_hsv.y - color_profile.ball_hsv.y)
+			var val_diff = absf(blob_hsv.z - color_profile.ball_hsv.z)
+			var color_match = 1.0 - clampf((hue_diff * 0.5) + sat_diff + val_diff, 0.0, 1.0)
+			score += color_match * 3.0
 
 		# Extra weight if inside the target placement circle (when looking for ball)
 		if not is_tracking and is_ball_in_circle(c_norm, circle_center_norm, circle_radius_norm):
@@ -361,6 +431,37 @@ func calculate_lateral_offset(ball_center: Vector2, midline_x: float) -> float:
 	return ball_center.x - midline_x
 
 
+## Sample reference color from the resting ball to lock onto its identity
+func sample_reference_color(image: Image, center_norm: Vector2) -> void:
+	if image == null:
+		return
+	var w: int = image.get_width()
+	var h: int = image.get_height()
+	var cx: int = clampi(int(center_norm.x * float(w)), 0, w - 1)
+	var cy: int = clampi(int(center_norm.y * float(h)), 0, h - 1)
+
+	var h_list: Array[float] = []
+	var s_list: Array[float] = []
+	var v_list: Array[float] = []
+
+	var sample_rad: int = 2
+	for y in range(maxi(0, cy - sample_rad), mini(h, cy + sample_rad + 1)):
+		for x in range(maxi(0, cx - sample_rad), mini(w, cx + sample_rad + 1)):
+			var c: Color = image.get_pixel(x, y)
+			var hsv: Vector3 = _rgb_to_hsv(c)
+			h_list.append(hsv.x)
+			s_list.append(hsv.y)
+			v_list.append(hsv.z)
+
+	if h_list.size() > 0:
+		h_list.sort()
+		s_list.sort()
+		v_list.sort()
+		var mid: int = h_list.size() / 2
+		_reference_color_hsv = Vector3(h_list[mid], s_list[mid], v_list[mid])
+		_reference_color_valid = true
+
+
 func reset() -> void:
 	ball_found = false
 	ball_center_norm = Vector2.ZERO
@@ -370,3 +471,5 @@ func reset() -> void:
 	_smoothed_center = Vector2.ZERO
 	_resting_anchor = Vector2.ZERO
 	is_tracking = false
+	_reference_color_valid = false
+	_reference_color_hsv = Vector3(-1, -1, -1)

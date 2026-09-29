@@ -327,7 +327,10 @@ internal sealed class LinuxBluetoothGattClient : IBluetoothGattClient
         {
             if (BlueZMapper.TryCreateDevice(path, interfaces, _scanOptions.DeviceNamePrefix, out var device))
             {
-                DeviceDiscovered?.Invoke(device);
+                if (device.Rssi != 0)
+                {
+                    DeviceDiscovered?.Invoke(device);
+                }
             }
         }
     }

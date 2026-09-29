@@ -268,7 +268,7 @@ func unlock_achievement(player_name: String, ach_id: String) -> bool:
 
 # --- Evaluation Helpers ---
 
-func check_hole_achievements(player_name: String, hole_par: int, strokes: int, lies_in_hole: Array = [], putt_dist_yards: float = 0.0, holed_in_cup: bool = false) -> void:
+func check_hole_achievements(player_name: String, hole_par: int, strokes: int, lies_in_hole: Array = [], putt_dist_yards: float = 0.0, holed_in_cup: bool = false, club_name: String = "") -> void:
 	if player_name.is_empty() or strokes <= 0:
 		return
 		
@@ -292,8 +292,10 @@ func check_hole_achievements(player_name: String, hole_par: int, strokes: int, l
 		if holed_in_cup:
 			unlock_achievement(player_name, "first_albatross")
 		
-	# Long putt (if holed out with putt >= 10 yards / 30 feet directly into cup, never from gimme range)
-	if holed_in_cup and putt_dist_yards >= 10.0 and lies_in_hole.size() > 0 and lies_in_hole[-1] == "green":
+	# Long putt / Downtown Drain (only achievable when using putter from 30+ feet / 10+ yards out directly into cup, never from gimme range)
+	var c_lower = club_name.strip_edges().to_lower()
+	var is_putter = c_lower in ["pt", "putt", "putter"] or c_lower.begins_with("putt")
+	if holed_in_cup and is_putter and putt_dist_yards >= 10.0:
 		unlock_achievement(player_name, "long_putt")
 		
 	# Sand save: Par or better after hitting out of a bunker

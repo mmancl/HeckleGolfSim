@@ -19,6 +19,7 @@ signal connected_and_continued
 @onready var disconnect_button: Button = %DisconnectButton
 @onready var status_label: Label = %StatusLabel
 @onready var battery_label: Label = %BatteryLabel
+@onready var hint_label: Label = %HintLabel
 @onready var device_card: PanelContainer = %DeviceCard
 @onready var status_card: PanelContainer = %StatusCard
 
@@ -162,6 +163,12 @@ func _ready() -> void:
 			_launch_monitor.battery_changed.connect(_on_battery_changed)
 		if not _launch_monitor.ready_changed.is_connected(_on_ready_changed):
 			_launch_monitor.ready_changed.connect(_on_ready_changed)
+
+	if hint_label != null:
+		if OS.get_name() == "Android":
+			hint_label.text = "💡 Android Tip: The Garmin R10 will NOT show up in phone Bluetooth settings. Do NOT pair it in Android settings. Disconnect PC / Garmin Golf app, hold R10 power button until LED flashes BLUE, and click Scan here in the app."
+		else:
+			hint_label.text = "💡 Power on your launch monitor before scanning. For Garmin Approach R10, hold the power button until the LED flashes blue. On Windows, pair the device in Windows Bluetooth settings first."
 
 	_refresh_devices()
 	_update_status_display()
@@ -619,7 +626,9 @@ func _refresh_devices(preferred_device_id: String = "") -> void:
 			return live_a
 		var rssi_a = int(dev_a.get("rssi", 0))
 		var rssi_b = int(dev_b.get("rssi", 0))
-		return rssi_a > rssi_b
+		var eff_a = rssi_a if (rssi_a < 0 and live_a) else -999
+		var eff_b = rssi_b if (rssi_b < 0 and live_b) else -999
+		return eff_a > eff_b
 	)
 
 	# Prioritize preferred device or actively discovered live devices
@@ -705,8 +714,10 @@ func _update_status_display() -> void:
 	var current_status: String = str(_launch_monitor.status)
 	scan_button.text = "🔍 Scan"
 
-	if current_status == "Connected" or current_status == "Ready":
-		status_label.text = "Status: Connected (%s)" % current_status
+	var is_dev_connected: bool = (current_status == "Connected" or current_status == "Ready" or bool(_launch_monitor.is_ready))
+	if is_dev_connected:
+		var display_state: String = current_status if (current_status != "Connecting" and not current_status.begins_with("Found")) else "Connected"
+		status_label.text = "Status: Connected (%s)" % display_state
 		status_label.add_theme_color_override("font_color", Color(0.35, 0.85, 0.45))
 		continue_button.text = "Continue to Main Menu ➔"
 	elif current_status.contains("Scanning") or current_status.contains("Searching"):
@@ -738,8 +749,11 @@ func _update_status_display() -> void:
 
 
 func _on_device_discovered(device_id: String, name: String, _rssi: int) -> void:
-	_refresh_devices(device_id)
-	if _launch_monitor != null and (_launch_monitor.status == "Scanning" or _launch_monitor.status.contains("Searching")):
+	var dev = _launch_monitor.devices.get(device_id, {}) if _launch_monitor != null else {}
+	var is_live: bool = bool(dev.get("is_discovered", false)) or (_rssi != 0)
+	var pref_id := device_id if is_live else ""
+	_refresh_devices(pref_id)
+	if is_live and _launch_monitor != null and (_launch_monitor.status == "Scanning" or _launch_monitor.status.contains("Searching")):
 		var display_name := name if name != "" else "Launch Monitor"
 		status_label.text = "Status: Found %s! Ready to connect." % display_name
 		status_label.add_theme_color_override("font_color", Color(0.35, 0.85, 0.45))

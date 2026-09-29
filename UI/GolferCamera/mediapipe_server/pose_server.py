@@ -203,6 +203,7 @@ class CameraManager:
                 self.active_index = -1
 
             if index < 0:
+                print("[PoseServer] Released system camera (camera deactivated)")
                 return True
 
             cap = None
@@ -317,12 +318,13 @@ class PoseHandler(http.server.BaseHTTPRequestHandler):
                 self._send(200, {"detected": False, "landmarks": {}, "error": str(exc)})
         elif parsed.path == "/camera/select":
             content_length = int(self.headers.get("Content-Length", 0))
-            idx = 0
+            idx = -1
             if content_length > 0:
                 body = self.rfile.read(content_length)
                 try:
                     data = json.loads(body)
-                    idx = data.get("index", 0)
+                    if "index" in data:
+                        idx = int(data["index"])
                 except Exception:
                     pass
             ok = camera_mgr.select_camera(idx)

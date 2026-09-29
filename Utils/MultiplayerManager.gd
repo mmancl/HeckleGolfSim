@@ -531,7 +531,9 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 		active_player["lies_in_hole"] = []
 	active_player["lies_in_hole"].append(active_player.get("lie_type", ""))
 	
-	if prev_lie == "green":
+	var c_lower = current_club.strip_edges().to_lower()
+	var is_putter_club = (c_lower in ["pt", "putt", "putter"] or c_lower.begins_with("putt"))
+	if is_putter_club:
 		active_player["last_putt_dist_yards"] = ground_dist_yds
 	else:
 		active_player["last_putt_dist_yards"] = 0.0
@@ -565,7 +567,7 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 				get_node("/root/AnnouncerEngine").call("AnnounceHoleScore", active_player["name"], active_player["strokes"], par)
 			if has_node("/root/AchievementManager"):
 				var putt_dist = active_player.get("last_putt_dist_yards", 0.0)
-				get_node("/root/AchievementManager").check_hole_achievements(active_player.get("name", ""), par, active_player["strokes"], active_player.get("lies_in_hole", []), putt_dist, true)
+				get_node("/root/AchievementManager").check_hole_achievements(active_player.get("name", ""), par, active_player["strokes"], active_player.get("lies_in_hole", []), putt_dist, true, current_club)
 		else:
 			# Play clap if drive lands in fairway, or ball lands on green in par-1 or less strokes
 			var landed_in_fairway = (par >= 4 and active_player["strokes"] == 1 and active_player.get("lie_type", "") == "fairway")
@@ -575,10 +577,11 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 				if gs_clap != null and gs_clap.has_method("play_golf_clap"):
 					gs_clap.play_golf_clap()
 
-			# Check gimme ranges if enabled
+			# Check gimme ranges if enabled (only if ball came to rest on the green or fringe)
 			var active_gimmes = []
 			var gs_gimme = _get_global_settings()
-			if gs_gimme != null and gs_gimme.range_settings != null:
+			var current_lie = str(active_player.get("lie_type", "")).to_lower()
+			if (current_lie == "green" or current_lie == "fringe") and gs_gimme != null and gs_gimme.range_settings != null:
 				if gs_gimme.range_settings.gimme_range_1_enabled.value:
 					active_gimmes.append({
 						"strokes": 1,
@@ -1109,8 +1112,9 @@ func _apply_gimme(active_player, extra_strokes: int, hole_id: String) -> void:
 		get_node("/root/AnnouncerEngine").call("AnnounceHoleScore", active_player["name"], active_player["strokes"], par)
 		
 	if has_node("/root/AchievementManager") and not practice_mode_active:
+		var last_club = active_player.get("last_shot_club", "")
 		# Birdie, eagle, hole-in-one, and putting achievements require sinking the ball into the cup; gimmes cannot earn them
-		get_node("/root/AchievementManager").check_hole_achievements(active_player.get("name", ""), par, active_player["strokes"], active_player.get("lies_in_hole", []), 0.0, false)
+		get_node("/root/AchievementManager").check_hole_achievements(active_player.get("name", ""), par, active_player["strokes"], active_player.get("lies_in_hole", []), 0.0, false, last_club)
 
 func concede_hole() -> void:
 	if practice_mode_active or players.is_empty():

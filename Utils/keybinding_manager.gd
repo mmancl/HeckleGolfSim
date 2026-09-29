@@ -112,6 +112,7 @@ func _init_action_definitions() -> void:
 	_register_def("golfer_cam_toggle", "Golfer Camera Toggle", CATEGORY_HUD, KEY_C, -1)
 	_register_def("putting_cam_toggle", "Putting Camera Toggle", CATEGORY_HUD, KEY_P, -1)
 	_register_def("distance_menu_toggle", "Hit Distance Menu", CATEGORY_HUD, KEY_D, -1)
+	_register_def("shot_traces_toggle", "Shot Traces & Dispersion Toggle", CATEGORY_HUD, KEY_T, -1)
 	_register_def("toggle_fullscreen", "Toggle Full Screen", CATEGORY_HUD, KEY_F11, -1)
 
 	# --- Category 4: Individual Stat Toggles ---
@@ -569,10 +570,20 @@ func _setup_ui_navigation_actions() -> void:
 	_add_key_to_action("ui_accept", KEY_SPACE)
 	_add_joy_button_to_action("ui_accept", JOY_BUTTON_A)
 
-	# UI Cancel (B on Xbox, Circle on PS, Escape, Backspace)
+	# UI Cancel (B on Xbox, Circle on PS, Escape)
 	_add_key_to_action("ui_cancel", KEY_ESCAPE)
-	_add_key_to_action("ui_cancel", KEY_BACKSPACE)
+	_remove_key_from_action("ui_cancel", KEY_BACKSPACE)
 	_add_joy_button_to_action("ui_cancel", JOY_BUTTON_B)
+
+
+func _remove_key_from_action(action: StringName, keycode: Key) -> void:
+	if keycode == KEY_NONE or keycode == 0:
+		return
+	if not InputMap.has_action(action):
+		return
+	for ev in InputMap.action_get_events(action):
+		if ev is InputEventKey and (ev.physical_keycode == keycode or ev.keycode == keycode):
+			InputMap.action_erase_event(action, ev)
 
 
 func _add_key_to_action(action: StringName, keycode: Key) -> void:
@@ -619,11 +630,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	
 	# If any directional navigation occurs and no UI element is currently focused (or focus is outside an active modal),
-	# auto-grab focus on the first visible interactive element so keyboard/controller navigation starts immediately.
+	# auto-grab focus on the first visible interactive element so keyboard/controller navigation starts immediately in menu screens or modals.
 	if event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down") or \
-	   event.is_action_pressed("ui_left") or event.is_action_pressed("ui_right") or \
-	   event.is_action_pressed("aim_left") or event.is_action_pressed("aim_right") or \
-	   event.is_action_pressed("aim_forward") or event.is_action_pressed("aim_backward"):
+	   event.is_action_pressed("ui_left") or event.is_action_pressed("ui_right"):
 		var vp = get_viewport()
 		if vp != null:
 			var cur_focus = vp.gui_get_focus_owner()
@@ -633,9 +642,24 @@ func _unhandled_input(event: InputEvent) -> void:
 					if focus_first_control(active_modal):
 						vp.set_input_as_handled()
 						return
-			elif cur_focus == null or not is_instance_valid(cur_focus) or not cur_focus.is_visible_in_tree():
-				if _focus_first_control_in_tree(vp):
-					vp.set_input_as_handled()
+			elif _is_menu_screen(get_tree().current_scene):
+				if cur_focus == null or not is_instance_valid(cur_focus) or not cur_focus.is_visible_in_tree():
+					if _focus_first_control_in_tree(vp):
+						vp.set_input_as_handled()
+
+
+func _is_menu_screen(scene: Node) -> bool:
+	if scene == null:
+		return true
+	var s_name := str(scene.name).to_lower()
+	var s_file := str(scene.scene_file_path).to_lower() if "scene_file_path" in scene else ""
+	var s_scr := str(scene.get_script().resource_path).to_lower() if scene.get_script() != null else ""
+	var full := s_name + " " + s_file + " " + s_scr
+	if full.contains("range") or full.contains("course_play") or full.contains("courseplay") \
+		or full.contains("practice") or full.contains("chipping") or full.contains("putting") \
+		or full.contains("coursemanager") or full.contains("course_manager") or full.contains("loft"):
+		return false
+	return true
 
 
 func _find_topmost_modal() -> Node:
@@ -657,6 +681,9 @@ func _find_topmost_modal() -> Node:
 	# 2. Check current scene for open modals, dialogs, overlays
 	var cur_scene = get_tree().current_scene
 	if cur_scene != null:
+		var dist_menu = cur_scene.find_child("DistanceMenu", true, false)
+		if dist_menu != null and is_instance_valid(dist_menu) and dist_menu.visible:
+			return dist_menu
 		var exit_dlg = cur_scene.find_child("ExitConfirmDialog", true, false)
 		if exit_dlg != null and is_instance_valid(exit_dlg) and exit_dlg.visible:
 			return exit_dlg
@@ -683,7 +710,7 @@ func _find_topmost_modal() -> Node:
 				var c_name = child.name
 				if c_name.contains("Rebind"):
 					continue
-				if c_name.contains("Modal") or c_name.contains("Dialog") or c_name.contains("SettingsLayer"):
+				if c_name.contains("Modal") or c_name.contains("Dialog") or c_name.contains("SettingsLayer") or c_name.contains("DistanceMenu"):
 					return child
 	
 	return null

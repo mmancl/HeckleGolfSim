@@ -20,6 +20,7 @@ func add_player():
 		new_line.set("theme_override_font_sizes/font_size", 30)
 		new_line.text = "Player " + str(num_players)
 		add_child(new_line)
+		new_line.call_deferred("grab_focus")
 		
 
 

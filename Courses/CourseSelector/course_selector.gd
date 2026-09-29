@@ -136,6 +136,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not is_visible_in_tree():
 		return
 	if event.is_action_pressed("ui_cancel"):
+		if event is InputEventKey and (event.keycode == KEY_BACKSPACE or event.physical_keycode == KEY_BACKSPACE):
+			return
 		for child in get_children():
 			if (child is ConfirmationDialog or child is AcceptDialog) and child.visible:
 				child.visible = false
@@ -504,17 +506,18 @@ func _create_green_speed_selector() -> PanelContainer:
 	hbox.add_child(lbl)
 
 	var slider = HSlider.new()
-	slider.min_value = 1.0
-	slider.max_value = 50.0
-	slider.step = 1.0
+	slider.min_value = 6.0
+	slider.max_value = 16.0
+	slider.step = 0.5
 	slider.value = GlobalSettings.range_settings.green_speed.value
-	slider.custom_minimum_size = Vector2(300, 30)
+	slider.custom_minimum_size = Vector2(200, 48 if MobilePerformance.is_mobile() else 36)
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	ThemeManager.apply_slider_style(slider, 48 if MobilePerformance.is_mobile() else 36, 200)
 	hbox.add_child(slider)
 
 	var val_lbl = Label.new()
-	val_lbl.text = str(slider.value)
+	val_lbl.text = "%.1f" % slider.value
 	val_lbl.add_theme_font_size_override("font_size", 24)
 	val_lbl.custom_minimum_size = Vector2(50, 0)
 	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -523,7 +526,14 @@ func _create_green_speed_selector() -> PanelContainer:
 
 	slider.value_changed.connect(func(val):
 		GlobalSettings.range_settings.green_speed.set_value(val)
-		val_lbl.text = str(val)
+		val_lbl.text = "%.1f" % val
+	)
+
+	GlobalSettings.range_settings.green_speed.setting_changed.connect(func(val):
+		if slider != null and is_instance_valid(slider) and not is_equal_approx(slider.value, val):
+			slider.value = val
+		if val_lbl != null and is_instance_valid(val_lbl):
+			val_lbl.text = "%.1f" % val
 	)
 
 	return panel

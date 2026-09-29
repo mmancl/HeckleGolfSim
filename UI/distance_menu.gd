@@ -160,8 +160,21 @@ func _ready() -> void:
 	_close_btn.text = "Close"
 	_close_btn.custom_minimum_size = Vector2(260, 44)
 	_apply_material_button_style(_close_btn, Color(0.35, 0.35, 0.35, 0.85))
-	_close_btn.pressed.connect(func(): visible = false)
+	_close_btn.pressed.connect(close)
 	_vbox.add_child(_close_btn)
+
+func close() -> void:
+	visible = false
+	var vp = get_viewport()
+	if vp != null:
+		vp.gui_release_focus()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not visible:
+		return
+	if event.is_action_pressed("ui_cancel") or (event is InputEventKey and not event.echo and event.keycode == KEY_ESCAPE):
+		close()
+		get_viewport().set_input_as_handled()
 
 func _add_distance_button(label: String, distance_yards: float) -> void:
 	var btn = Button.new()
@@ -242,7 +255,7 @@ func _inject_shot_for_distance(distance_yards: float) -> void:
 	data["VerticalFaceImpact"] = _impact_v_spin.value if _impact_v_spin != null else 0.0
 	
 	emit_signal("inject_shot", data)
-	visible = false
+	close()
 
 func _on_hit_100y_fade() -> void:
 	# Randomize open face (+0.8° to +2.4°) and out-to-in path (-3.2° to -1.4°)
@@ -274,7 +287,7 @@ func _on_hit_100y_fade() -> void:
 		"VerticalFaceImpact": rand_v
 	}
 	emit_signal("inject_shot", data)
-	visible = false
+	close()
 
 func _on_hit_100y_slice() -> void:
 	# Randomize severely open face (+3.5° to +7.5°) and out-to-in path (-9.5° to -5.0°)
@@ -306,7 +319,7 @@ func _on_hit_100y_slice() -> void:
 		"VerticalFaceImpact": rand_v
 	}
 	emit_signal("inject_shot", data)
-	visible = false
+	close()
 
 
 func _create_spinbox_row(parent: Node, label_text: String, min_v: float, max_v: float, step_v: float, def_v: float, sfx: String) -> SpinBox:

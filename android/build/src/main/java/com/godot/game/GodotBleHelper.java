@@ -7,11 +7,13 @@ import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanRecord;
 import android.bluetooth.le.ScanResult;
 import android.content.Context;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.ParcelUuid;
 import android.util.Log;
 import java.util.List;
 import java.util.UUID;
@@ -20,6 +22,17 @@ public class GodotBleHelper {
     private static final String TAG = "GodotBleHelper";
     private static final Handler sMainHandler = new Handler(Looper.getMainLooper());
     private static final UUID CLIENT_CONFIG_DESCRIPTOR_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
+    private static Context sContext;
+
+    public static void setContext(Context context) {
+        if (context != null) {
+            sContext = context.getApplicationContext();
+        }
+    }
+
+    public static Context getContext() {
+        return sContext;
+    }
 
     public interface ScanListener {
         void onDeviceDiscovered(String deviceId, String name, int rssi);
@@ -41,6 +54,30 @@ public class GodotBleHelper {
                 try {
                     final String deviceId = result.getDevice().getAddress();
                     String devName = result.getDevice().getName();
+                    ScanRecord record = result.getScanRecord();
+
+                    // On Android, unbonded BLE peripherals often return null from getDevice().getName().
+                    // The actual advertised name is stored in the ScanRecord.
+                    if ((devName == null || devName.trim().isEmpty()) && record != null) {
+                        devName = record.getDeviceName();
+                    }
+
+                    // If still empty, inspect advertised service UUIDs for known launch monitors
+                    if ((devName == null || devName.trim().isEmpty()) && record != null && record.getServiceUuids() != null) {
+                        for (ParcelUuid parcelUuid : record.getServiceUuids()) {
+                            if (parcelUuid != null) {
+                                String uuidStr = parcelUuid.getUuid().toString().toLowerCase();
+                                if (uuidStr.contains("6a4e2800") || uuidStr.contains("6a4e3400")) {
+                                    devName = "Approach R10";
+                                    break;
+                                } else if (uuidStr.contains("86602100") || uuidStr.contains("86602000") || uuidStr.contains("86602101")) {
+                                    devName = "Square Golf";
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
                     final String name = devName != null ? devName : "";
                     final int rssi = result.getRssi();
 
@@ -69,7 +106,17 @@ public class GodotBleHelper {
 
             @Override
             public void onScanFailed(int errorCode) {
-                Log.w(TAG, "BLE scan failed with errorCode: " + errorCode);
+                String errorReason;
+                switch (errorCode) {
+                    case 1: errorReason = "SCAN_FAILED_ALREADY_STARTED"; break;
+                    case 2: errorReason = "SCAN_FAILED_APPLICATION_REGISTRATION_FAILED"; break;
+                    case 3: errorReason = "SCAN_FAILED_INTERNAL_ERROR"; break;
+                    case 4: errorReason = "SCAN_FAILED_FEATURE_UNSUPPORTED"; break;
+                    case 5: errorReason = "SCAN_FAILED_OUT_OF_HARDWARE_RESOURCES"; break;
+                    case 6: errorReason = "SCAN_FAILED_SCANNING_TOO_FREQUENTLY"; break;
+                    default: errorReason = "UNKNOWN_ERROR (" + errorCode + ")"; break;
+                }
+                Log.w(TAG, "BLE scan failed with errorCode: " + errorCode + " (" + errorReason + ")");
             }
         };
     }
@@ -240,8 +287,11 @@ public class GodotBleHelper {
     }
 
     public static BluetoothGatt connectGatt(BluetoothDevice device, Context context, BluetoothGattCallback callback) {
+        if (context == null) {
+            context = sContext;
+        }
         if (device == null || context == null || callback == null) {
-            Log.e(TAG, "connectGatt called with null parameter(s)");
+            Log.e(TAG, "connectGatt called with null parameter(s): device=" + device + ", context=" + context + ", callback=" + callback);
             return null;
         }
         try {

@@ -285,13 +285,11 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 		ball_data["CarryDistance"] = float(raw_ball_data["CarryDistance"])
 	if raw_ball_data.has("TotalDistance"):
 		ball_data["TotalDistance"] = float(raw_ball_data["TotalDistance"])
-	if raw_ball_data.has("ClubSpeed"):
-		ball_data["ClubSpeed"] = float(raw_ball_data["ClubSpeed"])
-	if raw_ball_data.has("SmashFactor"):
+	if raw_ball_data.has("SmashFactor") and not ball_data.has("SmashFactor"):
 		ball_data["SmashFactor"] = float(raw_ball_data["SmashFactor"])
-	if raw_ball_data.has("AttackAngle"):
+	if raw_ball_data.has("AttackAngle") and not ball_data.has("AttackAngle"):
 		ball_data["AttackAngle"] = float(raw_ball_data["AttackAngle"])
-	elif raw_ball_data.has("AngleOfAttack"):
+	elif raw_ball_data.has("AngleOfAttack") and not ball_data.has("AttackAngle"):
 		ball_data["AttackAngle"] = float(raw_ball_data["AngleOfAttack"])
 
 	return ball_data

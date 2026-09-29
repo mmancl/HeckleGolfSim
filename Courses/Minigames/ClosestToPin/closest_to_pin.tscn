@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Courses/Minigames/ClosestToPin/closest_to_pin.gd" id="1_closest_to_pin_gd"]
+
+[node name="ClosestToPin" type="Node3D"]
+script = ExtResource("1_closest_to_pin_gd")

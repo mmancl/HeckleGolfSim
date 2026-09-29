@@ -25,12 +25,12 @@ public static class SquareProtocol
 
     public static bool IsStatusPacket(ReadOnlySpan<byte> data)
     {
-        return data.Length == 3 && data[0] == 0x11 && data[1] == 0x03;
+        return data.Length >= 3 && data[0] == 0x11 && data[1] == 0x03;
     }
 
     public static bool IsClubDataPacket(ReadOnlySpan<byte> data)
     {
-        return data.Length >= 9 && data[0] == 0x11 && data[1] == 0x03;
+        return data.Length >= 3 && data[0] == 0x11 && data[1] == 0x07;
     }
 
     public static bool TryParseStatus(ReadOnlySpan<byte> data, out byte statusCode)
@@ -41,7 +41,9 @@ public static class SquareProtocol
             return false;
         }
 
-        statusCode = data[2];
+        // In 4+ byte packets (e.g. 0x11 0x03 [seq] [state] ...), byte 3 is the DeviceState/status code.
+        // In 3-byte packets (0x11 0x03 [state]), byte 2 is the status code.
+        statusCode = data.Length >= 4 ? data[3] : data[2];
         return true;
     }
 
@@ -53,26 +55,34 @@ public static class SquareProtocol
             return false;
         }
 
-        // 9-byte 0x11 0x03 Club Delivery Packet layout:
+        // 0x11 0x07 Club Delivery Packet layout:
         // [0] 0x11 (header)
-        // [1] 0x03 (club event type)
-        // [2] Sequence / counter
-        // [3] Face Angle (signed sbyte, in degrees, + open / - closed)
-        // [4] Club Path (signed sbyte, in degrees, + in-to-out / - out-to-in)
-        // [5] Attack Angle (signed sbyte, in degrees)
-        // [6] Dynamic Loft (byte, in degrees)
-        // [7] 0x00
-        // [8] 0x01
-        var rawFace = (sbyte)data[3];
-        var rawPath = (sbyte)data[4];
-        var rawAttack = (sbyte)data[5];
-        var rawLoft = data[6];
+        // [1] 0x07 (club event type)
+        // [2] Validity bitmask (bit 0 = path, 1 = face, 2 = attack, 3 = loft)
+        // [3..5] Club Path (signed int16, / 100.0)
+        // [5..7] Face Angle (signed int16, / 100.0)
+        // [7..9] Attack Angle (signed int16, / 100.0)
+        // [9..11] Dynamic Loft (signed int16, / 100.0)
+        if (data.Length < 11)
+        {
+            return false;
+        }
+
+        var rawPath = BinaryPrimitives.ReadInt16LittleEndian(data[3..5]);
+        var rawFace = BinaryPrimitives.ReadInt16LittleEndian(data[5..7]);
+        var rawAttack = BinaryPrimitives.ReadInt16LittleEndian(data[7..9]);
+        var rawLoft = BinaryPrimitives.ReadInt16LittleEndian(data[9..11]);
+
+        var path = rawPath == -1 || rawPath == -32768 ? 0.0f : rawPath / 100.0f;
+        var face = rawFace == -1 || rawFace == -32768 ? 0.0f : rawFace / 100.0f;
+        var attack = rawAttack == -1 || rawAttack == -32768 ? 0.0f : rawAttack / 100.0f;
+        var loft = rawLoft == -1 || rawLoft == -32768 ? 0.0f : rawLoft / 100.0f;
 
         clubMetrics = new SquareClubMetrics(
-            FaceAngle: rawFace,
-            ClubPath: rawPath,
-            AttackAngle: rawAttack,
-            DynamicLoft: rawLoft);
+            FaceAngle: face,
+            ClubPath: path,
+            AttackAngle: attack,
+            DynamicLoft: loft);
 
         return true;
     }
@@ -88,8 +98,10 @@ public static class SquareProtocol
         var posX = BinaryPrimitives.ReadInt32LittleEndian(data[5..9]);
         var posY = BinaryPrimitives.ReadInt32LittleEndian(data[9..13]);
         var posZ = BinaryPrimitives.ReadInt32LittleEndian(data[13..17]);
-        var ballDetected = data[2] != 0x00 || data[4] != 0x00 || posX != 0 || posY != 0 || posZ != 0;
-        var ballReady = data[3] != 0x00 && ballDetected;
+        // Byte 2 is sequence counter. Byte 4 is ball detected flag (0x01 = detected, 0x00 = absent).
+        var ballDetected = data[4] != 0x00 || posX != 0 || posY != 0 || posZ != 0;
+        // Byte 3 is ball ready flag (0x01 or 0x02 = ready).
+        var ballReady = (data[3] == 0x01 || data[3] == 0x02 || data[3] != 0x00) && ballDetected;
 
         sensor = new SquareSensorData(
             ballReady,

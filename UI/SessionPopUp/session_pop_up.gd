@@ -42,6 +42,9 @@ func open():
 	get_tree().paused = true
 	$PanelContainer/MarginContainer/VBoxContainer/Label2.visible = false
 	$PanelContainer/MarginContainer/VBoxContainer/Label2.text = ""
+	var p_input = get_node_or_null("PanelContainer/MarginContainer/VBoxContainer/PlayerName/PlayerNameInput")
+	if p_input != null:
+		p_input.call_deferred("grab_focus")
 	
 func set_session_data(user, dir):
 	$PanelContainer/MarginContainer/VBoxContainer/PlayerName/PlayerNameInput.text = user

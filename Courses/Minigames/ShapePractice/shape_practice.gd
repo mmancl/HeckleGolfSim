@@ -72,6 +72,26 @@ var zone_bounds_lbl: Label = null
 var zone_lane_graphic_lbl: Label = null
 var zone_instruction_lbl: Label = null
 
+# Scoreboard Sub-Label References (dynamic for PvP / Practice)
+var t_sub_lbl: Label = null
+var att_sub_lbl: Label = null
+var h_sub_lbl: Label = null
+var acc_sub_lbl: Label = null
+var tot_sub_lbl: Label = null
+
+# PvP / Multiplayer State
+const MinigamePlayerModal = preload("res://Courses/Minigames/minigame_player_modal.gd")
+var pvp_mode: bool = false
+var active_player_index: int = 0
+var players_list: Array[Dictionary] = []
+var pvp_winner: String = ""
+var mode_toggle_btn: Button = null
+var players_btn: Button = null
+var game_over_panel: PanelContainer = null
+var _player_modal_instance: CanvasLayer = null
+var sfx_applause_player: AudioStreamPlayer = null
+const PVP_TARGET_GOAL: int = 6
+
 # Materials
 var green_mat: StandardMaterial3D
 var fringe_mat: StandardMaterial3D
@@ -84,6 +104,9 @@ var tee_turf_mat: StandardMaterial3D
 
 func _ready() -> void:
 	name = "ShapePractice"
+	
+	# 0. Initialize multiplayer player list
+	_init_player_names()
 	
 	# 1. Initialize target data & stats
 	_init_target_data()
@@ -814,12 +837,255 @@ func _setup_sfx() -> void:
 	elif ResourceLoader.exists("res://assets/audio/sfx/rough_thump.ogg"):
 		sfx_wall_player.stream = load("res://assets/audio/sfx/rough_thump.ogg")
 	add_child(sfx_wall_player)
+	
+	sfx_applause_player = AudioStreamPlayer.new()
+	sfx_applause_player.name = "ApplauseSFX"
+	if ResourceLoader.exists("res://assets/audio/sfx/applause.wav"):
+		sfx_applause_player.stream = load("res://assets/audio/sfx/applause.wav")
+	elif ResourceLoader.exists("res://assets/audio/sfx/golf_clap.wav"):
+		sfx_applause_player.stream = load("res://assets/audio/sfx/golf_clap.wav")
+	add_child(sfx_applause_player)
+
+# ========================================
+# MULTIPLAYER / PVP LOGIC & HELPERS
+# ========================================
+
+func get_active_player_name() -> String:
+	if not pvp_mode or players_list.is_empty():
+		return "Player"
+	return str(players_list[active_player_index].get("name", "Player %d" % (active_player_index + 1)))
+
+func get_active_player_color() -> Color:
+	if not pvp_mode or players_list.is_empty():
+		return Color(0.2, 0.85, 0.4)
+	return get_player_color_at(active_player_index)
+
+func get_player_color_at(idx: int) -> Color:
+	if idx >= 0 and idx < players_list.size():
+		var col = players_list[idx].get("color", null)
+		if col is Color:
+			return col
+	return MinigamePlayerModal.get_player_color(idx)
+
+func get_player_completed_count(player_dict: Dictionary) -> int:
+	var count = 0
+	var c_arr = player_dict.get("completed", [])
+	for val in c_arr:
+		if val == true:
+			count += 1
+	return count
+
+func _init_player_names() -> void:
+	if players_list.is_empty():
+		players_list = MinigamePlayerModal.init_default_players(12)
+	if players_list.size() < 2:
+		var p2 = MinigamePlayerModal.create_player("Player 2", 1, 12)
+		players_list.append(p2)
+	_update_players_button_label()
+
+func _toggle_pvp_mode() -> void:
+	pvp_mode = not pvp_mode
+	_hide_game_over_banner()
+	if mode_toggle_btn != null:
+		if pvp_mode:
+			mode_toggle_btn.text = "⚔️ PvP Mode: ON"
+			_apply_btn_style(mode_toggle_btn, Color(0.18, 0.45, 0.65), Color(0.25, 0.58, 0.82))
+		else:
+			mode_toggle_btn.text = "⚔️ PvP Mode: OFF"
+			_apply_btn_style(mode_toggle_btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
+	if players_btn != null:
+		players_btn.visible = pvp_mode
+	_reset_game()
+
+func _reset_game() -> void:
+	_init_player_names()
+	_hide_game_over_banner()
+	active_player_index = 0
+	pvp_winner = ""
+	for p in players_list:
+		p["shots"] = 0
+		if not p.has("completed") or p["completed"].size() != 12:
+			var c_arr: Array[bool] = []
+			for k in range(12):
+				c_arr.append(false)
+			p["completed"] = c_arr
+		else:
+			for k in range(12):
+				p["completed"][k] = false
+	for k in target_stats.keys():
+		target_stats[k]["Attempts"] = 0
+		target_stats[k]["Hits"] = 0
+	total_greens_hit = 0
+	if pvp_mode:
+		_select_target(0, true)
+	else:
+		_select_target(selected_target_index, true)
+	_update_hud()
+	_update_selector_buttons()
+	_update_players_button_label()
+	_update_wall_and_zone_highlights()
+
+func _get_next_uncompleted_target(player_idx: int) -> int:
+	if player_idx < 0 or player_idx >= players_list.size():
+		return selected_target_index
+	var completed = players_list[player_idx].get("completed", [])
+	# Check current side first
+	var start_base = 0 if selected_side == "draw" else 6
+	for i in range(6):
+		var idx = start_base + i
+		if idx < completed.size() and not completed[idx]:
+			return idx
+	# Check opposite side
+	var alt_base = 6 if selected_side == "draw" else 0
+	for i in range(6):
+		var idx = alt_base + i
+		if idx < completed.size() and not completed[idx]:
+			return idx
+	return selected_target_index
+
+func _open_players_modal() -> void:
+	if _player_modal_instance != null and is_instance_valid(_player_modal_instance):
+		_player_modal_instance.queue_free()
+		_player_modal_instance = null
+		
+	var modal = MinigamePlayerModal.new()
+	modal.name = "MinigamePlayerModal"
+	add_child(modal)
+	_player_modal_instance = modal
+	modal.open(players_list, 2, 12, active_player_index)
+	modal.players_changed.connect(func(new_players):
+		players_list = new_players
+		if active_player_index >= players_list.size():
+			active_player_index = 0
+		_update_players_button_label()
+		_update_hud()
+		_update_selector_buttons()
+		_update_wall_and_zone_highlights()
+	)
+	modal.reset_match_requested.connect(func():
+		_reset_game()
+	)
+	modal.modal_closed.connect(func():
+		_player_modal_instance = null
+	)
+
+func _update_players_button_label() -> void:
+	if players_btn != null:
+		players_btn.text = "👥 Players (%d)" % players_list.size()
+
+func _trigger_victory(winner_name: String) -> void:
+	pvp_winner = winner_name
+	if sfx_applause_player:
+		sfx_applause_player.play()
+	elif has_node("/root/GlobalSettings"):
+		GlobalSettings.play_golf_clap()
+	_update_hud()
+	_update_selector_buttons()
+	_show_game_over_banner(winner_name)
+
+func _show_game_over_banner(winner_name: String) -> void:
+	if game_over_panel != null and is_instance_valid(game_over_panel):
+		game_over_panel.queue_free()
+
+	game_over_panel = PanelContainer.new()
+	game_over_panel.custom_minimum_size = Vector2(560, 320)
+	game_over_panel.anchor_left = 0.5
+	game_over_panel.anchor_right = 0.5
+	game_over_panel.anchor_top = 0.5
+	game_over_panel.anchor_bottom = 0.5
+	game_over_panel.offset_left = -280
+	game_over_panel.offset_right = 280
+	game_over_panel.offset_top = -160
+	game_over_panel.offset_bottom = 160
+	ThemeManager.apply_modal_style(game_over_panel)
+	hud_control.add_child(game_over_panel)
+
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 30)
+	margin.add_theme_constant_override("margin_right", 30)
+	margin.add_theme_constant_override("margin_top", 24)
+	margin.add_theme_constant_override("margin_bottom", 24)
+	game_over_panel.add_child(margin)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	margin.add_child(vbox)
+
+	var crown_lbl = Label.new()
+	crown_lbl.text = "🏆 MATCH COMPLETE! 🏆"
+	crown_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	crown_lbl.add_theme_font_size_override("font_size", 28)
+	crown_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+	vbox.add_child(crown_lbl)
+
+	var win_lbl = Label.new()
+	win_lbl.text = "%s WINS THE SHAPE CONTEST!" % winner_name.to_upper()
+	win_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	win_lbl.add_theme_font_size_override("font_size", 22)
+	win_lbl.add_theme_color_override("font_color", Color.WHITE)
+	vbox.add_child(win_lbl)
+
+	# Standings summary
+	var standings_box = VBoxContainer.new()
+	standings_box.add_theme_constant_override("separation", 4)
+	vbox.add_child(standings_box)
+
+	var sorted_players = players_list.duplicate()
+	sorted_players.sort_custom(func(a, b):
+		var a_hits = get_player_completed_count(a)
+		var b_hits = get_player_completed_count(b)
+		if a_hits != b_hits:
+			return a_hits > b_hits
+		return a.get("shots", 0) < b.get("shots", 0)
+	)
+
+	for i in range(sorted_players.size()):
+		var p = sorted_players[i]
+		var p_line = Label.new()
+		var hits_count = get_player_completed_count(p)
+		var att_count = p.get("shots", 0)
+		var rank_str = "1st" if i == 0 else ("2nd" if i == 1 else ("3rd" if i == 2 else "%dth" % (i + 1)))
+		p_line.text = "%s: %s — %d/%d Zones (%d shots)" % [rank_str, p.get("name", "Player"), hits_count, PVP_TARGET_GOAL, att_count]
+		p_line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		p_line.add_theme_font_size_override("font_size", 16)
+		var p_col = p.get("color", Color.WHITE)
+		p_line.add_theme_color_override("font_color", p_col)
+		standings_box.add_child(p_line)
+
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_hbox.add_theme_constant_override("separation", 16)
+	vbox.add_child(btn_hbox)
+
+	var rematch_btn = Button.new()
+	rematch_btn.text = "PLAY AGAIN"
+	rematch_btn.custom_minimum_size = Vector2(140, 48)
+	_apply_btn_style(rematch_btn, Color(0.18, 0.42, 0.28), Color(0.25, 0.55, 0.36))
+	rematch_btn.pressed.connect(func():
+		_reset_game()
+	)
+	btn_hbox.add_child(rematch_btn)
+
+	var players_edit_btn = Button.new()
+	players_edit_btn.text = "PLAYERS"
+	players_edit_btn.custom_minimum_size = Vector2(120, 48)
+	_apply_btn_style(players_edit_btn, Color(0.2, 0.35, 0.5), Color(0.28, 0.45, 0.65))
+	players_edit_btn.pressed.connect(func():
+		_open_players_modal()
+	)
+	btn_hbox.add_child(players_edit_btn)
+
+func _hide_game_over_banner() -> void:
+	if game_over_panel != null and is_instance_valid(game_over_panel):
+		game_over_panel.queue_free()
+		game_over_panel = null
 
 # ========================================
 # TARGET SELECTION & HIGHLIGHT
 # ========================================
 
-func _select_target(index: int) -> void:
+func _select_target(index: int, reset_ball: bool = true) -> void:
 	if index < 0 or index >= target_data.size():
 		return
 		
@@ -830,7 +1096,8 @@ func _select_target(index: int) -> void:
 	_update_wall_and_zone_highlights()
 	_update_selector_buttons()
 	_update_hud()
-	_reset_ball_position()
+	if reset_ball:
+		_reset_ball_position()
 
 func _update_wall_and_zone_highlights() -> void:
 	var cur_data = target_data[selected_target_index]
@@ -838,7 +1105,7 @@ func _update_wall_and_zone_highlights() -> void:
 	var front_wall_yd = cur_data["front_wall_yd"]
 	var back_wall_yd = cur_data["back_wall_yd"]
 	var side = cur_data["side"]
-	var c = cur_data["color"]
+	var c = get_active_player_color() if pvp_mode else cur_data["color"]
 	var front_x = cur_data["front_x"]
 	var back_x = cur_data["back_x"]
 	var x_len = back_x - front_x
@@ -976,8 +1243,9 @@ func _update_wall_and_zone_highlights() -> void:
 	if target_zone_marker_3d:
 		target_zone_marker_3d.position = Vector3(x_center, 6.2, z_center)
 		var shape_str = "DRAW" if side == "draw" else "FADE"
-		target_zone_marker_3d.text = "▼ %d YD %s TARGET ZONE ▼\n(HIT BETWEEN %d & %d YD WALLS — ≥10 FT IN FROM CLEARWAY)" % [
-			dist_yd, shape_str, front_wall_yd, back_wall_yd
+		var turn_prefix = ("[%s's TURN] " % get_active_player_name().to_upper()) if pvp_mode else ""
+		target_zone_marker_3d.text = "▼ %s%d YD %s TARGET ZONE ▼\n(HIT BETWEEN %d & %d YD WALLS — ≥10 FT IN FROM CLEARWAY)" % [
+			turn_prefix, dist_yd, shape_str, front_wall_yd, back_wall_yd
 		]
 		target_zone_marker_3d.modulate = c
 		target_zone_marker_3d.visible = true
@@ -1038,13 +1306,27 @@ func _reset_ball_position() -> void:
 	var front = cur_data["front_wall_yd"]
 	var back = cur_data["back_wall_yd"]
 	var curve_dir = "left" if cur_data["side"] == "draw" else "right"
-	_show_banner("🎯 Target: %d YD %s Zone — Launch through center gate, shape %s ≥10 ft into %d-%d YD wall zone!" % [
-		cur_data["dist_yd"],
-		cur_data["side"].to_upper(),
-		curve_dir,
-		front,
-		back
-	])
+	if pvp_mode and not players_list.is_empty():
+		var p_name = get_active_player_name()
+		var p_comp = get_player_completed_count(players_list[active_player_index])
+		_show_banner("🏌️ %s's Turn (%d/%d zones) | Target: %d YD %s Zone (%d-%d YD walls, shape %s)" % [
+			p_name.to_upper(),
+			p_comp,
+			PVP_TARGET_GOAL,
+			cur_data["dist_yd"],
+			cur_data["side"].to_upper(),
+			front,
+			back,
+			curve_dir
+		])
+	else:
+		_show_banner("🎯 Target: %d YD %s Zone — Launch through center gate, shape %s ≥10 ft into %d-%d YD wall zone!" % [
+			cur_data["dist_yd"],
+			cur_data["side"].to_upper(),
+			curve_dir,
+			front,
+			back
+		])
 
 # ========================================
 # INPUT HANDLING
@@ -1080,7 +1362,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if event is InputEventKey and event.pressed:
 		if event.keycode == KEY_R:
-			_reset_ball_position()
+			if pvp_mode and pvp_winner != "":
+				_reset_game()
+			else:
+				_reset_ball_position()
 		elif event.keycode == KEY_TAB:
 			_switch_side("fade" if selected_side == "draw" else "draw")
 		elif event.keycode == KEY_D or event.keycode == KEY_LEFT:
@@ -1130,7 +1415,8 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	var cur_data = target_data[selected_target_index]
 	var front = cur_data["front_wall_yd"]
 	var back = cur_data["back_wall_yd"]
-	_show_banner("Shot Launched! Speed: %.1f mph | Shape ≥10 ft into the %d-%d YD wall zone!" % [speed_mph, front, back])
+	var p_prefix = ("[%s] " % get_active_player_name()) if pvp_mode else ""
+	_show_banner("%sShot Launched! Speed: %.1f mph | Shape ≥10 ft into the %d-%d YD wall zone!" % [p_prefix, speed_mph, front, back])
 
 	# Safety fallback: auto-reset after 6.5s if shot gets lost or rolls indefinitely
 	_schedule_auto_reset(this_shot, 6.5, "Safety Timeout")
@@ -1145,11 +1431,16 @@ func _on_barrier_wall_hit(dist_yd: int, side: String) -> void:
 		sfx_wall_player.pitch_scale = randf_range(0.92, 1.08)
 		sfx_wall_player.play()
 
-	target_stats[selected_target_index]["Attempts"] += 1
+	if pvp_mode and not players_list.is_empty():
+		var cur_player = players_list[active_player_index]
+		cur_player["shots"] = cur_player.get("shots", 0) + 1
+		_show_banner("⛔ WALL HIT! %s struck the %d YD %s Wall! Resetting..." % [get_active_player_name().to_upper(), dist_yd, side.to_upper()])
+	else:
+		target_stats[selected_target_index]["Attempts"] += 1
+		_show_banner("⛔ WALL HIT! Ball struck the %d YD %s Wall! Resetting to tee in 1.8s..." % [dist_yd, side.to_upper()])
+
 	_update_hud()
 	_update_selector_buttons()
-
-	_show_banner("⛔ WALL HIT! Ball struck the %d YD %s Wall! Resetting to tee in 1.8s..." % [dist_yd, side.to_upper()])
 	_schedule_auto_reset(this_shot, 1.8, "Wall Hit")
 
 # ========================================
@@ -1201,67 +1492,135 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 	var cur_data = target_data[selected_target_index]
 	var res = check_shot_in_zone(final_pos, selected_target_index)
 	
-	target_stats[selected_target_index]["Attempts"] += 1
-	
-	if res["is_hit"]:
-		target_stats[selected_target_index]["Hits"] += 1
-		total_greens_hit += 1
-		GlobalSettings.play_golf_clap()
-		_show_banner("🎯 ZONE HIT! Excellent %s shape! Landed %.0f yds out, %.1f ft inside the %d-%d YD wall zone! (%d total hits)" % [
-			cur_data["side"].to_upper(),
-			res["ball_x_yd"],
-			res["lateral_depth_ft"],
-			res["front_wall_yd"],
-			res["back_wall_yd"],
-			total_greens_hit
-		])
-	else:
-		# Check if shot qualified in another zone
-		var other_hit_idx = -1
-		for i in range(target_data.size()):
-			if i == selected_target_index:
-				continue
-			var other_res = check_shot_in_zone(final_pos, i)
-			if other_res["is_hit"]:
-				other_hit_idx = i
-				break
-				
-		if other_hit_idx != -1:
-			var other_data = target_data[other_hit_idx]
-			_show_banner("Landed in the %d YD %s zone — but you were targeting %d YD! Resetting..." % [
-				other_data["dist_yd"],
-				other_data["side"].to_upper(),
-				cur_data["dist_yd"]
-			])
-		elif res["in_x_range"] and res["on_correct_side"] and not res["past_10ft_thresh"]:
-			_show_banner("Didn't shape enough! Ball was only %.1f ft past wall start (needs ≥ 10 ft in from clearway). Resetting..." % [
-				max(0.0, res["lateral_depth_ft"])
-			])
-		elif abs(final_pos.z) <= res["gate_half_w"]:
-			_show_banner("Ball stayed in center clearway! Must curve %s at least 10 ft past wall start into the %d-%d YD zone." % [
+	if pvp_mode and not players_list.is_empty():
+		var cur_player = players_list[active_player_index]
+		var cur_completed = cur_player.get("completed", [])
+		var cur_name = get_active_player_name()
+		cur_player["shots"] = cur_player.get("shots", 0) + 1
+		
+		if res["is_hit"]:
+			if selected_target_index < cur_completed.size():
+				cur_completed[selected_target_index] = true
+			var count = get_player_completed_count(cur_player)
+			if sfx_applause_player:
+				sfx_applause_player.play()
+			GlobalSettings.play_golf_clap()
+			_show_banner("🎯 ZONE HIT! %s nailed %d YD %s Zone! (%d/%d)" % [
+				cur_name.to_upper(),
+				cur_data["dist_yd"],
 				cur_data["side"].to_upper(),
-				cur_data["front_wall_yd"],
-				cur_data["back_wall_yd"]
+				count,
+				PVP_TARGET_GOAL
 			])
-		elif res["ball_x_yd"] < cur_data["front_wall_yd"]:
-			_show_banner("Shot short! Ball reached %.0f yds (Target zone is %d-%d yds). Resetting..." % [
-				res["ball_x_yd"],
-				cur_data["front_wall_yd"],
-				cur_data["back_wall_yd"]
-			])
-		elif res["ball_x_yd"] > cur_data["back_wall_yd"]:
-			_show_banner("Shot long! Ball went %.0f yds (Target zone is %d-%d yds). Resetting..." % [
-				res["ball_x_yd"],
-				cur_data["front_wall_yd"],
-				cur_data["back_wall_yd"]
-			])
+			if count >= PVP_TARGET_GOAL:
+				pvp_winner = cur_name
+				_trigger_victory(cur_name)
+				_update_hud()
+				_update_selector_buttons()
+				return
 		else:
-			_show_banner("Missed target zone (%.0f yds, %.1f ft lateral). Must shape between %d & %d YD walls (≥10 ft in)!" % [
+			# Check bonus hit in another zone
+			var other_hit_idx = -1
+			for i in range(target_data.size()):
+				if i == selected_target_index:
+					continue
+				var other_res = check_shot_in_zone(final_pos, i)
+				if other_res["is_hit"]:
+					other_hit_idx = i
+					break
+			if other_hit_idx != -1:
+				var other_data = target_data[other_hit_idx]
+				var is_new = false
+				if other_hit_idx < cur_completed.size() and not cur_completed[other_hit_idx]:
+					cur_completed[other_hit_idx] = true
+					is_new = true
+				var count = get_player_completed_count(cur_player)
+				if is_new:
+					if sfx_applause_player:
+						sfx_applause_player.play()
+					GlobalSettings.play_golf_clap()
+					_show_banner("🌟 BONUS HIT! %s shaped into %d YD %s Zone! (%d/%d)" % [
+						cur_name.to_upper(),
+						other_data["dist_yd"],
+						other_data["side"].to_upper(),
+						count,
+						PVP_TARGET_GOAL
+					])
+					if count >= PVP_TARGET_GOAL:
+						pvp_winner = cur_name
+						_trigger_victory(cur_name)
+						_update_hud()
+						_update_selector_buttons()
+						return
+				else:
+					_show_banner("Landed in %d YD %s Zone (already completed by %s)." % [
+						other_data["dist_yd"],
+						other_data["side"].to_upper(),
+						cur_name
+					])
+			else:
+				_show_banner("Missed target zone. Next golfer up!")
+	else:
+		target_stats[selected_target_index]["Attempts"] += 1
+		if res["is_hit"]:
+			target_stats[selected_target_index]["Hits"] += 1
+			total_greens_hit += 1
+			GlobalSettings.play_golf_clap()
+			_show_banner("🎯 ZONE HIT! Excellent %s shape! Landed %.0f yds out, %.1f ft inside the %d-%d YD wall zone! (%d total hits)" % [
+				cur_data["side"].to_upper(),
 				res["ball_x_yd"],
 				res["lateral_depth_ft"],
-				cur_data["front_wall_yd"],
-				cur_data["back_wall_yd"]
+				res["front_wall_yd"],
+				res["back_wall_yd"],
+				total_greens_hit
 			])
+		else:
+			# Check if shot qualified in another zone
+			var other_hit_idx = -1
+			for i in range(target_data.size()):
+				if i == selected_target_index:
+					continue
+				var other_res = check_shot_in_zone(final_pos, i)
+				if other_res["is_hit"]:
+					other_hit_idx = i
+					break
+					
+			if other_hit_idx != -1:
+				var other_data = target_data[other_hit_idx]
+				_show_banner("Landed in the %d YD %s zone — but you were targeting %d YD! Resetting..." % [
+					other_data["dist_yd"],
+					other_data["side"].to_upper(),
+					cur_data["dist_yd"]
+				])
+			elif res["in_x_range"] and res["on_correct_side"] and not res["past_10ft_thresh"]:
+				_show_banner("Didn't shape enough! Ball was only %.1f ft past wall start (needs ≥ 10 ft in from clearway). Resetting..." % [
+					max(0.0, res["lateral_depth_ft"])
+				])
+			elif abs(final_pos.z) <= res["gate_half_w"]:
+				_show_banner("Ball stayed in center clearway! Must curve %s at least 10 ft past wall start into the %d-%d YD zone." % [
+					cur_data["side"].to_upper(),
+					cur_data["front_wall_yd"],
+					cur_data["back_wall_yd"]
+				])
+			elif res["ball_x_yd"] < cur_data["front_wall_yd"]:
+				_show_banner("Shot short! Ball reached %.0f yds (Target zone is %d-%d yds). Resetting..." % [
+					res["ball_x_yd"],
+					cur_data["front_wall_yd"],
+					cur_data["back_wall_yd"]
+				])
+			elif res["ball_x_yd"] > cur_data["back_wall_yd"]:
+				_show_banner("Shot long! Ball went %.0f yds (Target zone is %d-%d yds). Resetting..." % [
+					res["ball_x_yd"],
+					cur_data["front_wall_yd"],
+					cur_data["back_wall_yd"]
+				])
+			else:
+				_show_banner("Missed target zone (%.0f yds, %.1f ft lateral). Must shape between %d & %d YD walls (≥10 ft in)!" % [
+					res["ball_x_yd"],
+					res["lateral_depth_ft"],
+					cur_data["front_wall_yd"],
+					cur_data["back_wall_yd"]
+				])
 			
 	_update_selector_buttons()
 	_update_hud()
@@ -1272,6 +1631,10 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 func _schedule_auto_reset(shot_id: int, delay_sec: float, _reason: String = "") -> void:
 	await get_tree().create_timer(delay_sec).timeout
 	if is_inside_tree() and shot_reset_token == shot_id:
+		if pvp_mode and not players_list.is_empty() and pvp_winner == "":
+			active_player_index = (active_player_index + 1) % players_list.size()
+			var next_t = _get_next_uncompleted_target(active_player_index)
+			_select_target(next_t, false)
 		_reset_ball_position()
 
 func _trigger_test_shot() -> void:
@@ -1360,6 +1723,7 @@ func _setup_ui() -> void:
 	t_sub.add_theme_font_size_override("font_size", 12)
 	t_sub.add_theme_color_override("font_color", Color(0.15, 0.85, 1.0))
 	target_col.add_child(t_sub)
+	t_sub_lbl = t_sub
 	target_title_lbl = Label.new()
 	target_title_lbl.text = "150 YD DRAW ZONE"
 	target_title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1378,6 +1742,7 @@ func _setup_ui() -> void:
 	att_sub.add_theme_font_size_override("font_size", 14)
 	att_sub.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
 	att_col.add_child(att_sub)
+	att_sub_lbl = att_sub
 	attempts_lbl = Label.new()
 	attempts_lbl.text = "0"
 	attempts_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1396,6 +1761,7 @@ func _setup_ui() -> void:
 	h_sub.add_theme_font_size_override("font_size", 14)
 	h_sub.add_theme_color_override("font_color", Color(0.2, 0.85, 0.35))
 	hits_col.add_child(h_sub)
+	h_sub_lbl = h_sub
 	hits_lbl = Label.new()
 	hits_lbl.text = "0"
 	hits_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1414,6 +1780,7 @@ func _setup_ui() -> void:
 	acc_sub.add_theme_font_size_override("font_size", 14)
 	acc_sub.add_theme_color_override("font_color", Color(1.0, 0.85, 0.35))
 	acc_col.add_child(acc_sub)
+	acc_sub_lbl = acc_sub
 	accuracy_lbl = Label.new()
 	accuracy_lbl.text = "0%"
 	accuracy_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1432,6 +1799,7 @@ func _setup_ui() -> void:
 	tot_sub.add_theme_font_size_override("font_size", 14)
 	tot_sub.add_theme_color_override("font_color", Color(0.6, 0.85, 1.0))
 	tot_col.add_child(tot_sub)
+	tot_sub_lbl = tot_sub
 	total_hits_lbl = Label.new()
 	total_hits_lbl.text = "0"
 	total_hits_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1631,15 +1999,15 @@ func _setup_ui() -> void:
 	
 	# --- 4. BOTTOM CONTROLS PANEL ---
 	var ctrl_panel = PanelContainer.new()
-	ctrl_panel.custom_minimum_size = Vector2(420, 76)
+	ctrl_panel.custom_minimum_size = Vector2(760, 76)
 	ctrl_panel.anchor_left = 0.5
 	ctrl_panel.anchor_right = 0.5
 	ctrl_panel.anchor_top = 1.0
 	ctrl_panel.anchor_bottom = 1.0
 	ctrl_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	ctrl_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	ctrl_panel.offset_left = -210
-	ctrl_panel.offset_right = 210
+	ctrl_panel.offset_left = -380
+	ctrl_panel.offset_right = 380
 	ctrl_panel.offset_top = -94
 	ctrl_panel.offset_bottom = -18
 	ctrl_panel.add_theme_stylebox_override("panel", glass_style)
@@ -1655,11 +2023,35 @@ func _setup_ui() -> void:
 	ctrl_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	ctrl_margin.add_child(ctrl_hbox)
 	
+	# PvP Mode Toggle Button
+	mode_toggle_btn = Button.new()
+	mode_toggle_btn.text = "⚔️ PvP Mode: OFF"
+	mode_toggle_btn.custom_minimum_size = Vector2(165, 52)
+	mode_toggle_btn.add_theme_font_size_override("font_size", 15)
+	_apply_btn_style(mode_toggle_btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
+	mode_toggle_btn.pressed.connect(_toggle_pvp_mode)
+	ctrl_hbox.add_child(mode_toggle_btn)
+
+	# Players Manage Button
+	players_btn = Button.new()
+	players_btn.text = "👥 Players (%d)" % players_list.size()
+	players_btn.custom_minimum_size = Vector2(145, 52)
+	players_btn.add_theme_font_size_override("font_size", 15)
+	_apply_btn_style(players_btn, Color(0.18, 0.34, 0.50), Color(0.24, 0.44, 0.65))
+	players_btn.pressed.connect(_open_players_modal)
+	players_btn.visible = pvp_mode
+	ctrl_hbox.add_child(players_btn)
+	
 	var reset_btn = Button.new()
 	reset_btn.text = "RESET (R)"
 	reset_btn.custom_minimum_size = Vector2(120, 52)
 	_apply_btn_style(reset_btn, Color(0.48, 0.28, 0.18), Color(0.32, 0.18, 0.12))
-	reset_btn.pressed.connect(_reset_ball_position)
+	reset_btn.pressed.connect(func():
+		if pvp_mode:
+			_reset_game()
+		else:
+			_reset_ball_position()
+	)
 	ctrl_hbox.add_child(reset_btn)
 	
 	music_toggle_btn = Button.new()
@@ -1715,17 +2107,29 @@ func _update_selector_buttons() -> void:
 		var dist_yd = target_distances_yards[i]
 		var front_wall = dist_yd - 25
 		var back_wall = dist_yd + 25
-		var stats = target_stats.get(target_idx, {"Attempts": 0, "Hits": 0})
-		var hits = stats["Hits"]
-		var att = stats["Attempts"]
+		
+		# In PvP, format multi-player indicators: [✓|○|✓]
+		var status_str = ""
+		if pvp_mode and not players_list.is_empty():
+			var marks: Array[String] = []
+			for p in players_list:
+				var comp = p.get("completed", [])
+				if target_idx < comp.size() and comp[target_idx]:
+					marks.append("✓")
+				else:
+					marks.append("○")
+			status_str = " [" + "|".join(marks) + "]"
+		else:
+			var stats = target_stats.get(target_idx, {"Attempts": 0, "Hits": 0})
+			status_str = " [%d/%d]" % [stats["Hits"], stats["Attempts"]]
 		
 		if target_idx == selected_target_index:
-			btn.text = "▶ %d YD (%d-%d YD Zone) [%d/%d]" % [dist_yd, front_wall, back_wall, hits, att]
-			var active_color = Color(0.2, 0.85, 1.0) if selected_side == "draw" else Color(1.0, 0.7, 0.2)
+			btn.text = "▶ %d YD (%d-%d YD Zone)%s" % [dist_yd, front_wall, back_wall, status_str]
+			var active_color = get_active_player_color() if pvp_mode else (Color(0.2, 0.85, 1.0) if selected_side == "draw" else Color(1.0, 0.7, 0.2))
 			btn.add_theme_color_override("font_color", active_color)
 			_apply_btn_style(btn, Color(0.20, 0.32, 0.46), Color(0.28, 0.42, 0.58))
 		else:
-			btn.text = "  %d YD (%d-%d YD Zone) [%d/%d]" % [dist_yd, front_wall, back_wall, hits, att]
+			btn.text = "  %d YD (%d-%d YD Zone)%s" % [dist_yd, front_wall, back_wall, status_str]
 			btn.remove_theme_color_override("font_color")
 			_apply_btn_style(btn, Color(0.08, 0.13, 0.18), Color(0.14, 0.22, 0.30))
 
@@ -1733,18 +2137,79 @@ func _update_hud() -> void:
 	if attempts_lbl == null:
 		return
 	var cur_data = target_data[selected_target_index]
-	var stats = target_stats.get(selected_target_index, {"Attempts": 0, "Hits": 0})
-	var att = stats["Attempts"]
-	var hits = stats["Hits"]
-	var acc = (float(hits) / float(att) * 100.0) if att > 0 else 0.0
-	
-	target_title_lbl.text = "%d YD %s ZONE" % [cur_data["dist_yd"], cur_data["side"].to_upper()]
-	target_title_lbl.add_theme_color_override("font_color", cur_data["color"])
-	
-	attempts_lbl.text = str(att)
-	hits_lbl.text = str(hits)
-	accuracy_lbl.text = "%.0f%%" % acc
-	total_hits_lbl.text = str(total_greens_hit)
+
+	if pvp_mode and not players_list.is_empty():
+		var cur_p = players_list[active_player_index]
+		var cur_color = get_active_player_color()
+		var p_name = get_active_player_name()
+		var p_comp_count = get_player_completed_count(cur_p)
+		var p_shots: int = cur_p.get("shots", 0)
+
+		if t_sub_lbl:
+			t_sub_lbl.text = "CURRENT TURN"
+			t_sub_lbl.add_theme_color_override("font_color", cur_color)
+		target_title_lbl.text = "%s (%d/%d)" % [p_name.to_upper(), p_comp_count, PVP_TARGET_GOAL]
+		target_title_lbl.add_theme_color_override("font_color", cur_color)
+
+		if att_sub_lbl:
+			att_sub_lbl.text = "ZONES HIT"
+			att_sub_lbl.add_theme_color_override("font_color", Color(0.2, 0.85, 0.35))
+		attempts_lbl.text = "%d / %d" % [p_comp_count, PVP_TARGET_GOAL]
+
+		if h_sub_lbl:
+			h_sub_lbl.text = "MATCH STATUS"
+			h_sub_lbl.add_theme_color_override("font_color", Color(0.15, 0.85, 1.0))
+		if pvp_winner != "":
+			hits_lbl.text = "%s WINS!" % pvp_winner.to_upper()
+			hits_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+		else:
+			var max_comp = 0
+			for p in players_list:
+				max_comp = max(max_comp, get_player_completed_count(p))
+			hits_lbl.text = "%d/%d LEAD" % [max_comp, PVP_TARGET_GOAL]
+			hits_lbl.add_theme_color_override("font_color", Color.WHITE)
+
+		if acc_sub_lbl:
+			acc_sub_lbl.text = "TOTAL SHOTS"
+			acc_sub_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.35))
+		accuracy_lbl.text = "%d SHOTS" % p_shots
+
+		if tot_sub_lbl:
+			tot_sub_lbl.text = "TARGET ZONE"
+			tot_sub_lbl.add_theme_color_override("font_color", Color(0.6, 0.85, 1.0))
+		total_hits_lbl.text = "%d YD %s" % [cur_data["dist_yd"], cur_data["side"].to_upper()]
+	else:
+		var stats = target_stats.get(selected_target_index, {"Attempts": 0, "Hits": 0})
+		var att = stats["Attempts"]
+		var hits = stats["Hits"]
+		var acc = (float(hits) / float(att) * 100.0) if att > 0 else 0.0
+
+		if t_sub_lbl:
+			t_sub_lbl.text = "ACTIVE TARGET"
+			t_sub_lbl.add_theme_color_override("font_color", Color(0.15, 0.85, 1.0))
+		target_title_lbl.text = "%d YD %s ZONE" % [cur_data["dist_yd"], cur_data["side"].to_upper()]
+		target_title_lbl.add_theme_color_override("font_color", cur_data["color"])
+
+		if att_sub_lbl:
+			att_sub_lbl.text = "ATTEMPTS"
+			att_sub_lbl.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
+		attempts_lbl.text = str(att)
+
+		if h_sub_lbl:
+			h_sub_lbl.text = "HITS"
+			h_sub_lbl.add_theme_color_override("font_color", Color(0.2, 0.85, 0.35))
+		hits_lbl.text = str(hits)
+		hits_lbl.add_theme_color_override("font_color", Color.WHITE)
+
+		if acc_sub_lbl:
+			acc_sub_lbl.text = "ACCURACY"
+			acc_sub_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.35))
+		accuracy_lbl.text = "%.0f%%" % acc
+
+		if tot_sub_lbl:
+			tot_sub_lbl.text = "TOTAL HITS"
+			tot_sub_lbl.add_theme_color_override("font_color", Color(0.6, 0.85, 1.0))
+		total_hits_lbl.text = str(total_greens_hit)
 	
 	_update_zone_hud()
 

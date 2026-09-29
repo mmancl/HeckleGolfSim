@@ -66,7 +66,7 @@ internal static class ObjCRuntime
     public static extern IntPtr objc_msgSend_str(IntPtr receiver, IntPtr selector, [MarshalAs(UnmanagedType.LPUTF8Str)] string arg1);
 
     [DllImport(LibObjC, EntryPoint = "objc_msgSend")]
-    public static extern IntPtr objc_msgSend_bytes(IntPtr receiver, IntPtr selector, byte[] arg1, int arg2);
+    public static extern IntPtr objc_msgSend_bytes(IntPtr receiver, IntPtr selector, byte[] arg1, UIntPtr arg2);
 
     [DllImport(LibObjC, EntryPoint = "objc_autoreleasePoolPush")]
     public static extern IntPtr objc_autoreleasePoolPush();
@@ -130,7 +130,7 @@ internal static class ObjCRuntime
         }
 
         IntPtr nsDataCls = objc_getClass("NSData");
-        return objc_msgSend_bytes(nsDataCls, sel_registerName("dataWithBytes:length:"), bytes, bytes.Length);
+        return objc_msgSend_bytes(nsDataCls, sel_registerName("dataWithBytes:length:"), bytes, (UIntPtr)bytes.Length);
     }
 
     public static byte[] NSDataToBytes(IntPtr nsData)

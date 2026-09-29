@@ -387,6 +387,7 @@ public partial class AnnouncerEngine : Node
 
     public void SpeakIdleComment()
     {
+        if (!IsHeckleActiveForCurrentScene()) return;
         PlayCategory("player_afk_heckles");
     }
 
@@ -411,16 +412,7 @@ public partial class AnnouncerEngine : Node
 
     public void SpeakSettingsOpened()
     {
-        var mode = GetCurrentGameMode();
-        bool allow = mode switch
-        {
-            SimGameMode.CoursePlay => HeckleCoursePlay,
-            SimGameMode.Range => HeckleRange,
-            SimGameMode.MiniGames => HeckleMiniGames,
-            _ => HeckleCoursePlay || HeckleRange || HeckleMiniGames
-        };
-
-        if (!allow) return;
+        if (!IsHeckleActiveForCurrentScene()) return;
 
         _idleTimer = 0.0f;
         PlayCategory("settings_opened");

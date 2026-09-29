@@ -201,6 +201,11 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         EmitStatus("Ready");
     }
 
+    public async Task ArmAsync(CancellationToken cancellationToken = default)
+    {
+        await SetReadyAsync(cancellationToken);
+    }
+
     public async ValueTask DisposeAsync()
     {
         _bluetoothClient.DeviceDiscovered -= OnDeviceDiscovered;
@@ -477,13 +482,31 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
                 if (_isDetectBallActive && _isConnected)
                 {
                     _logInfo("Auto-rearming launch monitor detect mode after hardware reported idle.");
-                    await _delayAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
-                    await SetReadyAsync();
+                    _ = RunAsync(async () =>
+                    {
+                        await _delayAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+                        await ArmAsync();
+                    });
                 }
             }
             else if (statusCode == SquareProtocol.StatusReady)
             {
                 EmitStatus("Ready");
+                EmitReady(true);
+            }
+            else if (statusCode == SquareProtocol.StatusDetect)
+            {
+                EmitStatus("Detecting");
+                EmitReady(false);
+            }
+            else if (statusCode == SquareProtocol.StatusShot)
+            {
+                EmitReady(false);
+            }
+            else if (statusCode == SquareProtocol.StatusDone)
+            {
+                _logInfo("Square reported Done status.");
+                EmitReady(false);
             }
             return;
         }
@@ -494,7 +517,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
             var ready = sensor.BallReady && sensor.BallDetected;
             EmitReady(ready);
             SensorDataReceived?.Invoke(sensor);
-            _logInfo($"Sensor packet parsed. ready={ready}, pos=({sensor.PositionX}, {sensor.PositionY}, {sensor.PositionZ})");
+            _logInfo($"Sensor packet parsed. ready={ready}, detected={sensor.BallDetected}, pos=({sensor.PositionX}, {sensor.PositionY}, {sensor.PositionZ})");
             return;
         }
 
@@ -510,6 +533,21 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         }
 
         _lastPayload = payload;
+
+        if (!metrics.HasClubData && _isConnected)
+        {
+            try
+            {
+                await WriteCommandAsync(
+                    SquareCommandBuilder.RequestClubMetrics(NextSequence()),
+                    CancellationToken.None,
+                    BluetoothWriteMode.WithoutResponse);
+            }
+            catch (Exception ex)
+            {
+                _logError($"Failed to request club metrics: {ex.Message}");
+            }
+        }
 
         SquareShotMetrics? immediateShot = null;
         await _shotLock.WaitAsync();

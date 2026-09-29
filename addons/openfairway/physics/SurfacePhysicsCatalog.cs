@@ -6,7 +6,7 @@ public static class SurfacePhysicsCatalog
     private static readonly SurfacePhysicsSettings Fairway = new(
         PhysicsEnums.SurfaceType.Fairway,
         kineticFriction: 0.44f,
-        rollingFriction: 0.041f,
+        rollingFriction: 0.085f,
         grassViscosity: 0.0014f,
         criticalAngle: 0.285f,
         spinbackResponseScale: 0.69f,
@@ -20,7 +20,7 @@ public static class SurfacePhysicsCatalog
     private static readonly SurfacePhysicsSettings FairwaySoft = new(
         PhysicsEnums.SurfaceType.FairwaySoft,
         kineticFriction: 0.50f,
-        rollingFriction: 0.058f,
+        rollingFriction: 0.110f,
         grassViscosity: 0.0020f,
         criticalAngle: 0.31f,
         spinbackResponseScale: 0.84f,
@@ -34,8 +34,8 @@ public static class SurfacePhysicsCatalog
     private static readonly SurfacePhysicsSettings Rough = new(
         PhysicsEnums.SurfaceType.Rough,
         kineticFriction: 0.62f,
-        rollingFriction: 0.095f,
-        grassViscosity: 0.0032f,
+        rollingFriction: 0.175f,
+        grassViscosity: 0.0035f,
         criticalAngle: 0.35f,
         spinbackResponseScale: 0.70f,
         spinbackThetaBoostMax: 0.0f,
@@ -48,7 +48,7 @@ public static class SurfacePhysicsCatalog
     private static readonly SurfacePhysicsSettings Firm = new(
         PhysicsEnums.SurfaceType.Firm,
         kineticFriction: 0.29f,
-        rollingFriction: 0.027f,
+        rollingFriction: 0.065f,
         grassViscosity: 0.0009f,
         criticalAngle: 0.245f,
         spinbackResponseScale: 0.55f,

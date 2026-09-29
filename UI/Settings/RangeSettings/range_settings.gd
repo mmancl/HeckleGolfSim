@@ -39,6 +39,7 @@ var _graphics_quality_changed: bool = false
 var _wind_slider : HSlider = null
 var _wind_slider_lbl : Label = null
 var _fullscreen_check : CheckButton = null
+var _units_label : Label = null
 
 const SQUARE_UI_LOG_PREFIX := "[SquareUI]"
 const SQUARE_CLUBS := {
@@ -240,19 +241,47 @@ func _ready() -> void:
 
 	GlobalSettings.range_settings.range_units.setting_changed.connect(update_units)
 
+	var gameplay_vbox = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox
+	var camera_vbox = $MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox
+	var lm_vbox = $MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox
+
+	var units_row = gameplay_vbox.get_node_or_null("Units") as HBoxContainer
+	var auto_reset_row = gameplay_vbox.get_node_or_null("AutoBallReset") as HBoxContainer
+	var camera_follow_row = camera_vbox.get_node_or_null("CameraFollow") as HBoxContainer
+	var shot_injector_row = lm_vbox.get_node_or_null("ShotInjector") as HBoxContainer
+
 	# Initialize toggle button states
-	$MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/Units/CheckButton.set_pressed_no_signal(
-		GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.METRIC
-	)
-	$MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox/CameraFollow/CheckButton.set_pressed_no_signal(
-		GlobalSettings.range_settings.camera_follow_mode.value
-	)
-	$MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox/AutoBallReset/CheckButton.set_pressed_no_signal(
-		GlobalSettings.range_settings.auto_ball_reset.value
-	)
-	$MarginContainer/VBoxContainer/TabContainer/LaunchMonitor/MarginContainer/LaunchMonitorVBox/ShotInjector/CheckButton.set_pressed_no_signal(
-		GlobalSettings.range_settings.shot_injector_enabled.value
-	)
+	var units_check = _find_check_button(units_row)
+	if units_check != null:
+		units_check.set_pressed_no_signal(GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.METRIC)
+	var camera_follow_check = _find_check_button(camera_follow_row)
+	if camera_follow_check != null:
+		camera_follow_check.set_pressed_no_signal(GlobalSettings.range_settings.camera_follow_mode.value)
+	var auto_reset_check = _find_check_button(auto_reset_row)
+	if auto_reset_check != null:
+		auto_reset_check.set_pressed_no_signal(GlobalSettings.range_settings.auto_ball_reset.value)
+	var shot_injector_check = _find_check_button(shot_injector_row)
+	if shot_injector_check != null:
+		shot_injector_check.set_pressed_no_signal(GlobalSettings.range_settings.shot_injector_enabled.value)
+
+	_format_static_toggle_row(units_row, "Units (Metric)" if GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.METRIC else "Units (Imperial)")
+	_units_label = units_row.get_node_or_null("Label") if units_row != null else null
+	_format_static_toggle_row(auto_reset_row, "Auto Ball Reset")
+	_format_static_toggle_row(camera_follow_row, "Camera Follow Mode")
+	_format_static_toggle_row(shot_injector_row, "Shot Injector")
+
+	if camera_follow_row != null:
+		camera_follow_row.get_parent().remove_child(camera_follow_row)
+		var cam_top_grid = _create_toggle_grid([camera_follow_row], 3)
+		camera_vbox.add_child(cam_top_grid)
+		camera_vbox.move_child(cam_top_grid, 0)
+
+	if shot_injector_row != null:
+		shot_injector_row.get_parent().remove_child(shot_injector_row)
+		var lm_top_grid = _create_toggle_grid([shot_injector_row], 3)
+		lm_vbox.add_child(lm_top_grid)
+		lm_vbox.move_child(lm_top_grid, 0)
+
 	_setup_displayed_stats_section()
 	if GlobalSettings and GlobalSettings.range_settings and "displayed_stats" in GlobalSettings.range_settings:
 		GlobalSettings.range_settings.displayed_stats.setting_changed.connect(func(_v):
@@ -263,11 +292,16 @@ func _ready() -> void:
 	_setup_hecklelinks_announcer_section()
 	_setup_keybindings_section()
 
-	var gameplay_vbox = $MarginContainer/VBoxContainer/TabContainer/Gameplay/MarginContainer/GameplayVBox
-
 	# Wind Simulation toggle in Gameplay tab
 	var wind_toggle_row = _create_toggle_setting_row("Wind Simulation", "wind_enabled")
-	gameplay_vbox.add_child(wind_toggle_row)
+
+	if units_row != null:
+		units_row.get_parent().remove_child(units_row)
+	if auto_reset_row != null:
+		auto_reset_row.get_parent().remove_child(auto_reset_row)
+	var gameplay_top_toggles = _create_toggle_grid([units_row, auto_reset_row, wind_toggle_row], 3)
+	gameplay_vbox.add_child(gameplay_top_toggles)
+	gameplay_vbox.move_child(gameplay_top_toggles, 0)
 
 	var wind_slider_container = VBoxContainer.new()
 	wind_slider_container.name = "WindSliderContainer"
@@ -346,6 +380,31 @@ func _ready() -> void:
 	)
 
 	gameplay_vbox.add_child(wind_slider_container)
+	gameplay_vbox.move_child(wind_slider_container, 1)
+
+	# Group top gameplay numeric range items into a 2-column grid
+	var ball_reset_row = gameplay_vbox.get_node_or_null("BallResetTimer") as HBoxContainer
+	var temp_row = gameplay_vbox.get_node_or_null("Temperature") as HBoxContainer
+	var alt_row = gameplay_vbox.get_node_or_null("Altitude") as HBoxContainer
+	var tracer_row = gameplay_vbox.get_node_or_null("TracerCount") as HBoxContainer
+
+	if ball_reset_row != null and temp_row != null and alt_row != null and tracer_row != null:
+		var numeric_rows = [ball_reset_row, temp_row, alt_row, tracer_row]
+		for r in numeric_rows:
+			r.get_parent().remove_child(r)
+			r.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			var lbl = r.get_node_or_null("Label")
+			if lbl != null:
+				lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+			var ctrl = r.get_node_or_null("Control3")
+			if ctrl != null:
+				r.remove_child(ctrl)
+				ctrl.queue_free()
+
+		var gameplay_spin_grid = _create_range_grid(numeric_rows, 2)
+		gameplay_vbox.add_child(gameplay_spin_grid)
+		gameplay_vbox.move_child(gameplay_spin_grid, 2)
 
 	# Foam Ball Boost Mode section in Gameplay tab
 	var foam_sep = HSeparator.new()
@@ -365,7 +424,7 @@ func _ready() -> void:
 	gameplay_vbox.add_child(foam_desc)
 
 	var foam_toggle_row = _create_toggle_setting_row("Enable Foam Ball Boost", "foam_ball_boost_enabled")
-	gameplay_vbox.add_child(foam_toggle_row)
+	gameplay_vbox.add_child(_create_toggle_grid([foam_toggle_row], 3))
 	
 	var foam_slider_container = VBoxContainer.new()
 	foam_slider_container.name = "FoamBoostSliderContainer"
@@ -377,12 +436,15 @@ func _ready() -> void:
 	foam_slider_row.name = "FoamBoostSliderRow"
 	foam_slider_row.custom_minimum_size = Vector2(0, 52)
 	foam_slider_row.add_theme_constant_override("separation", 10)
+	foam_slider_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
 	var foam_slider_lbl = Label.new()
 	foam_slider_lbl.text = "Boost Amount: %.0f%%" % boost_setting.value
-	foam_slider_lbl.add_theme_font_size_override("font_size", 19)
-	foam_slider_lbl.custom_minimum_size = Vector2(300, 0)
+	foam_slider_lbl.add_theme_font_size_override("font_size", 18)
+	foam_slider_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	foam_slider_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	foam_slider_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	foam_slider_lbl.tooltip_text = "Boost Amount"
 	foam_slider_row.add_child(foam_slider_lbl)
 	
 	var minus_btn = Button.new()
@@ -398,7 +460,7 @@ func _ready() -> void:
 	slider.max_value = 100.0
 	slider.step = 1.0
 	slider.value = boost_setting.value
-	slider.custom_minimum_size = Vector2(180, 48)
+	slider.custom_minimum_size = Vector2(140, 48)
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	foam_slider_row.add_child(slider)
 	
@@ -409,7 +471,8 @@ func _ready() -> void:
 	ThemeManager.apply_nav_button_style(plus_btn, 8)
 	foam_slider_row.add_child(plus_btn)
 	
-	foam_slider_container.add_child(foam_slider_row)
+	var foam_grid = _create_range_grid([foam_slider_row], 2)
+	foam_slider_container.add_child(foam_grid)
 	
 	# Breakdown preview label showing exact scaling for each club category
 	var preview_lbl = Label.new()
@@ -475,12 +538,15 @@ func _ready() -> void:
 	curve_slider_row.name = "ShotShapeSensitivityRow"
 	curve_slider_row.custom_minimum_size = Vector2(0, 52)
 	curve_slider_row.add_theme_constant_override("separation", 10)
+	curve_slider_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	var curve_slider_lbl = Label.new()
 	curve_slider_lbl.text = "Curvature: %.2fx" % curve_setting.value
-	curve_slider_lbl.add_theme_font_size_override("font_size", 19)
-	curve_slider_lbl.custom_minimum_size = Vector2(300, 0)
+	curve_slider_lbl.add_theme_font_size_override("font_size", 18)
+	curve_slider_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	curve_slider_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	curve_slider_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	curve_slider_lbl.tooltip_text = "Shot Shape Sensitivity"
 	curve_slider_row.add_child(curve_slider_lbl)
 
 	var curve_minus_btn = Button.new()
@@ -496,7 +562,7 @@ func _ready() -> void:
 	curve_slider.max_value = 2.0
 	curve_slider.step = 0.05
 	curve_slider.value = curve_setting.value
-	curve_slider.custom_minimum_size = Vector2(180, 48)
+	curve_slider.custom_minimum_size = Vector2(140, 48)
 	curve_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	curve_slider_row.add_child(curve_slider)
 
@@ -507,7 +573,8 @@ func _ready() -> void:
 	ThemeManager.apply_nav_button_style(curve_plus_btn, 8)
 	curve_slider_row.add_child(curve_plus_btn)
 
-	curve_slider_container.add_child(curve_slider_row)
+	var curve_grid = _create_range_grid([curve_slider_row], 2)
+	curve_slider_container.add_child(curve_grid)
 
 	curve_slider.value_changed.connect(func(val: float):
 		curve_setting.set_value(val)
@@ -533,23 +600,17 @@ func _ready() -> void:
 	gimme_label.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
 	gameplay_vbox.add_child(gimme_label)
 	
-	var gimme_1_toggle = _create_toggle_setting_row("Gimme +1 Stroke Circle", "gimme_range_1_enabled")
-	gameplay_vbox.add_child(gimme_1_toggle)
+	var gimme_1_toggle = _create_toggle_setting_row("Gimme +1 Circle", "gimme_range_1_enabled")
+	var gimme_2_toggle = _create_toggle_setting_row("Gimme +2 Circle", "gimme_range_2_enabled")
+	var gimme_3_toggle = _create_toggle_setting_row("Gimme +3 Circle", "gimme_range_3_enabled")
+	var gimme_toggles_grid = _create_toggle_grid([gimme_1_toggle, gimme_2_toggle, gimme_3_toggle], 3)
+	gameplay_vbox.add_child(gimme_toggles_grid)
 	
 	var gimme_1_dist = _create_spinbox_setting_row("Gimme +1 Distance", "gimme_range_1_distance", 1.0, 100.0, 0.5, "ft")
-	gameplay_vbox.add_child(gimme_1_dist)
-	
-	var gimme_2_toggle = _create_toggle_setting_row("Gimme +2 Strokes Circle", "gimme_range_2_enabled")
-	gameplay_vbox.add_child(gimme_2_toggle)
-	
 	var gimme_2_dist = _create_spinbox_setting_row("Gimme +2 Distance", "gimme_range_2_distance", 1.0, 100.0, 0.5, "ft")
-	gameplay_vbox.add_child(gimme_2_dist)
-
-	var gimme_3_toggle = _create_toggle_setting_row("Gimme +3 Strokes Circle", "gimme_range_3_enabled")
-	gameplay_vbox.add_child(gimme_3_toggle)
-	
 	var gimme_3_dist = _create_spinbox_setting_row("Gimme +3 Distance", "gimme_range_3_distance", 1.0, 100.0, 0.5, "ft")
-	gameplay_vbox.add_child(gimme_3_dist)
+	var gimme_dist_grid = _create_range_grid([gimme_1_dist, gimme_2_dist, gimme_3_dist], 2)
+	gameplay_vbox.add_child(gimme_dist_grid)
 
 	var turn_sep = HSeparator.new()
 	gameplay_vbox.add_child(turn_sep)
@@ -563,51 +624,43 @@ func _ready() -> void:
 	var turn_order_row = _create_option_setting_row("Turn Order Mode", "turn_order_mode", ["Stay Up", "Classic", "Full Hole"])
 	gameplay_vbox.add_child(turn_order_row)
 	
-	var custom_next_player_toggle = _create_toggle_setting_row("Repeat Shot if <= 35% Club Distance", "custom_next_player")
-	gameplay_vbox.add_child(custom_next_player_toggle)
-
+	var custom_next_player_toggle = _create_toggle_setting_row("Repeat Shot <= 35% Dist", "custom_next_player")
 	var golf_clap_toggle = _create_toggle_setting_row("Golf Clap Audio", "golf_clap_enabled")
-	gameplay_vbox.add_child(golf_clap_toggle)
-
 	var ambient_sound_toggle = _create_toggle_setting_row("Ambient Nature Sounds", "ambient_sound_enabled")
-	gameplay_vbox.add_child(ambient_sound_toggle)
-
 	var menu_music_toggle = _create_toggle_setting_row("Menu Soundtrack", "menu_music_enabled")
-	gameplay_vbox.add_child(menu_music_toggle)
-
 	var minigame_music_toggle = _create_toggle_setting_row("Minigame Music Soundtrack", "minigame_music_enabled")
-	gameplay_vbox.add_child(minigame_music_toggle)
-
-	var suspense_toggle = _create_toggle_setting_row("Course Play Suspense (Heartbeat & Tunnel Vision)", "tension_effects_enabled")
-	gameplay_vbox.add_child(suspense_toggle)
-
+	var suspense_toggle = _create_toggle_setting_row("Course Play Suspense", "tension_effects_enabled")
 	var shot_analysis_toggle = _create_toggle_setting_row("Shot Analysis Suggestions", "shot_analysis_enabled")
-	gameplay_vbox.add_child(shot_analysis_toggle)
+
+	var audio_toggles_grid = _create_toggle_grid([
+		custom_next_player_toggle,
+		golf_clap_toggle,
+		ambient_sound_toggle,
+		menu_music_toggle,
+		minigame_music_toggle,
+		suspense_toggle,
+		shot_analysis_toggle
+	], 3)
+	gameplay_vbox.add_child(audio_toggles_grid)
 
 	var gs_sep = HSeparator.new()
 	gameplay_vbox.add_child(gs_sep)
 	
-	var green_speed_row = _create_slider_setting_row("Green Speed (Courses)", "green_speed", 6.0, 16.0, 0.5)
-	gameplay_vbox.add_child(green_speed_row)
-
-	var putting_green_speed_row = _create_slider_setting_row("Putting Minigame Green Speed", "putting_green_speed", 6.0, 16.0, 0.5)
-	gameplay_vbox.add_child(putting_green_speed_row)
+	var green_speed_row = _create_slider_setting_row("Green Speed", "green_speed", 6.0, 16.0, 0.5)
+	var green_speed_grid = _create_range_grid([green_speed_row], 2)
+	gameplay_vbox.add_child(green_speed_grid)
 
 
 	# Create and insert camera configuration settings rows in the Camera tab
-	var camera_vbox = $MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox
+	camera_vbox = $MarginContainer/VBoxContainer/TabContainer/Camera/MarginContainer/CameraVBox
 	
 	var height_row = _create_spinbox_setting_row("Camera Height", "camera_height", 0.5, 10.0, 0.1, "m")
-	camera_vbox.add_child(height_row)
-	
 	var dist_row = _create_spinbox_setting_row("Camera Distance", "camera_distance", 1.0, 30.0, 0.1, "m")
-	camera_vbox.add_child(dist_row)
-	
 	var fov_row = _create_spinbox_setting_row("Camera FOV", "camera_fov", 1.0, 90.0, 0.1, "deg")
-	camera_vbox.add_child(fov_row)
-
 	var far_row = _create_spinbox_setting_row("Camera Far", "camera_far", 100.0, 1000.0, 1.0, "m")
-	camera_vbox.add_child(far_row)
+	
+	var camera_range_grid = _create_range_grid([dist_row, height_row, fov_row, far_row], 2)
+	camera_vbox.add_child(camera_range_grid)
 	
 	# Visual effects separator
 	var fx_sep = HSeparator.new()
@@ -622,25 +675,27 @@ func _ready() -> void:
 	var graphics_row = _create_option_setting_row("Graphics Quality", "graphics_quality", ["Low", "High"])
 	camera_vbox.add_child(graphics_row)
 	
+	var visual_toggles: Array[Control] = []
 	if GlobalSettings != null and GlobalSettings.has_method("is_fullscreen_supported") and GlobalSettings.is_fullscreen_supported():
 		var fs_row = _create_fullscreen_setting_row("Windowed Full Screen")
-		camera_vbox.add_child(fs_row)
+		visual_toggles.append(fs_row)
 	
 	# DOF toggle
 	var dof_row = _create_toggle_setting_row("Depth of Field", "dof_enabled")
-	camera_vbox.add_child(dof_row)
-	
-	# DOF blur amount
-	var blur_row = _create_spinbox_setting_row("DOF Blur", "dof_blur_amount", 0.0, 0.3, 0.01, "")
-	camera_vbox.add_child(blur_row)
+	visual_toggles.append(dof_row)
 	
 	# Vignette toggle
 	var vig_row = _create_toggle_setting_row("Vignette", "vignette_enabled")
-	camera_vbox.add_child(vig_row)
+	visual_toggles.append(vig_row)
 	
-	# Vignette intensity
+	var visual_toggles_grid = _create_toggle_grid(visual_toggles, 3)
+	camera_vbox.add_child(visual_toggles_grid)
+	
+	# DOF blur amount and Vignette intensity
+	var blur_row = _create_spinbox_setting_row("DOF Blur", "dof_blur_amount", 0.0, 0.3, 0.01, "")
 	var vig_int_row = _create_spinbox_setting_row("Vignette Intensity", "vignette_intensity", 0.0, 3.0, 0.1, "")
-	camera_vbox.add_child(vig_int_row)
+	var vfx_range_grid = _create_range_grid([blur_row, vig_int_row], 2)
+	camera_vbox.add_child(vfx_range_grid)
 
 	# Add Close button dynamically to ButtonsHBox and style all buttons
 	var buttons_hbox = get_node_or_null("MarginContainer/VBoxContainer/ButtonsHBox")
@@ -689,6 +744,9 @@ func request_close() -> void:
 			if "visible" in curr:
 				curr.visible = false
 		curr = curr.get_parent()
+	var vp = get_viewport()
+	if vp != null:
+		vp.gui_release_focus()
 	close_settings_requested.emit()
 	_on_close_settings_requested()
 
@@ -703,6 +761,9 @@ func _on_close_settings_requested() -> void:
 			if "visible" in curr:
 				curr.visible = false
 		curr = curr.get_parent()
+	var vp = get_viewport()
+	if vp != null:
+		vp.gui_release_focus()
 	if GlobalSettings and GlobalSettings.range_settings and "graphics_quality" in GlobalSettings.range_settings:
 		GlobalSettings.save_settings()
 		var q = str(GlobalSettings.range_settings.graphics_quality.value)
@@ -853,16 +914,12 @@ func _setup_square_monitor_section() -> void:
 	title.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
 	section.add_child(title)
 
-	var enabled_row := HBoxContainer.new()
-	enabled_row.custom_minimum_size = Vector2(0, 52)
-	enabled_row.add_child(_make_label("Enabled"))
-	enabled_row.add_child(_make_spacer())
 	square_enabled_button = CheckButton.new()
 	square_enabled_button.custom_minimum_size = Vector2(72, 48)
 	square_enabled_button.set_pressed_no_signal(bool(launch_monitor.settings.get("enabled", false)))
 	square_enabled_button.toggled.connect(_on_square_enabled_toggled)
-	enabled_row.add_child(square_enabled_button)
-	section.add_child(enabled_row)
+	var enabled_row := _create_toggle_widget("Enabled", square_enabled_button)
+	section.add_child(_create_toggle_grid([enabled_row], 3))
 
 	var type_row := HBoxContainer.new()
 	type_row.custom_minimum_size = Vector2(0, 52)
@@ -898,6 +955,27 @@ func _setup_square_monitor_section() -> void:
 	square_device_option.item_selected.connect(_on_square_device_selected)
 	device_row.add_child(square_device_option)
 	section.add_child(device_row)
+
+	var status_info_vbox := VBoxContainer.new()
+	status_info_vbox.name = "SquareStatusInfo"
+	status_info_vbox.add_theme_constant_override("separation", 6)
+
+	square_status_label = Label.new()
+	square_status_label.add_theme_font_size_override("font_size", 18)
+	square_status_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+
+	square_battery_label = Label.new()
+	square_battery_label.add_theme_font_size_override("font_size", 18)
+	square_battery_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+
+	square_firmware_label = Label.new()
+	square_firmware_label.add_theme_font_size_override("font_size", 18)
+	square_firmware_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+
+	status_info_vbox.add_child(square_status_label)
+	status_info_vbox.add_child(square_battery_label)
+	status_info_vbox.add_child(square_firmware_label)
+	section.add_child(status_info_vbox)
 
 	var action_row := HBoxContainer.new()
 	action_row.custom_minimum_size = Vector2(0, 52)
@@ -978,40 +1056,22 @@ func _setup_square_monitor_section() -> void:
 	handedness_row.add_child(square_handedness_option)
 	section.add_child(handedness_row)
 
-	var sound_row := HBoxContainer.new()
-	sound_row.custom_minimum_size = Vector2(0, 52)
-	sound_row.add_child(_make_label("Ready Sound"))
-	sound_row.add_child(_make_spacer())
 	var sound_button := CheckButton.new()
 	sound_button.custom_minimum_size = Vector2(72, 48)
 	sound_button.set_pressed_no_signal(bool(launch_monitor.settings.get("ready_ding_enabled", true)))
 	sound_button.toggled.connect(func(toggled_on: bool):
 		launch_monitor.set_ready_ding_enabled(toggled_on)
 	)
-	sound_row.add_child(sound_button)
-	section.add_child(sound_row)
+	var sound_row := _create_toggle_widget("Ready Sound", sound_button)
 
-	var hud_row := HBoxContainer.new()
-	hud_row.custom_minimum_size = Vector2(0, 52)
-	var hud_label := _make_label("Ready Indicator")
-	hud_label.custom_minimum_size = Vector2(160, 0)
-	hud_row.add_child(hud_label)
-	hud_row.add_child(_make_spacer())
 	var hud_button := CheckButton.new()
 	hud_button.custom_minimum_size = Vector2(72, 48)
 	hud_button.set_pressed_no_signal(bool(launch_monitor.settings.get("ready_indicator_enabled", true)))
 	hud_button.toggled.connect(func(toggled_on: bool):
 		launch_monitor.set_ready_indicator_enabled(toggled_on)
 	)
-	hud_row.add_child(hud_button)
-	section.add_child(hud_row)
+	var hud_row := _create_toggle_widget("Ready Indicator", hud_button)
 
-	var guide_row := HBoxContainer.new()
-	guide_row.custom_minimum_size = Vector2(0, 52)
-	var guide_label := _make_label("Placement Guide")
-	guide_label.custom_minimum_size = Vector2(160, 0)
-	guide_row.add_child(guide_label)
-	guide_row.add_child(_make_spacer())
 	var guide_button := CheckButton.new()
 	guide_button.custom_minimum_size = Vector2(72, 48)
 	guide_button.set_pressed_no_signal(bool(launch_monitor.settings.get("ball_placement_guide_enabled", true)))
@@ -1019,24 +1079,10 @@ func _setup_square_monitor_section() -> void:
 		if launch_monitor.has_method("set_ball_placement_guide_enabled"):
 			launch_monitor.set_ball_placement_guide_enabled(toggled_on)
 	)
-	guide_row.add_child(guide_button)
-	section.add_child(guide_row)
+	var guide_row := _create_toggle_widget("Placement Guide", guide_button)
 
-	square_status_label = Label.new()
-	square_status_label.add_theme_font_size_override("font_size", 18)
-	square_status_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
-	
-	square_battery_label = Label.new()
-	square_battery_label.add_theme_font_size_override("font_size", 18)
-	square_battery_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
-	
-	square_firmware_label = Label.new()
-	square_firmware_label.add_theme_font_size_override("font_size", 18)
-	square_firmware_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
-	
-	section.add_child(square_status_label)
-	section.add_child(square_battery_label)
-	section.add_child(square_firmware_label)
+	var lm_toggles_grid = _create_toggle_grid([sound_row, hud_row, guide_row], 3)
+	section.add_child(lm_toggles_grid)
 
 	root.add_child(section)
 
@@ -1304,11 +1350,13 @@ func _on_square_device_selected(index: int) -> void:
 	_square_debug("Selected device_id=%s (%s)" % [dev_id, launch_monitor.settings.get("device_name", "")])
 
 
-func _refresh_square_devices() -> void:
+func _refresh_square_devices(preferred_device_id: String = "") -> void:
 	if square_device_option == null or not has_node("/root/LaunchMonitorManager"):
 		return
 	var launch_monitor = get_node("/root/LaunchMonitorManager")
-	var selected_device := str(launch_monitor.settings.get("device_id", ""))
+	var selected_device := preferred_device_id
+	if selected_device == "":
+		selected_device = str(launch_monitor.settings.get("device_id", ""))
 	var saved_name := str(launch_monitor.settings.get("device_name", ""))
 	var saved_t := str(launch_monitor.settings.get("device_type", "auto"))
 	if saved_name == "":
@@ -1317,7 +1365,8 @@ func _refresh_square_devices() -> void:
 		launch_monitor.devices[selected_device] = {
 			"name": saved_name,
 			"rssi": 0,
-			"type": saved_t if saved_t != "auto" else launch_monitor.detect_device_type(selected_device, saved_name)
+			"type": saved_t if saved_t != "auto" else launch_monitor.detect_device_type(selected_device, saved_name),
+			"is_discovered": false
 		}
 
 	var matching_keys: Array[String] = []
@@ -1334,12 +1383,40 @@ func _refresh_square_devices() -> void:
 			continue
 		matching_keys.append(device_id)
 
-	# Auto-select first device if none is selected or current selection is invalid
-	if (selected_device == "" or not matching_keys.has(selected_device)) and matching_keys.size() > 0:
-		selected_device = matching_keys[0]
+	# Sort matching keys: live discovered devices first (highest RSSI first), then offline devices
+	matching_keys.sort_custom(func(a, b):
+		var dev_a = launch_monitor.devices[a]
+		var dev_b = launch_monitor.devices[b]
+		var live_a = bool(dev_a.get("is_discovered", false))
+		var live_b = bool(dev_b.get("is_discovered", false))
+		if live_a != live_b:
+			return live_a
+		var rssi_a = int(dev_a.get("rssi", 0))
+		var rssi_b = int(dev_b.get("rssi", 0))
+		var eff_a = rssi_a if (rssi_a < 0 and live_a) else -999
+		var eff_b = rssi_b if (rssi_b < 0 and live_b) else -999
+		return eff_a > eff_b
+	)
+
+	var active_live_keys: Array[String] = []
+	for k in matching_keys:
+		if bool(launch_monitor.devices[k].get("is_discovered", false)):
+			active_live_keys.append(k)
+
+	if preferred_device_id != "" and matching_keys.has(preferred_device_id):
+		selected_device = preferred_device_id
+	else:
+		var current_is_live := matching_keys.has(selected_device) and bool(launch_monitor.devices[selected_device].get("is_discovered", false))
+		if not current_is_live and not active_live_keys.is_empty():
+			selected_device = active_live_keys[0]
+		elif (selected_device == "" or not matching_keys.has(selected_device)) and matching_keys.size() > 0:
+			selected_device = matching_keys[0]
+
+	if selected_device != "":
 		launch_monitor.settings["device_id"] = selected_device
-		var dev = launch_monitor.devices[selected_device]
-		launch_monitor.settings["device_name"] = str(dev.get("name", ""))
+		if launch_monitor.devices.has(selected_device):
+			var dev = launch_monitor.devices[selected_device]
+			launch_monitor.settings["device_name"] = str(dev.get("name", ""))
 		launch_monitor._save_settings()
 
 	# Avoid clearing dropdown if items are already identical (prevents closing popup while user interacts)
@@ -1358,13 +1435,15 @@ func _refresh_square_devices() -> void:
 			var device = launch_monitor.devices[device_id]
 			var dev_name: String = str(device.get("name", "Launch Monitor"))
 			var dev_type: String = str(device.get("type", ""))
+			var is_live: bool = bool(device.get("is_discovered", false))
 			if dev_type == "":
 				dev_type = launch_monitor.detect_device_type(device_id, dev_name)
 
 			var prefix := ""
 			if saved_t == "auto":
 				prefix = "[Garmin R10] " if dev_type == "garmin" else "[Square] "
-			var label := prefix + dev_name
+			var live_suffix := " 📶" if is_live else " (Offline)"
+			var label := prefix + dev_name + live_suffix
 			var index := square_device_option.item_count
 			square_device_option.add_item(label)
 			square_device_option.set_item_metadata(index, device_id)
@@ -1397,7 +1476,10 @@ func _update_square_status_labels() -> void:
 	if not has_node("/root/LaunchMonitorManager") or square_status_label == null:
 		return
 	var launch_monitor = get_node("/root/LaunchMonitorManager")
-	square_status_label.text = "Status: %s" % launch_monitor.status
+	var disp_status := str(launch_monitor.status)
+	if launch_monitor.is_ready and (disp_status == "Connecting" or disp_status.begins_with("Found")):
+		disp_status = "Connected"
+	square_status_label.text = "Status: %s" % disp_status
 	if square_scan_button != null:
 		square_scan_button.text = "Stop Scan" if launch_monitor.status == "Scanning" else "Scan"
 	if int(launch_monitor.battery_level) >= 0:
@@ -1473,9 +1555,18 @@ func _on_square_handedness_selected(index: int) -> void:
 	get_node("/root/LaunchMonitorManager").set_handedness(handedness)
 
 
-func _on_square_device_discovered(_device_id: String, _name: String, _rssi: int) -> void:
-	_square_debug("Device discovered event received")
-	_refresh_square_devices()
+func _on_square_device_discovered(device_id: String, name: String, rssi: int) -> void:
+	_square_debug("Device discovered event received for %s (rssi=%d)" % [device_id, rssi])
+	var launch_monitor = get_node_or_null("/root/LaunchMonitorManager")
+	var dev = launch_monitor.devices.get(device_id, {}) if launch_monitor != null else {}
+	var is_live: bool = bool(dev.get("is_discovered", false)) or (rssi != 0)
+	var pref_id := device_id if is_live else ""
+	_refresh_square_devices(pref_id)
+	if is_live and launch_monitor != null and (launch_monitor.status == "Scanning" or launch_monitor.status.contains("Searching")):
+		var display_name := name if name != "" else "Launch Monitor"
+		if square_status_label != null:
+			square_status_label.text = "Status: Found %s! Ready to connect." % display_name
+			square_status_label.add_theme_color_override("font_color", Color(0.35, 0.85, 0.45))
 
 
 func _on_square_status_changed(status: String) -> void:
@@ -1507,6 +1598,12 @@ func _square_debug(message: String) -> void:
 
 func update_units(value) -> void:
 	const m2ft = 3.28084
+
+	if _units_label != null and is_instance_valid(_units_label):
+		if value == PhysicsEnums.Units.IMPERIAL:
+			_units_label.text = "Units (Imperial)"
+		else:
+			_units_label.text = "Units (Metric)"
 
 	# Block spin box signals to prevent _on_*_value_changed from firing
 	# during conversion, which would double-write the setting.
@@ -1543,19 +1640,6 @@ func update_units(value) -> void:
 
 
 func _create_announcer_toggle_row(label_text: String, prop_name: String, announcer: Node) -> HBoxContainer:
-	var row := HBoxContainer.new()
-	row.custom_minimum_size = Vector2(0, 52)
-	var lbl := Label.new()
-	lbl.text = label_text
-	lbl.add_theme_font_size_override("font_size", 19)
-	lbl.custom_minimum_size = Vector2(200, 0)
-	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(lbl)
-	
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(spacer)
-	
 	var btn := CheckButton.new()
 	btn.custom_minimum_size = Vector2(72, 48)
 	btn.set_pressed_no_signal(bool(announcer.get(prop_name)))
@@ -1568,8 +1652,7 @@ func _create_announcer_toggle_row(label_text: String, prop_name: String, announc
 			else:
 				announcer.call("SpeakHecklesDisabled")
 	)
-	row.add_child(btn)
-	return row
+	return _create_toggle_widget(label_text, btn)
 
 
 func _setup_hecklelinks_announcer_section() -> void:
@@ -1599,8 +1682,9 @@ func _setup_hecklelinks_announcer_section() -> void:
 	course_lbl.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
 	section.add_child(course_lbl)
 
-	section.add_child(_create_announcer_toggle_row("Announcer Voice", "AnnouncerCoursePlay", announcer))
-	section.add_child(_create_announcer_toggle_row("Heckling", "HeckleCoursePlay", announcer))
+	var cp_voice = _create_announcer_toggle_row("Announcer Voice", "AnnouncerCoursePlay", announcer)
+	var cp_heckle = _create_announcer_toggle_row("Heckling", "HeckleCoursePlay", announcer)
+	section.add_child(_create_toggle_grid([cp_voice, cp_heckle], 3))
 
 	var sep1 := HSeparator.new()
 	section.add_child(sep1)
@@ -1612,8 +1696,9 @@ func _setup_hecklelinks_announcer_section() -> void:
 	range_lbl.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
 	section.add_child(range_lbl)
 
-	section.add_child(_create_announcer_toggle_row("Announcer Voice", "AnnouncerRange", announcer))
-	section.add_child(_create_announcer_toggle_row("Heckling", "HeckleRange", announcer))
+	var rg_voice = _create_announcer_toggle_row("Announcer Voice", "AnnouncerRange", announcer)
+	var rg_heckle = _create_announcer_toggle_row("Heckling", "HeckleRange", announcer)
+	section.add_child(_create_toggle_grid([rg_voice, rg_heckle], 3))
 
 	var sep2 := HSeparator.new()
 	section.add_child(sep2)
@@ -1625,8 +1710,9 @@ func _setup_hecklelinks_announcer_section() -> void:
 	mg_lbl.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
 	section.add_child(mg_lbl)
 
-	section.add_child(_create_announcer_toggle_row("Announcer Voice", "AnnouncerMiniGames", announcer))
-	section.add_child(_create_announcer_toggle_row("Heckling", "HeckleMiniGames", announcer))
+	var mg_voice = _create_announcer_toggle_row("Announcer Voice", "AnnouncerMiniGames", announcer)
+	var mg_heckle = _create_announcer_toggle_row("Heckling", "HeckleMiniGames", announcer)
+	section.add_child(_create_toggle_grid([mg_voice, mg_heckle], 3))
 
 	var sep3 := HSeparator.new()
 	section.add_child(sep3)
@@ -1638,7 +1724,8 @@ func _setup_hecklelinks_announcer_section() -> void:
 	voice_header.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
 	section.add_child(voice_header)
 
-	section.add_child(_create_announcer_toggle_row("Praise Commentary", "PraiseEnabled", announcer))
+	var praise_toggle = _create_announcer_toggle_row("Praise Commentary", "PraiseEnabled", announcer)
+	section.add_child(_create_toggle_grid([praise_toggle], 3))
 
 	var voice_row := HBoxContainer.new()
 	voice_row.custom_minimum_size = Vector2(0, 52)
@@ -1700,12 +1787,15 @@ func _setup_hecklelinks_announcer_section() -> void:
 	var pitch_row := HBoxContainer.new()
 	pitch_row.custom_minimum_size = Vector2(0, 52)
 	pitch_row.add_theme_constant_override("separation", 10)
+	pitch_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
 	var pitch_label := Label.new()
 	pitch_label.text = "Voice Pitch: %.1f" % announcer.get("Pitch")
-	pitch_label.add_theme_font_size_override("font_size", 19)
-	pitch_label.custom_minimum_size = Vector2(200, 0)
+	pitch_label.add_theme_font_size_override("font_size", 18)
+	pitch_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	pitch_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	pitch_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	pitch_label.tooltip_text = "Voice Pitch"
 	pitch_row.add_child(pitch_label)
 	
 	var pitch_minus_btn := Button.new()
@@ -1720,7 +1810,7 @@ func _setup_hecklelinks_announcer_section() -> void:
 	pitch_slider.max_value = 2.0
 	pitch_slider.step = 0.1
 	pitch_slider.value = announcer.get("Pitch")
-	pitch_slider.custom_minimum_size = Vector2(180, 48)
+	pitch_slider.custom_minimum_size = Vector2(140, 48)
 	pitch_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	pitch_slider.value_changed.connect(func(val):
 		announcer.set("Pitch", val)
@@ -1742,18 +1832,20 @@ func _setup_hecklelinks_announcer_section() -> void:
 	pitch_plus_btn.pressed.connect(func():
 		pitch_slider.value = clamp(pitch_slider.value + 0.1, pitch_slider.min_value, pitch_slider.max_value)
 	)
-	section.add_child(pitch_row)
 
 	# Voice Speed/Rate Slider Row with Touch Stepper
 	var rate_row := HBoxContainer.new()
 	rate_row.custom_minimum_size = Vector2(0, 52)
 	rate_row.add_theme_constant_override("separation", 10)
+	rate_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
 	var rate_label := Label.new()
 	rate_label.text = "Voice Speed: %.1f" % announcer.get("Rate")
-	rate_label.add_theme_font_size_override("font_size", 19)
-	rate_label.custom_minimum_size = Vector2(200, 0)
+	rate_label.add_theme_font_size_override("font_size", 18)
+	rate_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rate_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	rate_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	rate_label.tooltip_text = "Voice Speed"
 	rate_row.add_child(rate_label)
 	
 	var rate_minus_btn := Button.new()
@@ -1768,7 +1860,7 @@ func _setup_hecklelinks_announcer_section() -> void:
 	rate_slider.max_value = 2.0
 	rate_slider.step = 0.1
 	rate_slider.value = announcer.get("Rate")
-	rate_slider.custom_minimum_size = Vector2(180, 48)
+	rate_slider.custom_minimum_size = Vector2(140, 48)
 	rate_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rate_slider.value_changed.connect(func(val):
 		announcer.set("Rate", val)
@@ -1790,7 +1882,9 @@ func _setup_hecklelinks_announcer_section() -> void:
 	rate_plus_btn.pressed.connect(func():
 		rate_slider.value = clamp(rate_slider.value + 0.1, rate_slider.min_value, rate_slider.max_value)
 	)
-	section.add_child(rate_row)
+
+	var announcer_voice_grid = _create_range_grid([pitch_row, rate_row], 2)
+	section.add_child(announcer_voice_grid)
 
 	root.add_child(section)
 
@@ -1819,34 +1913,53 @@ func _get_friendly_accent_name(lang: String) -> String:
 		return lang.to_upper() + " Accent"
 
 
+func _create_range_grid(items: Array, columns: int = 2) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = columns
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", 24)
+	grid.add_theme_constant_override("v_separation", 10)
+	for item in items:
+		if item is Control:
+			item.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			grid.add_child(item)
+	var remainder = items.size() % columns
+	if remainder > 0:
+		for i in range(columns - remainder):
+			var dummy := Control.new()
+			dummy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			grid.add_child(dummy)
+	return grid
+
+
 func _create_spinbox_setting_row(label_text: String, setting_name: String, min_val: float, max_val: float, step: float, suffix: String = "") -> HBoxContainer:
 	var row = HBoxContainer.new()
 	row.name = label_text.replace(" ", "")
 	row.custom_minimum_size = Vector2(0, 52)
 	row.add_theme_constant_override("separation", 8)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
 	var label = Label.new()
 	label.text = label_text
-	label.add_theme_font_size_override("font_size", 19)
+	label.add_theme_font_size_override("font_size", 18)
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.tooltip_text = label_text
 	row.add_child(label)
-	
-	var spacer1 = Control.new()
-	spacer1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(spacer1)
 	
 	var setting = GlobalSettings.range_settings.settings[setting_name]
 	
 	# Minus Button
 	var minus_btn = Button.new()
 	minus_btn.text = "－"
-	minus_btn.custom_minimum_size = Vector2(52, 52)
-	minus_btn.add_theme_font_size_override("font_size", 22)
+	minus_btn.custom_minimum_size = Vector2(48, 48)
+	minus_btn.add_theme_font_size_override("font_size", 20)
 	ThemeManager.apply_nav_button_style(minus_btn, 8)
 	row.add_child(minus_btn)
 	
 	var spinbox = SpinBox.new()
-	spinbox.custom_minimum_size = Vector2(110, 52)
+	spinbox.custom_minimum_size = Vector2(100, 48)
 	spinbox.min_value = min_val
 	spinbox.max_value = max_val
 	spinbox.step = step
@@ -1855,7 +1968,7 @@ func _create_spinbox_setting_row(label_text: String, setting_name: String, min_v
 	var line_edit = spinbox.get_line_edit()
 	if line_edit != null:
 		line_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
-		line_edit.add_theme_font_size_override("font_size", 19)
+		line_edit.add_theme_font_size_override("font_size", 18)
 		ThemeManager.apply_input_style(line_edit, 8)
 		
 	spinbox.value_changed.connect(func(val):
@@ -1866,8 +1979,8 @@ func _create_spinbox_setting_row(label_text: String, setting_name: String, min_v
 	# Plus Button
 	var plus_btn = Button.new()
 	plus_btn.text = "＋"
-	plus_btn.custom_minimum_size = Vector2(52, 52)
-	plus_btn.add_theme_font_size_override("font_size", 22)
+	plus_btn.custom_minimum_size = Vector2(48, 48)
+	plus_btn.add_theme_font_size_override("font_size", 20)
 	ThemeManager.apply_nav_button_style(plus_btn, 8)
 	row.add_child(plus_btn)
 	
@@ -1881,7 +1994,6 @@ func _create_spinbox_setting_row(label_text: String, setting_name: String, min_v
 	if suffix != "":
 		var label2 = Label.new()
 		label2.text = suffix
-		label2.custom_minimum_size = Vector2(30, 0)
 		label2.add_theme_font_size_override("font_size", 18)
 		label2.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
 		label2.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -1890,18 +2002,94 @@ func _create_spinbox_setting_row(label_text: String, setting_name: String, min_v
 	return row
 
 
-func _create_toggle_setting_row(label_text: String, setting_name: String) -> HBoxContainer:
-	var row = HBoxContainer.new()
-	row.name = label_text.replace(" ", "")
-	row.custom_minimum_size = Vector2(0, 52)
+func _find_check_button(node: Node) -> CheckButton:
+	if node == null:
+		return null
+	if node is CheckButton:
+		return node
+	for child in node.get_children():
+		var found = _find_check_button(child)
+		if found != null:
+			return found
+	return null
+
+
+func _format_static_toggle_row(row: HBoxContainer, label_text: String) -> HBoxContainer:
+	if row == null:
+		return null
+	var label: Label = null
+	var check: CheckButton = null
+	var to_remove: Array[Node] = []
+	for child in row.get_children():
+		if child is Label and label == null:
+			label = child
+		elif child is CheckButton and check == null:
+			check = child
+		else:
+			to_remove.append(child)
+	for child in to_remove:
+		row.remove_child(child)
+		child.queue_free()
+	if label != null:
+		label.text = label_text
+		label.add_theme_font_size_override("font_size", 18)
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		label.tooltip_text = label_text
+	if check != null:
+		check.custom_minimum_size = Vector2(72, 48)
+		check.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		if label != null and check.get_index() < label.get_index():
+			row.move_child(check, label.get_index())
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("separation", 10)
+	return row
+
+
+func _create_toggle_widget(label_text: String, check_btn: CheckButton) -> HBoxContainer:
+	var item := HBoxContainer.new()
+	item.name = label_text.replace(" ", "")
+	item.custom_minimum_size = Vector2(0, 52)
+	item.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	item.add_theme_constant_override("separation", 10)
 	
-	var label = Label.new()
+	var label := Label.new()
 	label.text = label_text
-	label.add_theme_font_size_override("font_size", 19)
+	label.add_theme_font_size_override("font_size", 18)
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(label)
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.tooltip_text = label_text
+	item.add_child(label)
 	
+	check_btn.custom_minimum_size = Vector2(72, 48)
+	check_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	item.add_child(check_btn)
+	
+	return item
+
+
+func _create_toggle_grid(items: Array, columns: int = 3) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = columns
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", 24)
+	grid.add_theme_constant_override("v_separation", 10)
+	for item in items:
+		if item is Control:
+			item.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			grid.add_child(item)
+	var remainder = items.size() % columns
+	if remainder > 0:
+		for i in range(columns - remainder):
+			var dummy := Control.new()
+			dummy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			grid.add_child(dummy)
+	return grid
+
+
+func _create_toggle_setting_row(label_text: String, setting_name: String) -> HBoxContainer:
 	var check = CheckButton.new()
 	check.custom_minimum_size = Vector2(72, 48)
 	var setting = GlobalSettings.range_settings.settings[setting_name]
@@ -1909,23 +2097,10 @@ func _create_toggle_setting_row(label_text: String, setting_name: String) -> HBo
 	check.toggled.connect(func(on):
 		setting.set_value(on)
 	)
-	row.add_child(check)
-	
-	return row
+	return _create_toggle_widget(label_text, check)
 
 
 func _create_fullscreen_setting_row(label_text: String) -> HBoxContainer:
-	var row = HBoxContainer.new()
-	row.name = label_text.replace(" ", "")
-	row.custom_minimum_size = Vector2(0, 52)
-	
-	var label = Label.new()
-	label.text = label_text
-	label.add_theme_font_size_override("font_size", 19)
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(label)
-	
 	_fullscreen_check = CheckButton.new()
 	_fullscreen_check.custom_minimum_size = Vector2(72, 48)
 	_fullscreen_check.focus_mode = Control.FOCUS_ALL
@@ -1938,8 +2113,7 @@ func _create_fullscreen_setting_row(label_text: String) -> HBoxContainer:
 			if is_instance_valid(_fullscreen_check):
 				_fullscreen_check.set_pressed_no_signal(is_fs)
 		)
-	row.add_child(_fullscreen_check)
-	return row
+	return _create_toggle_widget(label_text, _fullscreen_check)
 
 
 func _create_option_setting_row(label_text: String, setting_name: String, options: Array[String]) -> HBoxContainer:
@@ -1998,14 +2172,17 @@ func _create_slider_setting_row(label_prefix: String, setting_name: String, min_
 	row.name = label_prefix.replace(" ", "")
 	row.custom_minimum_size = Vector2(0, 52)
 	row.add_theme_constant_override("separation", 10)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	
 	var setting = GlobalSettings.range_settings.settings[setting_name]
 	
 	var label := Label.new()
-	label.text = "%s: %.0f" % [label_prefix, setting.value]
-	label.add_theme_font_size_override("font_size", 19)
-	label.custom_minimum_size = Vector2(300, 0)
+	label.text = "%s: %.1f" % [label_prefix, setting.value]
+	label.add_theme_font_size_override("font_size", 18)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.tooltip_text = label_prefix
 	row.add_child(label)
 	
 	var minus_btn := Button.new()
@@ -2020,11 +2197,11 @@ func _create_slider_setting_row(label_prefix: String, setting_name: String, min_
 	slider.max_value = max_val
 	slider.step = step
 	slider.value = setting.value
-	slider.custom_minimum_size = Vector2(180, 48)
+	slider.custom_minimum_size = Vector2(140, 48)
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.value_changed.connect(func(val):
 		setting.set_value(val)
-		label.text = "%s: %.0f" % [label_prefix, val]
+		label.text = "%s: %.1f" % [label_prefix, val]
 	)
 	row.add_child(slider)
 	
@@ -2093,11 +2270,15 @@ func _setup_displayed_stats_section() -> void:
 		cat_label.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0))
 		root.add_child(cat_label)
 
+		var cards: Array[Control] = []
 		for stat in StatDefinitions.STATS:
 			if stat.get("category", "") != cat:
 				continue
 			var card = _create_stat_card_row(stat)
-			root.add_child(card)
+			cards.append(card)
+
+		var grid = _create_toggle_grid(cards, 3)
+		root.add_child(grid)
 
 		var cat_sep := HSeparator.new()
 		root.add_child(cat_sep)
@@ -2117,6 +2298,7 @@ func _update_stats_count_label() -> void:
 
 func _create_stat_card_row(stat: Dictionary) -> PanelContainer:
 	var card := PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ThemeManager.apply_card_panel_style(card, false, 8, 16, 12, 16, 12)
 	
 	var hbox := HBoxContainer.new()
@@ -2156,6 +2338,7 @@ func _create_stat_card_row(stat: Dictionary) -> PanelContainer:
 	
 	var check_btn := CheckButton.new()
 	check_btn.custom_minimum_size = Vector2(72, 48)
+	check_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var stat_id := str(stat.get("id", ""))
 	var active_stats: Array = GlobalSettings.range_settings.displayed_stats.value
 	check_btn.set_pressed_no_signal(active_stats.has(stat_id))

@@ -469,6 +469,8 @@ void fragment() {
 	_scrub_slider.step = 0.02
 	_scrub_slider.value = 0.0
 	_scrub_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scrub_slider.custom_minimum_size = Vector2(100, 48 if MobilePerformance.is_mobile() else 36)
+	ThemeManager.apply_slider_style(_scrub_slider, 48 if MobilePerformance.is_mobile() else 36, 100)
 	_scrub_slider.value_changed.connect(func(val):
 		current_time = val
 		_update_playback_frame()
@@ -1422,9 +1424,7 @@ func _on_close_button_pressed() -> void:
 	visible = false
 	var vp = get_viewport()
 	if vp != null:
-		var cur_f = vp.gui_get_focus_owner()
-		if cur_f != null and is_ancestor_of(cur_f):
-			cur_f.release_focus()
+		vp.gui_release_focus()
 	emit_signal("closed")
 	queue_free()
 

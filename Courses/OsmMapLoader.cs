@@ -964,27 +964,23 @@ public partial class OsmMapLoader : Node
                 }
             }
 
-            // Gather tree positions from OSM trees
-            var placedTreePositions = new List<Vector2>();
-            foreach (var tId in treeNodeIds)
-            {
-                if (nodes.TryGetValue(tId, out var coord))
-                {
-                    float tx = (float)((coord.Lon - refLon) * metersPerLon);
-                    float tz = -(float)((coord.Lat - refLat) * metersPerLat);
-                    placedTreePositions.Add(new Vector2(tx, tz));
-                }
-            }
-
             // Distance calculation to closest fairway polygon (or hole corridor if no fairways parsed)
             Func<Vector2, float> getDistToFairway = (pt) =>
             {
-                float minD = float.MaxValue;
+                float minFairwayD = float.MaxValue;
                 if (fairwayPolys.Count > 0)
                 {
                     for (int i = 0; i < fairwayPolys.Count; i++)
                     {
                         var fw = fairwayPolys[i];
+                        if (pt.X >= fw.MinX && pt.X <= fw.MaxX && pt.Y >= fw.MinY && pt.Y <= fw.MaxY)
+                        {
+                            if (PointInPolygon(pt, fw.Polygon))
+                            {
+                                return 0f; // Inside fairway polygon!
+                            }
+                        }
+
                         float dx = 0f;
                         if (pt.X < fw.MinX) dx = fw.MinX - pt.X;
                         else if (pt.X > fw.MaxX) dx = pt.X - fw.MaxX;
@@ -993,47 +989,91 @@ public partial class OsmMapLoader : Node
                         if (pt.Y < fw.MinY) dy = fw.MinY - pt.Y;
                         else if (pt.Y > fw.MaxY) dy = pt.Y - fw.MaxY;
 
-                        if (dx >= minD || dy >= minD) continue;
-                        if (dx * dx + dy * dy >= minD * minD) continue;
+                        if (dx >= minFairwayD || dy >= minFairwayD) continue;
+                        if (dx * dx + dy * dy >= minFairwayD * minFairwayD) continue;
 
                         float d = DistanceToPolygon(pt, fw.Polygon);
-                        if (d < minD) minD = d;
+                        if (d < minFairwayD) minFairwayD = d;
                     }
+                    return minFairwayD;
                 }
                 else if (lineOfPlayPaths.Count > 0)
                 {
+                    float minCorridorD = float.MaxValue;
                     for (int pIdx = 0; pIdx < lineOfPlayPaths.Count; pIdx++)
                     {
                         var path = lineOfPlayPaths[pIdx];
                         for (int i = 0; i < path.Count - 1; i++)
                         {
                             float d = DistanceToSegment(pt, path[i], path[i + 1]);
-                            if (d < minD) minD = d;
+                            if (d < minCorridorD) minCorridorD = d;
                         }
                     }
-                    minD = Math.Max(0f, minD - 16.0f);
+                    return Math.Max(0f, minCorridorD - 16.0f);
                 }
-                return minD;
+
+                return float.MaxValue;
             };
 
             // Tuned fairway proximity filter:
             // Keeps some trees close to fairways for natural hazard variety, but tunes down the frequency
-            // so they don't crowd or wall off the edges of fairways.
+            // so they don't crowd or wall off the edges of fairways, while preserving normal tree density in the rough.
             Func<Vector2, bool> shouldKeepNearFairway = (pt) =>
             {
-                if (!isComputerPlatform) return true;
-
                 float dist = getDistToFairway(pt);
-                if (dist >= 14.0f) return true;
+                if (dist >= 8.0f) return true; // Full density throughout the rough and woods
 
-                int hash = (int)(pt.X * 73856093) ^ (int)(pt.Y * 19349663);
-                float roll = ((hash & 0x7fffffff) % 1000) / 1000.0f;
+                // Robust 2D integer spatial hash (avoids float-to-int overflow saturation bug)
+                int ix = (int)Math.Floor(pt.X * 10.0f);
+                int iy = (int)Math.Floor(pt.Y * 10.0f);
+                uint h = unchecked((uint)(ix * 73856093) ^ (uint)(iy * 19349663));
+                h = unchecked((h ^ (h >> 13)) * 0x5bd1e995);
+                h ^= h >> 15;
+                float roll = (h % 10000) / 10000.0f;
 
-                if (dist < 2.5f) return roll < 0.08f;
-                if (dist < 6.0f) return roll < 0.22f;
-                if (dist < 10.0f) return roll < 0.45f;
-                return roll < 0.75f;
+                // Calibrated proximity gradient:
+                // Directly against fairway (< 2m): fairly infrequent (~8%), allowing occasional hazard trees.
+                // Close to fairway (2m - 4.5m): fairly infrequent framing (~25%).
+                // Rough transition (4.5m - 8m): moderate framing (~65%).
+                // Beyond 8m: 100% full density.
+                if (dist < 2.0f) return roll < 0.08f;
+                if (dist < 4.5f) return roll < 0.25f;
+                return roll < 0.65f;
             };
+
+            // Gather tree positions from OSM trees
+            var placedTreePositions = new List<Vector2>();
+            foreach (var tId in treeNodeIds)
+            {
+                if (nodes.TryGetValue(tId, out var coord))
+                {
+                    float tx = (float)((coord.Lon - refLon) * metersPerLon);
+                    float tz = -(float)((coord.Lat - refLat) * metersPerLat);
+                    var pt = new Vector2(tx, tz);
+
+                    // Check play surface exclusions
+                    bool insideExclusion = false;
+                    for (int i = 0; i < exclusionPolygons.Count; i++)
+                    {
+                        var excl = exclusionPolygons[i];
+                        if (tx >= excl.MinX && tx <= excl.MaxX && tz >= excl.MinY && tz <= excl.MaxY)
+                        {
+                            if (PointInPolygon(pt, excl.Polygon))
+                            {
+                                insideExclusion = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (insideExclusion) continue;
+
+                    // If very close to fairway (< 2.5m), apply shouldKeepNearFairway so mapped trees don't crowd
+                    float d = getDistToFairway(pt);
+                    if (d < 2.5f && !shouldKeepNearFairway(pt)) continue;
+
+                    placedTreePositions.Add(pt);
+                }
+            }
 
             // Scan satellite imagery for additional trees
             if (satImage != null)
@@ -1201,6 +1241,22 @@ public partial class OsmMapLoader : Node
                         var rp = new Vector2(rx, rz);
                         if (Geometry2D.IsPointInPolygon(rp, forestPoly))
                         {
+                            // Check play surface exclusions
+                            bool insideExclusion = false;
+                            for (int i = 0; i < exclusionPolygons.Count; i++)
+                            {
+                                var excl = exclusionPolygons[i];
+                                if (rx >= excl.MinX && rx <= excl.MaxX && rz >= excl.MinY && rz <= excl.MaxY)
+                                {
+                                    if (PointInPolygon(rp, excl.Polygon))
+                                    {
+                                        insideExclusion = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (insideExclusion) continue;
+
                             if (!shouldKeepNearFairway(rp)) continue;
 
                             bool tooClose = false;
@@ -1391,13 +1447,90 @@ public partial class OsmMapLoader : Node
             ReportProgress("Placing trees, greens, and course objects...");
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
-            // Spawn all trees (OSM + satellite selected)
+            // Identify exactly 1 (or infrequently 2 max) weeping willows per water feature, and none anywhere else
+            var willowTreePositions = new HashSet<Vector2>();
+            if (waterPolygons != null && waterPolygons.Count > 0)
+            {
+                for (int wIdx = 0; wIdx < waterPolygons.Count; wIdx++)
+                {
+                    var waterPoly = waterPolygons[wIdx];
+                    if (waterPoly == null || waterPoly.Length < 3) continue;
+
+                    // Centroid of water polygon to deterministically seed random selection for this feature
+                    float cX = 0f, cY = 0f;
+                    foreach (var p in waterPoly) { cX += p.X; cY += p.Y; }
+                    cX /= waterPoly.Length;
+                    cY /= waterPoly.Length;
+                    int polySeed = (int)(cX * 137.0f) ^ (int)(cY * 269.0f) ^ wIdx;
+                    var waterRnd = new Random(polySeed);
+
+                    // Infrequent across water hazards: exactly 15% of water hazards spawn a willow
+                    if (waterRnd.NextDouble() >= 0.15)
+                        continue;
+
+                    // Find all placed trees within shoreline range of this water feature (2.5m to 32.0m)
+                    var shorelineCandidates = new List<Vector2>();
+                    foreach (var pt in placedTreePositions)
+                    {
+                        float d = DistanceToPolygon(pt, waterPoly);
+                        if (d >= 2.5f && d <= 32.0f)
+                        {
+                            shorelineCandidates.Add(pt);
+                        }
+                    }
+
+                    if (shorelineCandidates.Count == 0)
+                        continue;
+
+                    // Check if any candidates are already designated as willows (e.g. from an adjacent/overlapping water feature)
+                    int alreadyAssignedCount = shorelineCandidates.Count(c => willowTreePositions.Contains(c));
+                    if (alreadyAssignedCount >= 2)
+                        continue; // Already has 2 willows for this water feature
+
+                    // 1 or infrequently 2 max per water feature
+                    // Only 15% chance of 2 willows if enough shoreline candidates (>= 4) exist, otherwise exactly 1
+                    int targetWillows = (shorelineCandidates.Count >= 4 && waterRnd.NextDouble() < 0.15) ? 2 : 1;
+                    int needed = targetWillows - alreadyAssignedCount;
+                    if (needed <= 0)
+                        continue;
+
+                    // Sort unassigned candidates by distance to water with slight jitter so it prefers trees on the bank
+                    var available = shorelineCandidates.Where(c => !willowTreePositions.Contains(c))
+                                                       .OrderBy(c => DistanceToPolygon(c, waterPoly) + (float)waterRnd.NextDouble() * 5.0f)
+                                                       .ToList();
+
+                    if (available.Count > 0)
+                    {
+                        var firstWillow = available[0];
+                        willowTreePositions.Add(firstWillow);
+                        needed--;
+
+                        // If 2nd willow is allowed, pick one spaced well apart (at least 20m) so they don't bunch together
+                        if (needed > 0 && available.Count > 1)
+                        {
+                            for (int i = 1; i < available.Count; i++)
+                            {
+                                if (available[i].DistanceTo(firstWillow) >= 20.0f)
+                                {
+                                    willowTreePositions.Add(available[i]);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Spawn all trees (OSM + satellite selected) with weeping willows ONLY at designated water feature spots (1 or infrequently 2 max)
+            int placedWillowCount = 0;
             foreach (var pt in placedTreePositions)
             {
                 float height = GetHeight(pt.X, pt.Y);
-                AddTreeAt(rootNode, new Vector3(pt.X, height, pt.Y));
+                bool isWillow = willowTreePositions.Contains(pt);
+                if (isWillow) placedWillowCount++;
+                AddTreeAt(rootNode, new Vector3(pt.X, height, pt.Y), isWillow);
             }
-            GD.Print($"{LogPrefix} Placed {placedTreePositions.Count} trees total.");
+            GD.Print($"{LogPrefix} Placed {placedTreePositions.Count} trees total ({placedWillowCount} weeping willows: 1 or infrequently 2 max per water feature, none elsewhere).");
 
             // Spawn random bushes clustered around a subset of trees (capped at 100 on mobile, 2400 on computer, 1200 on desktop)
             if (placedTreePositions.Count > 0)
@@ -2421,11 +2554,16 @@ public partial class OsmMapLoader : Node
         }
     }
 
-    public async void SearchGolfCourses(string queryText)
+    public void SearchGolfCourses(string queryText)
+    {
+        SearchGolfCourses(queryText, null);
+    }
+
+    public async void SearchGolfCourses(string queryText, Godot.Collections.Dictionary? options)
     {
         try
         {
-            var rawResults = await Task.Run(() => SearchGolfCoursesInternalAsync(queryText));
+            var rawResults = await Task.Run(() => SearchGolfCoursesInternalAsync(queryText, options));
             Callable.From(() =>
             {
                 if (!IsInstanceValid(this)) return;
@@ -2481,7 +2619,7 @@ public partial class OsmMapLoader : Node
         return r * c;
     }
 
-    private async Task<List<GolfSearchResult>> SearchGolfCoursesInternalAsync(string queryText)
+    private async Task<List<GolfSearchResult>> SearchGolfCoursesInternalAsync(string queryText, Godot.Collections.Dictionary? options = null)
     {
         var results = new List<GolfSearchResult>();
         if (string.IsNullOrWhiteSpace(queryText))
@@ -2489,14 +2627,69 @@ public partial class OsmMapLoader : Node
             return results;
         }
 
+        bool include9Hole = true;
+        bool include18Hole = true;
+        bool includeAllHoles = false;
+        bool requireLeisureGolf = true;
+        string customTagsRaw = "";
+
+        if (options != null)
+        {
+            if (options.ContainsKey("include_9_hole"))
+                include9Hole = options["include_9_hole"].AsBool();
+            if (options.ContainsKey("include_18_hole"))
+                include18Hole = options["include_18_hole"].AsBool();
+            if (options.ContainsKey("include_all_holes"))
+                includeAllHoles = options["include_all_holes"].AsBool();
+            if (options.ContainsKey("require_leisure_golf"))
+                requireLeisureGolf = options["require_leisure_golf"].AsBool();
+            if (options.ContainsKey("custom_tags"))
+                customTagsRaw = options["custom_tags"].AsString() ?? "";
+        }
+
+        var customTagList = new List<string>();
+        if (!string.IsNullOrWhiteSpace(customTagsRaw))
+        {
+            var rawTags = customTagsRaw.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var rt in rawTags)
+            {
+                string tr = rt.Trim();
+                if (!string.IsNullOrWhiteSpace(tr) && !customTagList.Contains(tr, StringComparer.OrdinalIgnoreCase))
+                {
+                    customTagList.Add(tr);
+                }
+            }
+        }
+
         string cleanQuery = queryText.Trim();
         var rawCandidates = new List<SearchCandidate>();
 
-        // 1. Primary Search: Query Photon API for true golf courses (leisure=golf_course)
+        // 1. Primary Search: Query Photon API
         try
         {
-            string photonUrl = $"https://photon.komoot.io/api/?q={Uri.EscapeDataString(cleanQuery)}&osm_tag=leisure:golf_course&limit=15";
-            GD.Print($"{LogPrefix} Searching Photon for '{cleanQuery}'...");
+            var photonTags = new List<string>();
+            if (requireLeisureGolf)
+            {
+                photonTags.Add("leisure:golf_course");
+            }
+            foreach (var ct in customTagList)
+            {
+                string pt = ct.Replace('=', ':');
+                if (!photonTags.Contains(pt, StringComparer.OrdinalIgnoreCase))
+                {
+                    photonTags.Add(pt);
+                }
+            }
+
+            var urlBuilder = new StringBuilder($"https://photon.komoot.io/api/?q={Uri.EscapeDataString(cleanQuery)}");
+            foreach (var pt in photonTags)
+            {
+                urlBuilder.Append($"&osm_tag={Uri.EscapeDataString(pt)}");
+            }
+            urlBuilder.Append("&limit=15");
+            string photonUrl = urlBuilder.ToString();
+
+            GD.Print($"{LogPrefix} Searching Photon for '{cleanQuery}' with url: {photonUrl}...");
             var photonResp = await HttpClient.GetAsync(photonUrl);
             if (photonResp.IsSuccessStatusCode)
             {
@@ -2557,8 +2750,8 @@ public partial class OsmMapLoader : Node
                 var nomResp = await HttpClient.GetAsync(nomUrl);
                 string nomJson = (nomResp.IsSuccessStatusCode) ? await nomResp.Content.ReadAsStringAsync() : "";
 
-                // If empty and didn't have "golf", retry with " golf"
-                if ((string.IsNullOrWhiteSpace(nomJson) || nomJson == "[]") && !cleanQuery.Contains("golf", StringComparison.OrdinalIgnoreCase))
+                // If empty and didn't have "golf", retry with " golf" if leisure_golf is enabled
+                if ((string.IsNullOrWhiteSpace(nomJson) || nomJson == "[]") && requireLeisureGolf && !cleanQuery.Contains("golf", StringComparison.OrdinalIgnoreCase))
                 {
                     string nomRetryUrl = $"https://nominatim.openstreetmap.org/search?q={Uri.EscapeDataString(cleanQuery + " golf")}&format=json&limit=15";
                     nomResp = await HttpClient.GetAsync(nomRetryUrl);
@@ -2644,7 +2837,24 @@ public partial class OsmMapLoader : Node
         foreach (var c in candidatesToVerify)
         {
             sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:1500, {c.Lat}, {c.Lon})[\"golf\"=\"hole\"];");
-            sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:500, {c.Lat}, {c.Lon})[\"leisure\"=\"golf_course\"];");
+            if (requireLeisureGolf)
+            {
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:500, {c.Lat}, {c.Lon})[\"leisure\"=\"golf_course\"];");
+            }
+            foreach (var ct in customTagList)
+            {
+                int sep = ct.IndexOfAny(new[] { '=', ':' });
+                if (sep > 0)
+                {
+                    string k = ct.Substring(0, sep).Trim();
+                    string v = ct.Substring(sep + 1).Trim();
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:500, {c.Lat}, {c.Lon})[\"{k}\"=\"{v}\"];");
+                }
+                else
+                {
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:500, {c.Lat}, {c.Lon})[\"{ct.Trim()}\"];");
+                }
+            }
         }
         sb.AppendLine(");");
         sb.AppendLine("out center tags meta;");
@@ -2734,7 +2944,7 @@ public partial class OsmMapLoader : Node
                                 }
                             }
 
-                            if (leisureVal == "golf_course")
+                            if (leisureVal == "golf_course" || !requireLeisureGolf || customTagList.Count > 0)
                             {
                                 if (tagsProp.TryGetProperty("golf:holes", out var ghProp) && int.TryParse(ghProp.GetString(), out int gh))
                                     c.BoundaryHoles = gh;
@@ -2765,19 +2975,31 @@ public partial class OsmMapLoader : Node
             }
         }
 
-        // 6. Filter results to only courses with exactly 9 or 18 holes defined
+        // 6. Filter results by hole count settings
         var validCandidates = new List<SearchCandidate>();
         foreach (var c in candidatesToVerify)
         {
             int holes = c.HoleRefs.Count > 0 ? c.HoleRefs.Count : c.BoundaryHoles;
-            if (holes == 9 || holes == 18)
+            c.HoleCount = holes;
+
+            bool matches = false;
+            if (includeAllHoles)
             {
-                c.HoleCount = holes;
+                matches = true;
+            }
+            else
+            {
+                if (include9Hole && holes == 9) matches = true;
+                if (include18Hole && holes == 18) matches = true;
+            }
+
+            if (matches)
+            {
                 validCandidates.Add(c);
             }
             else
             {
-                GD.Print($"{LogPrefix} Filtering out '{c.Name}' (holes detected: {holes}, requires exactly 9 or 18).");
+                GD.Print($"{LogPrefix} Filtering out '{c.Name}' (holes detected: {holes}, options: 9={include9Hole}, 18={include18Hole}, all={includeAllHoles}).");
             }
         }
 
@@ -3408,25 +3630,15 @@ public partial class OsmMapLoader : Node
 
             GD.Print($"{LogPrefix} Successfully fetched Open-Meteo elevation (range: {minH:F1}m to {maxH:F1}m).");
 
-            // Bilinear interpolate sample heights to widthPixels x heightPixels
+            // Bicubic Catmull-Rom interpolate sample heights to widthPixels x heightPixels for seamless slope continuity
             float[] elevationData = new float[widthPixels * heightPixels];
             for (int destY = 0; destY < heightPixels; destY++)
             {
                 float v = destY / (float)(heightPixels - 1) * (sampleCountY - 1);
-                int y0 = Math.Clamp((int)Math.Floor(v), 0, sampleCountY - 1);
-                int y1 = Math.Clamp(y0 + 1, 0, sampleCountY - 1);
-                float ty = v - y0;
-
                 for (int destX = 0; destX < widthPixels; destX++)
                 {
                     float u = destX / (float)(widthPixels - 1) * (sampleCountX - 1);
-                    int x0 = Math.Clamp((int)Math.Floor(u), 0, sampleCountX - 1);
-                    int x1 = Math.Clamp(x0 + 1, 0, sampleCountX - 1);
-                    float tx = u - x0;
-
-                    float h0 = sampleHeights[y0 * sampleCountX + x0] * (1f - tx) + sampleHeights[y0 * sampleCountX + x1] * tx;
-                    float h1 = sampleHeights[y1 * sampleCountX + x0] * (1f - tx) + sampleHeights[y1 * sampleCountX + x1] * tx;
-                    elevationData[destY * widthPixels + destX] = h0 * (1f - ty) + h1 * ty;
+                    elevationData[destY * widthPixels + destX] = BicubicSample(sampleHeights, sampleCountX, sampleCountY, u, v);
                 }
             }
 
@@ -3648,6 +3860,41 @@ public partial class OsmMapLoader : Node
         }
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static float CatmullRom1D(float p0, float p1, float p2, float p3, float t)
+    {
+        // Standard Catmull-Rom cubic spline ensuring continuous C1 derivatives across grid cells
+        float a0 = -0.5f * p0 + 1.5f * p1 - 1.5f * p2 + 0.5f * p3;
+        float a1 = p0 - 2.5f * p1 + 2.0f * p2 - 0.5f * p3;
+        float a2 = -0.5f * p0 + 0.5f * p2;
+        float a3 = p1;
+        return ((a0 * t + a1) * t + a2) * t + a3;
+    }
+
+    private static float BicubicSample(float[] data, int w, int h, float sampleX, float sampleY)
+    {
+        int x1 = Math.Clamp((int)Math.Floor(sampleX), 0, w - 1);
+        int y1 = Math.Clamp((int)Math.Floor(sampleY), 0, h - 1);
+        int x0 = Math.Clamp(x1 - 1, 0, w - 1);
+        int x2 = Math.Clamp(x1 + 1, 0, w - 1);
+        int x3 = Math.Clamp(x1 + 2, 0, w - 1);
+        int y0 = Math.Clamp(y1 - 1, 0, h - 1);
+        int y2 = Math.Clamp(y1 + 1, 0, h - 1);
+        int y3 = Math.Clamp(y1 + 2, 0, h - 1);
+
+        float tx = sampleX - x1;
+        float ty = sampleY - y1;
+
+        // Evaluate 4 horizontal lines with Catmull-Rom cubic spline
+        float r0 = CatmullRom1D(data[y0 * w + x0], data[y0 * w + x1], data[y0 * w + x2], data[y0 * w + x3], tx);
+        float r1 = CatmullRom1D(data[y1 * w + x0], data[y1 * w + x1], data[y1 * w + x2], data[y1 * w + x3], tx);
+        float r2 = CatmullRom1D(data[y2 * w + x0], data[y2 * w + x1], data[y2 * w + x2], data[y2 * w + x3], tx);
+        float r3 = CatmullRom1D(data[y3 * w + x0], data[y3 * w + x1], data[y3 * w + x2], data[y3 * w + x3], tx);
+
+        // Interpolate vertically across the 4 rows
+        return CatmullRom1D(r0, r1, r2, r3, ty);
+    }
+
     private float SampleRawHeight(double lat, double lon)
     {
         if (_currentElevationMap == null) return 0f;
@@ -3678,23 +3925,7 @@ public partial class OsmMapLoader : Node
         float sampleX = (float)(u * (w - 1));
         float sampleY = (float)(v * (h - 1));
 
-        int x0 = Math.Clamp((int)Math.Floor(sampleX), 0, w - 1);
-        int x1 = Math.Clamp(x0 + 1, 0, w - 1);
-        int y0 = Math.Clamp((int)Math.Floor(sampleY), 0, h - 1);
-        int y1 = Math.Clamp(y0 + 1, 0, h - 1);
-
-        float tx = sampleX - x0;
-        float ty = sampleY - y0;
-
-        float[] data = _currentElevationMap.Data;
-        float h00 = data[y0 * w + x0];
-        float h10 = data[y0 * w + x1];
-        float h01 = data[y1 * w + x0];
-        float h11 = data[y1 * w + x1];
-
-        float h0 = h00 * (1f - tx) + h10 * tx;
-        float h1 = h01 * (1f - tx) + h11 * tx;
-        return h0 * (1f - ty) + h1 * ty;
+        return BicubicSample(_currentElevationMap.Data, w, h, sampleX, sampleY);
     }
 
     private static float SampleRawHeightFromGrid(double lat, double lon, double leftLon, double rightLon, double topLat, double bottomLat, float[] data, int w, int h)
@@ -3717,22 +3948,7 @@ public partial class OsmMapLoader : Node
         float sampleX = (float)(u * (w - 1));
         float sampleY = (float)(v * (h - 1));
 
-        int x0 = Math.Clamp((int)Math.Floor(sampleX), 0, w - 1);
-        int x1 = Math.Clamp(x0 + 1, 0, w - 1);
-        int y0 = Math.Clamp((int)Math.Floor(sampleY), 0, h - 1);
-        int y1 = Math.Clamp(y0 + 1, 0, h - 1);
-
-        float tx = sampleX - x0;
-        float ty = sampleY - y0;
-
-        float h00 = data[y0 * w + x0];
-        float h10 = data[y0 * w + x1];
-        float h01 = data[y1 * w + x0];
-        float h11 = data[y1 * w + x1];
-
-        float h0 = h00 * (1f - tx) + h10 * tx;
-        float h1 = h01 * (1f - tx) + h11 * tx;
-        return h0 * (1f - ty) + h1 * ty;
+        return BicubicSample(data, w, h, sampleX, sampleY);
     }
 
     private List<Vector2> ResamplePath(List<Vector2> path, int numPoints)
@@ -3983,7 +4199,7 @@ public partial class OsmMapLoader : Node
         colShape.Owner = root;
     }
 
-    private static readonly string[] TreePaths = new string[]
+    private static readonly string[] StandardTreePaths = new string[]
     {
         "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-1-staticbody.tscn",
         "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-2-staticbody.tscn",
@@ -3999,6 +4215,27 @@ public partial class OsmMapLoader : Node
         "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-4-staticbody.tscn"
     };
 
+    private static readonly string[] WillowTreePaths = new string[]
+    {
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-willow-1-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-willow-2-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-willow-3-staticbody.tscn"
+    };
+
+    private static readonly string[] BirchTreePaths = new string[]
+    {
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-birch-1-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-birch-2-staticbody.tscn"
+    };
+
+    private static readonly string[] PineTreePaths = new string[]
+    {
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-pine-1-staticbody.tscn",
+        "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-pine-2-staticbody.tscn"
+    };
+
+    private static readonly string[] TreePaths = StandardTreePaths;
+
     private static readonly string[] BushPaths = new string[]
     {
         "res://addons/shapespark-low-poly-exterior-plants/bodies/bush-01-staticbody.tscn",
@@ -4008,57 +4245,117 @@ public partial class OsmMapLoader : Node
         "res://addons/shapespark-low-poly-exterior-plants/bodies/bush-05-staticbody.tscn"
     };
 
-    private List<PackedScene>? _cachedTreeScenes;
+    private List<PackedScene>? _cachedStandardTreeScenes;
+    private List<PackedScene>? _cachedWillowTreeScenes;
+    private List<PackedScene>? _cachedBirchTreeScenes;
+    private List<PackedScene>? _cachedPineTreeScenes;
     private List<PackedScene>? _cachedBushScenes;
+
+    private static List<PackedScene> LoadSceneList(string[] paths)
+    {
+        var list = new List<PackedScene>();
+        foreach (var path in paths)
+        {
+            if (ResourceLoader.Exists(path))
+            {
+                var s = GD.Load<PackedScene>(path);
+                if (s != null) list.Add(s);
+            }
+        }
+        return list;
+    }
 
     private void EnsurePlantScenesLoaded()
     {
-        if (_cachedTreeScenes == null)
-        {
-            _cachedTreeScenes = new List<PackedScene>();
-            foreach (var path in TreePaths)
-            {
-                var s = GD.Load<PackedScene>(path);
-                if (s != null) _cachedTreeScenes.Add(s);
-            }
-        }
+        if (_cachedStandardTreeScenes == null)
+            _cachedStandardTreeScenes = LoadSceneList(StandardTreePaths);
+        if (_cachedWillowTreeScenes == null)
+            _cachedWillowTreeScenes = LoadSceneList(WillowTreePaths);
+        if (_cachedBirchTreeScenes == null)
+            _cachedBirchTreeScenes = LoadSceneList(BirchTreePaths);
+        if (_cachedPineTreeScenes == null)
+            _cachedPineTreeScenes = LoadSceneList(PineTreePaths);
         if (_cachedBushScenes == null)
-        {
-            _cachedBushScenes = new List<PackedScene>();
-            foreach (var path in BushPaths)
-            {
-                var s = GD.Load<PackedScene>(path);
-                if (s != null) _cachedBushScenes.Add(s);
-            }
-        }
+            _cachedBushScenes = LoadSceneList(BushPaths);
     }
 
-    private void AddTreeAt(Node3D root, Vector3 position)
+    private void AddTreeAt(Node3D root, Vector3 position, bool isWillow = false)
     {
         EnsurePlantScenesLoaded();
-        if (_cachedTreeScenes == null || _cachedTreeScenes.Count == 0) return;
+        if (_cachedStandardTreeScenes == null || _cachedStandardTreeScenes.Count == 0) return;
 
-        // Seed Random deterministically using position hash so same tree always has same size
+        // Seed Random deterministically using position hash so same tree always has same type and size
         int posHash = (int)(position.X * 1000f) ^ (int)(position.Z * 1000f);
         var random = new Random(posHash);
-        int treeIndex = random.Next(_cachedTreeScenes.Count);
-        
+
+        PackedScene selectedScene;
+        double roll = random.NextDouble();
+        bool isPine = false;
+        bool isBirch = false;
+
+        if (isWillow && _cachedWillowTreeScenes != null && _cachedWillowTreeScenes.Count > 0)
+        {
+            selectedScene = _cachedWillowTreeScenes[random.Next(_cachedWillowTreeScenes.Count)];
+        }
+        else
+        {
+            isWillow = false;
+            // Standard golf course mix: lush oaks (72%), pines (16%), birches (12%)
+            // Weeping willows are NEVER spawned here (only at designated water feature spots)
+            if (roll < 0.72)
+            {
+                selectedScene = _cachedStandardTreeScenes[random.Next(_cachedStandardTreeScenes.Count)];
+            }
+            else if (roll < 0.88 && _cachedPineTreeScenes != null && _cachedPineTreeScenes.Count > 0)
+            {
+                selectedScene = _cachedPineTreeScenes[random.Next(_cachedPineTreeScenes.Count)];
+                isPine = true;
+            }
+            else if (_cachedBirchTreeScenes != null && _cachedBirchTreeScenes.Count > 0)
+            {
+                selectedScene = _cachedBirchTreeScenes[random.Next(_cachedBirchTreeScenes.Count)];
+                isBirch = true;
+            }
+            else
+            {
+                selectedScene = _cachedStandardTreeScenes[random.Next(_cachedStandardTreeScenes.Count)];
+            }
+        }
+
         try
         {
-            var treeScene = _cachedTreeScenes[treeIndex];
-            var treeInstance = treeScene.Instantiate<Node3D>();
+            var treeInstance = selectedScene.Instantiate<Node3D>();
             treeInstance.Name = $"Tree_{position.X:F1}_{position.Z:F1}";
             // Slightly sink tree base into ground to bed roots naturally on sloped terrain
             treeInstance.Position = new Vector3(position.X, position.Y - 0.15f, position.Z);
-            
-            // Random scale between 2.5 and 5.0 to make trees much larger
-            float scaleVal = 2.5f + (float)random.NextDouble() * 2.5f;
-            treeInstance.Scale = new Vector3(scaleVal, scaleVal, scaleVal);
-            
+
+            // Standard tree scaling: halfway between earlier sizes (1.95 to 3.65)
+            float scaleVal = 1.95f + (float)random.NextDouble() * 1.70f; // 1.95 to 3.65
+            if (isWillow)
+            {
+                // Weeping willows: mature, balanced scale (~14m - 18m tall/wide) so they feel grand without being overwhelmingly oversized
+                float willowScale = 2.0f + (float)random.NextDouble() * 0.6f; // 2.0 to 2.6
+                treeInstance.Scale = new Vector3(willowScale, willowScale, willowScale);
+            }
+            else if (isPine)
+            {
+                // Pines: conical, taller upright silhouette
+                treeInstance.Scale = new Vector3(scaleVal * 0.86f, scaleVal * 1.25f, scaleVal * 0.86f);
+            }
+            else if (isBirch)
+            {
+                // Birches: slender, elegant trunk
+                treeInstance.Scale = new Vector3(scaleVal * 0.90f, scaleVal * 1.15f, scaleVal * 0.90f);
+            }
+            else
+            {
+                treeInstance.Scale = new Vector3(scaleVal, scaleVal, scaleVal);
+            }
+
             // Apply a random Y rotation for organic variety
             float rotationY = (float)(random.NextDouble() * Math.PI * 2.0);
             treeInstance.Rotation = new Vector3(0f, rotationY, 0f);
-            
+
             root.AddChild(treeInstance);
             treeInstance.Owner = root;
 
@@ -4073,28 +4370,40 @@ public partial class OsmMapLoader : Node
                         newCapsule.Radius = 0.15f;
                         newCapsule.Height = 1.0f;
                         colShapeNode.Shape = newCapsule;
-                        
+
                         colShapeNode.Transform = new Transform3D(Basis.Identity, new Vector3(0f, 0.5f, 0f));
                     }
                 }
             }
 
-            // Create leaves/canopy Area3D to detect ball passing through
-            var canopyArea = new Area3D();
-            canopyArea.Name = "CanopyArea";
-            canopyArea.SetMeta("is_canopy", true);
+            // Ensure leaves/canopy Area3D is present to detect ball passing through
+            var existingCanopy = treeInstance.GetNodeOrNull<Area3D>("CanopyArea");
+            if (existingCanopy != null)
+            {
+                existingCanopy.Owner = root;
+                foreach (Node canopyChild in existingCanopy.GetChildren())
+                {
+                    canopyChild.Owner = root;
+                }
+            }
+            else
+            {
+                var canopyArea = new Area3D();
+                canopyArea.Name = "CanopyArea";
+                canopyArea.SetMeta("is_canopy", true);
 
-            var canopyShape = new CollisionShape3D();
-            var sphereShape = new SphereShape3D();
-            sphereShape.Radius = 1.8f;
-            canopyShape.Shape = sphereShape;
-            canopyShape.Position = new Vector3(0f, 3.8f, 0f);
+                var canopyShape = new CollisionShape3D();
+                var sphereShape = new SphereShape3D();
+                sphereShape.Radius = 1.8f;
+                canopyShape.Shape = sphereShape;
+                canopyShape.Position = new Vector3(0f, 3.8f, 0f);
 
-            canopyArea.AddChild(canopyShape);
-            treeInstance.AddChild(canopyArea);
+                canopyArea.AddChild(canopyShape);
+                treeInstance.AddChild(canopyArea);
 
-            canopyArea.Owner = root;
-            canopyShape.Owner = root;
+                canopyArea.Owner = root;
+                canopyShape.Owner = root;
+            }
         }
         catch (Exception ex)
         {
@@ -4209,6 +4518,12 @@ public partial class OsmMapLoader : Node
         public string? GolfType;
         public float? AverageHeight;
 
+        public float CenterX;
+        public float CenterY;
+        public float CenterHeight;
+        public float SlopeX;
+        public float SlopeY;
+
         public ExclusionPolygon(Vector2[] polygon, string? golfType = "", OsmMapLoader? loader = null)
         {
             Polygon = polygon;
@@ -4218,12 +4533,16 @@ public partial class OsmMapLoader : Node
             MinY = float.MaxValue;
             MaxY = float.MinValue;
             float sum = 0f;
+            float sumX = 0f;
+            float sumY = 0f;
             foreach (var p in polygon)
             {
                 if (p.X < MinX) MinX = p.X;
                 if (p.X > MaxX) MaxX = p.X;
                 if (p.Y < MinY) MinY = p.Y;
                 if (p.Y > MaxY) MaxY = p.Y;
+                sumX += p.X;
+                sumY += p.Y;
                 if (loader != null)
                 {
                     sum += loader.GetHeight(p.X, p.Y);
@@ -4232,6 +4551,36 @@ public partial class OsmMapLoader : Node
             if (loader != null && polygon.Length > 0 && (golfType == "tee" || golfType == "green"))
             {
                 AverageHeight = sum / polygon.Length;
+                CenterX = sumX / polygon.Length;
+                CenterY = sumY / polygon.Length;
+                CenterHeight = loader.GetHeight(CenterX, CenterY);
+
+                if (golfType == "green")
+                {
+                    // Sample terrain gradient across green center to establish an authentic putting slope
+                    float span = 8.0f;
+                    float hL = loader.GetHeight(CenterX - span, CenterY);
+                    float hR = loader.GetHeight(CenterX + span, CenterY);
+                    float hD = loader.GetHeight(CenterX, CenterY - span);
+                    float hU = loader.GetHeight(CenterX, CenterY + span);
+                    float rawSlopeX = (hR - hL) / (2f * span);
+                    float rawSlopeY = (hU - hD) / (2f * span);
+                    float slopeMag = Mathf.Sqrt(rawSlopeX * rawSlopeX + rawSlopeY * rawSlopeY);
+
+                    // Cap green putting slope to a gentle, playable 2.0% grade (0.020) so the ball has natural roll and break
+                    // while perfectly conforming to the hill's natural slope direction without creating a tabletop shelf
+                    float maxGrade = 0.020f;
+                    if (slopeMag > maxGrade && slopeMag > 0.0001f)
+                    {
+                        SlopeX = rawSlopeX * (maxGrade / slopeMag);
+                        SlopeY = rawSlopeY * (maxGrade / slopeMag);
+                    }
+                    else
+                    {
+                        SlopeX = rawSlopeX;
+                        SlopeY = rawSlopeY;
+                    }
+                }
             }
         }
     }
@@ -4922,7 +5271,9 @@ public partial class OsmMapLoader : Node
         }
 
         var tris = new List<SubdivisionTriangle>();
-        float maxEdgeSq = 12.0f * 12.0f;
+        bool isMobile = OS.GetName() == "Android" || OS.GetName() == "iOS";
+        float maxEdge = isMobile ? 8.0f : 5.0f;
+        float maxEdgeSq = maxEdge * maxEdge;
         while (queue.Count > 0)
         {
             var tri = queue.Dequeue();
@@ -5008,7 +5359,7 @@ public partial class OsmMapLoader : Node
         for (int i = 0; i < exclusions.Count; i++)
         {
             var excl = exclusions[i];
-            if (x < excl.MinX - 8.0f || x > excl.MaxX + 8.0f || z < excl.MinY - 8.0f || z > excl.MaxY + 8.0f)
+            if (x < excl.MinX - 10.0f || x > excl.MaxX + 10.0f || z < excl.MinY - 10.0f || z > excl.MaxY + 10.0f)
                 continue;
 
             bool inside = PointInPolygon(point, excl.Polygon);
@@ -5081,46 +5432,63 @@ public partial class OsmMapLoader : Node
             else if (excl.GolfType == "tee" && excl.AverageHeight.HasValue)
             {
                 float targetH = excl.AverageHeight.Value;
-                if (inside)
+                float dist = DistanceToPolygon(point, excl.Polygon);
+                float signedDist = inside ? dist : -dist;
+                float rOutTee = 2.5f;
+                float rInTee = 2.5f;
+                if (signedDist > -rOutTee)
                 {
-                    float dist = DistanceToPolygon(point, excl.Polygon);
-                    float blendRadius = 3.0f;
-                    if (dist < blendRadius)
+                    if (signedDist >= rInTee)
                     {
-                        float t = dist / blendRadius;
-                        float smoothT = QuinticSmoothstep(t);
-                        overrideHeight = (overrideHeight ?? baseHeight) * (1f - smoothT) + targetH * smoothT;
-                        overrideWeight = Math.Max(overrideWeight, smoothT);
+                        overrideHeight = (overrideHeight.HasValue && overrideWeight >= 1.0f) ? overrideHeight.Value : targetH;
+                        overrideWeight = 1.0f;
                     }
                     else
                     {
-                        overrideHeight = targetH;
-                        overrideWeight = 1.0f;
+                        float u = (signedDist + rOutTee) / (rInTee + rOutTee);
+                        float smoothT = QuinticSmoothstep(u);
+                        float blendedH = baseHeight * (1f - smoothT) + targetH * smoothT;
+                        if (!overrideHeight.HasValue || smoothT > overrideWeight)
+                        {
+                            overrideHeight = blendedH;
+                            overrideWeight = smoothT;
+                        }
                     }
                 }
             }
-            else if (excl.GolfType == "green" && excl.AverageHeight.HasValue)
+            else if (excl.GolfType == "green")
             {
-                float targetH = excl.AverageHeight.Value;
-                if (inside)
+                // Calculate signed distance: positive inside green, negative outside in fairway/apron
+                float dist = DistanceToPolygon(point, excl.Polygon);
+                float signedDist = inside ? dist : -dist;
+
+                // Wide, smooth bidirectional C2 rounding transition across apron, fringe, collar, and green
+                // Extends from 6m outside the green into the fairway/apron to 5m inside the green
+                float rOut = 6.0f;
+                float rIn = 5.0f;
+
+                if (signedDist > -rOut)
                 {
-                    float dist = DistanceToPolygon(point, excl.Polygon);
-                    float blendRadius = 3.0f;
-                    // Green flattening: strongly suppress slopes to a gentle 0.5% - 1.0% putting grade
-                    // so golf balls can comfortably come to rest and stay on the green.
-                    float greenSlopeScale = 0.04f;
-                    float smoothedH = targetH + (baseHeight - targetH) * greenSlopeScale;
-                    if (dist < blendRadius)
+                    // Ideal putting surface plane: gentle ~2% putting grade conforming to natural hill direction
+                    float puttH = excl.CenterHeight + excl.SlopeX * (x - excl.CenterX) + excl.SlopeY * (z - excl.CenterY);
+
+                    if (signedDist >= rIn)
                     {
-                        float t = dist / blendRadius;
-                        float smoothT = QuinticSmoothstep(t);
-                        overrideHeight = (overrideHeight ?? baseHeight) * (1f - smoothT) + smoothedH * smoothT;
-                        overrideWeight = Math.Max(overrideWeight, smoothT);
+                        // Fully on the smooth putting green
+                        overrideHeight = (overrideHeight.HasValue && overrideWeight >= 1.0f) ? overrideHeight.Value : puttH;
+                        overrideWeight = 1.0f;
                     }
                     else
                     {
-                        overrideHeight = smoothedH;
-                        overrideWeight = 1.0f;
+                        // In the smooth C2 rounded transition zone (collar/fringe)
+                        float u = (signedDist + rOut) / (rIn + rOut);
+                        float smoothT = QuinticSmoothstep(u);
+                        float blendedH = baseHeight * (1f - smoothT) + puttH * smoothT;
+                        if (!overrideHeight.HasValue || smoothT > overrideWeight)
+                        {
+                            overrideHeight = blendedH;
+                            overrideWeight = smoothT;
+                        }
                     }
                 }
             }

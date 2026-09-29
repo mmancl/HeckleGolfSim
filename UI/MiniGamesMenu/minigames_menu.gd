@@ -56,10 +56,10 @@ func _ready() -> void:
 	
 	# Main layout margin
 	var main_margin = MarginContainer.new()
-	main_margin.add_theme_constant_override("margin_left", 60)
-	main_margin.add_theme_constant_override("margin_right", 60)
-	main_margin.add_theme_constant_override("margin_top", 60)
-	main_margin.add_theme_constant_override("margin_bottom", 60)
+	main_margin.add_theme_constant_override("margin_left", 32)
+	main_margin.add_theme_constant_override("margin_right", 32)
+	main_margin.add_theme_constant_override("margin_top", 40)
+	main_margin.add_theme_constant_override("margin_bottom", 40)
 	main_margin.anchor_left = 0.0
 	main_margin.anchor_right = 1.0
 	main_margin.anchor_top = 0.0
@@ -91,14 +91,14 @@ func _ready() -> void:
 	
 	# Grid/Container for Minigame Selection Tiles
 	var tiles_hbox = HBoxContainer.new()
-	tiles_hbox.add_theme_constant_override("separation", 24)
+	tiles_hbox.add_theme_constant_override("separation", 16)
 	tiles_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	main_vbox.add_child(tiles_hbox)
 	
 	# --- TILE 1: Putting Practice ---
 	var putting_tile = _create_minigame_tile(
 		"Putting Practice",
-		"Practice your short game on a large, undulating green with 8 target holes (5, 10, 15, 20, 25, 30, 40, 50 ft). Includes single-player & 2-player turn-based PvP putting race!",
+		"Practice your short game on a large, undulating green with 8 target holes (5, 10, 15, 20, 25, 30, 40, 50 ft). Includes single-player & turn-based multiplayer putting race (2+ players)!",
 		"res://assets/images/menu/putting.jpg",
 		func(): SceneManager.change_scene("res://Courses/Minigames/PuttingPractice/putting_practice.tscn")
 	)
@@ -107,7 +107,7 @@ func _ready() -> void:
 	# --- TILE 2: Chipping Practice ---
 	var chipping_tile = _create_minigame_tile(
 		"Chipping Practice",
-		"Chip onto 7 custom floating island greens (25 to 200 yds) with retaining walls, sandtraps, and docks. Includes single-player & 2-player turn-based PvP island battle!",
+		"Chip onto 7 custom floating island greens (25 to 200 yds) with retaining walls, sandtraps, and docks. Includes single-player & turn-based multiplayer island battle (2+ players)!",
 		"res://assets/images/menu/chipping.jpg",
 		func(): SceneManager.change_scene("res://Courses/Minigames/Chipping/chipping.tscn")
 	)
@@ -125,11 +125,20 @@ func _ready() -> void:
 	# --- TILE 4: Shape Practice (Draw & Fade) ---
 	var shape_tile = _create_minigame_tile(
 		"Shape Practice",
-		"Master shot shaping by curving around barrier walls placed every 25 yards. Launch through the open middle gate and draw left or fade right to land in wall target zones (≥10 ft past wall start) from 50 to 300 yards!",
+		"Master shot shaping by curving around barrier walls placed every 25 yards. Launch through the open middle gate and draw left or fade right to land in wall target zones (50 to 300 yards). Includes single-player & turn-based multiplayer shape challenge (2+ players)!",
 		"res://assets/images/menu/shape_control.jpg",
 		func(): SceneManager.change_scene("res://Courses/Minigames/ShapePractice/shape_practice.tscn")
 	)
 	tiles_hbox.add_child(shape_tile)
+	
+	# --- TILE 5: Closest to Pin ---
+	var ctp_tile = _create_minigame_tile(
+		"Closest to Pin",
+		"Land closest to the flag! A target randomly appears between 50–200 yards with concentric scoring rings (5 pts to 1 pt). Running distance totals & multiplayer support (2+ players)!",
+		"res://assets/images/menu/closest_to_pin.jpg",
+		func(): SceneManager.change_scene("res://Courses/Minigames/ClosestToPin/closest_to_pin.tscn")
+	)
+	tiles_hbox.add_child(ctp_tile)
 	
 	# Spacer
 	var spacer = Control.new()
@@ -199,27 +208,27 @@ func _update_music_button() -> void:
 
 func _create_minigame_tile(title: String, desc: String, icon_path: String, on_click: Callable) -> PanelContainer:
 	var panel = PanelContainer.new()
-	panel.custom_minimum_size = Vector2(330, 320)
-	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	panel.custom_minimum_size = Vector2(295, 350)
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.clip_contents = true
 	ThemeManager.apply_card_panel_style(panel, false, 12)
 	panel.mouse_entered.connect(func(): ThemeManager.apply_card_panel_style(panel, true, 12))
 	panel.mouse_exited.connect(func(): ThemeManager.apply_card_panel_style(panel, false, 12))
 	
 	var margin = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 24)
-	margin.add_theme_constant_override("margin_right", 24)
-	margin.add_theme_constant_override("margin_top", 24)
-	margin.add_theme_constant_override("margin_bottom", 24)
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_bottom", 18)
 	panel.add_child(margin)
 	
 	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 16)
+	vbox.add_theme_constant_override("separation", 12)
 	margin.add_child(vbox)
 	
 	# Graphic texture
 	var tex = TextureRect.new()
-	tex.custom_minimum_size = Vector2(0, 100)
+	tex.custom_minimum_size = Vector2(0, 105)
 	tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	tex.clip_contents = true
@@ -234,7 +243,7 @@ func _create_minigame_tile(title: String, desc: String, icon_path: String, on_cl
 	
 	var name_lbl = Label.new()
 	name_lbl.text = title
-	name_lbl.add_theme_font_size_override("font_size", 24)
+	name_lbl.add_theme_font_size_override("font_size", 21)
 	name_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
 	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(name_lbl)
@@ -242,7 +251,7 @@ func _create_minigame_tile(title: String, desc: String, icon_path: String, on_cl
 	var desc_lbl = Label.new()
 	desc_lbl.text = desc
 	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
-	desc_lbl.add_theme_font_size_override("font_size", 14)
+	desc_lbl.add_theme_font_size_override("font_size", 13)
 	desc_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
 	desc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	desc_lbl.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -250,7 +259,7 @@ func _create_minigame_tile(title: String, desc: String, icon_path: String, on_cl
 	
 	var play_btn = Button.new()
 	play_btn.text = "PLAY"
-	play_btn.custom_minimum_size = Vector2(0, 44)
+	play_btn.custom_minimum_size = Vector2(0, 42)
 	ThemeManager.apply_primary_button_style(play_btn)
 	play_btn.pressed.connect(on_click)
 	vbox.add_child(play_btn)

@@ -153,7 +153,8 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
                     throw new InvalidOperationException("Failed to complete Garmin R10 handshake protocol.");
                 }
 
-                _logInfo("Handshake complete. Initializing device services...");
+                _logInfo("Handshake complete. Garmin R10 is connected. Initializing device services...");
+                EmitStatus("Connected");
 
                 // 1. Wake device
                 await WakeDeviceAsync(timeoutToken);
@@ -273,6 +274,7 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
             _logInfo("SetReady ignored: device is not connected or handshake not complete.");
             return;
         }
+        EmitStatus("Connected");
         await WakeDeviceAsync(cancellationToken);
         await Task.Delay(200, cancellationToken);
         await RequestStatusAsync(cancellationToken);
@@ -680,6 +682,7 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
                 AttackAngleDeg: club?.AttackAngle ?? 0.0f);
 
             _logInfo($"Shot {shotId} captured: Speed={shotMetrics.BallSpeedMps * 2.23694f:F1} mph, VLA={shotMetrics.VerticalLaunchAngle:F1}°, Spin={shotMetrics.TotalSpinRpm:F0} rpm");
+            EmitStatus("Connected");
             ShotReceived?.Invoke(shotMetrics);
         }
     }
@@ -689,6 +692,7 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
         _logInfo($"Garmin R10 State: {state}");
         if (state == StateType.Waiting)
         {
+            EmitStatus("Connected");
             EmitReady(true);
         }
         else
@@ -743,7 +747,7 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
             await WriteFramedMessageAsync(fullMsg, cancellationToken);
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(TimeSpan.FromSeconds(8));
+            cts.CancelAfter(TimeSpan.FromSeconds(3.0));
 
             try
             {

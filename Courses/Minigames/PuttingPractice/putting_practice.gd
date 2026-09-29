@@ -72,19 +72,38 @@ var display_data: Dictionary = {}
 var sfx_applause_player: AudioStreamPlayer = null
 
 # PvP Mode State
+const MinigamePlayerModal = preload("res://Courses/Minigames/minigame_player_modal.gd")
 var pvp_mode: bool = false
-var active_player_index: int = 0 # 0: Player 1, 1: Player 2
+var active_player_index: int = 0
+var players_list: Array[Dictionary] = []
 var p1_name: String = "Player 1"
 var p2_name: String = "Player 2"
 var p1_completed: Array[bool] = [false, false, false, false, false, false, false, false]
 var p2_completed: Array[bool] = [false, false, false, false, false, false, false, false]
 var p1_shots: int = 0
 var p2_shots: int = 0
-var pvp_winner: int = -1 # -1: in play, 0: p1, 1: p2
+var pvp_winner: int = -1 # -1: in play, >=0: winner index
 var shot_in_progress: bool = false
+var players_btn: Button = null
+var _player_modal_instance: CanvasLayer = null
 
 const P1_COLOR = Color(0.2, 0.9, 1.0) # Neon Cyan
 const P2_COLOR = Color(1.0, 0.75, 0.25) # Radiant Amber/Gold
+
+func get_active_player_name() -> String:
+	if players_list.is_empty():
+		return "Player 1"
+	return str(players_list[active_player_index % players_list.size()].get("name", "Player %d" % (active_player_index + 1)))
+
+func get_active_player_color() -> Color:
+	if players_list.is_empty():
+		return P1_COLOR
+	return players_list[active_player_index % players_list.size()].get("color", P1_COLOR)
+
+func get_player_color_at(idx: int) -> Color:
+	if idx < players_list.size():
+		return players_list[idx].get("color", MinigamePlayerModal.get_player_color(idx))
+	return MinigamePlayerModal.get_player_color(idx)
 
 func _ready() -> void:
 	name = "PuttingPractice"
@@ -160,16 +179,14 @@ func _exit_tree() -> void:
 
 
 func _init_player_names() -> void:
-	p1_name = "Player 1"
-	p2_name = "Player 2"
-	if has_node("/root/MultiplayerManager"):
-		var mp = get_node("/root/MultiplayerManager")
-		if mp.players.size() >= 2:
-			p1_name = mp.players[0].get("name", "Player 1")
-			p2_name = mp.players[1].get("name", "Player 2")
-		elif mp.players.size() == 1:
-			p1_name = mp.players[0].get("name", "Player 1")
-			p2_name = "Player 2"
+	if players_list.is_empty():
+		players_list = MinigamePlayerModal.init_default_players(8)
+	if players_list.size() < 2:
+		var p2 = MinigamePlayerModal.create_player("Player 2", 1, 8)
+		players_list.append(p2)
+	p1_name = players_list[0].get("name", "Player 1")
+	p2_name = players_list[1].get("name", "Player 2") if players_list.size() > 1 else "Player 2"
+	_update_players_button_label()
 
 
 func _toggle_pvp_mode() -> void:
@@ -182,6 +199,8 @@ func _toggle_pvp_mode() -> void:
 		else:
 			mode_toggle_btn.text = "⚔️ PvP Mode: OFF"
 			_apply_btn_style(mode_toggle_btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
+	if players_btn != null:
+		players_btn.visible = pvp_mode
 	_reset_game()
 
 
@@ -198,19 +217,88 @@ func _reset_game() -> void:
 	stats_within_5 = 0
 	stats_made = 0
 	stats_attempts_25_plus = 0
-	for i in range(8):
-		p1_completed[i] = false
-		p2_completed[i] = false
+	for p in players_list:
+		p["shots"] = 0
+		if not p.has("completed") or p["completed"].size() != 8:
+			var c_arr: Array[bool] = []
+			for k in range(8):
+				c_arr.append(false)
+			p["completed"] = c_arr
+		else:
+			for k in range(8):
+				p["completed"][k] = false
+	if players_list.size() > 0:
+		p1_completed = players_list[0]["completed"]
+	if players_list.size() > 1:
+		p2_completed = players_list[1]["completed"]
 	_select_hole(0, true)
 	_update_hud()
+	_update_hole_button_labels()
+	_update_players_button_label()
 
 
 func _get_next_uncompleted_hole(player_idx: int) -> int:
-	var completed = p1_completed if player_idx == 0 else p2_completed
+	if player_idx < 0 or player_idx >= players_list.size():
+		return selected_hole_index
+	var completed = players_list[player_idx].get("completed", [])
 	for i in range(completed.size()):
 		if not completed[i]:
 			return i
 	return selected_hole_index
+
+
+func _open_players_modal() -> void:
+	if _player_modal_instance != null and is_instance_valid(_player_modal_instance):
+		_player_modal_instance.queue_free()
+		_player_modal_instance = null
+		
+	var modal = MinigamePlayerModal.new()
+	modal.name = "MinigamePlayerModal"
+	add_child(modal)
+	_player_modal_instance = modal
+	modal.open(players_list, 2, 8, active_player_index)
+	modal.players_changed.connect(func(new_players):
+		players_list = new_players
+		if active_player_index >= players_list.size():
+			active_player_index = 0
+		p1_name = players_list[0].get("name", "Player 1")
+		p2_name = players_list[1].get("name", "Player 2") if players_list.size() > 1 else "Player 2"
+		if players_list.size() > 0:
+			p1_completed = players_list[0]["completed"]
+		if players_list.size() > 1:
+			p2_completed = players_list[1]["completed"]
+		_update_players_button_label()
+		_update_hole_button_labels()
+		_update_flagpole_color()
+		_update_hud()
+	)
+	modal.reset_match_requested.connect(func():
+		_reset_game()
+	)
+	modal.modal_closed.connect(func():
+		_player_modal_instance = null
+		_update_hud()
+	)
+
+
+func _update_players_button_label() -> void:
+	if players_btn != null and is_instance_valid(players_btn):
+		players_btn.text = "👥 Players (%d)" % players_list.size()
+
+
+func _update_flagpole_color() -> void:
+	if not has_node("FlagPin"):
+		return
+	var pin = get_node("FlagPin")
+	var flag = pin.get_node_or_null("Flag")
+	var ring = pin.get_node_or_null("TargetRing")
+	var active_col = get_active_player_color() if pvp_mode else Color(1.0, 0.1, 0.1)
+	if flag and flag.material_override is StandardMaterial3D:
+		flag.material_override.albedo_color = active_col
+		flag.material_override.emission = active_col
+	if ring and ring.material_override is StandardMaterial3D:
+		var ring_col = get_active_player_color() if pvp_mode else Color(0.0, 0.8, 1.0)
+		ring.material_override.albedo_color = Color(ring_col.r, ring_col.g, ring_col.b, 0.5)
 
 # ----------------- ENVIRONMENT SETUP -----------------
 
@@ -487,7 +575,9 @@ func _generate_trees() -> void:
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-1-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-2-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-3-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-4-staticbody.tscn"
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-4-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-birch-1-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-pine-1-staticbody.tscn",
 	]
 	
 	var trees_folder = Node3D.new()
@@ -935,6 +1025,10 @@ func _setup_putting_camera() -> void:
 		putting_cam_widget = widget_script.new()
 		putting_cam_widget.name = "PuttingCameraWidget"
 		hud_control.add_child(putting_cam_widget)
+		if putting_cam_widget.has_method("set_panel_position"):
+			putting_cam_widget.set_panel_position(Vector2(20, 20))
+		if putting_cam_widget.has_method("set_panel_size"):
+			putting_cam_widget.set_panel_size(Vector2(320, 325))
 		putting_cam_widget.putt_detected.connect(_on_launch_monitor_hit_ball)
 
 # ----------------- PLAYER SETUP -----------------
@@ -1025,7 +1119,7 @@ func _select_hole(index: int, reset_ball: bool = true) -> void:
 		_update_hole_button_labels()
 	
 	if pvp_mode:
-		var cur_name = p1_name if active_player_index == 0 else p2_name
+		var cur_name = get_active_player_name()
 		_show_banner("🎯 %s's Target: Hole %d (%d ft)" % [cur_name, index + 1, hole_data[index]["dist_ft"]])
 	else:
 		_show_banner("Target Hole %d (%d ft) Selected! Hit with Launch Monitor." % [index + 1, hole_data[index]["dist_ft"]])
@@ -1039,12 +1133,17 @@ func _update_hole_button_labels() -> void:
 		if i < hole_buttons.size():
 			var dist_ft = hole_data[i]["dist_ft"]
 			if pvp_mode:
-				var p1_mark = "✓" if p1_completed[i] else "○"
-				var p2_mark = "✓" if p2_completed[i] else "○"
+				var marks: Array[String] = []
+				for p in players_list:
+					var is_done = false
+					if p.has("completed") and i < p["completed"].size():
+						is_done = p["completed"][i]
+					marks.append("✓" if is_done else "○")
 				var prefix = "▶ " if i == selected_hole_index else "  "
-				hole_buttons[i].text = "%s%d ft [%s|%s]" % [prefix, dist_ft, p1_mark, p2_mark]
+				var marks_str = "|".join(marks)
+				hole_buttons[i].text = "%s%d ft [%s]" % [prefix, dist_ft, marks_str]
 				if i == selected_hole_index:
-					var active_col = P1_COLOR if active_player_index == 0 else P2_COLOR
+					var active_col = get_active_player_color()
 					hole_buttons[i].add_theme_color_override("font_color", active_col)
 				else:
 					hole_buttons[i].remove_theme_color_override("font_color")
@@ -1084,8 +1183,9 @@ func _spawn_flagpole(pos: Vector3) -> void:
 	var flag_mesh = PrismMesh.new()
 	flag_mesh.size = Vector3(0.4, 0.3, 0.02)
 	flag.mesh = flag_mesh
+	flag.name = "Flag"
 	
-	var flag_col = (P1_COLOR if active_player_index == 0 else P2_COLOR) if pvp_mode else Color(1.0, 0.1, 0.1)
+	var flag_col = get_active_player_color() if pvp_mode else Color(1.0, 0.1, 0.1)
 	var flag_mat = StandardMaterial3D.new()
 	flag_mat.albedo_color = flag_col
 	flag_mat.emission_enabled = true
@@ -1102,8 +1202,9 @@ func _spawn_flagpole(pos: Vector3) -> void:
 	ring_mesh.bottom_radius = 0.5
 	ring_mesh.height = 0.001
 	ring.mesh = ring_mesh
+	ring.name = "TargetRing"
 	
-	var ring_col = (P1_COLOR if active_player_index == 0 else P2_COLOR) if pvp_mode else Color(0.0, 0.8, 1.0)
+	var ring_col = get_active_player_color() if pvp_mode else Color(0.0, 0.8, 1.0)
 	var ring_mat = StandardMaterial3D.new()
 	ring_mat.albedo_color = Color(ring_col.r, ring_col.g, ring_col.b, 0.5)
 	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -1258,11 +1359,11 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 
 	shot_counter += 1
 	shot_in_progress = true
-	if pvp_mode:
-		if active_player_index == 0:
-			p1_shots += 1
-		else:
-			p2_shots += 1
+	if pvp_mode and not players_list.is_empty():
+		var cur_p = players_list[active_player_index % players_list.size()]
+		cur_p["shots"] = cur_p.get("shots", 0) + 1
+		p1_shots = players_list[0].get("shots", 0) if players_list.size() > 0 else 0
+		p2_shots = players_list[1].get("shots", 0) if players_list.size() > 1 else 0
 
 	last_putt_start_pos = player.ball.global_position
 	if selected_hole_index >= 0 and selected_hole_index < holes.size():
@@ -1278,7 +1379,7 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	# Show the banner
 	var speed_mph = data.get("Speed", 0.0)
 	if pvp_mode:
-		var cur_name = p1_name if active_player_index == 0 else p2_name
+		var cur_name = get_active_player_name()
 		_show_banner("%s Putt Hit! Speed: %.1f mph" % [cur_name, speed_mph])
 	else:
 		_show_banner("Putt Hit (Launch Monitor)! Speed: %.1f mph" % speed_mph)
@@ -1331,12 +1432,14 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 		made = true
 
 	if pvp_mode:
-		var cur_completed = p1_completed if active_player_index == 0 else p2_completed
-		var cur_name = p1_name if active_player_index == 0 else p2_name
+		var cur_player = players_list[active_player_index % players_list.size()]
+		var cur_completed = cur_player.get("completed", [])
+		var cur_name = cur_player.get("name", "Player %d" % (active_player_index + 1))
 		var target_dist_ft = hole_data[selected_hole_index]["dist_ft"]
 		
 		if made:
-			cur_completed[selected_hole_index] = true
+			if selected_hole_index < cur_completed.size():
+				cur_completed[selected_hole_index] = true
 			var count = cur_completed.count(true)
 			if sfx_applause_player:
 				sfx_applause_player.play()
@@ -1389,10 +1492,10 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 			if pvp_mode and pvp_winner == -1:
 				if shot_in_progress:
 					shot_in_progress = false
-					active_player_index = 1 - active_player_index
+					active_player_index = (active_player_index + 1) % players_list.size()
 					var next_hole = _get_next_uncompleted_hole(active_player_index)
 					_select_hole(next_hole, false)
-					var next_name = p1_name if active_player_index == 0 else p2_name
+					var next_name = get_active_player_name()
 					_show_banner("🎯 %s's Turn! Target: Hole %d (%d ft)" % [next_name, next_hole + 1, hole_data[next_hole]["dist_ft"]])
 			_reset_ball_position()
 
@@ -1552,15 +1655,15 @@ func _setup_ui() -> void:
 	
 	# --- BOTTOM CONTROLS PANEL ---
 	var ctrl_panel = PanelContainer.new()
-	ctrl_panel.custom_minimum_size = Vector2(1040, 76)
+	ctrl_panel.custom_minimum_size = Vector2(1180, 76)
 	ctrl_panel.anchor_left = 0.5
 	ctrl_panel.anchor_right = 0.5
 	ctrl_panel.anchor_top = 1.0
 	ctrl_panel.anchor_bottom = 1.0
 	ctrl_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	ctrl_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	ctrl_panel.offset_left = -520
-	ctrl_panel.offset_right = 520
+	ctrl_panel.offset_left = -590
+	ctrl_panel.offset_right = 590
 	ctrl_panel.offset_top = -94
 	ctrl_panel.offset_bottom = -18
 	hud_control.add_child(ctrl_panel)
@@ -1584,6 +1687,16 @@ func _setup_ui() -> void:
 	_apply_btn_style(mode_toggle_btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
 	mode_toggle_btn.pressed.connect(_toggle_pvp_mode)
 	ctrl_hbox.add_child(mode_toggle_btn)
+
+	# Players Manage Button
+	players_btn = Button.new()
+	players_btn.text = "👥 Players (%d)" % players_list.size()
+	players_btn.custom_minimum_size = Vector2(145, 52)
+	players_btn.add_theme_font_size_override("font_size", 15)
+	_apply_btn_style(players_btn, Color(0.18, 0.34, 0.50), Color(0.24, 0.44, 0.65))
+	players_btn.pressed.connect(_open_players_modal)
+	players_btn.visible = pvp_mode
+	ctrl_hbox.add_child(players_btn)
 	
 	# 1. Slope Grid Toggle Button
 	grid_toggle_btn = Button.new()
@@ -1664,7 +1777,7 @@ func _setup_ui() -> void:
 	_update_music_button_state()
 	_update_green_speed_button_label()
 	GlobalSettings.range_settings.minigame_music_enabled.setting_changed.connect(func(_val): _update_music_button_state())
-	GlobalSettings.range_settings.putting_green_speed.setting_changed.connect(func(val):
+	GlobalSettings.range_settings.green_speed.setting_changed.connect(func(val):
 		_update_green_speed_button_label()
 		if green_speed_val_lbl != null and is_instance_valid(green_speed_val_lbl):
 			green_speed_val_lbl.text = "%.1f" % val
@@ -1720,51 +1833,78 @@ func _create_stat_column(parent: HBoxContainer, title: String) -> Label:
 
 func _update_hud() -> void:
 	if stat_columns.size() >= 5:
-		if pvp_mode:
-			var p1_count = p1_completed.count(true)
-			var p2_count = p2_completed.count(true)
+		if pvp_mode and not players_list.is_empty():
+			var cur_p = players_list[active_player_index % players_list.size()]
+			var cur_name = cur_p.get("name", "Player %d" % (active_player_index + 1))
+			var cur_col = get_active_player_color()
 			
 			# Column 0: Current Turn
 			stat_columns[0]["title"].text = "CURRENT TURN"
 			if pvp_winner != -1:
-				var win_name = p1_name if pvp_winner == 0 else p2_name
+				var win_name = players_list[pvp_winner]["name"] if pvp_winner < players_list.size() else cur_name
 				stat_columns[0]["val"].text = "🏆 %s WINS!" % win_name
 				stat_columns[0]["val"].add_theme_color_override("font_color", Color(0.3, 1.0, 0.5))
 			else:
-				var cur_name = p1_name if active_player_index == 0 else p2_name
 				stat_columns[0]["val"].text = "%s (P%d)" % [cur_name, active_player_index + 1]
-				stat_columns[0]["val"].add_theme_color_override("font_color", P1_COLOR if active_player_index == 0 else P2_COLOR)
+				stat_columns[0]["val"].add_theme_color_override("font_color", cur_col)
 				
 			# Column 1: Putts Made
 			stat_columns[1]["title"].text = "PUTTS MADE"
-			stat_columns[1]["val"].text = "P1: %d/8 | P2: %d/8" % [p1_count, p2_count]
+			if players_list.size() == 2:
+				var c0 = players_list[0]["completed"].count(true) if players_list[0].has("completed") else 0
+				var c1 = players_list[1]["completed"].count(true) if players_list[1].has("completed") else 0
+				stat_columns[1]["val"].text = "P1: %d/8 | P2: %d/8" % [c0, c1]
+			elif players_list.size() == 3:
+				var c0 = players_list[0]["completed"].count(true) if players_list[0].has("completed") else 0
+				var c1 = players_list[1]["completed"].count(true) if players_list[1].has("completed") else 0
+				var c2 = players_list[2]["completed"].count(true) if players_list[2].has("completed") else 0
+				stat_columns[1]["val"].text = "P1:%d P2:%d P3:%d (/8)" % [c0, c1, c2]
+			else:
+				var c_cur = cur_p["completed"].count(true) if cur_p.has("completed") else 0
+				var max_c = 0
+				for p in players_list:
+					var pc = p["completed"].count(true) if p.has("completed") else 0
+					if pc > max_c:
+						max_c = pc
+				stat_columns[1]["val"].text = "P%d: %d/8 (Leader: %d)" % [active_player_index + 1, c_cur, max_c]
 			stat_columns[1]["val"].add_theme_color_override("font_color", Color.WHITE)
 			
-			# Column 2: Match Status
+			# Column 2: Match Status / Leaderboard
 			stat_columns[2]["title"].text = "MATCH STATUS"
-			var diff = p1_count - p2_count
 			if pvp_winner != -1:
-				stat_columns[2]["val"].text = "WINNER!"
+				stat_columns[2]["val"].text = "GAME OVER"
 				stat_columns[2]["val"].add_theme_color_override("font_color", Color(0.3, 1.0, 0.5))
-			elif diff > 0:
-				stat_columns[2]["val"].text = "P1 +%d" % diff
-				stat_columns[2]["val"].add_theme_color_override("font_color", P1_COLOR)
-			elif diff < 0:
-				stat_columns[2]["val"].text = "P2 +%d" % -diff
-				stat_columns[2]["val"].add_theme_color_override("font_color", P2_COLOR)
 			else:
-				stat_columns[2]["val"].text = "TIED"
-				stat_columns[2]["val"].add_theme_color_override("font_color", Color(1.0, 0.9, 0.4))
-				
+				var max_c = -1
+				var leader_idx = -1
+				var second_c = -1
+				var is_tie = false
+				for i in range(players_list.size()):
+					var c = players_list[i]["completed"].count(true) if players_list[i].has("completed") else 0
+					if c > max_c:
+						second_c = max_c
+						max_c = c
+						leader_idx = i
+						is_tie = false
+					elif c == max_c:
+						is_tie = true
+				if max_c == 0 or is_tie:
+					stat_columns[2]["val"].text = "TIED (%d/8)" % max_c
+					stat_columns[2]["val"].add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WARNING)
+				else:
+					var lead_diff = max_c - second_c
+					stat_columns[2]["val"].text = "P%d +%d" % [leader_idx + 1, lead_diff]
+					stat_columns[2]["val"].add_theme_color_override("font_color", get_player_color_at(leader_idx))
+					
 			# Column 3: Total Shots
-			stat_columns[3]["title"].text = "TOTAL SHOTS"
-			stat_columns[3]["val"].text = "P1: %d | P2: %d" % [p1_shots, p2_shots]
+			stat_columns[3]["title"].text = "SHOTS (P%d)" % (active_player_index + 1)
+			stat_columns[3]["val"].text = "%d" % cur_p.get("shots", 0)
 			stat_columns[3]["val"].add_theme_color_override("font_color", Color.WHITE)
 			
 			# Column 4: Target Distance
 			stat_columns[4]["title"].text = "TARGET DIST"
 			stat_columns[4]["val"].text = "%d FT" % hole_data[selected_hole_index]["dist_ft"]
-			stat_columns[4]["val"].add_theme_color_override("font_color", Color(0.5, 0.85, 1.0))
+			stat_columns[4]["val"].add_theme_color_override("font_color", cur_col)
 		else:
 			stat_columns[0]["title"].text = "ATTEMPTS"
 			stat_columns[0]["val"].text = str(stats_attempts)
@@ -1801,7 +1941,7 @@ func _trigger_victory(winner_name: String) -> void:
 	if sfx_applause_player:
 		sfx_applause_player.play()
 	GlobalSettings.play_golf_clap()
-	var win_color = P1_COLOR if pvp_winner == 0 else P2_COLOR
+	var win_color = get_active_player_color()
 	_show_game_over_banner(
 		"🎉 %s WINS!" % winner_name.to_upper(),
 		"First golfer to drain a putt at all 8 distances!",
@@ -1813,15 +1953,15 @@ func _show_game_over_banner(title: String, subtitle: String, theme_color: Color)
 		
 	game_over_panel = PanelContainer.new()
 	game_over_panel.name = "GameOverBanner"
-	game_over_panel.custom_minimum_size = Vector2(620, 240)
+	game_over_panel.custom_minimum_size = Vector2(640, 260)
 	game_over_panel.anchor_left = 0.5
 	game_over_panel.anchor_right = 0.5
 	game_over_panel.anchor_top = 0.5
 	game_over_panel.anchor_bottom = 0.5
-	game_over_panel.offset_left = -310
-	game_over_panel.offset_right = 310
-	game_over_panel.offset_top = -120
-	game_over_panel.offset_bottom = 120
+	game_over_panel.offset_left = -320
+	game_over_panel.offset_right = 320
+	game_over_panel.offset_top = -130
+	game_over_panel.offset_bottom = 130
 	
 	var style = StyleBoxFlat.new()
 	style.bg_color = Color(0.03, 0.07, 0.12, 0.95)
@@ -1864,11 +2004,14 @@ func _show_game_over_banner(title: String, subtitle: String, theme_color: Color)
 	sub_lbl.add_theme_color_override("font_color", Color(0.85, 0.9, 0.95))
 	vbox.add_child(sub_lbl)
 
+	var stat_lines: Array[String] = []
+	for i in range(players_list.size()):
+		var p = players_list[i]
+		var c_count = p["completed"].count(true) if p.has("completed") else 0
+		var s_count = p.get("shots", 0)
+		stat_lines.append("P%d %s: %d/8 putts (%d shots)" % [i + 1, p.get("name", "Player %d" % (i + 1)), c_count, s_count])
 	var stats_lbl = Label.new()
-	stats_lbl.text = "%s: %d/8 putts in %d shots\n%s: %d/8 putts in %d shots" % [
-		p1_name, p1_completed.count(true), p1_shots,
-		p2_name, p2_completed.count(true), p2_shots
-	]
+	stats_lbl.text = "\n".join(stat_lines)
 	stats_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	stats_lbl.add_theme_font_size_override("font_size", 15)
 	stats_lbl.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0))
@@ -2014,7 +2157,7 @@ func _update_stats_display(is_final_rest: bool = true) -> void:
 
 func _update_green_speed_button_label() -> void:
 	if green_speed_btn != null and is_instance_valid(green_speed_btn):
-		var spd = GlobalSettings.range_settings.putting_green_speed.value
+		var spd = GlobalSettings.range_settings.green_speed.value
 		green_speed_btn.text = "🟢 Speed: %.1f" % spd
 
 func _toggle_green_speed_popup() -> void:
@@ -2073,9 +2216,11 @@ func _toggle_green_speed_popup() -> void:
 	title.add_theme_color_override("font_color", Color(0.35, 0.85, 0.55))
 	top_hbox.add_child(title)
 	
+	var is_mob: bool = MobilePerformance.is_mobile()
+
 	var close_btn = Button.new()
 	close_btn.text = "✕"
-	close_btn.custom_minimum_size = Vector2(28, 28)
+	close_btn.custom_minimum_size = Vector2(40, 40) if is_mob else Vector2(28, 28)
 	close_btn.flat = true
 	close_btn.pressed.connect(func():
 		if green_speed_popup != null and is_instance_valid(green_speed_popup):
@@ -2085,7 +2230,7 @@ func _toggle_green_speed_popup() -> void:
 	top_hbox.add_child(close_btn)
 	
 	# Slider Row: Slider and numeric readout
-	var cur_val = GlobalSettings.range_settings.putting_green_speed.value
+	var cur_val = GlobalSettings.range_settings.green_speed.value
 	var slider_hbox = HBoxContainer.new()
 	slider_hbox.add_theme_constant_override("separation", 10)
 	vbox.add_child(slider_hbox)
@@ -2097,6 +2242,8 @@ func _toggle_green_speed_popup() -> void:
 	green_speed_slider.value = cur_val
 	green_speed_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	green_speed_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	green_speed_slider.custom_minimum_size = Vector2(120, 48 if is_mob else 36)
+	ThemeManager.apply_slider_style(green_speed_slider, 48 if is_mob else 36, 120)
 	slider_hbox.add_child(green_speed_slider)
 	
 	green_speed_val_lbl = Label.new()
@@ -2107,7 +2254,7 @@ func _toggle_green_speed_popup() -> void:
 	slider_hbox.add_child(green_speed_val_lbl)
 	
 	green_speed_slider.value_changed.connect(func(v: float):
-		GlobalSettings.range_settings.putting_green_speed.set_value(v)
+		GlobalSettings.range_settings.green_speed.set_value(v)
 		if green_speed_val_lbl != null and is_instance_valid(green_speed_val_lbl):
 			green_speed_val_lbl.text = "%.1f" % v
 		_update_green_speed_button_label()
@@ -2128,12 +2275,12 @@ func _toggle_green_speed_popup() -> void:
 	for p in presets:
 		var p_btn = Button.new()
 		p_btn.text = p["label"]
-		p_btn.custom_minimum_size = Vector2(68, 34)
-		p_btn.add_theme_font_size_override("font_size", 12)
+		p_btn.custom_minimum_size = Vector2(72, 44) if is_mob else Vector2(68, 34)
+		p_btn.add_theme_font_size_override("font_size", 14 if is_mob else 12)
 		_apply_btn_style(p_btn, Color(0.14, 0.22, 0.28), Color(0.20, 0.32, 0.40))
 		var v_val: float = p["val"]
 		p_btn.pressed.connect(func():
-			GlobalSettings.range_settings.putting_green_speed.set_value(v_val)
+			GlobalSettings.range_settings.green_speed.set_value(v_val)
 			if green_speed_slider != null and is_instance_valid(green_speed_slider):
 				green_speed_slider.value = v_val
 			if green_speed_val_lbl != null and is_instance_valid(green_speed_val_lbl):
@@ -2143,7 +2290,7 @@ func _toggle_green_speed_popup() -> void:
 		presets_hbox.add_child(p_btn)
 		
 	var hint_lbl = Label.new()
-	hint_lbl.text = "Course Play standard green speed is 10.0"
+	hint_lbl.text = "Standard green speed is 10.0"
 	hint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint_lbl.add_theme_font_size_override("font_size", 11)
 	hint_lbl.add_theme_color_override("font_color", Color(0.65, 0.75, 0.85, 0.7))

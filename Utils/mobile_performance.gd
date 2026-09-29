@@ -110,12 +110,32 @@ static func get_parallax_layers() -> int:
 static func get_parallax_depth_scale() -> float:
 	return 0.0 if is_mobile() else 0.12
 
+static func is_driving_range_node(node: Node) -> bool:
+	if node == null:
+		return false
+	if "is_driving_range" in node and bool(node.get("is_driving_range")):
+		return true
+	if node.has_meta("is_driving_range") and bool(node.get_meta("is_driving_range")):
+		return true
+	var n_name := node.name.to_lower()
+	var f_path := str(node.scene_file_path).to_lower() if "scene_file_path" in node else ""
+	if n_name == "range" or f_path.ends_with("range/range.tscn") or f_path.ends_with("range.tscn") or f_path.ends_with("range.scn"):
+		if not node.has_node("CoursePlay"):
+			return true
+	return false
+
 ## Applies chosen graphics quality ("Low" or "High") dynamically to any loaded 3D scene.
 ## Swaps terrain, water, foliage shaders and shadow/environment parameters without modifying saved assets.
 static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 	if scene_root == null:
 		return
 	
+	# Driving range always uses High quality graphics regardless of configured settings
+	if is_driving_range_node(scene_root):
+		quality = "High"
+	elif GlobalSettings != null and GlobalSettings.has_method("is_driving_range_scene") and GlobalSettings.is_driving_range_scene():
+		quality = "High"
+
 	var is_low = quality == "Low"
 	var stack: Array[Node] = [scene_root]
 	
@@ -357,27 +377,35 @@ static func _get_low_tree_material(orig_mat: Material, surface_name: String, sur
 
 static func _create_high_quality_range_turf() -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
-	if ResourceLoader.exists("res://Courses/Environments/shaders/parallax_turf.gdshader"):
-		mat.shader = load("res://Courses/Environments/shaders/parallax_turf.gdshader") as Shader
-		if ResourceLoader.exists("res://Courses/Environments/grassy-meadow1-bl/grassy-meadow1_albedo.png"):
-			mat.set_shader_parameter("albedo_tex", load("res://Courses/Environments/grassy-meadow1-bl/grassy-meadow1_albedo.png"))
-		if ResourceLoader.exists("res://Courses/Environments/grassy-meadow1-bl/grassy-meadow1_normal-ogl.png"):
-			mat.set_shader_parameter("normal_tex", load("res://Courses/Environments/grassy-meadow1-bl/grassy-meadow1_normal-ogl.png"))
-		if ResourceLoader.exists("res://Courses/Environments/grassy-meadow1-bl/grassy-meadow1_ao.png"):
-			mat.set_shader_parameter("ao_tex", load("res://Courses/Environments/grassy-meadow1-bl/grassy-meadow1_ao.png"))
-		var noise = FastNoiseLite.new()
-		noise.noise_type = FastNoiseLite.TYPE_SIMPLEX
-		noise.frequency = 0.4
-		var noise_tex = NoiseTexture2D.new()
-		noise_tex.noise = noise
-		noise_tex.seamless = true
-		mat.set_shader_parameter("noise_texture", noise_tex)
-		mat.set_shader_parameter("layers", get_parallax_layers())
-		mat.set_shader_parameter("depth_scale", get_parallax_depth_scale())
-		mat.set_shader_parameter("depth_strength", 0.4)
-		mat.set_shader_parameter("grass_color_tint", Color(0.9, 0.9, 0.9))
-		mat.set_shader_parameter("roughness", 0.8)
-		mat.set_shader_parameter("normal_depth", 0.85)
+	if ResourceLoader.exists("res://Courses/Environments/shaders/driving_range_turf.gdshader"):
+		mat.shader = load("res://Courses/Environments/shaders/driving_range_turf.gdshader") as Shader
+		if ResourceLoader.exists("res://Courses/Environments/grass-fairway/albedo.png"):
+			mat.set_shader_parameter("tex_fairway", load("res://Courses/Environments/grass-fairway/albedo.png"))
+		if ResourceLoader.exists("res://Courses/Environments/grass-fairway/normal.png"):
+			mat.set_shader_parameter("normal_fairway", load("res://Courses/Environments/grass-fairway/normal.png"))
+		if ResourceLoader.exists("res://Courses/Environments/grass-fairway/ao.png"):
+			mat.set_shader_parameter("ao_fairway", load("res://Courses/Environments/grass-fairway/ao.png"))
+		if ResourceLoader.exists("res://Courses/Environments/grass-fairway/roughness.png"):
+			mat.set_shader_parameter("roughness_fairway", load("res://Courses/Environments/grass-fairway/roughness.png"))
+
+		if ResourceLoader.exists("res://Courses/Environments/grass-rough/albedo.png"):
+			mat.set_shader_parameter("tex_rough", load("res://Courses/Environments/grass-rough/albedo.png"))
+		if ResourceLoader.exists("res://Courses/Environments/grass-rough/normal.png"):
+			mat.set_shader_parameter("normal_rough", load("res://Courses/Environments/grass-rough/normal.png"))
+		if ResourceLoader.exists("res://Courses/Environments/grass-rough/ao.png"):
+			mat.set_shader_parameter("ao_rough", load("res://Courses/Environments/grass-rough/ao.png"))
+		if ResourceLoader.exists("res://Courses/Environments/grass-rough/roughness.png"):
+			mat.set_shader_parameter("roughness_rough", load("res://Courses/Environments/grass-rough/roughness.png"))
+
+		mat.set_shader_parameter("corridor_half_width", 26.0)
+		mat.set_shader_parameter("blend_margin", 0.85)
+		mat.set_shader_parameter("tee_start_x", -12.0)
+		mat.set_shader_parameter("tee_blend_x", 4.0)
+		mat.set_shader_parameter("max_range_dist", 320.04)
+		mat.set_shader_parameter("uv_scale_fairway", 0.12)
+		mat.set_shader_parameter("uv_scale_rough", 0.08)
+		mat.set_shader_parameter("normal_depth", 0.65)
+		mat.set_shader_parameter("stripe_strength", 0.70)
 	return mat
 
 

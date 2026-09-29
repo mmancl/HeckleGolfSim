@@ -231,6 +231,7 @@ func _create_club_display_button() -> void:
 	club_button.text = "🏌 Club: " + clubs[0]
 	club_button.custom_minimum_size = Vector2(DEFAULT_TOGGLE_WIDTH, DEFAULT_TOGGLE_HEIGHT)
 	club_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	club_button.focus_mode = Control.FOCUS_NONE
 	club_button.theme = _create_display_button_theme()
 	club_button.pressed.connect(_on_display_button_pressed)
 	_update_tooltip()
@@ -247,6 +248,7 @@ func _create_club_buttons() -> void:
 		button.custom_minimum_size = CLUB_BUTTON_SIZE
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		button.focus_mode = Control.FOCUS_NONE
 		button.theme = button_theme
 		button.pressed.connect(_on_club_button_pressed.bindv([button]))
 		grid_container.add_child(button)
@@ -328,6 +330,9 @@ func _toggle_grid_visibility() -> void:
 			if anchor_left == 1.0 and anchor_right == 1.0:
 				offset_right = current_right
 				offset_left = current_right - DEFAULT_TOGGLE_WIDTH
+			var vp = get_viewport()
+			if vp != null:
+				vp.gui_release_focus()
 
 
 func _on_display_button_pressed() -> void:

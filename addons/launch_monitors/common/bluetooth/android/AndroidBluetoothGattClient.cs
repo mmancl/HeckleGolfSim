@@ -42,6 +42,20 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
     {
         try
         {
+            var helperClass = JavaClassWrapper.Wrap("com.godot.game.GodotBleHelper");
+            if (helperClass != null)
+            {
+                var context = helperClass.Call("getContext").As<JavaObject>();
+                if (context != null) return context;
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Could not get context via GodotBleHelper: {ex.Message}");
+        }
+
+        try
+        {
             var activityThreadClass = JavaClassWrapper.Wrap("android.app.ActivityThread");
             if (activityThreadClass != null)
             {

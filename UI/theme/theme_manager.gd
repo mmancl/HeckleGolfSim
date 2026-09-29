@@ -267,6 +267,145 @@ static func _create_stylebox(bg: Color, border: Color, corner_radius: int, borde
 	style.content_margin_bottom = m_bottom
 	return style
 
+static var _slider_grabber_normal: Texture2D = null
+static var _slider_grabber_hover: Texture2D = null
+static var _slider_grabber_pressed: Texture2D = null
+static var _slider_grabber_normal_mob: Texture2D = null
+static var _slider_grabber_hover_mob: Texture2D = null
+static var _slider_grabber_pressed_mob: Texture2D = null
+
+static func get_slider_grabber_icon(state: String = "normal", is_mob: bool = false) -> Texture2D:
+	if is_mob:
+		if state == "hover" and _slider_grabber_hover_mob != null:
+			return _slider_grabber_hover_mob
+		if state == "pressed" and _slider_grabber_pressed_mob != null:
+			return _slider_grabber_pressed_mob
+		if state == "normal" and _slider_grabber_normal_mob != null:
+			return _slider_grabber_normal_mob
+	else:
+		if state == "hover" and _slider_grabber_hover != null:
+			return _slider_grabber_hover
+		if state == "pressed" and _slider_grabber_pressed != null:
+			return _slider_grabber_pressed
+		if state == "normal" and _slider_grabber_normal != null:
+			return _slider_grabber_normal
+
+	var size = 36 if is_mob else 28
+	var img = Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var center = Vector2((size - 1) * 0.5, (size - 1) * 0.5)
+	var radius = (size - 4) * 0.5
+	var border_w = 2.5 if is_mob else 2.0
+	var dot_r = 3.5 if is_mob else 2.5
+
+	var fill_col = Color(0.94, 0.97, 1.0, 1.0)
+	var border_col = Color(0.35, 0.82, 1.0, 1.0)
+	var dot_col = Color(0.18, 0.38, 0.60, 1.0)
+	var shadow_col = Color(0.0, 0.0, 0.0, 0.4)
+
+	if state == "hover":
+		fill_col = Color(1.0, 1.0, 1.0, 1.0)
+		border_col = Color(0.55, 0.92, 1.0, 1.0)
+		dot_col = Color(0.24, 0.55, 0.85, 1.0)
+	elif state == "pressed":
+		fill_col = Color(0.85, 1.0, 0.92, 1.0)
+		border_col = Color(0.35, 0.95, 0.55, 1.0)
+		dot_col = Color(0.12, 0.50, 0.25, 1.0)
+
+	for y in range(size):
+		for x in range(size):
+			var d = center.distance_to(Vector2(x, y))
+			if d <= dot_r:
+				img.set_pixel(x, y, dot_col)
+			elif d <= radius - border_w:
+				img.set_pixel(x, y, fill_col)
+			elif d <= radius:
+				img.set_pixel(x, y, border_col)
+			elif d <= radius + 1.2:
+				var alpha = 1.0 - (d - radius) / 1.2
+				img.set_pixel(x, y, Color(border_col.r, border_col.g, border_col.b, border_col.a * alpha))
+			elif d <= radius + 2.0:
+				var s_alpha = (1.0 - (d - (radius + 1.0))) * shadow_col.a
+				img.set_pixel(x, y, Color(0, 0, 0, s_alpha))
+			else:
+				img.set_pixel(x, y, Color(0, 0, 0, 0))
+
+	var tex = ImageTexture.create_from_image(img)
+	if is_mob:
+		if state == "hover":
+			_slider_grabber_hover_mob = tex
+		elif state == "pressed":
+			_slider_grabber_pressed_mob = tex
+		else:
+			_slider_grabber_normal_mob = tex
+	else:
+		if state == "hover":
+			_slider_grabber_hover = tex
+		elif state == "pressed":
+			_slider_grabber_pressed = tex
+		else:
+			_slider_grabber_normal = tex
+	return tex
+
+static func apply_slider_style(slider: Slider, min_height: int = -1, min_width: int = -1) -> void:
+	if slider == null:
+		return
+	var is_mob = MobilePerformance.is_mobile()
+	var effective_height = min_height
+	if effective_height <= 0:
+		effective_height = 48 if is_mob else 36
+	elif is_mob and effective_height < 44:
+		effective_height = 48
+
+	var current_min = slider.custom_minimum_size
+	var target_w = maxf(current_min.x, float(min_width) if min_width > 0 else (100.0 if is_mob else 70.0))
+	var target_h = maxf(current_min.y, float(effective_height))
+	slider.custom_minimum_size = Vector2(target_w, target_h)
+	slider.focus_mode = Control.FOCUS_ALL
+
+	var grab_normal = get_slider_grabber_icon("normal", is_mob)
+	var grab_hover = get_slider_grabber_icon("hover", is_mob)
+	var grab_pressed = get_slider_grabber_icon("pressed", is_mob)
+
+	slider.add_theme_icon_override("grabber", grab_normal)
+	slider.add_theme_icon_override("grabber_highlight", grab_hover)
+	slider.add_theme_icon_override("grabber_disabled", grab_normal)
+	slider.add_theme_constant_override("center_grabber", 1)
+
+	var corner_rad = 5 if is_mob else 4
+	var margin_v = 5 if is_mob else 4
+
+	var track_bg = StyleBoxFlat.new()
+	track_bg.bg_color = Color(0.08, 0.12, 0.18, 0.90)
+	track_bg.border_color = Color(0.24, 0.44, 0.65, 0.45)
+	track_bg.border_width_left = 1
+	track_bg.border_width_right = 1
+	track_bg.border_width_top = 1
+	track_bg.border_width_bottom = 1
+	track_bg.corner_radius_top_left = corner_rad
+	track_bg.corner_radius_top_right = corner_rad
+	track_bg.corner_radius_bottom_right = corner_rad
+	track_bg.corner_radius_bottom_left = corner_rad
+	track_bg.content_margin_top = margin_v
+	track_bg.content_margin_bottom = margin_v
+
+	var track_fill = StyleBoxFlat.new()
+	track_fill.bg_color = Color(0.22, 0.58, 0.90, 0.95)
+	track_fill.corner_radius_top_left = corner_rad
+	track_fill.corner_radius_bottom_left = corner_rad
+	track_fill.content_margin_top = margin_v
+	track_fill.content_margin_bottom = margin_v
+
+	var track_fill_hi = StyleBoxFlat.new()
+	track_fill_hi.bg_color = Color(0.32, 0.72, 1.0, 1.0)
+	track_fill_hi.corner_radius_top_left = corner_rad
+	track_fill_hi.corner_radius_bottom_left = corner_rad
+	track_fill_hi.content_margin_top = margin_v
+	track_fill_hi.content_margin_bottom = margin_v
+
+	slider.add_theme_stylebox_override("slider", track_bg)
+	slider.add_theme_stylebox_override("grabber_area", track_fill)
+	slider.add_theme_stylebox_override("grabber_area_highlight", track_fill_hi)
+
 static var _dialog_close_icon_normal: Texture2D = null
 static var _dialog_close_icon_pressed: Texture2D = null
 

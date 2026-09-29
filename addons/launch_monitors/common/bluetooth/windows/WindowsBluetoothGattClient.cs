@@ -40,7 +40,8 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         _discoveredAddresses.Clear();
         _discoveredDeviceIds.Clear();
 
-        _deviceWatcher = DeviceInformation.CreateWatcher(BluetoothLEDevice.GetDeviceSelector());
+        _deviceWatcher = DeviceInformation.CreateWatcher(
+            BluetoothLEDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected));
         _deviceWatcher.Added += OnDeviceAdded;
         _deviceWatcher.Start();
 
@@ -382,7 +383,7 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         var name = args.Name?.Trim() ?? string.Empty;
         if (IsDeviceNameMatch(name) && _discoveredDeviceIds.Add(args.Id))
         {
-            DeviceDiscovered?.Invoke(new BluetoothDevice(args.Id, name, 0));
+            DeviceDiscovered?.Invoke(new BluetoothDevice(args.Id, name, -1));
         }
     }
 

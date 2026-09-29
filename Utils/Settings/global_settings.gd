@@ -58,6 +58,8 @@ func apply_foam_ball_boost(data: Dictionary, fallback_club: String = "") -> void
 
 
 func is_low_graphics() -> bool:
+	if is_driving_range_scene():
+		return false
 	if range_settings != null and range_settings.settings.has("graphics_quality"):
 		return range_settings.settings["graphics_quality"].value == "Low"
 	return MobilePerformance.is_mobile()
@@ -195,12 +197,9 @@ func load_settings() -> void:
 		range_settings.ball_reset_timer.set_value(1.5)
 		migrated = true
 	
-	# Migration / validation for green speeds (clamp out-of-bounds legacy settings like 30.0/50.0 to standard 10.0)
+	# Migration / validation for green speed (clamp out-of-bounds legacy settings like 30.0/50.0 to standard 10.0)
 	if range_settings.green_speed.value < 6.0 or range_settings.green_speed.value > 16.0:
 		range_settings.green_speed.set_value(10.0)
-		migrated = true
-	if range_settings.putting_green_speed.value < 6.0 or range_settings.putting_green_speed.value > 16.0:
-		range_settings.putting_green_speed.set_value(10.0)
 		migrated = true
 	
 	# Migration / validation for displayed_stats
@@ -430,15 +429,23 @@ func _setup_audio_players() -> void:
 	call_deferred("update_audio_state")
 
 
+var _mock_active_scene: Node = null
+
+func set_mock_active_scene(scene: Node) -> void:
+	_mock_active_scene = scene
+
 func _get_active_scene() -> Node:
-	if has_node("/root/SceneManager"):
-		var scn_mgr = get_node("/root/SceneManager")
-		var scn = scn_mgr.get("current_scene") as Node
-		if scn != null and is_instance_valid(scn):
-			return scn
-	var tree := get_tree()
-	if tree != null:
-		return tree.current_scene
+	if _mock_active_scene != null and is_instance_valid(_mock_active_scene):
+		return _mock_active_scene
+	if is_inside_tree():
+		if has_node("/root/SceneManager"):
+			var scn_mgr = get_node("/root/SceneManager")
+			var scn = scn_mgr.get("current_scene") as Node
+			if scn != null and is_instance_valid(scn):
+				return scn
+		var tree := get_tree()
+		if tree != null:
+			return tree.current_scene
 	return null
 
 
@@ -486,9 +493,6 @@ func is_putting_minigame_screen() -> bool:
 
 
 func get_effective_green_speed() -> float:
-	if is_putting_minigame_screen():
-		if range_settings != null and "putting_green_speed" in range_settings:
-			return float(range_settings.putting_green_speed.value)
 	if range_settings != null and "green_speed" in range_settings:
 		return float(range_settings.green_speed.value)
 	return 10.0
@@ -597,7 +601,7 @@ func is_driving_range_scene() -> bool:
 	var scene := _get_active_scene()
 	if scene == null:
 		return false
-	if "is_driving_range" in scene and bool(scene.get("is_driving_range")):
+	if ("is_driving_range" in scene and bool(scene.get("is_driving_range"))) or (scene.has_meta("is_driving_range") and bool(scene.get_meta("is_driving_range"))):
 		return true
 	var scene_name := str(scene.name).to_lower()
 	var script: Script = scene.get_script()
@@ -664,12 +668,30 @@ func start_round_wind(force_new: bool = true) -> void:
 		wind_initialized_for_round = false
 
 
+const WIND_PEAK_ALTITUDE_METERS: float = 25.0
+
 func get_wind_vector_mps() -> Vector3:
 	if not is_wind_enabled() or current_wind_speed_mph <= 0.0:
 		return Vector3.ZERO
 	var speed_mps: float = current_wind_speed_mph * 0.44704
 	# In Godot 3D, +X is East, +Z is South. Horizontal plane wind:
 	return Vector3(cos(current_wind_direction_rad), 0.0, sin(current_wind_direction_rad)) * speed_mps
+
+
+## Returns the atmospheric boundary layer wind scaling factor (0.0 to 1.0)
+## as a function of height above ground (altitude_m).
+## Near ground level (start/end of trajectory), wind effect is ~0.0 (little to no effect).
+## It increases smoothly up to 1.0 (the full listed amount) at peak heights (>= 25m).
+func get_wind_altitude_factor(altitude_m: float) -> float:
+	return smoothstep(0.0, WIND_PEAK_ALTITUDE_METERS, maxf(0.0, altitude_m))
+
+
+## Returns the effective wind vector scaled by the elevation gradient for the given altitude.
+func get_wind_vector_at_altitude_mps(altitude_m: float) -> Vector3:
+	var base_vec := get_wind_vector_mps()
+	if base_vec.is_zero_approx():
+		return Vector3.ZERO
+	return base_vec * get_wind_altitude_factor(altitude_m)
 
 
 func get_relative_wind_arrow_and_angle(ball_pos: Vector3, aim_target_pos: Vector3, fallback_forward: Vector3 = Vector3.ZERO) -> Dictionary:
@@ -707,8 +729,20 @@ func get_relative_wind_arrow_and_angle(ball_pos: Vector3, aim_target_pos: Vector
 	elif deg >= -67.5 and deg < -22.5:
 		arrow = "↖"
 
+	var thick_arrow: String = "⬆"
+	match arrow:
+		"↑": thick_arrow = "⬆"
+		"↗": thick_arrow = "⬈"
+		"→": thick_arrow = "➡"
+		"↘": thick_arrow = "⬊"
+		"↓": thick_arrow = "⬇"
+		"↙": thick_arrow = "⬋"
+		"←": thick_arrow = "⬅"
+		"↖": thick_arrow = "⬉"
+
 	return {
 		"arrow": arrow,
+		"thick_arrow": thick_arrow,
 		"angle_deg": deg,
 		"w_fwd": w_fwd,
 		"w_right": w_right,

@@ -656,10 +656,22 @@ static func _generate_fallback_fairway_tris(
 		center_pts.append(Vector2(target_tee_pos.x, target_tee_pos.z))
 		center_pts.append(Vector2(target_pin_pos.x, target_pin_pos.z))
 
-	var half_w = 14.0 # 28m fairway width
+	# Resample / subdivide center points so fallback fairway conforms smoothly to rolling terrain
+	var resampled_pts: Array[Vector2] = []
 	for j in range(center_pts.size() - 1):
-		var p1 = center_pts[j]
-		var p2 = center_pts[j + 1]
+		var cp1 = center_pts[j]
+		var cp2 = center_pts[j + 1]
+		var seg_len = cp1.distance_to(cp2)
+		var steps = maxi(1, int(ceil(seg_len / 16.0)))
+		for s in range(steps):
+			var t = float(s) / float(steps)
+			resampled_pts.append(cp1.lerp(cp2, t))
+	resampled_pts.append(center_pts.back())
+
+	var half_w = 14.0 # 28m fairway width
+	for j in range(resampled_pts.size() - 1):
+		var p1 = resampled_pts[j]
+		var p2 = resampled_pts[j + 1]
 		var fwd = (p2 - p1).normalized()
 		var side = Vector2(-fwd.y, fwd.x) * half_w
 
@@ -685,25 +697,55 @@ static func _generate_fallback_green_tris(
 	height_grid: Dictionary = {}
 ) -> void:
 	var radius = 13.0
-	var segs = 16
+	var segs = 24
+	var rings = 3
 	var center_y = _sample_height_from_grid(target_pin_pos.x, target_pin_pos.z, height_grid, 4.0, 0.0)
 	var center = Vector3(target_pin_pos.x, center_y, target_pin_pos.z)
 	var center2d = Vector2(center.x, center.z)
 
+	var ring_radii = [radius * 0.35, radius * 0.70, radius * 1.0]
+	var prev_pts_2d: Array[Vector2] = []
+	var prev_pts_3d: PackedVector3Array = PackedVector3Array()
+
+	# Center fan to ring 0
 	for i in range(segs):
-		var a1 = (float(i) / float(segs)) * TAU
-		var a2 = (float(i + 1) / float(segs)) * TAU
+		var a = (float(i) / float(segs)) * TAU
+		var p_xz = center2d + Vector2(cos(a), sin(a)) * ring_radii[0]
+		var py = _sample_height_from_grid(p_xz.x, p_xz.y, height_grid, 4.0, center_y)
+		prev_pts_2d.append(p_xz)
+		prev_pts_3d.append(Vector3(p_xz.x, py, p_xz.y))
 
-		var p1_xz = center2d + Vector2(cos(a1) * radius, sin(a1) * radius)
-		var p2_xz = center2d + Vector2(cos(a2) * radius, sin(a2) * radius)
-		var p1_y = _sample_height_from_grid(p1_xz.x, p1_xz.y, height_grid, 4.0, center_y)
-		var p2_y = _sample_height_from_grid(p2_xz.x, p2_xz.y, height_grid, 4.0, center_y)
+	for i in range(segs):
+		var i_next = (i + 1) % segs
+		out_3d.append_array([center, prev_pts_3d[i], prev_pts_3d[i_next]])
+		out_features.append([center2d, prev_pts_2d[i], prev_pts_2d[i_next]])
 
-		var p1 = Vector3(p1_xz.x, p1_y, p1_xz.y)
-		var p2 = Vector3(p2_xz.x, p2_y, p2_xz.y)
+	# Concentric quads for outer rings
+	for r in range(1, rings):
+		var curr_r = ring_radii[r]
+		var curr_pts_2d: Array[Vector2] = []
+		var curr_pts_3d: PackedVector3Array = PackedVector3Array()
 
-		out_3d.append_array([center, p1, p2])
-		out_features.append([center2d, Vector2(p1.x, p1.z), Vector2(p2.x, p2.z)])
+		for i in range(segs):
+			var a = (float(i) / float(segs)) * TAU
+			var p_xz = center2d + Vector2(cos(a), sin(a)) * curr_r
+			var py = _sample_height_from_grid(p_xz.x, p_xz.y, height_grid, 4.0, center_y)
+			curr_pts_2d.append(p_xz)
+			curr_pts_3d.append(Vector3(p_xz.x, py, p_xz.y))
+
+		for i in range(segs):
+			var i_next = (i + 1) % segs
+			var p_in_a = prev_pts_3d[i]
+			var p_in_b = prev_pts_3d[i_next]
+			var p_out_a = curr_pts_3d[i]
+			var p_out_b = curr_pts_3d[i_next]
+
+			out_3d.append_array([p_in_a, p_out_a, p_in_b, p_in_b, p_out_a, p_out_b])
+			out_features.append([prev_pts_2d[i], curr_pts_2d[i], prev_pts_2d[i_next]])
+			out_features.append([prev_pts_2d[i_next], curr_pts_2d[i], curr_pts_2d[i_next]])
+
+		prev_pts_2d = curr_pts_2d
+		prev_pts_3d = curr_pts_3d
 
 
 static func _build_hole_unified_terrain(
@@ -1277,28 +1319,38 @@ static func _sample_height_from_grid(
 	var min_dist_sq: float = 999999.0
 	var closest_y: float = fallback_y
 
-	for dx in range(-2, 3):
-		for dz in range(-2, 3):
+	var support_radius: float = 14.0
+	var support_radius_sq: float = support_radius * support_radius
+
+	for dx in range(-3, 4):
+		for dz in range(-3, 4):
 			var cell_key = Vector2i(cx + dx, cz + dz)
 			if not height_grid.has(cell_key):
 				continue
 			var cell_verts: Array = height_grid[cell_key]
 			for v in cell_verts:
 				var d2 = p2.distance_squared_to(Vector2(v.x, v.z))
-				if d2 < 0.001:
+				if d2 < 0.0001:
 					return v.y
 				if d2 < min_dist_sq:
 					min_dist_sq = d2
 					closest_y = v.y
-				if d2 < 100.0: # within 10 meters
-					var w = 1.0 / (d2 * d2)
+				if d2 < support_radius_sq:
+					var dist = sqrt(d2)
+					var q = dist / support_radius
+					# Wendland C2 compact polynomial: (1 - q)^4 * (4q + 1)
+					# Guarantees smooth first and second derivatives with zero tangent at boundary
+					var omq = 1.0 - q
+					var w = omq * omq * omq * omq * (4.0 * q + 1.0)
 					weighted_height += v.y * w
 					total_weight += w
 
 	if total_weight > 0.0:
 		return weighted_height / total_weight
-	if min_dist_sq < 900.0: # within 30 meters
-		return closest_y
+	if min_dist_sq < 1600.0: # within 40 meters
+		var d = sqrt(min_dist_sq)
+		var t = clampf((d - support_radius) / (40.0 - support_radius), 0.0, 1.0)
+		return lerpf(closest_y, fallback_y, _quintic_smooth(t))
 	return fallback_y
 
 

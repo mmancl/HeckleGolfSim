@@ -132,6 +132,11 @@ var _hit_leaves_this_shot := false
 var hit_tree_this_shot := false
 var _skipping_flight := false
 
+# Wind altitude scaling
+const WIND_PEAK_ALTITUDE_METERS: float = 25.0
+var _current_ground_y: float = 0.0
+var _ground_elevation_timer: float = 0.0
+
 
 # Ball physics constants (cached from C# addon in _init)
 var _ball_mass: float
@@ -416,14 +421,27 @@ func _is_collider_tree(collider: Object) -> bool:
 	return false
 
 
+func _is_collider_flagstick(collider: Object) -> bool:
+	if collider == null:
+		return false
+	if collider.has_meta("is_flagstick"):
+		return bool(collider.get_meta("is_flagstick"))
+	var c_name := String(collider.name)
+	if c_name.containsn("flagstick") or c_name.containsn("flagpole") or c_name.containsn("flagpin") or c_name.containsn("pinmarker"):
+		return true
+	var parent := (collider as Node).get_parent() if collider is Node else null
+	if parent != null:
+		if parent.has_meta("is_flagstick") or String(parent.name).containsn("flagpin"):
+			return true
+	return false
+
+
 func _connect_settings() -> void:
 	GlobalSettings.range_settings.temperature.setting_changed.connect(_on_environment_changed)
 	GlobalSettings.range_settings.altitude.setting_changed.connect(_on_environment_changed)
 	GlobalSettings.range_settings.range_units.setting_changed.connect(_on_environment_changed)
 	GlobalSettings.range_settings.surface_type.setting_changed.connect(_on_surface_type_changed)
 	GlobalSettings.range_settings.green_speed.setting_changed.connect(_on_green_speed_changed)
-	if "putting_green_speed" in GlobalSettings.range_settings:
-		GlobalSettings.range_settings.putting_green_speed.setting_changed.connect(_on_green_speed_changed)
 	
 	if has_node("/root/EventBus"):
 		var eb = get_node("/root/EventBus")
@@ -460,7 +478,8 @@ func _update_tee_elevation() -> void:
 		if probe.get("hit", false):
 			var hit_pos: Vector3 = probe.get("position", Vector3.ZERO)
 			var hit_norm: Vector3 = probe.get("normal", Vector3.UP)
-			global_position = hit_pos + hit_norm * (_ball_radius + GROUND_SNAP_OFFSET)
+			var nys := maxf(hit_norm.y, MIN_GROUND_NORMAL)
+			global_position.y = hit_pos.y + (_ball_radius + GROUND_SNAP_OFFSET) / nys
 			floor_normal = hit_norm
 			on_ground = true
 			if probe.has("collider") and probe["collider"] != null:
@@ -606,9 +625,9 @@ func _apply_surface_params() -> void:
 		if is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER:
 			surface_params = {"u_k": 0.95, "u_kr": 0.42, "nu_g": 0.020, "theta_c": 0.45}
 		else:
-			surface_params = {"u_k": 0.30, "u_kr": 0.03, "nu_g": 0.0010, "theta_c": 0.25}
+			surface_params = {"u_k": 0.30, "u_kr": 0.085, "nu_g": 0.0014, "theta_c": 0.285}
 	_kinetic_friction = float(surface_params.get("u_k", 0.30)) * _kinetic_mult
-	_rolling_friction = float(surface_params.get("u_kr", 0.03)) * _rolling_mult
+	_rolling_friction = float(surface_params.get("u_kr", 0.085)) * _rolling_mult
 	
 	# Determine green speed scaling exponent based on surface type
 	var green_speed = float(GlobalSettings.get_effective_green_speed())
@@ -672,6 +691,44 @@ func get_side_distance_meters() -> float:
 
 func get_side_distance_yards() -> float:
 	return get_side_distance_meters() * 1.09361
+
+
+## Returns the height of the ball above the terrain/ground beneath it in meters.
+func get_height_above_ground() -> float:
+	var current_y: float = global_position.y if is_inside_tree() else position.y
+	return maxf(0.0, current_y - _current_ground_y)
+
+
+## Returns the atmospheric boundary layer wind factor (0.0 to 1.0) based on elevation.
+## Near ground level (start/end of trajectory), wind has little to no effect.
+## It increases smoothly up to 1.0 (the full listed amount) at peak heights (>= 25m).
+func get_wind_factor() -> float:
+	return smoothstep(0.0, WIND_PEAK_ALTITUDE_METERS, get_height_above_ground())
+
+
+func _update_ground_elevation() -> void:
+	if not is_inside_tree():
+		return
+	var scene = get_tree().current_scene
+	if scene != null and scene.has_method("get_height"):
+		_current_ground_y = float(scene.call("get_height", global_position.x, global_position.z))
+		return
+
+	var world := get_world_3d()
+	if world != null and world.direct_space_state != null:
+		var ray_start := global_position + Vector3.UP * 1.0
+		var ray_end := global_position + Vector3.DOWN * 500.0
+		var query := PhysicsRayQueryParameters3D.create(ray_start, ray_end)
+		query.collide_with_areas = false
+		query.collide_with_bodies = true
+		query.exclude = [get_rid()]
+		var hit := world.direct_space_state.intersect_ray(query)
+		if not hit.is_empty():
+			_current_ground_y = float(hit["position"].y)
+			return
+
+	if not shot_start_pos_global.is_zero_approx():
+		_current_ground_y = shot_start_pos_global.y
 
 
 
@@ -842,19 +899,30 @@ func _physics_process(delta: float) -> void:
 		if gs != null and gs.is_wind_enabled():
 			var wind_vec: Vector3 = gs.get_wind_vector_mps()
 			if not wind_vec.is_zero_approx():
-				var v_ball := velocity
-				var v_rel := v_ball - wind_vec
-				var v_ball_len := v_ball.length()
-				var v_rel_len := v_rel.length()
-				var cd := 0.28
-				var rho := 1.204
-				if params != null:
-					rho = float(_get_openfairway_property(params, &"air_density", &"AirDensity", 1.204))
-				var cross_area := 0.0014303 # PI * RADIUS^2
-				var f_drag_wind: Vector3 = -0.5 * cd * rho * cross_area * v_rel_len * v_rel
-				var f_drag_still: Vector3 = -0.5 * cd * rho * cross_area * v_ball_len * v_ball
-				var wind_force: Vector3 = f_drag_wind - f_drag_still
-				velocity += (wind_force / _ball_mass) * delta
+				_ground_elevation_timer += delta
+				if _ground_elevation_timer >= 0.10:
+					_ground_elevation_timer = 0.0
+					_update_ground_elevation()
+
+				# Altitude / elevation-based wind scaling:
+				# Near ground level (start and end of trajectory), wind effect is ~0.0.
+				# It increases smoothly up to 1.0 (the full listed amount) at peak heights (>= 25m).
+				var wind_factor := get_wind_factor()
+				var effective_wind := wind_vec * wind_factor
+				if not effective_wind.is_zero_approx():
+					var v_ball := velocity
+					var v_rel := v_ball - effective_wind
+					var v_ball_len := v_ball.length()
+					var v_rel_len := v_rel.length()
+					var cd := 0.28
+					var rho := 1.204
+					if params != null:
+						rho = float(_get_openfairway_property(params, &"air_density", &"AirDensity", 1.204))
+					var cross_area := 0.0014303 # PI * RADIUS^2
+					var f_drag_wind: Vector3 = -0.5 * cd * rho * cross_area * v_rel_len * v_rel
+					var f_drag_still: Vector3 = -0.5 * cd * rho * cross_area * v_ball_len * v_ball
+					var wind_force: Vector3 = f_drag_wind - f_drag_still
+					velocity += (wind_force / _ball_mass) * delta
 
 	# Apply tree leaves reduction/damping (responsive check, 20 Hz)
 	if state == PhysicsEnums.BallState.FLIGHT and _has_canopy_trees:
@@ -929,7 +997,7 @@ func _physics_process(delta: float) -> void:
 			_ball_mesh.global_rotate(axis, angle)
 
 	# Check for rest
-	if velocity.length() < 0.1 and state != PhysicsEnums.BallState.REST:
+	if velocity.length() < 0.12 and state != PhysicsEnums.BallState.REST:
 		_enter_rest_state()
 
 
@@ -955,6 +1023,14 @@ func _check_out_of_bounds() -> bool:
 func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, prev_velocity: Vector3) -> void:
 	if collision:
 		var collider = collision.get_collider()
+		var is_flagstick := _is_collider_flagstick(collider)
+		if is_putt and is_flagstick:
+			# Flagstick is pulled during putting: no collision
+			var remainder := collision.get_remainder()
+			if remainder.length_squared() > 0.000001:
+				move_and_collide(remainder, false, COLLISION_SAFE_MARGIN)
+			return
+
 		var is_water_hit = collider != null and ((collider.has_meta("is_water") and bool(collider.get_meta("is_water"))) or collider.name.to_lower().contains("water"))
 		if is_water_hit:
 			is_in_water = true
@@ -978,7 +1054,7 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 		var is_rolling := was_on_ground or is_putt or state == PhysicsEnums.BallState.ROLLOUT
 		if not is_ground_norm and is_rolling:
 			var is_tree := _is_collider_tree(collider)
-			if not is_tree:
+			if not is_tree and not is_flagstick:
 				# Probe ahead across the edge to check if there is rollable ground on top of the step/lip
 				var forward_dir := -Vector3(normal.x, 0.0, normal.z).normalized()
 				if forward_dir.is_zero_approx():
@@ -1002,7 +1078,7 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 								if step_height >= -0.02 and step_height <= 0.040:
 									on_ground = true
 									floor_normal = step_normal
-									global_position.y = step_y + _ball_radius + GROUND_SNAP_OFFSET
+									global_position.y = step_y + (_ball_radius + GROUND_SNAP_OFFSET) / maxf(step_normal.y, MIN_GROUND_NORMAL)
 									global_position += forward_dir * 0.005
 									var prev_speed := prev_velocity.length()
 									velocity = _remove_velocity_along_normal(prev_velocity, floor_normal)
@@ -1131,12 +1207,16 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 					_update_surface_from_collider(collider)
 				var prev_speed := velocity.length()
 				velocity = _remove_velocity_along_normal(velocity, normal)
-				# If internal mesh seam drastically killed horizontal roll speed, preserve momentum
-				if prev_speed > 0.1 and velocity.length() < prev_speed * 0.90:
+				# Only protect against acute internal mesh seam micro-catches (e.g. nearly stopping on flat ground)
+				# without artificially boosting momentum when rolling uphill into normal slope contours.
+				if was_on_ground and prev_speed > 0.5 and velocity.length() < 0.05 and normal.y > 0.95:
 					if velocity.length_squared() > 0.0001:
-						velocity = velocity.normalized() * (prev_speed * 0.98)
-				# Slight depenetration along normal to prevent snagging on triangle mesh seams
-				global_position += normal * (COLLISION_SAFE_MARGIN * 2.0 + GROUND_SNAP_OFFSET)
+						velocity = velocity.normalized() * (prev_speed * 0.90)
+				# Snap ball Y to correct sphere-on-slope height at the collision point
+				# instead of pushing along normal (which accumulates lift over frames)
+				var contact_pos := collision.get_position()
+				var nys := maxf(normal.y, MIN_GROUND_NORMAL)
+				global_position.y = contact_pos.y + (_ball_radius + GROUND_SNAP_OFFSET) / nys
 				# Continue motion along the slope tangent for the remainder of this frame
 				var remainder := collision.get_remainder()
 				remainder = _remove_velocity_along_normal(remainder, normal)
@@ -1150,10 +1230,10 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 								_update_surface_from_collider(col2.get_collider())
 							var p_spd2 := velocity.length()
 							velocity = _remove_velocity_along_normal(velocity, norm2)
-							if p_spd2 > 0.1 and velocity.length() < p_spd2 * 0.90:
+							if was_on_ground and p_spd2 > 0.5 and velocity.length() < 0.05 and norm2.y > 0.95:
 								if velocity.length_squared() > 0.0001:
-									velocity = velocity.normalized() * (p_spd2 * 0.98)
-							global_position += norm2 * (COLLISION_SAFE_MARGIN * 2.0 + GROUND_SNAP_OFFSET)
+									velocity = velocity.normalized() * (p_spd2 * 0.90)
+							global_position.y = col2.get_position().y + (_ball_radius + GROUND_SNAP_OFFSET) / maxf(norm2.y, MIN_GROUND_NORMAL)
 		else:
 			# Wall collision - damped reflection
 			on_ground = false
@@ -1170,8 +1250,13 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 						get_node("/root/AnnouncerEngine").call("SpeakTreeHeckle")
 				if has_node("/root/TensionManager"):
 					get_node("/root/TensionManager").on_tree_hit()
+			elif is_flagstick:
+				if _cup_player != null and not _skipping_flight:
+					_cup_player.pitch_scale = randf_range(1.18, 1.30)
+					_cup_player.play()
+				print("[ball.gd] Ball struck the flagstick pin! Damped bounce.")
 
-			# Damped reflection off vertical surfaces (walls, barriers, trees, etc.)
+			# Damped reflection off vertical surfaces (walls, barriers, trees, flagstick, etc.)
 			velocity = velocity.bounce(normal) * 0.35
 			omega = omega * 0.5
 	else:
@@ -1181,11 +1266,21 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 			if bool(probe.get("hit", false)):
 				on_ground = true
 				floor_normal = probe.get("normal", Vector3.UP)
-				# Snap ball height along normal to sit cleanly ontop of the surface without penetrating slopes
+				# Compute correct sphere center Y for a sphere resting on a slope.
+				# The raycast fires vertically, so hit_pos is the vertical intersection.
+				# For a sphere of radius R on a surface with normal N, the center is at:
+				#   Y = hit_y + R / N.y  (geometrically: R / cos(slope_angle))
+				# This prevents floating on uphills and clipping on downhills.
 				var hit_pos: Vector3 = probe.get("position", Vector3.ZERO)
-				global_position = hit_pos + floor_normal * (_ball_radius + GROUND_SNAP_OFFSET)
+				var normal_y_safe := maxf(floor_normal.y, MIN_GROUND_NORMAL)
+				var correct_y := hit_pos.y + (_ball_radius + GROUND_SNAP_OFFSET) / normal_y_safe
+				global_position.x = global_position.x  # preserve horizontal motion from move_and_collide
+				global_position.z = global_position.z
+				global_position.y = correct_y
 				# Align velocity with the slope tangent
 				velocity = _remove_velocity_along_normal(velocity, floor_normal)
+				if probe.get("collider", null) != null:
+					_update_surface_from_collider(probe["collider"])
 			else:
 				on_ground = false
 				floor_normal = Vector3.UP
@@ -1215,7 +1310,8 @@ func _try_recover_to_ground() -> bool:
 	else:
 		hit_normal = hit_normal.normalized()
 
-	global_position = hit_position + hit_normal * (_ball_radius + GROUND_SNAP_OFFSET)
+	var nys := maxf(hit_normal.y, MIN_GROUND_NORMAL)
+	global_position = Vector3(hit_position.x, hit_position.y + (_ball_radius + GROUND_SNAP_OFFSET) / nys, hit_position.z)
 	floor_normal = hit_normal
 	velocity = _remove_velocity_along_normal(velocity, hit_normal)
 	on_ground = true
@@ -1355,6 +1451,8 @@ func reset() -> void:
 	is_putt = false
 	shot_start_pos = spawn_position
 	shot_start_pos_global = spawn_position
+	_current_ground_y = spawn_position.y
+	_ground_elevation_timer = 0.0
 	target_dir = Vector3.RIGHT
 	shot_was_in_sand = false
 	shot_was_from_teebox = false
@@ -1665,7 +1763,8 @@ func hit_from_data(data: Dictionary) -> void:
 		if probe.get("hit", false):
 			var hit_pos: Vector3 = probe.get("position", global_position)
 			floor_normal = probe.get("normal", Vector3.UP)
-			global_position = hit_pos + floor_normal * (_ball_radius + GROUND_SNAP_OFFSET)
+			var nys := maxf(floor_normal.y, MIN_GROUND_NORMAL)
+			global_position.y = hit_pos.y + (_ball_radius + GROUND_SNAP_OFFSET) / nys
 		var speed_mag := speed_mps
 		var flat_vel := Vector3(launch_velocity.x, 0.0, launch_velocity.z)
 		if flat_vel.length_squared() > 0.000001:
@@ -1715,6 +1814,9 @@ func hit_from_data(data: Dictionary) -> void:
 
 	shot_start_pos = position
 	shot_start_pos_global = global_position
+	_current_ground_y = global_position.y
+	_ground_elevation_timer = 0.0
+	_update_ground_elevation()
 	shot_was_in_sand = is_in_sand or (lie_type == "sand")
 	launch_spin_rpm = total_spin
 
@@ -1862,11 +1964,21 @@ func _update_surface_from_collider(collider: Object) -> void:
 	elif is_fairway:
 		lie_type = "fairway"
 		set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
-		if changed_sand:
-			_apply_surface_params()
 	elif is_rough:
 		if _is_position_on_fringe(global_position):
 			lie_type = "fringe"
+			set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+		else:
+			lie_type = "rough"
+			set_surface(PhysicsEnums.SurfaceType.ROUGH)
+		if changed_sand:
+			_apply_surface_params()
+	elif name_lower.contains("dynamicground") or (collider.get_parent() != null and collider.get_parent().name.to_lower().contains("dynamicground")):
+		if global_position.distance_to(spawn_position) < 1.5:
+			lie_type = "teebox"
+			set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+		elif abs(global_position.z) <= 26.0 and global_position.x >= -12.0:
+			lie_type = "fairway"
 			set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
 		else:
 			lie_type = "rough"

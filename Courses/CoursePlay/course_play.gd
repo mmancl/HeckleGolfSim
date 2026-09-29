@@ -979,6 +979,7 @@ func _setup_hud() -> void:
 	golfer_cam_btn = Button.new()
 	golfer_cam_btn.name = "GolferCamButton"
 	golfer_cam_btn.text = "📹 Golfer Cam: OFF"
+	golfer_cam_btn.tooltip_text = "Toggle Golfer Camera (Right-click for Setup)"
 	golfer_cam_btn.custom_minimum_size = Vector2(180, 56)
 	apply_material_button_style(golfer_cam_btn, Color(0.2, 0.45, 0.45, 0.85))
 	golfer_cam_btn.pressed.connect(func():
@@ -996,6 +997,12 @@ func _setup_hud() -> void:
 				range_ui.call("set_golfer_camera_visible", false)
 			_update_course_golfer_cam_btn_state()
 	)
+	golfer_cam_btn.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_RIGHT:
+			if range_ui != null and range_ui.has_method("open_camera_setup"):
+				range_ui.call("open_camera_setup", false)
+				get_viewport().set_input_as_handled()
+	)
 	toggles_container.add_child(golfer_cam_btn)
 	_update_course_golfer_cam_btn_state()
 
@@ -1003,7 +1010,7 @@ func _setup_hud() -> void:
 	putting_cam_btn = Button.new()
 	putting_cam_btn.name = "PuttingCamButton"
 	putting_cam_btn.text = "🎯 Putting Cam: OFF"
-	putting_cam_btn.tooltip_text = "Toggle Putting Camera"
+	putting_cam_btn.tooltip_text = "Toggle Putting Camera (Right-click for Setup)"
 	putting_cam_btn.custom_minimum_size = Vector2(180, 56)
 	apply_material_button_style(putting_cam_btn, Color(0.35, 0.35, 0.35, 0.85))
 	putting_cam_btn.pressed.connect(func():
@@ -1020,6 +1027,12 @@ func _setup_hud() -> void:
 			else:
 				range_ui.call("set_putting_camera_visible", false)
 		_update_course_putting_cam_btn_state()
+	)
+	putting_cam_btn.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_RIGHT:
+			if range_ui != null and range_ui.has_method("open_camera_setup"):
+				range_ui.call("open_camera_setup", true)
+				get_viewport().set_input_as_handled()
 	)
 	toggles_container.add_child(putting_cam_btn)
 	_update_course_putting_cam_btn_state()
@@ -1449,6 +1462,7 @@ func _setup_hud() -> void:
 	zoom_overlay.name = "ZoomOverlay"
 	zoom_overlay.mouse_filter = Control.MOUSE_FILTER_PASS
 	zoom_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	zoom_overlay.clip_contents = true
 	minimap_panel.add_child(zoom_overlay)
 
 	# Flag Marker on Minimap Overlay (shows at hole location on green heatmap)
@@ -1754,6 +1768,7 @@ func _setup_hud() -> void:
 	m_player_select_opt.item_selected.connect(func(index):
 		if index == 0:
 			m_name_input.visible = true
+			m_name_input.call_deferred("grab_focus")
 		else:
 			m_name_input.visible = false
 			var p_name = m_player_select_opt.get_item_text(index)
@@ -2005,7 +2020,26 @@ func _update_hud_focus_neighbors() -> void:
 
 
 func is_any_dialog_open() -> bool:
+	# Check UIFocusGuard: dropdown or manual lock active
+	if has_node("/root/UIFocusGuard"):
+		var guard = get_node("/root/UIFocusGuard")
+		if guard.is_dropdown_open() or guard.is_locked():
+			return true
+	# Check if any UI control currently has focus that is actively editing or inside a dialog
+	var vp := get_viewport()
+	if vp != null:
+		var focused := vp.gui_get_focus_owner()
+		if focused != null and is_instance_valid(focused) and focused.is_visible_in_tree():
+			if focused is LineEdit or focused is TextEdit:
+				return true
+			if focused is Range or (focused is Control and (focused.get_parent() is SpinBox or focused is SpinBox)):
+				return true
+			if _is_control_in_dialog(focused):
+				return true
 	if range_ui != null:
+		var dist_m = range_ui.find_child("DistanceMenu", true, false)
+		if dist_m != null and is_instance_valid(dist_m) and dist_m.visible:
+			return true
 		if range_ui.has_method("get_active_swing_replay_modal"):
 			var modal = range_ui.call("get_active_swing_replay_modal")
 			if modal != null and is_instance_valid(modal) and modal.visible:
@@ -2029,6 +2063,20 @@ func is_any_dialog_open() -> bool:
 		return true
 	if hud_overview != null and is_instance_valid(hud_overview) and hud_overview.visible:
 		return true
+	return false
+
+
+func _is_control_in_dialog(ctrl: Control) -> bool:
+	var cur: Node = ctrl
+	while cur != null and cur != self and cur != get_tree().root:
+		if cur is Popup or cur is AcceptDialog or cur is ConfirmationDialog or cur is Window:
+			return true
+		var c_name := str(cur.name).to_lower()
+		if c_name.contains("modal") or c_name.contains("dialog") or c_name.contains("popup") \
+			or c_name == "distancemenu" or c_name == "settingslayer" or c_name == "settingsmodallayer" \
+			or c_name == "scorecardpanel" or c_name == "manageplayerspanel":
+			return true
+		cur = cur.get_parent()
 	return false
 
 
@@ -2152,6 +2200,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			var no_btn = exit_confirm_dialog.find_child("NoButton", true, false) as Button
 			if is_escape or event.is_action_pressed("ui_cancel"):
 				exit_confirm_dialog.visible = false
+				get_viewport().gui_release_focus()
 				get_viewport().set_input_as_handled()
 				return
 			if is_enter or event.is_action_pressed("ui_accept"):
@@ -2162,6 +2211,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					no_btn.emit_signal("pressed")
 				else:
 					exit_confirm_dialog.visible = false
+				get_viewport().gui_release_focus()
 				get_viewport().set_input_as_handled()
 				return
 			if event.is_action_pressed("ui_left") or event.is_action_pressed("ui_right") or \
@@ -2178,11 +2228,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		if add_player_prompt_dialog != null and is_instance_valid(add_player_prompt_dialog) and add_player_prompt_dialog.visible:
 			if is_escape:
 				add_player_prompt_dialog.visible = false
+				get_viewport().gui_release_focus()
 			get_viewport().set_input_as_handled()
 			return
 		if resume_player_prompt_dialog != null and is_instance_valid(resume_player_prompt_dialog) and resume_player_prompt_dialog.visible:
 			if is_escape:
 				resume_player_prompt_dialog.visible = false
+				get_viewport().gui_release_focus()
 			get_viewport().set_input_as_handled()
 			return
 		if is_escape:
@@ -2190,16 +2242,25 @@ func _unhandled_input(event: InputEvent) -> void:
 				_stop_scorecard_countdown()
 				hud_scorecard.visible = false
 				_set_other_elements_visible(true)
+				get_viewport().gui_release_focus()
 				get_viewport().set_input_as_handled()
 				return
 			if range_ui != null:
+				var dist_m = range_ui.find_child("DistanceMenu", true, false)
+				if dist_m != null and is_instance_valid(dist_m) and dist_m.visible:
+					dist_m.visible = false
+					get_viewport().gui_release_focus()
+					get_viewport().set_input_as_handled()
+					return
 				var replay_modal = range_ui.call("get_active_swing_replay_modal") if range_ui.has_method("get_active_swing_replay_modal") else range_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
 				if replay_modal != null and is_instance_valid(replay_modal) and replay_modal.visible:
 					range_ui.call("toggle_prev_shot_analysis")
+					get_viewport().gui_release_focus()
 					get_viewport().set_input_as_handled()
 					return
 				if range_ui.has_node("SettingsLayer") and range_ui.get_node("SettingsLayer").visible:
 					range_ui.get_node("SettingsLayer").visible = false
+					get_viewport().gui_release_focus()
 					get_viewport().set_input_as_handled()
 					return
 
@@ -2354,9 +2415,9 @@ func _update_hud_tooltips() -> void:
 	if grid_btn != null and is_instance_valid(grid_btn):
 		grid_btn.tooltip_text = "Toggle Slope Grid (Show/Hide) [%s]" % km.get_action_summary_str("green_grid")
 	if golfer_cam_btn != null and is_instance_valid(golfer_cam_btn):
-		golfer_cam_btn.tooltip_text = "Toggle Golfer Camera [%s]" % km.get_action_summary_str("golfer_cam_toggle")
+		golfer_cam_btn.tooltip_text = "Toggle Golfer Camera [%s] (Right-click for Setup)" % km.get_action_summary_str("golfer_cam_toggle")
 	if putting_cam_btn != null and is_instance_valid(putting_cam_btn):
-		putting_cam_btn.tooltip_text = "Toggle Putting Camera [%s]" % km.get_action_summary_str("putting_cam_toggle")
+		putting_cam_btn.tooltip_text = "Toggle Putting Camera [%s] (Right-click for Setup)" % km.get_action_summary_str("putting_cam_toggle")
 	if map_btn != null and is_instance_valid(map_btn):
 		var is_aerial = course_instance.get("is_aerial_view") as bool if course_instance != null and course_instance.get("is_aerial_view") != null else false
 		if is_aerial:
@@ -2674,6 +2735,8 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			var flag_pin = course_instance.get_node_or_null("FlagPin")
 			if flag_pin != null:
 				flag_pin.global_position = course_instance.current_hole_location
+				if course_instance.has_method("update_gimme_circles"):
+					course_instance.update_gimme_circles()
 				
 		# Update tee-off distance
 		if player.get("strokes", 0) == 0 and course_instance != null and course_instance.has_method("get_height"):
@@ -3987,34 +4050,11 @@ func _get_minimap_flag_texture() -> Texture2D:
 		return ImageTexture.create_from_image(img)
 	return null
 
-func _update_minimap_flag_marker(pin_pos: Variant, current_zone: int, ball: Node) -> void:
+func _update_minimap_flag_marker(pin_pos: Variant, _current_zone: int, _ball: Node) -> void:
 	if _minimap_flag_icon == null or _minimap_camera == null:
 		return
 		
 	if pin_pos == null or (pin_pos is Vector3 and pin_pos.is_zero_approx()):
-		_minimap_flag_icon.visible = false
-		return
-		
-	# Check if player is on the green, fringe, or putting (or green heatmap is active)
-	var is_on_green_or_putting = (current_zone == 2) or is_default_club_putter() or is_player_on_green() or is_player_on_fringe()
-	if not is_on_green_or_putting and course_instance != null and course_instance.has_method("is_ball_on_green"):
-		is_on_green_or_putting = bool(course_instance.call("is_ball_on_green"))
-	if not is_on_green_or_putting and ball != null:
-		var lie_str = str(ball.get("lie_type")).to_lower()
-		if lie_str == "green" or ball.get("is_putt") == true:
-			is_on_green_or_putting = true
-	if not is_on_green_or_putting and has_node("/root/MultiplayerManager"):
-		var mp_mgr = get_node("/root/MultiplayerManager")
-		if not mp_mgr.players.is_empty():
-			var ap = mp_mgr.get_active_player()
-			if ap.get("lie_type", "").to_lower() == "green":
-				is_on_green_or_putting = true
-				
-	# If green heatmap is actively shown, treat as green/putting view
-	if not is_on_green_or_putting and course_instance != null and course_instance.get("show_green_grid") == true:
-		is_on_green_or_putting = true
-
-	if not is_on_green_or_putting:
 		_minimap_flag_icon.visible = false
 		return
 
@@ -4026,7 +4066,7 @@ func _update_minimap_flag_marker(pin_pos: Variant, current_zone: int, ball: Node
 	var screen_pos = _minimap_camera.unproject_position(pin_pos)
 	var vp_w = float(_minimap_viewport.size.x) if _minimap_viewport != null else 180.0
 	var vp_h = float(_minimap_viewport.size.y) if _minimap_viewport != null else 180.0
-	if screen_pos.x >= -12 and screen_pos.x <= vp_w + 12 and screen_pos.y >= -12 and screen_pos.y <= vp_h + 12:
+	if screen_pos.x >= -16 and screen_pos.x <= vp_w + 16 and screen_pos.y >= -16 and screen_pos.y <= vp_h + 16:
 		# Anchor at cup ellipse center (8, 32) so cup is on pin location and flag flies above it
 		_minimap_flag_icon.position = screen_pos - Vector2(8, 32)
 		_minimap_flag_icon.visible = true

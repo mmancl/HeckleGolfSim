@@ -2,11 +2,20 @@ class_name PuttingCameraStateMachine
 extends Node
 
 signal putt_detected(speed_mph: float, hla_deg: float)
+signal putt_rejected(reason: String, speed_mph: float)
 
 enum State { IDLE, READY, TRACKING, EXECUTION }
 
 var current_state: State = State.IDLE
-var overlay: PuttingCameraOverlay = null
+var overlay: PuttingCameraOverlay = null:
+	set(val):
+		if overlay != null and overlay.has_signal("circle_position_changed") and overlay.circle_position_changed.is_connected(_on_circle_position_changed):
+			overlay.circle_position_changed.disconnect(_on_circle_position_changed)
+		overlay = val
+		if overlay != null:
+			if overlay.has_signal("circle_position_changed") and not overlay.circle_position_changed.is_connected(_on_circle_position_changed):
+				overlay.circle_position_changed.connect(_on_circle_position_changed)
+			_established_ball_pos = overlay.circle_center
 var detector: PuttingBallDetector = PuttingBallDetector.new()
 
 ## Framerate (used for timeouts and fallback estimates)
@@ -42,9 +51,44 @@ var speed_calibration_constant: float = 2.5
 ## Field of view baseline across camera frame width
 var field_of_view_deg: float = 30.0
 
-## Maximum allowable putt speed (sanity check)
-const MAX_PUTT_SPEED_MPH: float = 25.0
-const MIN_PUTT_SPEED_MPH: float = 0.5
+## Absolute physical bounds (safety clamps)
+const ABSOLUTE_MAX_PUTT_SPEED_MPH: float = 25.0
+const ABSOLUTE_MIN_PUTT_SPEED_MPH: float = 0.5
+
+## Dynamic settings (synced with GlobalSettings.range_settings with fallbacks)
+var min_putt_speed_mph: float:
+	get:
+		if is_inside_tree() and has_node("/root/GlobalSettings"):
+			var gs = get_node("/root/GlobalSettings")
+			if gs.range_settings != null and gs.range_settings.settings.has("putting_min_speed_mph"):
+				return float(gs.range_settings.putting_min_speed_mph.value)
+		return _local_min_putt_speed_mph
+	set(val):
+		_local_min_putt_speed_mph = val
+
+var max_putt_speed_mph: float:
+	get:
+		if is_inside_tree() and has_node("/root/GlobalSettings"):
+			var gs = get_node("/root/GlobalSettings")
+			if gs.range_settings != null and gs.range_settings.settings.has("putting_max_speed_mph"):
+				return float(gs.range_settings.putting_max_speed_mph.value)
+		return _local_max_putt_speed_mph
+	set(val):
+		_local_max_putt_speed_mph = val
+
+var mishit_filter_enabled: bool:
+	get:
+		if is_inside_tree() and has_node("/root/GlobalSettings"):
+			var gs = get_node("/root/GlobalSettings")
+			if gs.range_settings != null and gs.range_settings.settings.has("putting_mishit_filter_enabled"):
+				return bool(gs.range_settings.putting_mishit_filter_enabled.value)
+		return _local_mishit_filter_enabled
+	set(val):
+		_local_mishit_filter_enabled = val
+
+var _local_min_putt_speed_mph: float = 1.5
+var _local_max_putt_speed_mph: float = 20.0
+var _local_mishit_filter_enabled: bool = true
 
 
 var _audio_player: AudioStreamPlayer = null
@@ -100,16 +144,16 @@ func process_frame(image: Image) -> void:
 
 	match current_state:
 		State.IDLE:
-			_handle_idle(result)
+			_handle_idle(result, image)
 		State.READY:
 			_handle_ready(result)
 		State.TRACKING:
 			_handle_tracking(result)
 		State.EXECUTION:
-			_handle_execution(result)
+			_handle_execution(result, image)
 
 
-func _handle_idle(result: Dictionary) -> void:
+func _handle_idle(result: Dictionary, image: Image = null) -> void:
 	if result.get("found", false):
 		var center: Vector2 = result.get("center", Vector2.ZERO)
 		overlay.set_ball_position(center)
@@ -118,6 +162,8 @@ func _handle_idle(result: Dictionary) -> void:
 			overlay.set_ball_in_circle(true)
 			if result.get("at_rest", false):
 				_established_ball_pos = center
+				if image != null:
+					detector.sample_reference_color(image, center)
 				_transition_to(State.READY)
 		else:
 			overlay.set_ball_in_circle(false)
@@ -167,9 +213,19 @@ func _start_tracking(first_seen_pos: Vector2) -> void:
 	_last_seen_time_msec = _tracking_start_time_msec
 	_tracking_start_position = _established_ball_pos
 	_last_seen_pos = first_seen_pos
-	_trajectory = [{ "pos": _established_ball_pos, "time": _tracking_start_time_msec }]
+
+	var frame_interval_msec: int = int(1000.0 / maxf(active_fps, 10.0))
 	if first_seen_pos != _established_ball_pos:
-		_trajectory.append({ "pos": first_seen_pos, "time": _tracking_start_time_msec })
+		# Ball was detected at first_seen_pos on this frame, meaning it departed rest 1 frame prior.
+		# Backdate the rest position timestamp so the initial segment duration is physically accurate.
+		_tracking_start_time_msec = _last_seen_time_msec - frame_interval_msec
+		_trajectory = [
+			{ "pos": _established_ball_pos, "time": _tracking_start_time_msec },
+			{ "pos": first_seen_pos, "time": _last_seen_time_msec }
+		]
+	else:
+		_trajectory = [{ "pos": _established_ball_pos, "time": _tracking_start_time_msec }]
+
 	_frames_since_ball_lost = 0
 	_lateral_offset_at_departure = detector.calculate_lateral_offset(first_seen_pos, overlay.circle_center.x)
 	_transition_to(State.TRACKING)
@@ -183,13 +239,31 @@ func _handle_tracking(result: Dictionary) -> void:
 		var center: Vector2 = result.get("center", Vector2.ZERO)
 
 		# Kinematic forward gating:
-		# A rolling golf ball ONLY advances forward (-Y direction down the green).
-		# It NEVER jumps backwards toward the golfer/putter, nor can it jump sideways by >0.18.
+		# Early frames allow slight departure jitter, later frames tighten considerably.
 		var last_known = _last_seen_pos if _last_seen_pos != Vector2.ZERO else _tracking_start_position
 		var delta_y = center.y - last_known.y
 		var delta_x = absf(center.x - last_known.x)
 
-		if delta_y <= 0.015 and delta_x <= 0.18:
+		var max_backward = 0.015 if _tracking_frame_count <= 2 else 0.005
+		var max_lateral = 0.18 if _tracking_frame_count <= 2 else 0.11
+
+		# Maximum realistic forward jump per frame:
+		# Prevents distractor blobs (putter follow-through, shoes, reflections near top of view)
+		# from teleporting the ball across the frame in a single frame.
+		var max_forward_jump = clampf((max_putt_speed_mph / speed_calibration_constant / maxf(active_fps, 15.0)) * 1.75, 0.28, 0.45)
+
+		var kinematically_valid = (delta_y <= max_backward and -delta_y <= max_forward_jump and delta_x <= max_lateral)
+
+		# Velocity direction consistency check when we already have trajectory history
+		if kinematically_valid and _trajectory.size() >= 3:
+			var prev_vector = (_trajectory[_trajectory.size() - 1]["pos"] as Vector2) - (_trajectory[0]["pos"] as Vector2)
+			var cur_step = center - last_known
+			if prev_vector.length_squared() > 0.0004 and cur_step.length_squared() > 0.0001:
+				var dot = prev_vector.normalized().dot(cur_step.normalized())
+				if dot < 0.25:  # Deviation > ~75 degrees from overall trajectory
+					kinematically_valid = false
+
+		if kinematically_valid:
 			overlay.set_ball_position(center)
 			_ball_last_seen_in_frame = true
 			_frames_since_ball_lost = 0
@@ -224,8 +298,9 @@ func _handle_tracking(result: Dictionary) -> void:
 		_calculate_and_dispatch_putt()
 		return
 
-	# Standard exit / lost timeout
-	if _frames_since_ball_lost >= BALL_LOST_CONFIRM_FRAMES:
+	# Dynamic exit / lost timeout: allow more grace frames early on in case putter momentarily occludes ball
+	var lost_threshold = 5 if _tracking_frame_count < 8 else BALL_LOST_CONFIRM_FRAMES
+	if _frames_since_ball_lost >= lost_threshold:
 		_calculate_and_dispatch_putt()
 		return
 
@@ -237,7 +312,7 @@ func _handle_tracking(result: Dictionary) -> void:
 
 ## Handles frame processing while in EXECUTION state (after a putt is registered).
 ## Watches for the next ball to be placed and settle in the circle to transition directly to READY.
-func _handle_execution(result: Dictionary) -> void:
+func _handle_execution(result: Dictionary, image: Image = null) -> void:
 	if result.get("found", false):
 		var center: Vector2 = result.get("center", Vector2.ZERO)
 		overlay.set_ball_position(center)
@@ -245,6 +320,8 @@ func _handle_execution(result: Dictionary) -> void:
 			overlay.set_ball_in_circle(true)
 			if result.get("at_rest", false):
 				_established_ball_pos = center
+				if image != null:
+					detector.sample_reference_color(image, center)
 				_transition_to(State.READY)
 		else:
 			overlay.set_ball_in_circle(false)
@@ -261,9 +338,16 @@ func _calculate_and_dispatch_putt() -> void:
 		for i in range(1, _trajectory.size()):
 			var cur_p: Vector2 = _trajectory[i]["pos"]
 			var last_p: Vector2 = clean_trajectory[clean_trajectory.size() - 1]["pos"]
-			if cur_p.y <= last_p.y + 0.015 and absf(cur_p.x - last_p.x) <= 0.18:
+			var fwd = last_p.y - cur_p.y
+			var lat = absf(cur_p.x - last_p.x)
+			if fwd >= -0.015 and lat <= 0.18:
 				clean_trajectory.append(_trajectory[i])
 	_trajectory = clean_trajectory
+
+	if _trajectory.size() < 2:
+		print("[PuttingCam] Tracking aborted: insufficient trajectory points (%d)" % _trajectory.size())
+		_transition_to(State.IDLE)
+		return
 
 	if _trajectory.size() > 0:
 		_last_seen_pos = _trajectory[_trajectory.size() - 1]["pos"]
@@ -272,7 +356,6 @@ func _calculate_and_dispatch_putt() -> void:
 	var total_displacement: Vector2 = _last_seen_pos - _tracking_start_position
 	var forward_y_norm: float = -total_displacement.y  # positive = forward (-Y in screen space)
 	var distance_norm: float = total_displacement.length()
-	var elapsed_sec: float = float(_last_seen_time_msec - _tracking_start_time_msec) / 1000.0
 
 	# VALIDATION: A real putt must move forward down the mat!
 	# Reject ball pickup, hand occlusions, and putter head movement
@@ -282,36 +365,87 @@ func _calculate_and_dispatch_putt() -> void:
 			print("[PuttingCam] Tracking aborted: insufficient forward displacement (dist=%.2f, fwd_y=%.2f, pts=%d) — not a valid putt" % [
 				distance_norm, forward_y_norm, _trajectory.size()
 			])
+			if mishit_filter_enabled and overlay != null:
+				overlay.show_rejection_notice("⚠️ Mishit: Ball didn't leave circle")
+			putt_rejected.emit("insufficient_displacement", 0.0)
 			_transition_to(State.IDLE)
 			return
 
-	# Elapsed time sanity check
-	if elapsed_sec < 0.02:
-		var now_msec = Time.get_ticks_msec()
-		elapsed_sec = clampf(float(now_msec - _tracking_start_time_msec) / 1000.0, 0.05, 1.5)
+	# Frame-rate reconciled elapsed time:
+	# Protects against network/thread packet clustering where multiple frames arrive in rapid bursts.
+	var wall_elapsed_sec: float = float(_last_seen_time_msec - _tracking_start_time_msec) / 1000.0
+	var sensor_frame_count: int = max(_tracking_frame_count, _trajectory.size() - 1)
+	var expected_sensor_sec: float = float(sensor_frame_count) / maxf(active_fps, 15.0)
+
+	var elapsed_sec: float = maxf(wall_elapsed_sec, expected_sensor_sec * 0.85)
+	elapsed_sec = maxf(elapsed_sec, 0.05)  # Enforce physical minimum elapsed time (50ms)
 
 	# Calculate speed in normalized screen units per second
 	# Use segment speeds across trajectory if available to reject network stalls and packet jitter
 	var norm_speed: float = 0.0
 	var segment_speeds: Array[float] = []
+	var min_dt: float = 0.70 / maxf(active_fps, 15.0)
+	var max_plausible_seg_norm: float = (max_putt_speed_mph / speed_calibration_constant) * 1.5
 
 	if _trajectory.size() >= 2:
 		for i in range(1, _trajectory.size()):
-			var dt = float(_trajectory[i]["time"] - _trajectory[i - 1]["time"]) / 1000.0
+			var raw_dt = float(_trajectory[i]["time"] - _trajectory[i - 1]["time"]) / 1000.0
+			var dt = maxf(raw_dt, min_dt)
 			var d = (_trajectory[i]["pos"] as Vector2).distance_to(_trajectory[i - 1]["pos"] as Vector2)
-			if dt >= 0.01 and dt <= 0.5 and d >= 0.005:
-				segment_speeds.append(d / dt)
+			if dt >= 0.01 and dt <= 0.6 and d >= 0.005:
+				var seg_spd = d / dt
+				if seg_spd <= max_plausible_seg_norm:
+					segment_speeds.append(seg_spd)
 
-	if segment_speeds.size() >= 2:
+	var overall_norm_speed: float = distance_norm / elapsed_sec
+
+	if segment_speeds.size() >= 3:
 		segment_speeds.sort()
 		var mid = segment_speeds.size() / 2
-		norm_speed = segment_speeds[mid]
+		var median_spd = segment_speeds[mid]
+		if segment_speeds.size() % 2 == 0:
+			median_spd = (segment_speeds[mid - 1] + segment_speeds[mid]) * 0.5
+		norm_speed = 0.6 * median_spd + 0.4 * overall_norm_speed
+	elif segment_speeds.size() >= 1:
+		var sum_spd: float = 0.0
+		for s in segment_speeds:
+			sum_spd += s
+		var avg_spd = sum_spd / float(segment_speeds.size())
+		norm_speed = 0.5 * avg_spd + 0.5 * overall_norm_speed
 	else:
-		norm_speed = distance_norm / maxf(elapsed_sec, 0.04)
+		norm_speed = overall_norm_speed
 
 	# Speed mapping: norm_speed * speed_calibration_constant
-	var speed_mph: float = norm_speed * speed_calibration_constant
-	speed_mph = clampf(speed_mph, MIN_PUTT_SPEED_MPH, MAX_PUTT_SPEED_MPH)
+	var raw_speed_mph: float = norm_speed * speed_calibration_constant
+
+	# AUTO-DETECT INVALID SPEEDS & MISHITS:
+	var min_speed = min_putt_speed_mph
+	var max_speed = max_putt_speed_mph
+	var filter_active = mishit_filter_enabled
+
+	# 1. Under-speed check (accidental ball nudge / practice waggle / tap too soft)
+	if filter_active and raw_speed_mph < min_speed:
+		print("[PuttingCam] Mishit ignored: speed (%.1f mph) is below minimum threshold (%.1f mph)" % [
+			raw_speed_mph, min_speed
+		])
+		if overlay != null:
+			overlay.show_rejection_notice("⚠️ Mishit: %.1f mph (Below %.1f mph - Ignored)" % [raw_speed_mph, min_speed])
+		putt_rejected.emit("mishit_too_slow", raw_speed_mph)
+		_transition_to(State.IDLE)
+		return
+
+	# 2. Over-speed check (tracking anomaly, teleporting blob, reflection spike > max speed)
+	if filter_active and raw_speed_mph > max_speed:
+		print("[PuttingCam] Invalid speed ignored: speed (%.1f mph) exceeds max realistic speed (%.1f mph)" % [
+			raw_speed_mph, max_speed
+		])
+		if overlay != null:
+			overlay.show_rejection_notice("⚠️ Invalid Speed: %.1f mph (Ignored)" % raw_speed_mph)
+		putt_rejected.emit("invalid_speed_too_fast", raw_speed_mph)
+		_transition_to(State.IDLE)
+		return
+
+	var speed_mph: float = clampf(raw_speed_mph, ABSOLUTE_MIN_PUTT_SPEED_MPH, ABSOLUTE_MAX_PUTT_SPEED_MPH)
 
 	# Direction: calculate actual trajectory launch angle in sensor pixel space
 	var W: float = last_frame_size.x if last_frame_size.x > 0.0 else 1280.0
@@ -400,3 +534,10 @@ func reset() -> void:
 	_transition_to(State.IDLE)
 	_total_frames_processed = 0
 	_trajectory.clear()
+
+
+func _on_circle_position_changed(new_pos: Vector2) -> void:
+	_established_ball_pos = new_pos
+	if current_state == State.READY or current_state == State.TRACKING:
+		_transition_to(State.IDLE)
+

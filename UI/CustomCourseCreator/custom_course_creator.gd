@@ -64,6 +64,7 @@ func _ready() -> void:
 	if title_input.text.strip_edges().is_empty():
 		title_input.text = "My Custom Course"
 	title_input.text_changed.connect(func(_t): _update_done_button())
+	title_input.call_deferred("grab_focus")
 
 	course_opt.item_selected.connect(_on_course_selected)
 	hole_opt.item_selected.connect(_on_hole_selected)

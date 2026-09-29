@@ -359,4 +359,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func close() -> void:
 	modal_closed.emit()
+	var vp = get_viewport()
+	if vp != null:
+		vp.gui_release_focus()
 	queue_free()

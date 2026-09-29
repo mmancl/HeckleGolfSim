@@ -193,7 +193,7 @@ func _initialize():
 	assert(no_wind_offset < wind_offset, "Badge must shrink when wind is disabled")
 	print("  PASS: HUD Label text when disabled: '%s' (badge width: %0.1f)" % [label.text, no_wind_offset * 2])
 
-	range_instance.queue_free()
+	range_instance.free()
 
 	# -------------------------------------------------------------
 	# Test 5: Ball Flight Aerodynamic Wind Force
@@ -273,17 +273,89 @@ func _initialize():
 	mock_range.name = "Range"
 	mock_range.scene_file_path = "res://Courses/Range/range.tscn"
 	mock_range.set("is_driving_range", true)
+	mock_range.set_meta("is_driving_range", true)
 	root.add_child(mock_range)
-	root.get_tree().current_scene = mock_range
+	gs.set_mock_active_scene(mock_range)
 
 	assert(not gs.is_wind_enabled(), "is_wind_enabled() must return false on driving range even when configured true")
 	assert(gs.get_wind_vector_mps() == Vector3.ZERO, "Wind vector must be ZERO on driving range")
 
-	mock_range.queue_free()
-	root.get_tree().current_scene = null
+	mock_range.free()
+	gs.set_mock_active_scene(null)
+	current_scene = null
 	print("  PASS: Driving range always overrides wind to off.")
+
+	# -------------------------------------------------------------
+	# Test 8: Atmospheric Boundary Layer Wind Elevation Gradient
+	# -------------------------------------------------------------
+	print("\n--- Test 8: Wind Elevation Scaling & Boundary Layer Profile ---")
+	gs.range_settings.wind_enabled.set_value(true)
+	gs.current_wind_speed_mph = 15.0
+	gs.current_wind_direction_rad = 0.0 # along +X
+
+	# At ground level (0m elevation, start and end of trajectory)
+	var factor_ground = gs.get_wind_altitude_factor(0.0)
+	assert(factor_ground == 0.0, "Wind factor at 0m must be exactly 0.0, got: %f" % factor_ground)
+	var vec_ground = gs.get_wind_vector_at_altitude_mps(0.0)
+	assert(vec_ground == Vector3.ZERO, "Wind vector at 0m must be Vector3.ZERO")
+
+	# Below ground level / depression (negative elevation)
+	assert(gs.get_wind_altitude_factor(-5.0) == 0.0, "Negative elevation must clamp to 0.0")
+
+	# Near ground level (1.0m, early launch / just off tee)
+	var factor_1m = gs.get_wind_altitude_factor(1.0)
+	assert(factor_1m < 0.01, "Wind factor at 1m must be < 1%% (negligible), got: %f" % factor_1m)
+	print("  PASS: Ground level wind factor is 0.00%%, 1m elevation factor is %0.2f%% (little to no effect)." % [factor_1m * 100.0])
+
+	# Mid elevation (12.5m, halfway to peak)
+	var factor_mid = gs.get_wind_altitude_factor(12.5)
+	assert(absf(factor_mid - 0.5) < 0.01, "Wind factor at 12.5m should be ~0.50, got: %f" % factor_mid)
+	print("  PASS: Mid elevation (12.5m) wind factor is %0.1f%%." % [factor_mid * 100.0])
+
+	# Peak height (25m and above)
+	var factor_peak = gs.get_wind_altitude_factor(25.0)
+	assert(absf(factor_peak - 1.0) < 0.001, "Wind factor at 25m must be 1.0 (100%% of listed amount), got: %f" % factor_peak)
+	var factor_above = gs.get_wind_altitude_factor(35.0)
+	assert(factor_above == 1.0, "Wind factor above peak height must be 1.0, got: %f" % factor_above)
+
+	var vec_peak = gs.get_wind_vector_at_altitude_mps(25.0)
+	var vec_full = gs.get_wind_vector_mps()
+	assert(vec_peak.is_equal_approx(vec_full), "Wind vector at peak height must equal full listed wind vector")
+	print("  PASS: Peak height (25m) wind factor is %0.1f%% (reaches full listed amount: %0.2f m/s)." % [factor_peak * 100.0, vec_peak.x])
+
+	# -------------------------------------------------------------
+	# Test 9: GolfBall Elevation Wind Factor
+	# -------------------------------------------------------------
+	print("\n--- Test 9: GolfBall Elevation Wind Factor ---")
+	var BallScript = load("res://Player/ball.gd")
+	assert(BallScript != null, "Player/ball.gd must load")
+	var ball_node = BallScript.new()
+	assert(ball_node != null, "GolfBall instance must be created")
+
+	# Set ball at ground level
+	ball_node.position = Vector3(0.0, 0.0, 0.0)
+	ball_node._current_ground_y = 0.0
+	assert(ball_node.get_height_above_ground() == 0.0, "Height above ground at Y=0 should be 0.0")
+	assert(ball_node.get_wind_factor() == 0.0, "Ball wind factor at ground level must be 0.0")
+
+	# Set ball at 1m above ground
+	ball_node.position.y = 1.0
+	assert(ball_node.get_wind_factor() < 0.01, "Ball wind factor at 1m must be < 0.01")
+
+	# Set ball at 25m peak height
+	ball_node.position.y = 25.0
+	assert(absf(ball_node.get_wind_factor() - 1.0) < 0.001, "Ball wind factor at 25m peak height must be 1.0")
+
+	# Test elevated ground (e.g. green at Y=10m, ball at Y=10.2m)
+	ball_node._current_ground_y = 10.0
+	ball_node.position.y = 10.2
+	assert(absf(ball_node.get_height_above_ground() - 0.2) < 0.001, "Height above ground on elevated green should be 0.2m")
+	assert(ball_node.get_wind_factor() < 0.001, "Ball wind factor near elevated green surface must be ~0.0")
+	print("  PASS: GolfBall ground height tracking and elevation wind scaling verified.")
+
+	ball_node.free()
 
 	print("\n=======================================================")
 	print("ALL WIND SIMULATION TESTS PASSED! 🎉")
 	print("=======================================================")
-	OS.kill(OS.get_process_id())
+	quit(0)

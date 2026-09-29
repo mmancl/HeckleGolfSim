@@ -1,0 +1,8 @@
+[gd_resource type="StandardMaterial3D" format=3]
+
+[ext_resource type="Texture2D" path="res://addons/shapespark-low-poly-exterior-plants/textures/willow-bark.jpg" id="1_771ie"]
+
+[resource]
+albedo_texture = ExtResource("1_771ie")
+roughness = 0.95
+uv1_scale = Vector3(1, 4, 1)

@@ -104,8 +104,24 @@ func _is_pos_inside_container(pos: Vector2) -> bool:
 		return false
 	if _h_bar != null and _h_bar.is_visible_in_tree() and _h_bar.get_global_rect().has_point(pos):
 		return false
+	# If the touch is on an active slider, let the slider handle touch/drag natively
+	if _is_pos_on_slider(_target_control, pos):
+		return false
 	var rect = _target_control.get_global_rect()
 	return rect.has_point(pos)
+
+
+static func _is_pos_on_slider(node: Node, pos: Vector2) -> bool:
+	if node == null:
+		return false
+	if node is Slider and (node as Slider).visible:
+		if (node as Slider).get_global_rect().has_point(pos):
+			return true
+	for child in node.get_children():
+		if child is Control and (child as Control).visible:
+			if _is_pos_on_slider(child, pos):
+				return true
+	return false
 
 
 func _begin_touch(pos: Vector2, index: int) -> void:

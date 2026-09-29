@@ -165,6 +165,7 @@ func _ready() -> void:
 	player_select_opt.item_selected.connect(func(index):
 		if index == 0:
 			name_input.visible = true
+			name_input.call_deferred("grab_focus")
 		else:
 			name_input.visible = false
 			var p_name = player_select_opt.get_item_text(index)

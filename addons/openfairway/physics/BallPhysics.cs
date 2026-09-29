@@ -67,6 +67,14 @@ public partial class BallPhysics : RefCounted
             // Keep the along-slope gravity contribution in horizontal axes only.
             gravityAlongSlope.Y = 0.0f;
 
+            // Prevent downhill slope gravity from infinitely rolling/creeping a ball that is nearly stopped
+            float speed = velocity.Length();
+            if (speed < 0.6f && gravityAlongSlope.LengthSquared() > 0.00001f)
+            {
+                float slopeHoldScale = Mathf.Clamp(speed / 0.6f, 0.0f, 1.0f);
+                gravityAlongSlope *= slopeHoldScale;
+            }
+
             Vector3 groundForces = CalculateGroundForces(velocity, omega, parameters);
             groundForces += gravityAlongSlope;
             groundForces.Y = 0.0f;  // Zero out any vertical component
@@ -435,6 +443,15 @@ public partial class BallPhysics : RefCounted
                 : 1.0f;
             float baseFriction = Mathf.Lerp(parameters.KineticFriction * 0.35f, parameters.KineticFriction, blendFactor);
             float effectiveFriction = baseFriction * spinMultiplier;
+
+            // Smoothly bridge the transition between pure rolling friction and kinetic slipping friction
+            float slipBlendThreshold = rp.TangentVelocityThreshold * 3.0f;
+            if (tangentVelMag < slipBlendThreshold)
+            {
+                float t = (tangentVelMag - rp.TangentVelocityThreshold) / (slipBlendThreshold - rp.TangentVelocityThreshold);
+                effectiveFriction = Mathf.Lerp(parameters.RollingFriction * spinMultiplier, effectiveFriction, t);
+            }
+
             Vector3 slipDir = tangentVelMag > 0.01f ? tangentVelocity.Normalized() : Vector3.Zero;
             return slipDir * (-effectiveFriction * MASS * 9.81f);
         }

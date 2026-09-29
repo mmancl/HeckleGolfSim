@@ -336,10 +336,25 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             throw new InvalidOperationException($"Characteristic {characteristicUuid} not found or not connected.");
         }
 
-        IntPtr nsData = ObjCRuntime.CreateNSData(value);
-        IntPtr writeType = writeMode == BluetoothWriteMode.WithResponse ? (IntPtr)0 : (IntPtr)1; // 0 = CBCharacteristicWriteWithResponse, 1 = CBCharacteristicWriteWithoutResponse
+        // Adapt write mode based on characteristic properties (0x04 = WriteWithoutResponse, 0x08 = WriteWithResponse)
+        ulong properties = (ulong)(long)ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("properties"));
+        bool canWriteWithoutResponse = (properties & 0x04) != 0;
+        bool canWriteWithResponse = (properties & 0x08) != 0;
 
-        if (writeMode == BluetoothWriteMode.WithResponse)
+        var effectiveMode = writeMode;
+        if (effectiveMode == BluetoothWriteMode.WithResponse && !canWriteWithResponse && canWriteWithoutResponse)
+        {
+            effectiveMode = BluetoothWriteMode.WithoutResponse;
+        }
+        else if (effectiveMode == BluetoothWriteMode.WithoutResponse && !canWriteWithoutResponse && canWriteWithResponse)
+        {
+            effectiveMode = BluetoothWriteMode.WithResponse;
+        }
+
+        IntPtr nsData = ObjCRuntime.CreateNSData(value);
+        IntPtr writeType = effectiveMode == BluetoothWriteMode.WithResponse ? (IntPtr)0 : (IntPtr)1; // 0 = CBCharacteristicWriteWithResponse, 1 = CBCharacteristicWriteWithoutResponse
+
+        if (effectiveMode == BluetoothWriteMode.WithResponse)
         {
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _writeTcsMap[characteristicUuid] = tcs;
@@ -350,7 +365,14 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
             using var reg = linkedCts.Token.Register(() => tcs.TrySetCanceled());
-            await tcs.Task;
+            try
+            {
+                await tcs.Task;
+            }
+            finally
+            {
+                _writeTcsMap.TryRemove(characteristicUuid, out _);
+            }
         }
         else
         {

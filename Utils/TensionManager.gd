@@ -13,6 +13,27 @@ const CHIP_MIN_SUSPENSE_DISTANCE_METERS := 30.48   # 100 feet in meters (100.0 *
 const MAX_PROJECTED_LANDING_DISTANCE_METERS := 18.288 # 20 yards in meters (20.0 * 0.9144)
 const PAST_HOLE_THRESHOLD_METERS := 0.3048         # 1 foot past the hole in meters (1.0 * 0.3048)
 const CYCLE_DURATION := 0.80          # ~75 BPM double-thump heartbeat cycle
+const CONE_HALF_ANGLE_DEG := 15.0
+const MIN_COS_THETA := 0.965925826    # cos(15 deg)
+const CUP_RADIUS_METERS := 0.054       # 4.25 in / 2 (standard golf cup)
+const MAX_HOLEABLE_SPEED_MPS := 2.8    # Max entry speed into cup
+
+enum SuspenseState {
+	IDLE,    # Before shot launched
+	READY,   # Shot launched & trajectory validated to enter cup; awaiting apex & cone criteria
+	ACTIVE,  # Suspense active (heartbeat, vignette, cone tracking)
+	SPENT    # Shot missed, completed, overshot, or broken offline; latched out for remainder of shot
+}
+
+var suspense_state: SuspenseState = SuspenseState.IDLE
+var shot_validated: bool = false
+
+# Predicted trajectory data
+var predicted_apex: Vector3 = Vector3.ZERO
+var predicted_land_pos: Vector3 = Vector3.ZERO
+var predicted_land_vel: Vector3 = Vector3.ZERO
+var predicted_roll_path: Array[Vector3] = []
+var predicted_holed_out: bool = false
 
 var tension_active: bool = false
 var current_mode: String = ""
@@ -169,7 +190,11 @@ func _create_procedural_heartbeat_wav() -> AudioStreamWAV:
 func is_active() -> bool:
 	return tension_active
 
+var force_course_play_active_for_testing: bool = false
+
 func is_course_play_active() -> bool:
+	if force_course_play_active_for_testing:
+		return true
 	# 1. Global Settings minigame and menu checks
 	var gs = get_node_or_null("/root/GlobalSettings")
 	if gs != null:
@@ -250,9 +275,11 @@ func is_course_play_active() -> bool:
 func is_shot_eligible_for_suspense(start_pos: Vector3, target_pos: Vector3, is_putt: bool, _is_sand: bool = false) -> bool:
 	if not is_course_play_active() or _shot_suspense_locked_out or _tree_hit_this_shot:
 		return false
-	if target_pos.is_zero_approx() or start_pos.is_zero_approx():
+	if target_pos.is_zero_approx():
 		return false
 	var dist_2d = Vector2(start_pos.x, start_pos.z).distance_to(Vector2(target_pos.x, target_pos.z))
+	if dist_2d < 0.05:
+		return false
 	# Use small epsilon (0.01m / ~0.4 in) to avoid floating point precision rounding dropouts
 	if is_putt:
 		return (dist_2d + 0.01) >= PUTT_MIN_SUSPENSE_DISTANCE_METERS
@@ -263,161 +290,225 @@ func is_shot_eligible_for_suspense(start_pos: Vector3, target_pos: Vector3, is_p
 
 func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool, target_pos: Vector3, is_sand: bool = false) -> Dictionary:
 	if not is_course_play_active() or _shot_suspense_locked_out or _tree_hit_this_shot:
-		return {"will_enter_zone": false, "min_dist": 999.0, "ending_dist": 999.0}
+		suspense_state = SuspenseState.SPENT
+		shot_validated = false
+		return {"will_enter_zone": false, "shot_validated": false, "min_dist": 999.0, "ending_dist": 999.0}
 	if target_pos.is_zero_approx():
-		return {"will_enter_zone": false, "min_dist": 999.0, "ending_dist": 999.0}
+		suspense_state = SuspenseState.SPENT
+		shot_validated = false
+		return {"will_enter_zone": false, "shot_validated": false, "min_dist": 999.0, "ending_dist": 999.0}
 	if not is_shot_eligible_for_suspense(start_pos, target_pos, is_putt, is_sand):
-		return {"will_enter_zone": false, "min_dist": 999.0, "ending_dist": 999.0, "mode": "putt" if is_putt else "chip"}
+		suspense_state = SuspenseState.SPENT
+		shot_validated = false
+		return {"will_enter_zone": false, "shot_validated": false, "min_dist": 999.0, "ending_dist": 999.0, "mode": "putt" if is_putt else "chip"}
 
-	var target_2d = Vector2(target_pos.x, target_pos.z)
-	var mode = "putt" if is_putt else "chip"
+	var target_2d := Vector2(target_pos.x, target_pos.z)
+	var mode := "putt" if is_putt else "chip"
 
-	var sim_pos = start_pos
-	var sim_vel = launch_vel
-	var min_dist_2d = 9999.0
-	var dt = 0.025
-	var holed_out = false
-	var did_land = false
-	var landing_dist_from_start = 0.0
-	var landing_dist_to_hole = 9999.0
+	# Get environmental parameters
+	var gs = get_node_or_null("/root/GlobalSettings")
+	var green_speed: float = 10.0
+	if gs != null and gs.has_method("get_effective_green_speed"):
+		green_speed = float(gs.get_effective_green_speed())
+	var speed_mult := pow(10.0 / maxf(green_speed, 1.0), 0.30)
+	var green_rolling_friction := 0.085 * speed_mult
+
+	# Query green slope normal around the target hole
+	var green_normal := Vector3.UP
+	var tree := get_tree()
+	if tree != null and tree.root != null and tree.root.get_world_3d() != null:
+		var space_state = tree.root.get_world_3d().direct_space_state
+		if space_state != null:
+			var query = PhysicsRayQueryParameters3D.create(
+				target_pos + Vector3.UP * 1.5,
+				target_pos + Vector3.DOWN * 2.5
+			)
+			query.collide_with_areas = false
+			query.collide_with_bodies = true
+			var hit = space_state.intersect_ray(query)
+			if not hit.is_empty():
+				var norm: Vector3 = hit.get("normal", Vector3.UP)
+				if norm.y > 0.5:
+					green_normal = norm.normalized()
+
+	# Wind vector (if enabled)
+	var wind_vec := Vector3.ZERO
+	if gs != null and gs.has_method("is_wind_enabled") and gs.is_wind_enabled() and gs.has_method("get_wind_vector_mps"):
+		wind_vec = gs.get_wind_vector_mps()
+
+	var sim_pos := start_pos
+	var sim_vel := launch_vel
+	var min_dist_2d := 9999.0
+	var dt := 0.025
+	var holed_out := false
+	var did_land := false
+	var p_apex := start_pos
+	var p_land := start_pos
+	var v_land := Vector3.ZERO
+	var roll_path: Array[Vector3] = []
+
+	var gravity_slope_2d = Vector2(green_normal.x, green_normal.z) * (9.81 * green_normal.y * 0.5)
 
 	if is_putt:
 		sim_vel.y = 0.0
-		for step in range(350):
+		p_apex = start_pos
+		p_land = start_pos
+		v_land = sim_vel
+		roll_path.append(start_pos)
+
+		for step in range(400):
 			var current_2d = Vector2(sim_pos.x, sim_pos.z)
 			var d = current_2d.distance_to(target_2d)
 			if d < min_dist_2d:
 				min_dist_2d = d
 
-			var speed = sim_vel.length()
-			# Ball sinks into cup on center/near-center roll at holeable speed (< 2.8 m/s)
-			if d < 0.054 and speed < 2.8:
+			var flat_speed = Vector2(sim_vel.x, sim_vel.z).length()
+
+			# Enter cup check: enters cup radius at holeable speed
+			if d <= CUP_RADIUS_METERS and flat_speed <= MAX_HOLEABLE_SPEED_MPS:
 				holed_out = true
 				min_dist_2d = 0.0
-				sim_pos = Vector3(target_pos.x, sim_pos.y, target_pos.z)
+				roll_path.append(target_pos)
 				break
 
-			if speed < 0.05:
+			if flat_speed < 0.03:
 				break
+
+			var slope_scale = clampf(flat_speed / 0.6, 0.0, 1.0)
+			var slope_accel = gravity_slope_2d * slope_scale
+			var friction_accel = -Vector2(sim_vel.x, sim_vel.z).normalized() * (green_rolling_friction * 9.81)
+
+			var vel_2d = Vector2(sim_vel.x, sim_vel.z) + (slope_accel + friction_accel) * dt
+			if vel_2d.dot(Vector2(sim_vel.x, sim_vel.z)) < 0.0:
+				break
+			sim_vel.x = vel_2d.x
+			sim_vel.z = vel_2d.y
 			sim_pos += sim_vel * dt
-			var decel = 0.48 * dt
-			var new_speed = max(0.0, speed - decel)
-			sim_vel = sim_vel.normalized() * new_speed
+			roll_path.append(sim_pos)
 	else:
-		var on_ground = false
-		var total_dist_2d = Vector2(start_pos.x, start_pos.z).distance_to(target_2d)
-		for step in range(350):
+		var in_flight := true
+		var total_dist_2d := Vector2(start_pos.x, start_pos.z).distance_to(target_2d)
+
+		for step in range(400):
 			var current_2d = Vector2(sim_pos.x, sim_pos.z)
 			var d = current_2d.distance_to(target_2d)
 
-			# Interpolate local ground elevation along the path from start to hole
-			var dist_from_start = Vector2(sim_pos.x - start_pos.x, sim_pos.z - start_pos.z).length()
-			var t_path = clampf(dist_from_start / maxf(total_dist_2d, 0.01), 0.0, 1.0)
-			var local_ground_y = lerpf(start_pos.y, target_pos.y, t_path)
+			if in_flight:
+				if sim_pos.y > p_apex.y:
+					p_apex = sim_pos
 
-			if not on_ground:
-				sim_pos += sim_vel * dt
+				var dist_from_start = Vector2(sim_pos.x - start_pos.x, sim_pos.z - start_pos.z).length()
+				var t_path = clampf(dist_from_start / maxf(total_dist_2d, 0.01), 0.0, 1.0)
+				var local_ground_y = lerpf(start_pos.y, target_pos.y, t_path)
+
+				var height_above_ground = maxf(0.0, sim_pos.y - local_ground_y)
+				var wind_factor = smoothstep(0.0, 25.0, height_above_ground)
+				var effective_wind = wind_vec * wind_factor
+				var v_rel = sim_vel - effective_wind
+				var v_rel_len = v_rel.length()
+
 				# Aerodynamic drag deceleration
-				var speed = sim_vel.length()
-				var drag = 0.0042 * speed * speed
-				sim_vel -= sim_vel.normalized() * (drag * dt)
-				sim_vel.y -= 9.81 * dt
+				var drag_force = -0.5 * 0.28 * 1.204 * 0.0014303 * v_rel_len * v_rel
+				var accel = (drag_force / 0.04593) + Vector3(0.0, -9.81, 0.0)
+				sim_vel += accel * dt
+				sim_pos += sim_vel * dt
 
-				# Ball only contacts the turf when descending and at or below interpolated ground
 				if sim_vel.y <= 0.0 and sim_pos.y <= local_ground_y:
 					sim_pos.y = local_ground_y
-					on_ground = true
+					in_flight = false
 					did_land = true
-					landing_dist_from_start = dist_from_start
-					var landing_pos_2d = Vector2(sim_pos.x, sim_pos.z)
-					landing_dist_to_hole = landing_pos_2d.distance_to(target_2d)
+					p_land = sim_pos
+					# Damped turf bounce
 					sim_vel.y = absf(sim_vel.y) * 0.20
 					sim_vel.x *= 0.52
 					sim_vel.z *= 0.52
+					v_land = sim_vel
+					roll_path.append(p_land)
 			else:
 				var flat_speed = Vector2(sim_vel.x, sim_vel.z).length()
 				if d < min_dist_2d:
 					min_dist_2d = d
 
-				# Chip ball rolls directly into cup
-				if d < 0.054 and flat_speed < 2.0:
+				if d <= CUP_RADIUS_METERS and flat_speed <= MAX_HOLEABLE_SPEED_MPS:
 					holed_out = true
 					min_dist_2d = 0.0
-					sim_pos = Vector3(target_pos.x, sim_pos.y, target_pos.z)
+					roll_path.append(target_pos)
 					break
 
-				if flat_speed < 0.05:
+				if flat_speed < 0.03:
 					break
-				sim_pos += sim_vel * dt
-				# Realistic turf rolling friction deceleration
-				var new_flat_speed = max(0.0, flat_speed - 1.8 * dt)
-				var dir_2d = Vector2(sim_vel.x, sim_vel.z).normalized()
-				sim_vel.x = dir_2d.x * new_flat_speed
-				sim_vel.z = dir_2d.y * new_flat_speed
+
+				var slope_scale = clampf(flat_speed / 0.6, 0.0, 1.0)
+				var slope_accel = gravity_slope_2d * slope_scale
+				var friction_accel = -Vector2(sim_vel.x, sim_vel.z).normalized() * (green_rolling_friction * 9.81)
+
+				var vel_2d = Vector2(sim_vel.x, sim_vel.z) + (slope_accel + friction_accel) * dt
+				if vel_2d.dot(Vector2(sim_vel.x, sim_vel.z)) < 0.0:
+					break
+				sim_vel.x = vel_2d.x
+				sim_vel.z = vel_2d.y
 				sim_vel.y = 0.0
+				sim_pos += sim_vel * dt
+				roll_path.append(sim_pos)
 
 	var ending_dist_2d = 0.0 if holed_out else Vector2(sim_pos.x, sim_pos.z).distance_to(target_2d)
-	var will_enter = false
-	if is_putt:
-		# Putt prediction:
-		# Does the simulated roll enter within 10 ft, or does the stroke line & speed target the cup?
-		var total_target_dist = Vector2(start_pos.x, start_pos.z).distance_to(target_2d)
-		var putt_speed = Vector2(launch_vel.x, launch_vel.z).length()
-		var dir_to_hole = (target_2d - Vector2(start_pos.x, start_pos.z)).normalized()
-		var putt_dir = Vector2(launch_vel.x, launch_vel.z).normalized()
-		var heading_dot = putt_dir.dot(dir_to_hole)
 
-		if min_dist_2d <= PUTT_THRESHOLD_METERS or ending_dist_2d <= PUTT_THRESHOLD_METERS or holed_out:
-			will_enter = true
-		elif heading_dot > 0.94 and putt_speed > 1.2:
-			# Kinematic check: flat/mildly sloped green roll estimate (v^2 / 2a)
-			var est_roll = (putt_speed * putt_speed) / 0.80
-			if est_roll >= (total_target_dist - PUTT_THRESHOLD_METERS) and est_roll <= (total_target_dist + 5.0):
-				will_enter = true
-	else:
-		# Airborne shot prediction (chips, pitches, approach shots):
-		# The ball MUST be projected to land at least within 20 yards (18.288m) of the hole to trigger.
-		if not did_land or landing_dist_to_hole > MAX_PROJECTED_LANDING_DISTANCE_METERS:
-			will_enter = false
-		else:
-			# If projected to land within 20 yards of the hole, trigger if it holes out,
-			# enters within threshold (25 ft), or finishes close:
-			if holed_out or min_dist_2d <= CHIP_THRESHOLD_METERS or ending_dist_2d <= (CHIP_THRESHOLD_METERS + 2.0):
-				will_enter = true
+	# --- TRAJECTORY VALIDATION (READY state evaluation) ---
+	# Does the entire predicted on-ground roll path (from P_land_predicted to final stop) ever enter the cup?
+	# If NO, transition directly to SPENT. This shot is a confirmed miss and never gets to ACTIVE.
+	if not holed_out:
+		suspense_state = SuspenseState.SPENT
+		_shot_suspense_locked_out = true
+		shot_validated = false
+		predicted_holed_out = false
+		print("[TensionManager] Trajectory Validation: MISS confirmed (closest to cup: %.2fm). Transitioned directly to SPENT." % min_dist_2d)
+		return {
+			"will_enter_zone": false,
+			"shot_validated": false,
+			"ending_dist": ending_dist_2d,
+			"min_dist": min_dist_2d,
+			"mode": mode
+		}
+
+	# Validation SUCCESS: Shot enters cup!
+	shot_validated = true
+	suspense_state = SuspenseState.READY
+	predicted_apex = p_apex
+	predicted_land_pos = p_land
+	predicted_land_vel = v_land
+	predicted_roll_path = roll_path
+	predicted_holed_out = true
+	_suspense_predicted_close = true
+	_predicted_ending_dist = 0.0
 
 	var time_to_apex: float = 0.0
 	var delay_to_apex: float = 0.25
 	if not is_putt and launch_vel.y > 0.5:
 		time_to_apex = launch_vel.y / 9.81
-		delay_to_apex = time_to_apex + 0.15 # Shortly after the apex of the shot!
+		delay_to_apex = time_to_apex + 0.15
 
+	print("[TensionManager] Trajectory Validation: SUCCESS! Roll path enters cup! State -> READY. P_apex: %s, P_land: %s" % [p_apex, p_land])
 	return {
-		"will_enter_zone": will_enter,
-		"ending_dist": ending_dist_2d,
-		"min_dist": min_dist_2d if holed_out else ending_dist_2d,
+		"will_enter_zone": true,
+		"shot_validated": true,
+		"ending_dist": 0.0,
+		"min_dist": 0.0,
 		"mode": mode,
 		"time_to_apex": time_to_apex,
 		"delay_to_apex": delay_to_apex,
-		"landing_dist_to_hole": landing_dist_to_hole
+		"p_apex": p_apex,
+		"p_land": p_land
 	}
 
-func schedule_apex_tension(mode: String, delay_seconds: float = 0.25, ending_dist: float = 0.0) -> void:
+func schedule_apex_tension(mode: String, _delay_seconds: float = 0.25, ending_dist: float = 0.0) -> void:
 	if not is_course_play_active() or _shot_suspense_locked_out or _tree_hit_this_shot:
 		return
 	cancel_scheduled_tension()
-	_is_scheduled = true
 	_scheduled_mode = mode
-	_suspense_predicted_close = true
 	_predicted_ending_dist = ending_dist
 	_closest_dist_reached = 9999.0
 	_has_entered_suspense_zone = false
-	var timer = get_tree().create_timer(delay_seconds)
-	await timer.timeout
-	if _is_scheduled and not _shot_suspense_locked_out and not _tree_hit_this_shot:
-		_is_scheduled = false
-		var threshold = PUTT_THRESHOLD_METERS if mode == "putt" else CHIP_THRESHOLD_METERS
-		var closeness = clampf(1.0 - (ending_dist / maxf(threshold, 0.001)), 0.35, 1.0)
-		start_tension(mode, closeness)
+	# Note: Activation is evaluated dynamically by altitude and cone angle in check_ball_proximity.
 
 func schedule_early_tension(mode: String, delay_seconds: float = 0.02, ending_dist: float = 0.0) -> void:
 	schedule_apex_tension(mode, delay_seconds, ending_dist)
@@ -428,11 +519,21 @@ func cancel_scheduled_tension() -> void:
 func on_tree_hit() -> void:
 	_tree_hit_this_shot = true
 	_suspense_predicted_close = false
+	shot_validated = false
+	suspense_state = SuspenseState.SPENT
+	_shot_suspense_locked_out = true
 	cancel_scheduled_tension()
 	stop_tension(true)
 
 func reset_for_new_shot() -> void:
 	cancel_scheduled_tension()
+	suspense_state = SuspenseState.IDLE
+	shot_validated = false
+	predicted_apex = Vector3.ZERO
+	predicted_land_pos = Vector3.ZERO
+	predicted_land_vel = Vector3.ZERO
+	predicted_roll_path.clear()
+	predicted_holed_out = false
 	_shot_suspense_locked_out = false
 	_tree_hit_this_shot = false
 	_suspense_predicted_close = false
@@ -444,14 +545,14 @@ func reset_for_new_shot() -> void:
 		tension_active = false
 		emit_signal("tension_stopped")
 
-# ---------------- LIVE PROXIMITY CHECK ----------------
+# ---------------- LIVE PROXIMITY & CONE CHECK ----------------
 
 func check_ball_proximity(
 	ball_pos: Vector3,
 	target_pos: Vector3,
 	is_putt: bool,
 	shot_start_pos: Vector3 = Vector3.ZERO,
-	is_sand: bool = false,
+	_is_sand: bool = false,
 	is_airborne: bool = false,
 	ball_vel: Vector3 = Vector3.ZERO,
 	hit_tree: bool = false
@@ -459,51 +560,18 @@ func check_ball_proximity(
 	# Never trigger or continue after hitting a tree
 	if _tree_hit_this_shot or hit_tree:
 		_tree_hit_this_shot = true
+		suspense_state = SuspenseState.SPENT
+		_shot_suspense_locked_out = true
 		cancel_scheduled_tension()
 		if tension_active:
 			stop_tension(true)
 		return false
 
-	# If tension is ALREADY active:
-	if tension_active:
-		# 1. Turn off if the ball has come to a complete rest:
-		if not is_airborne and ball_vel.length() < 0.05:
-			stop_tension(true) # Lock out for rest of shot now that ball is at rest
-			return false
-
-		var ball_pos_2d = Vector2(ball_pos.x, ball_pos.z)
-		var hole_pos_2d = Vector2(target_pos.x, target_pos.z)
-		var dist_2d = ball_pos_2d.distance_to(hole_pos_2d)
-
-		# 2. Turn off if the ball is physically more than 1 foot past the hole
-		# (on the other side of the hole relative to where the ball started):
-		var start_pos_2d = Vector2(shot_start_pos.x, shot_start_pos.z) if not shot_start_pos.is_zero_approx() else Vector2.ZERO
-		if not start_pos_2d.is_zero_approx():
-			var shot_vec = hole_pos_2d - start_pos_2d
-			if shot_vec.length_squared() > 0.01:
-				var shot_dir = shot_vec.normalized()
-				var hole_to_ball = ball_pos_2d - hole_pos_2d
-				var along_shot = hole_to_ball.dot(shot_dir)
-				# Physically past the hole (along_shot > 0) and physically more than 1 foot past:
-				if along_shot > 0.0 and dist_2d > PAST_HOLE_THRESHOLD_METERS:
-					stop_tension(true)
-					return false
-
-		# While still moving and not past the hole, maintain tension and update closeness:
-		var threshold = PUTT_THRESHOLD_METERS if is_putt else CHIP_THRESHOLD_METERS
-		var closeness = clampf(1.0 - (dist_2d / threshold), 0.25, 1.0)
-		current_closeness = maxf(current_closeness, closeness)
-		return true
-
-	# If not active, but already locked out on this shot (e.g. shot previously reached rest, hit tree, or went past):
-	if _shot_suspense_locked_out:
+	# Strict SPENT Latch: Suspense must never turn on more than once per shot
+	if suspense_state == SuspenseState.SPENT or _shot_suspense_locked_out:
 		return false
 
-	if not is_course_play_active():
-		return false
-	if target_pos.is_zero_approx():
-		return false
-	if shot_start_pos.is_zero_approx() or not is_shot_eligible_for_suspense(shot_start_pos, target_pos, is_putt, is_sand):
+	if not is_course_play_active() or target_pos.is_zero_approx():
 		return false
 
 	var ball_pos_2d = Vector2(ball_pos.x, ball_pos.z)
@@ -511,24 +579,85 @@ func check_ball_proximity(
 	var dist_2d = ball_pos_2d.distance_to(hole_pos_2d)
 	var threshold = PUTT_THRESHOLD_METERS if is_putt else CHIP_THRESHOLD_METERS
 
-	var vel_2d = Vector2(ball_vel.x, ball_vel.z)
-	var speed_2d = vel_2d.length()
-
-	# AIRBORNE APEX TRIGGER (For shots predicted to be close and landing within 20 yards):
-	# If predicted close, start the heartbeat shortly after apex (once descending: ball_vel.y <= -0.5)
-	if _suspense_predicted_close and is_airborne and ball_vel.y <= -0.5:
-		var pred_closeness = clampf(1.0 - (_predicted_ending_dist / maxf(threshold, 0.001)), 0.35, 1.0)
-		start_tension("chip", pred_closeness)
-		return true
-
-	# LIVE PROXIMITY TRIGGER:
-	# Inside threshold (25 ft for chips, 10 ft for putts)
-	if dist_2d <= threshold and speed_2d > 0.08:
-		# If the ball is high in the air above the green, don't trigger live ground proximity
-		if is_airborne and (ball_pos.y - target_pos.y > 3.0):
+	# ========================================================
+	# STATE: READY -> ACTIVE (Predictive Activation)
+	# ========================================================
+	if suspense_state == SuspenseState.READY:
+		# 1. Validation check (redundant but safe)
+		if not shot_validated:
+			suspense_state = SuspenseState.SPENT
+			_shot_suspense_locked_out = true
 			return false
 
-		# If the ball is already physically more than 1 foot past the hole, do not start:
+		# 2. Altitude Trigger: Ball must have passed predicted apex (Ball_Current_Altitude < P_apex.y and v_ball.y < 0)
+		if is_airborne:
+			if ball_vel.y >= 0.0 or ball_pos.y >= predicted_apex.y:
+				return false # Ascending or at/above apex
+
+		# 3. Angle Check (Critical): Cone projected forward from landing spot / ball must encompass hole
+		var cone_valid := false
+		if is_airborne:
+			var land_2d = Vector2(predicted_land_pos.x, predicted_land_pos.z)
+			var land_to_hole = (hole_pos_2d - land_2d).normalized() if land_2d.distance_to(hole_pos_2d) > 0.001 else Vector2.ZERO
+			var land_v_2d = Vector2(predicted_land_vel.x, predicted_land_vel.z).normalized()
+			var cos_theta_land = land_v_2d.dot(land_to_hole)
+
+			var cur_to_hole = (hole_pos_2d - ball_pos_2d).normalized() if dist_2d > 0.001 else Vector2.ZERO
+			var cur_v_2d = Vector2(ball_vel.x, ball_vel.z).normalized()
+			var cos_theta_cur = cur_v_2d.dot(cur_to_hole)
+
+			# Must satisfy cos_theta >= cos(cone_half_angle)
+			cone_valid = (cos_theta_land >= MIN_COS_THETA) and (cos_theta_cur >= (MIN_COS_THETA - 0.05))
+		else:
+			# Putting / on-ground rollout
+			var cur_to_hole = (hole_pos_2d - ball_pos_2d).normalized() if dist_2d > 0.001 else Vector2.ZERO
+			var cur_v_2d = Vector2(ball_vel.x, ball_vel.z).normalized()
+			var cos_theta_cur = cur_v_2d.dot(cur_to_hole)
+			var theta_cup = asin(clampf(CUP_RADIUS_METERS / maxf(dist_2d, 0.001), 0.0, 1.0))
+			var min_cos = minf(MIN_COS_THETA, cos(theta_cup))
+			cone_valid = (cos_theta_cur >= min_cos)
+
+		if cone_valid:
+			suspense_state = SuspenseState.ACTIVE
+			_closest_dist_reached = dist_2d
+			var closeness = clampf(1.0 - (dist_2d / maxf(threshold, 0.001)), 0.35, 1.0)
+			start_tension("putt" if is_putt else "chip", closeness)
+			print("[TensionManager] READY -> ACTIVE! Vision cone encompass validated. Mode: %s, Closeness: %.2f" % [
+				"putt" if is_putt else "chip", closeness
+			])
+			return true
+		else:
+			return false
+
+	# ========================================================
+	# STATE: ACTIVE (Ongoing Angle Loss & Deactivation Checks)
+	# ========================================================
+	if suspense_state == SuspenseState.ACTIVE:
+		# 1. Rest / Sunk Check:
+		var speed = ball_vel.length()
+		if not is_airborne and speed < 0.05:
+			print("[TensionManager] ACTIVE -> SPENT: Ball stopped at rest.")
+			suspense_state = SuspenseState.SPENT
+			stop_tension(true)
+			return false
+
+		if dist_2d <= CUP_RADIUS_METERS:
+			print("[TensionManager] ACTIVE -> SPENT: Ball reached/sunk in cup!")
+			suspense_state = SuspenseState.SPENT
+			stop_tension(true)
+			return false
+
+		var cur_to_hole = (hole_pos_2d - ball_pos_2d).normalized() if dist_2d > 0.001 else Vector2.ZERO
+		var cur_v_2d = Vector2(ball_vel.x, ball_vel.z).normalized()
+		var vel_dot_hole = cur_v_2d.dot(cur_to_hole)
+
+		# 2. Overshoot Check: Ball rolls past the hole
+		if not is_airborne and dist_2d > (_closest_dist_reached + 0.05) and vel_dot_hole <= 0.0:
+			print("[TensionManager] ACTIVE -> SPENT: Overshoot detected (moving away from hole). Dist: %.2fm" % dist_2d)
+			suspense_state = SuspenseState.SPENT
+			stop_tension(true)
+			return false
+
 		var start_pos_2d = Vector2(shot_start_pos.x, shot_start_pos.z) if not shot_start_pos.is_zero_approx() else Vector2.ZERO
 		if not start_pos_2d.is_zero_approx():
 			var shot_vec = hole_pos_2d - start_pos_2d
@@ -536,36 +665,33 @@ func check_ball_proximity(
 				var shot_dir = shot_vec.normalized()
 				var hole_to_ball = ball_pos_2d - hole_pos_2d
 				var along_shot = hole_to_ball.dot(shot_dir)
-				if along_shot > 0.0 and dist_2d > PAST_HOLE_THRESHOLD_METERS:
+				if along_shot > PAST_HOLE_THRESHOLD_METERS:
+					print("[TensionManager] ACTIVE -> SPENT: Ball physically > 1ft past hole.")
+					suspense_state = SuspenseState.SPENT
+					stop_tension(true)
 					return false
 
-		var dir_to_hole = (hole_pos_2d - ball_pos_2d).normalized() if dist_2d > 0.001 else Vector2.ZERO
-		var move_dir = vel_2d.normalized()
-		var heading_dot = move_dir.dot(dir_to_hole)
+		# 3. Hole Exits Cone (Angle Loss Check):
+		var theta_cup = asin(clampf(CUP_RADIUS_METERS / maxf(dist_2d, 0.001), 0.0, 1.0))
+		var min_cos = minf(MIN_COS_THETA, cos(theta_cup))
+		if vel_dot_hole < min_cos:
+			print("[TensionManager] ACTIVE -> SPENT: Hole exited cone! cos_theta: %.3f < min_cos: %.3f (Broke offline)." % [vel_dot_hole, min_cos])
+			suspense_state = SuspenseState.SPENT
+			stop_tension(true)
+			return false
 
-		# Moving generally towards the hole area (not straight backwards)
-		if heading_dot > -0.25:
-			# For airborne chips, check that ball flight won't carry 6+ ft past the pin in the air
-			if is_airborne:
-				var vy = ball_vel.y
-				var height_above_target = ball_pos.y - target_pos.y
-				var g = 9.81
-				var discriminant = vy * vy + 2.0 * g * maxf(height_above_target, 0.0)
-				var time_to_land = (vy + sqrt(maxf(0.0, discriminant))) / g
-				var carry_remaining = speed_2d * time_to_land
-				if carry_remaining > (dist_2d + 1.8):
-					return false # Flying far past the hole in the air
-
-			var closeness = clampf(1.0 - (dist_2d / threshold), 0.25, 1.0)
-			start_tension("putt" if is_putt else "chip", closeness)
-			return true
+		# Track closest distance and update heartbeat closeness
+		_closest_dist_reached = minf(_closest_dist_reached, dist_2d)
+		var closeness = clampf(1.0 - (dist_2d / maxf(threshold, 0.001)), 0.35, 1.0)
+		current_closeness = maxf(current_closeness, closeness)
+		return true
 
 	return false
 
 # ----------------- ACTIVATION / DEACTIVATION -----------------
 
 func start_tension(mode: String = "putt", initial_closeness: float = 0.40) -> void:
-	if _shot_suspense_locked_out or _tree_hit_this_shot:
+	if _shot_suspense_locked_out or _tree_hit_this_shot or suspense_state == SuspenseState.SPENT:
 		return
 	if not is_course_play_active():
 		return
@@ -589,6 +715,7 @@ func stop_tension(lockout: bool = true) -> void:
 	cancel_scheduled_tension()
 	if lockout:
 		_shot_suspense_locked_out = true
+		suspense_state = SuspenseState.SPENT
 	_closest_dist_reached = 9999.0
 	_has_entered_suspense_zone = false
 	current_closeness = 0.0
