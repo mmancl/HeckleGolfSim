@@ -205,6 +205,14 @@ speed = 5.0
 thickness = 4.0
 radius = 12.0
 
+[node name="ExpandSearchButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/StatusHBox"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(160, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Expand Search"
+
 [node name="NoticePanel" type="PanelContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
 unique_name_in_owner = true
 visible = false
@@ -408,6 +416,13 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 15
 placeholder_text = "e.g. leisure=golf_course, sport=golf, golf=course"
 clear_button_enabled = true
+
+[node name="ForceOnlineCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+button_pressed = false
+text = " Always use expanded search"
 
 [node name="SettingsFooterHBox" type="HBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox"]
 layout_mode = 2

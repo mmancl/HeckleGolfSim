@@ -378,12 +378,25 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         return ReadBuffer(result.Value);
     }
 
-    private void OnDeviceAdded(DeviceWatcher sender, DeviceInformation args)
+    private async void OnDeviceAdded(DeviceWatcher sender, DeviceInformation args)
     {
         var name = args.Name?.Trim() ?? string.Empty;
-        if (IsDeviceNameMatch(name) && _discoveredDeviceIds.Add(args.Id))
+        if (!IsDeviceNameMatch(name) || !_discoveredDeviceIds.Add(args.Id))
         {
-            DeviceDiscovered?.Invoke(new BluetoothDevice(args.Id, name, -1));
+            return;
+        }
+
+        try
+        {
+            using var device = await BluetoothLEDevice.FromIdAsync(args.Id);
+            if (device != null && device.ConnectionStatus == BluetoothConnectionStatus.Connected)
+            {
+                DeviceDiscovered?.Invoke(new BluetoothDevice(args.Id, name, -50));
+            }
+        }
+        catch
+        {
+            // Device cannot be accessed or is offline
         }
     }
 
@@ -421,8 +434,28 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
 
     private bool IsDeviceNameMatch(string? name)
     {
-        return !string.IsNullOrWhiteSpace(name)
-            && name.Trim().StartsWith(_scanOptions.DeviceNamePrefix, StringComparison.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        var prefix = _scanOptions.DeviceNamePrefix;
+        if (string.IsNullOrWhiteSpace(prefix))
+        {
+            return true;
+        }
+
+        var trimmedName = name.Trim();
+        if (trimmedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+            trimmedName.Contains(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var normalizedName = trimmedName.Replace(" ", "").Replace("-", "").Replace("_", "");
+        var normalizedPrefix = prefix.Replace(" ", "").Replace("-", "").Replace("_", "");
+        return normalizedName.StartsWith(normalizedPrefix, StringComparison.OrdinalIgnoreCase) ||
+               normalizedName.Contains(normalizedPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private void OnDeviceConnectionStatusChanged(BluetoothLEDevice sender, object args)

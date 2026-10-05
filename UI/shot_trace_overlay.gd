@@ -19,13 +19,19 @@ const BallTrailScript = preload("res://Player/ball_trail.gd")
 var _trace_nodes: Array[MeshInstance3D] = []
 var _is_active: bool = false
 var _current_club: String = ""
+var _current_player: String = ""
 
 func is_active() -> bool:
 	return _is_active
 
-func activate(shot_history: Array[Dictionary], current_club: String) -> void:
+func set_current_player(player_name: String) -> void:
+	_current_player = player_name
+
+func activate(shot_history: Array[Dictionary], current_club: String, current_player: String = "") -> void:
 	_is_active = true
 	_current_club = current_club
+	if not current_player.is_empty():
+		_current_player = current_player
 	visible = true
 	_rebuild_traces(shot_history)
 
@@ -34,8 +40,17 @@ func deactivate() -> void:
 	visible = false
 	_clear_traces()
 
-func on_club_changed(shot_history: Array[Dictionary], new_club: String) -> void:
+func on_club_changed(shot_history: Array[Dictionary], new_club: String, current_player: String = "") -> void:
 	_current_club = new_club
+	if not current_player.is_empty():
+		_current_player = current_player
+	if _is_active:
+		_rebuild_traces(shot_history)
+
+func on_player_changed(shot_history: Array[Dictionary], new_player: String, current_club: String = "") -> void:
+	_current_player = new_player
+	if not current_club.is_empty():
+		_current_club = current_club
 	if _is_active:
 		_rebuild_traces(shot_history)
 
@@ -44,6 +59,9 @@ func on_new_shot(shot_data: Dictionary) -> void:
 		return
 	var shot_club = str(shot_data.get("club", ""))
 	if not _is_matching_club(shot_club, _current_club):
+		return
+	var shot_player = str(shot_data.get("player", shot_data.get("player_name", "")))
+	if not _is_matching_player(shot_player, _current_player):
 		return
 	if not shot_data.has("tracer_points"):
 		return
@@ -68,7 +86,8 @@ func _rebuild_traces(shot_history: Array[Dictionary]) -> void:
 	var club_shots: Array[Dictionary] = []
 	for shot in shot_history:
 		var shot_club = str(shot.get("club", ""))
-		if _is_matching_club(shot_club, _current_club) and shot.has("tracer_points"):
+		var shot_player = str(shot.get("player", shot.get("player_name", "")))
+		if _is_matching_club(shot_club, _current_club) and _is_matching_player(shot_player, _current_player) and shot.has("tracer_points"):
 			var pts: Array = shot["tracer_points"]
 			if pts.size() >= 2:
 				club_shots.append(shot)
@@ -132,3 +151,10 @@ func _is_matching_club(club_a: String, club_b: String) -> bool:
 	if club_a == club_b:
 		return true
 	return club_a.to_lower().strip_edges() == club_b.to_lower().strip_edges()
+
+func _is_matching_player(player_a: String, player_b: String) -> bool:
+	if player_b.is_empty():
+		return true
+	if player_a.is_empty():
+		return false
+	return player_a.to_lower().strip_edges() == player_b.to_lower().strip_edges()

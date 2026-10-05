@@ -88,7 +88,7 @@ func _ready() -> void:
 	_create_garmin_monitor()
 	if _square == null and _garmin == null:
 		_debug_error("Neither Square nor Garmin monitor could be loaded: Square='%s', Garmin='%s'" % [_square_init_error, _garmin_init_error])
-	if bool(settings.get("enabled", false)):
+	if DisplayServer.get_name() != "headless" and bool(settings.get("enabled", false)):
 		_connect_saved_device_on_startup(str(settings.get("device_id", "")))
 	
 	if EventBus.has_signal("club_selected"):
@@ -181,12 +181,17 @@ func set_device_type(type_name: String) -> void:
 
 func is_garmin_device_name(name: String) -> bool:
 	var n := name.strip_edges().to_lower()
+	if n == "":
+		return false
 	return n.contains("approach") or n.contains("r10") or n.contains("garmin")
 
 
 func is_square_device_name(name: String) -> bool:
 	var n := name.strip_edges().to_lower()
-	return n.begins_with(SQUARE_DEVICE_PREFIX) or n.contains("square")
+	if n == "":
+		return false
+	var stripped := n.replace(" ", "").replace("-", "").replace("_", "")
+	return stripped.begins_with(SQUARE_DEVICE_PREFIX) or stripped.contains("square")
 
 
 func is_auto_connecting() -> bool:
@@ -194,21 +199,21 @@ func is_auto_connecting() -> bool:
 
 
 func detect_device_type(device_id: String, device_name: String = "") -> String:
-	if device_name != "":
-		if is_garmin_device_name(device_name):
-			return "garmin"
-		if is_square_device_name(device_name):
-			return "square"
 	if devices.has(device_id):
 		var dev: Dictionary = devices[device_id]
 		var dev_type := str(dev.get("type", ""))
 		if dev_type == "garmin" or dev_type == "square":
 			return dev_type
 		var dname := str(dev.get("name", ""))
-		if is_garmin_device_name(dname):
-			return "garmin"
 		if is_square_device_name(dname):
 			return "square"
+		if is_garmin_device_name(dname):
+			return "garmin"
+	if device_name != "":
+		if is_square_device_name(device_name):
+			return "square"
+		if is_garmin_device_name(device_name):
+			return "garmin"
 	var explicit_type := str(settings.get("device_type", "auto"))
 	if explicit_type == "square" or explicit_type == "garmin":
 		return explicit_type
@@ -256,13 +261,28 @@ func connect_to_device(device_id: String, is_auto: bool = false) -> void:
 	if devices.has(device_id):
 		device_name = str(devices[device_id].get("name", ""))
 		detected_type = str(devices[device_id].get("type", ""))
-	if device_name != "":
-		settings["device_name"] = device_name
-	elif str(settings.get("device_name", "")) != "":
-		device_name = str(settings.get("device_name", ""))
 	
 	if detected_type == "":
 		detected_type = detect_device_type(device_id, device_name)
+
+	if device_name != "":
+		if detected_type == "square" and is_garmin_device_name(device_name):
+			device_name = "Square Golf"
+		elif detected_type == "garmin" and is_square_device_name(device_name):
+			device_name = "Garmin Approach R10"
+		settings["device_name"] = device_name
+	elif str(settings.get("device_name", "")) != "":
+		var prev_name := str(settings.get("device_name", ""))
+		if detected_type == "square" and is_garmin_device_name(prev_name):
+			device_name = "Square Golf"
+		elif detected_type == "garmin" and is_square_device_name(prev_name):
+			device_name = "Garmin Approach R10"
+		else:
+			device_name = prev_name
+		settings["device_name"] = device_name
+	else:
+		device_name = "Square Golf" if detected_type == "square" else "Garmin Approach R10"
+		settings["device_name"] = device_name
 
 	_active_driver = detected_type
 	stop_scan()
@@ -551,7 +571,7 @@ func _on_square_device_discovered(device_id: String, name: String, rssi: int) ->
 		return
 	if not is_square_device_name(name):
 		return
-	var is_live := (rssi != 0)
+	var is_live := (rssi <= -10 and rssi >= -120) or (rssi != 0 and rssi != -1)
 	var is_new := not devices.has(device_id)
 	var prev_live := bool(devices.get(device_id, {}).get("is_discovered", false)) if not is_new else false
 	devices[device_id] = {
@@ -584,10 +604,10 @@ func _on_square_device_discovered(device_id: String, name: String, rssi: int) ->
 func _on_garmin_device_discovered(device_id: String, name: String, rssi: int) -> void:
 	if not _fallback_scan_active and str(settings.get("device_type", "auto")) == "square":
 		return
-	if name.strip_edges() != "" and not is_garmin_device_name(name):
+	if not is_garmin_device_name(name):
 		return
-	var display_name := name if name.strip_edges() != "" else "Garmin Approach R10"
-	var is_live := (rssi != 0)
+	var display_name := name.strip_edges()
+	var is_live := (rssi <= -10 and rssi >= -120) or (rssi != 0 and rssi != -1)
 	var is_new := not devices.has(device_id)
 	var prev_live := bool(devices.get(device_id, {}).get("is_discovered", false)) if not is_new else false
 	devices[device_id] = {

@@ -626,8 +626,8 @@ func _refresh_devices(preferred_device_id: String = "") -> void:
 			return live_a
 		var rssi_a = int(dev_a.get("rssi", 0))
 		var rssi_b = int(dev_b.get("rssi", 0))
-		var eff_a = rssi_a if (rssi_a < 0 and live_a) else -999
-		var eff_b = rssi_b if (rssi_b < 0 and live_b) else -999
+		var eff_a = rssi_a if (rssi_a <= -10 and rssi_a >= -120 and live_a) else -999
+		var eff_b = rssi_b if (rssi_b <= -10 and rssi_b >= -120 and live_b) else -999
 		return eff_a > eff_b
 	)
 
@@ -637,7 +637,7 @@ func _refresh_devices(preferred_device_id: String = "") -> void:
 		if bool(_launch_monitor.devices[k].get("is_discovered", false)):
 			active_live_keys.append(k)
 
-	if preferred_device_id != "" and matching_keys.has(preferred_device_id):
+	if preferred_device_id != "" and matching_keys.has(preferred_device_id) and bool(_launch_monitor.devices[preferred_device_id].get("is_discovered", false)):
 		selected_device = preferred_device_id
 	else:
 		var current_is_live := matching_keys.has(selected_device) and bool(_launch_monitor.devices[selected_device].get("is_discovered", false))
@@ -750,7 +750,7 @@ func _update_status_display() -> void:
 
 func _on_device_discovered(device_id: String, name: String, _rssi: int) -> void:
 	var dev = _launch_monitor.devices.get(device_id, {}) if _launch_monitor != null else {}
-	var is_live: bool = bool(dev.get("is_discovered", false)) or (_rssi != 0)
+	var is_live: bool = bool(dev.get("is_discovered", false)) or ((_rssi <= -10 and _rssi >= -120) or (_rssi != 0 and _rssi != -1))
 	var pref_id := device_id if is_live else ""
 	_refresh_devices(pref_id)
 	if is_live and _launch_monitor != null and (_launch_monitor.status == "Scanning" or _launch_monitor.status.contains("Searching")):

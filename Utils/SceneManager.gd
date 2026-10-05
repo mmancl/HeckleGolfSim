@@ -48,6 +48,9 @@ func load_course(scene_path: String, config_path: String) -> void:
 	# Yield one more frame to ensure the new scene is drawn before hiding the overlay
 	await get_tree().process_frame
 	_hide_loading_screen()
+	var vp := get_viewport()
+	if vp != null:
+		vp.gui_release_focus()
 
 
 func close_scene():

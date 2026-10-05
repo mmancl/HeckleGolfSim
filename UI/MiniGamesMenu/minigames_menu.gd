@@ -1,7 +1,5 @@
 extends Control
 
-var _music_btn: Button = null
-
 func _ready() -> void:
 	name = "MiniGamesMenu"
 	
@@ -27,32 +25,6 @@ func _ready() -> void:
 	glass_panel.anchor_top = 0.0
 	glass_panel.anchor_bottom = 1.0
 	add_child(glass_panel)
-	
-	# Top Right Header Strip for Quick Controls (Music Toggle)
-	var top_strip = MarginContainer.new()
-	top_strip.anchor_left = 0.0
-	top_strip.anchor_right = 1.0
-	top_strip.anchor_top = 0.0
-	top_strip.anchor_bottom = 0.0
-	top_strip.offset_left = 30
-	top_strip.offset_top = 24
-	top_strip.offset_right = -30
-	top_strip.offset_bottom = 74
-	add_child(top_strip)
-	
-	var top_hbox = HBoxContainer.new()
-	top_hbox.alignment = BoxContainer.ALIGNMENT_END
-	top_strip.add_child(top_hbox)
-	
-	_music_btn = Button.new()
-	_music_btn.name = "MusicToggleButton"
-	_music_btn.text = ""
-	_music_btn.custom_minimum_size = Vector2(44, 44)
-	_music_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_music_btn.expand_icon = true
-	ThemeManager.apply_nav_button_style(_music_btn, 6)
-	_music_btn.pressed.connect(_toggle_music)
-	top_hbox.add_child(_music_btn)
 	
 	# Main layout margin
 	var main_margin = MarginContainer.new()
@@ -155,8 +127,6 @@ func _ready() -> void:
 	back_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn") )
 	main_vbox.add_child(back_btn)
 
-	_update_music_button()
-	GlobalSettings.range_settings.minigame_music_enabled.setting_changed.connect(func(_val): _update_music_button())
 	call_deferred("_grab_initial_focus")
 
 
@@ -174,36 +144,6 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")
 		get_viewport().set_input_as_handled()
-
-
-func _toggle_music() -> void:
-	var current = GlobalSettings.range_settings.minigame_music_enabled.value
-	GlobalSettings.range_settings.minigame_music_enabled.set_value(not current)
-	_update_music_button()
-
-
-func _update_music_button() -> void:
-	if _music_btn == null:
-		return
-	var is_enabled: bool = GlobalSettings.range_settings.minigame_music_enabled.value
-	if is_enabled:
-		if ResourceLoader.exists("res://assets/images/menu/music_on.svg"):
-			_music_btn.icon = load("res://assets/images/menu/music_on.svg")
-		_music_btn.tooltip_text = "Music: Playing (Click to mute)"
-		ThemeManager.apply_nav_button_style(_music_btn, 6)
-	else:
-		if ResourceLoader.exists("res://assets/images/menu/music_off.svg"):
-			_music_btn.icon = load("res://assets/images/menu/music_off.svg")
-		_music_btn.tooltip_text = "Music: Muted (Click to play)"
-		var style = StyleBoxFlat.new()
-		style.bg_color = Color(0.35, 0.18, 0.18, 0.8)
-		style.corner_radius_top_left = 6
-		style.corner_radius_top_right = 6
-		style.corner_radius_bottom_right = 6
-		style.corner_radius_bottom_left = 6
-		_music_btn.add_theme_stylebox_override("normal", style)
-		_music_btn.add_theme_stylebox_override("hover", style)
-		_music_btn.add_theme_stylebox_override("pressed", style)
 
 
 func _create_minigame_tile(title: String, desc: String, icon_path: String, on_click: Callable) -> PanelContainer:
@@ -266,34 +206,3 @@ func _create_minigame_tile(title: String, desc: String, icon_path: String, on_cl
 	
 	return panel
 
-
-func _apply_premium_button_style(btn: Button, normal_color: Color, hover_color: Color):
-	var style_normal = StyleBoxFlat.new()
-	style_normal.bg_color = normal_color
-	style_normal.corner_radius_top_left = 6
-	style_normal.corner_radius_top_right = 6
-	style_normal.corner_radius_bottom_right = 6
-	style_normal.corner_radius_bottom_left = 6
-	style_normal.border_width_left = 1
-	style_normal.border_width_top = 1
-	style_normal.border_width_right = 1
-	style_normal.border_width_bottom = 1
-	style_normal.border_color = Color(1, 1, 1, 0.15)
-	
-	var style_hover = StyleBoxFlat.new()
-	style_hover.bg_color = hover_color
-	style_hover.corner_radius_top_left = 6
-	style_hover.corner_radius_top_right = 6
-	style_hover.corner_radius_bottom_right = 6
-	style_hover.corner_radius_bottom_left = 6
-	style_hover.border_width_left = 1
-	style_hover.border_width_top = 1
-	style_hover.border_width_right = 1
-	style_hover.border_width_bottom = 1
-	style_hover.border_color = Color(1, 1, 1, 0.3)
-	
-	btn.add_theme_stylebox_override("normal", style_normal)
-	btn.add_theme_stylebox_override("hover", style_hover)
-	btn.add_theme_stylebox_override("pressed", style_hover)
-	btn.add_theme_stylebox_override("focus", style_normal)
-	btn.add_theme_color_override("font_color", Color.WHITE)

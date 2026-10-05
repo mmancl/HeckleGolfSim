@@ -68,9 +68,14 @@ func _ready() -> void:
 
 	_create_club_display_button()
 	_create_club_buttons()
-	if grid_container != null and grid_container.get_child_count() > 0:
-		current_club = grid_container.get_child(0)
-		_on_club_button_pressed(current_club)
+	if grid_container != null:
+		grid_container.visible = false
+		if grid_container.get_child_count() > 0:
+			current_club = grid_container.get_child(0)
+			_set_button_selected(current_club)
+			if club_button != null:
+				club_button.text = "🏌 Club: " + current_club.text
+			EventBus.emit_signal("club_selected", current_club.text)
 	
 	var mp = get_node_or_null("/root/MultiplayerManager")
 	if mp != null:
@@ -175,12 +180,14 @@ func _detect_current_player_name() -> String:
 		var ap = mp.get_active_player()
 		if not ap.is_empty() and not ap.get("name", "").is_empty():
 			return ap.get("name", "")
-	var curr = get_parent()
-	while curr != null:
+	var curr = get_parent() if is_inside_tree() else null
+	while curr != null and is_instance_valid(curr):
 		if curr.has_method("get_selected_player_name"):
 			var sel = curr.get_selected_player_name()
 			if not sel.is_empty():
 				return sel
+		if not curr.is_inside_tree():
+			break
 		curr = curr.get_parent()
 	if mp != null and mp.has_method("get_default_range_profile_name"):
 		return mp.get_default_range_profile_name()
@@ -225,13 +232,19 @@ func _input(event: InputEvent) -> void:
 			if event.pressed:
 				_toggle_grid_visibility()
 			get_tree().root.set_input_as_handled()
+			return
+
+	if event.is_action_pressed("ui_cancel") or (event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE):
+		_toggle_grid_visibility()
+		get_viewport().set_input_as_handled()
+		return
 
 func _create_club_display_button() -> void:
 	club_button = Button.new()
 	club_button.text = "🏌 Club: " + clubs[0]
 	club_button.custom_minimum_size = Vector2(DEFAULT_TOGGLE_WIDTH, DEFAULT_TOGGLE_HEIGHT)
 	club_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	club_button.focus_mode = Control.FOCUS_NONE
+	club_button.focus_mode = Control.FOCUS_ALL
 	club_button.theme = _create_display_button_theme()
 	club_button.pressed.connect(_on_display_button_pressed)
 	_update_tooltip()
@@ -248,7 +261,7 @@ func _create_club_buttons() -> void:
 		button.custom_minimum_size = CLUB_BUTTON_SIZE
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		button.focus_mode = Control.FOCUS_NONE
+		button.focus_mode = Control.FOCUS_ALL
 		button.theme = button_theme
 		button.pressed.connect(_on_club_button_pressed.bindv([button]))
 		grid_container.add_child(button)
@@ -267,7 +280,12 @@ func _create_club_button_theme() -> Theme:
 	var pressed_style = _create_button_style(BUTTON_BG_PRESSED)
 	button_theme.set_stylebox("pressed", "Button", pressed_style)
 
-	var focus_style = StyleBoxEmpty.new()
+	var focus_style = normal_style.duplicate()
+	focus_style.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	focus_style.border_width_left = 3
+	focus_style.border_width_top = 3
+	focus_style.border_width_right = 3
+	focus_style.border_width_bottom = 3
 	button_theme.set_stylebox("focus", "Button", focus_style)
 
 	return button_theme
@@ -308,6 +326,14 @@ func _create_display_button_theme() -> Theme:
 	hover_style.bg_color = DISPLAY_BG_HOVER
 	display_theme.set_stylebox("hover", "Button", hover_style)
 
+	var focus_style = normal_style.duplicate()
+	focus_style.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	focus_style.border_width_left = 3
+	focus_style.border_width_top = 3
+	focus_style.border_width_right = 3
+	focus_style.border_width_bottom = 3
+	display_theme.set_stylebox("focus", "Button", focus_style)
+
 	return display_theme
 
 
@@ -323,6 +349,14 @@ func _toggle_grid_visibility() -> void:
 			custom_minimum_size.x = grid_w
 			if anchor_left == 1.0 and anchor_right == 1.0:
 				offset_left = offset_right - grid_w
+			if has_node("/root/UIFocusGuard"):
+				get_node("/root/UIFocusGuard").push_lock(grid_container)
+			if current_club != null and is_instance_valid(current_club):
+				current_club.call_deferred("grab_focus")
+			elif grid_container.get_child_count() > 0:
+				var first_child = grid_container.get_child(0) as Control
+				if first_child != null:
+					first_child.call_deferred("grab_focus")
 		else:
 			var current_right = offset_right
 			wrapper.custom_minimum_size = Vector2(DEFAULT_TOGGLE_WIDTH, 0)
@@ -330,9 +364,23 @@ func _toggle_grid_visibility() -> void:
 			if anchor_left == 1.0 and anchor_right == 1.0:
 				offset_right = current_right
 				offset_left = current_right - DEFAULT_TOGGLE_WIDTH
-			var vp = get_viewport()
-			if vp != null:
-				vp.gui_release_focus()
+			if has_node("/root/UIFocusGuard"):
+				var guard = get_node("/root/UIFocusGuard")
+				if guard.current_lock_root() == grid_container:
+					guard.pop_lock(false)
+			var cur_f = get_viewport().gui_get_focus_owner() if get_viewport() != null else null
+			var had_focus = (cur_f != null and (cur_f == club_button or (grid_container != null and grid_container.is_ancestor_of(cur_f))))
+			if had_focus and club_button != null and is_instance_valid(club_button):
+				club_button.call_deferred("grab_focus")
+			elif cur_f != null and (cur_f == club_button or (grid_container != null and grid_container.is_ancestor_of(cur_f))):
+				var vp = get_viewport()
+				if vp != null:
+					vp.gui_release_focus()
+
+
+func _on_focus_lock_popped() -> void:
+	if grid_container != null and grid_container.visible:
+		_toggle_grid_visibility()
 
 
 func _on_display_button_pressed() -> void:

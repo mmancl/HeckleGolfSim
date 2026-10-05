@@ -35,6 +35,7 @@ var turn_full_hole_btn: Button
 var turn_desc_lbl: Label
 
 var quality_low_btn: Button
+var quality_med_btn: Button
 var quality_high_btn: Button
 var quality_desc_lbl: Label
 
@@ -312,15 +313,41 @@ func _ready() -> void:
 	start_button.disabled = true
 	start_button.pressed.connect(_on_start_pressed)
 	action_row.add_child(start_button)
-	
 	right_vbox.add_child(action_row)
 
-	# Right Column Settings: Hole Selection & Wind Simulation
+	# Connect focus neighbors between tabs, course_list, and action buttons
+	if real_tab_btn != null and is_instance_valid(real_tab_btn):
+		course_list.focus_neighbor_top = course_list.get_path_to(real_tab_btn)
+		real_tab_btn.focus_neighbor_bottom = real_tab_btn.get_path_to(course_list)
+	if custom_tab_btn != null and is_instance_valid(custom_tab_btn):
+		custom_tab_btn.focus_neighbor_bottom = custom_tab_btn.get_path_to(course_list)
+	if create_custom_btn != null and is_instance_valid(create_custom_btn):
+		create_custom_btn.focus_neighbor_bottom = create_custom_btn.get_path_to(course_list)
+	course_list.focus_neighbor_bottom = course_list.get_path_to(download_btn)
+	download_btn.focus_neighbor_top = download_btn.get_path_to(course_list)
+	delete_btn.focus_neighbor_top = delete_btn.get_path_to(course_list)
+	preview_button.focus_neighbor_top = preview_button.get_path_to(course_list)
+	# Right Column Settings: Hole Selection & Wind Simulation (Shared Row) and Green Speed
+	var options_hbox = HBoxContainer.new()
+	options_hbox.add_theme_constant_override("separation", 14)
+	options_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
 	var length_selector = _create_length_selector()
-	right_vbox.add_child(length_selector)
+	length_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	options_hbox.add_child(length_selector)
 
 	var wind_selector = _create_wind_selector()
-	right_vbox.add_child(wind_selector)
+	wind_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	options_hbox.add_child(wind_selector)
+
+	right_vbox.add_child(options_hbox)
+
+	var selected_items = course_list.get_selected_items()
+	if not selected_items.is_empty():
+		_update_course_length_options(selected_items[0])
+
+	var green_speed_selector = _create_green_speed_selector()
+	right_vbox.add_child(green_speed_selector)
 	
 	# Add default initial player (player with biggest play history, first in list, or 'Player 1' fallback)
 	var default_player = MultiplayerManager.get_default_player_name()
@@ -482,6 +509,11 @@ func _scan_available_courses() -> void:
 		course_list.add_item(course["title"])
 		course_list.set_item_metadata(item_idx, course)
 		available_courses.append(course)
+
+	if course_list.get_item_count() > 0:
+		if course_list.get_selected_items().is_empty():
+			course_list.select(0)
+			_update_course_length_options(0)
 
 	_update_start_button()
 
@@ -782,43 +814,47 @@ func _create_length_selector() -> PanelContainer:
 	panel_style.corner_radius_top_right = 8
 	panel_style.corner_radius_bottom_left = 8
 	panel_style.corner_radius_bottom_right = 8
-	panel_style.content_margin_left = 14
-	panel_style.content_margin_right = 14
-	panel_style.content_margin_top = 10
-	panel_style.content_margin_bottom = 10
+	panel_style.content_margin_left = 12
+	panel_style.content_margin_right = 12
+	panel_style.content_margin_top = 8
+	panel_style.content_margin_bottom = 8
 	panel.add_theme_stylebox_override("panel", panel_style)
 
 	var hbox = HBoxContainer.new()
-	hbox.add_theme_constant_override("separation", 15)
+	hbox.add_theme_constant_override("separation", 10)
 	panel.add_child(hbox)
 
 	var lbl = Label.new()
 	lbl.text = "Select Holes:"
-	lbl.add_theme_font_size_override("font_size", 20)
+	lbl.add_theme_font_size_override("font_size", 18)
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hbox.add_child(lbl)
 
 	# Segmented buttons container
 	var seg_hbox = HBoxContainer.new()
 	seg_hbox.add_theme_constant_override("separation", 0)
+	seg_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hbox.add_child(seg_hbox)
 
 	front_9_btn = Button.new()
 	front_9_btn.text = "Front 9"
-	front_9_btn.custom_minimum_size = Vector2(110, 44)
-	front_9_btn.add_theme_font_size_override("font_size", 18)
+	front_9_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	front_9_btn.custom_minimum_size = Vector2(75, 42)
+	front_9_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(front_9_btn)
 
 	back_9_btn = Button.new()
 	back_9_btn.text = "Back 9"
-	back_9_btn.custom_minimum_size = Vector2(110, 44)
-	back_9_btn.add_theme_font_size_override("font_size", 18)
+	back_9_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	back_9_btn.custom_minimum_size = Vector2(75, 42)
+	back_9_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(back_9_btn)
 
 	full_18_btn = Button.new()
 	full_18_btn.text = "Full 18"
-	full_18_btn.custom_minimum_size = Vector2(110, 44)
-	full_18_btn.add_theme_font_size_override("font_size", 18)
+	full_18_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	full_18_btn.custom_minimum_size = Vector2(75, 42)
+	full_18_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(full_18_btn)
 
 	# Style buttons and setup connections
@@ -960,9 +996,15 @@ func _create_quality_selector() -> PanelContainer:
 	quality_low_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(quality_low_btn)
 
+	quality_med_btn = Button.new()
+	quality_med_btn.text = "Medium (PBR)"
+	quality_med_btn.custom_minimum_size = Vector2(115, 44)
+	quality_med_btn.add_theme_font_size_override("font_size", 16)
+	seg_hbox.add_child(quality_med_btn)
+
 	quality_high_btn = Button.new()
-	quality_high_btn.text = "High (PBR)"
-	quality_high_btn.custom_minimum_size = Vector2(105, 44)
+	quality_high_btn.text = "High (Realistic)"
+	quality_high_btn.custom_minimum_size = Vector2(125, 44)
 	quality_high_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(quality_high_btn)
 
@@ -973,6 +1015,7 @@ func _create_quality_selector() -> PanelContainer:
 	vbox.add_child(quality_desc_lbl)
 
 	quality_low_btn.pressed.connect(func(): _select_quality("Low"))
+	quality_med_btn.pressed.connect(func(): _select_quality("Medium"))
 	quality_high_btn.pressed.connect(func(): _select_quality("High"))
 
 	var current_q = "Low"
@@ -988,12 +1031,15 @@ func _select_quality(q_name: String) -> void:
 		GlobalSettings.save_settings()
 
 	_style_seg_button(quality_low_btn, "left", q_name == "Low")
+	_style_seg_button(quality_med_btn, "middle", q_name == "Medium")
 	_style_seg_button(quality_high_btn, "right", q_name == "High")
 
 	if q_name == "Low":
-		quality_desc_lbl.text = "Low (Fast): Stylized stippled turf with clear high-contrast slope shading. Optimized for mobile and systems with < 8GB RAM."
+		quality_desc_lbl.text = "Low (Fast): Stylized stippled turf with clear high-contrast slope shading. Optimized for mobile and lower-end hardware."
+	elif q_name == "Medium":
+		quality_desc_lbl.text = "Medium (PBR): Balanced 27-texture PBR terrain splatting, standard foliage, and 4-split cascaded shadows."
 	else:
-		quality_desc_lbl.text = "High (PBR): Photorealistic 27-texture PBR terrain splatting, depth water, and 4-split cascaded shadows."
+		quality_desc_lbl.text = "High (Realistic): Photorealistic turf with micro-blade detail, organic bunker transitions, natural color variegation, 3D translucent trees, and atmospheric lighting."
 
 
 func _create_wind_selector() -> PanelContainer:
@@ -1009,35 +1055,38 @@ func _create_wind_selector() -> PanelContainer:
 	panel_style.corner_radius_top_right = 8
 	panel_style.corner_radius_bottom_left = 8
 	panel_style.corner_radius_bottom_right = 8
-	panel_style.content_margin_left = 14
-	panel_style.content_margin_right = 14
-	panel_style.content_margin_top = 10
-	panel_style.content_margin_bottom = 10
+	panel_style.content_margin_left = 12
+	panel_style.content_margin_right = 12
+	panel_style.content_margin_top = 8
+	panel_style.content_margin_bottom = 8
 	panel.add_theme_stylebox_override("panel", panel_style)
 
 	var hbox = HBoxContainer.new()
-	hbox.add_theme_constant_override("separation", 15)
+	hbox.add_theme_constant_override("separation", 10)
 	panel.add_child(hbox)
 
 	var lbl = Label.new()
-	lbl.text = "Wind Simulation:"
-	lbl.add_theme_font_size_override("font_size", 20)
+	lbl.text = "Wind:"
+	lbl.add_theme_font_size_override("font_size", 18)
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hbox.add_child(lbl)
 
 	var seg_hbox = HBoxContainer.new()
 	seg_hbox.add_theme_constant_override("separation", 0)
+	seg_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hbox.add_child(seg_hbox)
 
 	wind_off_btn = Button.new()
 	wind_off_btn.text = "Disabled"
-	wind_off_btn.custom_minimum_size = Vector2(95, 44)
+	wind_off_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wind_off_btn.custom_minimum_size = Vector2(75, 42)
 	wind_off_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(wind_off_btn)
 
 	wind_on_btn = Button.new()
 	wind_on_btn.text = "Enabled"
-	wind_on_btn.custom_minimum_size = Vector2(95, 44)
+	wind_on_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wind_on_btn.custom_minimum_size = Vector2(75, 42)
 	wind_on_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(wind_on_btn)
 
@@ -1048,6 +1097,74 @@ func _create_wind_selector() -> PanelContainer:
 	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("wind_enabled"):
 		current_wind = bool(GlobalSettings.range_settings.wind_enabled.value)
 	_select_wind(current_wind)
+	return panel
+
+
+func _create_green_speed_selector() -> PanelContainer:
+	var panel = PanelContainer.new()
+	var panel_style = StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.08, 0.12, 0.15, 0.65)
+	panel_style.border_width_left = 1
+	panel_style.border_width_right = 1
+	panel_style.border_width_top = 1
+	panel_style.border_width_bottom = 1
+	panel_style.border_color = Color(0.2, 0.28, 0.35, 0.4)
+	panel_style.corner_radius_top_left = 8
+	panel_style.corner_radius_top_right = 8
+	panel_style.corner_radius_bottom_left = 8
+	panel_style.corner_radius_bottom_right = 8
+	panel_style.content_margin_left = 14
+	panel_style.content_margin_right = 14
+	panel_style.content_margin_top = 8
+	panel_style.content_margin_bottom = 8
+	panel.add_theme_stylebox_override("panel", panel_style)
+
+	var hbox = HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 15)
+	panel.add_child(hbox)
+
+	var lbl = Label.new()
+	lbl.text = "Green Speed: "
+	lbl.add_theme_font_size_override("font_size", 18)
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hbox.add_child(lbl)
+
+	var slider = HSlider.new()
+	slider.min_value = 6.0
+	slider.max_value = 16.0
+	slider.step = 0.5
+	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("green_speed"):
+		slider.value = GlobalSettings.range_settings.green_speed.value
+	else:
+		slider.value = 10.0
+	slider.custom_minimum_size = Vector2(200, 48 if MobilePerformance.is_mobile() else 36)
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	ThemeManager.apply_slider_style(slider, 48 if MobilePerformance.is_mobile() else 36, 200)
+	hbox.add_child(slider)
+
+	var val_lbl = Label.new()
+	val_lbl.text = "%.1f" % slider.value
+	val_lbl.add_theme_font_size_override("font_size", 18)
+	val_lbl.custom_minimum_size = Vector2(50, 0)
+	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	val_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hbox.add_child(val_lbl)
+
+	slider.value_changed.connect(func(val):
+		if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("green_speed"):
+			GlobalSettings.range_settings.green_speed.set_value(val)
+		val_lbl.text = "%.1f" % val
+	)
+
+	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("green_speed"):
+		GlobalSettings.range_settings.green_speed.setting_changed.connect(func(val):
+			if slider != null and is_instance_valid(slider) and not is_equal_approx(slider.value, val):
+				slider.value = val
+			if val_lbl != null and is_instance_valid(val_lbl):
+				val_lbl.text = "%.1f" % val
+		)
+
 	return panel
 
 
@@ -1114,7 +1231,11 @@ func _select_length(length: String) -> void:
 
 
 func _update_course_length_options(idx: int) -> void:
+	if back_9_btn == null or not is_instance_valid(back_9_btn):
+		return
 	var course_data = course_list.get_item_metadata(idx)
+	if course_data == null:
+		return
 	var config_path: String = course_data.get("config_path", "")
 	var file = FileAccess.open(config_path, FileAccess.READ)
 	if file != null:

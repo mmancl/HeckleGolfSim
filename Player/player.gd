@@ -19,6 +19,8 @@ var min_tracers : int = 0
 var tracers : Array = []
 var current_tracer : MeshInstance3D = null
 var BallTrailScript = preload("res://Player/ball_trail.gd")
+var current_profile_name : String = "Player 1"
+var profile_tracers : Dictionary = {}
 
 var ball : GolfBall = null
 var camera_target : Node3D = null
@@ -55,20 +57,56 @@ func _ready() -> void:
 	max_tracers = GlobalSettings.range_settings.shot_tracer_count.value
 	GlobalSettings.range_settings.shot_tracer_count.setting_changed.connect(_on_tracer_count_changed)
 
+	if has_node("/root/MultiplayerManager"):
+		var mp_mgr = get_node("/root/MultiplayerManager")
+		if mp_mgr.has_method("get_default_range_profile_name"):
+			var def_name = mp_mgr.get_default_range_profile_name()
+			if not def_name.is_empty():
+				current_profile_name = def_name
+
 	if has_node("/root/EventBus"):
 		var eb = get_node("/root/EventBus")
 		if eb.has_signal("club_selected") and not eb.is_connected("club_selected", Callable(self, "_on_club_selected")):
 			eb.connect("club_selected", Callable(self, "_on_club_selected"))
+
+func set_profile(player_name: String) -> void:
+	if player_name.is_empty():
+		return
+	if player_name == current_profile_name:
+		return
+
+	# Hide tracers for previous profile
+	var old_list: Array = profile_tracers.get(current_profile_name, [])
+	for tracer in old_list:
+		if is_instance_valid(tracer):
+			tracer.visible = false
+
+	current_profile_name = player_name
+
+	# Show tracers for new profile
+	if not profile_tracers.has(current_profile_name):
+		profile_tracers[current_profile_name] = []
+	var new_list: Array = profile_tracers[current_profile_name]
+	for tracer in new_list:
+		if is_instance_valid(tracer):
+			tracer.visible = true
+
+	tracers = new_list
+	current_tracer = tracers.back() if not tracers.is_empty() else null
 
 func _on_club_selected(club_name: String) -> void:
 	_cached_selected_club = club_name
 
 func _on_tracer_count_changed(value) -> void:
 	max_tracers = value
-	# Remove excess tracers if the new limit is lower
-	while tracers.size() > max_tracers:
-		var oldest = tracers.pop_front()
-		oldest.queue_free()
+	for p_name in profile_tracers:
+		var p_tracers: Array = profile_tracers[p_name]
+		while p_tracers.size() > max_tracers:
+			var oldest = p_tracers.pop_front()
+			if is_instance_valid(oldest):
+				oldest.queue_free()
+	tracers = profile_tracers.get(current_profile_name, [])
+	current_tracer = tracers.back() if not tracers.is_empty() else null
 
 func _find_node_by_name(node: Node, target_name: String) -> Node:
 	if node.name == target_name:
@@ -130,27 +168,44 @@ func create_new_tracer() -> MeshInstance3D:
 		current_tracer = null
 		return null
 
-	# Remove oldest tracer if we've hit the limit
-	if tracers.size() >= max_tracers:
-		var oldest = tracers.pop_front()
-		oldest.queue_free()
+	if not profile_tracers.has(current_profile_name):
+		profile_tracers[current_profile_name] = []
+	var p_tracers: Array = profile_tracers[current_profile_name]
+
+	# Remove oldest tracer if we've hit the limit for this profile
+	while p_tracers.size() >= max_tracers:
+		var oldest = p_tracers.pop_front()
+		if is_instance_valid(oldest):
+			oldest.queue_free()
 
 	# Create new tracer
 	var new_tracer = MeshInstance3D.new()
 	new_tracer.set_script(BallTrailScript)
 	add_child(new_tracer)
 
-	tracers.append(new_tracer)
+	p_tracers.append(new_tracer)
+	tracers = p_tracers
 	current_tracer = new_tracer
 	return new_tracer
 
 
-func clear_tracers() -> void:
-	for tracer in tracers:
-		if is_instance_valid(tracer):
-			tracer.queue_free()
-	tracers.clear()
-	current_tracer = null
+func clear_tracers(all_profiles: bool = false) -> void:
+	if all_profiles:
+		for p_name in profile_tracers:
+			for tracer in profile_tracers[p_name]:
+				if is_instance_valid(tracer):
+					tracer.queue_free()
+		profile_tracers.clear()
+		tracers.clear()
+		current_tracer = null
+	else:
+		var p_tracers: Array = profile_tracers.get(current_profile_name, [])
+		for tracer in p_tracers:
+			if is_instance_valid(tracer):
+				tracer.queue_free()
+		p_tracers.clear()
+		tracers = p_tracers
+		current_tracer = null
 
 func _process(_delta: float) -> void:
 	_handle_tree_occlusion()
@@ -170,7 +225,7 @@ func _process(_delta: float) -> void:
 	if Input.is_action_just_pressed("hit"):
 		manual_hit_shot()
 	if Input.is_action_just_pressed("reset"):
-		reset_ball()
+		reset_ball(true)
 
 func manual_hit_shot() -> void:
 	if ball == null:
@@ -231,11 +286,12 @@ func validate_data(data: Dictionary) -> bool:
 	return true
 
 
-func reset_ball():
+func reset_ball(clear_trail: bool = false):
 	ball.reset()
 	if camera_target != null and is_instance_valid(camera_target):
 		camera_target.global_position = ball.global_position
-	clear_tracers()
+	if clear_trail or max_tracers == 0:
+		clear_tracers()
 	apex = 0.0
 	carry = 0.0
 	side_distance = 0.0

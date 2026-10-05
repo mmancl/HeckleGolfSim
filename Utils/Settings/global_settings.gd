@@ -65,6 +65,12 @@ func is_low_graphics() -> bool:
 	return MobilePerformance.is_mobile()
 
 
+func get_graphics_quality() -> String:
+	if range_settings != null and range_settings.settings.has("graphics_quality"):
+		return str(range_settings.settings["graphics_quality"].value)
+	return MobilePerformance.get_default_graphics_quality()
+
+
 func _on_root_child_entered_tree(node: Node) -> void:
 	if node.name == "AnnouncerEngine":
 		_apply_announcer_settings(node)
@@ -184,6 +190,9 @@ func load_settings() -> void:
 			
 	# Migration for camera settings if updating from older config files with small camera distance
 	var migrated := false
+	if range_settings.shot_tracer_count.value == 1:
+		range_settings.shot_tracer_count.set_value(4)
+		migrated = true
 	if range_settings.camera_distance.value < 14.0:
 		range_settings.camera_distance.set_value(15.0)
 		migrated = true
@@ -433,6 +442,9 @@ var _mock_active_scene: Node = null
 
 func set_mock_active_scene(scene: Node) -> void:
 	_mock_active_scene = scene
+
+func get_active_scene() -> Node:
+	return _get_active_scene()
 
 func _get_active_scene() -> Node:
 	if _mock_active_scene != null and is_instance_valid(_mock_active_scene):

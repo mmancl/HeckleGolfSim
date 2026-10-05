@@ -376,8 +376,8 @@ func _setup_environment() -> void:
 	env.background_mode = Environment.BG_SKY
 	
 	var sky = Sky.new()
-	if is_mobile:
-		sky.process_mode = Sky.PROCESS_MODE_QUALITY
+	sky.process_mode = Sky.PROCESS_MODE_REALTIME
+	sky.radiance_size = Sky.RADIANCE_SIZE_128 if is_mobile else Sky.RADIANCE_SIZE_256
 	var sky_mat = ProceduralSkyMaterial.new()
 	sky_mat.sky_top_color = Color(0.20, 0.48, 0.82)
 	sky_mat.sky_horizon_color = Color(0.55, 0.74, 0.90)
@@ -418,6 +418,9 @@ func _setup_environment() -> void:
 	add_child(camera)
 	if has_node("/root/TensionManager"):
 		TensionManager.register_camera(camera, 55.0)
+	if has_node("/root/ScreenOffsetManager"):
+		ScreenOffsetManager.register_camera(camera)
+		ScreenOffsetManager.on_ready_for_shot(0.0, true)
 		
 	_update_camera_to_tee()
 
@@ -430,6 +433,9 @@ func _update_camera_to_tee() -> void:
 	camera.global_position = ball_pos + Vector3(-5.5, 2.4, 0.0)
 	camera.look_at(Vector3(WALL_DIST_X, 15.0, 0.0))
 	last_camera_offset = camera.global_position - ball_pos
+	if has_node("/root/ScreenOffsetManager"):
+		ScreenOffsetManager.set_suppressed(false)
+		ScreenOffsetManager.on_ready_for_shot()
 
 
 func _update_camera_to_wall_cam() -> void:
@@ -438,6 +444,8 @@ func _update_camera_to_wall_cam() -> void:
 	viewing_wall_cam = true
 	camera.global_position = Vector3(WALL_DIST_X - 22.0, 15.0, -16.0)
 	camera.look_at(Vector3(WALL_DIST_X, 15.0, 0.0))
+	if has_node("/root/ScreenOffsetManager"):
+		ScreenOffsetManager.set_suppressed(true)
 
 
 func _toggle_camera_view() -> void:
@@ -821,6 +829,8 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	shot_reset_token += 1
 	shot_in_progress = true
 	var this_shot = shot_reset_token
+	if has_node("/root/ScreenOffsetManager"):
+		ScreenOffsetManager.on_shot_started()
 	prev_ball_pos = player.ball.global_position
 	
 	# If currently on wall cam, switch back to tee follow cam on shot hit
@@ -1456,6 +1466,11 @@ func _setup_ui() -> void:
 	music_toggle_btn.custom_minimum_size = Vector2(52, 52)
 	music_toggle_btn.pressed.connect(_toggle_music)
 	ctrl_hbox.add_child(music_toggle_btn)
+
+	# Screen Offset Launcher
+	var so_ctrl_class = load("res://UI/ScreenOffset/screen_offset_control.gd")
+	if so_ctrl_class != null and so_ctrl_class.has_method("create_minigame_launcher"):
+		so_ctrl_class.call("create_minigame_launcher", self, ctrl_hbox, Callable(self, "_apply_btn_style"))
 	
 	# 5. Settings Button
 	var settings_btn = Button.new()
@@ -1828,3 +1843,8 @@ func _close_settings() -> void:
 		var launch_monitor = get_node("/root/LaunchMonitorManager")
 		if launch_monitor != null and launch_monitor.has_method("_update_hud_display"):
 			launch_monitor.call("_update_hud_display")
+
+
+func _exit_tree() -> void:
+	if has_node("/root/ScreenOffsetManager") and camera != null and is_instance_valid(camera):
+		ScreenOffsetManager.unregister_camera(camera)

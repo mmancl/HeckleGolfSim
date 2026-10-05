@@ -122,8 +122,27 @@ internal static class BlueZMapper
 
     public static bool IsDeviceNameMatch(string? name, string deviceNamePrefix)
     {
-        return !string.IsNullOrWhiteSpace(name)
-            && name.Trim().StartsWith(deviceNamePrefix, StringComparison.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(deviceNamePrefix))
+        {
+            return true;
+        }
+
+        var trimmedName = name.Trim();
+        if (trimmedName.StartsWith(deviceNamePrefix, StringComparison.OrdinalIgnoreCase) ||
+            trimmedName.Contains(deviceNamePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var normalizedName = trimmedName.Replace(" ", "").Replace("-", "").Replace("_", "");
+        var normalizedPrefix = deviceNamePrefix.Replace(" ", "").Replace("-", "").Replace("_", "");
+        return normalizedName.StartsWith(normalizedPrefix, StringComparison.OrdinalIgnoreCase) ||
+               normalizedName.Contains(normalizedPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     public static bool IsTransientConnectFailure(string? errorName, string? errorMessage)

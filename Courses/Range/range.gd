@@ -364,10 +364,15 @@ func _generate_ground_terrain() -> void:
 	static_body.add_child(collision_shape)
 
 
+func _enter_tree() -> void:
+	var p_path = scene_file_path.to_lower()
+	is_driving_range = (p_path.ends_with("range/range.tscn") or p_path.ends_with("range.tscn") or p_path.ends_with("range.scn") or (name.to_lower() == "range" and not p_path.contains("course")))
+
+
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	var p_path = scene_file_path.to_lower()
-	is_driving_range = (name.to_lower() == "range" or p_path.ends_with("range/range.tscn") or p_path.ends_with("range.tscn") or p_path.ends_with("range.scn"))
+	is_driving_range = (p_path.ends_with("range/range.tscn") or p_path.ends_with("range.tscn") or p_path.ends_with("range.scn") or (name.to_lower() == "range" and not p_path.contains("course")))
 	if is_driving_range:
 		var mp_mgr = get_node_or_null("/root/MultiplayerManager")
 		if mp_mgr != null:
@@ -404,6 +409,9 @@ func _ready() -> void:
 	update_camera_offset()
 	update_camera_fov(GlobalSettings.range_settings.camera_fov.value)
 	update_camera_far(GlobalSettings.range_settings.camera_far.value)
+	if has_node("/root/ScreenOffsetManager") and has_node("PhantomCamera3D"):
+		ScreenOffsetManager.register_camera($PhantomCamera3D)
+		ScreenOffsetManager.on_ready_for_shot(0.0, true)
 	
 	# Disconnect Player's direct connection to RangeUI's hit_shot signal to control execution order
 	if has_node("RangeUI") and has_node("Player"):
@@ -419,21 +427,23 @@ func _ready() -> void:
 			$RangeUI.player_profile_changed.connect(_on_player_profile_changed)
 		if $RangeUI.has_signal("shot_traces_toggled") and not $RangeUI.shot_traces_toggled.is_connected(_on_shot_traces_toggled):
 			$RangeUI.shot_traces_toggled.connect(_on_shot_traces_toggled)
-		if has_node("SessionRecorder") and $RangeUI.has_method("get_selected_player_name"):
-			$SessionRecorder.username = $RangeUI.get_selected_player_name()
+		var init_player = $RangeUI.get_selected_player_name() if $RangeUI.has_method("get_selected_player_name") else "Player 1"
+		if has_node("SessionRecorder"):
+			$SessionRecorder.username = init_player
+		if has_node("Player") and $Player.has_method("set_profile"):
+			$Player.set_profile(init_player)
 
-	_setup_shot_trace_overlay()
+	if is_driving_range:
+		_setup_shot_trace_overlay()
+		if has_node("RangeUI") and $RangeUI.has_method("is_shot_traces_active") and $RangeUI.is_shot_traces_active():
+			_on_shot_traces_toggled(true)
 			
 	# Visual effects setup
 	if has_node("Sky3D"):
 		MobilePerformance.optimize_sky3d($Sky3D)
 	MobilePerformance.optimize_scene(self)
-	# Driving range always uses high quality graphics
-	if is_driving_range:
-		MobilePerformance.apply_graphics_quality(self, "High")
-	else:
-		var range_quality = "Low" if (GlobalSettings != null and GlobalSettings.is_low_graphics()) else "High"
-		MobilePerformance.apply_graphics_quality(self, range_quality)
+	var range_quality = GlobalSettings.get_graphics_quality() if GlobalSettings != null else "High"
+	MobilePerformance.apply_graphics_quality(self, range_quality)
 	setup_depth_of_field()
 	setup_vignette()
 	setup_atmospheric_fog()
@@ -674,7 +684,7 @@ func _ready() -> void:
 	aim_lbl.anchor_left = 0.5
 	aim_lbl.anchor_right = 0.5
 	aim_lbl.offset_left = -260
-	aim_lbl.offset_top = 20
+	aim_lbl.offset_top = 22
 	aim_lbl.offset_right = 260
 	aim_lbl.offset_bottom = 60
 	aim_lbl.visible = true
@@ -772,7 +782,7 @@ func _ready() -> void:
 							practice_start_pos = spawn_pos
 							var hole_loc = first_hole.get("Hole Location")
 							var par = first_hole.get("Par", 4)
-							var hole_name = first_hole.get("Name", "Hole 1")
+							var hole_name = first_hole.get("Name", start_hole_id)
 							current_hole_name = hole_name
 							current_hole_par = par
 							if hole_loc != null:
@@ -928,7 +938,7 @@ func is_any_dialog_open() -> bool:
 		if focused != null and is_instance_valid(focused) and focused.is_visible_in_tree():
 			if focused is LineEdit or focused is TextEdit:
 				return true
-			if focused is Range or (focused is Control and (focused.get_parent() is SpinBox or focused is SpinBox)):
+			if focused is Range or (focused is Control and (focused.get_parent() != null and is_instance_valid(focused.get_parent()) and focused.get_parent() is SpinBox or focused is SpinBox)):
 				return true
 			if _is_control_in_dialog(focused):
 				return true
@@ -952,6 +962,9 @@ func is_any_dialog_open() -> bool:
 			return true
 		if r_ui.get("_exit_confirm_dialog") != null and is_instance_valid(r_ui.get("_exit_confirm_dialog")) and r_ui.get("_exit_confirm_dialog").visible:
 			return true
+		var cam_dlg = r_ui.find_child("CameraSetupDialog", true, false)
+		if cam_dlg != null and is_instance_valid(cam_dlg) and cam_dlg.visible:
+			return true
 	var cp = get_node_or_null("MultiplayerController")
 	if cp != null and cp.has_method("is_any_dialog_open") and cp.call("is_any_dialog_open"):
 		return true
@@ -959,8 +972,12 @@ func is_any_dialog_open() -> bool:
 
 
 func _is_control_in_dialog(ctrl: Control) -> bool:
+	if ctrl == null or not is_instance_valid(ctrl):
+		return false
 	var cur: Node = ctrl
-	while cur != null and cur != self and cur != get_tree().root:
+	var tree := get_tree()
+	var root := tree.root if tree != null else null
+	while cur != null and is_instance_valid(cur) and cur != self and cur != root:
 		if cur is Popup or cur is AcceptDialog or cur is ConfirmationDialog or cur is Window:
 			return true
 		var c_name := str(cur.name).to_lower()
@@ -968,6 +985,8 @@ func _is_control_in_dialog(ctrl: Control) -> bool:
 			or c_name == "distancemenu" or c_name == "settingslayer" or c_name == "settingsmodallayer" \
 			or c_name == "scorecardpanel" or c_name == "manageplayerspanel":
 			return true
+		if not cur.is_inside_tree():
+			break
 		cur = cur.get_parent()
 	return false
 
@@ -1012,6 +1031,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().gui_release_focus()
 				get_viewport().set_input_as_handled()
 				return
+		var vp := get_viewport()
+		if vp != null and vp.gui_get_focus_owner() != null and not _is_control_in_dialog(vp.gui_get_focus_owner()):
+			vp.gui_release_focus()
+			get_viewport().set_input_as_handled()
+			return
 
 	# 2. Previous Shot Analysis Menu Toggle (Xbox Y / PS Triangle / V key)
 	if event.is_action_pressed("prev_shot_analysis_toggle") or \
@@ -1024,6 +1048,22 @@ func _unhandled_input(event: InputEvent) -> void:
 	# 3. Block gameplay shortcuts if any modal/dialog is actively open
 	if is_any_dialog_open():
 		return
+
+	# If any UI control has focus and ui_accept was pressed, do not process global shortcuts
+	var vp_focus = get_viewport().gui_get_focus_owner() if get_viewport() != null else null
+	if vp_focus != null and event.is_action_pressed("ui_accept"):
+		return
+
+	# In practice mode + aerial view + place_ball_mode: Joypad A / ui_accept places the ball at aim target
+	if is_aerial_view and practice_mode_active and place_ball_mode:
+		var is_btn_focused = (vp_focus != null and (vp_focus is Button or vp_focus is BaseButton))
+		if not is_btn_focused:
+			var is_teleport_trigger = (event is InputEventJoypadButton and event.button_index == JOY_BUTTON_A and event.is_pressed()) or \
+				event.is_action_pressed("ui_accept")
+			if is_teleport_trigger:
+				_perform_practice_teleport_pos(aim_target_pos)
+				get_viewport().set_input_as_handled()
+				return
 
 	if event.is_action_pressed("reset"):
 		_reset_display_data()
@@ -1168,28 +1208,40 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		elif event.is_action_pressed("aim_left"):
 			var vp := get_viewport()
-			if vp != null and vp.gui_get_focus_owner() != null and not _is_control_in_dialog(vp.gui_get_focus_owner()):
+			if vp != null and vp.gui_get_focus_owner() != null:
+				var foc = vp.gui_get_focus_owner()
+				if _is_control_in_dialog(foc) or foc is LineEdit or foc is TextEdit:
+					return
 				vp.gui_release_focus()
 			_apply_aim_step(-1.5, 0.0)
 			get_viewport().set_input_as_handled()
 			return
 		elif event.is_action_pressed("aim_right"):
 			var vp := get_viewport()
-			if vp != null and vp.gui_get_focus_owner() != null and not _is_control_in_dialog(vp.gui_get_focus_owner()):
+			if vp != null and vp.gui_get_focus_owner() != null:
+				var foc = vp.gui_get_focus_owner()
+				if _is_control_in_dialog(foc) or foc is LineEdit or foc is TextEdit:
+					return
 				vp.gui_release_focus()
 			_apply_aim_step(1.5, 0.0)
 			get_viewport().set_input_as_handled()
 			return
 		elif event.is_action_pressed("aim_forward"):
 			var vp := get_viewport()
-			if vp != null and vp.gui_get_focus_owner() != null and not _is_control_in_dialog(vp.gui_get_focus_owner()):
+			if vp != null and vp.gui_get_focus_owner() != null:
+				var foc = vp.gui_get_focus_owner()
+				if _is_control_in_dialog(foc) or foc is LineEdit or foc is TextEdit:
+					return
 				vp.gui_release_focus()
 			_apply_aim_step(0.0, 2.0)
 			get_viewport().set_input_as_handled()
 			return
 		elif event.is_action_pressed("aim_backward"):
 			var vp := get_viewport()
-			if vp != null and vp.gui_get_focus_owner() != null and not _is_control_in_dialog(vp.gui_get_focus_owner()):
+			if vp != null and vp.gui_get_focus_owner() != null:
+				var foc = vp.gui_get_focus_owner()
+				if _is_control_in_dialog(foc) or foc is LineEdit or foc is TextEdit:
+					return
 				vp.gui_release_focus()
 			_apply_aim_step(0.0, -2.0)
 			get_viewport().set_input_as_handled()
@@ -1375,9 +1427,8 @@ func set_aim_target(target_pos: Vector3, update_club: bool = true) -> void:
 		if update_club:
 			update_auto_club(true)
 			
-		var is_on_green = is_ball_on_green()
-		var cam_pos = get_address_camera_position(ball_pos, -angle_rad, is_on_green)
-		var target_look = get_camera_target_look(aim_target_pos, ball_pos, is_on_green)
+		var cam_pos = get_address_camera_position(ball_pos, -angle_rad)
+		var target_look = get_camera_target_look(aim_target_pos, ball_pos)
 		if has_node("PhantomCamera3D"):
 			$PhantomCamera3D.follow_mode = PhantomCamera3D.FollowMode.NONE
 			$PhantomCamera3D.look_at_mode = PhantomCamera3D.LookAtMode.NONE
@@ -1389,6 +1440,9 @@ func set_aim_target(target_pos: Vector3, update_club: bool = true) -> void:
 			$Camera3D.global_position = cam_pos
 			$Camera3D.look_at(target_look)
 			$Camera3D.fov = GlobalSettings.range_settings.camera_fov.value
+
+		if has_node("/root/ScreenOffsetManager"):
+			ScreenOffsetManager.on_ready_for_shot()
 
 
 func _perform_map_click_aim(mouse_pos: Vector2) -> void:
@@ -1409,6 +1463,32 @@ func _perform_map_click_aim(mouse_pos: Vector2) -> void:
 			print("[Aim] Aim target set to: ", clicked_point, " | Yaw offset: ", $Player.ball.aim_yaw_offset_deg)
 
 
+func _perform_practice_teleport_pos(clicked_point: Vector3) -> void:
+	var target_pos = clicked_point
+	target_pos.y = get_height(target_pos.x, target_pos.z) + GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET
+	practice_start_pos = target_pos
+	if $Player and $Player.ball:
+		$Player.ball.spawn_position = target_pos
+		$Player.ball.global_position = target_pos
+		$Player.ball.reset()
+	print("[PracticeMode] Ball spawned at: ", target_pos)
+	
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and not mp_mgr.players.is_empty():
+		var active_player = mp_mgr.get_active_player()
+		if not active_player.is_empty():
+			active_player["position"] = target_pos
+	
+	_user_custom_club = ""
+	update_current_lie_and_reduction()
+	
+	# Automatically aim at the pin/fairway and position the camera behind the ball
+	if not current_hole_location.is_zero_approx():
+		_update_hole_info_label(true)
+		update_auto_club()
+		apply_default_aim()
+
+
 func _perform_practice_teleport(mouse_pos: Vector2) -> void:
 	var camera = get_viewport().get_camera_3d()
 	if camera != null:
@@ -1422,28 +1502,7 @@ func _perform_practice_teleport(mouse_pos: Vector2) -> void:
 			query.exclude = [$Player.ball.get_rid()]
 		var hit = get_world_3d().direct_space_state.intersect_ray(query)
 		if not hit.is_empty():
-			var clicked_point = hit["position"]
-			clicked_point.y = get_height(clicked_point.x, clicked_point.z) + GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET
-			practice_start_pos = clicked_point
-			$Player.ball.spawn_position = clicked_point
-			$Player.ball.global_position = clicked_point
-			$Player.ball.reset()
-			print("[PracticeMode] Ball spawned at: ", clicked_point)
-			
-			var mp_mgr = get_node_or_null("/root/MultiplayerManager")
-			if mp_mgr != null and not mp_mgr.players.is_empty():
-				var active_player = mp_mgr.get_active_player()
-				if not active_player.is_empty():
-					active_player["position"] = clicked_point
-			
-			_user_custom_club = ""
-			update_current_lie_and_reduction()
-			
-			# Automatically aim at the pin/fairway and position the camera behind the ball
-			if not current_hole_location.is_zero_approx():
-				_update_hole_info_label(true)
-				update_auto_club()
-				apply_default_aim()
+			_perform_practice_teleport_pos(hit["position"])
 
 
 func _process_screen_aiming(delta: float) -> void:
@@ -1485,9 +1544,8 @@ func _process_screen_aiming(delta: float) -> void:
 	update_auto_club(false)
 	update_dof_focus()
 
-	var is_on_green = is_ball_on_green()
-	var cam_pos = get_address_camera_position(ball_pos, -new_angle, is_on_green)
-	var target_look = get_camera_target_look(aim_target_pos, ball_pos, is_on_green)
+	var cam_pos = get_address_camera_position(ball_pos, -new_angle)
+	var target_look = get_camera_target_look(aim_target_pos, ball_pos)
 	if has_node("PhantomCamera3D"):
 		$PhantomCamera3D.global_position = cam_pos
 		$PhantomCamera3D.look_at(target_look)
@@ -1518,7 +1576,10 @@ func _process_keyboard_aiming(delta: float) -> void:
 		return
 
 	var vp := get_viewport()
-	if vp != null and vp.gui_get_focus_owner() != null and not _is_control_in_dialog(vp.gui_get_focus_owner()):
+	if vp != null and vp.gui_get_focus_owner() != null:
+		var foc = vp.gui_get_focus_owner()
+		if _is_control_in_dialog(foc) or foc is LineEdit or foc is TextEdit:
+			return
 		vp.gui_release_focus()
 
 	var ball_pos = $Player.ball.global_position
@@ -1560,9 +1621,8 @@ func _process_keyboard_aiming(delta: float) -> void:
 	update_dof_focus()
 
 	if not is_aerial_view:
-		var is_on_green = is_ball_on_green()
-		var cam_pos = get_address_camera_position(ball_pos, -current_angle, is_on_green)
-		var target_look = get_camera_target_look(aim_target_pos, ball_pos, is_on_green)
+		var cam_pos = get_address_camera_position(ball_pos, -current_angle)
+		var target_look = get_camera_target_look(aim_target_pos, ball_pos)
 		if has_node("PhantomCamera3D"):
 			$PhantomCamera3D.global_position = cam_pos
 			$PhantomCamera3D.look_at(target_look)
@@ -1606,15 +1666,16 @@ func _apply_aim_step(turn_deg: float, dist_m: float) -> void:
 	update_dof_focus()
 
 	if not is_aerial_view:
-		var is_on_green = is_ball_on_green()
-		var cam_pos = get_address_camera_position(ball_pos, -current_angle, is_on_green)
-		var target_look = get_camera_target_look(aim_target_pos, ball_pos, is_on_green)
+		var cam_pos = get_address_camera_position(ball_pos, -current_angle)
+		var target_look = get_camera_target_look(aim_target_pos, ball_pos)
 		if has_node("PhantomCamera3D"):
 			$PhantomCamera3D.global_position = cam_pos
 			$PhantomCamera3D.look_at(target_look)
 		if has_node("Camera3D"):
 			$Camera3D.global_position = cam_pos
 			$Camera3D.look_at(target_look)
+		if has_node("/root/ScreenOffsetManager"):
+			ScreenOffsetManager.on_ready_for_shot()
 
 
 func _cycle_club(longer: bool) -> void:
@@ -1668,6 +1729,8 @@ func _toggle_distance_menu() -> void:
 
 
 func _toggle_shot_traces() -> void:
+	if not is_driving_range:
+		return
 	if has_node("RangeUI"):
 		$RangeUI.call("toggle_shot_traces")
 
@@ -1756,12 +1819,7 @@ func _process(delta: float) -> void:
 					var hole_pos_2d = Vector2(target_pos.x, target_pos.z)
 					var dist_to_target = ball_pos_2d.distance_to(hole_pos_2d)
 					
-					if ball_node.is_putt:
-						_putt_close_view_triggered = TensionManager.is_active()
-						if (_putt_close_view_triggered or TensionManager.is_active()) and has_node("PhantomCamera3D") and $PhantomCamera3D.follow_mode == PhantomCamera3D.FollowMode.SIMPLE:
-							var target_offset = Vector3(-3.5, 0.8, 0).rotated(Vector3.UP, _last_travel_yaw)
-							$PhantomCamera3D.follow_offset = $PhantomCamera3D.follow_offset.lerp(target_offset, delta * 4.0)
-					else:
+					if not ball_node.is_putt:
 						_chip_close_view_triggered = TensionManager.is_active()
 						if (_chip_close_view_triggered or TensionManager.is_active()) and has_node("PhantomCamera3D") and $PhantomCamera3D.follow_mode == PhantomCamera3D.FollowMode.SIMPLE:
 							var target_offset = Vector3(-6.0, 1.4, 0).rotated(Vector3.UP, _last_travel_yaw)
@@ -1893,6 +1951,7 @@ func _on_golf_ball_rest(_ball_data) -> void:
 		var p_name = _get_current_player_name()
 		var club_name = _get_current_club()
 		raw_ball_data["player"] = p_name
+		raw_ball_data["player_name"] = p_name
 		raw_ball_data["club"] = club_name
 
 		# Ensure downrange TotalDistance, CarryDistance, and lateral SideDistance are properly captured
@@ -2039,6 +2098,9 @@ func _on_golf_ball_rest(_ball_data) -> void:
 		
 		# 2. Update ball position and spawn position
 		ball.global_position = recovery_pos
+		if ball.has_method("ensure_rock_clearance"):
+			ball.ensure_rock_clearance()
+			recovery_pos = ball.global_position
 		if not practice_mode_active:
 			ball.spawn_position = recovery_pos
 		ball_pos = recovery_pos
@@ -2139,9 +2201,8 @@ func _on_golf_ball_rest(_ball_data) -> void:
 				set_aim_distance(int(practice_start_pos.distance_to(aim_target_pos) * 1.09361))
 				
 			var yaw_rad = deg_to_rad(saved_yaw)
-			var is_on_green = is_ball_on_green()
-			var cam_pos = get_address_camera_position(practice_start_pos, yaw_rad, is_on_green)
-			var target_look = get_camera_target_look(aim_target_pos, practice_start_pos, is_on_green)
+			var cam_pos = get_address_camera_position(practice_start_pos, yaw_rad)
+			var target_look = get_camera_target_look(aim_target_pos, practice_start_pos)
 			if has_node("PhantomCamera3D"):
 				$PhantomCamera3D.global_position = cam_pos
 				$PhantomCamera3D.look_at(target_look)
@@ -2364,21 +2425,18 @@ func set_camera_follow_mode(value) -> void:
 		camera.follow_damping = false
 		
 		# Check if putting to determine camera configuration
-		if player.ball.is_putt:
+		var is_putting = player.ball.is_putt or is_putting_view()
+		if is_putting:
 			update_camera_fov(GlobalSettings.range_settings.camera_fov.value)
-			
-			# Check if already within 5 feet (1.524m) of the hole
-			var dist_to_hole = 999.0
-			if not current_hole_location.is_zero_approx():
-				var ball_pos_2d = Vector2(player.ball.global_position.x, player.ball.global_position.z)
-				var hole_pos_2d = Vector2(current_hole_location.x, current_hole_location.z)
-				dist_to_hole = ball_pos_2d.distance_to(hole_pos_2d)
-			
-			_putt_close_view_triggered = (dist_to_hole <= TensionManager.PUTT_THRESHOLD_METERS)
-			var cam_dist = 3.5 if _putt_close_view_triggered else 5.0
-			var cam_height = 0.8 if _putt_close_view_triggered else 1.2
-			var local_offset = Vector3(-cam_dist, cam_height, 0).rotated(Vector3.UP, yaw_rad)
+			_putt_close_view_triggered = false
+			# Follow behind the ball at current address putting offset without zooming out
+			var local_offset = Vector3(-1.05, 0.6, 0.0).rotated(Vector3.UP, yaw_rad)
 			camera.follow_offset = local_offset
+			# Retain current camera angle down the putting line instead of looking down at the ball
+			camera.look_at_mode = PhantomCamera3D.LookAtMode.NONE
+			camera.look_at_target = null
+			camera.look_at_offset = Vector3.ZERO
+			camera.look_at_damping = false
 		else:
 			_putt_close_view_triggered = false
 			# Standard FOV for ball flight view (follows user's camera FOV setting)
@@ -2390,11 +2448,11 @@ func set_camera_follow_mode(value) -> void:
 			var local_offset = Vector3(-cam_dist, cam_height, 0).rotated(Vector3.UP, yaw_rad)
 			camera.follow_offset = local_offset
 		
-		# Rotate camera to look directly at the ball with slight elevation for better course framing
-		camera.look_at_mode = PhantomCamera3D.LookAtMode.SIMPLE
-		camera.look_at_target = target_node
-		camera.look_at_offset = Vector3(0.0, 0.25, 0.0)
-		camera.look_at_damping = false
+			# Rotate camera to look directly at the ball with slight elevation for better course framing
+			camera.look_at_mode = PhantomCamera3D.LookAtMode.SIMPLE
+			camera.look_at_target = target_node
+			camera.look_at_offset = Vector3(0.0, 0.25, 0.0)
+			camera.look_at_damping = false
 	else:
 		_putt_close_view_triggered = false
 		_chip_close_view_triggered = false
@@ -2420,17 +2478,20 @@ func reset_camera_to_start() -> void:
 	# Calculate offset behind the ball in the direction we are aiming
 	var saved_yaw = $Player.ball.aim_yaw_offset_deg
 	var yaw_rad = deg_to_rad(saved_yaw)
-	var is_on_green = is_ball_on_green()
-	var start_pos = get_address_camera_position($Player.ball.spawn_position, yaw_rad, is_on_green)
-	var target_look = get_camera_target_look(aim_target_pos, $Player.ball.spawn_position, is_on_green)
+	var start_pos = get_address_camera_position($Player.ball.spawn_position, yaw_rad)
+	var target_look = get_camera_target_look(aim_target_pos, $Player.ball.spawn_position)
 
 	if _skip_requested:
+		if has_node("/root/ScreenOffsetManager"):
+			ScreenOffsetManager.on_ready_for_shot(0.0, true)
 		camera.global_position = start_pos
 		camera.look_at_from_position(start_pos, target_look)
 		if has_node("Camera3D"):
 			$Camera3D.global_position = start_pos
 			$Camera3D.look_at(target_look)
 	else:
+		if has_node("/root/ScreenOffsetManager"):
+			ScreenOffsetManager.on_ready_for_shot(1.5)
 		# Tween camera back to starting position
 		var tween := create_tween()
 		tween.set_trans(Tween.TRANS_CUBIC)
@@ -2692,6 +2753,10 @@ func _on_map_button_pressed() -> void:
 			$AerialCamera.make_current()
 			
 		update_hole_outline()
+		call_deferred("_update_aerial_focus_neighbors")
+		call_deferred("_focus_initial_aerial_control")
+		if has_node("/root/ScreenOffsetManager"):
+			ScreenOffsetManager.set_suppressed(true)
 		print("[Map] Switched to Aerial View")
 	else:
 		# Switch back to the main camera
@@ -2699,7 +2764,70 @@ func _on_map_button_pressed() -> void:
 			$Camera3D.make_current()
 		update_hole_outline()
 		update_camera_offset()
+		if has_node("/root/ScreenOffsetManager"):
+			ScreenOffsetManager.set_suppressed(false)
+		var map_btn = find_child("MapButton", true, false) as Control
+		if map_btn == null and get_tree() != null and get_tree().current_scene != null:
+			map_btn = get_tree().current_scene.find_child("MapButton", true, false) as Control
+		if map_btn != null and is_instance_valid(map_btn) and map_btn.is_visible_in_tree():
+			map_btn.call_deferred("grab_focus")
 		print("[Map] Switched to Player View")
+
+
+func _update_aerial_focus_neighbors() -> void:
+	if not has_node("MapCanvas/AerialZoomVBox"):
+		return
+	var zoom_vbox = $MapCanvas/AerialZoomVBox
+	var z_in = zoom_vbox.get_node_or_null("ZoomInButton") as Button
+	var z_out = zoom_vbox.get_node_or_null("ZoomOutButton") as Button
+	var g_btn = zoom_vbox.get_node_or_null("GridToggleButton") as Button
+	if z_in == null or z_out == null or g_btn == null:
+		return
+
+	z_in.focus_neighbor_bottom = z_in.get_path_to(z_out)
+	z_out.focus_neighbor_top = z_out.get_path_to(z_in)
+	z_out.focus_neighbor_bottom = z_out.get_path_to(g_btn)
+	g_btn.focus_neighbor_top = g_btn.get_path_to(z_out)
+
+	var target_right: Control = null
+	var target_candidates = ["PlaceBallButton", "PrevHoleButton", "NextHoleButton", "MapButton", "HideHelpersButton", "SettingsButton"]
+	for cand in target_candidates:
+		var found = find_child(cand, true, false) as Control
+		if found == null:
+			var cur_sc = get_tree().current_scene if get_tree() != null else null
+			if cur_sc != null:
+				found = cur_sc.find_child(cand, true, false) as Control
+		if found != null and is_instance_valid(found) and found.is_visible_in_tree():
+			target_right = found
+			break
+
+	if target_right != null:
+		z_in.focus_neighbor_right = z_in.get_path_to(target_right)
+		z_out.focus_neighbor_right = z_out.get_path_to(target_right)
+		g_btn.focus_neighbor_right = g_btn.get_path_to(target_right)
+		if target_right is Button:
+			target_right.focus_neighbor_left = target_right.get_path_to(z_in)
+
+
+func _focus_initial_aerial_control() -> void:
+	if not is_aerial_view:
+		return
+	var place_btn = find_child("PlaceBallButton", true, false) as Control
+	if place_btn == null and get_tree() != null and get_tree().current_scene != null:
+		place_btn = get_tree().current_scene.find_child("PlaceBallButton", true, false) as Control
+	if place_btn != null and is_instance_valid(place_btn) and place_btn.is_visible_in_tree():
+		place_btn.grab_focus()
+		return
+
+	var map_btn = find_child("MapButton", true, false) as Control
+	if map_btn == null and get_tree() != null and get_tree().current_scene != null:
+		map_btn = get_tree().current_scene.find_child("MapButton", true, false) as Control
+	if map_btn != null and is_instance_valid(map_btn) and map_btn.is_visible_in_tree():
+		map_btn.grab_focus()
+		return
+
+	if has_node("MapCanvas/AerialZoomVBox/ZoomInButton"):
+		$MapCanvas/AerialZoomVBox/ZoomInButton.grab_focus()
 
 
 func _spawn_flag_pin() -> void:
@@ -2842,6 +2970,8 @@ func _on_shot_initiated() -> void:
 	_shot_active = true
 	_shot_transition_active = false
 	_zoom_zone_dirty = true
+	if has_node("/root/ScreenOffsetManager"):
+		ScreenOffsetManager.on_shot_started()
 	if has_node("/root/LaunchMonitorManager"):
 		get_node("/root/LaunchMonitorManager").call("notify_shot_started")
 	is_screen_aiming = false
@@ -2857,28 +2987,30 @@ func _on_shot_initiated() -> void:
 		is_putt_shot = is_default_club_putter()
 	update_flagstick_collision(is_putt_shot)
 	if has_node("/root/TensionManager"):
-		TensionManager.reset_for_new_shot()
+		if TensionManager.suspense_state == TensionManager.SuspenseState.IDLE or TensionManager.suspense_state == TensionManager.SuspenseState.SPENT:
+			TensionManager.reset_for_new_shot()
 
 	if has_node("RangeUI"):
 		$RangeUI.show_skip_button()
 		if $RangeUI.has_method("on_ball_hit"):
 			$RangeUI.on_ball_hit()
 
-	# Early Trajectory Prediction for Suspense (Course Play only)
-	if has_node("/root/TensionManager") and TensionManager.is_course_play_active() and not current_hole_location.is_zero_approx() and has_node("Player") and $Player.ball != null:
+	# Early Trajectory Prediction for Suspense (if not already predicted by ball.gd)
+	if has_node("/root/TensionManager") and TensionManager.is_course_play_active() and not current_hole_location.is_zero_approx() and not is_driving_range and has_node("Player") and $Player.ball != null:
 		var ball_node = $Player.ball
-		var is_putt = ball_node.is_putt
-		var is_sand = ball_node.is_in_sand or (ball_node.get("shot_was_in_sand") == true) or (ball_node.lie_type == "sand")
-		var start_p = ball_node.global_position
-		if TensionManager.is_shot_eligible_for_suspense(start_p, current_hole_location, is_putt, is_sand):
-			var prediction = TensionManager.predict_shot_outcome(start_p, ball_node.velocity, is_putt, current_hole_location, is_sand)
-			if prediction.get("will_enter_zone", false):
-				var ending_dist = prediction.get("ending_dist", prediction.get("min_dist", 0.0))
-				var delay_to_apex = prediction.get("delay_to_apex", 0.25)
-				print("[TensionManager] Early suspense predicted for Course Play shot! Mode: %s, Delay to apex: %.2fs, Ending Dist: %.2fm. Scheduling heartbeat." % [
-					prediction.get("mode", "putt"), delay_to_apex, ending_dist
-				])
-				TensionManager.schedule_apex_tension(prediction.get("mode", "putt"), delay_to_apex, ending_dist)
+		if TensionManager.suspense_state == TensionManager.SuspenseState.IDLE:
+			var is_putt = ball_node.is_putt
+			var is_sand = ball_node.is_in_sand or (ball_node.get("shot_was_in_sand") == true) or (ball_node.lie_type == "sand")
+			var start_p = ball_node.global_position
+			if TensionManager.is_shot_eligible_for_suspense(start_p, current_hole_location, is_putt, is_sand):
+				var prediction = TensionManager.predict_shot_outcome(start_p, ball_node.velocity, is_putt, current_hole_location, is_sand)
+				if prediction.get("will_enter_zone", false):
+					var ending_dist = prediction.get("ending_dist", prediction.get("min_dist", 0.0))
+					var delay_to_apex = prediction.get("delay_to_apex", 0.25)
+					print("[TensionManager] Early suspense predicted for shot! Mode: %s, Delay to apex: %.2fs, Ending Dist: %.2fm. Scheduling heartbeat." % [
+						prediction.get("mode", "putt"), delay_to_apex, ending_dist
+					])
+					TensionManager.schedule_apex_tension(prediction.get("mode", "putt"), delay_to_apex, ending_dist)
 
 	if current_hole_location.is_zero_approx():
 		return
@@ -3195,49 +3327,30 @@ func is_ball_on_fringe() -> bool:
 	return false
 
 
-func get_camera_target_look(target_pos: Vector3, origin_pos: Vector3, is_on_green: bool = false) -> Vector3:
-	var is_putting = is_on_green or is_ball_on_fringe() or (_get_current_club().to_lower() in ["pt", "putt", "putter"])
-	if is_putting:
-		if not target_pos.is_zero_approx():
-			var dist = origin_pos.distance_to(target_pos)
-			if dist > 0.01:
-				var look_dist = clamp(dist * 0.4, 2.0, 6.0)
-				if dist < 2.0:
-					look_dist = dist
-				var fraction = clamp(look_dist / dist, 0.0, 1.0)
-				return origin_pos.lerp(target_pos, fraction)
-			return (target_pos + origin_pos) * 0.5
-		else:
-			var aim_dir = Vector3.RIGHT
-			if has_node("Player") and $Player.ball != null:
-				var yaw_rad = deg_to_rad($Player.ball.aim_yaw_offset_deg)
-				aim_dir = Vector3.RIGHT.rotated(Vector3.UP, yaw_rad)
-			return origin_pos + aim_dir * 3.5
+func is_putting_view(override_val: Variant = null) -> bool:
+	if override_val != null:
+		return bool(override_val)
+	var club = _get_current_club().to_lower()
+	return is_ball_on_green() or is_ball_on_fringe() or (club in ["pt", "putt", "putter"])
 
-	var dist = origin_pos.distance_to(target_pos) if not target_pos.is_zero_approx() else 50.0
-	var aim_dir = (target_pos - origin_pos).normalized() if not target_pos.is_zero_approx() else Vector3.ZERO
+
+func get_camera_target_look(target_pos: Vector3, origin_pos: Vector3, is_on_green: Variant = null) -> Vector3:
+	var is_putting = is_putting_view(is_on_green)
+	var aim_dir = Vector3(target_pos.x - origin_pos.x, 0.0, target_pos.z - origin_pos.z).normalized() if not target_pos.is_zero_approx() else Vector3.ZERO
 	if aim_dir.is_zero_approx():
 		aim_dir = Vector3.RIGHT
 		if has_node("Player") and $Player.ball != null:
 			var yaw_rad = deg_to_rad($Player.ball.aim_yaw_offset_deg)
 			aim_dir = Vector3.RIGHT.rotated(Vector3.UP, yaw_rad)
 
-	# Smoothly calculate target look point:
-	# For full shots and approach shots, look at comfortable eye level (+1.0m above terrain).
-	# For short shots (< 50m), look directly toward target position (+1.0m eye-level).
-	# For longer shots (>= 50m), look down the aim direction towards 50m with appropriate eye-level elevation.
-	var look_dist = clampf(dist, 10.0, 50.0)
-	var t = clampf(look_dist / maxf(dist, 0.001), 0.0, 1.0)
-	var base_look_pos = origin_pos.lerp(target_pos, t) if not target_pos.is_zero_approx() else (origin_pos + aim_dir * 50.0)
-	return base_look_pos + Vector3.UP * 1.0
+	if is_putting:
+		return origin_pos + aim_dir * 3.5
+
+	return origin_pos + aim_dir * 50.0 + Vector3.UP * 1.0
 
 
 func get_camera_local_offset(override_is_on_green: Variant = null) -> Vector3:
-	var is_on_green = false
-	if override_is_on_green != null:
-		is_on_green = bool(override_is_on_green)
-	else:
-		is_on_green = is_ball_on_green() or is_ball_on_fringe() or (_get_current_club().to_lower() in ["pt", "putt", "putter"])
+	var is_on_green = is_putting_view(override_is_on_green)
 		
 	if is_on_green:
 		return Vector3(-1.05, 0.6, 0)
@@ -3278,11 +3391,7 @@ func is_ball_in_sand(pos: Variant = null) -> bool:
 
 
 func get_address_camera_position(ball_pos: Vector3, rot_y: float, override_is_on_green: Variant = null) -> Vector3:
-	var is_on_green = false
-	if override_is_on_green != null:
-		is_on_green = bool(override_is_on_green)
-	else:
-		is_on_green = is_ball_on_green() or is_ball_on_fringe() or (_get_current_club().to_lower() in ["pt", "putt", "putter"])
+	var is_on_green = is_putting_view(override_is_on_green)
 	
 	if is_on_green:
 		var green_offset = Vector3(-1.05, 0.6, 0.0).rotated(Vector3.UP, rot_y)
@@ -3392,14 +3501,15 @@ func update_camera_offset(_val = null) -> void:
 	if has_node("Player") and $Player.ball != null:
 		if has_node("PhantomCamera3D") and $PhantomCamera3D.follow_mode == PhantomCamera3D.FollowMode.NONE:
 			var yaw_rad = deg_to_rad($Player.ball.aim_yaw_offset_deg)
-			var is_on_green = is_ball_on_green()
-			var cam_pos = get_address_camera_position($Player.ball.global_position, yaw_rad, is_on_green)
+			var cam_pos = get_address_camera_position($Player.ball.global_position, yaw_rad)
 			$PhantomCamera3D.global_position = cam_pos
-			var target_look = get_camera_target_look(aim_target_pos, $Player.ball.global_position, is_on_green)
+			var target_look = get_camera_target_look(aim_target_pos, $Player.ball.global_position)
 			$PhantomCamera3D.look_at(target_look)
 			if has_node("Camera3D"):
 				$Camera3D.global_position = cam_pos
 				$Camera3D.look_at(target_look)
+			if has_node("/root/ScreenOffsetManager"):
+				ScreenOffsetManager.on_ready_for_shot()
 
 
 func update_camera_fov(value: float) -> void:
@@ -4606,6 +4716,18 @@ func _on_player_profile_changed(player_name: String) -> void:
 		session_rec.username = player_name
 	_update_averages()
 
+	# Update Player 3D tracers to match newly selected profile
+	if has_node("Player") and $Player.has_method("set_profile"):
+		$Player.set_profile(player_name)
+
+	# Update Shot Traces overlay & dispersion for newly selected profile
+	var club = _get_current_club()
+	if is_driving_range and _shot_trace_overlay != null and _shot_trace_overlay.is_active():
+		_shot_trace_overlay.on_player_changed(shot_history, player_name, club)
+	if is_driving_range and has_node("RangeUI") and _shot_trace_overlay != null and _shot_trace_overlay.is_active():
+		var club_shots = _get_shots_for_club(club, player_name)
+		$RangeUI.show_dispersion(club_shots, club)
+
 
 func _get_current_player_name() -> String:
 	if not is_driving_range:
@@ -4651,6 +4773,8 @@ func _on_club_selected(club_name: String) -> void:
 	_update_averages(club_name)
 	var is_pt = (club_name.to_lower() in ["pt", "putt", "putter"])
 	update_flagstick_collision(is_pt)
+	if has_node("/root/ScreenOffsetManager"):
+		ScreenOffsetManager.set_putter_active(is_pt)
 	if not _is_updating_auto_club:
 		_user_custom_club = club_name
 	if has_node("Player") and $Player.ball != null and $Player.ball.has_method("_on_club_selected"):
@@ -4662,14 +4786,19 @@ func _on_club_selected(club_name: String) -> void:
 			update_camera_offset()
 
 	# Update shot traces & dispersion overlay if active
-	if _shot_trace_overlay != null and _shot_trace_overlay.is_active():
-		_shot_trace_overlay.on_club_changed(shot_history, club_name)
+	if is_driving_range and _shot_trace_overlay != null and _shot_trace_overlay.is_active():
+		var cur_player = _get_current_player_name()
+		_shot_trace_overlay.on_club_changed(shot_history, club_name, cur_player)
 		if has_node("RangeUI"):
-			var club_shots = _get_shots_for_club(club_name)
+			var club_shots = _get_shots_for_club(club_name, cur_player)
 			$RangeUI.show_dispersion(club_shots, club_name)
 
 
 func _on_active_player_changed(_player: Dictionary) -> void:
+	var p_name = str(_player.get("name", ""))
+	if not p_name.is_empty() and has_node("Player") and $Player.has_method("set_profile"):
+		$Player.set_profile(p_name)
+
 	# If MultiplayerController (course_play.gd) is present, it handles ball positioning, resetting, lie detection, aim angle, and camera setup.
 	var is_course_play = has_node("MultiplayerController") or get_node_or_null("MultiplayerController") != null or (get_parent() != null and get_parent().name == "CoursePlay")
 	if is_course_play:
@@ -4732,6 +4861,13 @@ func remove_last_shot() -> void:
 		if not p_name.is_empty() and not club_name.is_empty():
 			_remove_last_global_shot(p_name, club_name)
 		_update_averages()
+		if is_driving_range and _shot_trace_overlay != null and _shot_trace_overlay.is_active():
+			var cur_p = _get_current_player_name()
+			var cur_c = _get_current_club()
+			_shot_trace_overlay.on_player_changed(shot_history, cur_p, cur_c)
+			if has_node("RangeUI"):
+				var club_shots = _get_shots_for_club(cur_c, cur_p)
+				$RangeUI.show_dispersion(club_shots, cur_c)
 
 
 func _distance_to_segment_2d(p: Vector2, a: Vector2, b: Vector2) -> float:
@@ -5231,10 +5367,9 @@ func apply_default_aim(club_name: String = "") -> Vector3:
 	var dist_yards = int(dist_m * 1.09361)
 	set_aim_distance(dist_yards)
 
-	var is_on_green = is_ball_on_green()
 	var yaw_rad = -angle_rad
-	var cam_pos = get_address_camera_position(ball_pos, yaw_rad, is_on_green)
-	var target_look = get_camera_target_look(aim_target_pos, ball_pos, is_on_green)
+	var cam_pos = get_address_camera_position(ball_pos, yaw_rad)
+	var target_look = get_camera_target_look(aim_target_pos, ball_pos)
 
 	if has_node("PhantomCamera3D"):
 		$PhantomCamera3D.follow_mode = PhantomCamera3D.FollowMode.NONE
@@ -5247,6 +5382,9 @@ func apply_default_aim(club_name: String = "") -> Vector3:
 		$Camera3D.global_position = cam_pos
 		$Camera3D.look_at(target_look)
 		$Camera3D.fov = GlobalSettings.range_settings.camera_fov.value
+
+	if has_node("/root/ScreenOffsetManager"):
+		ScreenOffsetManager.on_ready_for_shot()
 
 	_aim_is_manual = false
 	return aim_target_pos
@@ -5633,9 +5771,18 @@ func apply_circular_button_style(btn: Button, bg_color: Color):
 	var style_pressed = style_normal.duplicate()
 	style_pressed.bg_color = bg_color.darkened(0.15)
 
+	var style_focus = style_normal.duplicate()
+	style_focus.border_width_left = 3
+	style_focus.border_width_top = 3
+	style_focus.border_width_right = 3
+	style_focus.border_width_bottom = 3
+	style_focus.border_color = Color(0.2, 0.8, 1.0, 0.95)
+
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_pressed)
+	btn.add_theme_stylebox_override("focus", style_focus)
+	btn.focus_mode = Control.FOCUS_ALL
 	btn.add_theme_color_override("font_color", Color.WHITE)
 	btn.add_theme_color_override("font_hover_color", Color.WHITE)
 	btn.add_theme_color_override("font_pressed_color", Color.WHITE)
@@ -6262,6 +6409,10 @@ void fragment() {
 
 
 func _exit_tree() -> void:
+	if has_node("/root/ScreenOffsetManager"):
+		if has_node("PhantomCamera3D"):
+			ScreenOffsetManager.unregister_camera($PhantomCamera3D)
+		ScreenOffsetManager.set_putter_active(false)
 	if GlobalSettings.is_chipping_minigame:
 		GlobalSettings.is_chipping_minigame = false
 
@@ -6706,18 +6857,28 @@ func _setup_shot_trace_overlay() -> void:
 		_shot_trace_overlay.set_script(overlay_script)
 		_shot_trace_overlay.name = "ShotTraceOverlay"
 		add_child(_shot_trace_overlay)
+		if _shot_trace_overlay.has_method("set_current_player"):
+			_shot_trace_overlay.set_current_player(_get_current_player_name())
 
 
 func _on_shot_traces_toggled(enabled: bool) -> void:
+	if not is_driving_range:
+		if _shot_trace_overlay != null:
+			_shot_trace_overlay.deactivate()
+		if has_node("RangeUI"):
+			$RangeUI.hide_dispersion()
+		return
+
 	if _shot_trace_overlay == null:
 		_setup_shot_trace_overlay()
 
 	var club = _get_current_club()
+	var player_name = _get_current_player_name()
 	if enabled:
 		if _shot_trace_overlay != null:
-			_shot_trace_overlay.activate(shot_history, club)
+			_shot_trace_overlay.activate(shot_history, club, player_name)
 		if has_node("RangeUI"):
-			var club_shots = _get_shots_for_club(club)
+			var club_shots = _get_shots_for_club(club, player_name)
 			$RangeUI.show_dispersion(club_shots, club)
 	else:
 		if _shot_trace_overlay != null:
@@ -6727,6 +6888,8 @@ func _on_shot_traces_toggled(enabled: bool) -> void:
 
 
 func _notify_shot_trace_overlay(shot_data: Dictionary) -> void:
+	if not is_driving_range:
+		return
 	if _shot_trace_overlay == null:
 		return
 	if not _shot_trace_overlay.is_active():
@@ -6735,13 +6898,19 @@ func _notify_shot_trace_overlay(shot_data: Dictionary) -> void:
 	_shot_trace_overlay.on_new_shot(shot_data)
 	if has_node("RangeUI"):
 		var club = _get_current_club()
-		var club_shots = _get_shots_for_club(club)
+		var player_name = _get_current_player_name()
+		var club_shots = _get_shots_for_club(club, player_name)
 		$RangeUI.show_dispersion(club_shots, club)
 
 
-func _get_shots_for_club(club_name: String) -> Array[Dictionary]:
+func _get_shots_for_club(club_name: String, player_name: String = "") -> Array[Dictionary]:
+	if player_name.is_empty():
+		player_name = _get_current_player_name()
 	var result: Array[Dictionary] = []
 	for shot in shot_history:
+		var s_player = str(shot.get("player", shot.get("player_name", "")))
+		if not player_name.is_empty() and not s_player.is_empty() and s_player.to_lower().strip_edges() != player_name.to_lower().strip_edges():
+			continue
 		var s_club = str(shot.get("club", ""))
 		if s_club.to_lower().strip_edges() == club_name.to_lower().strip_edges():
 			result.append(shot)

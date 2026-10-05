@@ -25,12 +25,13 @@ public static class SquareProtocol
 
     public static bool IsStatusPacket(ReadOnlySpan<byte> data)
     {
-        return data.Length >= 3 && data[0] == 0x11 && data[1] == 0x03;
+        return (data.Length == 3 || data.Length == 4) && data[0] == 0x11 && data[1] == 0x03;
     }
 
     public static bool IsClubDataPacket(ReadOnlySpan<byte> data)
     {
-        return data.Length >= 3 && data[0] == 0x11 && data[1] == 0x07;
+        return (data.Length >= 11 && data[0] == 0x11 && data[1] == 0x07) ||
+               (data.Length >= 9 && data[0] == 0x11 && data[1] == 0x03);
     }
 
     public static bool TryParseStatus(ReadOnlySpan<byte> data, out byte statusCode)
@@ -41,7 +42,7 @@ public static class SquareProtocol
             return false;
         }
 
-        // In 4+ byte packets (e.g. 0x11 0x03 [seq] [state] ...), byte 3 is the DeviceState/status code.
+        // In 4-byte packets (e.g. 0x11 0x03 [seq] [state]), byte 3 is the DeviceState/status code.
         // In 3-byte packets (0x11 0x03 [state]), byte 2 is the status code.
         statusCode = data.Length >= 4 ? data[3] : data[2];
         return true;
@@ -55,36 +56,66 @@ public static class SquareProtocol
             return false;
         }
 
-        // 0x11 0x07 Club Delivery Packet layout:
-        // [0] 0x11 (header)
-        // [1] 0x07 (club event type)
-        // [2] Validity bitmask (bit 0 = path, 1 = face, 2 = attack, 3 = loft)
-        // [3..5] Club Path (signed int16, / 100.0)
-        // [5..7] Face Angle (signed int16, / 100.0)
-        // [7..9] Attack Angle (signed int16, / 100.0)
-        // [9..11] Dynamic Loft (signed int16, / 100.0)
-        if (data.Length < 11)
+        if (data[1] == 0x07)
         {
-            return false;
+            // 0x11 0x07 Club Delivery Packet layout:
+            // [0] 0x11 (header)
+            // [1] 0x07 (club event type)
+            // [2] Validity bitmask (bit 0 = path, 1 = face, 2 = attack, 3 = loft)
+            // [3..5] Club Path (signed int16, / 100.0)
+            // [5..7] Face Angle (signed int16, / 100.0)
+            // [7..9] Attack Angle (signed int16, / 100.0)
+            // [9..11] Dynamic Loft (signed int16, / 100.0)
+            if (data.Length < 11)
+            {
+                return false;
+            }
+
+            var rawPath = BinaryPrimitives.ReadInt16LittleEndian(data[3..5]);
+            var rawFace = BinaryPrimitives.ReadInt16LittleEndian(data[5..7]);
+            var rawAttack = BinaryPrimitives.ReadInt16LittleEndian(data[7..9]);
+            var rawLoft = BinaryPrimitives.ReadInt16LittleEndian(data[9..11]);
+
+            var path = rawPath == -1 || rawPath == -32768 ? 0.0f : rawPath / 100.0f;
+            var face = rawFace == -1 || rawFace == -32768 ? 0.0f : rawFace / 100.0f;
+            var attack = rawAttack == -1 || rawAttack == -32768 ? 0.0f : rawAttack / 100.0f;
+            var loft = rawLoft == -1 || rawLoft == -32768 ? 0.0f : rawLoft / 100.0f;
+
+            clubMetrics = new SquareClubMetrics(
+                FaceAngle: face,
+                ClubPath: path,
+                AttackAngle: attack,
+                DynamicLoft: loft);
+
+            return true;
+        }
+        else if (data[1] == 0x03 && data.Length >= 9)
+        {
+            // 9-byte 0x11 0x03 Club Delivery Packet layout:
+            // [0] 0x11 (header)
+            // [1] 0x03 (club event type)
+            // [2] Sequence / counter
+            // [3] Face Angle (signed sbyte, in degrees, + open / - closed)
+            // [4] Club Path (signed sbyte, in degrees, + in-to-out / - out-to-in)
+            // [5] Attack Angle (signed sbyte, in degrees)
+            // [6] Dynamic Loft (byte, in degrees)
+            // [7] 0x00
+            // [8] 0x01
+            var rawFace = (sbyte)data[3];
+            var rawPath = (sbyte)data[4];
+            var rawAttack = (sbyte)data[5];
+            var rawLoft = data[6];
+
+            clubMetrics = new SquareClubMetrics(
+                FaceAngle: rawFace,
+                ClubPath: rawPath,
+                AttackAngle: rawAttack,
+                DynamicLoft: rawLoft);
+
+            return true;
         }
 
-        var rawPath = BinaryPrimitives.ReadInt16LittleEndian(data[3..5]);
-        var rawFace = BinaryPrimitives.ReadInt16LittleEndian(data[5..7]);
-        var rawAttack = BinaryPrimitives.ReadInt16LittleEndian(data[7..9]);
-        var rawLoft = BinaryPrimitives.ReadInt16LittleEndian(data[9..11]);
-
-        var path = rawPath == -1 || rawPath == -32768 ? 0.0f : rawPath / 100.0f;
-        var face = rawFace == -1 || rawFace == -32768 ? 0.0f : rawFace / 100.0f;
-        var attack = rawAttack == -1 || rawAttack == -32768 ? 0.0f : rawAttack / 100.0f;
-        var loft = rawLoft == -1 || rawLoft == -32768 ? 0.0f : rawLoft / 100.0f;
-
-        clubMetrics = new SquareClubMetrics(
-            FaceAngle: face,
-            ClubPath: path,
-            AttackAngle: attack,
-            DynamicLoft: loft);
-
-        return true;
+        return false;
     }
 
     public static bool TryParseSensor(ReadOnlySpan<byte> data, out SquareSensorData sensor)
@@ -149,6 +180,7 @@ public static class SquareProtocol
         // Square Golf's camera system populates these when club marking stickers
         // are detected on the club shaft. Uses the same Int16LE ÷100 pattern.
         // The sentinel value -32768 (0x8000) indicates the field was not measured.
+        bool hasClubData = false;
         float clubPath = 0.0f;
         float faceAngle = 0.0f;
         float attackAngle = 0.0f;
@@ -161,10 +193,14 @@ public static class SquareProtocol
             var rawAttackAngle = BinaryPrimitives.ReadInt16LittleEndian(data[21..23]);
             var rawDynamicLoft = BinaryPrimitives.ReadInt16LittleEndian(data[23..25]);
 
-            clubPath = rawClubPath == -32768 ? 0.0f : rawClubPath / 100.0f;
-            faceAngle = rawFaceAngle == -32768 ? 0.0f : rawFaceAngle / 100.0f;
-            attackAngle = rawAttackAngle == -32768 ? 0.0f : rawAttackAngle / 100.0f;
-            dynamicLoft = rawDynamicLoft == -32768 ? 0.0f : rawDynamicLoft / 100.0f;
+            if (rawClubPath != -32768 || rawFaceAngle != -32768 || rawAttackAngle != -32768 || rawDynamicLoft != -32768)
+            {
+                hasClubData = true;
+                clubPath = rawClubPath == -32768 ? 0.0f : rawClubPath / 100.0f;
+                faceAngle = rawFaceAngle == -32768 ? 0.0f : rawFaceAngle / 100.0f;
+                attackAngle = rawAttackAngle == -32768 ? 0.0f : rawAttackAngle / 100.0f;
+                dynamicLoft = rawDynamicLoft == -32768 ? 0.0f : rawDynamicLoft / 100.0f;
+            }
         }
 
         metrics = new SquareShotMetrics(
@@ -179,7 +215,8 @@ public static class SquareProtocol
             clubPath,
             faceAngle,
             attackAngle,
-            dynamicLoft);
+            dynamicLoft,
+            HasClubData: hasClubData);
 
         return IsPlausible(metrics);
     }

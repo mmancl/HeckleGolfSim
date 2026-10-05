@@ -106,7 +106,5 @@ func get_current_config_path() -> String:
 
 
 func _apply_course_graphics_quality(course_scene: Node) -> void:
-	var quality = "Low"
-	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("graphics_quality"):
-		quality = GlobalSettings.range_settings.settings["graphics_quality"].value
+	var quality = GlobalSettings.get_graphics_quality() if GlobalSettings != null else "High"
 	MobilePerformance.apply_graphics_quality(course_scene, quality)

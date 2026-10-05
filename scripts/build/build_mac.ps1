@@ -9,6 +9,8 @@
     Directory where the distribution ZIP will be placed (default: dist).
 .PARAMETER Clean
     Clean previous builds before exporting.
+.PARAMETER CustomGodotPath
+    Explicit path to the Godot console executable (optional).
 .EXAMPLE
     .\build_mac.ps1
 #>
@@ -27,67 +29,93 @@ Write-Host "    Heckle Golf Simulator - macOS Builder              " -Foreground
 Write-Host "=======================================================" -ForegroundColor Cyan
 Write-Host ""
 
-$RepoRoot = if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "..\..\project.godot"))) { (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path } else { (Get-Location).Path }
+# Helper loader
+$helperScript = Join-Path (Split-Path -Parent $PSScriptRoot) "build_helpers.ps1"
+if (-not (Test-Path $helperScript)) {
+    $helperScript = Join-Path $PSScriptRoot "..\build_helpers.ps1"
+}
+if (Test-Path $helperScript) {
+    . (Resolve-Path $helperScript).Path
+}
+
+# Resolve Repo Root
+if (Get-Command "Get-RepoRoot" -ErrorAction SilentlyContinue) {
+    $RepoRoot = Get-RepoRoot
+} else {
+    $dir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+    while ($dir -and (Test-Path $dir)) {
+        if (Test-Path (Join-Path $dir "project.godot")) { $RepoRoot = (Resolve-Path $dir).Path; break }
+        $parent = Split-Path -Parent $dir
+        if (-not $parent -or $parent -eq $dir) { break }
+        $dir = $parent
+    }
+    if (-not $RepoRoot) { $RepoRoot = (Get-Location).Path }
+}
 Set-Location $RepoRoot
 
 # 1. Resolve Version
-$Version = "0.35.0"
-$ProjectGodot = Join-Path $RepoRoot "project.godot"
-if (Test-Path $ProjectGodot) {
-    $content = Get-Content $ProjectGodot -Raw
-    if ($content -match 'config/version="([^"]+)"') {
-        $Version = $matches[1]
+$Version = "0.92.2"
+if (Get-Command "Get-ProjectMetadata" -ErrorAction SilentlyContinue) {
+    $meta = Get-ProjectMetadata $RepoRoot
+    $Version = $meta.VersionName
+} else {
+    $ProjectGodot = Join-Path $RepoRoot "project.godot"
+    if (Test-Path $ProjectGodot) {
+        $content = Get-Content $ProjectGodot -Raw
+        if ($content -match 'config/version="([^"]+)"') { $Version = $matches[1] }
     }
 }
 Write-Host "Game Version:   $Version" -ForegroundColor Green
 
 # 2. Locate .NET SDK
-$DotNetRoot = $env:DOTNET_ROOT
-if (-not $DotNetRoot -or -not (Test-Path $DotNetRoot)) {
-    $userDotNet = Join-Path $env:USERPROFILE ".dotnet"
-    if (Test-Path $userDotNet) {
-        $DotNetRoot = $userDotNet
+if (Get-Command "Configure-DotNet" -ErrorAction SilentlyContinue) {
+    Configure-DotNet
+} else {
+    $DotNetRoot = $env:DOTNET_ROOT
+    if (-not $DotNetRoot -or -not (Test-Path (Join-Path $DotNetRoot "sdk"))) {
+        $userDotNet = Join-Path $env:USERPROFILE ".dotnet"
+        if (Test-Path (Join-Path $userDotNet "sdk")) { $DotNetRoot = $userDotNet }
     }
-}
-if ($DotNetRoot -and (Test-Path $DotNetRoot)) {
-    $env:DOTNET_ROOT = $DotNetRoot
-    $env:DOTNET_ROOT_X64 = $DotNetRoot
-    $env:DOTNET_MULTILEVEL_LOOKUP = "0"
-    $env:PATH = "$DotNetRoot;$env:PATH"
-    Write-Host ".NET Root:      $DotNetRoot" -ForegroundColor Gray
+    if ($DotNetRoot -and (Test-Path $DotNetRoot)) {
+        $env:DOTNET_ROOT = $DotNetRoot
+        $env:DOTNET_ROOT_X64 = $DotNetRoot
+        $env:DOTNET_MULTILEVEL_LOOKUP = "0"
+        $env:PATH = "$DotNetRoot;$env:PATH"
+        Write-Host ".NET Root:      $DotNetRoot" -ForegroundColor Gray
+    }
+    $env:UseSharedCompilation = "false"
+    $env:MSBUILDDISABLENODEREUSE = "1"
+    $env:DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER = "1"
 }
 
-# Disable MSBuild node reuse and background compilation server to prevent persistent worker processes from holding console handles
-$env:UseSharedCompilation = "false"
-$env:MSBUILDDISABLENODEREUSE = "1"
-$env:DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER = "1"
-
-# Ensure Godot ignores build, dist, and native build folders during project scanning and export
-@("build", "dist", "android\build") | ForEach-Object {
-    $targetDir = Join-Path $RepoRoot $_
-    if (-not (Test-Path $targetDir)) {
-        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-    }
-    $gdignorePath = Join-Path $targetDir ".gdignore"
-    if (-not (Test-Path $gdignorePath)) {
-        New-Item -ItemType File -Path $gdignorePath -Force | Out-Null
+# Ensure Godot ignores build, dist, and native build folders
+if (Get-Command "Ensure-GodotIgnore" -ErrorAction SilentlyContinue) {
+    Ensure-GodotIgnore $RepoRoot
+} else {
+    @("build", "dist", "android\build") | ForEach-Object {
+        $targetDir = Join-Path $RepoRoot $_
+        if (-not (Test-Path $targetDir)) { New-Item -ItemType Directory -Path $targetDir -Force | Out-Null }
+        $gdignorePath = Join-Path $targetDir ".gdignore"
+        if (-not (Test-Path $gdignorePath)) { New-Item -ItemType File -Path $gdignorePath -Force | Out-Null }
     }
 }
 
 # 3. Locate Godot Console Executable
-$GodotExe = $CustomGodotPath
-if (-not $GodotExe) {
+if (Get-Command "Find-GodotExecutable" -ErrorAction SilentlyContinue) {
+    $GodotExe = Find-GodotExecutable $CustomGodotPath
+} else {
     $candidates = @(
+        $CustomGodotPath,
         $env:GODOT_BIN,
-        "C:\Users\micha\Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe",
-        "C:\Users\micha\Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64.exe",
+        (Join-Path $env:USERPROFILE "Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe"),
+        (Join-Path $env:USERPROFILE "Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64.exe"),
         (Get-Command "godot" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
     )
     $GodotExe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 }
 
 if (-not $GodotExe) {
-    throw "Godot executable not found! Please install Godot 4.7 Mono or specify -CustomGodotPath."
+    throw "Godot executable not found! Please install Godot 4.7 Mono, set GODOT_BIN, or pass -CustomGodotPath."
 }
 Write-Host "Godot Binary:   $GodotExe" -ForegroundColor Gray
 

@@ -136,6 +136,7 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 		var p_email = config.get("email", reg.get("email", ""))
 		var p_avatar = config.get("avatar", reg.get("avatar", ""))
 		var p_bag = config.get("bag", reg.get("bag", []))
+		var p_skill = config.get("skill_level", reg.get("skill_level", "mid_handicap"))
 
 		var p := {
 			"name": p_name,
@@ -144,6 +145,7 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 			"email": p_email,
 			"avatar": p_avatar,
 			"bag": p_bag,
+			"skill_level": p_skill,
 			"strokes": 0,
 			"total_strokes": 0,
 			"last_hole_score": 0,
@@ -169,7 +171,7 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 			"last_starting_pos": Vector3.ZERO
 		}
 		players.append(p)
-		register_player(p_name, p_email, p_avatar)
+		register_player(p_name, p_email, p_avatar, p_bag, config.get("tee", "Blue"), p_skill)
 		skins_won[p_name] = 0
 		
 	course_title = config_data.get("Title", "")
@@ -211,6 +213,30 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 	print("[MultiplayerManager] Game setup complete. Mode: %s, Players: %d, Holes: %d" % [game_mode, players.size(), hole_ids.size()])
 	save_current_match()
 
+func get_hole_number(idx: int) -> int:
+	if hole_ids.is_empty():
+		if selected_course_length == "Back 9":
+			return idx + 10
+		return idx + 1
+	var safe_idx = clamp(idx, 0, hole_ids.size() - 1)
+	return get_hole_number_from_id(hole_ids[safe_idx], safe_idx)
+
+func get_current_hole_number() -> int:
+	return get_hole_number(current_hole_index)
+
+static func get_hole_number_from_id(hole_id: String, fallback_idx: int = 0) -> int:
+	if hole_id.is_empty():
+		return fallback_idx + 1
+	var clean = hole_id.replace("Hole", "").strip_edges()
+	if clean.is_valid_int():
+		return int(clean)
+	var regex = RegEx.new()
+	if regex.compile("\\d+") == OK:
+		var m = regex.search(hole_id)
+		if m:
+			return int(m.get_string())
+	return fallback_idx + 1
+
 func start_hole() -> void:
 	if current_hole_index >= hole_ids.size():
 		is_finished = true
@@ -233,13 +259,21 @@ func start_hole() -> void:
 					if p.get("active", true):
 						var p_name = p.get("name", "")
 						var pts = 0
-						for h_id in hole_ids:
+						var f9_strokes = 0
+						var b9_strokes = 0
+						for idx in range(hole_ids.size()):
+							var h_id = hole_ids[idx]
 							if p["hole_scores"].get(h_id) != null:
-								pts += int(p["hole_scores"][h_id])
+								var val = int(p["hole_scores"][h_id])
+								pts += val
+								if idx < 9:
+									f9_strokes += val
+								elif idx < 18:
+									b9_strokes += val
 						var is_winner = (pts == max_pts and max_pts > 0)
 						var p_stats = calculate_player_stats(p_name)
 						var total_wins = p_stats.get("wins", 0)
-						ach_mgr.check_round_achievements(p_name, p["total_strokes"], hole_ids.size(), is_winner, total_wins)
+						ach_mgr.check_round_achievements(p_name, p["total_strokes"], hole_ids.size(), is_winner, total_wins, f9_strokes, b9_strokes)
 			else:
 				var min_strokes = 99999
 				for p in players:
@@ -249,10 +283,20 @@ func start_hole() -> void:
 				for p in players:
 					if p.get("active", true) and p.get("total_strokes", 0) > 0:
 						var p_name = p.get("name", "")
+						var f9_strokes = 0
+						var b9_strokes = 0
+						for idx in range(hole_ids.size()):
+							var h_id = hole_ids[idx]
+							if p["hole_scores"].get(h_id) != null:
+								var val = int(p["hole_scores"][h_id])
+								if idx < 9:
+									f9_strokes += val
+								elif idx < 18:
+									b9_strokes += val
 						var is_winner = (p["total_strokes"] == min_strokes)
 						var p_stats = calculate_player_stats(p_name)
 						var total_wins = p_stats.get("wins", 0)
-						ach_mgr.check_round_achievements(p_name, p["total_strokes"], hole_ids.size(), is_winner, total_wins)
+						ach_mgr.check_round_achievements(p_name, p["total_strokes"], hole_ids.size(), is_winner, total_wins, f9_strokes, b9_strokes)
 
 		emit_signal("game_over", players)
 		return
@@ -567,7 +611,8 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 				get_node("/root/AnnouncerEngine").call("AnnounceHoleScore", active_player["name"], active_player["strokes"], par)
 			if has_node("/root/AchievementManager"):
 				var putt_dist = active_player.get("last_putt_dist_yards", 0.0)
-				get_node("/root/AchievementManager").check_hole_achievements(active_player.get("name", ""), par, active_player["strokes"], active_player.get("lies_in_hole", []), putt_dist, true, current_club)
+				var shot_dist = active_player.get("last_shot_distance_yards", 0.0)
+				get_node("/root/AchievementManager").check_hole_achievements(active_player.get("name", ""), par, active_player["strokes"], active_player.get("lies_in_hole", []), putt_dist, true, current_club, shot_dist)
 		else:
 			# Play clap if drive lands in fairway, or ball lands on green in par-1 or less strokes
 			var landed_in_fairway = (par >= 4 and active_player["strokes"] == 1 and active_player.get("lie_type", "") == "fairway")
@@ -1218,7 +1263,7 @@ func resume_player(idx: int, mode: String = "auto") -> void:
 		# Resumed on the same hole! Keep ball position and strokes intact
 		player["paused"] = false
 		player["saved_paused_state"].clear()
-		print("[MultiplayerManager] Player %s resumed on same hole %d right where they left off." % [player["name"], current_hole_index + 1])
+		print("[MultiplayerManager] Player %s resumed on same hole %d right where they left off." % [player["name"], get_current_hole_number()])
 		
 		# If current active player is holed out, inactive, or paused, switch to this player
 		var cur = get_active_player()
@@ -1252,7 +1297,7 @@ func resume_player(idx: int, mode: String = "auto") -> void:
 			player["position"] = Vector3(tee_pos[0], offset_y, tee_pos[1])
 			player["last_starting_pos"] = player["position"]
 			
-		print("[MultiplayerManager] Player %s skipped missed holes with dashes and joined Hole %d." % [player["name"], current_hole_index + 1])
+		print("[MultiplayerManager] Player %s skipped missed holes with dashes and joined Hole %d." % [player["name"], get_current_hole_number()])
 		select_next_player()
 	elif mode == "catch_up":
 		# Group has advanced; player chooses to catch up solo from where they paused!
@@ -1329,8 +1374,10 @@ func start_catch_up_mode(player_dict: Dictionary, start_hole_idx: int, target_ho
 			player_dict["position"] = Vector3(tee_pos[0], offset_y, tee_pos[1])
 			player_dict["last_starting_pos"] = player_dict["position"]
 			
-	print("[MultiplayerManager] Catch-up mode started for %s: Hole %d -> Group Hole %d" % [p_name, current_hole_index + 1, catch_up_saved_group_hole_index + 1])
-	emit_signal("catch_up_mode_changed", true, p_name, current_hole_index + 1, catch_up_saved_group_hole_index + 1)
+	var cur_h_num = get_current_hole_number()
+	var grp_h_num = get_hole_number(catch_up_saved_group_hole_index)
+	print("[MultiplayerManager] Catch-up mode started for %s: Hole %d -> Group Hole %d" % [p_name, cur_h_num, grp_h_num])
+	emit_signal("catch_up_mode_changed", true, p_name, cur_h_num, grp_h_num)
 	emit_signal("active_player_changed", get_active_player())
 	save_current_match()
 
@@ -1384,8 +1431,10 @@ func advance_catch_up_hole() -> void:
 		
 	active_player_index = players.find(cp)
 	clear_last_shot()
-	print("[MultiplayerManager] Catch-up advancing: %s on Hole %d of %d" % [catch_up_player_name, current_hole_index + 1, catch_up_saved_group_hole_index + 1])
-	emit_signal("catch_up_mode_changed", true, catch_up_player_name, current_hole_index + 1, catch_up_saved_group_hole_index + 1)
+	var cur_adv_num = get_current_hole_number()
+	var grp_adv_num = get_hole_number(catch_up_saved_group_hole_index)
+	print("[MultiplayerManager] Catch-up advancing: %s on Hole %d of %d" % [catch_up_player_name, cur_adv_num, grp_adv_num])
+	emit_signal("catch_up_mode_changed", true, catch_up_player_name, cur_adv_num, grp_adv_num)
 	emit_signal("active_player_changed", get_active_player())
 	save_current_match()
 
@@ -1440,8 +1489,9 @@ func finish_catch_up_mode() -> void:
 	catch_up_saved_group_hole_index = -1
 	catch_up_saved_group_states.clear()
 	
-	print("[MultiplayerManager] Catch-up completed for %s! Group rejoined on Hole %d." % [cp_name, current_hole_index + 1])
-	emit_signal("catch_up_mode_changed", false, cp_name, current_hole_index + 1, current_hole_index + 1)
+	var cur_rejoin_num = get_current_hole_number()
+	print("[MultiplayerManager] Catch-up completed for %s! Group rejoined on Hole %d." % [cp_name, cur_rejoin_num])
+	emit_signal("catch_up_mode_changed", false, cp_name, cur_rejoin_num, cur_rejoin_num)
 	select_next_player()
 	save_current_match()
 
@@ -1517,7 +1567,7 @@ func add_new_player_with_mode(player_name: String, tee_color: String, mode: Stri
 			
 		players.append(p)
 		register_player(player_name, p_email, p_avatar)
-		print("[MultiplayerManager] Added new player mid-game: %s on hole %d" % [player_name, current_hole_index + 1])
+		print("[MultiplayerManager] Added new player mid-game: %s on hole %d" % [player_name, get_current_hole_number()])
 		save_current_match()
 
 func toggle_player_active(idx: int, active: bool) -> void:
@@ -1609,6 +1659,7 @@ func save_current_match() -> void:
 		"players": _serialize_players(players),
 		"hole_pars": _get_hole_pars(),
 		"selected_course_length": selected_course_length,
+		"hole_ids": hole_ids.duplicate(),
 		"game_mode": game_mode,
 		"turn_order_mode": turn_order_mode,
 		"team_assignments": team_assignments,
@@ -1677,6 +1728,21 @@ func resume_match(match_data: Dictionary) -> void:
 				else:
 					hole_ids = all_hole_ids.duplicate()
 			
+	# Fallback if hole_info is empty but match_data has saved hole_pars
+	if hole_info.is_empty() and match_data.has("hole_pars"):
+		var saved_pars = match_data.get("hole_pars", {})
+		if typeof(saved_pars) == TYPE_DICTIONARY and not saved_pars.is_empty():
+			for h_id in saved_pars:
+				hole_info[h_id] = { "Par": int(round(float(saved_pars[h_id]))) }
+			if hole_ids.is_empty():
+				var all_hole_ids = hole_info.keys()
+				all_hole_ids.sort_custom(func(a, b):
+					var num_a = int(a.replace("Hole ", ""))
+					var num_b = int(b.replace("Hole ", ""))
+					return num_a < num_b
+				)
+				hole_ids = all_hole_ids.duplicate()
+
 	players = _deserialize_players(match_data.get("players", []))
 	
 	print("[MultiplayerManager] Resuming game on course: %s, hole: %d" % [course_title, current_hole_index])
@@ -1864,6 +1930,36 @@ func _deserialize_players(serialized_array: Array) -> Array[Dictionary]:
 		dup["last_shot_distance_yards"] = float(dup.get("last_shot_distance_yards", -1.0))
 		dup["last_shot_club"] = str(dup.get("last_shot_club", ""))
 		dup["last_shot_starting_lie"] = str(dup.get("last_shot_starting_lie", ""))
+		
+		# Ensure strokes and hole_scores are integer types
+		dup["strokes"] = int(round(float(dup.get("strokes", 0))))
+		dup["total_strokes"] = int(round(float(dup.get("total_strokes", 0))))
+		dup["last_hole_score"] = int(round(float(dup.get("last_hole_score", 0))))
+		if dup.has("hole_scores") and typeof(dup["hole_scores"]) == TYPE_DICTIONARY:
+			var clean_scores = {}
+			for k in dup["hole_scores"]:
+				var val = dup["hole_scores"][k]
+				if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
+					clean_scores[str(k)] = int(round(float(val)))
+				elif typeof(val) == TYPE_STRING and val.is_valid_float():
+					clean_scores[str(k)] = int(round(val.to_float()))
+				else:
+					clean_scores[str(k)] = val
+			dup["hole_scores"] = clean_scores
+
+		# Keep player bag, email, and avatar synchronized with the player's current registry profile
+		var p_name = str(dup.get("name", ""))
+		var reg = get_registered_player(p_name)
+		if not reg.is_empty():
+			if reg.has("bag") and typeof(reg["bag"]) == TYPE_ARRAY:
+				dup["bag"] = reg["bag"].duplicate()
+			if not reg.get("email", "").is_empty():
+				dup["email"] = reg["email"]
+			if not reg.get("avatar", "").is_empty():
+				dup["avatar"] = reg["avatar"]
+		elif not dup.has("bag") or typeof(dup["bag"]) != TYPE_ARRAY:
+			dup["bag"] = []
+
 		deserialized.append(dup)
 	return deserialized
 
@@ -2042,16 +2138,21 @@ func get_registered_player(player_name: String) -> Dictionary:
 			return p
 	return {}
 
-func update_player_profile(player_name: String, email: String, avatar: String, preferred_tee: String = "") -> bool:
+func update_player_profile(player_name: String, email: String, avatar: String, preferred_tee: String = "", skill_level: String = "mid_handicap") -> bool:
 	var registered = get_registered_players()
 	for p in registered:
 		if p.get("name", "").to_lower() == player_name.to_lower():
 			p["email"] = email.strip_edges()
 			p["avatar"] = avatar.strip_edges()
 			p["preferred_tee"] = preferred_tee.strip_edges()
+			p["skill_level"] = skill_level.strip_edges() if not skill_level.is_empty() else "mid_handicap"
 			save_registered_players(registered)
 			return true
 	return false
+
+func get_player_skill_level(player_name: String) -> String:
+	var p = get_registered_player(player_name)
+	return p.get("skill_level", "mid_handicap")
 
 func get_player_email(player_name: String) -> String:
 	var p = get_registered_player(player_name)
@@ -2068,12 +2169,14 @@ func get_player_preferred_tee(player_name: String) -> String:
 func get_player_bag(player_name: String) -> Array:
 	if player_name.is_empty():
 		return []
+	var reg = get_registered_player(player_name)
+	if reg.has("bag") and typeof(reg["bag"]) == TYPE_ARRAY and not reg["bag"].is_empty():
+		return reg["bag"]
 	for p in players:
 		if p.get("name", "").to_lower() == player_name.to_lower():
 			var b = p.get("bag", [])
 			if typeof(b) == TYPE_ARRAY and not b.is_empty():
 				return b
-	var reg = get_registered_player(player_name)
 	if reg.has("bag") and typeof(reg["bag"]) == TYPE_ARRAY:
 		return reg["bag"]
 	return []
@@ -2104,7 +2207,7 @@ func set_player_bag(player_name: String, bag: Array) -> bool:
 	emit_signal("player_bag_changed", player_name, clean_bag)
 	return found
 
-func register_player(player_name: String, email: String = "", avatar: String = "", bag: Array = [], preferred_tee: String = "") -> void:
+func register_player(player_name: String, email: String = "", avatar: String = "", bag: Array = [], preferred_tee: String = "", skill_level: String = "mid_handicap") -> void:
 	if player_name.is_empty():
 		return
 	var registered = get_registered_players()
@@ -2123,6 +2226,9 @@ func register_player(player_name: String, email: String = "", avatar: String = "
 			if not preferred_tee.is_empty() and p.get("preferred_tee", "") != preferred_tee:
 				p["preferred_tee"] = preferred_tee.strip_edges()
 				changed = true
+			if not skill_level.is_empty() and p.get("skill_level", "") != skill_level:
+				p["skill_level"] = skill_level.strip_edges()
+				changed = true
 			if changed:
 				save_registered_players(registered)
 			return # Already exists
@@ -2133,6 +2239,7 @@ func register_player(player_name: String, email: String = "", avatar: String = "
 		"avatar": avatar.strip_edges(),
 		"bag": bag,
 		"preferred_tee": preferred_tee.strip_edges(),
+		"skill_level": skill_level.strip_edges() if not skill_level.is_empty() else "mid_handicap",
 		"created_at": Time.get_unix_time_from_system()
 	}
 	registered.append(new_player)

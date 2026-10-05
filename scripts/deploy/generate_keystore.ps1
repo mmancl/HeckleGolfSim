@@ -20,6 +20,30 @@ Write-Host "  Heckle Golf Simulator - Release Keystore Generator" -ForegroundCol
 Write-Host "=======================================================" -ForegroundColor Cyan
 Write-Host ""
 
+# Helper loader
+$helperScript = Join-Path (Split-Path -Parent $PSScriptRoot) "build_helpers.ps1"
+if (-not (Test-Path $helperScript)) {
+    $helperScript = Join-Path $PSScriptRoot "..\build_helpers.ps1"
+}
+if (Test-Path $helperScript) {
+    . (Resolve-Path $helperScript).Path
+}
+
+# Resolve Repo Root
+if (Get-Command "Get-RepoRoot" -ErrorAction SilentlyContinue) {
+    $RepoRoot = Get-RepoRoot
+} else {
+    $dir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+    while ($dir -and (Test-Path $dir)) {
+        if (Test-Path (Join-Path $dir "project.godot")) { $RepoRoot = (Resolve-Path $dir).Path; break }
+        $parent = Split-Path -Parent $dir
+        if (-not $parent -or $parent -eq $dir) { break }
+        $dir = $parent
+    }
+    if (-not $RepoRoot) { $RepoRoot = (Get-Location).Path }
+}
+Set-Location $RepoRoot
+
 # Locate keytool
 $keytoolCmd = "keytool"
 $found = Get-Command $keytoolCmd -ErrorAction SilentlyContinue
@@ -33,11 +57,6 @@ if (-not $found) {
         exit 1
     }
 }
-
-$scriptDir = $PSScriptRoot
-if (-not $scriptDir) { $scriptDir = (Get-Location).Path }
-$RepoRoot = if (Test-Path (Join-Path $scriptDir "..\..\project.godot")) { (Resolve-Path (Join-Path $scriptDir "..\..")).Path } else { $scriptDir }
-Set-Location $RepoRoot
 
 if (-not [System.IO.Path]::IsPathRooted($KeystorePath)) {
     $KeystorePath = Join-Path $RepoRoot $KeystorePath

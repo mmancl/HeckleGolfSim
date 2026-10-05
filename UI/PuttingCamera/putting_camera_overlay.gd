@@ -31,9 +31,13 @@ var ball_color_swatch: Color = Color.WHITE
 var bg_color_configured: bool = false
 var bg_color_swatch: Color = Color(0.2, 0.3, 0.2)
 
-## Rejection / Mishit Feedback
+## Rejection / Mishit / Low FPS Feedback
 var _rejection_message: String = ""
 var _rejection_timer: float = 0.0
+
+## Framerate HUD
+var fps_display_text: String = ""
+var fps_color: Color = Color(0.7, 0.8, 0.9)
 
 ## Colors
 const COLOR_CIRCLE_WAITING = Color(0.5, 0.5, 0.5, 0.6)
@@ -159,6 +163,16 @@ func _draw() -> void:
 	draw_rect(status_rect, Color(0.0, 0.0, 0.0, 0.65), true)
 	draw_string(font, status_pos + Vector2(12, status_size.y + 2), status_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, status_color)
 
+	# 3b. Draw FPS Badge in the Top-Right of the feed
+	if not fps_display_text.is_empty():
+		var fps_font_size: int = 12
+		var fps_sz: Vector2 = font.get_string_size(fps_display_text, HORIZONTAL_ALIGNMENT_RIGHT, -1, fps_font_size)
+		var fps_pos: Vector2 = Vector2(sz.x - fps_sz.x - 20, 14)
+		var fps_rect: Rect2 = Rect2(fps_pos - Vector2(6, 2), fps_sz + Vector2(12, 6))
+		draw_rect(fps_rect, Color(0.04, 0.06, 0.10, 0.85), true)
+		draw_rect(fps_rect, fps_color * Color(1, 1, 1, 0.7), false, 1.0)
+		draw_string(font, fps_pos + Vector2(0, fps_sz.y - 2), fps_display_text, HORIZONTAL_ALIGNMENT_LEFT, -1, fps_font_size, fps_color)
+
 	# 4. Draw Speed & Offline Result Stats or Rejection / Mishit Notice at the BOTTOM of the feed
 	if _rejection_timer > 0.0 and not _rejection_message.is_empty():
 		var rej_size: Vector2 = font.get_string_size(_rejection_message, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
@@ -236,6 +250,26 @@ func set_result(speed_mph: float, offset_deg: float) -> void:
 func show_rejection_notice(msg: String, duration_sec: float = 2.5) -> void:
 	_rejection_message = msg
 	_rejection_timer = duration_sec
+	queue_redraw()
+
+
+func show_framerate_lock_notice(msg: String, duration_sec: float = 3.0) -> void:
+	show_rejection_notice(msg, duration_sec)
+
+
+func set_fps_metrics(text: String, tier: int = 0) -> void:
+	fps_display_text = text
+	match tier:
+		1: # CRITICAL_LOW
+			fps_color = Color(1.0, 0.35, 0.35)
+		2: # DEGRADED
+			fps_color = Color(1.0, 0.85, 0.25)
+		3: # STABLE
+			fps_color = Color(0.25, 0.95, 0.5)
+		4: # HIGH_PRECISION
+			fps_color = Color(0.35, 0.85, 1.0)
+		_:
+			fps_color = Color(0.7, 0.8, 0.9)
 	queue_redraw()
 
 

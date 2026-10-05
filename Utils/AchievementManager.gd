@@ -86,6 +86,14 @@ var achievements_db: Dictionary = {
 		"category": "18-Hole",
 		"rarity": "Legendary"
 	},
+	"pity_150_18": {
+		"id": "pity_150_18",
+		"title": "The Scenic Route",
+		"description": "Shoot 150 or more strokes in an 18-hole round",
+		"badge_path": "res://assets/images/achievements/badge_pity_150_18.svg",
+		"category": "18-Hole",
+		"rarity": "Common"
+	},
 	"broke_50_9": {
 		"id": "broke_50_9",
 		"title": "Half-Course Hero",
@@ -125,6 +133,14 @@ var achievements_db: Dictionary = {
 		"badge_path": "res://assets/images/achievements/badge_broke_30_9.svg",
 		"category": "9-Hole",
 		"rarity": "Legendary"
+	},
+	"pity_80_9": {
+		"id": "pity_80_9",
+		"title": "Honest Golfer",
+		"description": "Shoot 80 or more strokes on a 9-hole round, front 9, or back 9",
+		"badge_path": "res://assets/images/achievements/badge_pity_80_9.svg",
+		"category": "9-Hole",
+		"rarity": "Common"
 	},
 	"win_1_round": {
 		"id": "win_1_round",
@@ -166,6 +182,14 @@ var achievements_db: Dictionary = {
 		"category": "Special",
 		"rarity": "Rare"
 	},
+	"putt_20_ft": {
+		"id": "putt_20_ft",
+		"title": "Clutch Roller",
+		"description": "Drain a putt from 20+ feet out",
+		"badge_path": "res://assets/images/achievements/badge_putt_20.svg",
+		"category": "Special",
+		"rarity": "Common"
+	},
 	"long_putt": {
 		"id": "long_putt",
 		"title": "Downtown Drain",
@@ -174,6 +198,46 @@ var achievements_db: Dictionary = {
 		"category": "Special",
 		"rarity": "Rare"
 	},
+	"putt_40_ft": {
+		"id": "putt_40_ft",
+		"title": "Cross-Green Sniper",
+		"description": "Drain a putt from 40+ feet out",
+		"badge_path": "res://assets/images/achievements/badge_putt_40.svg",
+		"category": "Special",
+		"rarity": "Epic"
+	},
+	"putt_50_ft": {
+		"id": "putt_50_ft",
+		"title": "Astronomical Roll",
+		"description": "Drain a putt from 50+ feet out",
+		"badge_path": "res://assets/images/achievements/badge_putt_50.svg",
+		"category": "Special",
+		"rarity": "Legendary"
+	},
+	"chip_in_50": {
+		"id": "chip_in_50",
+		"title": "Iron Sharpshooter",
+		"description": "Hole out from 50+ yards away using an iron",
+		"badge_path": "res://assets/images/achievements/badge_chip_in_50.svg",
+		"category": "Special",
+		"rarity": "Rare"
+	},
+	"chip_in_75": {
+		"id": "chip_in_75",
+		"title": "Iron Magician",
+		"description": "Hole out from 75+ yards away using an iron",
+		"badge_path": "res://assets/images/achievements/badge_chip_in_75.svg",
+		"category": "Special",
+		"rarity": "Epic"
+	},
+	"chip_in_100": {
+		"id": "chip_in_100",
+		"title": "Iron Maestro",
+		"description": "Hole out from 100+ yards away using an iron",
+		"badge_path": "res://assets/images/achievements/badge_chip_in_100.svg",
+		"category": "Special",
+		"rarity": "Legendary"
+	},
 	"sand_save": {
 		"id": "sand_save",
 		"title": "Beach Escape",
@@ -181,6 +245,14 @@ var achievements_db: Dictionary = {
 		"badge_path": "res://assets/images/achievements/badge_sand_save.svg",
 		"category": "Special",
 		"rarity": "Rare"
+	},
+	"all_achievements": {
+		"id": "all_achievements",
+		"title": "Grand Slam Champion",
+		"description": "Unlock all other achievements in Heckle Golf Sim!",
+		"badge_path": "res://assets/images/achievements/badge_all_achievements.svg",
+		"category": "Special",
+		"rarity": "Legendary"
 	}
 }
 
@@ -225,10 +297,12 @@ func get_all_achievements() -> Array[Dictionary]:
 	var list: Array[Dictionary] = []
 	var order = [
 		"first_par", "first_birdie", "first_eagle", "first_albatross", "hole_in_one",
-		"broke_100_18", "broke_90_18", "broke_80_18", "broke_70_18", "broke_60_18",
-		"broke_50_9", "broke_45_9", "broke_40_9", "broke_35_9", "broke_30_9",
+		"broke_100_18", "broke_90_18", "broke_80_18", "broke_70_18", "broke_60_18", "pity_150_18",
+		"broke_50_9", "broke_45_9", "broke_40_9", "broke_35_9", "broke_30_9", "pity_80_9",
 		"win_1_round", "win_5_rounds", "win_10_rounds", "win_50_rounds",
-		"long_drive", "long_putt", "sand_save"
+		"long_drive", "putt_20_ft", "long_putt", "putt_40_ft", "putt_50_ft",
+		"chip_in_50", "chip_in_75", "chip_in_100",
+		"sand_save", "all_achievements"
 	]
 	for id in order:
 		if achievements_db.has(id):
@@ -264,11 +338,41 @@ func unlock_achievement(player_name: String, ach_id: String) -> bool:
 	
 	print("[AchievementManager] Unlocked '%s' (%s) for player '%s'!" % [ach_def.title, ach_id, player_name])
 	emit_signal("achievement_unlocked", player_name, ach_def)
+	
+	if ach_id != "all_achievements":
+		_check_all_achievements_unlocked(player_name)
+		
 	return true
+
+func _check_all_achievements_unlocked(player_name: String) -> void:
+	if player_name.is_empty() or is_unlocked(player_name, "all_achievements"):
+		return
+	var p_ach = _player_data.get(player_name, {})
+	for aid in achievements_db.keys():
+		if aid == "all_achievements":
+			continue
+		if not p_ach.has(aid):
+			return
+	unlock_achievement(player_name, "all_achievements")
+
+func is_iron_club(club_name: String) -> bool:
+	var c = club_name.strip_edges().to_lower()
+	if c.is_empty():
+		return false
+	if c in ["1i", "2i", "3i", "4i", "5i", "6i", "7i", "8i", "9i"]:
+		return true
+	if c in ["1 iron", "2 iron", "3 iron", "4 iron", "5 iron", "6 iron", "7 iron", "8 iron", "9 iron"]:
+		return true
+	if c in ["1-iron", "2-iron", "3-iron", "4-iron", "5-iron", "6-iron", "7-iron", "8-iron", "9-iron"]:
+		return true
+	if c.ends_with("iron") or (c.length() == 2 and c.ends_with("i")):
+		if not (c in ["dr", "driver", "1w", "3w", "5w", "7w", "pt", "putt", "putter", "pw", "gw", "sw", "lw", "aw", "pitching wedge", "sand wedge", "lob wedge", "gap wedge", "2h", "3h", "4h", "5h", "hybrid"]):
+			return true
+	return false
 
 # --- Evaluation Helpers ---
 
-func check_hole_achievements(player_name: String, hole_par: int, strokes: int, lies_in_hole: Array = [], putt_dist_yards: float = 0.0, holed_in_cup: bool = false, club_name: String = "") -> void:
+func check_hole_achievements(player_name: String, hole_par: int, strokes: int, lies_in_hole: Array = [], putt_dist_yards: float = 0.0, holed_in_cup: bool = false, club_name: String = "", shot_dist_yards: float = 0.0) -> void:
 	if player_name.is_empty() or strokes <= 0:
 		return
 		
@@ -292,11 +396,31 @@ func check_hole_achievements(player_name: String, hole_par: int, strokes: int, l
 		if holed_in_cup:
 			unlock_achievement(player_name, "first_albatross")
 		
-	# Long putt / Downtown Drain (only achievable when using putter from 30+ feet / 10+ yards out directly into cup, never from gimme range)
+	# Putting milestones: 20+ ft, 30+ ft (Downtown Drain), 40+ ft, 50+ ft
 	var c_lower = club_name.strip_edges().to_lower()
 	var is_putter = c_lower in ["pt", "putt", "putter"] or c_lower.begins_with("putt")
-	if holed_in_cup and is_putter and putt_dist_yards >= 10.0:
-		unlock_achievement(player_name, "long_putt")
+	if holed_in_cup and is_putter:
+		var putt_feet = putt_dist_yards * 3.0
+		if putt_feet >= 20.0 or putt_dist_yards >= (20.0 / 3.0 - 0.01):
+			unlock_achievement(player_name, "putt_20_ft")
+		if putt_dist_yards >= 10.0 or putt_feet >= 30.0:
+			unlock_achievement(player_name, "long_putt")
+		if putt_feet >= 40.0 or putt_dist_yards >= (40.0 / 3.0 - 0.01):
+			unlock_achievement(player_name, "putt_40_ft")
+		if putt_feet >= 50.0 or putt_dist_yards >= (50.0 / 3.0 - 0.01):
+			unlock_achievement(player_name, "putt_50_ft")
+
+	# Iron chip-in / hole-out milestones: 50+ yds, 75+ yds, 100+ yds (only earnable when using an iron)
+	var dist_for_chip = shot_dist_yards
+	if dist_for_chip <= 0.0 and putt_dist_yards > 0.0:
+		dist_for_chip = putt_dist_yards
+	if holed_in_cup and is_iron_club(club_name):
+		if dist_for_chip >= 50.0:
+			unlock_achievement(player_name, "chip_in_50")
+		if dist_for_chip >= 75.0:
+			unlock_achievement(player_name, "chip_in_75")
+		if dist_for_chip >= 100.0:
+			unlock_achievement(player_name, "chip_in_100")
 		
 	# Sand save: Par or better after hitting out of a bunker
 	if diff <= 0 and "bunker" in lies_in_hole:
@@ -324,7 +448,7 @@ func check_shot_achievements(player_name: String, club_name: String, total_yards
 		if total_yards > prev_best and (prev_best > 0.0 or total_yards >= 150.0):
 			emit_signal("longest_drive_recorded", player_name, total_yards, prev_best)
 
-func check_round_achievements(player_name: String, total_strokes: int, hole_count: int, is_winner: bool, total_wins: int) -> void:
+func check_round_achievements(player_name: String, total_strokes: int, hole_count: int, is_winner: bool, total_wins: int, front_9_strokes: int = 0, back_9_strokes: int = 0) -> void:
 	if player_name.is_empty() or total_strokes <= 0:
 		return
 		
@@ -340,6 +464,8 @@ func check_round_achievements(player_name: String, total_strokes: int, hole_coun
 			unlock_achievement(player_name, "broke_70_18")
 		if total_strokes < 60:
 			unlock_achievement(player_name, "broke_60_18")
+		if total_strokes >= 150:
+			unlock_achievement(player_name, "pity_150_18")
 			
 	# 9-hole milestones
 	if hole_count >= 9 and hole_count < 18:
@@ -353,7 +479,13 @@ func check_round_achievements(player_name: String, total_strokes: int, hole_coun
 			unlock_achievement(player_name, "broke_35_9")
 		if total_strokes < 30:
 			unlock_achievement(player_name, "broke_30_9")
+		if total_strokes >= 80:
+			unlock_achievement(player_name, "pity_80_9")
 			
+	# Front 9 / Back 9 specific check (whether 9 holes or 18 holes)
+	if front_9_strokes >= 80 or back_9_strokes >= 80:
+		unlock_achievement(player_name, "pity_80_9")
+
 	# Win milestones
 	if is_winner:
 		unlock_achievement(player_name, "win_1_round")
@@ -363,3 +495,4 @@ func check_round_achievements(player_name: String, total_strokes: int, hole_coun
 			unlock_achievement(player_name, "win_10_rounds")
 		if total_wins >= 50:
 			unlock_achievement(player_name, "win_50_rounds")
+

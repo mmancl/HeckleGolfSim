@@ -51,6 +51,333 @@ const HM_VIDEOS = {
 	}
 }
 
+const SKILL_LEVEL_NAMES = {
+	"mid_handicap": "Mid Handicap (10–19 HCP)",
+	"scratch": "Scratch / Low HCP (0–9 HCP)",
+	"tour_pro": "Tour Pro (PGA/LPGA Benchmark)",
+	"high_handicap": "High Handicap (20+ HCP)"
+}
+
+const CLUB_BENCHMARKS = {
+	"mid_handicap": {
+		"driver": {"name": "Driver", "club_speed_min": 90.0, "club_speed_max": 97.0, "ball_speed_min": 128.0, "ball_speed_max": 140.0, "smash_min": 1.41, "smash_max": 1.46, "aoa_min": -2.5, "aoa_max": 1.5, "vla_min": 12.5, "vla_max": 15.5, "spin_min": 2500.0, "spin_max": 3200.0, "carry_min": 205.0, "carry_max": 230.0, "rollout_min": 15.0, "rollout_max": 24.0, "apex_min": 75.0, "apex_max": 90.0, "land_angle_min": 36.0, "land_angle_max": 41.0},
+		"3w": {"name": "3-Wood", "club_speed_min": 85.0, "club_speed_max": 92.0, "ball_speed_min": 122.0, "ball_speed_max": 132.0, "smash_min": 1.41, "smash_max": 1.45, "aoa_min": -2.0, "aoa_max": 0.5, "vla_min": 12.0, "vla_max": 14.8, "spin_min": 3400.0, "spin_max": 4300.0, "carry_min": 185.0, "carry_max": 205.0, "rollout_min": 14.0, "rollout_max": 20.0, "apex_min": 74.0, "apex_max": 88.0, "land_angle_min": 40.0, "land_angle_max": 44.0},
+		"5w": {"name": "5-Wood", "club_speed_min": 82.0, "club_speed_max": 88.0, "ball_speed_min": 116.0, "ball_speed_max": 126.0, "smash_min": 1.40, "smash_max": 1.44, "aoa_min": -2.5, "aoa_max": 0.0, "vla_min": 13.0, "vla_max": 16.0, "spin_min": 4000.0, "spin_max": 4900.0, "carry_min": 174.0, "carry_max": 192.0, "rollout_min": 10.0, "rollout_max": 16.0, "apex_min": 74.0, "apex_max": 88.0, "land_angle_min": 42.0, "land_angle_max": 46.0},
+		"hybrid": {"name": "Hybrid", "club_speed_min": 79.0, "club_speed_max": 85.0, "ball_speed_min": 112.0, "ball_speed_max": 121.0, "smash_min": 1.39, "smash_max": 1.43, "aoa_min": -3.0, "aoa_max": -0.5, "vla_min": 13.5, "vla_max": 16.5, "spin_min": 4200.0, "spin_max": 5100.0, "carry_min": 165.0, "carry_max": 182.0, "rollout_min": 8.0, "rollout_max": 14.0, "apex_min": 72.0, "apex_max": 86.0, "land_angle_min": 43.0, "land_angle_max": 47.0},
+		"4i": {"name": "4-Iron", "club_speed_min": 77.0, "club_speed_max": 83.0, "ball_speed_min": 107.0, "ball_speed_max": 116.0, "smash_min": 1.37, "smash_max": 1.41, "aoa_min": -3.0, "aoa_max": -1.0, "vla_min": 13.0, "vla_max": 15.5, "spin_min": 4200.0, "spin_max": 5100.0, "carry_min": 156.0, "carry_max": 172.0, "rollout_min": 8.0, "rollout_max": 14.0, "apex_min": 70.0, "apex_max": 84.0, "land_angle_min": 43.0, "land_angle_max": 47.0},
+		"5i": {"name": "5-Iron", "club_speed_min": 75.0, "club_speed_max": 80.0, "ball_speed_min": 102.0, "ball_speed_max": 111.0, "smash_min": 1.36, "smash_max": 1.40, "aoa_min": -3.2, "aoa_max": -1.2, "vla_min": 14.0, "vla_max": 16.8, "spin_min": 4600.0, "spin_max": 5500.0, "carry_min": 148.0, "carry_max": 162.0, "rollout_min": 6.0, "rollout_max": 12.0, "apex_min": 70.0, "apex_max": 84.0, "land_angle_min": 44.0, "land_angle_max": 48.0},
+		"6i": {"name": "6-Iron", "club_speed_min": 73.0, "club_speed_max": 78.0, "ball_speed_min": 97.0, "ball_speed_max": 105.0, "smash_min": 1.34, "smash_max": 1.38, "aoa_min": -3.5, "aoa_max": -1.5, "vla_min": 15.5, "vla_max": 18.5, "spin_min": 5000.0, "spin_max": 6000.0, "carry_min": 138.0, "carry_max": 152.0, "rollout_min": 5.0, "rollout_max": 9.0, "apex_min": 70.0, "apex_max": 84.0, "land_angle_min": 45.0, "land_angle_max": 49.0},
+		"7i": {"name": "7-Iron", "club_speed_min": 70.0, "club_speed_max": 76.0, "ball_speed_min": 92.0, "ball_speed_max": 101.0, "smash_min": 1.32, "smash_max": 1.36, "aoa_min": -3.8, "aoa_max": -1.8, "vla_min": 17.5, "vla_max": 20.8, "spin_min": 5400.0, "spin_max": 6400.0, "carry_min": 128.0, "carry_max": 142.0, "rollout_min": 4.0, "rollout_max": 8.0, "apex_min": 70.0, "apex_max": 82.0, "land_angle_min": 46.0, "land_angle_max": 50.0},
+		"8i": {"name": "8-Iron", "club_speed_min": 68.0, "club_speed_max": 73.0, "ball_speed_min": 87.0, "ball_speed_max": 95.0, "smash_min": 1.30, "smash_max": 1.34, "aoa_min": -4.0, "aoa_max": -2.0, "vla_min": 19.0, "vla_max": 22.5, "spin_min": 5900.0, "spin_max": 7000.0, "carry_min": 118.0, "carry_max": 131.0, "rollout_min": 3.0, "rollout_max": 6.0, "apex_min": 68.0, "apex_max": 80.0, "land_angle_min": 47.0, "land_angle_max": 51.0},
+		"9i": {"name": "9-Iron", "club_speed_min": 65.0, "club_speed_max": 70.0, "ball_speed_min": 81.0, "ball_speed_max": 89.0, "smash_min": 1.26, "smash_max": 1.30, "aoa_min": -4.2, "aoa_max": -2.2, "vla_min": 21.0, "vla_max": 24.8, "spin_min": 6400.0, "spin_max": 7500.0, "carry_min": 108.0, "carry_max": 120.0, "rollout_min": 2.0, "rollout_max": 4.0, "apex_min": 68.0, "apex_max": 80.0, "land_angle_min": 48.0, "land_angle_max": 52.0},
+		"pw": {"name": "Pitching Wedge", "club_speed_min": 63.0, "club_speed_max": 68.0, "ball_speed_min": 75.0, "ball_speed_max": 83.0, "smash_min": 1.20, "smash_max": 1.24, "aoa_min": -4.5, "aoa_max": -2.5, "vla_min": 24.0, "vla_max": 28.0, "spin_min": 6800.0, "spin_max": 8000.0, "carry_min": 98.0, "carry_max": 110.0, "rollout_min": 1.0, "rollout_max": 3.0, "apex_min": 66.0, "apex_max": 78.0, "land_angle_min": 49.0, "land_angle_max": 53.0},
+		"gw": {"name": "Gap Wedge", "club_speed_min": 60.0, "club_speed_max": 65.0, "ball_speed_min": 69.0, "ball_speed_max": 76.0, "smash_min": 1.16, "smash_max": 1.20, "aoa_min": -4.8, "aoa_max": -2.8, "vla_min": 26.0, "vla_max": 30.5, "spin_min": 7000.0, "spin_max": 8200.0, "carry_min": 86.0, "carry_max": 98.0, "rollout_min": 1.0, "rollout_max": 3.0, "apex_min": 64.0, "apex_max": 76.0, "land_angle_min": 50.0, "land_angle_max": 54.0},
+		"sw": {"name": "Sand Wedge", "club_speed_min": 56.0, "club_speed_max": 61.0, "ball_speed_min": 62.0, "ball_speed_max": 69.0, "smash_min": 1.12, "smash_max": 1.16, "aoa_min": -5.0, "aoa_max": -3.0, "vla_min": 29.0, "vla_max": 33.5, "spin_min": 7200.0, "spin_max": 8400.0, "carry_min": 74.0, "carry_max": 84.0, "rollout_min": 0.0, "rollout_max": 2.0, "apex_min": 62.0, "apex_max": 72.0, "land_angle_min": 51.0, "land_angle_max": 55.0},
+		"lw": {"name": "Lob Wedge", "club_speed_min": 52.0, "club_speed_max": 57.0, "ball_speed_min": 54.0, "ball_speed_max": 61.0, "smash_min": 1.05, "smash_max": 1.10, "aoa_min": -5.2, "aoa_max": -3.2, "vla_min": 32.0, "vla_max": 37.0, "spin_min": 6800.0, "spin_max": 8000.0, "carry_min": 60.0, "carry_max": 70.0, "rollout_min": 0.0, "rollout_max": 2.0, "apex_min": 58.0, "apex_max": 68.0, "land_angle_min": 52.0, "land_angle_max": 56.0}
+	},
+	"scratch": {
+		"driver": {"name": "Driver", "club_speed_min": 102.0, "club_speed_max": 108.0, "ball_speed_min": 150.0, "ball_speed_max": 160.0, "smash_min": 1.45, "smash_max": 1.49, "aoa_min": -1.0, "aoa_max": 3.0, "vla_min": 11.5, "vla_max": 14.5, "spin_min": 2300.0, "spin_max": 2800.0, "carry_min": 245.0, "carry_max": 265.0, "rollout_min": 18.0, "rollout_max": 26.0, "apex_min": 85.0, "apex_max": 100.0, "land_angle_min": 37.0, "land_angle_max": 41.0},
+		"3w": {"name": "3-Wood", "club_speed_min": 96.0, "club_speed_max": 102.0, "ball_speed_min": 142.0, "ball_speed_max": 150.0, "smash_min": 1.45, "smash_max": 1.48, "aoa_min": -2.5, "aoa_max": -0.5, "vla_min": 11.0, "vla_max": 13.5, "spin_min": 3500.0, "spin_max": 4200.0, "carry_min": 218.0, "carry_max": 235.0, "rollout_min": 14.0, "rollout_max": 20.0, "apex_min": 82.0, "apex_max": 95.0, "land_angle_min": 41.0, "land_angle_max": 45.0},
+		"5w": {"name": "5-Wood", "club_speed_min": 92.0, "club_speed_max": 98.0, "ball_speed_min": 135.0, "ball_speed_max": 143.0, "smash_min": 1.44, "smash_max": 1.47, "aoa_min": -3.0, "aoa_max": -1.0, "vla_min": 12.5, "vla_max": 15.0, "spin_min": 4100.0, "spin_max": 4800.0, "carry_min": 205.0, "carry_max": 220.0, "rollout_min": 10.0, "rollout_max": 15.0, "apex_min": 84.0, "apex_max": 96.0, "land_angle_min": 43.0, "land_angle_max": 47.0},
+		"hybrid": {"name": "Hybrid", "club_speed_min": 89.0, "club_speed_max": 95.0, "ball_speed_min": 130.0, "ball_speed_max": 138.0, "smash_min": 1.43, "smash_max": 1.46, "aoa_min": -3.5, "aoa_max": -1.5, "vla_min": 13.0, "vla_max": 15.5, "spin_min": 4400.0, "spin_max": 5100.0, "carry_min": 196.0, "carry_max": 210.0, "rollout_min": 8.0, "rollout_max": 13.0, "apex_min": 82.0, "apex_max": 94.0, "land_angle_min": 44.0, "land_angle_max": 48.0},
+		"4i": {"name": "4-Iron", "club_speed_min": 86.0, "club_speed_max": 92.0, "ball_speed_min": 123.0, "ball_speed_max": 131.0, "smash_min": 1.40, "smash_max": 1.44, "aoa_min": -3.8, "aoa_max": -1.8, "vla_min": 12.0, "vla_max": 14.5, "spin_min": 4500.0, "spin_max": 5300.0, "carry_min": 185.0, "carry_max": 198.0, "rollout_min": 8.0, "rollout_max": 13.0, "apex_min": 80.0, "apex_max": 92.0, "land_angle_min": 44.0, "land_angle_max": 48.0},
+		"5i": {"name": "5-Iron", "club_speed_min": 84.0, "club_speed_max": 89.0, "ball_speed_min": 118.0, "ball_speed_max": 126.0, "smash_min": 1.39, "smash_max": 1.43, "aoa_min": -4.0, "aoa_max": -2.0, "vla_min": 13.0, "vla_max": 15.5, "spin_min": 5000.0, "spin_max": 5800.0, "carry_min": 175.0, "carry_max": 187.0, "rollout_min": 6.0, "rollout_max": 10.0, "apex_min": 80.0, "apex_max": 92.0, "land_angle_min": 45.0, "land_angle_max": 49.0},
+		"6i": {"name": "6-Iron", "club_speed_min": 81.0, "club_speed_max": 86.0, "ball_speed_min": 113.0, "ball_speed_max": 120.0, "smash_min": 1.38, "smash_max": 1.41, "aoa_min": -4.2, "aoa_max": -2.2, "vla_min": 14.5, "vla_max": 17.0, "spin_min": 5700.0, "spin_max": 6500.0, "carry_min": 165.0, "carry_max": 176.0, "rollout_min": 5.0, "rollout_max": 8.0, "apex_min": 82.0, "apex_max": 94.0, "land_angle_min": 46.5, "land_angle_max": 50.5},
+		"7i": {"name": "7-Iron", "club_speed_min": 79.0, "club_speed_max": 84.0, "ball_speed_min": 108.0, "ball_speed_max": 115.0, "smash_min": 1.35, "smash_max": 1.39, "aoa_min": -4.5, "aoa_max": -2.5, "vla_min": 16.5, "vla_max": 19.0, "spin_min": 6300.0, "spin_max": 7100.0, "carry_min": 155.0, "carry_max": 166.0, "rollout_min": 3.0, "rollout_max": 6.0, "apex_min": 82.0, "apex_max": 94.0, "land_angle_min": 48.0, "land_angle_max": 52.0},
+		"8i": {"name": "8-Iron", "club_speed_min": 76.0, "club_speed_max": 81.0, "ball_speed_min": 102.0, "ball_speed_max": 109.0, "smash_min": 1.33, "smash_max": 1.37, "aoa_min": -4.8, "aoa_max": -2.8, "vla_min": 18.0, "vla_max": 21.0, "spin_min": 7100.0, "spin_max": 7900.0, "carry_min": 144.0, "carry_max": 155.0, "rollout_min": 2.0, "rollout_max": 5.0, "apex_min": 82.0, "apex_max": 92.0, "land_angle_min": 49.0, "land_angle_max": 53.0},
+		"9i": {"name": "9-Iron", "club_speed_min": 74.0, "club_speed_max": 78.0, "ball_speed_min": 96.0, "ball_speed_max": 102.0, "smash_min": 1.29, "smash_max": 1.33, "aoa_min": -5.0, "aoa_max": -3.0, "vla_min": 20.0, "vla_max": 23.0, "spin_min": 7700.0, "spin_max": 8600.0, "carry_min": 133.0, "carry_max": 144.0, "rollout_min": 1.0, "rollout_max": 3.0, "apex_min": 80.0, "apex_max": 92.0, "land_angle_min": 50.0, "land_angle_max": 54.0},
+		"pw": {"name": "Pitching Wedge", "club_speed_min": 71.0, "club_speed_max": 76.0, "ball_speed_min": 89.0, "ball_speed_max": 95.0, "smash_min": 1.22, "smash_max": 1.26, "aoa_min": -5.2, "aoa_max": -3.2, "vla_min": 23.5, "vla_max": 27.0, "spin_min": 8200.0, "spin_max": 9200.0, "carry_min": 122.0, "carry_max": 132.0, "rollout_min": 0.0, "rollout_max": 2.0, "apex_min": 78.0, "apex_max": 90.0, "land_angle_min": 51.0, "land_angle_max": 55.0},
+		"gw": {"name": "Gap Wedge", "club_speed_min": 68.0, "club_speed_max": 73.0, "ball_speed_min": 82.0, "ball_speed_max": 88.0, "smash_min": 1.19, "smash_max": 1.23, "aoa_min": -5.5, "aoa_max": -3.5, "vla_min": 25.5, "vla_max": 29.5, "spin_min": 8500.0, "spin_max": 9500.0, "carry_min": 108.0, "carry_max": 118.0, "rollout_min": 0.0, "rollout_max": 2.0, "apex_min": 76.0, "apex_max": 88.0, "land_angle_min": 52.0, "land_angle_max": 56.0},
+		"sw": {"name": "Sand Wedge", "club_speed_min": 64.0, "club_speed_max": 69.0, "ball_speed_min": 74.0, "ball_speed_max": 80.0, "smash_min": 1.15, "smash_max": 1.19, "aoa_min": -5.8, "aoa_max": -3.8, "vla_min": 28.5, "vla_max": 32.5, "spin_min": 8700.0, "spin_max": 9700.0, "carry_min": 92.0, "carry_max": 102.0, "rollout_min": 0.0, "rollout_max": 1.0, "apex_min": 72.0, "apex_max": 84.0, "land_angle_min": 53.0, "land_angle_max": 57.0},
+		"lw": {"name": "Lob Wedge", "club_speed_min": 59.0, "club_speed_max": 64.0, "ball_speed_min": 64.0, "ball_speed_max": 70.0, "smash_min": 1.09, "smash_max": 1.13, "aoa_min": -6.0, "aoa_max": -4.0, "vla_min": 31.5, "vla_max": 36.0, "spin_min": 8200.0, "spin_max": 9200.0, "carry_min": 74.0, "carry_max": 84.0, "rollout_min": 0.0, "rollout_max": 1.0, "apex_min": 68.0, "apex_max": 78.0, "land_angle_min": 54.0, "land_angle_max": 58.0}
+	},
+	"tour_pro": {
+		"driver": {"name": "Driver", "club_speed_min": 112.0, "club_speed_max": 118.0, "ball_speed_min": 167.0, "ball_speed_max": 174.0, "smash_min": 1.46, "smash_max": 1.50, "aoa_min": -2.0, "aoa_max": 2.5, "vla_min": 10.0, "vla_max": 13.0, "spin_min": 2200.0, "spin_max": 2700.0, "carry_min": 275.0, "carry_max": 295.0, "rollout_min": 18.0, "rollout_max": 28.0, "apex_min": 95.0, "apex_max": 110.0, "land_angle_min": 37.0, "land_angle_max": 42.0},
+		"3w": {"name": "3-Wood", "club_speed_min": 105.0, "club_speed_max": 111.0, "ball_speed_min": 156.0, "ball_speed_max": 163.0, "smash_min": 1.46, "smash_max": 1.50, "aoa_min": -3.5, "aoa_max": -1.5, "vla_min": 10.0, "vla_max": 12.5, "spin_min": 3300.0, "spin_max": 4000.0, "carry_min": 240.0, "carry_max": 258.0, "rollout_min": 15.0, "rollout_max": 22.0, "apex_min": 90.0, "apex_max": 102.0, "land_angle_min": 42.0, "land_angle_max": 46.0},
+		"5w": {"name": "5-Wood", "club_speed_min": 101.0, "club_speed_max": 107.0, "ball_speed_min": 149.0, "ball_speed_max": 156.0, "smash_min": 1.45, "smash_max": 1.49, "aoa_min": -4.0, "aoa_max": -2.0, "vla_min": 11.5, "vla_max": 14.0, "spin_min": 4000.0, "spin_max": 4700.0, "carry_min": 228.0, "carry_max": 244.0, "rollout_min": 10.0, "rollout_max": 16.0, "apex_min": 92.0, "apex_max": 104.0, "land_angle_min": 45.0, "land_angle_max": 49.0},
+		"hybrid": {"name": "Hybrid", "club_speed_min": 98.0, "club_speed_max": 104.0, "ball_speed_min": 143.0, "ball_speed_max": 150.0, "smash_min": 1.44, "smash_max": 1.48, "aoa_min": -4.5, "aoa_max": -2.5, "vla_min": 12.0, "vla_max": 14.5, "spin_min": 4200.0, "spin_max": 5000.0, "carry_min": 220.0, "carry_max": 235.0, "rollout_min": 8.0, "rollout_max": 14.0, "apex_min": 90.0, "apex_max": 100.0, "land_angle_min": 45.0, "land_angle_max": 50.0},
+		"4i": {"name": "4-Iron", "club_speed_min": 94.0, "club_speed_max": 99.0, "ball_speed_min": 135.0, "ball_speed_max": 142.0, "smash_min": 1.42, "smash_max": 1.46, "aoa_min": -4.5, "aoa_max": -2.5, "vla_min": 10.5, "vla_max": 13.0, "spin_min": 4400.0, "spin_max": 5200.0, "carry_min": 202.0, "carry_max": 216.0, "rollout_min": 8.0, "rollout_max": 14.0, "apex_min": 88.0, "apex_max": 98.0, "land_angle_min": 45.0, "land_angle_max": 49.0},
+		"5i": {"name": "5-Iron", "club_speed_min": 91.0, "club_speed_max": 96.0, "ball_speed_min": 131.0, "ball_speed_max": 137.0, "smash_min": 1.41, "smash_max": 1.45, "aoa_min": -4.8, "aoa_max": -2.8, "vla_min": 11.5, "vla_max": 14.0, "spin_min": 4900.0, "spin_max": 5700.0, "carry_min": 192.0, "carry_max": 205.0, "rollout_min": 6.0, "rollout_max": 12.0, "apex_min": 90.0, "apex_max": 100.0, "land_angle_min": 46.0, "land_angle_max": 50.0},
+		"6i": {"name": "6-Iron", "club_speed_min": 89.0, "club_speed_max": 94.0, "ball_speed_min": 126.0, "ball_speed_max": 132.0, "smash_min": 1.39, "smash_max": 1.43, "aoa_min": -5.0, "aoa_max": -3.0, "vla_min": 13.0, "vla_max": 15.5, "spin_min": 5800.0, "spin_max": 6600.0, "carry_min": 182.0, "carry_max": 194.0, "rollout_min": 5.0, "rollout_max": 10.0, "apex_min": 90.0, "apex_max": 100.0, "land_angle_min": 48.0, "land_angle_max": 52.0},
+		"7i": {"name": "7-Iron", "club_speed_min": 87.0, "club_speed_max": 92.0, "ball_speed_min": 120.0, "ball_speed_max": 126.0, "smash_min": 1.36, "smash_max": 1.40, "aoa_min": -5.2, "aoa_max": -3.2, "vla_min": 15.0, "vla_max": 17.5, "spin_min": 6600.0, "spin_max": 7500.0, "carry_min": 170.0, "carry_max": 182.0, "rollout_min": 3.0, "rollout_max": 7.0, "apex_min": 92.0, "apex_max": 102.0, "land_angle_min": 49.0, "land_angle_max": 53.0},
+		"8i": {"name": "8-Iron", "club_speed_min": 84.0, "club_speed_max": 89.0, "ball_speed_min": 114.0, "ball_speed_max": 120.0, "smash_min": 1.34, "smash_max": 1.38, "aoa_min": -5.5, "aoa_max": -3.5, "vla_min": 17.0, "vla_max": 19.5, "spin_min": 7600.0, "spin_max": 8500.0, "carry_min": 158.0, "carry_max": 170.0, "rollout_min": 2.0, "rollout_max": 5.0, "apex_min": 90.0, "apex_max": 100.0, "land_angle_min": 50.0, "land_angle_max": 54.0},
+		"9i": {"name": "9-Iron", "club_speed_min": 82.0, "club_speed_max": 87.0, "ball_speed_min": 108.0, "ball_speed_max": 114.0, "smash_min": 1.30, "smash_max": 1.34, "aoa_min": -5.8, "aoa_max": -3.8, "vla_min": 19.0, "vla_max": 22.0, "spin_min": 8300.0, "spin_max": 9200.0, "carry_min": 146.0, "carry_max": 158.0, "rollout_min": 1.0, "rollout_max": 4.0, "apex_min": 88.0, "apex_max": 98.0, "land_angle_min": 51.0, "land_angle_max": 55.0},
+		"pw": {"name": "Pitching Wedge", "club_speed_min": 80.0, "club_speed_max": 85.0, "ball_speed_min": 100.0, "ball_speed_max": 106.0, "smash_min": 1.23, "smash_max": 1.28, "aoa_min": -6.0, "aoa_max": -4.0, "vla_min": 22.5, "vla_max": 26.0, "spin_min": 8800.0, "spin_max": 9800.0, "carry_min": 136.0, "carry_max": 146.0, "rollout_min": 0.0, "rollout_max": 2.0, "apex_min": 88.0, "apex_max": 96.0, "land_angle_min": 52.0, "land_angle_max": 56.0},
+		"gw": {"name": "Gap Wedge", "club_speed_min": 76.0, "club_speed_max": 81.0, "ball_speed_min": 93.0, "ball_speed_max": 99.0, "smash_min": 1.21, "smash_max": 1.25, "aoa_min": -6.2, "aoa_max": -4.2, "vla_min": 24.5, "vla_max": 28.5, "spin_min": 9100.0, "spin_max": 10100.0, "carry_min": 120.0, "carry_max": 130.0, "rollout_min": 0.0, "rollout_max": 2.0, "apex_min": 84.0, "apex_max": 92.0, "land_angle_min": 53.0, "land_angle_max": 57.0},
+		"sw": {"name": "Sand Wedge", "club_speed_min": 71.0, "club_speed_max": 76.0, "ball_speed_min": 84.0, "ball_speed_max": 90.0, "smash_min": 1.17, "smash_max": 1.21, "aoa_min": -6.5, "aoa_max": -4.5, "vla_min": 27.5, "vla_max": 31.5, "spin_min": 9400.0, "spin_max": 10400.0, "carry_min": 102.0, "carry_max": 112.0, "rollout_min": 0.0, "rollout_max": 1.0, "apex_min": 78.0, "apex_max": 86.0, "land_angle_min": 54.0, "land_angle_max": 58.0},
+		"lw": {"name": "Lob Wedge", "club_speed_min": 65.0, "club_speed_max": 70.0, "ball_speed_min": 73.0, "ball_speed_max": 79.0, "smash_min": 1.11, "smash_max": 1.15, "aoa_min": -6.8, "aoa_max": -4.8, "vla_min": 30.5, "vla_max": 35.0, "spin_min": 9000.0, "spin_max": 10000.0, "carry_min": 82.0, "carry_max": 92.0, "rollout_min": 0.0, "rollout_max": 1.0, "apex_min": 72.0, "apex_max": 80.0, "land_angle_min": 55.0, "land_angle_max": 60.0}
+	},
+	"high_handicap": {
+		"driver": {"name": "Driver", "club_speed_min": 78.0, "club_speed_max": 86.0, "ball_speed_min": 106.0, "ball_speed_max": 120.0, "smash_min": 1.34, "smash_max": 1.40, "aoa_min": -3.5, "aoa_max": 1.0, "vla_min": 13.5, "vla_max": 17.0, "spin_min": 2900.0, "spin_max": 3800.0, "carry_min": 165.0, "carry_max": 192.0, "rollout_min": 12.0, "rollout_max": 20.0, "apex_min": 60.0, "apex_max": 75.0, "land_angle_min": 35.0, "land_angle_max": 40.0},
+		"3w": {"name": "3-Wood", "club_speed_min": 74.0, "club_speed_max": 81.0, "ball_speed_min": 100.0, "ball_speed_max": 111.0, "smash_min": 1.34, "smash_max": 1.39, "aoa_min": -2.5, "aoa_max": 1.0, "vla_min": 13.0, "vla_max": 16.5, "spin_min": 3600.0, "spin_max": 4700.0, "carry_min": 150.0, "carry_max": 170.0, "rollout_min": 12.0, "rollout_max": 18.0, "apex_min": 60.0, "apex_max": 74.0, "land_angle_min": 38.0, "land_angle_max": 43.0},
+		"5w": {"name": "5-Wood", "club_speed_min": 71.0, "club_speed_max": 77.0, "ball_speed_min": 95.0, "ball_speed_max": 105.0, "smash_min": 1.33, "smash_max": 1.38, "aoa_min": -2.5, "aoa_max": 0.5, "vla_min": 14.0, "vla_max": 17.5, "spin_min": 4000.0, "spin_max": 5100.0, "carry_min": 140.0, "carry_max": 158.0, "rollout_min": 10.0, "rollout_max": 15.0, "apex_min": 60.0, "apex_max": 74.0, "land_angle_min": 40.0, "land_angle_max": 45.0},
+		"hybrid": {"name": "Hybrid", "club_speed_min": 68.0, "club_speed_max": 74.0, "ball_speed_min": 90.0, "ball_speed_max": 100.0, "smash_min": 1.32, "smash_max": 1.37, "aoa_min": -2.8, "aoa_max": 0.0, "vla_min": 14.5, "vla_max": 18.0, "spin_min": 4100.0, "spin_max": 5200.0, "carry_min": 132.0, "carry_max": 148.0, "rollout_min": 8.0, "rollout_max": 13.0, "apex_min": 58.0, "apex_max": 72.0, "land_angle_min": 41.0, "land_angle_max": 46.0},
+		"4i": {"name": "4-Iron", "club_speed_min": 66.0, "club_speed_max": 72.0, "ball_speed_min": 86.0, "ball_speed_max": 95.0, "smash_min": 1.30, "smash_max": 1.35, "aoa_min": -2.5, "aoa_max": 0.0, "vla_min": 14.0, "vla_max": 17.0, "spin_min": 4000.0, "spin_max": 5000.0, "carry_min": 124.0, "carry_max": 138.0, "rollout_min": 8.0, "rollout_max": 14.0, "apex_min": 56.0, "apex_max": 70.0, "land_angle_min": 41.0, "land_angle_max": 45.0},
+		"5i": {"name": "5-Iron", "club_speed_min": 64.0, "club_speed_max": 69.0, "ball_speed_min": 82.0, "ball_speed_max": 90.0, "smash_min": 1.29, "smash_max": 1.34, "aoa_min": -2.8, "aoa_max": -0.2, "vla_min": 15.0, "vla_max": 18.0, "spin_min": 4200.0, "spin_max": 5200.0, "carry_min": 116.0, "carry_max": 130.0, "rollout_min": 6.0, "rollout_max": 12.0, "apex_min": 56.0, "apex_max": 70.0, "land_angle_min": 42.0, "land_angle_max": 46.0},
+		"6i": {"name": "6-Iron", "club_speed_min": 62.0, "club_speed_max": 67.0, "ball_speed_min": 78.0, "ball_speed_max": 86.0, "smash_min": 1.28, "smash_max": 1.33, "aoa_min": -3.0, "aoa_max": -0.5, "vla_min": 16.5, "vla_max": 19.5, "spin_min": 4500.0, "spin_max": 5600.0, "carry_min": 108.0, "carry_max": 121.0, "rollout_min": 5.0, "rollout_max": 9.0, "apex_min": 56.0, "apex_max": 70.0, "land_angle_min": 43.0, "land_angle_max": 47.0},
+		"7i": {"name": "7-Iron", "club_speed_min": 59.0, "club_speed_max": 65.0, "ball_speed_min": 74.0, "ball_speed_max": 82.0, "smash_min": 1.26, "smash_max": 1.31, "aoa_min": -3.2, "aoa_max": -0.8, "vla_min": 18.5, "vla_max": 22.0, "spin_min": 4800.0, "spin_max": 5900.0, "carry_min": 98.0, "carry_max": 112.0, "rollout_min": 4.0, "rollout_max": 8.0, "apex_min": 56.0, "apex_max": 68.0, "land_angle_min": 44.0, "land_angle_max": 48.0},
+		"8i": {"name": "8-Iron", "club_speed_min": 57.0, "club_speed_max": 62.0, "ball_speed_min": 70.0, "ball_speed_max": 77.0, "smash_min": 1.24, "smash_max": 1.29, "aoa_min": -3.5, "aoa_max": -1.0, "vla_min": 20.0, "vla_max": 23.5, "spin_min": 5200.0, "spin_max": 6300.0, "carry_min": 88.0, "carry_max": 101.0, "rollout_min": 3.0, "rollout_max": 6.0, "apex_min": 54.0, "apex_max": 66.0, "land_angle_min": 45.0, "land_angle_max": 49.0},
+		"9i": {"name": "9-Iron", "club_speed_min": 54.0, "club_speed_max": 59.0, "ball_speed_min": 65.0, "ball_speed_max": 72.0, "smash_min": 1.21, "smash_max": 1.26, "aoa_min": -3.8, "aoa_max": -1.2, "vla_min": 22.0, "vla_max": 26.0, "spin_min": 5500.0, "spin_max": 6600.0, "carry_min": 78.0, "carry_max": 90.0, "rollout_min": 2.0, "rollout_max": 5.0, "apex_min": 54.0, "apex_max": 66.0, "land_angle_min": 46.0, "land_angle_max": 50.0},
+		"pw": {"name": "Pitching Wedge", "club_speed_min": 52.0, "club_speed_max": 57.0, "ball_speed_min": 60.0, "ball_speed_max": 67.0, "smash_min": 1.16, "smash_max": 1.21, "aoa_min": -4.0, "aoa_max": -1.5, "vla_min": 25.0, "vla_max": 29.5, "spin_min": 5800.0, "spin_max": 7000.0, "carry_min": 68.0, "carry_max": 80.0, "rollout_min": 1.0, "rollout_max": 3.0, "apex_min": 52.0, "apex_max": 64.0, "land_angle_min": 47.0, "land_angle_max": 51.0},
+		"gw": {"name": "Gap Wedge", "club_speed_min": 49.0, "club_speed_max": 54.0, "ball_speed_min": 55.0, "ball_speed_max": 61.0, "smash_min": 1.12, "smash_max": 1.17, "aoa_min": -4.2, "aoa_max": -1.8, "vla_min": 27.0, "vla_max": 32.0, "spin_min": 5900.0, "spin_max": 7100.0, "carry_min": 58.0, "carry_max": 70.0, "rollout_min": 1.0, "rollout_max": 3.0, "apex_min": 50.0, "apex_max": 62.0, "land_angle_min": 48.0, "land_angle_max": 52.0},
+		"sw": {"name": "Sand Wedge", "club_speed_min": 46.0, "club_speed_max": 51.0, "ball_speed_min": 49.0, "ball_speed_max": 55.0, "smash_min": 1.08, "smash_max": 1.13, "aoa_min": -4.5, "aoa_max": -2.0, "vla_min": 30.0, "vla_max": 35.0, "spin_min": 6000.0, "spin_max": 7200.0, "carry_min": 48.0, "carry_max": 60.0, "rollout_min": 0.0, "rollout_max": 2.0, "apex_min": 48.0, "apex_max": 58.0, "land_angle_min": 49.0, "land_angle_max": 53.0},
+		"lw": {"name": "Lob Wedge", "club_speed_min": 43.0, "club_speed_max": 48.0, "ball_speed_min": 43.0, "ball_speed_max": 49.0, "smash_min": 1.02, "smash_max": 1.07, "aoa_min": -4.5, "aoa_max": -2.0, "vla_min": 33.0, "vla_max": 39.0, "spin_min": 5600.0, "spin_max": 6800.0, "carry_min": 38.0, "carry_max": 48.0, "rollout_min": 0.0, "rollout_max": 2.0, "apex_min": 46.0, "apex_max": 56.0, "land_angle_min": 50.0, "land_angle_max": 54.0}
+	}
+}
+
+static func _classify_club_discrete(club_name: String) -> String:
+	var c = club_name.to_lower().strip_edges()
+	if "putt" in c or c == "pt":
+		return "putter"
+	if c in ["dr", "1w", "driver"] or "driver" in c:
+		return "driver"
+	if c in ["3w", "3-wood", "3 wood"]:
+		return "3w"
+	if c in ["5w", "5-wood", "5 wood", "4w", "7w"] or "wood" in c or "fw" in c:
+		return "5w"
+	if c in ["2h", "3h", "4h", "5h", "hybrid", "rescue"] or "hybrid" in c:
+		return "hybrid"
+	if c in ["3i", "4i", "3-iron", "4-iron", "3 iron", "4 iron"]:
+		return "4i"
+	if c in ["5i", "5-iron", "5 iron"]:
+		return "5i"
+	if c in ["6i", "6-iron", "6 iron"]:
+		return "6i"
+	if c in ["7i", "7-iron", "7 iron"]:
+		return "7i"
+	if c in ["8i", "8-iron", "8 iron"]:
+		return "8i"
+	if c in ["9i", "9-iron", "9 iron"]:
+		return "9i"
+	if c in ["pw", "pitching", "pitching wedge"]:
+		return "pw"
+	if c in ["gw", "aw", "gap", "approach", "gap wedge", "approach wedge", "50", "52"]:
+		return "gw"
+	if c in ["sw", "sand", "sand wedge", "54", "56"]:
+		return "sw"
+	if c in ["lw", "lob", "lob wedge", "58", "60"]:
+		return "lw"
+	if "wedge" in c:
+		return "pw"
+	if "iron" in c:
+		return "7i"
+	return "driver"
+
+static func get_benchmark(club_name: String, skill_level: String = "mid_handicap") -> Dictionary:
+	var tier: String = skill_level if CLUB_BENCHMARKS.has(skill_level) else "mid_handicap"
+	var club_key: String = _classify_club_discrete(club_name)
+	var tier_data: Dictionary = CLUB_BENCHMARKS.get(tier, CLUB_BENCHMARKS["mid_handicap"])
+	if tier_data.has(club_key):
+		return tier_data[club_key]
+	return tier_data.get("driver", {})
+
+static func _build_comparison_table(shot_data: Dictionary, benchmark: Dictionary, _skill_tier: String) -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	if benchmark.is_empty():
+		return rows
+
+	var club_speed = _get_float_val(shot_data, ["ClubSpeed"], 0.0)
+	var ball_speed = _get_float_val(shot_data, ["Speed", "BallSpeed"], 0.0)
+	var smash_factor = _get_float_val(shot_data, ["SmashFactor"], 0.0)
+	if smash_factor <= 0.5 and ball_speed > 0.0 and club_speed > 0.0:
+		smash_factor = ball_speed / club_speed
+	var vla = _get_float_val(shot_data, ["VLA", "VerticalLaunchAngle"], 14.0)
+	var total_spin = _get_float_val(shot_data, ["TotalSpin", "BackSpin"], 0.0)
+	var attack_angle = _get_float_val(shot_data, ["AttackAngle", "AngleOfAttack"], 999.0)
+	var spin_axis = _get_float_val(shot_data, ["SpinAxis", "SideSpinAxis"], 0.0)
+	var carry = _get_float_val(shot_data, ["Carry", "CarryDistance", "Distance"], 0.0)
+	var apex = _get_float_val(shot_data, ["Apex", "PeakHeight", "MaxHeight"], 0.0)
+	var land_angle = _get_float_val(shot_data, ["DescentAngle", "LandAngle", "LandingAngle"], 0.0)
+
+	# 1. Ball Speed
+	if ball_speed > 0.0:
+		var bs_min = float(benchmark.get("ball_speed_min", 125.0))
+		var bs_max = float(benchmark.get("ball_speed_max", 140.0))
+		var status = "OPTIMAL"
+		if ball_speed < bs_min - 10.0:
+			status = "CRITICAL"
+		elif ball_speed < bs_min - 4.0:
+			status = "SUB-OPTIMAL"
+		elif ball_speed > bs_max + 12.0:
+			status = "GOOD"
+		rows.append({
+			"metric": "Ball Speed",
+			"player": "%.1f mph" % ball_speed,
+			"target": "%.1f – %.1f mph" % [bs_min, bs_max],
+			"status": status,
+			"note": "Primary governor of total potential distance."
+		})
+
+	# 2. Smash Factor
+	if smash_factor > 0.5:
+		var sm_min = float(benchmark.get("smash_min", 1.40))
+		var sm_max = float(benchmark.get("smash_max", 1.48))
+		var status = "OPTIMAL"
+		if smash_factor < sm_min - 0.07:
+			status = "CRITICAL"
+		elif smash_factor < sm_min:
+			status = "SUB-OPTIMAL"
+		elif smash_factor >= sm_min and smash_factor <= sm_max + 0.02:
+			status = "OPTIMAL"
+		else:
+			status = "GOOD"
+		rows.append({
+			"metric": "Smash Factor",
+			"player": "%.2f" % smash_factor,
+			"target": "%.2f – %.2f" % [sm_min, sm_max],
+			"status": status,
+			"note": "Clubface energy transfer and centered sweet-spot compression."
+		})
+
+	# 3. Dynamic Launch (VLA)
+	var vla_min = float(benchmark.get("vla_min", 12.0))
+	var vla_max = float(benchmark.get("vla_max", 16.0))
+	var vla_status = "OPTIMAL"
+	if vla < vla_min - 3.0 or vla > vla_max + 4.0:
+		vla_status = "CRITICAL"
+	elif vla < vla_min - 1.0 or vla > vla_max + 1.5:
+		vla_status = "SUB-OPTIMAL"
+	rows.append({
+		"metric": "Launch Angle (VLA)",
+		"player": "%.1f°" % vla,
+		"target": "%.1f° – %.1f°" % [vla_min, vla_max],
+		"status": vla_status,
+		"note": "Initial vertical takeoff angle off clubface."
+	})
+
+	# 4. Total Spin
+	if total_spin > 0.0:
+		var sp_min = float(benchmark.get("spin_min", 2500.0))
+		var sp_max = float(benchmark.get("spin_max", 3400.0))
+		var sp_status = "OPTIMAL"
+		if total_spin < sp_min - 800.0 or total_spin > sp_max + 1200.0:
+			sp_status = "CRITICAL"
+		elif total_spin < sp_min - 300.0 or total_spin > sp_max + 450.0:
+			sp_status = "SUB-OPTIMAL"
+		rows.append({
+			"metric": "Total Spin",
+			"player": "%.0f RPM" % total_spin,
+			"target": "%.0f – %.0f RPM" % [sp_min, sp_max],
+			"status": sp_status,
+			"note": "Aerodynamic lift, wind stability, and green-stopping control."
+		})
+
+	# 5. Angle of Attack (AoA)
+	if attack_angle < 900.0:
+		var aoa_min = float(benchmark.get("aoa_min", -2.5))
+		var aoa_max = float(benchmark.get("aoa_max", 1.5))
+		var aoa_status = "OPTIMAL"
+		if attack_angle < aoa_min - 2.5 or attack_angle > aoa_max + 2.5:
+			aoa_status = "CRITICAL"
+		elif attack_angle < aoa_min - 1.0 or attack_angle > aoa_max + 1.0:
+			aoa_status = "SUB-OPTIMAL"
+		rows.append({
+			"metric": "Attack Angle (AoA)",
+			"player": "%+.1f°" % attack_angle,
+			"target": "%+.1f° to %+.1f°" % [aoa_min, aoa_max],
+			"status": aoa_status,
+			"note": "Angle of clubhead path moving into the ball."
+		})
+
+	# 6. Spin Axis / Direction
+	var axis_status = "OPTIMAL"
+	if abs(spin_axis) > 8.0:
+		axis_status = "CRITICAL"
+	elif abs(spin_axis) > 3.5:
+		axis_status = "SUB-OPTIMAL"
+	elif abs(spin_axis) > 2.0:
+		axis_status = "GOOD"
+	rows.append({
+		"metric": "Spin Axis",
+		"player": "%+.1f°" % spin_axis,
+		"target": "-2.5° to +2.5°",
+		"status": axis_status,
+		"note": "Tilt of spin vector governing draw or slice curve."
+	})
+
+	# 7. Carry Distance
+	if carry > 0.0:
+		var c_min = float(benchmark.get("carry_min", 150.0))
+		var c_max = float(benchmark.get("carry_max", 175.0))
+		var c_status = "OPTIMAL"
+		if carry < c_min - 25.0:
+			c_status = "CRITICAL"
+		elif carry < c_min - 10.0:
+			c_status = "SUB-OPTIMAL"
+		elif carry >= c_min and carry <= c_max:
+			c_status = "OPTIMAL"
+		else:
+			c_status = "GOOD"
+		rows.append({
+			"metric": "Carry Distance",
+			"player": "%.0f yds" % carry,
+			"target": "%.0f – %.0f yds" % [c_min, c_max],
+			"status": c_status,
+			"note": "Airborne distance traveled before ground contact."
+		})
+
+	# 8. Apex Height (if available)
+	if apex > 0.0:
+		var ap_min = float(benchmark.get("apex_min", 70.0))
+		var ap_max = float(benchmark.get("apex_max", 90.0))
+		var ap_status = "OPTIMAL"
+		if apex < ap_min - 20.0 or apex > ap_max + 25.0:
+			ap_status = "SUB-OPTIMAL"
+		rows.append({
+			"metric": "Apex (Max Height)",
+			"player": "%.0f ft" % apex,
+			"target": "%.0f – %.0f ft" % [ap_min, ap_max],
+			"status": ap_status,
+			"note": "Peak trajectory altitude."
+		})
+
+	# 9. Landing Angle (if available)
+	if land_angle > 0.0:
+		var la_min = float(benchmark.get("land_angle_min", 40.0))
+		var la_max = float(benchmark.get("land_angle_max", 50.0))
+		var la_status = "OPTIMAL"
+		if land_angle < la_min - 5.0:
+			la_status = "SUB-OPTIMAL"
+		rows.append({
+			"metric": "Landing Angle",
+			"player": "%.1f°" % land_angle,
+			"target": "%.1f° – %.1f°" % [la_min, la_max],
+			"status": la_status,
+			"note": "Descent pitch governing release and green holding."
+		})
+
+	return rows
+
+static func _build_four_tier_diagnosis(rec: Dictionary, _shot_data: Dictionary, _benchmark: Dictionary) -> Dictionary:
+	var player_val = str(rec.get("player_val", ""))
+	var bench_val = str(rec.get("benchmark_val", ""))
+	var cam_flaw = str(rec.get("camera_flaw", ""))
+	var launch_eff = str(rec.get("launch_effect", ""))
+	var fix_inst = str(rec.get("fix_instruction", ""))
+
+	var observation = "Measured: %s\nTarget Baseline: %s" % [player_val, bench_val]
+	if not cam_flaw.is_empty():
+		observation += "\nSensor / Video Observation: " + cam_flaw
+
+	var impact = launch_eff
+	if impact.is_empty():
+		impact = "Sub-optimal launch conditions reducing carry distance and directional accuracy."
+
+	var cause = cam_flaw
+	if cause.is_empty():
+		cause = str(rec.get("issue_type", "Club delivery deviation during impact."))
+
+	var prescription = fix_inst
+	if prescription.is_empty():
+		prescription = "Focus on centered contact, steady head posture, and smooth body sequencing through impact."
+
+	return {
+		"observation": observation,
+		"impact": impact,
+		"cause": cause,
+		"prescription": prescription
+	}
+
 static func _attach_video_metadata(rec: Dictionary, video_key: String) -> void:
 	if HM_VIDEOS.has(video_key):
 		var v: Dictionary = HM_VIDEOS[video_key]
@@ -113,38 +440,29 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 	if smash_factor <= 0.5 and ball_speed > 0.0 and club_speed > 0.0:
 		smash_factor = ball_speed / club_speed
 
+	# Player skill tier retrieval
+	var player_name: String = str(shot_data.get("Player", shot_data.get("player", "")))
+	var skill_level: String = "mid_handicap"
+	if shot_data.has("skill_level") and str(shot_data["skill_level"]) != "":
+		skill_level = str(shot_data["skill_level"])
+	elif Engine.has_singleton("MultiplayerManager"):
+		var mp_mgr = Engine.get_singleton("MultiplayerManager")
+		if mp_mgr != null and mp_mgr.has_method("get_player_skill_level"):
+			skill_level = mp_mgr.get_player_skill_level(player_name)
+	elif Engine.get_main_loop() != null and Engine.get_main_loop().root != null and Engine.get_main_loop().root.has_node("MultiplayerManager"):
+		var mp_node = Engine.get_main_loop().root.get_node_or_null("MultiplayerManager")
+		if mp_node != null and mp_node.has_method("get_player_skill_level"):
+			skill_level = mp_node.get_player_skill_level(player_name)
+
+	var skill_disp: String = SKILL_LEVEL_NAMES.get(skill_level, "Mid Handicap (10–19 HCP)")
+	var benchmark: Dictionary = get_benchmark(club_name, skill_level)
+
 	# ─── 1. SMASH FACTOR & IMPACT EFFICIENCY (TOP PRIORITY FOR DISTANCE & CONSISTENCY) ───
 	if smash_factor > 0.5:
-		var target_smash_min: float = 1.44
-		var target_smash_max: float = 1.50
-		var bench_desc: String = "1.45–1.50 (Pro Benchmark)"
-		var crit_thresh: float = 1.38
-
-		if club_cat == "mid_iron":
-			target_smash_min = 1.33
-			target_smash_max = 1.38
-			bench_desc = "1.33–1.38 (Solid Iron Compression)"
-			crit_thresh = 1.25
-		elif club_cat == "long_iron":
-			target_smash_min = 1.35
-			target_smash_max = 1.42
-			bench_desc = "1.35–1.42 (Long Iron Strike)"
-			crit_thresh = 1.28
-		elif club_cat == "wedge":
-			target_smash_min = 1.20
-			target_smash_max = 1.28
-			bench_desc = "1.20–1.28 (Controlled Wedge Strike)"
-			crit_thresh = 1.15
-		elif club_cat == "wood":
-			target_smash_min = 1.40
-			target_smash_max = 1.48
-			bench_desc = "1.40–1.48 (Fairway Wood)"
-			crit_thresh = 1.33
-		elif club_cat == "hybrid":
-			target_smash_min = 1.36
-			target_smash_max = 1.44
-			bench_desc = "1.36–1.44 (Hybrid Strike)"
-			crit_thresh = 1.30
+		var target_smash_min: float = float(benchmark.get("smash_min", 1.41))
+		var target_smash_max: float = float(benchmark.get("smash_max", 1.46))
+		var bench_desc: String = "%.2f–%.2f (%s)" % [target_smash_min, target_smash_max, skill_disp]
+		var crit_thresh: float = target_smash_min - 0.06
 
 		var fix_inst = "Focus on centered face contact before swinging faster. Smooth out your transition to find the middle of the clubface."
 		var drill_inst = "⛳ Impact Tape / Dry Erase Drill: Spray clubface with dry-shampoo or impact decal; confirm strike is centered on sweet spot."
@@ -660,6 +978,13 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 	recs.sort_custom(func(a, b): return a["score"] > b["score"])
 	for idx in range(recs.size()):
 		recs[idx]["priority"] = idx + 1
+
+	var comp_table: Array[Dictionary] = _build_comparison_table(shot_data, benchmark, skill_level)
+	for r in recs:
+		r["skill_level"] = skill_level
+		r["skill_level_display"] = skill_disp
+		r["comparison_table"] = comp_table
+		r["four_tier_diagnosis"] = _build_four_tier_diagnosis(r, shot_data, benchmark)
 
 	return recs
 
@@ -1267,10 +1592,35 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 	if final_recs.is_empty():
 		final_recs = lm_recs
 
-	# Sort by score descending and assign clean 1-based priorities
 	final_recs.sort_custom(func(a, b): return a["score"] > b["score"])
 	for idx in range(final_recs.size()):
 		final_recs[idx]["priority"] = idx + 1
+
+	var player_name: String = str(shot_data.get("Player", shot_data.get("player", "")))
+	var skill_level: String = "mid_handicap"
+	if shot_data.has("skill_level") and str(shot_data["skill_level"]) != "":
+		skill_level = str(shot_data["skill_level"])
+	elif Engine.has_singleton("MultiplayerManager"):
+		var mp_mgr = Engine.get_singleton("MultiplayerManager")
+		if mp_mgr != null and mp_mgr.has_method("get_player_skill_level"):
+			skill_level = mp_mgr.get_player_skill_level(player_name)
+	elif Engine.get_main_loop() != null and Engine.get_main_loop().root != null and Engine.get_main_loop().root.has_node("MultiplayerManager"):
+		var mp_node = Engine.get_main_loop().root.get_node_or_null("MultiplayerManager")
+		if mp_node != null and mp_node.has_method("get_player_skill_level"):
+			skill_level = mp_node.get_player_skill_level(player_name)
+
+	var skill_disp: String = SKILL_LEVEL_NAMES.get(skill_level, "Mid Handicap (10–19 HCP)")
+	var benchmark: Dictionary = get_benchmark(club_name, skill_level)
+	var comp_table: Array[Dictionary] = _build_comparison_table(shot_data, benchmark, skill_level)
+
+	for r in final_recs:
+		if not r.has("skill_level"):
+			r["skill_level"] = skill_level
+			r["skill_level_display"] = skill_disp
+		if not r.has("comparison_table"):
+			r["comparison_table"] = comp_table
+		if not r.has("four_tier_diagnosis"):
+			r["four_tier_diagnosis"] = _build_four_tier_diagnosis(r, shot_data, benchmark)
 
 	return final_recs
 

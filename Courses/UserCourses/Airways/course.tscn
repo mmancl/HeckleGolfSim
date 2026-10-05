@@ -134,6 +134,8 @@ shader_parameter/deep_space_matrix = Basis(0.5686409, -0.82258594, -2.9802322e-0
 
 [sub_resource type="Sky" id="Sky_rybw1"]
 sky_material = SubResource("ShaderMaterial_0yxxa")
+process_mode = 3
+radiance_size = 3
 
 [sub_resource type="Environment" id="Environment_2xe6u"]
 background_mode = 2

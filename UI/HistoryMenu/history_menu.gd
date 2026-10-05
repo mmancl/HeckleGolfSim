@@ -407,16 +407,34 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 				var hole_info = parsed.get("Hole Info", {})
 				for h_id in hole_info.keys():
 					var h_data = hole_info[h_id]
-					hole_pars[h_id] = h_data.get("Par", 4)
+					hole_pars[h_id] = int(round(float(h_data.get("Par", 4))))
 					var tee_boxes = h_data.get("Tee Boxes", {})
 					var tee_pos = tee_boxes.get(tee_color, [0.0, 0.0])
 					var hole_loc = h_data.get("Hole Location", [0.0, 0.0])
 					var dist = int(Vector2(tee_pos[0], tee_pos[1]).distance_to(Vector2(hole_loc[0], hole_loc[1])) * 1.09361)
 					hole_dists[h_id] = dist
 
+	# Fallback if hole_pars is empty but match_data has saved hole_pars
+	if hole_pars.is_empty() and match_data.has("hole_pars"):
+		var saved_pars = match_data.get("hole_pars", {})
+		if typeof(saved_pars) == TYPE_DICTIONARY:
+			for h_id in saved_pars:
+				hole_pars[h_id] = int(round(float(saved_pars[h_id])))
+
 	# Holes list sorted
-	var hole_ids = hole_pars.keys()
-	hole_ids.sort()
+	var hole_ids: Array = []
+	if match_data.has("hole_ids") and not match_data["hole_ids"].is_empty():
+		hole_ids = match_data["hole_ids"].duplicate()
+	else:
+		hole_ids = hole_pars.keys()
+		hole_ids.sort_custom(func(a, b):
+			return MultiplayerManager.get_hole_number_from_id(a) < MultiplayerManager.get_hole_number_from_id(b)
+		)
+		var course_len = match_data.get("selected_course_length", "Full 18")
+		if course_len == "Back 9":
+			hole_ids = hole_ids.filter(func(h_id): return MultiplayerManager.get_hole_number_from_id(h_id) >= 10)
+		elif course_len == "Front 9":
+			hole_ids = hole_ids.filter(func(h_id): return MultiplayerManager.get_hole_number_from_id(h_id) <= 9)
 	var num_holes = hole_ids.size()
 	
 	if num_holes == 0:
@@ -428,23 +446,30 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 	# Split into Front 9 and Back 9
 	var front_holes = []
 	var back_holes = []
-	for i in range(num_holes):
-		var h_id = hole_ids[i]
-		if i < 9:
+	for h_id in hole_ids:
+		var h_num = MultiplayerManager.get_hole_number_from_id(h_id)
+		if h_num <= 9:
 			front_holes.append(h_id)
 		else:
 			back_holes.append(h_id)
 			
-	# Columns: Player | 1..9 | [OUT] | 10..N | [IN] | TOT
+	var has_both_nines = not front_holes.is_empty() and not back_holes.is_empty()
+
+	# Columns: Player | front holes | [OUT/TOT] | back holes | [IN] | [TOT if both]
 	var columns = ["Player"]
-	for i in range(front_holes.size()):
-		columns.append(str(i + 1))
-	if num_holes > 9:
-		columns.append("OUT")
-		for i in range(back_holes.size()):
-			columns.append(str(10 + i))
+	if not front_holes.is_empty():
+		for h_id in front_holes:
+			columns.append(str(MultiplayerManager.get_hole_number_from_id(h_id)))
+		if not back_holes.is_empty():
+			columns.append("OUT")
+		else:
+			columns.append("TOT")
+	if not back_holes.is_empty():
+		for h_id in back_holes:
+			columns.append(str(MultiplayerManager.get_hole_number_from_id(h_id)))
 		columns.append("IN")
-	columns.append("TOT")
+	if has_both_nines:
+		columns.append("TOT")
 	
 	grid.columns = columns.size()
 	
@@ -515,17 +540,17 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		var d = hole_dists.get(h_id, 0)
 		front_dist_sum += d
 		add_cell.call(grid, str(d) if d > 0 else "-", dist_bg, false, Color(0.8, 0.8, 0.8), 15)
-	if num_holes > 9:
+	if not front_holes.is_empty():
 		add_cell.call(grid, str(front_dist_sum), dist_bg, false, Color(0.9, 0.9, 0.9), 15)
-		var back_dist_sum = 0
-		for h_id in back_holes:
-			var d = hole_dists.get(h_id, 0)
-			back_dist_sum += d
-			add_cell.call(grid, str(d) if d > 0 else "-", dist_bg, false, Color(0.8, 0.8, 0.8), 15)
+	var back_dist_sum = 0
+	for h_id in back_holes:
+		var d = hole_dists.get(h_id, 0)
+		back_dist_sum += d
+		add_cell.call(grid, str(d) if d > 0 else "-", dist_bg, false, Color(0.8, 0.8, 0.8), 15)
+	if not back_holes.is_empty():
 		add_cell.call(grid, str(back_dist_sum), dist_bg, false, Color(0.9, 0.9, 0.9), 15)
+	if has_both_nines:
 		add_cell.call(grid, str(front_dist_sum + back_dist_sum), dist_bg, false, Color(1.0, 0.85, 0.38), 15)
-	else:
-		add_cell.call(grid, str(front_dist_sum), dist_bg, false, Color(1.0, 0.85, 0.38), 15)
 
 	# 3. PAR ROW
 	add_cell.call(grid, "Par", par_bg, false, Color(0.8, 0.8, 0.8), 15)
@@ -534,17 +559,17 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		var p_val = hole_pars.get(h_id, 4)
 		front_par_sum += p_val
 		add_cell.call(grid, str(p_val), par_bg, false, Color(0.8, 0.8, 0.8), 15)
-	if num_holes > 9:
+	if not front_holes.is_empty():
 		add_cell.call(grid, str(front_par_sum), par_bg, false, Color(0.9, 0.9, 0.9), 15)
-		var back_par_sum = 0
-		for h_id in back_holes:
-			var p_val = hole_pars.get(h_id, 4)
-			back_par_sum += p_val
-			add_cell.call(grid, str(p_val), par_bg, false, Color(0.8, 0.8, 0.8), 15)
+	var back_par_sum = 0
+	for h_id in back_holes:
+		var p_val = hole_pars.get(h_id, 4)
+		back_par_sum += p_val
+		add_cell.call(grid, str(p_val), par_bg, false, Color(0.8, 0.8, 0.8), 15)
+	if not back_holes.is_empty():
 		add_cell.call(grid, str(back_par_sum), par_bg, false, Color(0.9, 0.9, 0.9), 15)
+	if has_both_nines:
 		add_cell.call(grid, str(front_par_sum + back_par_sum), par_bg, false, Color(1.0, 0.85, 0.38), 15)
-	else:
-		add_cell.call(grid, str(front_par_sum), par_bg, false, Color(1.0, 0.85, 0.38), 15)
 
 	# 4. PLAYER ROWS
 	for p_idx in range(players_list.size()):
@@ -634,36 +659,36 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		for h_id in front_holes:
 			var s = hole_scores.get(h_id)
 			var display_s = "-"
-			var par = hole_pars.get(h_id, 4)
+			var par = int(round(float(hole_pars.get(h_id, 4))))
 			if s != null:
-				display_s = str(s)
-				front_sum += int(s)
+				var s_num = int(round(float(s)))
+				display_s = str(s_num)
+				front_sum += s_num
 			add_score_cell.call(grid, display_s, par, row_bg, is_ctp_mode, 16)
 			
-		if num_holes > 9:
+		if not front_holes.is_empty():
 			add_cell.call(grid, str(front_sum) if front_sum > 0 else "-", row_bg, false, Color(0.9, 0.9, 0.9))
 			
-			# Back scores
-			var back_sum = 0
-			for h_id in back_holes:
-				var s = hole_scores.get(h_id)
-				var display_s = "-"
-				var par = hole_pars.get(h_id, 4)
-				if s != null:
-					display_s = str(s)
-					back_sum += int(s)
-				add_score_cell.call(grid, display_s, par, row_bg, is_ctp_mode, 16)
-				
+		# Back scores
+		var back_sum = 0
+		for h_id in back_holes:
+			var s = hole_scores.get(h_id)
+			var display_s = "-"
+			var par = int(round(float(hole_pars.get(h_id, 4))))
+			if s != null:
+				var s_num = int(round(float(s)))
+				display_s = str(s_num)
+				back_sum += s_num
+			add_score_cell.call(grid, display_s, par, row_bg, is_ctp_mode, 16)
+			
+		if not back_holes.is_empty():
 			add_cell.call(grid, str(back_sum) if back_sum > 0 else "-", row_bg, false, Color(0.9, 0.9, 0.9))
+			
+		if has_both_nines:
 			var total = front_sum + back_sum
 			var tot_str = str(total) if total > 0 else "-"
 			if is_ctp_mode:
 				tot_str = "%d pts" % total
-			add_cell.call(grid, tot_str, row_bg, false, Color(1.0, 0.85, 0.38))
-		else:
-			var tot_str = str(front_sum) if front_sum > 0 else "-"
-			if is_ctp_mode:
-				tot_str = "%d pts" % front_sum
 			add_cell.call(grid, tot_str, row_bg, false, Color(1.0, 0.85, 0.38))
 
 func _email_player_stats(player: Dictionary, match_data: Dictionary) -> void:

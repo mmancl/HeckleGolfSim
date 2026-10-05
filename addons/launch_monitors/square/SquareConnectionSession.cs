@@ -268,7 +268,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
     private async Task WriteCommandAsync(
         byte[] command,
         CancellationToken cancellationToken,
-        BluetoothWriteMode writeMode = BluetoothWriteMode.WithResponse)
+        BluetoothWriteMode writeMode = BluetoothWriteMode.WithoutResponse)
     {
         if (!_isConnected)
         {
@@ -479,13 +479,16 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
                 EmitReady(false);
                 SensorDataReceived?.Invoke(new SquareSensorData(false, false, 0, 0, 0));
 
-                if (_isDetectBallActive && _isConnected)
+                if (_isDetectBallActive && _isConnected && _pendingShotMetrics == null)
                 {
                     _logInfo("Auto-rearming launch monitor detect mode after hardware reported idle.");
                     _ = RunAsync(async () =>
                     {
                         await _delayAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
-                        await ArmAsync();
+                        if (_pendingShotMetrics == null)
+                        {
+                            await ArmAsync();
+                        }
                     });
                 }
             }
@@ -534,27 +537,16 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
 
         _lastPayload = payload;
 
-        if (!metrics.HasClubData && _isConnected)
-        {
-            try
-            {
-                await WriteCommandAsync(
-                    SquareCommandBuilder.RequestClubMetrics(NextSequence()),
-                    CancellationToken.None,
-                    BluetoothWriteMode.WithoutResponse);
-            }
-            catch (Exception ex)
-            {
-                _logError($"Failed to request club metrics: {ex.Message}");
-            }
-        }
-
         SquareShotMetrics? immediateShot = null;
         await _shotLock.WaitAsync();
         try
         {
             var now = DateTime.UtcNow;
-            if (_recentClubMetrics.HasValue && (now - _recentClubMetricsTime) < TimeSpan.FromMilliseconds(600))
+            if (metrics.HasClubData)
+            {
+                immediateShot = metrics;
+            }
+            else if (_recentClubMetrics.HasValue && (now - _recentClubMetricsTime) < TimeSpan.FromMilliseconds(600))
             {
                 var club = _recentClubMetrics.Value;
                 _recentClubMetrics = null;
@@ -579,7 +571,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
                 {
                     try
                     {
-                        await _delayAsync(TimeSpan.FromMilliseconds(350), cts.Token);
+                        await _delayAsync(TimeSpan.FromMilliseconds(300), cts.Token);
                         SquareShotMetrics? toEmit = null;
                         await _shotLock.WaitAsync();
                         try
@@ -597,7 +589,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
 
                         if (toEmit.HasValue)
                         {
-                            _logInfo("Club data window (350ms) elapsed without club packet. Emitting ball-only shot.");
+                            _logInfo("Club data window (300ms) elapsed without club packet. Emitting ball-only shot.");
                             await DispatchShotAsync(toEmit.Value);
                         }
                     }
@@ -615,7 +607,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
 
         if (immediateShot.HasValue)
         {
-            _logInfo($"Immediately merged recent club data into shot: face={immediateShot.Value.FaceAngle}, path={immediateShot.Value.ClubPath}, aoa={immediateShot.Value.AttackAngle}, loft={immediateShot.Value.DynamicLoft}");
+            _logInfo($"Immediately dispatching shot (hasClubData={immediateShot.Value.HasClubData}): face={immediateShot.Value.FaceAngle}, path={immediateShot.Value.ClubPath}, aoa={immediateShot.Value.AttackAngle}, loft={immediateShot.Value.DynamicLoft}");
             await DispatchShotAsync(immediateShot.Value);
         }
     }

@@ -23,6 +23,9 @@ const FOLIAGE_DAMPING_MAX: float = 0.14
 const FOLIAGE_RAMP_DURATION: float = 0.40
 const TREE_CHECK_INTERVAL: float = 0.05 # 20 Hz responsive canopy detection
 
+# Rock clearance parameters (relief from rocks when ending within 2 feet)
+const TWO_FEET_METERS: float = 0.6096 # 2 feet in meters
+
 var ball_model : PackedScene = preload("res://assets/models/balls/golf_ball.glb")
 var _ball_mesh: Node3D = null
 var _tee_mesh: Node3D = null
@@ -97,10 +100,10 @@ var _terrain_cache_searched: bool = false
 # Surface parameters (base values from C# Surface addon, then multiplied below).
 # TODO - some of these values should not be in ball. Ball type shouldn't matter grass viscosity.
 # Change the *_mult values to create a different "feel" for this ball without touching global settings.
-var surface_type: int = PhysicsEnums.SurfaceType.FAIRWAY
+var surface_type: int = -1
 var _surface_zone_stack: Array[int] = []
-var _kinetic_friction: float = 0.42
-var _rolling_friction: float = 0.18
+var _kinetic_friction: float = 0.44
+var _rolling_friction: float = 0.085
 var _grass_viscosity: float = 0.0020
 var _critical_angle: float = 0.30  # radians
 var _kinetic_mult := 1.0
@@ -159,6 +162,7 @@ const DEFAULT_BALL_MOI := 0.4 * DEFAULT_BALL_MASS * DEFAULT_BALL_RADIUS * DEFAUL
 
 
 func _ready() -> void:
+	add_to_group("golf_ball")
 	_try_initialize_ball()
 	_create_physics_params()
 	reset()
@@ -436,6 +440,203 @@ func _is_collider_flagstick(collider: Object) -> bool:
 	return false
 
 
+func _is_collider_rock(collider: Object) -> bool:
+	if collider == null:
+		return false
+	if collider.has_meta("is_rock") and bool(collider.get_meta("is_rock")):
+		return true
+	if collider is Node and (collider.is_in_group("rocks") or collider.is_in_group("rock")):
+		return true
+	var c_name := String(collider.name).to_lower()
+	if c_name.begins_with("rock") or c_name.contains("rock"):
+		return true
+	var parent := (collider as Node).get_parent() if collider is Node else null
+	if parent != null:
+		if parent.has_meta("is_rock") and bool(parent.get_meta("is_rock")):
+			return true
+		if parent.is_in_group("rocks") or parent.is_in_group("rock"):
+			return true
+		var p_name := String(parent.name).to_lower()
+		if p_name.begins_with("rock") or p_name.contains("rock"):
+			return true
+	return false
+
+
+func _get_nearby_rocks(pos: Vector3, max_dist: float) -> Array:
+	var rocks: Array = []
+	var world := get_world_3d()
+	if world != null and world.direct_space_state != null:
+		var query := PhysicsShapeQueryParameters3D.new()
+		var sphere := SphereShape3D.new()
+		sphere.radius = max_dist
+		query.shape = sphere
+		query.transform = Transform3D(Basis(), pos)
+		query.collision_mask = 1
+		query.collide_with_bodies = true
+		query.collide_with_areas = false
+		query.exclude = [get_rid()]
+		var hits := world.direct_space_state.intersect_shape(query, 64)
+		for hit in hits:
+			var col = hit.get("collider")
+			if col != null and _is_collider_rock(col) and not rocks.has(col):
+				rocks.append(col)
+
+	if get_tree() != null:
+		var group_rocks := get_tree().get_nodes_in_group("rocks")
+		for r in group_rocks:
+			if r is Node3D and not rocks.has(r):
+				var r_scale: float = 1.0
+				if "scale" in r:
+					r_scale = maxf(r.scale.x, maxf(r.scale.y, r.scale.z))
+				if pos.distance_to(r.global_position) <= (r_scale * 0.9 + max_dist):
+					rocks.append(r)
+	return rocks
+
+
+func _get_ground_y_at(x: float, z: float) -> float:
+	var course = null
+	var player_parent = get_parent()
+	if player_parent != null:
+		course = player_parent.get_parent()
+	if course == null or not course.has_method("get_height"):
+		var root = get_tree().current_scene if get_tree() != null else null
+		if root != null and root.has_method("get_height"):
+			course = root
+
+	if course != null and course.has_method("get_height"):
+		return float(course.call("get_height", x, z))
+
+	var world := get_world_3d()
+	if world != null and world.direct_space_state != null:
+		var ray_start := Vector3(x, 500.0, z)
+		var ray_end := Vector3(x, -500.0, z)
+		var query := PhysicsRayQueryParameters3D.create(ray_start, ray_end)
+		query.collide_with_areas = false
+		query.collide_with_bodies = true
+		query.exclude = [get_rid()]
+		for attempt in range(5):
+			var hit := world.direct_space_state.intersect_ray(query)
+			if hit.is_empty():
+				break
+			var col = hit.get("collider")
+			if col != null and (_is_collider_rock(col) or _is_collider_tree(col)):
+				query.exclude.append(col.get_rid())
+			else:
+				return float(hit["position"].y)
+
+	return global_position.y
+
+
+func _is_position_in_water(x: float, z: float, y_ref: float) -> bool:
+	var course = null
+	var player_parent = get_parent()
+	if player_parent != null:
+		course = player_parent.get_parent()
+	if course == null:
+		course = get_tree().current_scene if get_tree() != null else null
+
+	if course != null and "water_polygons" in course:
+		var w_polys = course.water_polygons
+		if w_polys is Array:
+			var pt_2d := Vector2(x, z)
+			for poly in w_polys:
+				if poly is PackedVector2Array and Geometry2D.is_point_in_polygon(pt_2d, poly):
+					return true
+
+	var world := get_world_3d()
+	if world != null and world.direct_space_state != null:
+		var ray_start := Vector3(x, y_ref + 2.0, z)
+		var ray_end := Vector3(x, y_ref - 5.0, z)
+		var query := PhysicsRayQueryParameters3D.create(ray_start, ray_end)
+		query.collide_with_areas = false
+		query.collide_with_bodies = true
+		query.exclude = [get_rid()]
+		var hit := world.direct_space_state.intersect_ray(query)
+		if not hit.is_empty():
+			var col = hit.get("collider")
+			if col != null and ((col.has_meta("is_water") and bool(col.get_meta("is_water"))) or col.name.to_lower().contains("water")):
+				return true
+	return false
+
+
+## Checks if the ball ends within 2 feet (0.6096m) of any rock, and moves the ball 2 feet away onto playable ground.
+func ensure_rock_clearance() -> bool:
+	var rocks := _get_nearby_rocks(global_position, TWO_FEET_METERS)
+	if rocks.is_empty():
+		return false
+
+	var ball_pos_2d := Vector2(global_position.x, global_position.z)
+	var away_dir_2d := Vector2.ZERO
+	for r in rocks:
+		var r_pos_3d: Vector3 = r.global_position if r is Node3D else global_position
+		var diff := ball_pos_2d - Vector2(r_pos_3d.x, r_pos_3d.z)
+		if diff.length_squared() > 0.0001:
+			away_dir_2d += diff.normalized()
+		else:
+			away_dir_2d += Vector2(1.0, 0.0)
+
+	if away_dir_2d.length_squared() > 0.0001:
+		away_dir_2d = away_dir_2d.normalized()
+	else:
+		if not shot_start_pos_global.is_zero_approx():
+			var s_diff := Vector2(shot_start_pos_global.x - global_position.x, shot_start_pos_global.z - global_position.z)
+			if s_diff.length_squared() > 0.0001:
+				away_dir_2d = s_diff.normalized()
+		if away_dir_2d.length_squared() <= 0.0001:
+			away_dir_2d = Vector2(0.0, 1.0)
+
+	var test_angles = [
+		0.0,
+		deg_to_rad(30.0), deg_to_rad(-30.0),
+		deg_to_rad(60.0), deg_to_rad(-60.0),
+		deg_to_rad(90.0), deg_to_rad(-90.0),
+		deg_to_rad(120.0), deg_to_rad(-120.0),
+		deg_to_rad(150.0), deg_to_rad(-150.0),
+		deg_to_rad(180.0)
+	]
+
+	var best_pos: Vector3 = Vector3.ZERO
+	var found_spot := false
+
+	# Step outward starting from 2 feet (0.6096m), increasing if the rock is large or multiple rocks are nearby
+	for dist_mult in [1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0]:
+		var test_dist: float = TWO_FEET_METERS * dist_mult
+		for angle in test_angles:
+			var cand_dir: Vector2 = away_dir_2d.rotated(angle)
+			var cand_2d: Vector2 = ball_pos_2d + cand_dir * test_dist
+			var cand_y: float = _get_ground_y_at(cand_2d.x, cand_2d.y)
+			var cand_pos := Vector3(cand_2d.x, cand_y + GROUND_CENTER_HEIGHT + GROUND_SNAP_OFFSET, cand_2d.y)
+
+			if _is_position_in_water(cand_2d.x, cand_2d.y, cand_y):
+				continue
+
+			var rocks_at_cand := _get_nearby_rocks(cand_pos, TWO_FEET_METERS)
+			if rocks_at_cand.is_empty():
+				best_pos = cand_pos
+				found_spot = true
+				break
+
+		if found_spot:
+			break
+
+	if not found_spot:
+		# Fallback: move 2 feet along away_dir_2d
+		var cand_2d: Vector2 = ball_pos_2d + away_dir_2d * TWO_FEET_METERS
+		var cand_y: float = _get_ground_y_at(cand_2d.x, cand_2d.y)
+		best_pos = Vector3(cand_2d.x, cand_y + GROUND_CENTER_HEIGHT + GROUND_SNAP_OFFSET, cand_2d.y)
+
+	var prev_pos := global_position
+	global_position = best_pos
+	curr_physics_pos = best_pos
+	prev_physics_pos = best_pos
+	_current_ground_y = best_pos.y - (GROUND_CENTER_HEIGHT + GROUND_SNAP_OFFSET)
+	_update_surface_from_underneath()
+
+	print("[ball.gd] Rock relief applied: Ball ended within 2 feet of rock at %s. Moved 2 feet away to %s." % [str(prev_pos), str(best_pos)])
+	return true
+
+
+
 func _connect_settings() -> void:
 	GlobalSettings.range_settings.temperature.setting_changed.connect(_on_environment_changed)
 	GlobalSettings.range_settings.altitude.setting_changed.connect(_on_environment_changed)
@@ -443,7 +644,7 @@ func _connect_settings() -> void:
 	GlobalSettings.range_settings.surface_type.setting_changed.connect(_on_surface_type_changed)
 	GlobalSettings.range_settings.green_speed.setting_changed.connect(_on_green_speed_changed)
 	
-	if has_node("/root/EventBus"):
+	if is_inside_tree() and has_node("/root/EventBus"):
 		var eb = get_node("/root/EventBus")
 		if eb.has_signal("club_selected") and not eb.is_connected("club_selected", Callable(self, "_on_club_selected")):
 			eb.connect("club_selected", Callable(self, "_on_club_selected"))
@@ -505,7 +706,8 @@ func _create_physics_params():
 				0.0,
 				0.0,
 				0.0,
-				is_putt
+				is_putt,
+				1.0
 			]
 		)
 		if created_params == null:
@@ -615,6 +817,8 @@ func exit_surface_zone(surface: int) -> void:
 
 
 func _apply_surface_params() -> void:
+	if _surface == null:
+		_try_initialize_ball()
 	if _surface == null:
 		return
 	var params_variant = _call_openfairway_method(_surface, &"get_params", &"GetParams", [surface_type])
@@ -985,9 +1189,10 @@ func _physics_process(delta: float) -> void:
 		else:
 			var contact_vel := velocity + omega.cross(-floor_normal * _ball_radius)
 			var tangent_slip := contact_vel - floor_normal * contact_vel.dot(floor_normal)
-			if tangent_slip.length() < 0.1:
+			if tangent_slip.length() < 0.15:
 				if velocity.length_squared() > 0.0001:
 					omega = (floor_normal.cross(velocity)) / _ball_radius
+				rollout_impact_spin_rpm = 0.0
 
 	# Rotate ball mesh based on angular velocity (omega)
 	if _ball_mesh != null and omega.length_squared() > 0.00001:
@@ -1054,7 +1259,8 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 		var is_rolling := was_on_ground or is_putt or state == PhysicsEnums.BallState.ROLLOUT
 		if not is_ground_norm and is_rolling:
 			var is_tree := _is_collider_tree(collider)
-			if not is_tree and not is_flagstick:
+			var is_rock := _is_collider_rock(collider)
+			if not is_tree and not is_flagstick and not is_rock:
 				# Probe ahead across the edge to check if there is rollable ground on top of the step/lip
 				var forward_dir := -Vector3(normal.x, 0.0, normal.z).normalized()
 				if forward_dir.is_zero_approx():
@@ -1391,7 +1597,11 @@ func _get_active_hole_position(ball_pos: Vector3 = Vector3.ZERO) -> Vector3:
 	if parent_scene == null:
 		return Vector3.ZERO
 
-	# 1. Single-hole course play / range position
+	# Driving range has no golf holes
+	if ("is_driving_range" in parent_scene and bool(parent_scene.get("is_driving_range"))) or (parent_scene.has_meta("is_driving_range") and bool(parent_scene.get_meta("is_driving_range"))):
+		return Vector3.ZERO
+
+	# 1. Single-hole course play position
 	if "current_hole_location" in parent_scene and not parent_scene.current_hole_location.is_zero_approx():
 		return parent_scene.current_hole_location
 
@@ -1436,6 +1646,8 @@ func _enter_rest_state() -> void:
 	_canopy_time = 0.0
 	if _leaves_player and _leaves_player.playing:
 		_leaves_player.stop()
+	if not is_in_water:
+		ensure_rock_clearance()
 	emit_signal("rest")
 
 
@@ -1564,32 +1776,59 @@ func _check_is_on_teebox() -> bool:
 
 
 func hit() -> void:
-	var target_hole = get_target_hole_position()
-	var dist_to_target = global_position.distance_to(target_hole) if not target_hole.is_zero_approx() else 999.0
-	var is_on_green = (lie_type == "green" or lie_type == "fringe" or _is_position_on_fringe(global_position) or current_selected_club.to_lower() in ["pt", "putt", "putter"])
-	if is_on_green:
-		var dist_to_hole = global_position.distance_to(target_hole) if not target_hole.is_zero_approx() else 5.0
-		var putt_speed_mps = sqrt(2.0 * 0.48 * maxf(dist_to_hole, 0.5)) * 1.02
-		var putt_speed_mph = putt_speed_mps * 2.23694
-		var data := {
-			"Speed": clampf(putt_speed_mph, 3.0, 25.0),
-			"VLA": 0.0,
-			"HLA": 0.0,
-			"TotalSpin": 0.0,
-			"SpinAxis": 0.0,
-			"Club": "Pt",
-			"ShotType": "putt"
-		}
-		hit_from_data(data)
+	var target_pos := Vector3.ZERO
+	var player_node = get_parent()
+	var course = player_node.get_parent() if player_node != null else null
+	if course != null and "aim_target_pos" in course and course.aim_target_pos is Vector3 and not course.aim_target_pos.is_zero_approx():
+		target_pos = course.aim_target_pos
 	else:
-		var data := {
-			"Speed": 100.0,
-			"VLA": 22.0,
-			"HLA": -3.1,
-			"TotalSpin": 6000.0,
-			"SpinAxis": 3.5,
-		}
-		hit_from_data(data)
+		target_pos = get_target_hole_position()
+
+	var is_on_green = (lie_type == "green" or lie_type == "fringe" or _is_position_on_fringe(global_position) or current_selected_club.to_lower() in ["pt", "putt", "putter"])
+	
+	# Determine distance and payload
+	var dist_yards := 150.0
+	if not target_pos.is_zero_approx():
+		var p1_flat = Vector2(global_position.x, global_position.z)
+		var p2_flat = Vector2(target_pos.x, target_pos.z)
+		var horizontal_dist_yards = p1_flat.distance_to(p2_flat) * 1.09361
+		var elevation_diff_yards = (target_pos.y - global_position.y) * 1.09361
+		dist_yards = maxf(1.0, horizontal_dist_yards + elevation_diff_yards)
+	elif is_on_green:
+		dist_yards = 5.0
+
+	var club = "Pt" if is_on_green else current_selected_club
+	var distance_menu_script = load("res://UI/distance_menu.gd")
+	var data: Dictionary = {}
+	if distance_menu_script != null and distance_menu_script.has_method("build_shot_payload"):
+		data = distance_menu_script.build_shot_payload(dist_yards, club)
+	else:
+		if is_on_green:
+			var putt_speed = 1.8 * sqrt(dist_yards)
+			data = {
+				"Speed": clampf(putt_speed, 2.0, 40.0),
+				"VLA": 0.0,
+				"HLA": 0.0,
+				"TotalSpin": 50.0,
+				"SpinAxis": 0.0,
+				"Club": "Pt",
+				"ShotType": "putt"
+			}
+		else:
+			data = {
+				"Speed": 100.0,
+				"VLA": 22.0,
+				"HLA": 0.0,
+				"TotalSpin": 6000.0,
+				"SpinAxis": 0.0,
+				"Club": club
+			}
+
+	if player_node != null and "shot_data" in player_node:
+		player_node.shot_data = data.duplicate()
+		player_node.shot_data["TargetDistance"] = dist_yards / 1.09361
+
+	hit_from_data(data)
 
 
 func hit_from_data(data: Dictionary) -> void:
@@ -1822,6 +2061,9 @@ func hit_from_data(data: Dictionary) -> void:
 
 	if has_node("/root/TensionManager"):
 		TensionManager.reset_for_new_shot()
+		if TensionManager.is_course_play_active() and not _cached_target_hole.is_zero_approx():
+			if TensionManager.is_shot_eligible_for_suspense(global_position, _cached_target_hole, is_putt, shot_was_in_sand):
+				TensionManager.predict_shot_outcome(global_position, velocity, is_putt, _cached_target_hole, shot_was_in_sand)
 
 	_print_launch_debug(data, speed_mps, vla_deg, hla_deg, total_spin, spin_axis)
 
@@ -2051,12 +2293,14 @@ func _update_surface_from_underneath() -> void:
 	# to prioritize hitting specific surface colliders first.
 	if not _terrain_cache_searched:
 		_terrain_cache_searched = true
-		var curr = get_parent()
-		while curr != null:
+		var curr = get_parent() if is_inside_tree() else null
+		while curr != null and is_instance_valid(curr):
 			if _cached_terrain_static == null:
 				_cached_terrain_static = curr.get_node_or_null("TerrainStatic") as CollisionObject3D
 			if _cached_rough_static == null:
 				_cached_rough_static = curr.get_node_or_null("RoughStatic") as CollisionObject3D
+			if not curr.is_inside_tree():
+				break
 			curr = curr.get_parent()
 		
 	if is_instance_valid(_cached_terrain_static):

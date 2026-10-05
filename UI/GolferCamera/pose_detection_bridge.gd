@@ -15,6 +15,8 @@ signal server_ready()
 signal desktop_cameras_updated(cameras: Array)
 signal desktop_frame_received(image: Image, texture: Texture2D, landmarks: Dictionary)
 
+var last_capture_timestamp_usec: int = 0
+
 # Platform state
 var _is_android: bool = false
 var _plugin = null  # Android GodotPlugin singleton
@@ -53,6 +55,9 @@ const FRAME_INTERVAL: float = 0.04  # ~25 FPS cap for desktop camera streaming
 func _ready() -> void:
 	_is_android = OS.get_name() == "Android" or OS.has_feature("android")
 	
+	if DisplayServer.get_name() == "headless":
+		return
+
 	if _is_android:
 		_init_android_plugin()
 	else:
@@ -110,6 +115,9 @@ func _on_android_camera_frame(jpg_bytes: PackedByteArray, json_str: String) -> v
 		detected = json.data.get("detected", false)
 		if detected:
 			landmarks = json.data.get("landmarks", {})
+		var ts_ns: int = int(json.data.get("timestamp_ns", 0))
+		if ts_ns > 0:
+			last_capture_timestamp_usec = int(ts_ns / 1000)
 	
 	if detected:
 		pose_detected.emit(landmarks)
@@ -130,7 +138,7 @@ func request_camera_permission_if_needed() -> bool:
 		if OS.has_method("request_permission"):
 			OS.call("request_permission", "android.permission.CAMERA")
 		elif OS.has_method("request_permissions"):
-			OS.call("request_permissions")
+			OS.call("request_permission", "android.permission.CAMERA")
 		return false
 	return true
 
@@ -337,17 +345,20 @@ func _on_health_response(_result: int, response_code: int, _headers: PackedStrin
 func fetch_desktop_cameras() -> void:
 	if _is_android:
 		desktop_cameras = []
-		var count: int = 2
-		if _plugin != null and _plugin.has_method("getCameraCount"):
-			var plugin_count: int = _plugin.call("getCameraCount")
-			if plugin_count > 0:
-				count = plugin_count
-		desktop_cameras.append({"id": 0, "name": "Back Camera (Device)", "facing": 0})
-		if count > 1:
-			desktop_cameras.append({"id": 1, "name": "Front Camera (Device)", "facing": 1})
-		for i in range(2, count):
-			desktop_cameras.append({"id": i, "name": "Camera %d (Device)" % i, "facing": i})
-		print("[PoseDetectionBridge] Android cameras detected (%d available)." % desktop_cameras.size())
+		if _plugin != null and _plugin.has_method("hasCamera") and _plugin.call("hasCamera"):
+			var count: int = 2
+			if _plugin.has_method("getCameraCount"):
+				var plugin_count: int = _plugin.call("getCameraCount")
+				if plugin_count > 0:
+					count = plugin_count
+			desktop_cameras.append({"id": 0, "name": "Back Camera (Device)", "facing": 0})
+			if count > 1:
+				desktop_cameras.append({"id": 1, "name": "Front Camera (Device)", "facing": 1})
+			for i in range(2, count):
+				desktop_cameras.append({"id": i, "name": "Camera %d (Device)" % i, "facing": i})
+			print("[PoseDetectionBridge] Android cameras detected via native plugin (%d available)." % desktop_cameras.size())
+		else:
+			print("[PoseDetectionBridge] No native MediaPipe Android camera plugin detected; desktop_cameras left empty to allow Godot CameraServer.")
 		desktop_cameras_updated.emit(desktop_cameras)
 		return
 	
@@ -514,6 +525,9 @@ func _on_cam_capture_response(_result: int, response_code: int, _headers: Packed
 			var b64_img: String = data.get("image_base64", "")
 			var landmarks: Dictionary = data.get("landmarks", {})
 			var detected: bool = data.get("detected", false)
+			var ts_ns: int = int(data.get("timestamp_ns", 0))
+			if ts_ns > 0:
+				last_capture_timestamp_usec = int(ts_ns / 1000)
 			
 			if not b64_img.is_empty():
 				var bytes := Marshalls.base64_to_raw(b64_img)

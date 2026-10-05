@@ -18,8 +18,11 @@ var overlay: PuttingCameraOverlay = null:
 			_established_ball_pos = overlay.circle_center
 var detector: PuttingBallDetector = PuttingBallDetector.new()
 
+const FrameRateMonitorClass = preload("res://UI/PuttingCamera/frame_rate_monitor.gd")
+
 ## Framerate (used for timeouts and fallback estimates)
 var active_fps: float = 30.0
+var frame_rate_monitor: RefCounted = FrameRateMonitorClass.new()
 
 ## Sensor / image dimensions of the most recent frame
 var last_frame_size: Vector2 = Vector2(1280, 720)
@@ -96,6 +99,8 @@ var _audio_player: AudioStreamPlayer = null
 
 func _ready() -> void:
 	set_process(false)  # Processing is driven by process_frame() calls, not _process()
+	if frame_rate_monitor == null:
+		frame_rate_monitor = FrameRateMonitorClass.new()
 	_setup_audio_player()
 
 
@@ -130,10 +135,21 @@ func _play_ready_sound() -> void:
 		_audio_player.play()
 
 
-## Called by range_ui.gd for every incoming camera frame
-func process_frame(image: Image) -> void:
+## Called by range_ui.gd or PuttingCameraWidget for every incoming camera frame
+func process_frame(image: Image, source_time_usec: int = -1) -> void:
 	if overlay == null or image == null:
 		return
+
+	var frame_time_msec: int = int(source_time_usec / 1000) if source_time_usec > 0 else Time.get_ticks_msec()
+
+	if frame_rate_monitor != null:
+		var is_unique = frame_rate_monitor.record_frame(source_time_usec)
+		if not is_unique:
+			return # Duplicate frame dropped to protect delta time calculation
+		if frame_rate_monitor.current_fps >= 1.0:
+			set_fps(frame_rate_monitor.current_fps)
+		if overlay != null:
+			overlay.set_fps_metrics(frame_rate_monitor.get_status_text(), int(frame_rate_monitor.stability_tier))
 
 	_total_frames_processed += 1
 	last_frame_size = Vector2(image.get_width(), image.get_height())
@@ -146,9 +162,9 @@ func process_frame(image: Image) -> void:
 		State.IDLE:
 			_handle_idle(result, image)
 		State.READY:
-			_handle_ready(result)
+			_handle_ready(result, frame_time_msec)
 		State.TRACKING:
-			_handle_tracking(result)
+			_handle_tracking(result, frame_time_msec)
 		State.EXECUTION:
 			_handle_execution(result, image)
 
@@ -162,6 +178,14 @@ func _handle_idle(result: Dictionary, image: Image = null) -> void:
 			overlay.set_ball_in_circle(true)
 			if result.get("at_rest", false):
 				_established_ball_pos = center
+
+				# HARD GATE: Verify framerate meets the minimum threshold (>= 15.0 FPS)
+				if frame_rate_monitor != null and frame_rate_monitor.total_frames_measured >= FrameRateMonitorClass.MIN_SAMPLES_FOR_VALIDATION:
+					if not frame_rate_monitor.is_valid_for_tracking:
+						if overlay != null:
+							overlay.show_framerate_lock_notice("⚠️ Camera FPS too low (%.1f FPS)\nMinimum 15.0 FPS required" % frame_rate_monitor.current_fps)
+						return
+
 				if image != null:
 					detector.sample_reference_color(image, center)
 				_transition_to(State.READY)
@@ -172,7 +196,15 @@ func _handle_idle(result: Dictionary, image: Image = null) -> void:
 		overlay.set_ball_position(Vector2.ZERO)
 
 
-func _handle_ready(result: Dictionary) -> void:
+func _handle_ready(result: Dictionary, frame_time_msec: int = -1) -> void:
+	# Hard-gate safety: if framerate drops below 15 FPS while ready, revert to IDLE
+	if frame_rate_monitor != null and frame_rate_monitor.total_frames_measured >= FrameRateMonitorClass.MIN_SAMPLES_FOR_VALIDATION and not frame_rate_monitor.is_valid_for_tracking:
+		if overlay != null:
+			overlay.show_framerate_lock_notice("⚠️ Camera FPS dropped (< 15 FPS)")
+		overlay.set_ball_in_circle(false)
+		_transition_to(State.IDLE)
+		return
+
 	var center: Vector2 = result.get("center", Vector2.ZERO)
 	var found: bool = result.get("found", false)
 
@@ -187,12 +219,12 @@ func _handle_ready(result: Dictionary) -> void:
 			# Has it moved significantly forward?
 			var dy = center.y - _established_ball_pos.y
 			if dy <= -0.012:
-				_start_tracking(center)
+				_start_tracking(center, frame_time_msec)
 				return
 		else:
 			# Ball is outside circle: check if it moved FORWARD (putt launched!)
 			if center.y < _established_ball_pos.y - 0.012:
-				_start_tracking(center)
+				_start_tracking(center, frame_time_msec)
 				return
 			else:
 				# Ball moved outside circle backwards or sideways without forward progress
@@ -203,22 +235,27 @@ func _handle_ready(result: Dictionary) -> void:
 		# Ball disappeared from circle!
 		# Could be a fast-exit putt (exited circle in 1 frame) or ball picked up.
 		# Start tracking from established ball position to search the forward corridor!
-		_start_tracking(_established_ball_pos)
+		_start_tracking(_established_ball_pos, frame_time_msec)
 
 
-func _start_tracking(first_seen_pos: Vector2) -> void:
+func _start_tracking(first_seen_pos: Vector2, frame_time_msec: int = -1) -> void:
 	_tracking_start_frame = _total_frames_processed
 	_tracking_frame_count = 0
-	_tracking_start_time_msec = Time.get_ticks_msec()
-	_last_seen_time_msec = _tracking_start_time_msec
+	var now_msec: int = frame_time_msec if frame_time_msec > 0 else Time.get_ticks_msec()
+	_tracking_start_time_msec = now_msec
+	_last_seen_time_msec = now_msec
 	_tracking_start_position = _established_ball_pos
 	_last_seen_pos = first_seen_pos
 
 	var frame_interval_msec: int = int(1000.0 / maxf(active_fps, 10.0))
 	if first_seen_pos != _established_ball_pos:
-		# Ball was detected at first_seen_pos on this frame, meaning it departed rest 1 frame prior.
-		# Backdate the rest position timestamp so the initial segment duration is physically accurate.
-		_tracking_start_time_msec = _last_seen_time_msec - frame_interval_msec
+		# Sub-frame departure extrapolation:
+		var forward_dist = _established_ball_pos.y - first_seen_pos.y
+		var dep_dt = frame_interval_msec
+		if forward_dist > 0.012:
+			var frac = clampf((forward_dist - 0.012) / maxf(forward_dist, 0.001), 0.25, 0.95)
+			dep_dt = int(float(frame_interval_msec) * frac)
+		_tracking_start_time_msec = _last_seen_time_msec - dep_dt
 		_trajectory = [
 			{ "pos": _established_ball_pos, "time": _tracking_start_time_msec },
 			{ "pos": first_seen_pos, "time": _last_seen_time_msec }
@@ -231,9 +268,9 @@ func _start_tracking(first_seen_pos: Vector2) -> void:
 	_transition_to(State.TRACKING)
 
 
-func _handle_tracking(result: Dictionary) -> void:
+func _handle_tracking(result: Dictionary, frame_time_msec: int = -1) -> void:
 	_tracking_frame_count += 1
-	var now_msec: int = Time.get_ticks_msec()
+	var now_msec: int = frame_time_msec if frame_time_msec > 0 else Time.get_ticks_msec()
 
 	if result.get("found", false):
 		var center: Vector2 = result.get("center", Vector2.ZERO)
@@ -380,38 +417,59 @@ func _calculate_and_dispatch_putt() -> void:
 	var elapsed_sec: float = maxf(wall_elapsed_sec, expected_sensor_sec * 0.85)
 	elapsed_sec = maxf(elapsed_sec, 0.05)  # Enforce physical minimum elapsed time (50ms)
 
-	# Calculate speed in normalized screen units per second
-	# Use segment speeds across trajectory if available to reject network stalls and packet jitter
+	# Calculate speed in normalized screen units per second using OLS Linear Regression
 	var norm_speed: float = 0.0
-	var segment_speeds: Array[float] = []
-	var min_dt: float = 0.70 / maxf(active_fps, 15.0)
-	var max_plausible_seg_norm: float = (max_putt_speed_mph / speed_calibration_constant) * 1.5
-
-	if _trajectory.size() >= 2:
-		for i in range(1, _trajectory.size()):
-			var raw_dt = float(_trajectory[i]["time"] - _trajectory[i - 1]["time"]) / 1000.0
-			var dt = maxf(raw_dt, min_dt)
-			var d = (_trajectory[i]["pos"] as Vector2).distance_to(_trajectory[i - 1]["pos"] as Vector2)
-			if dt >= 0.01 and dt <= 0.6 and d >= 0.005:
-				var seg_spd = d / dt
-				if seg_spd <= max_plausible_seg_norm:
-					segment_speeds.append(seg_spd)
-
 	var overall_norm_speed: float = distance_norm / elapsed_sec
 
-	if segment_speeds.size() >= 3:
-		segment_speeds.sort()
-		var mid = segment_speeds.size() / 2
-		var median_spd = segment_speeds[mid]
-		if segment_speeds.size() % 2 == 0:
-			median_spd = (segment_speeds[mid - 1] + segment_speeds[mid]) * 0.5
-		norm_speed = 0.6 * median_spd + 0.4 * overall_norm_speed
-	elif segment_speeds.size() >= 1:
-		var sum_spd: float = 0.0
-		for s in segment_speeds:
-			sum_spd += s
-		var avg_spd = sum_spd / float(segment_speeds.size())
-		norm_speed = 0.5 * avg_spd + 0.5 * overall_norm_speed
+	if _trajectory.size() >= 3:
+		# Ordinary Least Squares (OLS) slope on (t_i, d_i)
+		var t_pts: Array[float] = []
+		var d_pts: Array[float] = []
+		var t0_sec = float(_trajectory[0]["time"]) / 1000.0
+		var p0: Vector2 = _trajectory[0]["pos"]
+
+		# Scale time if wall elapsed time is shorter than expected sensor time (anti-burst clustering)
+		var time_scale: float = elapsed_sec / maxf(wall_elapsed_sec, 0.01)
+
+		for pt in _trajectory:
+			var t_sec = (float(pt["time"]) / 1000.0 - t0_sec) * time_scale
+			var d = (pt["pos"] as Vector2).distance_to(p0)
+			t_pts.append(t_sec)
+			d_pts.append(d)
+
+		var n_pts = float(t_pts.size())
+		var sum_t: float = 0.0
+		var sum_d: float = 0.0
+		for i in range(t_pts.size()):
+			sum_t += t_pts[i]
+			sum_d += d_pts[i]
+
+		var mean_t = sum_t / n_pts
+		var mean_d = sum_d / n_pts
+
+		var numerator: float = 0.0
+		var denominator: float = 0.0
+		for i in range(t_pts.size()):
+			var dt = t_pts[i] - mean_t
+			numerator += dt * (d_pts[i] - mean_d)
+			denominator += dt * dt
+
+		if denominator > 1e-6 and numerator > 0.0:
+			var ols_slope = numerator / denominator
+			var max_res: float = 0.0
+			for i in range(t_pts.size()):
+				var expected_d = ols_slope * t_pts[i]
+				var res = absf(d_pts[i] - expected_d)
+				if res > max_res:
+					max_res = res
+
+			# Outlier check: if linear fit is solid, use OLS slope
+			if max_res <= 0.08:
+				norm_speed = ols_slope
+			else:
+				norm_speed = 0.7 * ols_slope + 0.3 * overall_norm_speed
+		else:
+			norm_speed = overall_norm_speed
 	else:
 		norm_speed = overall_norm_speed
 

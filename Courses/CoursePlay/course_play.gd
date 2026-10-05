@@ -77,6 +77,7 @@ var golfer_cam_btn: Button = null
 var putting_cam_btn: Button = null
 var announcer_btn: Button = null
 var tension_btn: Button = null
+var _screen_offset_ctrl: Control = null
 var club_selector_node: Control = null
 
 var course_instance: Node = null
@@ -252,11 +253,11 @@ func _setup_hud() -> void:
 	)
 	confirm_btn.name = "ConfirmBtn"
 	cancel_btn.name = "CancelBtn"
+	btn_hbox.add_child(cancel_btn)
 	confirm_btn.focus_neighbor_right = confirm_btn.get_path_to(cancel_btn)
 	confirm_btn.focus_neighbor_left = confirm_btn.get_path_to(cancel_btn)
 	cancel_btn.focus_neighbor_left = cancel_btn.get_path_to(confirm_btn)
 	cancel_btn.focus_neighbor_right = cancel_btn.get_path_to(confirm_btn)
-	btn_hbox.add_child(cancel_btn)
 	
 	content_vbox.add_child(btn_hbox)
 	mulligan_confirm_dialog.add_child(content_vbox)
@@ -397,6 +398,7 @@ func _setup_hud() -> void:
 	exit_no_btn.pressed.connect(func():
 		exit_confirm_dialog.visible = false
 	)
+	exit_btn_hbox.add_child(exit_no_btn)
 	exit_yes_btn.focus_neighbor_right = exit_yes_btn.get_path_to(exit_no_btn)
 	exit_yes_btn.focus_neighbor_left = exit_yes_btn.get_path_to(exit_no_btn)
 	exit_no_btn.focus_neighbor_left = exit_no_btn.get_path_to(exit_yes_btn)
@@ -946,6 +948,20 @@ func _setup_hud() -> void:
 	)
 	toggles_container.add_child(tension_btn)
 
+	# Screen Offset Toggle & Dual Sliders (General & Putter)
+	var so_script = load("res://UI/ScreenOffset/screen_offset_control.gd")
+	var so_ctrl = so_script.new()
+	so_ctrl.name = "ScreenOffsetControl"
+	so_ctrl.is_course_play = true
+	so_ctrl.show_putter_slider = true
+	so_ctrl.style_button = func(btn: Button, is_on: bool):
+		var c = Color(0.2, 0.5, 0.75, 0.85) if is_on else Color(0.5, 0.5, 0.5, 0.85)
+		apply_material_button_style(btn, c)
+	toggles_container.add_child(so_ctrl)
+	_screen_offset_ctrl = so_ctrl
+	if so_ctrl.has_signal("offset_toggled"):
+		so_ctrl.offset_toggled.connect(func(_on): call_deferred("_update_hud_focus_neighbors"))
+
 	# Distance Menu setup
 	var distance_menu_script = load("res://UI/distance_menu.gd")
 	var dist_menu = distance_menu_script.new()
@@ -1062,22 +1078,6 @@ func _setup_hud() -> void:
 	)
 	toggles_container.add_child(shot_analysis_btn)
 
-	# Sky View Toggle Button
-	var sky_view_btn = Button.new()
-	sky_view_btn.name = "SkyViewButton"
-	sky_view_btn.text = "☁ Sky View"
-	sky_view_btn.custom_minimum_size = Vector2(180, 56)
-	apply_material_button_style(sky_view_btn, Color(0.4, 0.6, 0.8, 0.85)) # Light blue
-	sky_view_btn.pressed.connect(func():
-		if course_instance and course_instance.has_method("toggle_sky_view"):
-			course_instance.call("toggle_sky_view")
-			var is_sky = course_instance.get("is_sky_view_active")
-			if is_sky:
-				apply_material_button_style(sky_view_btn, Color(0.2, 0.8, 0.9, 0.85))
-			else:
-				apply_material_button_style(sky_view_btn, Color(0.4, 0.6, 0.8, 0.85))
-	)
-	toggles_container.add_child(sky_view_btn)
 
 	var is_match_play = not MultiplayerManager.players.is_empty() and not MultiplayerManager.practice_mode_active
 
@@ -1778,6 +1778,7 @@ func _setup_hud() -> void:
 					if m_tee_opt.get_item_text(t_i).to_lower() == pref_tee.to_lower():
 						m_tee_opt.selected = t_i
 						break
+		_update_manage_players_focus_neighbors()
 	)
 	
 	var m_add_btn = Button.new()
@@ -1810,6 +1811,7 @@ func _setup_hud() -> void:
 			_refresh_manage_players_dropdown()
 			_populate_manage_players()
 			_populate_scorecard("toggle")
+			select_opt.call_deferred("grab_focus")
 	)
 	
 	# Close button
@@ -1822,8 +1824,7 @@ func _setup_hud() -> void:
 	m_vbox.add_child(m_close_btn)
 	
 	m_close_btn.pressed.connect(func():
-		hud_manage_players.visible = false
-		_set_other_elements_visible(true)
+		_close_manage_players_panel()
 	)
 	
 	margin.add_child(hud_manage_players)
@@ -1998,25 +1999,28 @@ func _update_hud_focus_neighbors() -> void:
 
 	# Wire helper vertical list if open
 	if toggles_scroll != null and is_instance_valid(toggles_scroll) and toggles_scroll.visible:
-		var helper_buttons: Array[Button] = []
+		var helper_controls: Array[Control] = []
 		var container = toggles_scroll.get_node_or_null("TogglesContainer")
 		if container != null:
 			for ch in container.get_children():
 				if ch is Button and ch.visible:
-					helper_buttons.append(ch)
-		for i in range(helper_buttons.size()):
-			var h_btn = helper_buttons[i]
+					helper_controls.append(ch)
+				elif ch is ScreenOffsetControl and ch.visible:
+					for foc in ch.get_focusables():
+						helper_controls.append(foc)
+		for i in range(helper_controls.size()):
+			var h_ctrl = helper_controls[i]
 			if i == 0 and hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
-				h_btn.focus_neighbor_top = h_btn.get_path_to(hide_helpers_btn)
+				h_ctrl.focus_neighbor_top = h_ctrl.get_path_to(hide_helpers_btn)
 			elif i > 0:
-				h_btn.focus_neighbor_top = h_btn.get_path_to(helper_buttons[i - 1])
-			if i < helper_buttons.size() - 1:
-				h_btn.focus_neighbor_bottom = h_btn.get_path_to(helper_buttons[i + 1])
+				h_ctrl.focus_neighbor_top = h_ctrl.get_path_to(helper_controls[i - 1])
+			if i < helper_controls.size() - 1:
+				h_ctrl.focus_neighbor_bottom = h_ctrl.get_path_to(helper_controls[i + 1])
 			else:
 				if map_btn != null and is_instance_valid(map_btn):
-					h_btn.focus_neighbor_bottom = h_btn.get_path_to(map_btn)
+					h_ctrl.focus_neighbor_bottom = h_ctrl.get_path_to(map_btn)
 				elif prev_shot_btn != null and is_instance_valid(prev_shot_btn):
-					h_btn.focus_neighbor_bottom = h_btn.get_path_to(prev_shot_btn)
+					h_ctrl.focus_neighbor_bottom = h_ctrl.get_path_to(prev_shot_btn)
 
 
 func is_any_dialog_open() -> bool:
@@ -2140,20 +2144,41 @@ func _handle_mulligan_dialog_input(event: InputEvent) -> bool:
 	if mulligan_confirm_dialog == null or not mulligan_confirm_dialog.visible:
 		return false
 
-	var is_cancel = (event is InputEventKey and (event as InputEventKey).keycode == KEY_ESCAPE) or (event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == JOY_BUTTON_B)
-	var is_enter = (event is InputEventKey and ((event as InputEventKey).keycode == KEY_ENTER or (event as InputEventKey).keycode == KEY_KP_ENTER)) or (event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == JOY_BUTTON_A)
+	var is_cancel = (event is InputEventKey and (event as InputEventKey).keycode == KEY_ESCAPE) or (event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == JOY_BUTTON_B) or event.is_action_pressed("ui_cancel")
+	var is_enter = (event is InputEventKey and ((event as InputEventKey).keycode == KEY_ENTER or (event as InputEventKey).keycode == KEY_KP_ENTER)) or (event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == JOY_BUTTON_A) or event.is_action_pressed("ui_accept")
 
 	if is_cancel:
+		if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == mulligan_confirm_dialog:
+			UIFocusGuard.pop_lock(false)
 		mulligan_confirm_dialog.visible = false
 		return true
 
 	if not _mulligan_is_selection_mode:
-		if event.is_action_pressed("mulligan") or is_enter:
-			mulligan_confirm_dialog.visible = false
-			_on_mulligan_confirmed()
+		if event.is_action_pressed("ui_left") or event.is_action_pressed("aim_left"):
+			if _mulligan_confirm_btn != null and is_instance_valid(_mulligan_confirm_btn):
+				_mulligan_confirm_btn.grab_focus()
 			return true
+		if event.is_action_pressed("ui_right") or event.is_action_pressed("aim_right"):
+			if _mulligan_cancel_btn != null and is_instance_valid(_mulligan_cancel_btn):
+				_mulligan_cancel_btn.grab_focus()
+			return true
+		if event.is_action_pressed("mulligan") or is_enter:
+			var cur_focus = get_viewport().gui_get_focus_owner()
+			if cur_focus == _mulligan_cancel_btn:
+				if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == mulligan_confirm_dialog:
+					UIFocusGuard.pop_lock(false)
+				mulligan_confirm_dialog.visible = false
+				return true
+			else:
+				if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == mulligan_confirm_dialog:
+					UIFocusGuard.pop_lock(false)
+				mulligan_confirm_dialog.visible = false
+				_on_mulligan_confirmed()
+				return true
 	else:
 		if event.is_action_pressed("mulligan"):
+			if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == mulligan_confirm_dialog:
+				UIFocusGuard.pop_lock(false)
 			mulligan_confirm_dialog.visible = false
 			_on_mulligan_confirmed()
 			return true
@@ -2168,6 +2193,8 @@ func _handle_mulligan_dialog_input(event: InputEvent) -> bool:
 				_update_mulligan_selection_highlight()
 			return true
 		elif is_enter:
+			if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == mulligan_confirm_dialog:
+				UIFocusGuard.pop_lock(false)
 			mulligan_confirm_dialog.visible = false
 			if _mulligan_selected_idx == 0:
 				_on_mulligan_confirmed()
@@ -2226,15 +2253,79 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if add_player_prompt_dialog != null and is_instance_valid(add_player_prompt_dialog) and add_player_prompt_dialog.visible:
-			if is_escape:
-				add_player_prompt_dialog.visible = false
-				get_viewport().gui_release_focus()
+			var join_btn = add_player_prompt_dialog.find_child("JoinCurrentButton", true, false) as Button
+			var play_btn = add_player_prompt_dialog.find_child("PlayMissedButton", true, false) as Button
+			var cancel_btn = add_player_prompt_dialog.find_child("CancelButton", true, false) as Button
+			var dialog_btns: Array[Button] = []
+			for b in [join_btn, play_btn, cancel_btn]:
+				if b != null and is_instance_valid(b) and b.visible and not b.disabled:
+					dialog_btns.append(b)
+			if is_escape or event.is_action_pressed("ui_cancel"):
+				_dismiss_add_player_dialog()
+				get_viewport().set_input_as_handled()
+				return
+			if is_enter or event.is_action_pressed("ui_accept"):
+				var cur_focus = get_viewport().gui_get_focus_owner()
+				if cur_focus != null and cur_focus in dialog_btns:
+					(cur_focus as Button).emit_signal("pressed")
+				elif not dialog_btns.is_empty():
+					dialog_btns[0].emit_signal("pressed")
+				get_viewport().set_input_as_handled()
+				return
+			if event.is_action_pressed("ui_up") or event.is_action_pressed("aim_forward") or \
+			   (event is InputEventJoypadMotion and event.axis == JOY_AXIS_LEFT_Y and event.axis_value <= -0.5):
+				_navigate_dialog_buttons(dialog_btns, -1)
+				get_viewport().set_input_as_handled()
+				return
+			if event.is_action_pressed("ui_down") or event.is_action_pressed("aim_backward") or \
+			   (event is InputEventJoypadMotion and event.axis == JOY_AXIS_LEFT_Y and event.axis_value >= 0.5):
+				_navigate_dialog_buttons(dialog_btns, 1)
+				get_viewport().set_input_as_handled()
+				return
 			get_viewport().set_input_as_handled()
 			return
 		if resume_player_prompt_dialog != null and is_instance_valid(resume_player_prompt_dialog) and resume_player_prompt_dialog.visible:
-			if is_escape:
-				resume_player_prompt_dialog.visible = false
-				get_viewport().gui_release_focus()
+			var catch_btn = resume_player_prompt_dialog.find_child("CatchUpButton", true, false) as Button
+			var skip_btn = resume_player_prompt_dialog.find_child("SkipButton", true, false) as Button
+			var cancel_btn = resume_player_prompt_dialog.find_child("CancelButton", true, false) as Button
+			var dialog_btns: Array[Button] = []
+			for b in [catch_btn, skip_btn, cancel_btn]:
+				if b != null and is_instance_valid(b) and b.visible and not b.disabled:
+					dialog_btns.append(b)
+			if is_escape or event.is_action_pressed("ui_cancel"):
+				_dismiss_resume_player_dialog()
+				get_viewport().set_input_as_handled()
+				return
+			if is_enter or event.is_action_pressed("ui_accept"):
+				var cur_focus = get_viewport().gui_get_focus_owner()
+				if cur_focus != null and cur_focus in dialog_btns:
+					(cur_focus as Button).emit_signal("pressed")
+				elif not dialog_btns.is_empty():
+					dialog_btns[0].emit_signal("pressed")
+				get_viewport().set_input_as_handled()
+				return
+			if event.is_action_pressed("ui_up") or event.is_action_pressed("aim_forward") or \
+			   (event is InputEventJoypadMotion and event.axis == JOY_AXIS_LEFT_Y and event.axis_value <= -0.5):
+				_navigate_dialog_buttons(dialog_btns, -1)
+				get_viewport().set_input_as_handled()
+				return
+			if event.is_action_pressed("ui_down") or event.is_action_pressed("aim_backward") or \
+			   (event is InputEventJoypadMotion and event.axis == JOY_AXIS_LEFT_Y and event.axis_value >= 0.5):
+				_navigate_dialog_buttons(dialog_btns, 1)
+				get_viewport().set_input_as_handled()
+				return
+			get_viewport().set_input_as_handled()
+			return
+		if hud_manage_players != null and is_instance_valid(hud_manage_players) and hud_manage_players.visible:
+			if is_escape or event.is_action_pressed("ui_cancel"):
+				_close_manage_players_panel()
+				get_viewport().set_input_as_handled()
+				return
+			var cur_focus = get_viewport().gui_get_focus_owner()
+			if cur_focus == null or not hud_manage_players.is_ancestor_of(cur_focus):
+				var select_opt = hud_manage_players.get_node_or_null("VBoxContainer/AddSection/AddRow/PlayerSelectOpt") as Control
+				if select_opt != null and select_opt.is_visible_in_tree():
+					select_opt.grab_focus()
 			get_viewport().set_input_as_handled()
 			return
 		if is_escape:
@@ -2882,6 +2973,16 @@ func _on_active_player_changed(player: Dictionary) -> void:
 		# Evaluate if the active player's default club is putter (e.g. on green or on fringe within putting distance)
 		var is_default_putter = is_default_club_putter()
 
+		if has_node("/root/ScreenOffsetManager") and course_instance != null:
+			var som = get_node("/root/ScreenOffsetManager")
+			var cam_to_register = course_instance.get_node_or_null("PhantomCamera3D")
+			if cam_to_register == null:
+				cam_to_register = course_instance.get_node_or_null("Camera3D")
+			if cam_to_register != null:
+				som.call("register_camera", cam_to_register)
+			som.call("set_putter_active", is_default_putter)
+			som.call("on_ready_for_shot")
+
 		# Synchronize green grid view strictly for the active player
 		if course_instance != null and "show_green_grid" in course_instance:
 			course_instance.show_green_grid = is_default_putter
@@ -2998,11 +3099,14 @@ func _on_mulligan_pressed() -> void:
 		btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 		
 		var confirm_btn = Button.new()
+		confirm_btn.name = "ConfirmBtn"
 		confirm_btn.text = "Yes, Undo"
 		confirm_btn.custom_minimum_size = Vector2(170, 52)
 		confirm_btn.add_theme_font_size_override("font_size", 18)
 		apply_material_button_style(confirm_btn, Color(0.24, 0.46, 0.72, 0.85))
 		confirm_btn.pressed.connect(func():
+			if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == mulligan_confirm_dialog:
+				UIFocusGuard.pop_lock(false)
 			mulligan_confirm_dialog.visible = false
 			_on_mulligan_confirmed()
 		)
@@ -3010,16 +3114,20 @@ func _on_mulligan_pressed() -> void:
 		_mulligan_confirm_btn = confirm_btn
 		
 		var cancel_btn = Button.new()
+		cancel_btn.name = "CancelBtn"
 		cancel_btn.text = "Cancel"
 		cancel_btn.custom_minimum_size = Vector2(170, 52)
 		cancel_btn.add_theme_font_size_override("font_size", 18)
 		apply_material_button_style(cancel_btn, Color(0.56, 0.22, 0.22, 0.85))
 		cancel_btn.pressed.connect(func():
+			if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == mulligan_confirm_dialog:
+				UIFocusGuard.pop_lock(false)
 			mulligan_confirm_dialog.visible = false
 		)
 		btn_hbox.add_child(cancel_btn)
 		_mulligan_cancel_btn = cancel_btn
-		
+		confirm_btn.focus_neighbor_right = confirm_btn.get_path_to(cancel_btn)
+		cancel_btn.focus_neighbor_left = cancel_btn.get_path_to(confirm_btn)
 		content_vbox.add_child(btn_hbox)
 		
 		mulligan_confirm_dialog.offset_left = -280
@@ -3131,9 +3239,14 @@ func _on_mulligan_pressed() -> void:
 		
 	mulligan_confirm_dialog.add_child(content_vbox)
 	mulligan_confirm_dialog.visible = true
-	var m_cancel = mulligan_confirm_dialog.find_child("CancelBtn", true, false) as Button
-	if m_cancel != null:
-		m_cancel.call_deferred("grab_focus")
+	UIFocusGuard.push_lock(mulligan_confirm_dialog)
+	if _mulligan_is_selection_mode:
+		var m_cancel = mulligan_confirm_dialog.find_child("CancelBtn", true, false) as Button
+		if m_cancel != null:
+			m_cancel.call_deferred("grab_focus")
+	else:
+		if _mulligan_confirm_btn != null:
+			_mulligan_confirm_btn.call_deferred("grab_focus")
 
 
 func _on_mulligan_confirmed() -> void:
@@ -3576,6 +3689,13 @@ func _process(_delta: float) -> void:
 	if ball_is_moving != _prev_ball_moving:
 		_prev_ball_moving = ball_is_moving
 		_minimap_zoom_dirty = true
+		if has_node("/root/ScreenOffsetManager"):
+			var som = get_node("/root/ScreenOffsetManager")
+			if ball_is_moving:
+				som.call("on_shot_started")
+			else:
+				som.call("set_putter_active", is_default_club_putter())
+				som.call("on_ready_for_shot")
 
 	if mulligan_btn != null and mulligan_btn.visible:
 		var can_mull = MultiplayerManager.can_mulligan() and not ball_is_moving and not hud_scorecard.visible and not hud_overview.visible
@@ -4399,6 +4519,14 @@ func aim_at_world_position(target_pos: Vector3) -> void:
 			cam3d.look_at(target_look)
 			cam3d.fov = GlobalSettings.range_settings.camera_fov.value
 
+		if has_node("/root/ScreenOffsetManager"):
+			var som = get_node("/root/ScreenOffsetManager")
+			var cam_to_register = camera if camera != null else cam3d
+			if cam_to_register != null:
+				som.call("register_camera", cam_to_register)
+			som.call("set_putter_active", is_default_club_putter())
+			som.call("on_ready_for_shot")
+
 	if player_node != null:
 		player_node.set("_last_aim_target_pos", target_pos)
 		player_node.set("_last_aim_yaw_offset_deg", aim_yaw)
@@ -4565,7 +4693,7 @@ func update_practice_ui_visibility(is_aerial: bool) -> void:
 
 func _on_scorecard_toggle_pressed() -> void:
 	if hud_manage_players.visible:
-		hud_manage_players.visible = false
+		_close_manage_players_panel()
 	if hud_overview.visible:
 		hud_overview.visible = false
 	if hud_scorecard.visible:
@@ -5203,8 +5331,12 @@ func _set_other_elements_visible(is_visible: bool) -> void:
 		forfeit_confirm_dialog.visible = false
 	if not is_visible:
 		if add_player_prompt_dialog != null and add_player_prompt_dialog.visible:
+			if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == add_player_prompt_dialog:
+				UIFocusGuard.pop_lock(false)
 			add_player_prompt_dialog.visible = false
 		if resume_player_prompt_dialog != null and resume_player_prompt_dialog.visible:
+			if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == resume_player_prompt_dialog:
+				UIFocusGuard.pop_lock(false)
 			resume_player_prompt_dialog.visible = false
 	if catch_up_banner != null:
 		catch_up_banner.visible = is_visible and MultiplayerManager.is_in_catch_up
@@ -5216,22 +5348,48 @@ func _on_manage_players_toggle_pressed() -> void:
 	if forfeit_confirm_dialog != null and forfeit_confirm_dialog.visible:
 		forfeit_confirm_dialog.visible = false
 	if add_player_prompt_dialog != null and add_player_prompt_dialog.visible:
-		add_player_prompt_dialog.visible = false
+		_dismiss_add_player_dialog()
 	if resume_player_prompt_dialog != null and resume_player_prompt_dialog.visible:
-		resume_player_prompt_dialog.visible = false
+		_dismiss_resume_player_dialog()
 	if hud_scorecard.visible:
 		_stop_scorecard_countdown()
 		hud_scorecard.visible = false
 	if hud_overview.visible:
 		hud_overview.visible = false
 	if hud_manage_players.visible:
-		hud_manage_players.visible = false
-		_set_other_elements_visible(true)
+		_close_manage_players_panel()
 	else:
-		_populate_manage_players()
-		_refresh_manage_players_dropdown()
-		hud_manage_players.visible = true
-		_set_other_elements_visible(false)
+		_open_manage_players_panel()
+
+
+func _open_manage_players_panel() -> void:
+	_populate_manage_players()
+	_refresh_manage_players_dropdown()
+	hud_manage_players.visible = true
+	_set_other_elements_visible(false)
+	UIFocusGuard.push_lock(hud_manage_players)
+	hud_manage_players.set_meta("on_focus_lock_popped", Callable(self, "_on_manage_players_lock_popped"))
+	var select_opt = hud_manage_players.get_node_or_null("VBoxContainer/AddSection/AddRow/PlayerSelectOpt") as Control
+	if select_opt != null and select_opt.is_visible_in_tree():
+		select_opt.call_deferred("grab_focus")
+
+
+func _close_manage_players_panel() -> void:
+	if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == hud_manage_players:
+		UIFocusGuard.pop_lock(false)
+	hud_manage_players.visible = false
+	_set_other_elements_visible(true)
+	var players_btn = find_child("ManagePlayersButton", true, false) as Control
+	if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
+		players_btn.call_deferred("grab_focus")
+
+
+func _on_manage_players_lock_popped() -> void:
+	hud_manage_players.visible = false
+	_set_other_elements_visible(true)
+	var players_btn = find_child("ManagePlayersButton", true, false) as Control
+	if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
+		players_btn.call_deferred("grab_focus")
 
 
 func _refresh_manage_players_dropdown() -> void:
@@ -5245,6 +5403,7 @@ func _refresh_manage_players_dropdown() -> void:
 			select_opt.add_item(registered[i].get("name", "Player"), i + 1)
 		select_opt.selected = 0
 		name_input.visible = true
+	_update_manage_players_focus_neighbors()
 
 
 func _populate_manage_players() -> void:
@@ -5275,9 +5434,11 @@ func _populate_manage_players() -> void:
 			status_str = " (Out)"
 		elif p.get("paused", false):
 			status_str = " (⏸️ Paused)"
-		elif MultiplayerManager.is_in_catch_up and MultiplayerManager.catch_up_player_name == p["name"]:
+		elif MultiplayerManager.is_in_catch_up and MultiplayerManager.catch_up_player_name == p.get("name", ""):
 			status_str = " (⛳ Catching up)"
-		name_lbl.text = "%s (%s)%s" % [p["name"], p["tee"], status_str]
+		var p_name_str = p.get("name", "Player")
+		var p_tee_str = p.get("tee", "White")
+		name_lbl.text = "%s (%s)%s" % [p_name_str, p_tee_str, status_str]
 		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if not p.get("active", true):
 			name_lbl.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
@@ -5290,7 +5451,9 @@ func _populate_manage_players() -> void:
 		# Pause / Resume Button
 		if p.get("active", true):
 			var pause_btn = Button.new()
+			pause_btn.name = "PauseBtn"
 			pause_btn.custom_minimum_size = Vector2(105, 44)
+			pause_btn.focus_mode = Control.FOCUS_ALL
 			if p.get("paused", false):
 				pause_btn.text = "▶ Resume"
 				apply_material_button_style(pause_btn, Color(0.2, 0.6, 0.5, 0.9))
@@ -5299,12 +5462,9 @@ func _populate_manage_players() -> void:
 					var paused_hole_idx = saved.get("hole_index", MultiplayerManager.current_hole_index)
 					if paused_hole_idx == MultiplayerManager.current_hole_index:
 						MultiplayerManager.resume_player(i, "same_hole")
-						hud_manage_players.visible = false
-						_set_other_elements_visible(true)
-						_populate_manage_players()
+						_close_manage_players_panel()
 						_populate_scorecard("toggle")
 					else:
-						hud_manage_players.visible = false
 						_show_resume_player_dialog(i, p, paused_hole_idx)
 				)
 			else:
@@ -5319,7 +5479,9 @@ func _populate_manage_players() -> void:
 			row.add_child(pause_btn)
 		
 		var toggle_btn = Button.new()
+		toggle_btn.name = "ToggleBtn"
 		toggle_btn.custom_minimum_size = Vector2(100, 44)
+		toggle_btn.focus_mode = Control.FOCUS_ALL
 		if p.get("active", true):
 			toggle_btn.text = "Remove"
 			apply_material_button_style(toggle_btn, Color(0.56, 0.22, 0.22, 0.85)) # Red
@@ -5340,11 +5502,114 @@ func _populate_manage_players() -> void:
 		row.add_child(toggle_btn)
 		list_node.add_child(row)
 
+	_update_manage_players_focus_neighbors()
+
+
+func _update_manage_players_focus_neighbors() -> void:
+	if hud_manage_players == null or not is_instance_valid(hud_manage_players):
+		return
+	var list_node = hud_manage_players.get_node_or_null("VBoxContainer/ScrollContainer/PlayerList") as VBoxContainer
+	var select_opt = hud_manage_players.get_node_or_null("VBoxContainer/AddSection/AddRow/PlayerSelectOpt") as OptionButton
+	var name_input = hud_manage_players.get_node_or_null("VBoxContainer/AddSection/AddRow/NameInput") as LineEdit
+	var tee_opt = hud_manage_players.get_node_or_null("VBoxContainer/AddSection/AddRow/TeeOpt") as OptionButton
+	var add_btn = hud_manage_players.get_node_or_null("VBoxContainer/AddSection/AddRow/AddBtn") as Button
+	var close_btn = hud_manage_players.get_node_or_null("VBoxContainer/CloseBtn") as Button
+
+	if select_opt == null or tee_opt == null or add_btn == null or close_btn == null:
+		return
+
+	# Determine visible controls in AddRow
+	var add_controls: Array[Control] = [select_opt]
+	if name_input != null and is_instance_valid(name_input) and name_input.visible:
+		add_controls.append(name_input)
+	add_controls.append(tee_opt)
+	add_controls.append(add_btn)
+
+	# Wire horizontal neighbors for AddRow
+	for i in range(add_controls.size()):
+		var ctrl = add_controls[i]
+		ctrl.focus_mode = Control.FOCUS_ALL
+		var left_ctrl = add_controls[(i - 1 + add_controls.size()) % add_controls.size()]
+		var right_ctrl = add_controls[(i + 1) % add_controls.size()]
+		ctrl.focus_neighbor_left = ctrl.get_path_to(left_ctrl)
+		ctrl.focus_neighbor_right = ctrl.get_path_to(right_ctrl)
+
+	# Close button horizontal links wrap to self
+	close_btn.focus_mode = Control.FOCUS_ALL
+	close_btn.focus_neighbor_left = close_btn.get_path_to(close_btn)
+	close_btn.focus_neighbor_right = close_btn.get_path_to(close_btn)
+
+	# Collect all interactive player rows
+	var player_rows: Array[Array] = []
+	if list_node != null and is_instance_valid(list_node):
+		for row_child in list_node.get_children():
+			var row_btns: Array[Button] = []
+			var pause_b = row_child.get_node_or_null("PauseBtn") as Button
+			var toggle_b = row_child.get_node_or_null("ToggleBtn") as Button
+			if pause_b != null and is_instance_valid(pause_b) and pause_b.visible and not pause_b.disabled:
+				pause_b.focus_mode = Control.FOCUS_ALL
+				row_btns.append(pause_b)
+			if toggle_b != null and is_instance_valid(toggle_b) and toggle_b.visible and not toggle_b.disabled:
+				toggle_b.focus_mode = Control.FOCUS_ALL
+				row_btns.append(toggle_b)
+			if not row_btns.is_empty():
+				player_rows.append(row_btns)
+
+	# Wire player row internal horizontal neighbors
+	for row_btns in player_rows:
+		if row_btns.size() == 2:
+			row_btns[0].focus_neighbor_right = row_btns[0].get_path_to(row_btns[1])
+			row_btns[1].focus_neighbor_left = row_btns[1].get_path_to(row_btns[0])
+
+	# Wire vertical neighbors
+	if player_rows.is_empty():
+		for ctrl in add_controls:
+			ctrl.focus_neighbor_top = ctrl.get_path_to(close_btn)
+			ctrl.focus_neighbor_bottom = ctrl.get_path_to(close_btn)
+		close_btn.focus_neighbor_top = close_btn.get_path_to(add_btn)
+		close_btn.focus_neighbor_bottom = close_btn.get_path_to(select_opt)
+	else:
+		# Between player rows
+		for r in range(player_rows.size()):
+			var cur_row_btns = player_rows[r]
+			if r == 0:
+				for b in cur_row_btns:
+					b.focus_neighbor_top = b.get_path_to(close_btn)
+			else:
+				var prev_row_btns = player_rows[r - 1]
+				for b_idx in range(cur_row_btns.size()):
+					var b = cur_row_btns[b_idx]
+					var target_prev = prev_row_btns[mini(b_idx, prev_row_btns.size() - 1)]
+					b.focus_neighbor_top = b.get_path_to(target_prev)
+
+			if r == player_rows.size() - 1:
+				for b in cur_row_btns:
+					b.focus_neighbor_bottom = b.get_path_to(select_opt)
+			else:
+				var next_row_btns = player_rows[r + 1]
+				for b_idx in range(cur_row_btns.size()):
+					var b = cur_row_btns[b_idx]
+					var target_next = next_row_btns[mini(b_idx, next_row_btns.size() - 1)]
+					b.focus_neighbor_bottom = b.get_path_to(target_next)
+
+		# AddRow controls vertical neighbors
+		var last_row_btns = player_rows[player_rows.size() - 1]
+		var top_player_target = last_row_btns[0]
+		for ctrl in add_controls:
+			ctrl.focus_neighbor_top = ctrl.get_path_to(top_player_target)
+			ctrl.focus_neighbor_bottom = ctrl.get_path_to(close_btn)
+
+		# Close button vertical neighbors
+		close_btn.focus_neighbor_top = close_btn.get_path_to(add_btn)
+		close_btn.focus_neighbor_bottom = close_btn.get_path_to(player_rows[0][0])
+
 
 func _show_add_player_dialog(p_name: String, tee_color: String) -> void:
 	if add_player_prompt_dialog == null:
 		return
 		
+	if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == hud_manage_players:
+		UIFocusGuard.pop_lock(false)
 	hud_manage_players.visible = false
 	for child in add_player_prompt_dialog.get_children():
 		add_player_prompt_dialog.remove_child(child)
@@ -5370,10 +5635,14 @@ func _show_add_player_dialog(p_name: String, tee_color: String) -> void:
 	vbox.add_child(msg)
 	
 	var join_cur_btn = Button.new()
+	join_cur_btn.name = "JoinCurrentButton"
 	join_cur_btn.text = "⛳ Put on Hole %d (Dashes on Holes 1-%d)" % [cur_hole_num, missed_cnt]
 	join_cur_btn.custom_minimum_size = Vector2(0, 48)
+	join_cur_btn.focus_mode = Control.FOCUS_ALL
 	apply_material_button_style(join_cur_btn, Color(0.24, 0.46, 0.72, 0.9))
 	join_cur_btn.pressed.connect(func():
+		if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == add_player_prompt_dialog:
+			UIFocusGuard.pop_lock(false)
 		add_player_prompt_dialog.visible = false
 		hud_manage_players.visible = false
 		_set_other_elements_visible(true)
@@ -5381,14 +5650,21 @@ func _show_add_player_dialog(p_name: String, tee_color: String) -> void:
 		_refresh_manage_players_dropdown()
 		_populate_manage_players()
 		_populate_scorecard("toggle")
+		var players_btn = find_child("ManagePlayersButton", true, false) as Control
+		if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
+			players_btn.call_deferred("grab_focus")
 	)
 	vbox.add_child(join_cur_btn)
 	
 	var play_missed_btn = Button.new()
+	play_missed_btn.name = "PlayMissedButton"
 	play_missed_btn.text = "🏌️ Play Missed Holes (Holes 1-%d Solo Catch-Up)" % missed_cnt
 	play_missed_btn.custom_minimum_size = Vector2(0, 48)
+	play_missed_btn.focus_mode = Control.FOCUS_ALL
 	apply_material_button_style(play_missed_btn, Color(0.25, 0.65, 0.35, 0.9))
 	play_missed_btn.pressed.connect(func():
+		if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == add_player_prompt_dialog:
+			UIFocusGuard.pop_lock(false)
 		add_player_prompt_dialog.visible = false
 		hud_manage_players.visible = false
 		_set_other_elements_visible(true)
@@ -5397,28 +5673,56 @@ func _show_add_player_dialog(p_name: String, tee_color: String) -> void:
 		_populate_manage_players()
 		_populate_scorecard("toggle")
 		_update_catch_up_hud()
+		var players_btn = find_child("ManagePlayersButton", true, false) as Control
+		if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
+			players_btn.call_deferred("grab_focus")
 	)
 	vbox.add_child(play_missed_btn)
 	
 	var cancel_btn = Button.new()
+	cancel_btn.name = "CancelButton"
 	cancel_btn.text = "Cancel"
 	cancel_btn.custom_minimum_size = Vector2(120, 40)
 	cancel_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	cancel_btn.focus_mode = Control.FOCUS_ALL
 	apply_material_button_style(cancel_btn, Color(0.45, 0.45, 0.48, 0.85))
 	cancel_btn.pressed.connect(func():
-		add_player_prompt_dialog.visible = false
-		hud_manage_players.visible = true
+		_dismiss_add_player_dialog()
 	)
 	vbox.add_child(cancel_btn)
 	
+	join_cur_btn.focus_neighbor_bottom = join_cur_btn.get_path_to(play_missed_btn)
+	join_cur_btn.focus_neighbor_top = join_cur_btn.get_path_to(cancel_btn)
+	play_missed_btn.focus_neighbor_top = play_missed_btn.get_path_to(join_cur_btn)
+	play_missed_btn.focus_neighbor_bottom = play_missed_btn.get_path_to(cancel_btn)
+	cancel_btn.focus_neighbor_top = cancel_btn.get_path_to(play_missed_btn)
+	cancel_btn.focus_neighbor_bottom = cancel_btn.get_path_to(join_cur_btn)
+	
 	add_player_prompt_dialog.add_child(vbox)
 	add_player_prompt_dialog.visible = true
+	UIFocusGuard.push_lock(add_player_prompt_dialog)
+	add_player_prompt_dialog.set_meta("on_focus_lock_popped", Callable(self, "_on_add_player_lock_popped"))
+	join_cur_btn.call_deferred("grab_focus")
+
+
+func _dismiss_add_player_dialog() -> void:
+	if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == add_player_prompt_dialog:
+		UIFocusGuard.pop_lock(false)
+	add_player_prompt_dialog.visible = false
+	_open_manage_players_panel()
+
+
+func _on_add_player_lock_popped() -> void:
+	add_player_prompt_dialog.visible = false
+	_open_manage_players_panel()
 
 
 func _show_resume_player_dialog(idx: int, p: Dictionary, paused_hole_idx: int) -> void:
 	if resume_player_prompt_dialog == null:
 		return
 		
+	if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == hud_manage_players:
+		UIFocusGuard.pop_lock(false)
 	hud_manage_players.visible = false
 	for child in resume_player_prompt_dialog.get_children():
 		resume_player_prompt_dialog.remove_child(child)
@@ -5445,10 +5749,14 @@ func _show_resume_player_dialog(idx: int, p: Dictionary, paused_hole_idx: int) -
 	vbox.add_child(msg)
 	
 	var catch_up_btn = Button.new()
+	catch_up_btn.name = "CatchUpButton"
 	catch_up_btn.text = "🏌️ Continue Where Left Off (Play Missed Holes Solo)"
 	catch_up_btn.custom_minimum_size = Vector2(0, 48)
+	catch_up_btn.focus_mode = Control.FOCUS_ALL
 	apply_material_button_style(catch_up_btn, Color(0.25, 0.65, 0.35, 0.9))
 	catch_up_btn.pressed.connect(func():
+		if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == resume_player_prompt_dialog:
+			UIFocusGuard.pop_lock(false)
 		resume_player_prompt_dialog.visible = false
 		hud_manage_players.visible = false
 		_set_other_elements_visible(true)
@@ -5456,36 +5764,81 @@ func _show_resume_player_dialog(idx: int, p: Dictionary, paused_hole_idx: int) -
 		_populate_manage_players()
 		_populate_scorecard("toggle")
 		_update_catch_up_hud()
+		var players_btn = find_child("ManagePlayersButton", true, false) as Control
+		if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
+			players_btn.call_deferred("grab_focus")
 	)
 	vbox.add_child(catch_up_btn)
 	
 	var skip_btn = Button.new()
+	skip_btn.name = "SkipButton"
 	skip_btn.text = "⛳ Skip to Hole %d (Dashes on Missed Holes)" % cur_hole_num
 	skip_btn.custom_minimum_size = Vector2(0, 48)
+	skip_btn.focus_mode = Control.FOCUS_ALL
 	apply_material_button_style(skip_btn, Color(0.24, 0.46, 0.72, 0.9))
 	skip_btn.pressed.connect(func():
+		if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == resume_player_prompt_dialog:
+			UIFocusGuard.pop_lock(false)
 		resume_player_prompt_dialog.visible = false
 		hud_manage_players.visible = false
 		_set_other_elements_visible(true)
 		MultiplayerManager.resume_player(idx, "current_hole")
 		_populate_manage_players()
 		_populate_scorecard("toggle")
+		var players_btn = find_child("ManagePlayersButton", true, false) as Control
+		if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
+			players_btn.call_deferred("grab_focus")
 	)
 	vbox.add_child(skip_btn)
 	
 	var cancel_btn = Button.new()
+	cancel_btn.name = "CancelButton"
 	cancel_btn.text = "Cancel"
 	cancel_btn.custom_minimum_size = Vector2(120, 40)
 	cancel_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	cancel_btn.focus_mode = Control.FOCUS_ALL
 	apply_material_button_style(cancel_btn, Color(0.45, 0.45, 0.48, 0.85))
 	cancel_btn.pressed.connect(func():
-		resume_player_prompt_dialog.visible = false
-		hud_manage_players.visible = true
+		_dismiss_resume_player_dialog()
 	)
 	vbox.add_child(cancel_btn)
 	
+	catch_up_btn.focus_neighbor_bottom = catch_up_btn.get_path_to(skip_btn)
+	catch_up_btn.focus_neighbor_top = catch_up_btn.get_path_to(cancel_btn)
+	skip_btn.focus_neighbor_top = skip_btn.get_path_to(catch_up_btn)
+	skip_btn.focus_neighbor_bottom = skip_btn.get_path_to(cancel_btn)
+	cancel_btn.focus_neighbor_top = cancel_btn.get_path_to(skip_btn)
+	cancel_btn.focus_neighbor_bottom = cancel_btn.get_path_to(catch_up_btn)
+	
 	resume_player_prompt_dialog.add_child(vbox)
 	resume_player_prompt_dialog.visible = true
+	UIFocusGuard.push_lock(resume_player_prompt_dialog)
+	resume_player_prompt_dialog.set_meta("on_focus_lock_popped", Callable(self, "_on_resume_player_lock_popped"))
+	catch_up_btn.call_deferred("grab_focus")
+
+
+func _dismiss_resume_player_dialog() -> void:
+	if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == resume_player_prompt_dialog:
+		UIFocusGuard.pop_lock(false)
+	resume_player_prompt_dialog.visible = false
+	_open_manage_players_panel()
+
+
+func _on_resume_player_lock_popped() -> void:
+	resume_player_prompt_dialog.visible = false
+	_open_manage_players_panel()
+
+
+func _navigate_dialog_buttons(buttons: Array[Button], dir: int) -> void:
+	if buttons.is_empty():
+		return
+	var cur_focus = get_viewport().gui_get_focus_owner()
+	var idx = buttons.find(cur_focus)
+	if idx == -1:
+		buttons[0].grab_focus()
+	else:
+		var next_idx = (idx + dir + buttons.size()) % buttons.size()
+		buttons[next_idx].grab_focus()
 
 
 func _update_catch_up_hud() -> void:
@@ -6216,6 +6569,19 @@ func _update_grid_button_state(active: bool) -> void:
 		apply_circular_button_style(grid_btn, Color(0.2, 0.6, 0.3, 0.85)) # Green when active
 	else:
 		apply_circular_button_style(grid_btn, Color(0.15, 0.15, 0.15, 0.85)) # Gray when inactive
+
+
+func _exit_tree() -> void:
+	if has_node("/root/ScreenOffsetManager"):
+		var som = get_node("/root/ScreenOffsetManager")
+		if som != null:
+			if course_instance != null:
+				var cam = course_instance.get_node_or_null("PhantomCamera3D")
+				if cam == null:
+					cam = course_instance.get_node_or_null("Camera3D")
+				if cam != null:
+					som.call("unregister_camera", cam)
+			som.call("set_putter_active", false)
 
 
 class MultiplayerBallOverlay extends Control:

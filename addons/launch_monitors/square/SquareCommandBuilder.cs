@@ -27,11 +27,6 @@ public static class SquareCommandBuilder
         return FromHex($"1182{sequence:X2}{clubCode}0{handedness}000000");
     }
 
-    public static byte[] RequestClubMetrics(byte sequence)
-    {
-        return FromHex($"1187{sequence:X2}0000000000");
-    }
-
     public static byte[] FromHex(string hex)
     {
         if (hex.Length % 2 != 0)

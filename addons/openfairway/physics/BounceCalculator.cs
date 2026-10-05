@@ -18,7 +18,7 @@ public partial class BounceCalculator : RefCounted
         PhysicsParams parameters)
     {
         bool isBunker = (parameters?.SurfaceType == PhysicsEnums.SurfaceType.Bunker) || (parameters?.IsInSand == true);
-        BounceProfile profile = isBunker ? BounceProfile.Bunker : BounceProfile.Default;
+        BounceProfile profile = BounceProfile.ForSurface(parameters?.SurfaceType ?? PhysicsEnums.SurfaceType.Fairway, isBunker);
         return CalculateBounce(vel, omega, normal, currentState, parameters, profile);
     }
 
@@ -53,13 +53,13 @@ public partial class BounceCalculator : RefCounted
         BounceProfile bp)
     {
         bool isBunker = (parameters?.SurfaceType == PhysicsEnums.SurfaceType.Bunker) || (parameters?.IsInSand == true);
-        if (isBunker && (bp == null || bp == BounceProfile.Default))
+        if (bp == null)
+        {
+            bp = BounceProfile.ForSurface(parameters?.SurfaceType ?? PhysicsEnums.SurfaceType.Fairway, isBunker);
+        }
+        else if (isBunker && bp == BounceProfile.Default)
         {
             bp = BounceProfile.Bunker;
-        }
-        else if (bp == null)
-        {
-            bp = BounceProfile.Default;
         }
 
         PhysicsEnums.BallState newState = currentState == PhysicsEnums.BallState.Flight
@@ -137,12 +137,12 @@ public partial class BounceCalculator : RefCounted
 
                     if (parameters != null && parameters.InitialLaunchAngleDeg < 12.0f)
                     {
-                        float vlaFactor = Mathf.Clamp(parameters.InitialLaunchAngleDeg / 12.0f, 0.75f, 1.0f);
+                        float vlaFactor = Mathf.Clamp(parameters.InitialLaunchAngleDeg / 12.0f, 0.80f, 1.0f);
                         baseRetention *= vlaFactor;
                     }
 
-                    newTangentSpeed = speedTangent * baseRetention * tangentSpinFactor * lowEnergyScale;
-                    PhysicsLogger.Verbose($"  Bounce: Shallow angle ({impactAngleDeg:F2}° < {criticalAngleDeg:F2}°, retention={baseRetention * tangentSpinFactor * lowEnergyScale:F3}) - newTangentSpeed={newTangentSpeed:F2} m/s");
+                    newTangentSpeed = speedTangent * baseRetention * lowEnergyScale;
+                    PhysicsLogger.Verbose($"  Bounce: Shallow angle ({impactAngleDeg:F2}° < {criticalAngleDeg:F2}°, retention={baseRetention * lowEnergyScale:F3}) - newTangentSpeed={newTangentSpeed:F2} m/s");
                 }
                 else
                 {
@@ -156,10 +156,13 @@ public partial class BounceCalculator : RefCounted
             }
             else
             {
-                float forwardTurfSpeed = Mathf.Max(0.0f, vel.Length() * Mathf.Cos(impactAngle + effectiveCriticalAngle));
-                float forwardSpeed = Mathf.Min(speedTangent, forwardTurfSpeed);
+                float steepDamping = 1.0f;
+                if (impactAngleDeg > 45.0f)
+                {
+                    steepDamping = Mathf.Clamp(1.0f - (impactAngleDeg - 45.0f) * 0.015f, 0.65f, 1.0f);
+                }
                 float spinbackTerm = 2.0f * BallPhysics.RADIUS * omegaTangentMagnitude * Mathf.Max(parameters.SpinbackResponseScale, 0.0f) / 7.0f;
-                newTangentSpeed = forwardSpeed * bp.FlightTangentialRetentionBase * tangentSpinFactor - spinbackTerm;
+                newTangentSpeed = (speedTangent * bp.FlightTangentialRetentionBase * steepDamping) - spinbackTerm;
 
                 if (!hasSpinbackSurface)
                 {
@@ -173,8 +176,8 @@ public partial class BounceCalculator : RefCounted
                 }
                 else
                 {
-                    // Nearly vertical flop shot can have a gentle check backwards, bounded
-                    newTangentSpeed = Mathf.Max(-0.75f, newTangentSpeed);
+                    // High flop shot or vertical drop can check backwards, bounded
+                    newTangentSpeed = Mathf.Max(-1.25f, newTangentSpeed);
                 }
 
                 PhysicsLogger.Verbose($"  Bounce: Penner model ({parameters.SurfaceType}) speed={impactSpeed:F2} m/s angle={impactAngleDeg:F2}° crit={criticalAngleDeg:F2}°");

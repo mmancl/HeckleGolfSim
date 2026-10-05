@@ -6,17 +6,21 @@ extends Node
 signal tension_started(mode: String)
 signal tension_stopped()
 
-const PUTT_THRESHOLD_METERS := 3.048   # 10 feet in meters (10.0 * 0.3048)
-const CHIP_THRESHOLD_METERS := 7.62    # 25 feet in meters (25.0 * 0.3048)
-const PUTT_MIN_SUSPENSE_DISTANCE_METERS := 6.096   # 20 feet in meters (20.0 * 0.3048)
-const CHIP_MIN_SUSPENSE_DISTANCE_METERS := 30.48   # 100 feet in meters (100.0 * 0.3048)
+const PUTT_THRESHOLD_METERS := 9.144   # 30 feet in meters (zone where suspense heartbeat builds for putts)
+const CHIP_THRESHOLD_METERS := 15.24   # 50 feet in meters (zone for chip/pitch rollouts)
+const PUTT_MIN_SUSPENSE_DISTANCE_METERS := 1.20 # ~4 feet in meters (filters out trivial tap-ins under 4ft)
+const CHIP_MIN_SUSPENSE_DISTANCE_METERS := 2.50 # ~8 feet in meters
 const MAX_PROJECTED_LANDING_DISTANCE_METERS := 18.288 # 20 yards in meters (20.0 * 0.9144)
 const PAST_HOLE_THRESHOLD_METERS := 0.3048         # 1 foot past the hole in meters (1.0 * 0.3048)
 const CYCLE_DURATION := 0.80          # ~75 BPM double-thump heartbeat cycle
-const CONE_HALF_ANGLE_DEG := 15.0
-const MIN_COS_THETA := 0.965925826    # cos(15 deg)
+const AIRBORNE_CONE_HALF_ANGLE_DEG := 5.0  # Tight 5.0 degree half-angle (10.0 deg total) in flight
+const CONE_HALF_ANGLE_DEG := 15.0           # Max angle clamp for ultra-close putting
+const MIN_COS_THETA := 0.996194698          # cos(5 deg)
 const CUP_RADIUS_METERS := 0.054       # 4.25 in / 2 (standard golf cup)
-const MAX_HOLEABLE_SPEED_MPS := 2.8    # Max entry speed into cup
+const CONTENDER_RADIUS_METERS := 3.0   # Contender window for airborne trajectory validation
+const CONTENDER_RADIUS_PUTT_METERS := 0.50 # 0.5 meters (~1.6 feet) contender window for putts (tightened from 2.5m)
+const MAX_HOLEABLE_SPEED_MPS := 3.2    # Max entry speed into cup
+const SHORT_ROLL_MARGIN_METERS := 0.75 # ~2.5 feet close-call margin for near misses
 
 enum SuspenseState {
 	IDLE,    # Before shot launched
@@ -51,6 +55,22 @@ var _tree_hit_this_shot: bool = false
 var _suspense_predicted_close: bool = false
 var _predicted_ending_dist: float = 0.0
 
+# 3D Debug Vision Cone Visualizer
+var _cone_mesh_instance: MeshInstance3D = null
+var _cone_immediate_mesh: ImmediateMesh = null
+var _cone_material: StandardMaterial3D = null
+var _last_ball_pos: Vector3 = Vector3.ZERO
+var _last_ball_vel: Vector3 = Vector3.ZERO
+var _last_target_pos: Vector3 = Vector3.ZERO
+var _last_is_putt: bool = false
+var _last_is_airborne: bool = false
+var _last_cone_valid: bool = false
+
+# Touchdown transition state for smooth airborne -> rollout cone sizing
+var _was_airborne_this_shot: bool = false
+var _touchdown_timer: float = 0.0
+const TOUCHDOWN_TRANSITION_DURATION: float = 1.35 # seconds
+
 # Visual nodes
 var canvas_layer: CanvasLayer = null
 var vignette_rect: ColorRect = null
@@ -74,6 +94,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_setup_visuals()
 	_setup_audio()
+	_setup_debug_cone_visualizer()
 	print("[TensionManager] Ready and initialized.")
 
 
@@ -195,41 +216,33 @@ var force_course_play_active_for_testing: bool = false
 func is_course_play_active() -> bool:
 	if force_course_play_active_for_testing:
 		return true
-	# 1. Global Settings minigame and menu checks
-	var gs = get_node_or_null("/root/GlobalSettings")
-	if gs != null:
-		if gs.is_minigames_scene() or gs.is_chipping_minigame or gs.is_putting_minigame:
-			return false
-		if gs.is_menu_screen():
-			return false
 
-	# 2. MultiplayerManager checks (Course Play requires active round without practice mode)
-	var mp = get_node_or_null("/root/MultiplayerManager")
-	var players_empty = (mp != null and mp.players.is_empty())
-	var mp_practice = (mp != null and mp.practice_mode_active)
-	if mp_practice or (players_empty and not (get_tree() != null and get_tree().current_scene != null and get_tree().current_scene.has_node("CoursePlay"))):
-		return false
-
-	# 3. Active Scene checks
-	var tree = get_tree()
+	var tree: SceneTree = get_tree() if is_inside_tree() else (Engine.get_main_loop() as SceneTree)
 	if tree == null:
 		return false
+
+	# 1. Global Settings menu and driving range checks
+	var gs = (tree.root.get_node_or_null("GlobalSettings") if tree.root != null else null)
+	if gs != null:
+		if gs.is_menu_screen():
+			return false
+		if gs.has_method("is_driving_range_scene") and gs.is_driving_range_scene():
+			return false
+
+	# 2. Active Scene checks
 	var current_scene = tree.current_scene
+	if current_scene == null and gs != null:
+		if gs.has_method("get_active_scene"):
+			current_scene = gs.get_active_scene()
+		elif gs.has_method("_get_active_scene"):
+			current_scene = gs._get_active_scene()
 	if current_scene == null:
 		return false
 
-	var practice_mode = (current_scene.get("practice_mode_active") == true)
-
-	if _cached_scene_ref != null and _cached_scene_ref.get_ref() == current_scene \
-		and _cached_practice_mode == practice_mode and _cached_players_empty == players_empty:
-		return _cached_is_course_play
-
-	_cached_scene_ref = weakref(current_scene)
-	_cached_practice_mode = practice_mode
-	_cached_players_empty = players_empty
-
-	if practice_mode:
-		_cached_is_course_play = false
+	# Exclude driving range by properties
+	if "is_driving_range" in current_scene and bool(current_scene.get("is_driving_range")):
+		return false
+	if current_scene.has_meta("is_driving_range") and bool(current_scene.get_meta("is_driving_range")):
 		return false
 
 	var scene_name = str(current_scene.name).to_lower()
@@ -237,6 +250,18 @@ func is_course_play_active() -> bool:
 	var script_path = str(script.resource_path).to_lower() if script != null else ""
 	var scene_path = str(current_scene.scene_file_path).to_lower() if "scene_file_path" in current_scene else ""
 	var full_id = (scene_name + " " + script_path + " " + scene_path).to_lower()
+
+	# Exclude driving range by file/scene path (res://Courses/Range/range.tscn)
+	var is_course_match = false
+	if current_scene.has_node("CoursePlay") or full_id.contains("course_play") or full_id.contains("courseplaysetup") or full_id.contains("coursemanager") or full_id.contains("course_manager"):
+		is_course_match = true
+	var mp = tree.root.get_node_or_null("MultiplayerManager") if tree.root != null else null
+	if mp != null and not mp.players.is_empty() and not mp.hole_ids.is_empty():
+		is_course_match = true
+
+	if not is_course_match:
+		if full_id.contains("range/range.tscn") or scene_path.ends_with("range.tscn") or scene_name == "range":
+			return false
 
 	# Exclude menus and setup screens
 	if full_id.contains("main_menu") or full_id.contains("mainmenu") \
@@ -247,28 +272,70 @@ func is_course_play_active() -> bool:
 		or full_id.contains("analytics") or full_id.contains("history") \
 		or full_id.contains("custom_course_creator") or full_id.contains("osm_download") \
 		or full_id.contains("course_preview"):
-		_cached_is_course_play = false
 		return false
 
-	# Exclude all Minigames
-	if full_id.contains("chipping") or full_id.contains("putting") \
-		or full_id.contains("loft_control") or full_id.contains("shape_practice") \
-		or full_id.contains("minigame") or full_id.contains("minigames"):
-		_cached_is_course_play = false
+	# Exclude training minigames that do not use the course cup
+	if full_id.contains("loft_control") or full_id.contains("shape_practice"):
 		return false
 
-	# Exclude standalone Driving Range
-	if (scene_name == "range" or scene_path.ends_with("range.tscn")) and not current_scene.has_node("CoursePlay"):
-		_cached_is_course_play = false
-		return false
+	# Allow course play and practice mode on course holes
+	return true
 
-	# Must have CoursePlay node or be a course scene with active hole play
-	if current_scene.has_node("CoursePlay") or scene_name == "courseplay" or full_id.contains("course_play") or full_id.contains("usercourses") or scene_name.contains("course"):
-		_cached_is_course_play = true
-		return true
+# ---------------- VISION CONE CALCULATION ----------------
 
-	_cached_is_course_play = false
-	return false
+func get_vision_cone_half_angle(dist_to_hole: float, is_putt: bool, is_airborne: bool) -> float:
+	if is_airborne:
+		return deg_to_rad(AIRBORNE_CONE_HALF_ANGLE_DEG) # 5.0 degrees
+	if is_putt:
+		# Dynamic lateral corridor for putting:
+		# Far away (e.g. 8m/26ft): corridor ~0.48m (~1.6 ft, angle ~3.4°), prevents false positives at start
+		# Close up (e.g. 0.3m/1ft): corridor widens to cup lip (angle up to 15.0°)
+		var corridor = clampf(0.08 + 0.05 * dist_to_hole, CUP_RADIUS_METERS * 1.5, 0.55)
+		var angle = asin(clampf(corridor / maxf(dist_to_hole, 0.1), 0.01, sin(deg_to_rad(CONE_HALF_ANGLE_DEG))))
+		return angle
+	else:
+		# On-ground chip rollout:
+		var target_roll_corridor = clampf(0.18 + 0.08 * dist_to_hole, CUP_RADIUS_METERS * 2.0, 1.25)
+		var base_roll_angle = asin(clampf(target_roll_corridor / maxf(dist_to_hole, 0.1), 0.01, sin(deg_to_rad(CONE_HALF_ANGLE_DEG))))
+
+		# Smooth transition from in-flight 5° cone to rollout cone after touchdown
+		if _touchdown_timer > 0.0:
+			var t_norm = clampf(_touchdown_timer / TOUCHDOWN_TRANSITION_DURATION, 0.0, 1.0)
+			var blend_factor = smoothstep(0.0, 1.0, t_norm)
+			return lerpf(base_roll_angle, deg_to_rad(AIRBORNE_CONE_HALF_ANGLE_DEG), blend_factor)
+		return base_roll_angle
+
+func get_effective_rolling_deceleration() -> float:
+	var gs = get_node_or_null("/root/GlobalSettings")
+	var green_speed: float = 10.0
+	if gs != null and gs.has_method("get_effective_green_speed"):
+		green_speed = float(gs.get_effective_green_speed())
+	var speed_mult := 10.0 / maxf(green_speed, 1.0)
+	var green_rolling_friction := 0.056 * speed_mult
+	return green_rolling_friction * 9.81
+
+func get_projected_reach_distance(ball_pos: Vector3, ball_vel: Vector3, is_airborne: bool, target_pos: Vector3 = Vector3.ZERO) -> float:
+	var flat_vel = Vector2(ball_vel.x, ball_vel.z)
+	var flat_speed = flat_vel.length()
+	if flat_speed < 0.03:
+		return 0.0
+
+	var decel = get_effective_rolling_deceleration()
+
+	if is_airborne:
+		var target_y = target_pos.y if not target_pos.is_zero_approx() else 0.0
+		var h = maxf(0.0, ball_pos.y - target_y)
+		var g = 9.81
+		var vy = ball_vel.y
+		var disc = vy * vy + 2.0 * g * h
+		var t_land = maxf(0.0, (vy + sqrt(maxf(0.0, disc))) / g)
+		var flight_dist = flat_speed * t_land
+		var land_flat_speed = flat_speed * 0.52
+		var rollout_dist = (land_flat_speed * land_flat_speed) / (2.0 * decel)
+		return flight_dist + rollout_dist + SHORT_ROLL_MARGIN_METERS
+	else:
+		var rollout_dist = (flat_speed * flat_speed) / (2.0 * decel)
+		return rollout_dist + SHORT_ROLL_MARGIN_METERS
 
 # ---------------- SUSPENSE ELIGIBILITY ----------------
 
@@ -310,8 +377,8 @@ func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool
 	var green_speed: float = 10.0
 	if gs != null and gs.has_method("get_effective_green_speed"):
 		green_speed = float(gs.get_effective_green_speed())
-	var speed_mult := pow(10.0 / maxf(green_speed, 1.0), 0.30)
-	var green_rolling_friction := 0.085 * speed_mult
+	var speed_mult := 10.0 / maxf(green_speed, 1.0)
+	var green_rolling_friction := 0.056 * speed_mult
 
 	# Query green slope normal around the target hole
 	var green_normal := Vector3.UP
@@ -454,14 +521,46 @@ func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool
 	var ending_dist_2d = 0.0 if holed_out else Vector2(sim_pos.x, sim_pos.z).distance_to(target_2d)
 
 	# --- TRAJECTORY VALIDATION (READY state evaluation) ---
-	# Does the entire predicted on-ground roll path (from P_land_predicted to final stop) ever enter the cup?
-	# If NO, transition directly to SPENT. This shot is a confirmed miss and never gets to ACTIVE.
-	if not holed_out:
+	var is_contender := false
+	var is_confirmed_miss := false
+	if is_putt:
+		var start_to_hole = (target_2d - Vector2(start_pos.x, start_pos.z)).normalized() if Vector2(start_pos.x, start_pos.z).distance_to(target_2d) > 0.001 else Vector2.ZERO
+		var putt_launch_dir = Vector2(launch_vel.x, launch_vel.z).normalized()
+		var forward_dot = putt_launch_dir.dot(start_to_hole)
+		# Tighten putt validation: must be directed towards hole and stop within contender window
+		if forward_dot > 0.85:
+			is_contender = holed_out or (min_dist_2d <= CONTENDER_RADIUS_PUTT_METERS)
+		if forward_dot <= 0.0 or (forward_dot < 0.75 and min_dist_2d > CONTENDER_RADIUS_PUTT_METERS):
+			is_confirmed_miss = true
+	else:
+		# Airborne / chip shot:
+		var start_to_hole = (target_2d - Vector2(start_pos.x, start_pos.z)).normalized() if Vector2(start_pos.x, start_pos.z).distance_to(target_2d) > 0.001 else Vector2.ZERO
+		var chip_launch_dir = Vector2(launch_vel.x, launch_vel.z).normalized()
+		var forward_dot = chip_launch_dir.dot(start_to_hole)
+		if forward_dot < 0.2:
+			is_confirmed_miss = true # Hit backwards or extreme shank
+		else:
+			# Do not permanently lock out airborne shots from toy simulation!
+			# Validate as contender if aimed toward green (forward_dot >= 0.70 or min_dist <= 16m)
+			is_contender = holed_out or (min_dist_2d <= 16.0) or (forward_dot >= 0.70)
+
+	if is_confirmed_miss:
 		suspense_state = SuspenseState.SPENT
 		_shot_suspense_locked_out = true
 		shot_validated = false
 		predicted_holed_out = false
-		print("[TensionManager] Trajectory Validation: MISS confirmed (closest to cup: %.2fm). Transitioned directly to SPENT." % min_dist_2d)
+		print("[TensionManager] Trajectory Validation: MISS confirmed (hit offline or backwards). Transitioned directly to SPENT.")
+		return {
+			"will_enter_zone": false,
+			"shot_validated": false,
+			"ending_dist": ending_dist_2d,
+			"min_dist": min_dist_2d,
+			"mode": mode
+		}
+	elif not is_contender:
+		# Not a clear pre-launch contender from toy physics, but keep in IDLE so live cone checks evaluate actual C# physics
+		suspense_state = SuspenseState.IDLE
+		shot_validated = false
 		return {
 			"will_enter_zone": false,
 			"shot_validated": false,
@@ -470,16 +569,16 @@ func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool
 			"mode": mode
 		}
 
-	# Validation SUCCESS: Shot enters cup!
+	# Validation SUCCESS: Shot is on target (enters cup or close contender zone)!
 	shot_validated = true
 	suspense_state = SuspenseState.READY
 	predicted_apex = p_apex
 	predicted_land_pos = p_land
 	predicted_land_vel = v_land
 	predicted_roll_path = roll_path
-	predicted_holed_out = true
+	predicted_holed_out = holed_out
 	_suspense_predicted_close = true
-	_predicted_ending_dist = 0.0
+	_predicted_ending_dist = ending_dist_2d
 
 	var time_to_apex: float = 0.0
 	var delay_to_apex: float = 0.25
@@ -487,12 +586,12 @@ func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool
 		time_to_apex = launch_vel.y / 9.81
 		delay_to_apex = time_to_apex + 0.15
 
-	print("[TensionManager] Trajectory Validation: SUCCESS! Roll path enters cup! State -> READY. P_apex: %s, P_land: %s" % [p_apex, p_land])
+	print("[TensionManager] Trajectory Validation: SUCCESS! Contender path (closest: %.2fm). State -> READY. P_apex: %s, P_land: %s" % [min_dist_2d, p_apex, p_land])
 	return {
 		"will_enter_zone": true,
 		"shot_validated": true,
-		"ending_dist": 0.0,
-		"min_dist": 0.0,
+		"ending_dist": ending_dist_2d,
+		"min_dist": min_dist_2d,
 		"mode": mode,
 		"time_to_apex": time_to_apex,
 		"delay_to_apex": delay_to_apex,
@@ -541,6 +640,8 @@ func reset_for_new_shot() -> void:
 	_closest_dist_reached = 9999.0
 	_has_entered_suspense_zone = false
 	current_closeness = 0.0
+	_was_airborne_this_shot = false
+	_touchdown_timer = 0.0
 	if tension_active:
 		tension_active = false
 		emit_signal("tension_stopped")
@@ -562,16 +663,29 @@ func check_ball_proximity(
 		_tree_hit_this_shot = true
 		suspense_state = SuspenseState.SPENT
 		_shot_suspense_locked_out = true
+		_last_cone_valid = false
 		cancel_scheduled_tension()
 		if tension_active:
 			stop_tension(true)
 		return false
 
+	# Cache last observed parameters for 3D visualizer
+	_last_ball_pos = ball_pos
+	_last_ball_vel = ball_vel
+	_last_target_pos = target_pos
+	_last_is_putt = is_putt
+	_last_is_airborne = is_airborne
+	if is_airborne:
+		_was_airborne_this_shot = true
+		_touchdown_timer = TOUCHDOWN_TRANSITION_DURATION
+
 	# Strict SPENT Latch: Suspense must never turn on more than once per shot
 	if suspense_state == SuspenseState.SPENT or _shot_suspense_locked_out:
+		_last_cone_valid = false
 		return false
 
 	if not is_course_play_active() or target_pos.is_zero_approx():
+		_last_cone_valid = false
 		return false
 
 	var ball_pos_2d = Vector2(ball_pos.x, ball_pos.z)
@@ -580,42 +694,69 @@ func check_ball_proximity(
 	var threshold = PUTT_THRESHOLD_METERS if is_putt else CHIP_THRESHOLD_METERS
 
 	# ========================================================
-	# STATE: READY -> ACTIVE (Predictive Activation)
+	# STATE: IDLE / READY -> ACTIVE (Predictive Activation)
 	# ========================================================
-	if suspense_state == SuspenseState.READY:
-		# 1. Validation check (redundant but safe)
-		if not shot_validated:
+	if suspense_state == SuspenseState.READY or suspense_state == SuspenseState.IDLE:
+		# In READY state, trajectory validation must have passed
+		if suspense_state == SuspenseState.READY and not shot_validated:
 			suspense_state = SuspenseState.SPENT
 			_shot_suspense_locked_out = true
+			_last_cone_valid = false
 			return false
+
+		# In IDLE state, verify basic distance eligibility
+		if suspense_state == SuspenseState.IDLE:
+			var start_p = shot_start_pos if not shot_start_pos.is_zero_approx() else ball_pos
+			if not is_shot_eligible_for_suspense(start_p, target_pos, is_putt, _is_sand):
+				_last_cone_valid = false
+				return false
 
 		# 2. Altitude Trigger: Ball must have passed predicted apex (Ball_Current_Altitude < P_apex.y and v_ball.y < 0)
 		if is_airborne:
-			if ball_vel.y >= 0.0 or ball_pos.y >= predicted_apex.y:
-				return false # Ascending or at/above apex
+			if ball_vel.y >= 0.0:
+				_last_cone_valid = false
+				return false # Ascending
+			if predicted_apex != Vector3.ZERO and ball_pos.y >= predicted_apex.y:
+				_last_cone_valid = false
+				return false # Still at or above apex height
 
-		# 3. Angle Check (Critical): Cone projected forward from landing spot / ball must encompass hole
+		# 3. Angle Check (Critical): Cone projected forward along path of travel must encompass hole
 		var cone_valid := false
-		if is_airborne:
-			var land_2d = Vector2(predicted_land_pos.x, predicted_land_pos.z)
-			var land_to_hole = (hole_pos_2d - land_2d).normalized() if land_2d.distance_to(hole_pos_2d) > 0.001 else Vector2.ZERO
-			var land_v_2d = Vector2(predicted_land_vel.x, predicted_land_vel.z).normalized()
-			var cos_theta_land = land_v_2d.dot(land_to_hole)
+		var flat_vel = Vector2(ball_vel.x, ball_vel.z)
+		var flat_speed = flat_vel.length()
 
+		if flat_speed >= 0.05:
 			var cur_to_hole = (hole_pos_2d - ball_pos_2d).normalized() if dist_2d > 0.001 else Vector2.ZERO
-			var cur_v_2d = Vector2(ball_vel.x, ball_vel.z).normalized()
-			var cos_theta_cur = cur_v_2d.dot(cur_to_hole)
+			var travel_dir_2d = flat_vel / flat_speed
+			var cos_theta_cur = travel_dir_2d.dot(cur_to_hole)
+			var half_angle = get_vision_cone_half_angle(dist_2d, is_putt, is_airborne)
+			var min_cos = cos(half_angle)
 
-			# Must satisfy cos_theta >= cos(cone_half_angle)
-			cone_valid = (cos_theta_land >= MIN_COS_THETA) and (cos_theta_cur >= (MIN_COS_THETA - 0.05))
-		else:
-			# Putting / on-ground rollout
-			var cur_to_hole = (hole_pos_2d - ball_pos_2d).normalized() if dist_2d > 0.001 else Vector2.ZERO
-			var cur_v_2d = Vector2(ball_vel.x, ball_vel.z).normalized()
-			var cos_theta_cur = cur_v_2d.dot(cur_to_hole)
-			var theta_cup = asin(clampf(CUP_RADIUS_METERS / maxf(dist_2d, 0.001), 0.0, 1.0))
-			var min_cos = minf(MIN_COS_THETA, cos(theta_cup))
-			cone_valid = (cos_theta_cur >= min_cos)
+			# Distance Reach Check: Ball must have sufficient speed to reach the hole / close proximity
+			var projected_reach = get_projected_reach_distance(ball_pos, ball_vel, is_airborne, target_pos)
+			var is_reachable = (projected_reach >= dist_2d)
+
+			if is_airborne:
+				var h = maxf(0.0, ball_pos.y - target_pos.y)
+				var g = 9.81
+				var vy = ball_vel.y
+				var disc = vy * vy + 2.0 * g * h
+				var t_land = maxf(0.0, (vy + sqrt(maxf(0.0, disc))) / g)
+				var dynamic_land_2d = ball_pos_2d + flat_vel * t_land
+				var dist_land = dynamic_land_2d.distance_to(hole_pos_2d)
+
+				# Airborne shot triggers when descending, travel direction within tight cone,
+				# speed reaches target, and projected landing within realistic proximity window
+				var max_land_proximity = clampf(dist_2d * 0.45 + 1.5, 3.0, 8.0)
+				if cos_theta_cur >= min_cos and is_reachable and (dist_land <= max_land_proximity or dist_land <= CUP_RADIUS_METERS):
+					cone_valid = true
+			else:
+				# Putting / on-ground rollout:
+				# Inside threshold or READY, travel direction inside tightened cone, and speed reaches hole
+				if (dist_2d <= threshold or suspense_state == SuspenseState.READY) and is_reachable:
+					cone_valid = (cos_theta_cur >= min_cos)
+
+		_last_cone_valid = cone_valid
 
 		if cone_valid:
 			suspense_state = SuspenseState.ACTIVE
@@ -638,23 +779,37 @@ func check_ball_proximity(
 		if not is_airborne and speed < 0.05:
 			print("[TensionManager] ACTIVE -> SPENT: Ball stopped at rest.")
 			suspense_state = SuspenseState.SPENT
+			_last_cone_valid = false
 			stop_tension(true)
 			return false
 
 		if dist_2d <= CUP_RADIUS_METERS:
 			print("[TensionManager] ACTIVE -> SPENT: Ball reached/sunk in cup!")
 			suspense_state = SuspenseState.SPENT
+			_last_cone_valid = false
 			stop_tension(true)
 			return false
 
 		var cur_to_hole = (hole_pos_2d - ball_pos_2d).normalized() if dist_2d > 0.001 else Vector2.ZERO
-		var cur_v_2d = Vector2(ball_vel.x, ball_vel.z).normalized()
-		var vel_dot_hole = cur_v_2d.dot(cur_to_hole)
+		var flat_vel = Vector2(ball_vel.x, ball_vel.z)
+		var flat_speed = flat_vel.length()
+		var travel_dir_2d = flat_vel / flat_speed if flat_speed > 0.05 else Vector2.ZERO
+		var vel_dot_hole = travel_dir_2d.dot(cur_to_hole) if travel_dir_2d != Vector2.ZERO else 0.0
 
-		# 2. Overshoot Check: Ball rolls past the hole
+		# 2. Coming up short check: Ball speed has dropped such that it will clearly end short of the hole
+		var projected_reach = get_projected_reach_distance(ball_pos, ball_vel, is_airborne, target_pos)
+		if not is_airborne and dist_2d > projected_reach:
+			print("[TensionManager] ACTIVE -> SPENT: Ball clearly coming up short! Reach: %.2fm < Dist: %.2fm" % [projected_reach, dist_2d])
+			suspense_state = SuspenseState.SPENT
+			_last_cone_valid = false
+			stop_tension(true)
+			return false
+
+		# 3. Overshoot Check: Ball rolls past the hole
 		if not is_airborne and dist_2d > (_closest_dist_reached + 0.05) and vel_dot_hole <= 0.0:
 			print("[TensionManager] ACTIVE -> SPENT: Overshoot detected (moving away from hole). Dist: %.2fm" % dist_2d)
 			suspense_state = SuspenseState.SPENT
+			_last_cone_valid = false
 			stop_tension(true)
 			return false
 
@@ -668,24 +823,41 @@ func check_ball_proximity(
 				if along_shot > PAST_HOLE_THRESHOLD_METERS:
 					print("[TensionManager] ACTIVE -> SPENT: Ball physically > 1ft past hole.")
 					suspense_state = SuspenseState.SPENT
+					_last_cone_valid = false
 					stop_tension(true)
 					return false
 
 		# 3. Hole Exits Cone (Angle Loss Check):
-		var theta_cup = asin(clampf(CUP_RADIUS_METERS / maxf(dist_2d, 0.001), 0.0, 1.0))
-		var min_cos = minf(MIN_COS_THETA, cos(theta_cup))
-		if vel_dot_hole < min_cos:
-			print("[TensionManager] ACTIVE -> SPENT: Hole exited cone! cos_theta: %.3f < min_cos: %.3f (Broke offline)." % [vel_dot_hole, min_cos])
-			suspense_state = SuspenseState.SPENT
-			stop_tension(true)
-			return false
+		var half_angle = get_vision_cone_half_angle(dist_2d, is_putt, is_airborne)
+		var min_cos = cos(half_angle)
+
+		if is_airborne:
+			var cos_theta_cur = vel_dot_hole
+			if cos_theta_cur < min_cos:
+				print("[TensionManager] ACTIVE -> SPENT: Airborne hole exited cone! cos_theta: %.3f < min_cos: %.3f" % [cos_theta_cur, min_cos])
+				suspense_state = SuspenseState.SPENT
+				_last_cone_valid = false
+				stop_tension(true)
+				return false
+		else:
+			if vel_dot_hole < min_cos:
+				print("[TensionManager] ACTIVE -> SPENT: Hole exited cone! cos_theta: %.3f < min_cos: %.3f (Broke offline)." % [vel_dot_hole, min_cos])
+				suspense_state = SuspenseState.SPENT
+				_last_cone_valid = false
+				stop_tension(true)
+				return false
+
+		_last_cone_valid = true
 
 		# Track closest distance and update heartbeat closeness
 		_closest_dist_reached = minf(_closest_dist_reached, dist_2d)
 		var closeness = clampf(1.0 - (dist_2d / maxf(threshold, 0.001)), 0.35, 1.0)
 		current_closeness = maxf(current_closeness, closeness)
+		if vignette_material != null:
+			vignette_material.set_shader_parameter("closeness", closeness)
 		return true
 
+	_last_cone_valid = false
 	return false
 
 # ----------------- ACTIVATION / DEACTIVATION -----------------
@@ -730,6 +902,9 @@ func register_camera(cam: Camera3D, base_fov: float = 55.0) -> void:
 # ---------------- PROCESS & VISUAL/AUDIO PULSE ----------------
 
 func _process(delta: float) -> void:
+	if _touchdown_timer > 0.0 and not _last_is_airborne:
+		_touchdown_timer = maxf(0.0, _touchdown_timer - delta)
+
 	if tension_active:
 		pulse_timer += delta
 		var t_in_cycle = fmod(pulse_timer, CYCLE_DURATION)
@@ -786,8 +961,228 @@ func _process(delta: float) -> void:
 			target_fov = base_camera_fov + fov_offset
 		cam.fov = lerp(cam.fov, target_fov, delta * 6.0)
 
+	_update_debug_cone_visualizer()
+
 func get_tension_intensity() -> float:
 	return current_intensity
 
 func get_tension_pulse() -> float:
 	return current_pulse
+
+
+# ---------------- 3D DEBUG VISION CONE VISUALIZER ----------------
+
+func _setup_debug_cone_visualizer() -> void:
+	if _cone_immediate_mesh != null and _cone_mesh_instance != null and is_instance_valid(_cone_mesh_instance):
+		return
+	_cone_immediate_mesh = ImmediateMesh.new()
+	_cone_mesh_instance = MeshInstance3D.new()
+	_cone_mesh_instance.name = "SuspenseConeVisualizer"
+	_cone_mesh_instance.mesh = _cone_immediate_mesh
+	_cone_mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+	_cone_material = StandardMaterial3D.new()
+	_cone_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_cone_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_cone_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_cone_material.vertex_color_use_as_albedo = true
+	_cone_mesh_instance.material_override = _cone_material
+
+
+func _update_debug_cone_visualizer() -> void:
+	var tree = get_tree() if is_inside_tree() else (Engine.get_main_loop() as SceneTree)
+	var gs = (tree.root.get_node_or_null("GlobalSettings") if (tree != null and tree.root != null) else null)
+	if gs == null and is_inside_tree():
+		gs = get_node_or_null("/root/GlobalSettings")
+
+	var enabled = false
+	if gs != null and gs.range_settings != null and gs.range_settings.settings.has("debug_show_suspense_cone"):
+		enabled = bool(gs.range_settings.debug_show_suspense_cone.value)
+
+	if not enabled:
+		if _cone_immediate_mesh != null and _cone_immediate_mesh.get_surface_count() > 0:
+			_cone_immediate_mesh.clear_surfaces()
+		if _cone_mesh_instance != null and is_instance_valid(_cone_mesh_instance):
+			_cone_mesh_instance.visible = false
+		return
+
+	if tree == null:
+		return
+
+	if _cone_mesh_instance == null or not is_instance_valid(_cone_mesh_instance):
+		_setup_debug_cone_visualizer()
+
+	var current_scene = tree.current_scene
+	if current_scene == null and gs != null and gs.has_method("get_active_scene"):
+		current_scene = gs.get_active_scene()
+	if current_scene == null and tree.root != null:
+		current_scene = tree.root
+
+	if current_scene != null and is_instance_valid(_cone_mesh_instance) and _cone_mesh_instance.get_parent() != current_scene:
+		if _cone_mesh_instance.get_parent() != null and is_instance_valid(_cone_mesh_instance.get_parent()):
+			_cone_mesh_instance.get_parent().remove_child(_cone_mesh_instance)
+		current_scene.add_child(_cone_mesh_instance)
+
+	if _cone_mesh_instance != null and is_instance_valid(_cone_mesh_instance):
+		_cone_mesh_instance.visible = true
+
+	# Find active ball in tree
+	var ball: Node3D = null
+	if tree.has_group("golf_ball"):
+		ball = tree.get_first_node_in_group("golf_ball") as Node3D
+	if ball == null and current_scene.has_node("Player"):
+		var p = current_scene.get_node("Player")
+		if "ball" in p and p.ball != null:
+			ball = p.ball
+	if ball == null:
+		ball = current_scene.find_child("ball", true, false) as Node3D
+
+	var ball_pos = _last_ball_pos
+	var ball_vel = _last_ball_vel
+	var target_pos = _last_target_pos
+	var is_putt = _last_is_putt
+	var is_airborne = _last_is_airborne
+
+	if ball != null and is_instance_valid(ball):
+		ball_pos = ball.global_position
+		if "velocity" in ball:
+			ball_vel = ball.velocity
+		if "is_putt" in ball:
+			is_putt = bool(ball.is_putt)
+		if "state" in ball:
+			is_airborne = (ball.state == PhysicsEnums.BallState.FLIGHT)
+		if target_pos.is_zero_approx() and ball.has_method("_get_active_hole_position"):
+			target_pos = ball._get_active_hole_position(ball_pos)
+
+	if target_pos.is_zero_approx() and "current_hole_location" in current_scene:
+		target_pos = current_scene.current_hole_location
+
+	if is_airborne:
+		_was_airborne_this_shot = true
+		_touchdown_timer = TOUCHDOWN_TRANSITION_DURATION
+
+	if ball_pos.is_zero_approx() and target_pos.is_zero_approx() and ball == null:
+		if _cone_immediate_mesh != null and _cone_immediate_mesh.get_surface_count() > 0:
+			_cone_immediate_mesh.clear_surfaces()
+		return
+
+	var dist_to_hole = Vector2(ball_pos.x, ball_pos.z).distance_to(Vector2(target_pos.x, target_pos.z))
+	var half_angle = get_vision_cone_half_angle(dist_to_hole, is_putt, is_airborne)
+
+	# Forward direction of cone (faces 3D trajectory in air, ground travel direction when rolling):
+	var forward := Vector3.ZERO
+	if ball_vel.length() >= 0.05:
+		if is_airborne:
+			forward = ball_vel.normalized()
+		else:
+			var flat_vel = Vector3(ball_vel.x, 0.0, ball_vel.z)
+			forward = flat_vel.normalized() if flat_vel.length() >= 0.01 else ball_vel.normalized()
+	elif not target_pos.is_zero_approx():
+		forward = Vector3(target_pos.x - ball_pos.x, 0.0, target_pos.z - ball_pos.z).normalized()
+	else:
+		forward = -Vector3.FORWARD
+
+	var projected_reach = get_projected_reach_distance(ball_pos, ball_vel, is_airborne, target_pos)
+
+	# Dynamic cone length based on ball speed / projected reach:
+	var cone_length: float
+	if ball_vel.length() >= 0.05:
+		cone_length = clampf(projected_reach, 0.6, 35.0)
+	elif not target_pos.is_zero_approx():
+		cone_length = clampf(dist_to_hole if dist_to_hole > 1.0 else 5.0, 2.0, 8.0)
+	else:
+		cone_length = 5.0
+
+	var is_in_cone := _last_cone_valid
+	if suspense_state != SuspenseState.SPENT and not target_pos.is_zero_approx():
+		var to_hole_2d = Vector2(target_pos.x - ball_pos.x, target_pos.z - ball_pos.z).normalized()
+		var fwd_2d = Vector2(forward.x, forward.z).normalized()
+		if fwd_2d.length_squared() > 0.01:
+			var dot = fwd_2d.dot(to_hole_2d)
+			var in_angle = (dot >= cos(half_angle))
+			var in_reach = (projected_reach >= dist_to_hole) or ball_vel.length() < 0.05
+			var in_geom = in_angle and in_reach
+			is_in_cone = _last_cone_valid or in_geom
+
+	_draw_3d_vision_cone(ball_pos, forward, target_pos, half_angle, cone_length, is_in_cone)
+
+
+func _draw_3d_vision_cone(origin: Vector3, forward: Vector3, target_pos: Vector3, half_angle: float, cone_len: float, is_in_cone: bool) -> void:
+	if _cone_immediate_mesh == null:
+		return
+	_cone_immediate_mesh.clear_surfaces()
+
+	var base_radius = cone_len * tan(half_angle)
+
+	var up = Vector3.UP
+	if absf(forward.dot(up)) > 0.95:
+		up = Vector3.RIGHT
+	var right = forward.cross(up).normalized()
+	var actual_up = right.cross(forward).normalized()
+	var base_center = origin + forward * cone_len
+
+	var segments := 24
+	var circle_pts: Array[Vector3] = []
+	for i in range(segments):
+		var theta = (float(i) / float(segments)) * TAU
+		var pt = base_center + right * (cos(theta) * base_radius) + actual_up * (sin(theta) * base_radius)
+		circle_pts.append(pt)
+
+	# Determine colors based on status
+	var line_color: Color
+	var fill_color: Color
+	if tension_active:
+		line_color = Color(0.2, 1.0, 0.4, 0.95) # Pulsing active green
+		fill_color = Color(0.1, 0.9, 0.3, 0.22)
+	elif is_in_cone:
+		line_color = Color(0.1, 0.85, 1.0, 0.90) # On-target cyan
+		fill_color = Color(0.05, 0.75, 0.95, 0.16)
+	else:
+		line_color = Color(1.0, 0.25, 0.15, 0.85) # Offline / outside red
+		fill_color = Color(0.95, 0.2, 0.1, 0.12)
+
+	# 1. Translucent cone surface
+	_cone_immediate_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in range(segments):
+		var next_i = (i + 1) % segments
+		_cone_immediate_mesh.surface_set_color(fill_color)
+		_cone_immediate_mesh.surface_add_vertex(origin)
+		_cone_immediate_mesh.surface_set_color(fill_color)
+		_cone_immediate_mesh.surface_add_vertex(circle_pts[i])
+		_cone_immediate_mesh.surface_set_color(fill_color)
+		_cone_immediate_mesh.surface_add_vertex(circle_pts[next_i])
+	_cone_immediate_mesh.surface_end()
+
+	# 2. Wireframe outline lines
+	_cone_immediate_mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	# Circle perimeter
+	for i in range(segments):
+		var next_i = (i + 1) % segments
+		_cone_immediate_mesh.surface_set_color(line_color)
+		_cone_immediate_mesh.surface_add_vertex(circle_pts[i])
+		_cone_immediate_mesh.surface_set_color(line_color)
+		_cone_immediate_mesh.surface_add_vertex(circle_pts[next_i])
+
+	# 8 boundary rays from apex to perimeter
+	for k in range(8):
+		var idx = k * (segments / 8)
+		_cone_immediate_mesh.surface_set_color(line_color)
+		_cone_immediate_mesh.surface_add_vertex(origin)
+		_cone_immediate_mesh.surface_set_color(line_color)
+		_cone_immediate_mesh.surface_add_vertex(circle_pts[idx])
+
+	# Center axis ray
+	_cone_immediate_mesh.surface_set_color(line_color)
+	_cone_immediate_mesh.surface_add_vertex(origin)
+	_cone_immediate_mesh.surface_set_color(line_color)
+	_cone_immediate_mesh.surface_add_vertex(base_center)
+
+	# Line connecting ball to hole (if target exists)
+	if not target_pos.is_zero_approx():
+		var target_color = Color(1.0, 0.9, 0.2, 0.75) if is_in_cone else Color(1.0, 0.4, 0.4, 0.5)
+		_cone_immediate_mesh.surface_set_color(target_color)
+		_cone_immediate_mesh.surface_add_vertex(origin)
+		_cone_immediate_mesh.surface_set_color(target_color)
+		_cone_immediate_mesh.surface_add_vertex(target_pos)
+
+	_cone_immediate_mesh.surface_end()

@@ -1,9 +1,6 @@
 extends Control
 
 @onready var _course_list = $ContentPanel/ContentMargin/VBoxContainer/ScrollContainer/CourseList
-@onready var _course_directory_text: LineEdit = $ContentPanel/ContentMargin/VBoxContainer/CourseDirectory/CourseDirectoryText
-@onready var _status_label: Label = $ContentPanel/ContentMargin/VBoxContainer/StatusLabel
-@onready var _refresh_button: Button = $ContentPanel/ContentMargin/VBoxContainer/CourseDirectory/RefreshButton
 var _play_button: Button
 var _preview_button: Button
 
@@ -26,8 +23,6 @@ func _ready() -> void:
 		main_menu_btn.expand_icon = true
 		ThemeManager.apply_nav_button_style(main_menu_btn)
 
-	_refresh_button.mouse_entered.connect(_on_refresh_button_mouse_entered)
-	_refresh_button.mouse_exited.connect(_on_refresh_button_mouse_exited)
 	_course_list.item_selected.connect(_on_course_selected)
 	ThemeManager.apply_item_list_style(_course_list)
 
@@ -87,14 +82,23 @@ func _ready() -> void:
 		vbox.add_child(download_panel)
 		vbox.move_child(download_panel, 0)
 
+		# Combined options row for hole length (front/back/full) and wind simulation
+		var options_hbox = HBoxContainer.new()
+		options_hbox.add_theme_constant_override("separation", 16)
+		options_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
 		var length_selector = _create_length_selector()
-		vbox.add_child(length_selector)
+		length_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		options_hbox.add_child(length_selector)
+
+		var wind_selector = _create_wind_selector()
+		wind_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		options_hbox.add_child(wind_selector)
+
+		vbox.add_child(options_hbox)
 
 		var green_speed_selector = _create_green_speed_selector()
 		vbox.add_child(green_speed_selector)
-
-		var wind_selector = _create_wind_selector()
-		vbox.add_child(wind_selector)
 
 		# Add Footer with Play Course button
 		var footer_hbox = HBoxContainer.new()
@@ -155,11 +159,6 @@ func _on_main_menu_button_pressed() -> void:
 	SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")
 
 
-func _on_refresh_button_pressed() -> void:
-	_flash_refresh_button()
-	_request_course_reload()
-
-
 func _on_course_list_item_activated(index: int) -> void:
 	var scene_path: String = _course_list.get_scene_path_for_index(index)
 	var config_path: String = _course_list.get_config_path_for_index(index)
@@ -198,27 +197,23 @@ func _on_course_list_item_activated(index: int) -> void:
 
 
 func _request_course_reload() -> void:
-	var status_text: String = _course_list.reload_courses(_course_directory_text.text)
-	_status_label.text = status_text if not status_text.is_empty() else "Ready"
+	_course_list.reload_courses("res://Courses/UserCourses")
 	_update_play_button()
 
 
 func _on_delete_course_pressed() -> void:
 	var selected = _course_list.get_selected_items()
 	if selected.is_empty():
-		_status_label.text = "Select a course to delete first."
 		return
 	
 	var metadata = _course_list.get_item_metadata(selected[0])
 	var config_path: String = metadata.get("config_path", "")
 	
 	if config_path.is_empty():
-		_status_label.text = "Cannot determine course path."
 		return
 	
 	# Only allow deleting user-downloaded courses, not built-in ones
 	if not config_path.begins_with("user://"):
-		_status_label.text = "Cannot delete built-in courses."
 		return
 	
 	var course_dir = config_path.get_base_dir()
@@ -232,7 +227,6 @@ func _on_delete_course_pressed() -> void:
 	ThemeManager.apply_dialog_style(confirm)
 	confirm.confirmed.connect(func():
 		_delete_course_dir(course_dir)
-		_status_label.text = "Deleted course: %s" % course_title
 		_request_course_reload()
 		confirm.queue_free()
 	)
@@ -265,21 +259,6 @@ func _delete_course_dir(dir_path: String) -> void:
 	if parent_dir != null:
 		parent_dir.remove(dir_path.get_file())
 		print("[CourseSelector] Deleted course directory: %s" % dir_path)
-
-
-func _flash_refresh_button() -> void:
-	_refresh_button.self_modulate = Color(1, 1, 1, 1)
-	var tween := create_tween()
-	tween.tween_property(_refresh_button, "self_modulate", Color(0.75, 0.9, 1.0, 1), 0.08)
-	tween.tween_property(_refresh_button, "self_modulate", Color(1, 1, 1, 1), 0.16)
-
-
-func _on_refresh_button_mouse_entered() -> void:
-	_refresh_button.self_modulate = Color(0.8, 0.92, 1.0, 1)
-
-
-func _on_refresh_button_mouse_exited() -> void:
-	_refresh_button.self_modulate = Color(1, 1, 1, 1)
 
 
 func _on_course_selected(index: int) -> void:
@@ -457,7 +436,11 @@ func _select_length(length: String) -> void:
 
 
 func _update_course_length_options(idx: int) -> void:
+	if back_9_btn == null or not is_instance_valid(back_9_btn):
+		return
 	var course_data = _course_list.get_item_metadata(idx)
+	if course_data == null:
+		return
 	var config_path: String = course_data.get("config_path", "")
 	var file = FileAccess.open(config_path, FileAccess.READ)
 	if file != null:

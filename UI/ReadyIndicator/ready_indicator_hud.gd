@@ -794,7 +794,7 @@ func _is_node_visible_in_tree(node: Node) -> bool:
 		return false
 
 	var curr: Node = node
-	while curr != null:
+	while curr != null and is_instance_valid(curr):
 		if curr is CanvasItem:
 			if not (curr as CanvasItem).visible:
 				return false
@@ -804,6 +804,8 @@ func _is_node_visible_in_tree(node: Node) -> bool:
 		elif curr is Window:
 			if not (curr as Window).visible:
 				return false
+		if not curr.is_inside_tree():
+			break
 		curr = curr.get_parent()
 
 	return true

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2874A6"/>
+      <stop offset="100%" stop-color="#154360"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+  <circle cx="64" cy="64" r="58" fill="url(#bg)" stroke="#85C1E9" stroke-width="4" filter="url(#shadow)"/>
+  <circle cx="64" cy="64" r="50" fill="none" stroke="#85C1E9" stroke-dasharray="3 3" stroke-width="1.5" opacity="0.6"/>
+  <g transform="translate(0, -6)">
+    <path d="M52 32 L76 32 L72 56 L48 56 Z" fill="#1B4F72" stroke="#EBF5FB" stroke-width="2"/>
+    <line x1="53" y1="38" x2="73" y2="38" stroke="#EBF5FB" stroke-width="1.5"/>
+    <line x1="51" y1="44" x2="71" y2="44" stroke="#EBF5FB" stroke-width="1.5"/>
+    <line x1="49" y1="50" x2="69" y2="50" stroke="#EBF5FB" stroke-width="1.5"/>
+    <circle cx="78" cy="56" r="4" fill="#FFFFFF"/>
+    <path d="M80 26 L81 29 L84 30 L81 31 L80 34 L79 31 L76 30 L79 29 Z" fill="#F4D03F"/>
+  </g>
+  <text x="64" y="86" font-family="sans-serif" font-size="10" font-weight="800" fill="#FFFFFF" text-anchor="middle" letter-spacing="0.5">IRON MAGIC</text>
+  <text x="64" y="98" font-family="sans-serif" font-size="9" font-weight="600" fill="#E2E8F0" text-anchor="middle">75+ YARDS</text>
+</svg>

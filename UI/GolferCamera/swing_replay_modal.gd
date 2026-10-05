@@ -90,17 +90,102 @@ func _ready() -> void:
 func _grab_initial_focus() -> void:
 	if not is_visible_in_tree():
 		return
+	if not UIFocusGuard.is_locked() or UIFocusGuard.current_lock_root() != self:
+		UIFocusGuard.push_lock(self)
+	var preferred_btn := find_child("ResumePracticeButton", true, false)
+	if preferred_btn == null or not is_instance_valid(preferred_btn):
+		preferred_btn = find_child("CloseDetachedButton", true, false)
+	if preferred_btn != null and is_instance_valid(preferred_btn) and preferred_btn.is_visible_in_tree():
+		preferred_btn.grab_focus()
+		return
 	if has_node("/root/KeybindingManager"):
 		var km = get_node("/root/KeybindingManager")
 		km.focus_first_control(self)
 
 
+func _on_focus_lock_popped() -> void:
+	if not is_inside_tree() or is_queued_for_deletion():
+		return
+	var detail_modal = get_node_or_null("DetailModal")
+	if detail_modal != null and is_instance_valid(detail_modal):
+		InAppVideoPlayer.stop_all_players()
+		detail_modal.queue_free()
+		return
+	_on_close_button_pressed()
+
+
 func _input(event: InputEvent) -> void:
+	if _process_detail_modal_scroll(event):
+		return
 	_process_close_input(event)
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _process_detail_modal_scroll(event):
+		return
 	_process_close_input(event)
+
+
+func _process_detail_modal_scroll(event: InputEvent) -> bool:
+	var detail_modal = get_node_or_null("DetailModal")
+	if detail_modal == null or not is_instance_valid(detail_modal) or not detail_modal.visible:
+		return false
+	var scroll: ScrollContainer = detail_modal.find_child("DetailScroll", true, false) as ScrollContainer
+	if scroll == null or not is_instance_valid(scroll):
+		return false
+
+	# 1. Analog Right Stick scrolling
+	if event is InputEventJoypadMotion and event.axis == JOY_AXIS_RIGHT_Y:
+		if abs(event.axis_value) >= 0.2:
+			scroll.scroll_vertical += int(event.axis_value * 28.0)
+			get_viewport().set_input_as_handled()
+			return true
+
+	# 2. Shoulder buttons for page scrolling (LB / RB)
+	if event is InputEventJoypadButton and event.pressed:
+		if event.button_index == JOY_BUTTON_LEFT_SHOULDER:
+			var page_h := int(max(scroll.size.y * 0.7, 100.0))
+			scroll.scroll_vertical = max(0, scroll.scroll_vertical - page_h)
+			get_viewport().set_input_as_handled()
+			return true
+		elif event.button_index == JOY_BUTTON_RIGHT_SHOULDER:
+			var page_h := int(max(scroll.size.y * 0.7, 100.0))
+			scroll.scroll_vertical += page_h
+			get_viewport().set_input_as_handled()
+			return true
+
+	# 3. D-pad & Left Stick scrolling when scroll container is focused
+	var vp := get_viewport()
+	if vp != null and vp.gui_get_focus_owner() == scroll:
+		var is_down: bool = event.is_action_pressed("ui_down") or (event is InputEventJoypadButton and event.button_index == JOY_BUTTON_DPAD_DOWN and event.pressed) or (event is InputEventJoypadMotion and event.axis == JOY_AXIS_LEFT_Y and event.axis_value >= 0.5)
+		var is_up: bool = event.is_action_pressed("ui_up") or (event is InputEventJoypadButton and event.button_index == JOY_BUTTON_DPAD_UP and event.pressed) or (event is InputEventJoypadMotion and event.axis == JOY_AXIS_LEFT_Y and event.axis_value <= -0.5)
+
+		var v_bar := scroll.get_v_scroll_bar()
+		var max_v := v_bar.max_value - scroll.size.y if v_bar != null else 9999.0
+
+		if is_down:
+			if scroll.scroll_vertical < max_v - 15:
+				scroll.scroll_vertical += 60
+				get_viewport().set_input_as_handled()
+				return true
+			else:
+				var footer_btn := detail_modal.find_child("FooterCloseButton", true, false) as Control
+				if footer_btn != null and is_instance_valid(footer_btn) and footer_btn.is_visible_in_tree():
+					footer_btn.grab_focus()
+					get_viewport().set_input_as_handled()
+					return true
+		elif is_up:
+			if scroll.scroll_vertical > 15:
+				scroll.scroll_vertical = max(0, scroll.scroll_vertical - 60)
+				get_viewport().set_input_as_handled()
+				return true
+			else:
+				var close_btn := detail_modal.find_child("CloseButton", true, false) as Control
+				if close_btn != null and is_instance_valid(close_btn) and close_btn.is_visible_in_tree():
+					close_btn.grab_focus()
+					get_viewport().set_input_as_handled()
+					return true
+	return false
 
 
 func _process_close_input(event: InputEvent) -> void:
@@ -184,6 +269,7 @@ func setup_modal(data: Dictionary, frames: Array = [], suggestions_only: bool = 
 		_start_background_wireframe_analysis()
 	else:
 		_record_swing_recommendations()
+	call_deferred("_grab_initial_focus")
 
 
 func update_shot_data(data: Dictionary, frames: Array = [], suggestions_only: bool = false) -> void:
@@ -211,6 +297,7 @@ func update_shot_data(data: Dictionary, frames: Array = [], suggestions_only: bo
 		_start_background_wireframe_analysis()
 	else:
 		_record_swing_recommendations()
+	call_deferred("_grab_initial_focus")
 
 
 func _build_ui() -> void:
@@ -1422,15 +1509,16 @@ func _on_close_button_pressed() -> void:
 	_analysis_cancelled = true
 	_close_active_video_players()
 	visible = false
-	var vp = get_viewport()
-	if vp != null:
-		vp.gui_release_focus()
+	if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == self:
+		UIFocusGuard.pop_lock(true)
 	emit_signal("closed")
 	queue_free()
 
 
 func _exit_tree() -> void:
 	_close_active_video_players()
+	if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == self:
+		UIFocusGuard.pop_lock(false)
 
 
 func _close_active_video_players() -> void:
@@ -1535,6 +1623,123 @@ func _on_detail_button_pressed(rec: Dictionary, modal_type: String) -> void:
 
 	var modal = _create_detail_modal(rec, modal_type)
 	add_child(modal)
+	UIFocusGuard.push_lock(modal)
+	_setup_detail_modal_focus_navigation(modal)
+	call_deferred("_setup_detail_modal_focus_navigation", modal)
+
+	var primary_focus: Control = null
+	if modal_type == "video":
+		primary_focus = modal.find_child("BrowserBtn", true, false) as Control
+		if primary_focus == null:
+			primary_focus = modal.find_child("MobWatchBtn", true, false) as Control
+		if primary_focus == null:
+			primary_focus = modal.find_child("VideoPlaceholderFrame", true, false) as Control
+	if primary_focus == null:
+		primary_focus = modal.find_child("CloseButton", true, false) as Control
+	if primary_focus == null:
+		primary_focus = modal.find_child("FooterCloseButton", true, false) as Control
+	if primary_focus != null and is_instance_valid(primary_focus):
+		primary_focus.call_deferred("grab_focus")
+	else:
+		KeybindingManager.focus_first_control(modal)
+
+
+func _setup_detail_modal_focus_navigation(modal: Control) -> void:
+	if modal == null or not is_instance_valid(modal):
+		return
+	var close_btn: Button = modal.find_child("CloseButton", true, false) as Button
+	var footer_btn: Button = modal.find_child("FooterCloseButton", true, false) as Button
+	var scroll: ScrollContainer = modal.find_child("DetailScroll", true, false) as ScrollContainer
+	var v_frame: Control = modal.find_child("VideoPlaceholderFrame", true, false) as Control
+
+	var body_buttons: Array[Control] = []
+	if scroll != null:
+		_collect_detail_focusable_controls(scroll, body_buttons)
+
+	if v_frame != null and v_frame.is_visible_in_tree() and v_frame.focus_mode != Control.FOCUS_NONE:
+		if close_btn != null:
+			close_btn.focus_neighbor_bottom = close_btn.get_path_to(v_frame)
+			v_frame.focus_neighbor_top = v_frame.get_path_to(close_btn)
+		if not body_buttons.is_empty():
+			v_frame.focus_neighbor_bottom = v_frame.get_path_to(body_buttons[0])
+			for i in range(body_buttons.size()):
+				var b = body_buttons[i]
+				var prev_b = body_buttons[(i - 1 + body_buttons.size()) % body_buttons.size()]
+				var next_b = body_buttons[(i + 1) % body_buttons.size()]
+				b.focus_neighbor_left = b.get_path_to(prev_b)
+				b.focus_neighbor_right = b.get_path_to(next_b)
+				b.focus_neighbor_top = b.get_path_to(v_frame)
+				if footer_btn != null:
+					b.focus_neighbor_bottom = b.get_path_to(footer_btn)
+			if footer_btn != null:
+				footer_btn.focus_neighbor_top = footer_btn.get_path_to(body_buttons[0])
+				if close_btn != null:
+					footer_btn.focus_neighbor_bottom = footer_btn.get_path_to(close_btn)
+					close_btn.focus_neighbor_top = close_btn.get_path_to(footer_btn)
+		else:
+			if footer_btn != null:
+				v_frame.focus_neighbor_bottom = v_frame.get_path_to(footer_btn)
+				footer_btn.focus_neighbor_top = footer_btn.get_path_to(v_frame)
+				if close_btn != null:
+					footer_btn.focus_neighbor_bottom = footer_btn.get_path_to(close_btn)
+					close_btn.focus_neighbor_top = close_btn.get_path_to(footer_btn)
+	elif not body_buttons.is_empty():
+		for i in range(body_buttons.size()):
+			var b = body_buttons[i]
+			var prev_b = body_buttons[(i - 1 + body_buttons.size()) % body_buttons.size()]
+			var next_b = body_buttons[(i + 1) % body_buttons.size()]
+			b.focus_neighbor_left = b.get_path_to(prev_b)
+			b.focus_neighbor_right = b.get_path_to(next_b)
+			if close_btn != null:
+				b.focus_neighbor_top = b.get_path_to(close_btn)
+			if footer_btn != null:
+				b.focus_neighbor_bottom = b.get_path_to(footer_btn)
+
+		if close_btn != null:
+			close_btn.focus_neighbor_bottom = close_btn.get_path_to(body_buttons[0])
+			if footer_btn != null:
+				close_btn.focus_neighbor_top = close_btn.get_path_to(footer_btn)
+				close_btn.focus_neighbor_left = close_btn.get_path_to(footer_btn)
+				close_btn.focus_neighbor_right = close_btn.get_path_to(body_buttons[0])
+
+		if footer_btn != null:
+			footer_btn.focus_neighbor_top = footer_btn.get_path_to(body_buttons[0])
+			if close_btn != null:
+				footer_btn.focus_neighbor_bottom = footer_btn.get_path_to(close_btn)
+				footer_btn.focus_neighbor_left = footer_btn.get_path_to(close_btn)
+				footer_btn.focus_neighbor_right = footer_btn.get_path_to(body_buttons[0])
+	else:
+		if scroll != null:
+			scroll.focus_mode = Control.FOCUS_ALL
+			if close_btn != null:
+				scroll.focus_neighbor_top = scroll.get_path_to(close_btn)
+				close_btn.focus_neighbor_bottom = close_btn.get_path_to(scroll)
+				if footer_btn != null:
+					close_btn.focus_neighbor_top = close_btn.get_path_to(footer_btn)
+					close_btn.focus_neighbor_left = close_btn.get_path_to(footer_btn)
+					close_btn.focus_neighbor_right = close_btn.get_path_to(scroll)
+			if footer_btn != null:
+				scroll.focus_neighbor_bottom = scroll.get_path_to(footer_btn)
+				footer_btn.focus_neighbor_top = footer_btn.get_path_to(scroll)
+				if close_btn != null:
+					footer_btn.focus_neighbor_bottom = footer_btn.get_path_to(close_btn)
+					footer_btn.focus_neighbor_left = footer_btn.get_path_to(close_btn)
+					footer_btn.focus_neighbor_right = footer_btn.get_path_to(scroll)
+		elif close_btn != null and footer_btn != null:
+			close_btn.focus_neighbor_bottom = close_btn.get_path_to(footer_btn)
+			close_btn.focus_neighbor_top = close_btn.get_path_to(footer_btn)
+			footer_btn.focus_neighbor_top = footer_btn.get_path_to(close_btn)
+			footer_btn.focus_neighbor_bottom = footer_btn.get_path_to(close_btn)
+
+
+func _collect_detail_focusable_controls(node: Node, out_list: Array[Control]) -> void:
+	if node is Control:
+		var c = node as Control
+		if c.visible and c.focus_mode != Control.FOCUS_NONE:
+			if c is Button or c is BaseButton:
+				out_list.append(c)
+	for ch in node.get_children():
+		_collect_detail_focusable_controls(ch, out_list)
 
 
 func _create_detail_modal(rec: Dictionary, modal_type: String) -> Control:
@@ -1549,10 +1754,16 @@ func _create_detail_modal(rec: Dictionary, modal_type: String) -> Control:
 
 	var dismiss_modal = func():
 		InAppVideoPlayer.stop_all_players()
+		if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == root:
+			UIFocusGuard.pop_lock(true)
 		root.queue_free()
+
+	root.set_meta("on_focus_lock_popped", dismiss_modal)
 
 	root.tree_exiting.connect(func():
 		InAppVideoPlayer.stop_all_players()
+		if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == root:
+			UIFocusGuard.pop_lock(true)
 	)
 
 	# Semi-transparent backdrop dimmer (click to dismiss)
@@ -1606,6 +1817,7 @@ func _create_detail_modal(rec: Dictionary, modal_type: String) -> Control:
 	header.add_child(title_lbl)
 
 	var close_btn = Button.new()
+	close_btn.name = "CloseButton"
 	close_btn.text = "✖"
 	close_btn.custom_minimum_size = Vector2(50 if is_mob else 46, 50 if is_mob else 46)
 	close_btn.add_theme_font_size_override("font_size", 22)
@@ -1632,6 +1844,8 @@ func _create_detail_modal(rec: Dictionary, modal_type: String) -> Control:
 
 	# ── Scrollable Body ──
 	var scroll = ScrollContainer.new()
+	scroll.name = "DetailScroll"
+	scroll.focus_mode = Control.FOCUS_ALL
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -1650,6 +1864,7 @@ func _create_detail_modal(rec: Dictionary, modal_type: String) -> Control:
 
 	# ── Footer Button for Quick Mobile / Remote Dismissal ──
 	var footer_btn = Button.new()
+	footer_btn.name = "FooterCloseButton"
 	footer_btn.text = "Close"
 	footer_btn.custom_minimum_size = Vector2(160, 50 if is_mob else 44)
 	footer_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -1689,94 +1904,242 @@ func _populate_detail_content(container: VBoxContainer, rec: Dictionary, modal_t
 
 
 func _build_data_comparison_content(container: VBoxContainer, rec: Dictionary, is_mob: bool) -> void:
-	# ── Section 1: Comparison Cards (Your Data vs Pro Benchmark) ──
-	var comp_flow = HFlowContainer.new()
-	comp_flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	comp_flow.add_theme_constant_override("h_separation", 14)
-	comp_flow.add_theme_constant_override("v_separation", 14)
+	if rec.has("comparison_table") and not (rec["comparison_table"] as Array).is_empty():
+		# ── Skill Baseline Header ──
+		var base_panel = PanelContainer.new()
+		base_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var base_style = StyleBoxFlat.new()
+		base_style.bg_color = Color(0.06, 0.12, 0.18, 0.95)
+		base_style.corner_radius_top_left = 8
+		base_style.corner_radius_top_right = 8
+		base_style.corner_radius_bottom_left = 8
+		base_style.corner_radius_bottom_right = 8
+		base_style.border_width_left = 3
+		base_style.border_color = Color(0.25, 0.65, 0.95, 0.9)
+		base_style.content_margin_left = 14
+		base_style.content_margin_top = 10
+		base_style.content_margin_right = 14
+		base_style.content_margin_bottom = 10
+		base_panel.add_theme_stylebox_override("panel", base_style)
 
-	# 🔴 Your Shot Card
-	var your_panel = PanelContainer.new()
-	your_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	your_panel.custom_minimum_size = Vector2(260, 0)
-	var your_style = StyleBoxFlat.new()
-	your_style.bg_color = Color(0.12, 0.06, 0.08, 0.95)
-	your_style.corner_radius_top_left = 8
-	your_style.corner_radius_top_right = 8
-	your_style.corner_radius_bottom_left = 8
-	your_style.corner_radius_bottom_right = 8
-	your_style.border_width_left = 4
-	your_style.border_color = Color(1.0, 0.40, 0.40, 0.95)
-	your_style.content_margin_left = 16
-	your_style.content_margin_top = 14
-	your_style.content_margin_right = 16
-	your_style.content_margin_bottom = 14
-	your_panel.add_theme_stylebox_override("panel", your_style)
+		var base_hbox = HBoxContainer.new()
+		base_hbox.add_theme_constant_override("separation", 10)
 
-	var your_vbox = VBoxContainer.new()
-	your_vbox.add_theme_constant_override("separation", 8)
+		var base_icon = Label.new()
+		base_icon.text = "🎯"
+		base_icon.add_theme_font_size_override("font_size", 20 if is_mob else 22)
+		base_hbox.add_child(base_icon)
 
-	var your_title = Label.new()
-	your_title.text = "🔴 YOUR SHOT"
-	your_title.add_theme_font_size_override("font_size", 18 if is_mob else 18)
-	your_title.add_theme_color_override("font_color", Color(1.0, 0.70, 0.70))
-	your_vbox.add_child(your_title)
+		var base_vbox = VBoxContainer.new()
+		base_vbox.add_theme_constant_override("separation", 2)
+		base_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-	var player_val = str(rec.get("player_val", "---"))
-	var parts = player_val.split("|")
-	for part in parts:
-		var part_str = part.strip_edges()
-		if part_str != "":
-			var val_lbl = Label.new()
-			val_lbl.text = "• " + part_str
-			val_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			val_lbl.add_theme_font_size_override("font_size", 17 if is_mob else 18)
-			val_lbl.add_theme_color_override("font_color", Color.WHITE)
-			your_vbox.add_child(val_lbl)
+		var base_title = Label.new()
+		base_title.text = "SKILL BASELINE: " + str(rec.get("skill_level_display", "Mid Handicap (10–19 HCP)")).to_upper()
+		base_title.add_theme_font_size_override("font_size", 14 if is_mob else 15)
+		base_title.add_theme_color_override("font_color", Color(1.0, 0.90, 0.55))
+		base_vbox.add_child(base_title)
 
-	your_panel.add_child(your_vbox)
-	comp_flow.add_child(your_panel)
+		var base_note = Label.new()
+		base_note.text = "Benchmarks dynamically calibrated to your player profile handicap tier."
+		base_note.add_theme_font_size_override("font_size", 12 if is_mob else 13)
+		base_note.add_theme_color_override("font_color", Color(0.70, 0.85, 0.98))
+		base_vbox.add_child(base_note)
 
-	# 🟢 Pro Target Card
-	var pro_panel = PanelContainer.new()
-	pro_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	pro_panel.custom_minimum_size = Vector2(260, 0)
-	var pro_style = StyleBoxFlat.new()
-	pro_style.bg_color = Color(0.04, 0.11, 0.07, 0.95)
-	pro_style.corner_radius_top_left = 8
-	pro_style.corner_radius_top_right = 8
-	pro_style.corner_radius_bottom_left = 8
-	pro_style.corner_radius_bottom_right = 8
-	pro_style.border_width_left = 4
-	pro_style.border_color = Color(0.35, 0.90, 0.55, 0.95)
-	pro_style.content_margin_left = 16
-	pro_style.content_margin_top = 14
-	pro_style.content_margin_right = 16
-	pro_style.content_margin_bottom = 14
-	pro_panel.add_theme_stylebox_override("panel", pro_style)
+		base_hbox.add_child(base_vbox)
+		base_panel.add_child(base_hbox)
+		container.add_child(base_panel)
 
-	var pro_vbox = VBoxContainer.new()
-	pro_vbox.add_theme_constant_override("separation", 8)
+		# ── Multi-Row Ballistic Scorecard Table ──
+		var table_panel = PanelContainer.new()
+		table_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var table_style = StyleBoxFlat.new()
+		table_style.bg_color = Color(0.05, 0.08, 0.12, 0.95)
+		table_style.corner_radius_top_left = 8
+		table_style.corner_radius_top_right = 8
+		table_style.corner_radius_bottom_left = 8
+		table_style.corner_radius_bottom_right = 8
+		table_style.border_width_left = 1
+		table_style.border_width_top = 1
+		table_style.border_width_right = 1
+		table_style.border_width_bottom = 1
+		table_style.border_color = Color(0.18, 0.28, 0.40, 0.8)
+		table_style.content_margin_left = 12 if is_mob else 16
+		table_style.content_margin_top = 12 if is_mob else 14
+		table_style.content_margin_right = 12 if is_mob else 16
+		table_style.content_margin_bottom = 12 if is_mob else 14
+		table_panel.add_theme_stylebox_override("panel", table_style)
 
-	var pro_title = Label.new()
-	pro_title.text = "🟢 PRO BENCHMARK"
-	pro_title.add_theme_font_size_override("font_size", 18 if is_mob else 18)
-	pro_title.add_theme_color_override("font_color", Color(0.55, 0.95, 0.70))
-	pro_vbox.add_child(pro_title)
+		var table_vbox = VBoxContainer.new()
+		table_vbox.add_theme_constant_override("separation", 8)
 
-	var bench_lbl = Label.new()
-	bench_lbl.text = str(rec.get("benchmark_val", "---"))
-	bench_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	bench_lbl.add_theme_font_size_override("font_size", 17 if is_mob else 18)
-	bench_lbl.add_theme_color_override("font_color", Color.WHITE)
-	pro_vbox.add_child(bench_lbl)
+		var header_row = HBoxContainer.new()
+		header_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		header_row.add_theme_constant_override("separation", 8)
 
-	pro_panel.add_child(pro_vbox)
-	comp_flow.add_child(pro_panel)
+		var h_metric = Label.new()
+		h_metric.text = "METRIC"
+		h_metric.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		h_metric.add_theme_font_size_override("font_size", 12 if is_mob else 13)
+		h_metric.add_theme_color_override("font_color", Color(0.65, 0.78, 0.90))
+		header_row.add_child(h_metric)
 
-	container.add_child(comp_flow)
+		var h_your = Label.new()
+		h_your.text = "YOUR SHOT"
+		h_your.custom_minimum_size = Vector2(90 if is_mob else 120, 0)
+		h_your.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		h_your.add_theme_font_size_override("font_size", 12 if is_mob else 13)
+		h_your.add_theme_color_override("font_color", Color(1.0, 0.75, 0.75))
+		header_row.add_child(h_your)
 
-	# ── Section 2: Launch Impact / Consequence ──
+		var h_target = Label.new()
+		h_target.text = "TARGET WINDOW"
+		h_target.custom_minimum_size = Vector2(120 if is_mob else 150, 0)
+		h_target.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		h_target.add_theme_font_size_override("font_size", 12 if is_mob else 13)
+		h_target.add_theme_color_override("font_color", Color(0.65, 0.95, 0.75))
+		header_row.add_child(h_target)
+
+		var h_status = Label.new()
+		h_status.text = "STATUS"
+		h_status.custom_minimum_size = Vector2(85 if is_mob else 110, 0)
+		h_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		h_status.add_theme_font_size_override("font_size", 12 if is_mob else 13)
+		h_status.add_theme_color_override("font_color", Color(0.85, 0.85, 0.90))
+		header_row.add_child(h_status)
+
+		table_vbox.add_child(header_row)
+
+		var h_sep = HSeparator.new()
+		h_sep.add_theme_constant_override("separation", 4)
+		table_vbox.add_child(h_sep)
+
+		var comp_table = rec["comparison_table"] as Array
+		for row_data in comp_table:
+			var r_row = HBoxContainer.new()
+			r_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			r_row.add_theme_constant_override("separation", 8)
+
+			var m_lbl = Label.new()
+			m_lbl.text = str(row_data.get("metric", ""))
+			m_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			m_lbl.add_theme_font_size_override("font_size", 14 if is_mob else 15)
+			m_lbl.add_theme_color_override("font_color", Color.WHITE)
+			r_row.add_child(m_lbl)
+
+			var y_lbl = Label.new()
+			y_lbl.text = str(row_data.get("player", "---"))
+			y_lbl.custom_minimum_size = Vector2(90 if is_mob else 120, 0)
+			y_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			y_lbl.add_theme_font_size_override("font_size", 14 if is_mob else 15)
+			y_lbl.add_theme_color_override("font_color", Color.WHITE)
+			r_row.add_child(y_lbl)
+
+			var t_lbl = Label.new()
+			t_lbl.text = str(row_data.get("target", "---"))
+			t_lbl.custom_minimum_size = Vector2(120 if is_mob else 150, 0)
+			t_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			t_lbl.add_theme_font_size_override("font_size", 13 if is_mob else 14)
+			t_lbl.add_theme_color_override("font_color", Color(0.55, 0.95, 0.70))
+			r_row.add_child(t_lbl)
+
+			var s_badge = _create_status_pill(str(row_data.get("status", "GOOD")), is_mob)
+			s_badge.custom_minimum_size = Vector2(85 if is_mob else 110, 24)
+			r_row.add_child(s_badge)
+
+			table_vbox.add_child(r_row)
+
+		table_panel.add_child(table_vbox)
+		container.add_child(table_panel)
+
+	else:
+		# Fallback to 2-card comparison
+		var comp_flow = HFlowContainer.new()
+		comp_flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		comp_flow.add_theme_constant_override("h_separation", 14)
+		comp_flow.add_theme_constant_override("v_separation", 14)
+
+		# 🔴 Your Shot Card
+		var your_panel = PanelContainer.new()
+		your_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		your_panel.custom_minimum_size = Vector2(260, 0)
+		var your_style = StyleBoxFlat.new()
+		your_style.bg_color = Color(0.12, 0.06, 0.08, 0.95)
+		your_style.corner_radius_top_left = 8
+		your_style.corner_radius_top_right = 8
+		your_style.corner_radius_bottom_left = 8
+		your_style.corner_radius_bottom_right = 8
+		your_style.border_width_left = 4
+		your_style.border_color = Color(1.0, 0.40, 0.40, 0.95)
+		your_style.content_margin_left = 16
+		your_style.content_margin_top = 14
+		your_style.content_margin_right = 16
+		your_style.content_margin_bottom = 14
+		your_panel.add_theme_stylebox_override("panel", your_style)
+
+		var your_vbox = VBoxContainer.new()
+		your_vbox.add_theme_constant_override("separation", 8)
+
+		var your_title = Label.new()
+		your_title.text = "🔴 YOUR SHOT"
+		your_title.add_theme_font_size_override("font_size", 18 if is_mob else 18)
+		your_title.add_theme_color_override("font_color", Color(1.0, 0.70, 0.70))
+		your_vbox.add_child(your_title)
+
+		var player_val = str(rec.get("player_val", "---"))
+		var parts = player_val.split("|")
+		for part in parts:
+			var part_str = part.strip_edges()
+			if part_str != "":
+				var val_lbl = Label.new()
+				val_lbl.text = "• " + part_str
+				val_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+				val_lbl.add_theme_font_size_override("font_size", 17 if is_mob else 18)
+				val_lbl.add_theme_color_override("font_color", Color.WHITE)
+				your_vbox.add_child(val_lbl)
+
+		your_panel.add_child(your_vbox)
+		comp_flow.add_child(your_panel)
+
+		# 🟢 Benchmark Card
+		var pro_panel = PanelContainer.new()
+		pro_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		pro_panel.custom_minimum_size = Vector2(260, 0)
+		var pro_style = StyleBoxFlat.new()
+		pro_style.bg_color = Color(0.04, 0.11, 0.07, 0.95)
+		pro_style.corner_radius_top_left = 8
+		pro_style.corner_radius_top_right = 8
+		pro_style.corner_radius_bottom_left = 8
+		pro_style.corner_radius_bottom_right = 8
+		pro_style.border_width_left = 4
+		pro_style.border_color = Color(0.35, 0.90, 0.55, 0.95)
+		pro_style.content_margin_left = 16
+		pro_style.content_margin_top = 14
+		pro_style.content_margin_right = 16
+		pro_style.content_margin_bottom = 14
+		pro_panel.add_theme_stylebox_override("panel", pro_style)
+
+		var pro_vbox = VBoxContainer.new()
+		pro_vbox.add_theme_constant_override("separation", 8)
+
+		var pro_title = Label.new()
+		pro_title.text = "🟢 TARGET BENCHMARK"
+		pro_title.add_theme_font_size_override("font_size", 18 if is_mob else 18)
+		pro_title.add_theme_color_override("font_color", Color(0.55, 0.95, 0.70))
+		pro_vbox.add_child(pro_title)
+
+		var bench_lbl = Label.new()
+		bench_lbl.text = str(rec.get("benchmark_val", "---"))
+		bench_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		bench_lbl.add_theme_font_size_override("font_size", 17 if is_mob else 18)
+		bench_lbl.add_theme_color_override("font_color", Color.WHITE)
+		pro_vbox.add_child(bench_lbl)
+
+		pro_panel.add_child(pro_vbox)
+		comp_flow.add_child(pro_panel)
+		container.add_child(comp_flow)
+
+	# ── Launch Impact / Consequence ──
 	var launch_effect = str(rec.get("launch_effect", ""))
 	if launch_effect != "":
 		var effect_panel = PanelContainer.new()
@@ -1798,7 +2161,7 @@ func _build_data_comparison_content(container: VBoxContainer, rec: Dictionary, i
 		eff_vbox.add_theme_constant_override("separation", 6)
 
 		var eff_head = Label.new()
-		eff_head.text = "⚡ Launch Consequence"
+		eff_head.text = "⚡ Launch Consequence & Dispersion"
 		eff_head.add_theme_font_size_override("font_size", 17 if is_mob else 17)
 		eff_head.add_theme_color_override("font_color", Color(1.0, 0.90, 0.55))
 		eff_vbox.add_child(eff_head)
@@ -1814,114 +2177,145 @@ func _build_data_comparison_content(container: VBoxContainer, rec: Dictionary, i
 		container.add_child(effect_panel)
 
 
+func _create_status_pill(status_text: String, is_mob: bool) -> PanelContainer:
+	var pill = PanelContainer.new()
+	var style = StyleBoxFlat.new()
+	style.corner_radius_top_left = 10
+	style.corner_radius_top_right = 10
+	style.corner_radius_bottom_left = 10
+	style.corner_radius_bottom_right = 10
+
+	var fg_col = Color.WHITE
+	var display_txt = status_text
+	match status_text.to_upper():
+		"OPTIMAL":
+			style.bg_color = Color(0.12, 0.35, 0.18, 0.95)
+			style.border_color = Color(0.3, 0.85, 0.45, 0.9)
+			style.border_width_left = 1
+			style.border_width_top = 1
+			style.border_width_right = 1
+			style.border_width_bottom = 1
+			fg_col = Color(0.4, 0.95, 0.6)
+			display_txt = "🟢 OPTIMAL"
+		"GOOD":
+			style.bg_color = Color(0.10, 0.25, 0.38, 0.95)
+			style.border_color = Color(0.3, 0.70, 0.95, 0.9)
+			style.border_width_left = 1
+			style.border_width_top = 1
+			style.border_width_right = 1
+			style.border_width_bottom = 1
+			fg_col = Color(0.45, 0.85, 1.0)
+			display_txt = "🔵 GOOD"
+		"SUB-OPTIMAL":
+			style.bg_color = Color(0.35, 0.26, 0.08, 0.95)
+			style.border_color = Color(0.95, 0.75, 0.25, 0.9)
+			style.border_width_left = 1
+			style.border_width_top = 1
+			style.border_width_right = 1
+			style.border_width_bottom = 1
+			fg_col = Color(1.0, 0.85, 0.4)
+			display_txt = "🟡 SUB-OPT"
+		"CRITICAL":
+			style.bg_color = Color(0.38, 0.10, 0.12, 0.95)
+			style.border_color = Color(0.95, 0.35, 0.35, 0.9)
+			style.border_width_left = 1
+			style.border_width_top = 1
+			style.border_width_right = 1
+			style.border_width_bottom = 1
+			fg_col = Color(1.0, 0.5, 0.5)
+			display_txt = "🔴 CRITICAL"
+		_:
+			style.bg_color = Color(0.15, 0.18, 0.22, 0.95)
+			fg_col = Color(0.7, 0.75, 0.8)
+			display_txt = status_text
+
+	style.content_margin_left = 6
+	style.content_margin_top = 2
+	style.content_margin_right = 6
+	style.content_margin_bottom = 2
+	pill.add_theme_stylebox_override("panel", style)
+
+	var lbl = Label.new()
+	lbl.text = display_txt
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.add_theme_font_size_override("font_size", 11 if is_mob else 12)
+	lbl.add_theme_color_override("font_color", fg_col)
+	pill.add_child(lbl)
+	return pill
+
+
 func _build_explain_content(container: VBoxContainer, rec: Dictionary, is_mob: bool) -> void:
-	var cam_flaw = str(rec.get("camera_flaw", ""))
-	if cam_flaw != "":
-		var cam_panel = PanelContainer.new()
-		var cam_style = StyleBoxFlat.new()
-		cam_style.bg_color = Color(0.05, 0.09, 0.14, 0.95)
-		cam_style.corner_radius_top_left = 8
-		cam_style.corner_radius_top_right = 8
-		cam_style.corner_radius_bottom_left = 8
-		cam_style.corner_radius_bottom_right = 8
-		cam_style.border_width_left = 4
-		cam_style.border_color = Color(0.35, 0.85, 1.0, 0.9)
-		cam_style.content_margin_left = 16
-		cam_style.content_margin_top = 12
-		cam_style.content_margin_right = 16
-		cam_style.content_margin_bottom = 12
-		cam_panel.add_theme_stylebox_override("panel", cam_style)
+	if rec.has("four_tier_diagnosis") and not (rec["four_tier_diagnosis"] as Dictionary).is_empty():
+		var diag: Dictionary = rec["four_tier_diagnosis"]
 
-		var cam_vbox = VBoxContainer.new()
-		cam_vbox.add_theme_constant_override("separation", 6)
+		# Tier 1: Observation
+		var obs_text = str(diag.get("observation", ""))
+		if not obs_text.is_empty():
+			container.add_child(_create_explain_card("🔬 1. WHAT THE DATA SHOWS (Observation)", obs_text, Color(0.35, 0.85, 1.0), is_mob))
 
-		var cam_header = Label.new()
-		cam_header.text = "🦴 Biomechanics & Camera Observation"
-		cam_header.add_theme_font_size_override("font_size", 18 if is_mob else 18)
-		cam_header.add_theme_color_override("font_color", Color(0.40, 0.85, 1.0))
-		cam_vbox.add_child(cam_header)
+		# Tier 2: Launch Impact
+		var imp_text = str(diag.get("impact", ""))
+		if not imp_text.is_empty():
+			container.add_child(_create_explain_card("⚡ 2. LAUNCH FLIGHT IMPACT (Impact & Lost Distance)", imp_text, Color(1.0, 0.85, 0.40), is_mob))
 
-		var cam_lbl = Label.new()
-		cam_lbl.text = cam_flaw
-		cam_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		cam_lbl.add_theme_font_size_override("font_size", 16 if is_mob else 16)
-		cam_lbl.add_theme_color_override("font_color", Color(0.88, 0.94, 1.0))
-		cam_vbox.add_child(cam_lbl)
+		# Tier 3: Root Cause & Biomechanics
+		var cause_text = str(diag.get("cause", ""))
+		if not cause_text.is_empty():
+			container.add_child(_create_explain_card("🦴 3. ROOT CAUSE & BIOMECHANICS (Underlying Fault)", cause_text, Color(1.0, 0.45, 0.45), is_mob))
 
-		cam_panel.add_child(cam_vbox)
-		container.add_child(cam_panel)
+		# Tier 4: Corrective Prescription
+		var fix_text = str(diag.get("prescription", ""))
+		if not fix_text.is_empty():
+			container.add_child(_create_explain_card("💡 4. CORRECTIVE PRESCRIPTION (Actionable Fix)", fix_text, Color(0.35, 1.0, 0.65), is_mob))
+	else:
+		var cam_flaw = str(rec.get("camera_flaw", ""))
+		if cam_flaw != "":
+			container.add_child(_create_explain_card("🦴 Biomechanics & Camera Observation", cam_flaw, Color(0.35, 0.85, 1.0), is_mob))
 
-	var launch_effect = str(rec.get("launch_effect", ""))
-	if launch_effect != "":
-		var launch_panel = PanelContainer.new()
-		var launch_style = StyleBoxFlat.new()
-		launch_style.bg_color = Color(0.10, 0.08, 0.05, 0.95)
-		launch_style.corner_radius_top_left = 8
-		launch_style.corner_radius_top_right = 8
-		launch_style.corner_radius_bottom_left = 8
-		launch_style.corner_radius_bottom_right = 8
-		launch_style.border_width_left = 4
-		launch_style.border_color = Color(1.0, 0.85, 0.40, 0.9)
-		launch_style.content_margin_left = 16
-		launch_style.content_margin_top = 12
-		launch_style.content_margin_right = 16
-		launch_style.content_margin_bottom = 12
-		launch_panel.add_theme_stylebox_override("panel", launch_style)
+		var launch_effect = str(rec.get("launch_effect", ""))
+		if launch_effect != "":
+			container.add_child(_create_explain_card("⚡ Launch Symptom", launch_effect, Color(1.0, 0.85, 0.40), is_mob))
 
-		var l_vbox = VBoxContainer.new()
-		l_vbox.add_theme_constant_override("separation", 6)
+		var fix_instruction = str(rec.get("fix_instruction", ""))
+		if fix_instruction != "":
+			container.add_child(_create_explain_card("💡 How to Correct It", fix_instruction, Color(0.35, 1.0, 0.65), is_mob))
 
-		var launch_header = Label.new()
-		launch_header.text = "⚡ Launch Symptom"
-		launch_header.add_theme_font_size_override("font_size", 18 if is_mob else 18)
-		launch_header.add_theme_color_override("font_color", Color(1.0, 0.90, 0.55))
-		l_vbox.add_child(launch_header)
 
-		var launch_lbl = Label.new()
-		launch_lbl.text = launch_effect
-		launch_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		launch_lbl.add_theme_font_size_override("font_size", 16 if is_mob else 16)
-		launch_lbl.add_theme_color_override("font_color", Color(0.95, 0.92, 0.80))
-		l_vbox.add_child(launch_lbl)
+func _create_explain_card(header_title: String, text_content: String, border_col: Color, is_mob: bool) -> PanelContainer:
+	var panel = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.06, 0.09, 0.13, 0.95)
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
+	style.border_width_left = 4
+	style.border_color = border_col
+	style.content_margin_left = 16
+	style.content_margin_top = 12
+	style.content_margin_right = 16
+	style.content_margin_bottom = 12
+	panel.add_theme_stylebox_override("panel", style)
 
-		launch_panel.add_child(l_vbox)
-		container.add_child(launch_panel)
+	var vb = VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 6)
 
-	var fix_instruction = str(rec.get("fix_instruction", ""))
-	if fix_instruction != "":
-		var fix_panel = PanelContainer.new()
-		var fix_style = StyleBoxFlat.new()
-		fix_style.bg_color = Color(0.04, 0.11, 0.08, 0.95)
-		fix_style.corner_radius_top_left = 8
-		fix_style.corner_radius_top_right = 8
-		fix_style.corner_radius_bottom_left = 8
-		fix_style.corner_radius_bottom_right = 8
-		fix_style.border_width_left = 4
-		fix_style.border_color = Color(0.35, 1.0, 0.65, 0.9)
-		fix_style.content_margin_left = 16
-		fix_style.content_margin_top = 12
-		fix_style.content_margin_right = 16
-		fix_style.content_margin_bottom = 12
-		fix_panel.add_theme_stylebox_override("panel", fix_style)
+	var head = Label.new()
+	head.text = header_title
+	head.add_theme_font_size_override("font_size", 17 if is_mob else 18)
+	head.add_theme_color_override("font_color", border_col)
+	vb.add_child(head)
 
-		var f_vbox = VBoxContainer.new()
-		f_vbox.add_theme_constant_override("separation", 6)
+	var lbl = Label.new()
+	lbl.text = text_content
+	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl.add_theme_font_size_override("font_size", 15 if is_mob else 16)
+	lbl.add_theme_color_override("font_color", Color(0.92, 0.94, 0.96))
+	vb.add_child(lbl)
 
-		var fix_header = Label.new()
-		fix_header.text = "💡 How to Correct It"
-		fix_header.add_theme_font_size_override("font_size", 18 if is_mob else 18)
-		fix_header.add_theme_color_override("font_color", Color(0.40, 1.0, 0.68))
-		f_vbox.add_child(fix_header)
-
-		var fix_lbl = Label.new()
-		fix_lbl.text = fix_instruction
-		fix_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		fix_lbl.add_theme_font_size_override("font_size", 16 if is_mob else 16)
-		fix_lbl.add_theme_color_override("font_color", Color(0.88, 0.98, 0.90))
-		f_vbox.add_child(fix_lbl)
-
-		fix_panel.add_child(f_vbox)
-		container.add_child(fix_panel)
+	panel.add_child(vb)
+	return panel
 
 
 func _build_drills_content(container: VBoxContainer, rec: Dictionary, is_mob: bool) -> void:
@@ -2076,8 +2470,16 @@ func _apply_btn_style(btn: Button, bg_col: Color) -> void:
 	var pressed_style = style.duplicate()
 	pressed_style.bg_color = bg_col.darkened(0.15)
 
+	var focus_style = style.duplicate()
+	focus_style.border_width_left = 3
+	focus_style.border_width_top = 3
+	focus_style.border_width_right = 3
+	focus_style.border_width_bottom = 3
+	focus_style.border_color = Color(0.35, 0.82, 1.0, 0.95)
+
+	btn.focus_mode = Control.FOCUS_ALL
 	btn.add_theme_stylebox_override("normal", style)
 	btn.add_theme_stylebox_override("hover", hover_style)
 	btn.add_theme_stylebox_override("pressed", pressed_style)
-	btn.add_theme_stylebox_override("focus", style)
+	btn.add_theme_stylebox_override("focus", focus_style)
 	btn.add_theme_color_override("font_color", Color.WHITE)

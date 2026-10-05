@@ -2,18 +2,19 @@
 .SYNOPSIS
     Builds the release Android App Bundle (.aab) for Heckle Golf Simulator.
 .DESCRIPTION
-    Invokes Gradle bundleMonoRelease within android/build and outputs the resulting
-    HeckleGolfSim.aab ready for uploading to Google Play Console.
+    Invokes Godot headless export with Gradle bundleMonoRelease within android/build
+    and outputs the resulting HeckleGolfSim.aab ready for uploading to Google Play Console.
 #>
 
 param(
     [string]$OutputPath = "HeckleGolfSim.aab",
-    [string]$PackageName = "com.hecklegolf.simulator",
-    [string]$VersionName = "0.31.1",
-    [int]$VersionCode = 2,
+    [string]$PackageName = "",
+    [string]$VersionName = "",
+    [int]$VersionCode = 0,
     [string]$KeystorePath = "",
     [string]$KeyAlias = "hecklegolf",
-    [string]$KeystorePassword = ""
+    [string]$KeystorePassword = "",
+    [string]$CustomGodotPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,9 +24,28 @@ Write-Host "  Heckle Golf Simulator - Android AAB Bundle Builder" -ForegroundCol
 Write-Host "=======================================================" -ForegroundColor Cyan
 Write-Host ""
 
-$scriptDir = $PSScriptRoot
-if (-not $scriptDir) { $scriptDir = (Get-Location).Path }
-$RepoRoot = if (Test-Path (Join-Path $scriptDir "..\..\project.godot")) { (Resolve-Path (Join-Path $scriptDir "..\..")).Path } else { $scriptDir }
+# Helper loader
+$helperScript = Join-Path (Split-Path -Parent $PSScriptRoot) "build_helpers.ps1"
+if (-not (Test-Path $helperScript)) {
+    $helperScript = Join-Path $PSScriptRoot "..\build_helpers.ps1"
+}
+if (Test-Path $helperScript) {
+    . (Resolve-Path $helperScript).Path
+}
+
+# Resolve Repo Root
+if (Get-Command "Get-RepoRoot" -ErrorAction SilentlyContinue) {
+    $RepoRoot = Get-RepoRoot
+} else {
+    $dir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+    while ($dir -and (Test-Path $dir)) {
+        if (Test-Path (Join-Path $dir "project.godot")) { $RepoRoot = (Resolve-Path $dir).Path; break }
+        $parent = Split-Path -Parent $dir
+        if (-not $parent -or $parent -eq $dir) { break }
+        $dir = $parent
+    }
+    if (-not $RepoRoot) { $RepoRoot = (Get-Location).Path }
+}
 Set-Location $RepoRoot
 $androidBuildDir = Join-Path $RepoRoot "android\build"
 $gradlewCmd = Join-Path $androidBuildDir "gradlew.bat"
@@ -36,33 +56,19 @@ if (-not (Test-Path $gradlewCmd)) {
     exit 1
 }
 
-# Try reading version from project.godot if default
-$projectGodotPath = Join-Path $RepoRoot "project.godot"
-if (Test-Path $projectGodotPath) {
-    $godotContent = Get-Content $projectGodotPath -Raw
-    if ($godotContent -match 'config/version="([^"]+)"') {
-        $VersionName = $matches[1]
-    }
+# Resolve Metadata
+$meta = if (Get-Command "Get-ProjectMetadata" -ErrorAction SilentlyContinue) { Get-ProjectMetadata $RepoRoot } else { $null }
+if (-not $PackageName) {
+    $PackageName = if ($meta) { $meta.PackageName } else { "com.hecklegolf.simulator" }
 }
-
-$exportPresetsPath = Join-Path $RepoRoot "export_presets.cfg"
-$targetSdk = "36"
-$minSdk = "30"
-if (Test-Path $exportPresetsPath) {
-    $presetsContent = Get-Content $exportPresetsPath -Raw
-    if ($presetsContent -match 'version/code=(\d+)') {
-        $VersionCode = [int]$matches[1]
-    }
-    if ($presetsContent -match 'gradle_build/target_sdk="?(\d+)"?') {
-        $targetSdk = $matches[1]
-    }
-    if ([int]$targetSdk -lt 36) {
-        $targetSdk = "36"
-    }
-    if ($presetsContent -match 'gradle_build/min_sdk="?(\d+)"?') {
-        $minSdk = $matches[1]
-    }
+if (-not $VersionName) {
+    $VersionName = if ($meta) { $meta.VersionName } else { "0.92.2" }
 }
+if (-not $VersionCode) {
+    $VersionCode = if ($meta) { $meta.VersionCode } else { 1 }
+}
+$targetSdk = if ($meta) { $meta.TargetSdk } else { "36" }
+$minSdk = if ($meta) { $meta.MinSdk } else { "30" }
 
 # Ensure asset pack assets directory exists to prevent AssetPackPreBundleTask failure
 $assetPackAssetsDir = Join-Path $androidBuildDir "assetPackInstallTime\src\main\assets"
@@ -86,12 +92,13 @@ $gradleArgs = @(
 # Detect release keystore if not explicitly passed
 $resolvedKeystore = ""
 if ($KeystorePath) {
-    $resolvedKeystore = if ([System.IO.Path]::IsPathRooted($KeystorePath)) { $KeystorePath } else { Join-Path $scriptDir $KeystorePath }
+    $resolvedKeystore = if ([System.IO.Path]::IsPathRooted($KeystorePath)) { $KeystorePath } else { Join-Path $RepoRoot $KeystorePath }
 } else {
-    $defaultKeystore = Join-Path $scriptDir "release.keystore"
-    if (Test-Path $defaultKeystore) {
-        $resolvedKeystore = $defaultKeystore
-    }
+    $candidates = @(
+        (Join-Path $RepoRoot "release.keystore"),
+        (Join-Path $PSScriptRoot "release.keystore")
+    )
+    $resolvedKeystore = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 }
 
 if ($resolvedKeystore -and (Test-Path $resolvedKeystore)) {
@@ -127,45 +134,57 @@ $destination = if ([System.IO.Path]::IsPathRooted($OutputPath)) {
     Join-Path $distDir $OutputPath
 }
 
-# Compile C# .NET Solution for Android
-$UserDotnet = Join-Path $env:USERPROFILE ".dotnet"
-if (Test-Path $UserDotnet) {
-    $env:DOTNET_ROOT = $UserDotnet
-    $env:DOTNET_ROOT_X64 = $UserDotnet
-    $env:DOTNET_MULTILEVEL_LOOKUP = "0"
-    $env:PATH = "$UserDotnet;$env:PATH"
+# Locate & Configure .NET SDK
+if (Get-Command "Configure-DotNet" -ErrorAction SilentlyContinue) {
+    Configure-DotNet
+} else {
+    $DotNetRoot = $env:DOTNET_ROOT
+    if (-not $DotNetRoot -or -not (Test-Path (Join-Path $DotNetRoot "sdk"))) {
+        $userDotNet = Join-Path $env:USERPROFILE ".dotnet"
+        if (Test-Path (Join-Path $userDotNet "sdk")) { $DotNetRoot = $userDotNet }
+    }
+    if ($DotNetRoot -and (Test-Path $DotNetRoot)) {
+        $env:DOTNET_ROOT = $DotNetRoot
+        $env:DOTNET_ROOT_X64 = $DotNetRoot
+        $env:DOTNET_MULTILEVEL_LOOKUP = "0"
+        $env:PATH = "$DotNetRoot;$env:PATH"
+    }
+    $env:UseSharedCompilation = "false"
+    $env:MSBUILDDISABLENODEREUSE = "1"
+    $env:DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER = "1"
 }
 
-# Disable MSBuild node reuse and background compilation server to prevent persistent worker processes from holding console handles
-$env:UseSharedCompilation = "false"
-$env:MSBUILDDISABLENODEREUSE = "1"
-$env:DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER = "1"
-
-
 # Ensure Godot ignores build, dist, and native build folders
-@("build", "dist", "android\build") | ForEach-Object {
-    $targetDir = Join-Path $RepoRoot $_
-    if (-not (Test-Path $targetDir)) {
-        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-    }
-    $gdignorePath = Join-Path $targetDir ".gdignore"
-    if (-not (Test-Path $gdignorePath)) {
-        New-Item -ItemType File -Path $gdignorePath -Force | Out-Null
+if (Get-Command "Ensure-GodotIgnore" -ErrorAction SilentlyContinue) {
+    Ensure-GodotIgnore $RepoRoot
+} else {
+    @("build", "dist", "android\build") | ForEach-Object {
+        $targetDir = Join-Path $RepoRoot $_
+        if (-not (Test-Path $targetDir)) { New-Item -ItemType Directory -Path $targetDir -Force | Out-Null }
+        $gdignorePath = Join-Path $targetDir ".gdignore"
+        if (-not (Test-Path $gdignorePath)) { New-Item -ItemType File -Path $gdignorePath -Force | Out-Null }
     }
 }
 
 # Locate Godot Console Executable
-$candidates = @(
-    $env:GODOT_BIN,
-    "C:\Users\micha\Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe",
-    "C:\Users\micha\Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64.exe",
-    (Get-Command "godot" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
-)
-$GodotExe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if (Get-Command "Find-GodotExecutable" -ErrorAction SilentlyContinue) {
+    $GodotExe = Find-GodotExecutable $CustomGodotPath
+} else {
+    $candidates = @(
+        $CustomGodotPath,
+        $env:GODOT_BIN,
+        (Join-Path $env:USERPROFILE "Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe"),
+        (Join-Path $env:USERPROFILE "Downloads\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64.exe"),
+        (Get-Command "godot" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
+    )
+    $GodotExe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+}
 
 if (-not $GodotExe) {
-    throw "Godot executable not found! Please install Godot 4.7 Mono or set GODOT_BIN environment variable."
+    throw "Godot executable not found! Please install Godot 4.7 Mono, set GODOT_BIN, or pass -CustomGodotPath."
 }
+Write-Host "Godot Binary:   $GodotExe" -ForegroundColor Gray
+
 Write-Host ""
 Write-Host "Pre-compiling C# .NET solution for Android (ExportRelease)..." -ForegroundColor Green
 & dotnet build -c ExportRelease -p:GodotTargetPlatform=android -p:UseSharedCompilation=false -nr:false
@@ -180,7 +199,6 @@ Write-Host "Running .NET export, asset sync, and Gradle R8 bundling (takes ~60-8
 
 $env:GRADLE_OPTS = "-Dorg.gradle.daemon=false"
 & $GodotExe --headless --path $RepoRoot --export-release "Android" $destination
-
 
 $buildSuccess = ($LASTEXITCODE -eq 0 -and (Test-Path $destination))
 if (-not $buildSuccess) {

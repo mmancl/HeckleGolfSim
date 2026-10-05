@@ -159,6 +159,11 @@ class CameraManager:
         self.cap = None
         self.active_index = -1
         self._read_fail_count = 0
+        self._bg_thread = None
+        self._running = False
+        self._last_frame = None
+        self._last_ts_ns = 0
+        self._frame_id = 0
 
     def scan_cameras(self) -> list:
         cams = []
@@ -192,15 +197,35 @@ class CameraManager:
                     break
         return cams
 
+    def _capture_worker(self):
+        while self._running:
+            with self.lock:
+                cap = self.cap
+            if cap is None or not cap.isOpened():
+                time.sleep(0.01)
+                continue
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                ts = time.monotonic_ns()
+                with self.lock:
+                    self._last_frame = frame
+                    self._last_ts_ns = ts
+                    self._frame_id += 1
+                    self._read_fail_count = 0
+            else:
+                time.sleep(0.005)
+
     def select_camera(self, index: int) -> bool:
         with self.lock:
             self._read_fail_count = 0
             if self.active_index == index and self.cap is not None and self.cap.isOpened():
                 return True
+            self._running = False
             if self.cap is not None:
                 self.cap.release()
                 self.cap = None
-                self.active_index = -1
+            self.active_index = -1
+            self._last_frame = None
 
             if index < 0:
                 print("[PoseServer] Released system camera (camera deactivated)")
@@ -216,9 +241,13 @@ class CameraManager:
                 cap = cv2.VideoCapture(index)
 
             if cap is not None and cap.isOpened():
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 self.cap = cap
                 self.active_index = index
-                print(f"[PoseServer] Activated system camera {index}")
+                self._running = True
+                self._bg_thread = threading.Thread(target=self._capture_worker, daemon=True)
+                self._bg_thread.start()
+                print(f"[PoseServer] Activated system camera {index} with threaded grabber")
                 return True
             else:
                 if cap is not None:
@@ -230,67 +259,60 @@ class CameraManager:
         with self.lock:
             if self.cap is None or not self.cap.isOpened():
                 return {"detected": False, "landmarks": {}, "image_base64": "", "error": "No active camera"}
+            frame = self._last_frame
+            ts_ns = self._last_ts_ns
+            frame_id = self._frame_id
+            active_idx = self.active_index
 
-            ret, frame = self.cap.read()
-            if not ret or frame is None:
-                # Retry once in case of dropped frame
-                ret, frame = self.cap.read()
-
-            if not ret or frame is None:
-                self._read_fail_count += 1
-                if self._read_fail_count >= 5 and self.active_index >= 0:
-                    print(f"[PoseServer] Camera {self.active_index} read failed {self._read_fail_count} times, reconnecting...")
-                    # Reopen camera
-                    if self.cap is not None:
-                        self.cap.release()
-                        self.cap = None
-                    if os.name == "nt":
-                        self.cap = cv2.VideoCapture(self.active_index, cv2.CAP_DSHOW)
-                        if not self.cap.isOpened():
-                            self.cap.release()
-                            self.cap = cv2.VideoCapture(self.active_index)
-                    else:
-                        self.cap = cv2.VideoCapture(self.active_index)
-                    self._read_fail_count = 0
+        if frame is None:
+            # Fallback direct read on initial start
+            with self.lock:
+                if self.cap is not None and self.cap.isOpened():
+                    ret, frame = self.cap.read()
+                    ts_ns = time.monotonic_ns()
+                    frame_id = self._frame_id + 1
+            if frame is None:
                 return {"detected": False, "landmarks": {}, "image_base64": "", "error": "Frame read failed"}
 
-            self._read_fail_count = 0
+        # Resize if large to ensure smooth transmission
+        h, w = frame.shape[:2]
+        if w > 960:
+            new_w = 640
+            new_h = int(h * (640.0 / w))
+            frame = cv2.resize(frame, (new_w, new_h))
 
-            # Resize if large to ensure smooth 30 FPS transmission
-            h, w = frame.shape[:2]
-            if w > 960:
-                new_w = 640
-                new_h = int(h * (640.0 / w))
-                frame = cv2.resize(frame, (new_w, new_h))
+        landmarks = {}
+        detected = False
+        if detect:
+            # Run MediaPipe PoseLandmarker only when explicitly requested
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            result = detector.detect(mp_image)
+            landmarks = parse_landmarks(result)
+            detected = len(landmarks) > 0
 
-            landmarks = {}
-            detected = False
-            if detect:
-                # Run MediaPipe PoseLandmarker only when explicitly requested
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-                result = detector.detect(mp_image)
-                landmarks = parse_landmarks(result)
-                detected = len(landmarks) > 0
+        # Encode frame to JPEG and base64
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 75]
+        _, jpg_buffer = cv2.imencode('.jpg', frame, encode_param)
+        b64_str = base64.b64encode(jpg_buffer).decode('ascii')
 
-            # Encode frame to JPEG and base64
-            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 75]
-            _, jpg_buffer = cv2.imencode('.jpg', frame, encode_param)
-            b64_str = base64.b64encode(jpg_buffer).decode('ascii')
-
-            return {
-                "detected": detected,
-                "landmarks": landmarks,
-                "image_base64": b64_str,
-                "camera_index": self.active_index,
-            }
+        return {
+            "detected": detected,
+            "landmarks": landmarks,
+            "image_base64": b64_str,
+            "camera_index": active_idx,
+            "frame_id": frame_id,
+            "timestamp_ns": ts_ns,
+        }
 
     def close(self):
         with self.lock:
+            self._running = False
             if self.cap is not None:
                 self.cap.release()
                 self.cap = None
-                self.active_index = -1
+            self.active_index = -1
+            self._last_frame = None
 
 
 camera_mgr = CameraManager()

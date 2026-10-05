@@ -302,6 +302,20 @@ public partial class BallPhysics : RefCounted
 
         velocity += (force / MASS) * dt;
         omega += (torque / MOMENT_OF_INERTIA) * dt;
+
+        // Apply unconditionally stable analytical exponential decay for grass viscosity when on ground
+        if (onGround && parameters != null && parameters.GrassViscosity > 0.0f)
+        {
+            float decayRate = (6.0f * Mathf.Pi * parameters.GrassViscosity * RADIUS) / MOMENT_OF_INERTIA;
+            float dampingFactor = Mathf.Clamp(Mathf.Exp(-decayRate * dt), 0.0f, 1.0f);
+            omega *= dampingFactor;
+        }
+
+        // Numerical safety: ensure finite values
+        if (!float.IsFinite(velocity.X) || !float.IsFinite(velocity.Y) || !float.IsFinite(velocity.Z))
+            velocity = Vector3.Zero;
+        if (!float.IsFinite(omega.X) || !float.IsFinite(omega.Y) || !float.IsFinite(omega.Z))
+            omega = Vector3.Zero;
     }
 
     /// <summary>
@@ -312,7 +326,7 @@ public partial class BallPhysics : RefCounted
         Vector3 omega,
         PhysicsParams parameters)
     {
-        Vector3 grassTorque = -6.0f * Mathf.Pi * parameters.GrassViscosity * RADIUS * omega;
+        Vector3 grassTorque = Vector3.Zero;
 
         Vector3 contactVelocity = velocity + omega.Cross(-parameters.FloorNormal * RADIUS);
         Vector3 tangentVelocity = contactVelocity - parameters.FloorNormal * contactVelocity.Dot(parameters.FloorNormal);
@@ -366,7 +380,16 @@ public partial class BallPhysics : RefCounted
     private float GetSpinFrictionMultiplier(Vector3 omega, float impactSpinRpm, float ballSpeed, RolloutProfile rp)
     {
         float currentSpinRpm = omega.Length() / ShotSetup.RAD_PER_RPM;
-        float effectiveSpinRpm = Mathf.Max(currentSpinRpm, impactSpinRpm);
+        float rollRpm = (ballSpeed / RADIUS) / ShotSetup.RAD_PER_RPM;
+        float excessSpinRpm = Mathf.Max(0.0f, currentSpinRpm - rollRpm);
+
+        // When spin is matched to forward roll (or below), no extra kinetic slip friction occurs
+        if (excessSpinRpm < 250.0f)
+        {
+            return 1.0f;
+        }
+
+        float effectiveSpinRpm = Mathf.Min(excessSpinRpm, Mathf.Max(currentSpinRpm, impactSpinRpm));
 
         float velocityScale;
         if (ballSpeed < rp.ChipSpeedThreshold)
@@ -432,8 +455,7 @@ public partial class BallPhysics : RefCounted
         {
             Vector3 flatVelocity = velocity - parameters.FloorNormal * velocity.Dot(parameters.FloorNormal);
             Vector3 frictionDir = flatVelocity.Length() > 0.01f ? flatVelocity.Normalized() : Vector3.Zero;
-            float effectiveRollingFriction = parameters.RollingFriction * spinMultiplier;
-            return frictionDir * (-effectiveRollingFriction * MASS * 9.81f);
+            return frictionDir * (-parameters.RollingFriction * MASS * 9.81f);
         }
         else
         {
@@ -449,7 +471,7 @@ public partial class BallPhysics : RefCounted
             if (tangentVelMag < slipBlendThreshold)
             {
                 float t = (tangentVelMag - rp.TangentVelocityThreshold) / (slipBlendThreshold - rp.TangentVelocityThreshold);
-                effectiveFriction = Mathf.Lerp(parameters.RollingFriction * spinMultiplier, effectiveFriction, t);
+                effectiveFriction = Mathf.Lerp(parameters.RollingFriction, effectiveFriction, t);
             }
 
             Vector3 slipDir = tangentVelMag > 0.01f ? tangentVelocity.Normalized() : Vector3.Zero;

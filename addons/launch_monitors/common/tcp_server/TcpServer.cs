@@ -148,11 +148,11 @@ public partial class TcpServer : Node
 				float ballSpeed = 0f;
 				if (ballData.TryGetValue("Speed", out var bsVar))
 				{
-					ballSpeed = Convert.ToSingle(bsVar);
+					ballSpeed = bsVar.AsSingle();
 				}
 				else if (ballData.TryGetValue("BallSpeed", out var bsVar2))
 				{
-					ballSpeed = Convert.ToSingle(bsVar2);
+					ballSpeed = bsVar2.AsSingle();
 				}
 
 				float clubSpeed = 0f;
@@ -162,11 +162,11 @@ public partial class TcpServer : Node
 					var clubData = clubDataVar.AsGodotDictionary();
 					if (clubData.TryGetValue("Speed", out var csVar))
 					{
-						clubSpeed = Convert.ToSingle(csVar);
+						clubSpeed = csVar.AsSingle();
 					}
 					else if (clubData.TryGetValue("ClubSpeed", out var csVar2))
 					{
-						clubSpeed = Convert.ToSingle(csVar2);
+						clubSpeed = csVar2.AsSingle();
 					}
 
 					foreach (var kvp in clubData)
@@ -209,7 +209,7 @@ public partial class TcpServer : Node
 				float smash = 0f;
 				if (hitData.TryGetValue("SmashFactor", out var sfCheck))
 				{
-					try { smash = Convert.ToSingle(sfCheck); } catch { smash = 0f; }
+					try { smash = sfCheck.AsSingle(); } catch { smash = 0f; }
 				}
 				if (smash <= 0.05f && ballSpeed > 0f && clubSpeed > 0f)
 				{

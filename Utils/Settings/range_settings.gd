@@ -9,7 +9,7 @@ var ball_reset_timer := Setting.new(1.5, 0.0, 15.0)
 var temperature := Setting.new(75, -40, 120)
 var altitude := Setting.new(0.0, -1000.0, 10000.0)
 var surface_type := Setting.new(PhysicsEnums.SurfaceType.FAIRWAY)
-var shot_tracer_count := Setting.new(1, 0, 4)
+var shot_tracer_count := Setting.new(4, 0, 4)
 var ball_type := Setting.new(0)
 var camera_height := Setting.new(1.65, 0.5, 10.0)
 var camera_distance := Setting.new(5.2, 1.0, 30.0)
@@ -64,6 +64,10 @@ var putting_max_speed_mph := Setting.new(20.0, 10.0, 30.0)
 var putting_mishit_filter_enabled := Setting.new(true)
 var windowed_fullscreen := Setting.new(true)
 var shot_curve_sensitivity := Setting.new(1.0, 0.5, 2.0)
+var debug_show_suspense_cone := Setting.new(false)
+var screen_offset_enabled := Setting.new(false)
+var screen_offset_value := Setting.new(0.0, -1.0, 1.0)
+var screen_offset_putter_value := Setting.new(0.0, -1.0, 1.0)
 
 func _init():
 	init({
@@ -130,6 +134,10 @@ func _init():
 		"putting_mishit_filter_enabled": putting_mishit_filter_enabled,
 		"windowed_fullscreen": windowed_fullscreen,
 		"shot_curve_sensitivity": shot_curve_sensitivity,
+		"debug_show_suspense_cone": debug_show_suspense_cone,
+		"screen_offset_enabled": screen_offset_enabled,
+		"screen_offset_value": screen_offset_value,
+		"screen_offset_putter_value": screen_offset_putter_value,
 	})
 
 

@@ -31,16 +31,40 @@ Write-Host "      Heckle Golf Simulator - iOS Builder (.ipa)       " -Foreground
 Write-Host "=======================================================" -ForegroundColor Cyan
 Write-Host ""
 
-$RepoRoot = if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "..\..\project.godot"))) { (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path } else { (Get-Location).Path }
+# Helper loader
+$helperScript = Join-Path (Split-Path -Parent $PSScriptRoot) "build_helpers.ps1"
+if (-not (Test-Path $helperScript)) {
+    $helperScript = Join-Path $PSScriptRoot "..\build_helpers.ps1"
+}
+if (Test-Path $helperScript) {
+    . (Resolve-Path $helperScript).Path
+}
+
+# Resolve Repo Root
+if (Get-Command "Get-RepoRoot" -ErrorAction SilentlyContinue) {
+    $RepoRoot = Get-RepoRoot
+} else {
+    $dir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+    while ($dir -and (Test-Path $dir)) {
+        if (Test-Path (Join-Path $dir "project.godot")) { $RepoRoot = (Resolve-Path $dir).Path; break }
+        $parent = Split-Path -Parent $dir
+        if (-not $parent -or $parent -eq $dir) { break }
+        $dir = $parent
+    }
+    if (-not $RepoRoot) { $RepoRoot = (Get-Location).Path }
+}
 Set-Location $RepoRoot
 
 # 1. Resolve Version
-$Version = "0.35.2"
-$ProjectGodot = Join-Path $RepoRoot "project.godot"
-if (Test-Path $ProjectGodot) {
-    $content = Get-Content $ProjectGodot -Raw
-    if ($content -match 'config/version="([^"]+)"') {
-        $Version = $matches[1]
+$Version = "0.92.2"
+if (Get-Command "Get-ProjectMetadata" -ErrorAction SilentlyContinue) {
+    $meta = Get-ProjectMetadata $RepoRoot
+    $Version = $meta.VersionName
+} else {
+    $ProjectGodot = Join-Path $RepoRoot "project.godot"
+    if (Test-Path $ProjectGodot) {
+        $content = Get-Content $ProjectGodot -Raw
+        if ($content -match 'config/version="([^"]+)"') { $Version = $matches[1] }
     }
 }
 Write-Host "Game Version:   $Version" -ForegroundColor Green

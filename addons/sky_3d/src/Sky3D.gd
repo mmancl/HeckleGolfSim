@@ -503,8 +503,9 @@ func _initialize() -> void:
 		environment.sky.sky_material = ShaderMaterial.new()
 		environment.sky.sky_material.shader = sky_shader
 	
-	if is_mobile_platform and environment.sky != null:
-		environment.sky.process_mode = Sky.PROCESS_MODE_QUALITY
+	if environment.sky != null:
+		environment.sky.process_mode = Sky.PROCESS_MODE_REALTIME
+		environment.sky.radiance_size = Sky.RADIANCE_SIZE_128 if is_mobile_platform else Sky.RADIANCE_SIZE_256
 		
 	# Set a reference to the sky material for easy access.
 	sky_material = environment.sky.sky_material

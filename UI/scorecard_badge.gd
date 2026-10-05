@@ -162,17 +162,26 @@ static func evaluate_score_style(score_str: String, par: int, is_ctp: bool = fal
 	if clean_num_str.ends_with("*"):
 		# In-progress hole: no shapes, keep "*" as suffix
 		var base = clean_num_str.rstrip("*")
+		if base.is_valid_int():
+			base = str(int(base))
+		elif base.is_valid_float():
+			base = str(int(round(base.to_float())))
 		result["clean_score"] = base
 		result["suffix"] = "*" + suffix
 		result["font_color"] = Color(0.85, 0.85, 0.85)
 		return result
 
-	if not clean_num_str.is_valid_int():
+	var score_val: int = 0
+	if clean_num_str.is_valid_int():
+		score_val = int(clean_num_str)
+	elif clean_num_str.is_valid_float():
+		score_val = int(round(clean_num_str.to_float()))
+	else:
 		result["clean_score"] = score_str
 		return result
 
-	var score_val = int(clean_num_str)
-	var diff = score_val - par
+	var par_val = int(round(float(par)))
+	var diff = score_val - par_val
 
 	result["clean_score"] = str(score_val)
 	result["suffix"] = suffix

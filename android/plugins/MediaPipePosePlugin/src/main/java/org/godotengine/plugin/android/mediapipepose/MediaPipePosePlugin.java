@@ -21,6 +21,7 @@ import android.media.ImageReader;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
+import android.util.Range;
 import android.util.Size;
 import androidx.annotation.NonNull;
 
@@ -72,6 +73,7 @@ public class MediaPipePosePlugin extends GodotPlugin {
     private boolean cameraRunning = false;
     private int activeFacing = 0; // 0 = BACK, 1 = FRONT
     private int sensorOrientation = 0;
+    private CameraCharacteristics activeCharacteristics = null;
     private volatile boolean liveInferenceEnabled = false; // Default false to avoid choppiness on mobile
 
     private static final String[] LANDMARK_NAMES = {
@@ -294,6 +296,7 @@ public class MediaPipePosePlugin extends GodotPlugin {
             }
 
             CameraCharacteristics characteristics = manager.getCameraCharacteristics(selectedCameraId);
+            activeCharacteristics = characteristics;
             StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             Size previewSize = chooseOptimalSize(map != null ? map.getOutputSizes(ImageFormat.YUV_420_888) : null, 640, 480);
 
@@ -369,6 +372,20 @@ public class MediaPipePosePlugin extends GodotPlugin {
             final CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             builder.addTarget(imageReader.getSurface());
             builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+
+            if (activeCharacteristics != null) {
+                Range<Integer>[] fpsRanges = activeCharacteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+                if (fpsRanges != null && fpsRanges.length > 0) {
+                    Range<Integer> bestRange = fpsRanges[0];
+                    for (Range<Integer> range : fpsRanges) {
+                        if (range.getUpper() > bestRange.getUpper() || (range.getUpper().equals(bestRange.getUpper()) && range.getLower() > bestRange.getLower())) {
+                            bestRange = range;
+                        }
+                    }
+                    builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bestRange);
+                    Log.i(TAG, "Configured Camera2 CONTROL_AE_TARGET_FPS_RANGE: " + bestRange);
+                }
+            }
 
             cameraDevice.createCaptureSession(Collections.singletonList(imageReader.getSurface()), new CameraCaptureSession.StateCallback() {
                 @Override
@@ -496,10 +513,15 @@ public class MediaPipePosePlugin extends GodotPlugin {
                 finalJpegBytes = uprightOut.toByteArray();
             }
 
+            long sensorTimestampNs = image.getTimestamp();
+
             String jsonResult = "{\"detected\":false}";
             if (liveInferenceEnabled) {
                 jsonResult = runPoseInference(bitmap);
                 emitSignal("pose_result", jsonResult);
+            }
+            if (jsonResult.endsWith("}")) {
+                jsonResult = jsonResult.substring(0, jsonResult.length() - 1) + ",\"timestamp_ns\":" + sensorTimestampNs + "}";
             }
 
             if (bitmap != null) {

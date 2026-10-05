@@ -22,11 +22,14 @@ var _align_slider: HSlider = null
 
 enum PickerMode { NONE, PICK_BALL, PICK_BACKGROUND }
 
+const MJPEGStreamReaderClass = preload("res://UI/PuttingCamera/mjpeg_stream_reader.gd")
+
 var _picker_mode: PickerMode = PickerMode.NONE
 var _color_profile: PuttingColorProfile = null
 var _last_feed_image: Image = null
 
 var _http_req: HTTPRequest = null
+var _mjpeg_reader: Node = null
 var _is_active: bool = false
 var _is_minimized: bool = false
 var _phone_stream_failed_count: int = 0
@@ -45,6 +48,8 @@ var camera_rotation_deg: int:
 		if is_inside_tree() and has_node("/root/GlobalSettings"):
 			GlobalSettings.range_settings.putting_camera_rotation.set_value(_local_rotation_deg)
 			GlobalSettings.save_settings()
+		if _camera_feed_rect != null and _camera_feed_rect.material != null:
+			_camera_feed_rect.material.set_shader_parameter("manual_rotation_rad", deg_to_rad(float(_local_rotation_deg)))
 
 var _local_rotation_deg: int = 0
 
@@ -136,6 +141,61 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	set_camera_active(false)
+
+
+var _camera_server_process_time: float = 0.0
+const CAMERA_SERVER_PROCESS_INTERVAL: float = 0.04
+
+func _process(delta: float) -> void:
+	if not _is_active or _use_phone_stream:
+		return
+	if _camera_feed_rect != null and _camera_feed_rect.texture == null:
+		if CameraServer.is_monitoring_feeds() and CameraServer.get_feed_count() > 0:
+			_update_camera_feed(true)
+
+	if _state_machine != null and _camera_feed_rect != null and _camera_feed_rect.texture != null:
+		var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
+		var bridge_active: bool = pose_bridge != null and pose_bridge.has_method("is_desktop_camera_active") and pose_bridge.is_desktop_camera_active()
+		if not bridge_active:
+			_camera_server_process_time += delta
+			if _camera_server_process_time >= CAMERA_SERVER_PROCESS_INTERVAL:
+				_camera_server_process_time = 0.0
+				var img: Image = null
+				var tex = _camera_feed_rect.texture
+				if tex != null and tex.has_method("get_image"):
+					img = tex.get_image()
+					if img != null and not img.is_empty():
+						if img.is_compressed():
+							img.decompress()
+						if img.get_format() != Image.FORMAT_RGBA8 and img.get_format() != Image.FORMAT_RGB8:
+							img.convert(Image.FORMAT_RGBA8)
+				if (img == null or img.is_empty()) and is_inside_tree():
+					var vp = get_viewport()
+					if vp != null:
+						var vp_tex = vp.get_texture()
+						if vp_tex != null:
+							var full_img = vp_tex.get_image()
+							if full_img != null and not full_img.is_empty():
+								if full_img.is_compressed():
+									full_img.decompress()
+								if full_img.get_format() != Image.FORMAT_RGBA8 and full_img.get_format() != Image.FORMAT_RGB8:
+									full_img.convert(Image.FORMAT_RGBA8)
+								var target_rect: Rect2 = _camera_feed_rect.get_global_rect()
+								var vp_sz = vp.get_visible_rect().size
+								if target_rect.size.x > 10 and target_rect.size.y > 10:
+									var crop_x = clamp(int(target_rect.position.x), 0, int(vp_sz.x - 10))
+									var crop_y = clamp(int(target_rect.position.y), 0, int(vp_sz.y - 10))
+									var crop_w = clamp(int(target_rect.size.x), 10, int(vp_sz.x - crop_x))
+									var crop_h = clamp(int(target_rect.size.y), 10, int(vp_sz.y - crop_y))
+									if crop_w > 0 and crop_h > 0:
+										img = full_img.get_region(Rect2i(crop_x, crop_y, crop_w, crop_h))
+				if img != null and not img.is_empty():
+					var active_img = img
+					if camera_rotation_deg != 0:
+						active_img = img.duplicate()
+						apply_image_rotation(active_img)
+					_last_feed_image = active_img
+					_state_machine.process_frame(active_img)
 
 
 func _build_ui() -> void:
@@ -672,21 +732,32 @@ func _stop_local_camera_stream() -> void:
 			pose_bridge.stop_desktop_camera()
 		if pose_bridge.has_method("stop_android_camera"):
 			pose_bridge.stop_android_camera()
+	if _camera_feed_rect != null:
+		_camera_feed_rect.material = null
 	if CameraServer.is_monitoring_feeds():
 		for feed in CameraServer.feeds():
 			if feed != null:
 				feed.feed_is_active = false
 		CameraServer.set_monitoring_feeds(false)
-	else:
-		for feed in CameraServer.feeds():
-			if feed != null:
-				feed.feed_is_active = false
 
 
 func _stop_phone_camera_stream() -> void:
 	_is_requesting_frame = false
+	if _mjpeg_reader != null and _mjpeg_reader.has_method("stop_stream"):
+		_mjpeg_reader.stop_stream()
 	if _http_req != null and _http_req.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
 		_http_req.cancel_request()
+
+
+func _find_default_camera_index(feeds: Array = []) -> int:
+	if feeds.is_empty():
+		if CameraServer.is_monitoring_feeds():
+			feeds = CameraServer.feeds()
+	for i in range(feeds.size()):
+		var feed = feeds[i]
+		if feed != null and feed.get_position() == CameraFeed.FEED_BACK:
+			return i
+	return 0
 
 
 func _update_camera_feed(active: bool) -> void:
@@ -696,6 +767,7 @@ func _update_camera_feed(active: bool) -> void:
 		_stop_local_camera_stream()
 		_stop_phone_camera_stream()
 		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
 			_camera_feed_rect.texture = null
 		_update_status_overlay("PUTTING CAMERA FEED\n[ Click ⚙️ Setup to connect ]", true)
 		return
@@ -707,6 +779,7 @@ func _update_camera_feed(active: bool) -> void:
 			_start_phone_camera_stream(_phone_cam_url)
 		else:
 			if _camera_feed_rect != null:
+				_camera_feed_rect.material = null
 				_camera_feed_rect.texture = null
 			_update_status_overlay("NO PHONE STREAM URL\n[ Click ⚙️ Setup for Phone Stream ]", true)
 		return
@@ -734,6 +807,7 @@ func _update_camera_feed(active: bool) -> void:
 				OS.call("request_permissions")
 			_update_status_overlay("CAMERA PERMISSION REQUIRED\n[ Please grant camera permission when prompted ]", true)
 			if _camera_feed_rect != null:
+				_camera_feed_rect.material = null
 				_camera_feed_rect.texture = null
 			get_tree().create_timer(1.5).timeout.connect(func():
 				if _is_active:
@@ -741,57 +815,132 @@ func _update_camera_feed(active: bool) -> void:
 			)
 			return
 
-	if _use_phone_stream and not _phone_cam_url.is_empty():
-		_start_phone_camera_stream(_phone_cam_url)
-		return
-
-	if is_android:
-		# On Android, route through PoseDetectionBridge which uses MediaPipe Camera2
-		if CameraServer.is_monitoring_feeds():
-			for f in CameraServer.feeds():
-				if f != null:
-					f.feed_is_active = false
-			CameraServer.set_monitoring_feeds(false)
-		if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
-			pose_bridge.select_desktop_camera(_current_camera_feed_index)
-			_update_status_overlay("", false)
-		return
-
-	CameraServer.set_monitoring_feeds(true)
+	if not CameraServer.is_monitoring_feeds():
+		CameraServer.set_monitoring_feeds(true)
 
 	var feeds = CameraServer.feeds()
 	if feeds.size() > 0:
-		_activate_camera_feed_index(clamp(_current_camera_feed_index, 0, feeds.size() - 1))
+		var selected_index = _current_camera_feed_index
+		if selected_index < 0 or selected_index >= feeds.size():
+			selected_index = _find_default_camera_index(feeds)
+			_current_camera_feed_index = selected_index
+		_activate_camera_feed_index(selected_index)
 	elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
 		var sel_idx = clamp(_current_camera_feed_index, 0, pose_bridge.desktop_cameras.size() - 1)
+		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
 		pose_bridge.select_desktop_camera(sel_idx)
 		_update_status_overlay("", false)
 	else:
-		_update_status_overlay("SEARCHING FOR WEBCAMS...\n[ Click ⚙️ Setup for phone stream ]", true)
+		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
+			_camera_feed_rect.texture = null
+		_update_status_overlay("SEARCHING FOR CAMERAS...\n[ Click ⚙️ Setup for phone stream ]", true)
 		if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
 			pose_bridge.fetch_desktop_cameras()
+		if get_tree() != null:
+			get_tree().create_timer(0.6).timeout.connect(func():
+				if _is_active and not _use_phone_stream:
+					if not CameraServer.is_monitoring_feeds():
+						CameraServer.set_monitoring_feeds(true)
+					var rescan_feeds = CameraServer.feeds()
+					if rescan_feeds.size() > 0:
+						var sel_idx = _find_default_camera_index(rescan_feeds) if _current_camera_feed_index < 0 or _current_camera_feed_index >= rescan_feeds.size() else _current_camera_feed_index
+						_current_camera_feed_index = sel_idx
+						_activate_camera_feed_index(sel_idx)
+					elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
+						var sel_idx = clamp(_current_camera_feed_index, 0, pose_bridge.desktop_cameras.size() - 1)
+						_current_camera_feed_index = sel_idx
+						if _camera_feed_rect != null:
+							_camera_feed_rect.material = null
+						pose_bridge.select_desktop_camera(sel_idx)
+						_update_status_overlay("", false)
+					elif _phone_cam_url.is_empty():
+						_update_status_overlay("NO LOCAL CAMERA DETECTED\n[ Click ⚙️ Setup for Phone Stream ]", true)
+			)
 
 
 func _activate_camera_feed_index(index: int) -> void:
+	if not CameraServer.is_monitoring_feeds():
+		CameraServer.set_monitoring_feeds(true)
 	var feeds = CameraServer.feeds()
 	if index < 0 or index >= feeds.size():
 		var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
 		if pose_bridge != null and "desktop_cameras" in pose_bridge and index >= 0 and index < pose_bridge.desktop_cameras.size():
+			if _camera_feed_rect != null:
+				_camera_feed_rect.material = null
 			pose_bridge.select_desktop_camera(index)
 			_update_status_overlay("", false)
 			return
-		_update_status_overlay("NO LOCAL WEBCAM DETECTED\n[ Click ⚙️ Setup for Phone Stream ]", true)
+		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
+			_camera_feed_rect.texture = null
+		_update_status_overlay("NO LOCAL CAMERA DETECTED\n[ Click ⚙️ Setup for Phone Stream ]", true)
 		return
 
 	var feed = feeds[index]
 	if feed != null:
 		feed.feed_is_active = true
-		var cam_tex = CameraTexture.new()
-		cam_tex.camera_feed_id = feed.get_id()
-		cam_tex.which_feed = CameraServer.FEED_RGBA_IMAGE
-		cam_tex.camera_is_active = true
-		if _camera_feed_rect != null:
-			_camera_feed_rect.texture = cam_tex
+		var data_type = feed.get_datatype()
+		if data_type == CameraFeed.FEED_YCBCR or data_type == CameraFeed.FEED_YCBCR_SEP:
+			var y_tex = CameraTexture.new()
+			y_tex.camera_feed_id = feed.get_id()
+			y_tex.which_feed = CameraServer.FEED_Y_IMAGE
+			y_tex.camera_is_active = true
+
+			var cbcr_tex = CameraTexture.new()
+			cbcr_tex.camera_feed_id = feed.get_id()
+			cbcr_tex.which_feed = CameraServer.FEED_CBCR_IMAGE
+			cbcr_tex.camera_is_active = true
+
+			var shader = Shader.new()
+			shader.code = """
+shader_type canvas_item;
+
+uniform sampler2D y_tex : hint_default_black;
+uniform sampler2D cbcr_tex : hint_default_black;
+uniform mat3 feed_transform;
+uniform float manual_rotation_rad : default_value(0.0);
+
+void fragment() {
+	vec2 center = vec2(0.5);
+	vec2 uv_rot = UV - center;
+	float c = cos(manual_rotation_rad);
+	float s = sin(manual_rotation_rad);
+	uv_rot = vec2(c * uv_rot.x - s * uv_rot.y, s * uv_rot.x + c * uv_rot.y) + center;
+
+	vec2 uv = (feed_transform * vec3(uv_rot, 1.0)).xy;
+	float y = texture(y_tex, uv).r;
+	vec2 cbcr = texture(cbcr_tex, uv).rg;
+
+	float cb = cbcr.r - 0.5;
+	float cr = cbcr.g - 0.5;
+
+	float r = y + 1.402 * cr;
+	float g = y - 0.344136 * cb - 0.714136 * cr;
+	float b = y + 1.772 * cb;
+
+	COLOR = vec4(clamp(vec3(r, g, b), 0.0, 1.0), 1.0);
+}
+"""
+			var mat = ShaderMaterial.new()
+			mat.shader = shader
+			mat.set_shader_parameter("y_tex", y_tex)
+			mat.set_shader_parameter("cbcr_tex", cbcr_tex)
+			mat.set_shader_parameter("feed_transform", feed.get_transform())
+			mat.set_shader_parameter("manual_rotation_rad", deg_to_rad(float(camera_rotation_deg)))
+
+			if _camera_feed_rect != null:
+				_camera_feed_rect.material = mat
+				_camera_feed_rect.texture = y_tex
+		else:
+			if _camera_feed_rect != null:
+				_camera_feed_rect.material = null
+				var cam_tex = CameraTexture.new()
+				cam_tex.camera_feed_id = feed.get_id()
+				cam_tex.which_feed = CameraServer.FEED_RGBA_IMAGE
+				cam_tex.camera_is_active = true
+				_camera_feed_rect.texture = cam_tex
 		_update_status_overlay("", false)
 
 
@@ -821,7 +970,9 @@ func _on_desktop_frame_received(_img: Image, tex: Texture2D, _landmarks: Diction
 	_update_status_overlay("", false)
 
 	if _state_machine != null:
-		_state_machine.process_frame(rotated_img)
+		var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
+		var ts_usec: int = bridge.last_capture_timestamp_usec if (bridge != null and "last_capture_timestamp_usec" in bridge and bridge.last_capture_timestamp_usec > 0) else Time.get_ticks_usec()
+		_state_machine.process_frame(rotated_img, ts_usec)
 
 
 func _on_flip_camera_pressed() -> void:
@@ -830,11 +981,13 @@ func _on_flip_camera_pressed() -> void:
 		_use_phone_stream = false
 
 	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android"
+	if not CameraServer.is_monitoring_feeds():
+		CameraServer.set_monitoring_feeds(true)
 	var feeds = CameraServer.feeds()
 	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
 	var desk_cams: Array = pose_bridge.desktop_cameras if (pose_bridge != null and "desktop_cameras" in pose_bridge) else []
 	var total_count = max(feeds.size(), desk_cams.size())
-	if is_android and total_count < 2:
+	if is_android and total_count < 2 and feeds.is_empty() and desk_cams.is_empty():
 		total_count = 2
 
 	if total_count > 1:
@@ -859,15 +1012,50 @@ func _start_phone_camera_stream(url_str: String) -> void:
 	_alt_endpoint_idx = 0
 	_update_status_overlay("CONNECTING TO PHONE STREAM...\n" + _phone_cam_url, true)
 
-	if _http_req == null:
-		_http_req = HTTPRequest.new()
-		_http_req.name = "PhoneCameraHTTPRequest"
-		_http_req.timeout = 3.0
-		_http_req.request_completed.connect(_on_phone_cam_frame_received)
-		add_child(_http_req)
+	if _mjpeg_reader == null:
+		_mjpeg_reader = MJPEGStreamReaderClass.new()
+		_mjpeg_reader.name = "MJPEGStreamReader"
+		add_child(_mjpeg_reader)
+		_mjpeg_reader.frame_received.connect(_on_mjpeg_frame_received)
+		_mjpeg_reader.connection_status_changed.connect(_on_mjpeg_connection_changed)
 
-	_is_requesting_frame = false
-	_request_next_phone_frame()
+	_mjpeg_reader.start_stream(_phone_cam_url)
+
+
+func _on_mjpeg_frame_received(img: Image, timestamp_usec: int) -> void:
+	if not _is_active or img == null:
+		return
+
+	_phone_stream_failed_count = 0
+	_stream_established = true
+
+	apply_image_rotation(img)
+	_last_feed_image = img
+
+	var tex = ImageTexture.create_from_image(img)
+	if _camera_feed_rect != null:
+		_camera_feed_rect.texture = tex
+	_update_status_overlay("", false)
+
+	if _state_machine != null:
+		_state_machine.process_frame(img, timestamp_usec)
+
+
+func _on_mjpeg_connection_changed(connected: bool, _message: String) -> void:
+	if connected:
+		_stream_established = true
+		_update_status_overlay("", false)
+	else:
+		if not _stream_established and _is_active:
+			# Fallback to polling /shot.jpg if MJPEG stream endpoint is unavailable
+			if _http_req == null:
+				_http_req = HTTPRequest.new()
+				_http_req.name = "PhoneCameraHTTPRequest"
+				_http_req.timeout = 3.0
+				_http_req.request_completed.connect(_on_phone_cam_frame_received)
+				add_child(_http_req)
+			if not _is_requesting_frame:
+				_request_next_phone_frame()
 
 
 func _request_next_phone_frame() -> void:
@@ -909,7 +1097,7 @@ func _on_phone_cam_frame_received(result: int, response_code: int, _headers: Pac
 			_update_status_overlay("", false)
 
 			if _state_machine != null:
-				_state_machine.process_frame(img)
+				_state_machine.process_frame(img, Time.get_ticks_usec())
 		else:
 			_try_fallback_endpoint_or_error(result, response_code, "Invalid image encoding received")
 	else:
@@ -1086,38 +1274,45 @@ func _open_camera_setup_dialog() -> void:
 	ThemeManager.apply_scroll_container_style(scroll)
 	outer_vbox.add_child(scroll)
 
+	var scroll_margin = MarginContainer.new()
+	scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll_margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var scroll_pad_right = 64 if is_mob else 36
+	scroll_margin.add_theme_constant_override("margin_right", scroll_pad_right)
+	scroll_margin.add_theme_constant_override("margin_left", 6)
+	scroll_margin.add_theme_constant_override("margin_top", 4)
+	scroll_margin.add_theme_constant_override("margin_bottom", 6)
+	scroll.add_child(scroll_margin)
+
 	var vbox = VBoxContainer.new()
 	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_theme_constant_override("separation", 10)
-	scroll.add_child(vbox)
+	scroll_margin.add_child(vbox)
+
+	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android"
+	if not CameraServer.is_monitoring_feeds():
+		CameraServer.set_monitoring_feeds(true)
+	var feeds = CameraServer.feeds()
+	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
+	if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
+		pose_bridge.fetch_desktop_cameras()
+	var desk_cams: Array = pose_bridge.desktop_cameras if (pose_bridge != null and "desktop_cameras" in pose_bridge) else []
+	var total_count = max(feeds.size(), desk_cams.size())
+	if is_android and total_count < 2 and desk_cams.is_empty() and feeds.is_empty():
+		total_count = 2
 
 	# Section 1: Local / Desktop Webcams
 	var webcams_lbl = Label.new()
-	webcams_lbl.text = "1. Local Webcams:"
+	webcams_lbl.text = "1. Local Webcams (%d detected):" % total_count
 	webcams_lbl.add_theme_font_size_override("font_size", 14 if is_mob else 13)
 	vbox.add_child(webcams_lbl)
 
 	var cam_option = OptionButton.new()
 	cam_option.custom_minimum_size = Vector2(0, 46 if is_mob else 36)
 	cam_option.add_theme_font_size_override("font_size", 15 if is_mob else 13)
-	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android"
-	var feeds = CameraServer.feeds()
-	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
-	if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
-		pose_bridge.fetch_desktop_cameras()
-	var desk_cams: Array = pose_bridge.desktop_cameras if (pose_bridge != null and "desktop_cameras" in pose_bridge) else []
-	var total_count = max(feeds.size(), desk_cams.size())
-	if is_android and total_count < 2:
-		total_count = 2
 
-	if is_android:
+	if feeds.size() > 0:
 		cam_option.disabled = false
-		cam_option.add_item("Camera 0 (Back Camera)", 0)
-		cam_option.add_item("Camera 1 (Front Camera)", 1)
-		for i in range(2, total_count):
-			cam_option.add_item("Camera %d (Device)" % i, i)
-		cam_option.select(clamp(_current_camera_feed_index, 0, cam_option.item_count - 1))
-	elif feeds.size() > 0:
 		for i in range(feeds.size()):
 			var feed = feeds[i]
 			var feed_name = "Camera %d" % i
@@ -1134,10 +1329,18 @@ func _open_camera_setup_dialog() -> void:
 			cam_option.add_item(feed_name, i)
 		cam_option.select(clamp(_current_camera_feed_index, 0, feeds.size() - 1))
 	elif desk_cams.size() > 0:
+		cam_option.disabled = false
 		for i in range(desk_cams.size()):
 			var c_name: String = desk_cams[i].get("name", "System Camera %d" % i)
 			cam_option.add_item(c_name, i)
 		cam_option.select(clamp(_current_camera_feed_index, 0, desk_cams.size() - 1))
+	elif is_android:
+		cam_option.disabled = false
+		cam_option.add_item("Camera 0 (Back Camera)", 0)
+		cam_option.add_item("Camera 1 (Front Camera)", 1)
+		for i in range(2, total_count):
+			cam_option.add_item("Camera %d (Device)" % i, i)
+		cam_option.select(clamp(_current_camera_feed_index, 0, cam_option.item_count - 1))
 	else:
 		cam_option.add_item("No local webcams detected", 0)
 		cam_option.disabled = true
@@ -1474,7 +1677,7 @@ func _open_camera_setup_dialog() -> void:
 			ip_input.focus_neighbor_bottom = connect_phone_btn.get_path()
 			connect_phone_btn.focus_neighbor_top = ip_input.get_path()
 
-	if has_node("/root/VirtualKeyboardManager"):
+	if is_inside_tree() and has_node("/root/VirtualKeyboardManager"):
 		var vkm = get_node("/root/VirtualKeyboardManager")
 		if vkm.is_controller_mode_active():
 			feeds = CameraServer.feeds()

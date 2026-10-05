@@ -75,6 +75,7 @@ var last_active_tab_index: int = 0
 var new_player_avatar_path: String = ""
 var avatar_preview_btn: Button = Button.new()
 var new_player_tee_opt: OptionButton = OptionButton.new()
+var new_player_skill_opt: OptionButton = OptionButton.new()
 var avatar_picker_callback: Callable
 var avatar_picker_selected_path: String = ""
 var avatar_picker_content: VBoxContainer = VBoxContainer.new()
@@ -84,10 +85,32 @@ var edit_profile_player_name: String = ""
 var edit_profile_email_input: LineEdit = LineEdit.new()
 var edit_profile_avatar_path: String = ""
 var edit_profile_tee_opt: OptionButton = OptionButton.new()
+var edit_profile_skill_opt: OptionButton = OptionButton.new()
 var edit_profile_content: VBoxContainer = VBoxContainer.new()
 var edit_profile_avatar_preview_container: Control = null
 var back_btn: Button = null
 var register_btn: Button = null
+
+func _skill_key_to_index(skill_key: String) -> int:
+	match skill_key.to_lower():
+		"tour_pro": return 3
+		"scratch", "low_handicap": return 1
+		"high_handicap": return 2
+		_: return 0 # mid_handicap is default
+
+func _skill_index_to_key(idx: int) -> String:
+	match idx:
+		1: return "scratch"
+		2: return "high_handicap"
+		3: return "tour_pro"
+		_: return "mid_handicap"
+
+func _skill_key_to_display(skill_key: String) -> String:
+	match skill_key.to_lower():
+		"tour_pro": return "Tour Professional (+ HCP)"
+		"scratch", "low_handicap": return "Scratch / Low (0–9 HCP)"
+		"high_handicap": return "High Handicap (20+ HCP)"
+		_: return "Mid Handicap (10–19 HCP)"
 
 func _ready() -> void:
 	name = "PlayersMenu"
@@ -242,6 +265,18 @@ func _ready() -> void:
 	ThemeManager.apply_option_button_style(new_player_tee_opt, 17, Vector2(0, 50))
 	reg_section.add_child(new_player_tee_opt)
 
+	new_player_skill_opt.name = "NewPlayerSkillOpt"
+	new_player_skill_opt.clear()
+	new_player_skill_opt.add_item("Skill: Mid Handicap (10–19 HCP)", 0)
+	new_player_skill_opt.add_item("Skill: Scratch / Low (0–9 HCP)", 1)
+	new_player_skill_opt.add_item("Skill: High Handicap (20+ HCP)", 2)
+	new_player_skill_opt.add_item("Skill: Tour Professional (+ HCP)", 3)
+	new_player_skill_opt.selected = 0
+	new_player_skill_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	new_player_skill_opt.custom_minimum_size = Vector2(0, 50)
+	ThemeManager.apply_option_button_style(new_player_skill_opt, 17, Vector2(0, 50))
+	reg_section.add_child(new_player_skill_opt)
+
 	var reg_btn_hbox = HBoxContainer.new()
 	reg_btn_hbox.add_theme_constant_override("separation", 10)
 	reg_section.add_child(reg_btn_hbox)
@@ -364,6 +399,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			alert_dialog.visible = false
 			get_viewport().set_input_as_handled()
 			return
+		var issue_modal = get_node_or_null("IssueDetailModal")
+		if issue_modal != null and is_instance_valid(issue_modal):
+			InAppVideoPlayer.stop_all_players()
+			if has_node("/root/UIFocusGuard"):
+				get_node("/root/UIFocusGuard").pop_lock()
+			issue_modal.queue_free()
+			get_viewport().set_input_as_handled()
+			return
 		if avatar_picker_dialog != null and avatar_picker_dialog.visible:
 			avatar_picker_dialog.visible = false
 			get_viewport().set_input_as_handled()
@@ -374,10 +417,29 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")
 		get_viewport().set_input_as_handled()
+		return
+
+	# Controller bumper tab cycling in player profile (LB/RB or L1/R1)
+	if stats_panel != null and is_instance_valid(stats_panel):
+		var tabs = stats_panel.find_child("TabContainer", true, false) as TabContainer
+		if tabs != null and tabs.is_visible_in_tree() and tabs.get_tab_count() > 1:
+			var is_lb: bool = (event is InputEventJoypadButton and event.button_index == JOY_BUTTON_LEFT_SHOULDER and event.pressed)
+			var is_rb: bool = (event is InputEventJoypadButton and event.button_index == JOY_BUTTON_RIGHT_SHOULDER and event.pressed)
+			if is_lb:
+				tabs.current_tab = (tabs.current_tab - 1 + tabs.get_tab_count()) % tabs.get_tab_count()
+				last_active_tab_index = tabs.current_tab
+				get_viewport().set_input_as_handled()
+				return
+			elif is_rb:
+				tabs.current_tab = (tabs.current_tab + 1) % tabs.get_tab_count()
+				last_active_tab_index = tabs.current_tab
+				get_viewport().set_input_as_handled()
+				return
 
 
 func _refresh_players_list() -> void:
 	for child in players_list_vbox.get_children():
+		players_list_vbox.remove_child(child)
 		child.queue_free()
 		
 	var registered = MultiplayerManager.get_registered_players()
@@ -429,6 +491,7 @@ func _refresh_players_list() -> void:
 			btn_style_selected.border_width_left = 4
 			btn_style_selected.border_color = Color(0.85, 0.65, 0.15)
 			btn.add_theme_stylebox_override("normal", btn_style_selected)
+			btn.call_deferred("grab_focus")
 			
 		btn.pressed.connect(func(): _select_player(p_name))
 		players_list_vbox.add_child(btn)
@@ -442,7 +505,7 @@ func _update_controller_focus_navigation() -> void:
 
 	var player_buttons: Array[Button] = []
 	for child in players_list_vbox.get_children():
-		if child is Button and child.is_visible_in_tree():
+		if child is Button and child.is_visible_in_tree() and not child.is_queued_for_deletion():
 			player_buttons.append(child)
 
 	if player_buttons.is_empty():
@@ -463,12 +526,57 @@ func _update_controller_focus_navigation() -> void:
 	new_player_email_input.focus_neighbor_top = new_player_input.get_path()
 	new_player_email_input.focus_neighbor_bottom = new_player_tee_opt.get_path()
 	new_player_tee_opt.focus_neighbor_top = new_player_email_input.get_path()
-	new_player_tee_opt.focus_neighbor_bottom = avatar_preview_btn.get_path()
-	avatar_preview_btn.focus_neighbor_top = new_player_tee_opt.get_path()
+	new_player_tee_opt.focus_neighbor_bottom = new_player_skill_opt.get_path()
+	new_player_skill_opt.focus_neighbor_top = new_player_tee_opt.get_path()
+	new_player_skill_opt.focus_neighbor_bottom = avatar_preview_btn.get_path()
+	avatar_preview_btn.focus_neighbor_top = new_player_skill_opt.get_path()
 	avatar_preview_btn.focus_neighbor_right = register_btn.get_path()
 	register_btn.focus_neighbor_left = avatar_preview_btn.get_path()
-	register_btn.focus_neighbor_top = new_player_tee_opt.get_path()
+	register_btn.focus_neighbor_top = new_player_skill_opt.get_path()
 	register_btn.focus_neighbor_bottom = back_btn.get_path()
+
+	# Wire cross-navigation between player list and profile view
+	if stats_panel != null and is_instance_valid(stats_panel):
+		var edit_profile_btn = stats_panel.find_child("EditProfileBtn", true, false) as Button
+		var build_bag_btn = stats_panel.find_child("BuildBagBtn", true, false) as Button
+		var tabs = stats_panel.find_child("TabContainer", true, false) as TabContainer
+		var tab_bar: TabBar = tabs.get_tab_bar() if tabs != null else null
+		var email_report_btn = stats_panel.find_child("EmailReportBtn", true, false) as Button
+		var clear_btn = stats_panel.find_child("ClearBallHistoryBtn", true, false) as Button
+		var delete_btn = stats_panel.find_child("DeleteProfileBtn", true, false) as Button
+
+		var right_target: Control = edit_profile_btn if (edit_profile_btn != null and is_instance_valid(edit_profile_btn)) else (tab_bar if (tab_bar != null and is_instance_valid(tab_bar)) else null)
+		if right_target != null and not player_buttons.is_empty():
+			for p_btn in player_buttons:
+				p_btn.focus_neighbor_right = p_btn.get_path_to(right_target)
+			new_player_input.focus_neighbor_right = new_player_input.get_path_to(right_target)
+			new_player_email_input.focus_neighbor_right = new_player_email_input.get_path_to(right_target)
+			new_player_tee_opt.focus_neighbor_right = new_player_tee_opt.get_path_to(right_target)
+			new_player_skill_opt.focus_neighbor_right = new_player_skill_opt.get_path_to(right_target)
+
+		if edit_profile_btn != null and is_instance_valid(edit_profile_btn):
+			if not player_buttons.is_empty():
+				edit_profile_btn.focus_neighbor_left = edit_profile_btn.get_path_to(player_buttons[0])
+			if build_bag_btn != null and is_instance_valid(build_bag_btn):
+				edit_profile_btn.focus_neighbor_right = edit_profile_btn.get_path_to(build_bag_btn)
+				build_bag_btn.focus_neighbor_left = build_bag_btn.get_path_to(edit_profile_btn)
+				if tab_bar != null and is_instance_valid(tab_bar):
+					build_bag_btn.focus_neighbor_bottom = build_bag_btn.get_path_to(tab_bar)
+			if tab_bar != null and is_instance_valid(tab_bar):
+				edit_profile_btn.focus_neighbor_bottom = edit_profile_btn.get_path_to(tab_bar)
+				tab_bar.focus_neighbor_top = tab_bar.get_path_to(edit_profile_btn)
+				if not player_buttons.is_empty():
+					tab_bar.focus_neighbor_left = tab_bar.get_path_to(player_buttons[0])
+
+		if email_report_btn != null and is_instance_valid(email_report_btn) and delete_btn != null and is_instance_valid(delete_btn):
+			email_report_btn.focus_neighbor_right = email_report_btn.get_path_to(clear_btn if clear_btn != null else delete_btn)
+			if clear_btn != null and is_instance_valid(clear_btn):
+				clear_btn.focus_neighbor_left = clear_btn.get_path_to(email_report_btn)
+				clear_btn.focus_neighbor_right = clear_btn.get_path_to(delete_btn)
+				delete_btn.focus_neighbor_left = delete_btn.get_path_to(clear_btn)
+			else:
+				delete_btn.focus_neighbor_left = delete_btn.get_path_to(email_report_btn)
+			delete_btn.focus_neighbor_bottom = delete_btn.get_path_to(back_btn)
 
 
 func _select_player(player_name: String) -> void:
@@ -495,11 +603,13 @@ func _on_register_pressed() -> void:
 	if new_player_tee_opt != null and new_player_tee_opt.selected > 0:
 		var raw_t = new_player_tee_opt.get_item_text(new_player_tee_opt.selected)
 		pref_tee = raw_t.replace("Preferred Tee: ", "").strip_edges()
-	MultiplayerManager.register_player(name_text, email_text, new_player_avatar_path, [], pref_tee)
+	var skill_level = _skill_index_to_key(new_player_skill_opt.selected)
+	MultiplayerManager.register_player(name_text, email_text, new_player_avatar_path, [], pref_tee, skill_level)
 	new_player_input.clear()
 	new_player_email_input.clear()
 	new_player_avatar_path = ""
 	new_player_tee_opt.selected = 0
+	new_player_skill_opt.selected = 0
 	_update_new_player_avatar_preview()
 	_select_player(name_text)
 
@@ -523,6 +633,19 @@ func _open_avatar_picker(current_path: String, callback: Callable) -> void:
 	avatar_picker_selected_path = current_path
 	_build_avatar_picker_ui()
 	avatar_picker_dialog.popup_centered()
+	# Grab initial focus on the currently selected avatar or first avatar option
+	var focused_btn := false
+	for entry in avatar_picker_buttons:
+		if entry["path"] == avatar_picker_selected_path:
+			var btn = entry["btn"] as Button
+			if btn != null and is_instance_valid(btn):
+				btn.call_deferred("grab_focus")
+				focused_btn = true
+				break
+	if not focused_btn and avatar_picker_buttons.size() > 0:
+		var first_btn = avatar_picker_buttons[0]["btn"] as Button
+		if first_btn != null and is_instance_valid(first_btn):
+			first_btn.call_deferred("grab_focus")
 
 func _on_avatar_picker_confirmed() -> void:
 	if avatar_picker_callback.is_valid():
@@ -565,10 +688,22 @@ func _build_avatar_picker_ui() -> void:
 
 	_update_avatar_picker_highlights()
 
+	# Connect bottom row to OK button and OK/Cancel to avatar buttons
+	var ok_btn = avatar_picker_dialog.get_ok_button()
+	var cancel_btn = avatar_picker_dialog.get_cancel_button()
+	if ok_btn != null and cancel_btn != null and not avatar_picker_buttons.is_empty():
+		var last_btn = avatar_picker_buttons.back()["btn"] as Button
+		ok_btn.focus_neighbor_top = ok_btn.get_path_to(last_btn)
+		cancel_btn.focus_neighbor_top = cancel_btn.get_path_to(last_btn)
+		var count = avatar_picker_buttons.size()
+		for i in range(maxi(0, count - 3), count):
+			var b = avatar_picker_buttons[i]["btn"] as Button
+			b.focus_neighbor_bottom = b.get_path_to(ok_btn)
+
 func _create_avatar_picker_option(path: String, title: String, tex: Texture2D) -> Button:
 	var btn = Button.new()
 	btn.custom_minimum_size = Vector2(165, 95)
-	btn.focus_mode = Control.FOCUS_NONE
+	btn.focus_mode = Control.FOCUS_ALL
 	
 	var vb = VBoxContainer.new()
 	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -648,6 +783,13 @@ func _update_avatar_picker_highlights() -> void:
 		var style_hover = style.duplicate()
 		style_hover.bg_color = style.bg_color.lightened(0.1)
 		btn.add_theme_stylebox_override("hover", style_hover)
+		var style_focus = style.duplicate()
+		style_focus.border_color = Color(0.4, 0.85, 1.0)
+		style_focus.border_width_left = 3
+		style_focus.border_width_right = 3
+		style_focus.border_width_top = 3
+		style_focus.border_width_bottom = 3
+		btn.add_theme_stylebox_override("focus", style_focus)
 
 func _open_edit_profile_dialog(player_name: String) -> void:
 	edit_profile_player_name = player_name
@@ -755,8 +897,35 @@ func _open_edit_profile_dialog(player_name: String) -> void:
 	for i in range(1, edit_profile_tee_opt.item_count):
 		if edit_profile_tee_opt.get_item_text(i).to_lower() == cur_pref_tee.to_lower():
 			edit_profile_tee_opt.selected = i
-			break
 	tee_sec.add_child(edit_profile_tee_opt)
+
+	# Skill Level Section
+	var skill_sec = VBoxContainer.new()
+	skill_sec.add_theme_constant_override("separation", 6)
+	edit_profile_content.add_child(skill_sec)
+	
+	var skill_title = Label.new()
+	skill_title.text = "Player Skill Level:"
+	skill_title.add_theme_font_size_override("font_size", 15)
+	skill_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	skill_sec.add_child(skill_title)
+
+	var skill_hint = Label.new()
+	skill_hint.text = "ℹ️ Tailors your shot recommendations, launch benchmarks, and flaw analysis."
+	skill_hint.add_theme_font_size_override("font_size", 13)
+	skill_hint.add_theme_color_override("font_color", Color(0.65, 0.85, 1.0))
+	skill_sec.add_child(skill_hint)
+
+	edit_profile_skill_opt = OptionButton.new()
+	edit_profile_skill_opt.add_item("Mid Handicap (10–19 HCP)", 0)
+	edit_profile_skill_opt.add_item("Scratch / Low Handicap (0–9 HCP)", 1)
+	edit_profile_skill_opt.add_item("High Handicap (20+ HCP)", 2)
+	edit_profile_skill_opt.add_item("Tour Professional (+ HCP)", 3)
+	edit_profile_skill_opt.custom_minimum_size = Vector2(0, 50)
+	ThemeManager.apply_option_button_style(edit_profile_skill_opt, 18, Vector2(0, 50))
+	var cur_skill = reg.get("skill_level", "mid_handicap")
+	edit_profile_skill_opt.selected = _skill_key_to_index(cur_skill)
+	skill_sec.add_child(edit_profile_skill_opt)
 
 	# Bag Section
 	var bag_sec = VBoxContainer.new()
@@ -872,7 +1041,8 @@ func _on_edit_profile_confirmed() -> void:
 	var new_tee = ""
 	if edit_profile_tee_opt != null and edit_profile_tee_opt.selected > 0:
 		new_tee = edit_profile_tee_opt.get_item_text(edit_profile_tee_opt.selected)
-	MultiplayerManager.update_player_profile(edit_profile_player_name, new_email, edit_profile_avatar_path, new_tee)
+	var new_skill = _skill_index_to_key(edit_profile_skill_opt.selected)
+	MultiplayerManager.update_player_profile(edit_profile_player_name, new_email, edit_profile_avatar_path, new_tee, new_skill)
 	_refresh_players_list()
 	_render_player_profile(edit_profile_player_name)
 
@@ -1008,7 +1178,15 @@ func _render_player_profile(player_name: String) -> void:
 	tee_lbl.add_theme_font_size_override("font_size", 14)
 	info_vbox.add_child(tee_lbl)
 
+	var p_skill = reg_p.get("skill_level", "mid_handicap")
+	var skill_lbl = Label.new()
+	skill_lbl.text = "🎯 Skill: " + _skill_key_to_display(p_skill)
+	skill_lbl.add_theme_font_size_override("font_size", 14)
+	skill_lbl.add_theme_color_override("font_color", Color(0.4, 0.9, 0.6))
+	info_vbox.add_child(skill_lbl)
+
 	var edit_profile_btn = Button.new()
+	edit_profile_btn.name = "EditProfileBtn"
 	edit_profile_btn.text = "✏️ Edit Profile"
 	edit_profile_btn.custom_minimum_size = Vector2(160, 50)
 	edit_profile_btn.add_theme_font_size_override("font_size", 17)
@@ -1017,6 +1195,7 @@ func _render_player_profile(player_name: String) -> void:
 	header_hbox.add_child(edit_profile_btn)
 
 	var build_bag_btn = Button.new()
+	build_bag_btn.name = "BuildBagBtn"
 	build_bag_btn.text = "🎒 Build Bag"
 	build_bag_btn.custom_minimum_size = Vector2(160, 50)
 	build_bag_btn.add_theme_font_size_override("font_size", 17)
@@ -1347,6 +1526,7 @@ func _render_player_profile(player_name: String) -> void:
 	actions_hbox.add_child(spacer_act)
 
 	var email_report_btn = Button.new()
+	email_report_btn.name = "EmailReportBtn"
 	email_report_btn.text = "✉ Email Profile Report"
 	email_report_btn.custom_minimum_size = Vector2(210, 52)
 	email_report_btn.add_theme_font_size_override("font_size", 16)
@@ -1355,6 +1535,7 @@ func _render_player_profile(player_name: String) -> void:
 	actions_hbox.add_child(email_report_btn)
 	
 	var clear_btn = Button.new()
+	clear_btn.name = "ClearBallHistoryBtn"
 	clear_btn.text = "🧹 Clear All Ball History"
 	clear_btn.custom_minimum_size = Vector2(210, 52)
 	clear_btn.add_theme_font_size_override("font_size", 16)
@@ -1363,6 +1544,7 @@ func _render_player_profile(player_name: String) -> void:
 	actions_hbox.add_child(clear_btn)
 	
 	var delete_btn = Button.new()
+	delete_btn.name = "DeleteProfileBtn"
 	delete_btn.text = "❌ Delete Profile permanently"
 	delete_btn.custom_minimum_size = Vector2(250, 52)
 	delete_btn.add_theme_font_size_override("font_size", 16)
@@ -1370,14 +1552,16 @@ func _render_player_profile(player_name: String) -> void:
 	delete_btn.pressed.connect(func(): delete_confirm_dialog.popup_centered())
 	actions_hbox.add_child(delete_btn)
 
+	call_deferred("_update_controller_focus_navigation")
+
 func _exit_tree() -> void:
 	InAppVideoPlayer.stop_all_players()
 
-func _create_issue_card(issue_name: String, count: int, period_label: String) -> PanelContainer:
-	var card = PanelContainer.new()
+func _create_issue_card(issue_name: String, count: int, period_label: String) -> Button:
+	var card = Button.new()
 	card.custom_minimum_size = Vector2(260, 64)
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	card.focus_mode = Control.FOCUS_ALL
 	card.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	card.tooltip_text = "Click to view swing explanation, causes, and drill guide for %s" % issue_name
 	
@@ -1398,11 +1582,16 @@ func _create_issue_card(issue_name: String, count: int, period_label: String) ->
 	hover_style.bg_color = Color(0.15, 0.22, 0.28, 0.95)
 	hover_style.border_color = Color(0.4, 0.85, 1.0, 1.0)
 	hover_style.border_width_left = 4
+
+	var focus_style = hover_style.duplicate()
+	focus_style.border_width_right = 3
+	focus_style.border_width_top = 3
+	focus_style.border_width_bottom = 3
 	
-	card.add_theme_stylebox_override("panel", normal_style)
-	
-	card.mouse_entered.connect(func(): card.add_theme_stylebox_override("panel", hover_style))
-	card.mouse_exited.connect(func(): card.add_theme_stylebox_override("panel", normal_style))
+	card.add_theme_stylebox_override("normal", normal_style)
+	card.add_theme_stylebox_override("hover", hover_style)
+	card.add_theme_stylebox_override("pressed", hover_style)
+	card.add_theme_stylebox_override("focus", focus_style)
 	
 	var hbox = HBoxContainer.new()
 	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1434,9 +1623,8 @@ func _create_issue_card(issue_name: String, count: int, period_label: String) ->
 	cnt_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hbox.add_child(cnt_lbl)
 	
-	card.gui_input.connect(func(event: InputEvent):
-		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			_show_issue_detail_modal(issue_name)
+	card.pressed.connect(func():
+		_show_issue_detail_modal(issue_name)
 	)
 	
 	return card
@@ -1445,11 +1633,15 @@ func _show_issue_detail_modal(issue_name: String) -> void:
 	var existing = get_node_or_null("IssueDetailModal")
 	if existing != null:
 		InAppVideoPlayer.stop_all_players()
+		if has_node("/root/UIFocusGuard"):
+			get_node("/root/UIFocusGuard").pop_lock()
 		existing.queue_free()
 	
 	var info = GolfSwingAnalyzer.get_issue_info(issue_name)
 	var modal = _create_issue_detail_modal(info)
 	add_child(modal)
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").push_lock(modal)
 
 func _create_issue_detail_modal(info: Dictionary) -> Control:
 	var vp_size = get_viewport_rect().size
@@ -1461,6 +1653,8 @@ func _create_issue_detail_modal(info: Dictionary) -> Control:
 	
 	var dismiss_modal = func():
 		InAppVideoPlayer.stop_all_players()
+		if has_node("/root/UIFocusGuard"):
+			get_node("/root/UIFocusGuard").pop_lock()
 		root.queue_free()
 	
 	root.tree_exiting.connect(func():
@@ -1732,6 +1926,10 @@ func _create_issue_detail_modal(info: Dictionary) -> Control:
 	ThemeManager.apply_secondary_button_style(footer_btn, 6)
 	footer_btn.pressed.connect(dismiss_modal)
 	outer_vbox.add_child(footer_btn)
+	
+	footer_btn.focus_neighbor_top = footer_btn.get_path_to(close_btn)
+	close_btn.focus_neighbor_bottom = close_btn.get_path_to(footer_btn)
+	footer_btn.call_deferred("grab_focus")
 	
 	return root
 
@@ -2178,6 +2376,13 @@ func _build_bag_tab(player_name: String) -> VBoxContainer:
 			var style_hover = style.duplicate()
 			style_hover.bg_color = style.bg_color.lightened(0.12)
 			btn.add_theme_stylebox_override("hover", style_hover)
+			var style_focus = style.duplicate()
+			style_focus.border_color = Color(0.4, 0.85, 1.0)
+			style_focus.border_width_left = 3
+			style_focus.border_width_right = 3
+			style_focus.border_width_top = 3
+			style_focus.border_width_bottom = 3
+			btn.add_theme_stylebox_override("focus", style_focus)
 
 	var save_current_bag = func(show_toast: bool = true):
 		var bag_to_save: Array[String] = []
@@ -2191,6 +2396,7 @@ func _build_bag_tab(player_name: String) -> VBoxContainer:
 			var t = tab_vbox.get_tree().create_timer(2.5)
 			t.timeout.connect(func(): if is_instance_valid(toast_lbl): toast_lbl.text = "")
 
+	var category_grids: Array[Array] = []
 	for cat in CLUB_CATEGORIES:
 		var cat_name = cat["category"] as String
 		var cat_clubs = cat["clubs"] as Array
@@ -2212,6 +2418,7 @@ func _build_bag_tab(player_name: String) -> VBoxContainer:
 		grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cat_section.add_child(grid)
 		
+		var cat_btn_list: Array[Button] = []
 		for club_info in cat_clubs:
 			var code = club_info["code"] as String
 			var full_name = club_info["name"] as String
@@ -2219,7 +2426,7 @@ func _build_bag_tab(player_name: String) -> VBoxContainer:
 			var btn = Button.new()
 			btn.custom_minimum_size = Vector2(180, 68)
 			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			btn.focus_mode = Control.FOCUS_NONE
+			btn.focus_mode = Control.FOCUS_ALL
 			
 			var btn_vbox = VBoxContainer.new()
 			btn_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -2264,6 +2471,33 @@ func _build_bag_tab(player_name: String) -> VBoxContainer:
 			
 			grid.add_child(btn)
 			club_buttons_ref.append({"code": code, "btn": btn, "status_lbl": s_lbl})
+			cat_btn_list.append(btn)
+		category_grids.append(cat_btn_list)
+
+	# Wire focus neighbors across toolbar and categories for controller navigation
+	if not club_buttons_ref.is_empty():
+		var first_club_btn: Button = club_buttons_ref[0]["btn"]
+		standard_preset_btn.focus_neighbor_bottom = standard_preset_btn.get_path_to(first_club_btn)
+		select_all_btn.focus_neighbor_bottom = select_all_btn.get_path_to(first_club_btn)
+		clear_all_btn.focus_neighbor_bottom = clear_all_btn.get_path_to(first_club_btn)
+		reset_default_btn.focus_neighbor_bottom = reset_default_btn.get_path_to(first_club_btn)
+		save_btn.focus_neighbor_bottom = save_btn.get_path_to(first_club_btn)
+		for i in range(mini(3, club_buttons_ref.size())):
+			var top_c_btn: Button = club_buttons_ref[i]["btn"]
+			top_c_btn.focus_neighbor_top = top_c_btn.get_path_to(standard_preset_btn)
+
+	for c in range(category_grids.size() - 1):
+		var cur_cat_btns: Array = category_grids[c]
+		var next_cat_btns: Array = category_grids[c + 1]
+		if not cur_cat_btns.is_empty() and not next_cat_btns.is_empty():
+			var start_idx = maxi(0, cur_cat_btns.size() - 3)
+			for idx in range(start_idx, cur_cat_btns.size()):
+				var b: Button = cur_cat_btns[idx]
+				b.focus_neighbor_bottom = b.get_path_to(next_cat_btns[0])
+			var end_idx = mini(3, next_cat_btns.size())
+			for idx in range(end_idx):
+				var b: Button = next_cat_btns[idx]
+				b.focus_neighbor_top = b.get_path_to(cur_cat_btns.back())
 
 	# Presets and action handlers
 	standard_preset_btn.pressed.connect(func():

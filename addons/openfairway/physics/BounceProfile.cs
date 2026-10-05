@@ -47,7 +47,68 @@ public sealed class BounceProfile
     public string Name { get; init; } = "Default";
     public string Version { get; init; } = "1.0";
 
-    public static BounceProfile Default { get; } = new();
+    public static BounceProfile Default { get; } = new()
+    {
+        Name = "Fairway",
+        Version = "1.0",
+        FlightTangentialRetentionBase = 0.60f,
+        ShallowImpactRetentionMin = 0.58f,
+        ShallowImpactRetentionMax = 0.72f
+    };
+
+    public static BounceProfile Green { get; } = new()
+    {
+        Name = "Green",
+        Version = "1.0",
+        CorBaseA = 0.42f,
+        CorHighSpeedCap = 0.22f,
+        FlightTangentialRetentionBase = 0.58f,
+        ShallowImpactRetentionMin = 0.55f,
+        ShallowImpactRetentionMax = 0.70f,
+        RolloutLowSpinRetention = 0.88f,
+        RolloutHighSpinRetention = 0.74f
+    };
+
+    public static BounceProfile Rough { get; } = new()
+    {
+        Name = "Rough",
+        Version = "1.0",
+        CorBaseA = 0.28f,
+        CorHighSpeedCap = 0.16f,
+        CorKillThreshold = 2.5f,
+        FlightTangentialRetentionBase = 0.45f,
+        ShallowImpactRetentionMin = 0.40f,
+        ShallowImpactRetentionMax = 0.52f,
+        RolloutLowSpinRetention = 0.60f,
+        RolloutHighSpinRetention = 0.45f,
+        RolloutBounceCorScale = 0.35f
+    };
+
+    public static BounceProfile FairwaySoft { get; } = new()
+    {
+        Name = "FairwaySoft",
+        Version = "1.0",
+        CorBaseA = 0.38f,
+        CorHighSpeedCap = 0.20f,
+        FlightTangentialRetentionBase = 0.55f,
+        ShallowImpactRetentionMin = 0.50f,
+        ShallowImpactRetentionMax = 0.66f,
+        RolloutLowSpinRetention = 0.78f,
+        RolloutHighSpinRetention = 0.65f
+    };
+
+    public static BounceProfile Firm { get; } = new()
+    {
+        Name = "Firm",
+        Version = "1.0",
+        CorBaseA = 0.52f,
+        CorHighSpeedCap = 0.30f,
+        FlightTangentialRetentionBase = 0.72f,
+        ShallowImpactRetentionMin = 0.66f,
+        ShallowImpactRetentionMax = 0.82f,
+        RolloutLowSpinRetention = 0.90f,
+        RolloutHighSpinRetention = 0.78f
+    };
 
     public static BounceProfile Bunker { get; } = new()
     {
@@ -71,4 +132,19 @@ public sealed class BounceProfile
         RolloutBounceCorScale = 0.15f,
         PennerLowEnergyThreshold = 30.0f
     };
+
+    public static BounceProfile ForSurface(PhysicsEnums.SurfaceType surface, bool isInSand = false)
+    {
+        if (isInSand || surface == PhysicsEnums.SurfaceType.Bunker)
+            return Bunker;
+
+        return surface switch
+        {
+            PhysicsEnums.SurfaceType.Green => Green,
+            PhysicsEnums.SurfaceType.Rough => Rough,
+            PhysicsEnums.SurfaceType.FairwaySoft => FairwaySoft,
+            PhysicsEnums.SurfaceType.Firm => Firm,
+            _ => Default
+        };
+    }
 }

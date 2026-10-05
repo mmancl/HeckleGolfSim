@@ -103,7 +103,7 @@ func _init_action_definitions() -> void:
 	# Previous Shot Analysis Menu -> Xbox Y / PS Triangle
 	# Suspense Heartbeat Toggle -> Xbox LB / PS L1
 	# Announcer -> Xbox RB / PS R1
-	_register_def("toggle_stats", "Toggle Stats Display Panel", CATEGORY_HUD, KEY_S, JOY_BUTTON_A)
+	_register_def("toggle_stats", "Toggle Stats Display Panel", CATEGORY_HUD, KEY_S, -1)
 	_register_def("prev_shot_analysis_toggle", "Previous Shot Analysis Menu", CATEGORY_HUD, KEY_V, JOY_BUTTON_Y)
 	_register_def("suspense_toggle", "Suspense Heartbeat Toggle", CATEGORY_HUD, KEY_U, JOY_BUTTON_LEFT_SHOULDER)
 	_register_def("announcer_toggle", "Announcer Mute / Unmute", CATEGORY_HUD, KEY_N, JOY_BUTTON_RIGHT_SHOULDER)
@@ -626,13 +626,17 @@ func _add_joy_motion_to_action(action: StringName, axis: JoyAxis, axis_value: fl
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not event.is_pressed():
+	if not event.is_pressed() and not (event is InputEventJoypadMotion and abs((event as InputEventJoypadMotion).axis_value) >= 0.5):
 		return
 	
 	# If any directional navigation occurs and no UI element is currently focused (or focus is outside an active modal),
-	# auto-grab focus on the first visible interactive element so keyboard/controller navigation starts immediately in menu screens or modals.
-	if event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down") or \
-	   event.is_action_pressed("ui_left") or event.is_action_pressed("ui_right"):
+	# auto-grab focus on the first visible interactive element so keyboard/controller navigation starts immediately.
+	var is_directional := event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down") or \
+		event.is_action_pressed("ui_left") or event.is_action_pressed("ui_right")
+	if not is_directional and event is InputEventJoypadMotion and abs((event as InputEventJoypadMotion).axis_value) >= 0.5:
+		is_directional = event.is_action("ui_up") or event.is_action("ui_down") or \
+			event.is_action("ui_left") or event.is_action("ui_right")
+	if is_directional:
 		var vp = get_viewport()
 		if vp != null:
 			var cur_focus = vp.gui_get_focus_owner()
@@ -642,10 +646,59 @@ func _unhandled_input(event: InputEvent) -> void:
 					if focus_first_control(active_modal):
 						vp.set_input_as_handled()
 						return
-			elif _is_menu_screen(get_tree().current_scene):
+			elif _is_menu_screen(get_tree().current_scene) or _is_aerial_map_view(get_tree().current_scene):
 				if cur_focus == null or not is_instance_valid(cur_focus) or not cur_focus.is_visible_in_tree():
 					if _focus_first_control_in_tree(vp):
 						vp.set_input_as_handled()
+						return
+			else:
+				# 3D Gameplay (Driving Range / Course Play):
+				# Joypad Left Stick motion or non-aim directional input wakes up HUD focus if nothing is focused.
+				if event is InputEventJoypadMotion or (event is InputEventJoypadButton and not _is_aim_action(event)):
+					if cur_focus == null or not is_instance_valid(cur_focus) or not cur_focus.is_visible_in_tree():
+						if _focus_first_control_in_tree(vp):
+							vp.set_input_as_handled()
+							return
+
+
+func _is_aim_action(event: InputEvent) -> bool:
+	if event is InputEventJoypadButton:
+		var btn = event.button_index
+		return btn == JOY_BUTTON_DPAD_LEFT or btn == JOY_BUTTON_DPAD_RIGHT or \
+			   btn == JOY_BUTTON_DPAD_UP or btn == JOY_BUTTON_DPAD_DOWN
+	if event is InputEventKey:
+		var code = event.keycode
+		return code == KEY_LEFT or code == KEY_RIGHT or code == KEY_UP or code == KEY_DOWN
+	return false
+
+
+func _is_aerial_map_view(scene: Node) -> bool:
+	if scene != null:
+		if ("is_aerial_view" in scene and bool(scene.is_aerial_view)) or (scene.has_meta("is_aerial_view") and bool(scene.get_meta("is_aerial_view"))):
+			return true
+		if "course_instance" in scene:
+			var ci = scene.get("course_instance")
+			if ci != null and (("is_aerial_view" in ci and bool(ci.is_aerial_view)) or (ci.has_meta("is_aerial_view") and bool(ci.get_meta("is_aerial_view")))):
+				return true
+		var place_btn = scene.find_child("PlaceBallButton", true, false)
+		if place_btn != null and _is_node_visible(place_btn):
+			return true
+
+	var root = get_tree().root if get_tree() != null else null
+	if root != null:
+		for ch in root.get_children():
+			if ch == self:
+				continue
+			if "is_aerial_view" in ch and bool(ch.is_aerial_view):
+				return true
+			if "course_instance" in ch:
+				var ci = ch.get("course_instance")
+				if ci != null and "is_aerial_view" in ci and bool(ci.is_aerial_view):
+					return true
+			var pb = ch.find_child("PlaceBallButton", true, false)
+			if pb != null and _is_node_visible(pb):
+				return true
+	return false
 
 
 func _is_menu_screen(scene: Node) -> bool:
@@ -655,6 +708,8 @@ func _is_menu_screen(scene: Node) -> bool:
 	var s_file := str(scene.scene_file_path).to_lower() if "scene_file_path" in scene else ""
 	var s_scr := str(scene.get_script().resource_path).to_lower() if scene.get_script() != null else ""
 	var full := s_name + " " + s_file + " " + s_scr
+	if full.contains("setup"):
+		return true
 	if full.contains("range") or full.contains("course_play") or full.contains("courseplay") \
 		or full.contains("practice") or full.contains("chipping") or full.contains("putting") \
 		or full.contains("coursemanager") or full.contains("course_manager") or full.contains("loft"):
@@ -662,7 +717,25 @@ func _is_menu_screen(scene: Node) -> bool:
 	return true
 
 
+func _is_node_visible(node: Node) -> bool:
+	if node == null or not is_instance_valid(node):
+		return false
+	if node is CanvasItem:
+		return (node as CanvasItem).is_visible_in_tree()
+	if "visible" in node:
+		return bool(node.visible)
+	return true
+
+
 func _find_topmost_modal() -> Node:
+	# 0. Check UIFocusGuard lock if active
+	if has_node("/root/UIFocusGuard"):
+		var guard = get_node("/root/UIFocusGuard")
+		if guard.is_locked():
+			var lock_root = guard.current_lock_root()
+			if lock_root != null and is_instance_valid(lock_root) and _is_node_visible(lock_root):
+				return lock_root
+
 	# 1. Check root children (e.g., StatsCustomizationModal, multi-window popups)
 	var root = get_tree().root
 	if root != null:
@@ -671,7 +744,7 @@ func _find_topmost_modal() -> Node:
 			var ch = root_children[i]
 			if ch == self or ch == get_tree().current_scene:
 				continue
-			if (ch is CanvasLayer or ch is Control) and "visible" in ch and ch.visible:
+			if (ch is CanvasLayer or ch is Control or ch is Window) and _is_node_visible(ch):
 				var c_name = ch.name
 				if c_name.contains("Rebind"):
 					continue
@@ -681,44 +754,79 @@ func _find_topmost_modal() -> Node:
 	# 2. Check current scene for open modals, dialogs, overlays
 	var cur_scene = get_tree().current_scene
 	if cur_scene != null:
+		var settings_layer = cur_scene.find_child("SettingsLayer", true, false)
+		if settings_layer != null and _is_node_visible(settings_layer):
+			return settings_layer
+		var range_settings = cur_scene.find_child("RangeSettings", true, false)
+		if range_settings != null and _is_node_visible(range_settings):
+			return range_settings
+		var mm_settings = cur_scene.find_child("MainMenuSettings", true, false)
+		if mm_settings != null and _is_node_visible(mm_settings):
+			return mm_settings
+		var cam_setup = cur_scene.find_child("CameraSetupDialog", true, false)
+		if cam_setup != null and _is_node_visible(cam_setup):
+			return cam_setup
 		var dist_menu = cur_scene.find_child("DistanceMenu", true, false)
-		if dist_menu != null and is_instance_valid(dist_menu) and dist_menu.visible:
+		if dist_menu != null and _is_node_visible(dist_menu):
 			return dist_menu
 		var exit_dlg = cur_scene.find_child("ExitConfirmDialog", true, false)
-		if exit_dlg != null and is_instance_valid(exit_dlg) and exit_dlg.visible:
+		if exit_dlg != null and _is_node_visible(exit_dlg):
 			return exit_dlg
 		var forfeit_dlg = cur_scene.find_child("ForfeitConfirmDialog", true, false)
-		if forfeit_dlg != null and is_instance_valid(forfeit_dlg) and forfeit_dlg.visible:
+		if forfeit_dlg != null and _is_node_visible(forfeit_dlg):
 			return forfeit_dlg
 		var mulligan_dlg = cur_scene.find_child("MulliganConfirmDialog", true, false)
-		if mulligan_dlg != null and is_instance_valid(mulligan_dlg) and mulligan_dlg.visible:
+		if mulligan_dlg != null and _is_node_visible(mulligan_dlg):
 			return mulligan_dlg
 		var replay_modal = cur_scene.find_child("SwingReplayModal", true, false)
-		if replay_modal != null and is_instance_valid(replay_modal) and replay_modal.visible:
+		if replay_modal != null and _is_node_visible(replay_modal):
 			return replay_modal
 		var scorecard = cur_scene.find_child("ScorecardPanel", true, false)
-		if scorecard != null and is_instance_valid(scorecard) and scorecard.visible:
+		if scorecard != null and _is_node_visible(scorecard):
 			return scorecard
 		var manage_players = cur_scene.find_child("ManagePlayersPanel", true, false)
-		if manage_players != null and is_instance_valid(manage_players) and manage_players.visible:
+		if manage_players != null and _is_node_visible(manage_players):
 			return manage_players
 		
-		var children = cur_scene.get_children()
-		for i in range(children.size() - 1, -1, -1):
-			var child = children[i]
-			if (child is CanvasLayer or child is Control) and "visible" in child and child.visible:
+		var candidate = _find_visible_modal_recursive(cur_scene)
+		if candidate != null:
+			return candidate
+	
+	return null
+
+
+func _find_visible_modal_recursive(node: Node) -> Node:
+	if node == null:
+		return null
+	var children = node.get_children()
+	for i in range(children.size() - 1, -1, -1):
+		var child = children[i]
+		if (child is CanvasLayer or child is Control or child is Window):
+			if _is_node_visible(child):
 				var c_name = child.name
 				if c_name.contains("Rebind"):
 					continue
-				if c_name.contains("Modal") or c_name.contains("Dialog") or c_name.contains("SettingsLayer") or c_name.contains("DistanceMenu"):
+				if c_name.contains("Modal") or c_name.contains("Dialog") or c_name.contains("Popup") \
+					or c_name.contains("SettingsLayer") or c_name.contains("SettingsModal") or c_name == "DistanceMenu":
 					return child
-	
+		var sub = _find_visible_modal_recursive(child)
+		if sub != null:
+			return sub
 	return null
 
 
 func _focus_first_control_in_tree(vp: Viewport) -> bool:
 	var cur_scene = get_tree().current_scene
 	if cur_scene == null:
+		var root = get_tree().root if get_tree() != null else null
+		if root != null:
+			var root_children = root.get_children()
+			for i in range(root_children.size() - 1, -1, -1):
+				var ch = root_children[i]
+				if ch == self or ch.name.ends_with("Manager") or ch.name.begins_with("VirtualKeyboard"):
+					continue
+				if focus_first_control(ch):
+					return true
 		return false
 	
 	# Check root for topmost modal first
@@ -726,19 +834,44 @@ func _focus_first_control_in_tree(vp: Viewport) -> bool:
 	if top_modal != null:
 		return focus_first_control(top_modal)
 	
+	# In CoursePlay (CourseManager), prefer focusing CoursePlay HUD buttons
+	var cp_ctrl = cur_scene.find_child("CoursePlay", true, false)
+	if cp_ctrl == null:
+		cp_ctrl = cur_scene.find_child("MultiplayerController", true, false)
+	if cp_ctrl == null and (cur_scene.name == "CoursePlay" or cur_scene.name == "CourseManager"):
+		cp_ctrl = cur_scene
+	if cp_ctrl != null and is_instance_valid(cp_ctrl) and cp_ctrl.is_inside_tree():
+		if focus_first_control(cp_ctrl):
+			return true
+
+	# In Driving Range / other scenes with RangeUI, prefer RangeUI overlay buttons
+	var r_ui = cur_scene.find_child("RangeUI", true, false)
+	if r_ui != null and is_instance_valid(r_ui) and r_ui.is_inside_tree():
+		var overlay = r_ui.get_node_or_null("OverlayLayer")
+		if overlay != null and focus_first_control(overlay):
+			return true
+		if focus_first_control(r_ui):
+			return true
+	
 	return focus_first_control(cur_scene)
 
 
 static func focus_first_control(root: Node) -> bool:
 	if root == null:
 		return false
+	if root is CanvasLayer and not (root as CanvasLayer).visible:
+		return false
 	if root is Control:
 		var c = root as Control
-		if c.is_visible_in_tree() and c.focus_mode != Control.FOCUS_NONE:
+		if not c.is_visible_in_tree():
+			return false
+		if c.focus_mode != Control.FOCUS_NONE:
 			if c is Button or c is OptionButton or c is LineEdit or c is Range or c is ItemList or c is CheckBox or c is CheckButton:
 				c.grab_focus()
 				return true
 	for child in root.get_children():
+		if child is CanvasLayer and not (child as CanvasLayer).visible:
+			continue
 		if child is Control and not (child as Control).is_visible_in_tree():
 			continue
 		if focus_first_control(child):

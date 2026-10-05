@@ -1086,7 +1086,7 @@ static func _build_hole_unified_terrain(
 	var ground_mesh = MeshInstance3D.new()
 	ground_mesh.name = "UnifiedTerrain"
 	ground_mesh.mesh = arr_mesh
-	var q = "Low" if (GlobalSettings != null and GlobalSettings.is_low_graphics()) else "High"
+	var q = GlobalSettings.get_graphics_quality() if GlobalSettings != null else "High"
 	MobilePerformance.apply_graphics_quality(ground_mesh, q)
 	hole_node.add_child(ground_mesh)
 	ground_mesh.owner = root
@@ -1514,8 +1514,10 @@ static func _delete_dir_recursive(path: String) -> void:
 static func _get_relative_transform(node: Node3D, root_node: Node) -> Transform3D:
 	var t = Transform3D.IDENTITY
 	var curr: Node = node
-	while curr != null and curr != root_node:
+	while curr != null and is_instance_valid(curr) and curr != root_node:
 		if curr is Node3D:
 			t = (curr as Node3D).transform * t
+		if not curr.is_inside_tree():
+			break
 		curr = curr.get_parent()
 	return t

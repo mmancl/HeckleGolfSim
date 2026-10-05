@@ -16,6 +16,9 @@
 /android/build/src/main/java/com/godot/game/*
 !/android/build/src/main/java/com/godot/game/GodotBleHelper.java
 !/android/plugins/
+android/plugins/**/build/
+android/plugins/**/.gradle/
+android/plugins/**/MediaPipePosePlugin-release.aar
 # Godot-specific ignores
 .import/
 export.cfg
@@ -68,3 +71,9 @@ dist/
 
 # Commercial generator tool
 scripts/tools/commercial_generator/
+
+# OpenStreetMap extracts and temporary data
+*.osm.pbf
+*.pbf
+/tmp/
+scratch_aar/

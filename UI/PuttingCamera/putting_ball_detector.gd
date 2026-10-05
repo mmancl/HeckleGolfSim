@@ -361,8 +361,10 @@ func detect_ball(image: Image, circle_center_norm: Vector2, circle_radius_norm: 
 	var raw_center: Vector2 = best_blob["center"]
 	var approx_radius: float = best_blob["radius"]
 
-	# 6. Anti-Jitter Smoothing with Deadband
-	if _smoothed_center == Vector2.ZERO or not ball_found:
+	# 6. Anti-Jitter Smoothing with Deadband (bypassed during active tracking to prevent lag)
+	if is_tracking:
+		_smoothed_center = raw_center
+	elif _smoothed_center == Vector2.ZERO or not ball_found:
 		_smoothed_center = raw_center
 		_resting_anchor = raw_center
 		_rest_frame_count = 0

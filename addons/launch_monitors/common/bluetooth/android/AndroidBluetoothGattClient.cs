@@ -22,9 +22,11 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
     
     private AndroidScanListener? _scanListener;
     private AndroidGattListener? _gattListener;
+    private BluetoothScanOptions _scanOptions = new(null);
     
     private TaskCompletionSource<bool>? _connectTcs;
     private TaskCompletionSource<bool>? _servicesTcs;
+    private TaskCompletionSource<int>? _mtuTcs;
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<byte[]>> _readTcsMap = new();
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<bool>> _writeTcsMap = new();
     
@@ -134,7 +136,9 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
 
     private JavaObject EnsureScannerAvailable()
     {
-        OS.RequestPermissions();
+        OS.RequestPermission("android.permission.BLUETOOTH_SCAN");
+        OS.RequestPermission("android.permission.BLUETOOTH_CONNECT");
+        OS.RequestPermission("android.permission.ACCESS_FINE_LOCATION");
 
         var adapter = GetBluetoothAdapter();
         if (adapter == null)
@@ -179,6 +183,7 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
     
     public Task StartScanAsync(BluetoothScanOptions options, CancellationToken cancellationToken)
     {
+        _scanOptions = options;
         var scanner = EnsureScannerAvailable();
         
         _scanListener = new AndroidScanListener(this);
@@ -288,6 +293,25 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
             }
         }
         
+        // Request high MTU for launch monitors (Square Golf shot packets are 25 bytes)
+        try
+        {
+            _mtuTcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            bool req = helperClass.Call("requestMtu", _bluetoothGatt, 512).As<bool>();
+            if (req)
+            {
+                using var mtuTimeoutCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1500));
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, mtuTimeoutCts.Token);
+                using var reg = linkedCts.Token.Register(() => _mtuTcs.TrySetResult(23));
+                int negotiatedMtu = await _mtuTcs.Task;
+                GD.Print($"{LogPrefix} Negotiated MTU: {negotiatedMtu} bytes");
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} MTU request exception or timeout (continuing): {ex.Message}");
+        }
+
         helperClass.Call("discoverServices", _bluetoothGatt);
         using (var servicesTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
@@ -339,8 +363,10 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
 
         _connectTcs?.TrySetCanceled();
         _servicesTcs?.TrySetCanceled();
+        _mtuTcs?.TrySetCanceled();
         _connectTcs = null;
         _servicesTcs = null;
+        _mtuTcs = null;
 
         foreach (var kvp in _readTcsMap)
         {
@@ -472,12 +498,41 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
     {
         try
         {
+            if (!IsDeviceNameMatch(name, _scanOptions.DeviceNamePrefix))
+            {
+                return;
+            }
             DeviceDiscovered?.Invoke(new BluetoothDevice(deviceId, name, rssi));
         }
         catch (Exception ex)
         {
             GD.PrintErr($"{LogPrefix} Error in DeviceDiscovered event handler: {ex.Message}");
         }
+    }
+
+    private static bool IsDeviceNameMatch(string? name, string? prefix)
+    {
+        if (string.IsNullOrWhiteSpace(prefix))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        var trimmedName = name.Trim();
+        if (trimmedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+            trimmedName.Contains(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var normalizedName = trimmedName.Replace(" ", "").Replace("-", "").Replace("_", "");
+        var normalizedPrefix = prefix.Replace(" ", "").Replace("-", "").Replace("_", "");
+        return normalizedName.StartsWith(normalizedPrefix, StringComparison.OrdinalIgnoreCase) ||
+               normalizedName.Contains(normalizedPrefix, StringComparison.OrdinalIgnoreCase);
     }
     
     internal void OnConnectionStateChange(int status, int newState)
@@ -584,6 +639,12 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
         }
     }
     
+    internal void OnMtuChanged(int mtu, int status)
+    {
+        GD.Print($"{LogPrefix} OnMtuChanged: mtu={mtu}, status={status}");
+        _mtuTcs?.TrySetResult(status == 0 ? mtu : 23);
+    }
+    
     private partial class AndroidScanListener : GodotObject
     {
         private readonly AndroidBluetoothGattClient _client;
@@ -623,6 +684,11 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
         public void onCharacteristicChanged(string uuid, byte[] value)
         {
             _client.OnCharacteristicChanged(uuid, value);
+        }
+
+        public void onMtuChanged(int mtu, int status)
+        {
+            _client.OnMtuChanged(mtu, status);
         }
     }
 }

@@ -9,6 +9,7 @@ const SETTINGS_FILE = "user://osm_download_settings.cfg"
 @onready var settings_button: Button = %SettingsButton
 @onready var results_list: ItemList = %ResultsList
 @onready var status_label: Label = %StatusLabel
+@onready var expand_search_button: Button = %ExpandSearchButton
 @onready var cancel_button: Button = %CancelButton
 @onready var download_button: Button = %DownloadButton
 @onready var spinner: Control = %Spinner
@@ -26,6 +27,7 @@ const SETTINGS_FILE = "user://osm_download_settings.cfg"
 @onready var btn_all_holes: Button = %BtnAllHoles
 @onready var leisure_golf_check: CheckBox = %LeisureGolfCheck
 @onready var custom_tags_input: LineEdit = %CustomTagsInput
+@onready var force_online_check: CheckBox = %ForceOnlineCheck
 @onready var reset_defaults_button: Button = %ResetDefaultsButton
 @onready var settings_done_button: Button = %SettingsDoneButton
 
@@ -45,6 +47,11 @@ func _ready() -> void:
 	ThemeManager.apply_nav_button_style(cancel_button, 6)
 	ThemeManager.apply_input_style(search_input)
 	ThemeManager.apply_item_list_style(results_list)
+
+	if expand_search_button != null:
+		ThemeManager.apply_secondary_button_style(expand_search_button, 6)
+		expand_search_button.pressed.connect(func(): _perform_search(true))
+		expand_search_button.visible = false
 
 	# Setup settings button
 	if settings_button != null:
@@ -188,6 +195,8 @@ func _on_reset_defaults_pressed() -> void:
 		leisure_golf_check.button_pressed = true
 	if custom_tags_input != null:
 		custom_tags_input.text = ""
+	if force_online_check != null:
+		force_online_check.button_pressed = false
 	_update_hole_buttons_visual()
 	_save_search_settings()
 
@@ -215,12 +224,15 @@ func _load_search_settings() -> void:
 			leisure_golf_check.button_pressed = cfg.get_value("search_filter", "require_leisure_golf", true)
 		if custom_tags_input != null:
 			custom_tags_input.text = cfg.get_value("search_filter", "custom_tags", "")
+		if force_online_check != null:
+			force_online_check.button_pressed = cfg.get_value("search_filter", "force_online", false)
 	else:
 		if btn_9_hole != null: btn_9_hole.set_pressed_no_signal(true)
 		if btn_18_hole != null: btn_18_hole.set_pressed_no_signal(true)
 		if btn_all_holes != null: btn_all_holes.set_pressed_no_signal(false)
 		if leisure_golf_check != null: leisure_golf_check.button_pressed = true
 		if custom_tags_input != null: custom_tags_input.text = ""
+		if force_online_check != null: force_online_check.button_pressed = false
 
 
 func _save_search_settings() -> void:
@@ -235,17 +247,30 @@ func _save_search_settings() -> void:
 		cfg.set_value("search_filter", "require_leisure_golf", leisure_golf_check.button_pressed)
 	if custom_tags_input != null:
 		cfg.set_value("search_filter", "custom_tags", custom_tags_input.text.strip_edges())
+	if force_online_check != null:
+		cfg.set_value("search_filter", "force_online", force_online_check.button_pressed)
 	cfg.save(SETTINGS_FILE)
 
 
 func _on_search_pressed() -> void:
+	_perform_search(false)
+
+
+func _perform_search(force_online: bool = false) -> void:
 	var query = search_input.text.strip_edges()
 	if query.is_empty():
 		status_label.text = "Please enter a search query."
 		return
 		
 	status_label.add_theme_color_override("font_color", Color(0.78, 0.82, 0.88, 1.0))
-	status_label.text = "Searching OpenStreetMap for '" + query + "'..."
+	if force_online:
+		status_label.text = "Expanding search for '" + query + "'..."
+	else:
+		status_label.text = "Searching courses for '" + query + "'..."
+
+	if expand_search_button != null:
+		expand_search_button.visible = false
+
 	_set_ui_disabled(true)
 	results_list.clear()
 	_results.clear()
@@ -255,11 +280,13 @@ func _on_search_pressed() -> void:
 		notice_panel.visible = false
 	
 	_save_search_settings()
+	var should_force_online: bool = force_online or (force_online_check != null and force_online_check.button_pressed)
 	var filter_options = {
 		"include_9_hole": btn_9_hole.button_pressed if btn_9_hole != null else true,
 		"include_18_hole": btn_18_hole.button_pressed if btn_18_hole != null else true,
 		"include_all_holes": btn_all_holes.button_pressed if btn_all_holes != null else false,
 		"require_leisure_golf": leisure_golf_check.button_pressed if leisure_golf_check != null else true,
+		"force_online": should_force_online,
 		"custom_tags": custom_tags_input.text.strip_edges() if custom_tags_input != null else ""
 	}
 	
@@ -281,9 +308,17 @@ func _on_search_pressed() -> void:
 		elif btn_18_hole != null and btn_18_hole.button_pressed:
 			hole_desc = " with 18 holes"
 		status_label.text = "No golf courses" + hole_desc + " found matching '" + query + "' with active filters."
+		if not should_force_online and expand_search_button != null:
+			expand_search_button.visible = true
 		return
 		
 	_results = results_array
+	var from_catalog: bool = false
+	for item in _results:
+		if item.get("is_catalog", false):
+			from_catalog = true
+			break
+
 	for item in _results:
 		var name_text = item.get("name", "Unnamed Course")
 		var loc_text = item.get("location", "")
@@ -306,7 +341,11 @@ func _on_search_pressed() -> void:
 			display_text += " (" + loc_text + ")"
 		results_list.add_item(display_text)
 		
-	status_label.text = "Found " + str(_results.size()) + " course(s) (newest first). Select one to download."
+	status_label.text = "Found " + str(_results.size()) + " course(s). Select one to download."
+	if from_catalog and not should_force_online and expand_search_button != null:
+		expand_search_button.visible = true
+	elif expand_search_button != null:
+		expand_search_button.visible = false
 
 
 func _on_item_selected(_index: int) -> void:

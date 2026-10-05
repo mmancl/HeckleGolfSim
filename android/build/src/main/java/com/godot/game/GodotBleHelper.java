@@ -44,6 +44,7 @@ public class GodotBleHelper {
         void onCharacteristicRead(String uuid, byte[] value, int status);
         void onCharacteristicWrite(String uuid, int status);
         void onCharacteristicChanged(String uuid, byte[] value);
+        void onMtuChanged(int mtu, int status);
     }
 
     public static ScanCallback createScanCallback(final ScanListener listener) {
@@ -125,6 +126,16 @@ public class GodotBleHelper {
         return new BluetoothGattCallback() {
             @Override
             public void onConnectionStateChange(BluetoothGatt gatt, final int status, final int newState) {
+                if (status == BluetoothGatt.GATT_SUCCESS && newState == 2 /* STATE_CONNECTED */) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        try {
+                            Log.d(TAG, "Connected to GATT server. Proactively requesting MTU 512...");
+                            gatt.requestMtu(512);
+                        } catch (Throwable t) {
+                            Log.w(TAG, "Could not proactively request MTU", t);
+                        }
+                    }
+                }
                 if (listener == null) return;
                 sMainHandler.post(new Runnable() {
                     @Override
@@ -283,7 +294,36 @@ public class GodotBleHelper {
                     Log.w(TAG, "Descriptor write failed with status: " + status);
                 }
             }
+
+            @Override
+            public void onMtuChanged(BluetoothGatt gatt, final int mtu, final int status) {
+                Log.d(TAG, "onMtuChanged: mtu=" + mtu + ", status=" + status);
+                if (listener == null) return;
+                sMainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            listener.onMtuChanged(mtu, status);
+                        } catch (Throwable t) {
+                            Log.e(TAG, "Error in onMtuChanged callback", t);
+                        }
+                    }
+                });
+            }
         };
+    }
+
+    public static boolean requestMtu(BluetoothGatt gatt, int mtu) {
+        if (gatt == null) return false;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                Log.d(TAG, "Requesting MTU: " + mtu);
+                return gatt.requestMtu(mtu);
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Exception during requestMtu", t);
+        }
+        return false;
     }
 
     public static BluetoothGatt connectGatt(BluetoothDevice device, Context context, BluetoothGattCallback callback) {

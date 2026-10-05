@@ -239,15 +239,17 @@ def main():
             else:
                 screen_x, screen_y = x, y
 
-            # Position and reveal borderless window precisely over the placeholder
+            SW_SHOWNA = 8
+            # Position and reveal borderless window precisely over the placeholder without stealing focus
             user32.SetWindowPos(
                 child_hwnd, 0,
                 screen_x, screen_y, w, h,
-                SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW
             )
-            user32.ShowWindow(child_hwnd, SW_SHOW)
+            user32.ShowWindow(child_hwnd, SW_SHOWNA)
             user32.UpdateWindow(child_hwnd)
-            user32.BringWindowToTop(child_hwnd)
+            if parent_hwnd > 0:
+                user32.SetForegroundWindow(parent_hwnd)
             print(f"READY:{child_hwnd}:PORT:{udp_port}:BPID:{proc.pid}", flush=True)
 
             # UDP command receiver for instant sub-millisecond updates from Godot (scroll, resize, move)
@@ -282,7 +284,9 @@ def main():
                                         pt_cmd.x, pt_cmd.y, w, h,
                                         SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW
                                     )
-                                    user32.ShowWindow(child_hwnd, SW_SHOW)
+                                    user32.ShowWindow(child_hwnd, SW_SHOWNA)
+                                    if parent_hwnd > 0:
+                                        user32.SetForegroundWindow(parent_hwnd)
                     except Exception:
                         if not tracking_active:
                             break
@@ -316,7 +320,9 @@ def main():
                         was_iconic = True
                     elif not is_iconic and was_iconic:
                         if cur_visible:
-                            user32.ShowWindow(child_hwnd, SW_SHOW)
+                            user32.ShowWindow(child_hwnd, SW_SHOWNA)
+                            if parent_hwnd > 0:
+                                user32.SetForegroundWindow(parent_hwnd)
                         was_iconic = False
 
                     if not is_iconic and cur_visible:
@@ -329,6 +335,8 @@ def main():
                                 curr_pt.x, curr_pt.y, w, h,
                                 SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW
                             )
+                            if parent_hwnd > 0:
+                                user32.SetForegroundWindow(parent_hwnd)
 
             tracker_thread = threading.Thread(target=sync_tracker, daemon=True)
             tracker_thread.start()

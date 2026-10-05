@@ -419,8 +419,8 @@ func _setup_environment() -> void:
 	env.background_mode = Environment.BG_SKY
 	
 	var sky = Sky.new()
-	if is_mobile:
-		sky.process_mode = Sky.PROCESS_MODE_QUALITY
+	sky.process_mode = Sky.PROCESS_MODE_REALTIME
+	sky.radiance_size = Sky.RADIANCE_SIZE_128 if is_mobile else Sky.RADIANCE_SIZE_256
 	var sky_mat = ProceduralSkyMaterial.new()
 	sky_mat.sky_top_color = Color(0.24, 0.54, 0.88)
 	sky_mat.sky_horizon_color = Color(0.60, 0.78, 0.94)
@@ -465,6 +465,9 @@ func _setup_environment() -> void:
 	
 	if has_node("/root/TensionManager"):
 		TensionManager.register_camera(camera, 58.0)
+	if has_node("/root/ScreenOffsetManager"):
+		ScreenOffsetManager.register_camera(camera)
+		ScreenOffsetManager.on_ready_for_shot(0.0, true)
 
 # ========================================
 # GROUND & FAIRWAY SETUP
@@ -1296,6 +1299,8 @@ func _reset_ball_position() -> void:
 		cam.look_at(default_look_target)
 	last_camera_offset = default_cam_pos - Vector3(0.0, 0.05, 0.0)
 	camera_following = false
+	if has_node("/root/ScreenOffsetManager"):
+		ScreenOffsetManager.on_ready_for_shot()
 
 	if has_node("/root/LaunchMonitorManager"):
 		var lm = get_node("/root/LaunchMonitorManager")
@@ -1401,6 +1406,8 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 	is_resetting = false
 	shot_reset_token += 1
 	var this_shot = shot_reset_token
+	if has_node("/root/ScreenOffsetManager"):
+		ScreenOffsetManager.on_shot_started()
 
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
@@ -2062,6 +2069,11 @@ func _setup_ui() -> void:
 	music_toggle_btn.custom_minimum_size = Vector2(52, 52)
 	music_toggle_btn.pressed.connect(_toggle_music)
 	ctrl_hbox.add_child(music_toggle_btn)
+
+	# Screen Offset Launcher
+	var so_ctrl_class = load("res://UI/ScreenOffset/screen_offset_control.gd")
+	if so_ctrl_class != null and so_ctrl_class.has_method("create_minigame_launcher"):
+		so_ctrl_class.call("create_minigame_launcher", self, ctrl_hbox, Callable(self, "_apply_btn_style"))
 	
 	var settings_btn = Button.new()
 	settings_btn.name = "SettingsButton"
@@ -2405,3 +2417,8 @@ func _close_settings() -> void:
 		var lm = get_node("/root/LaunchMonitorManager")
 		if lm != null and lm.has_method("_update_hud_display"):
 			lm.call("_update_hud_display")
+
+
+func _exit_tree() -> void:
+	if has_node("/root/ScreenOffsetManager") and has_node("Camera3D"):
+		ScreenOffsetManager.unregister_camera($Camera3D)

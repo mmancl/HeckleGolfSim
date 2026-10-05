@@ -14,7 +14,7 @@ var _impact_h_spin: SpinBox = null
 var _impact_v_spin: SpinBox = null
 
 # Approximate table for distances (yards) to physics payload
-var _calibration_table = [
+const CALIBRATION_TABLE = [
 	{ "distance": 10.0, "speed": 20.0, "vla": 40.0, "spin": 2000.0 },
 	{ "distance": 50.0, "speed": 50.0, "vla": 32.0, "spin": 5000.0 },
 	{ "distance": 100.0, "speed": 82.0, "vla": 26.0, "spin": 6500.0 },
@@ -24,6 +24,7 @@ var _calibration_table = [
 	{ "distance": 300.0, "speed": 165.0, "vla": 12.0, "spin": 2500.0 },
 	{ "distance": 350.0, "speed": 185.0, "vla": 11.5, "spin": 2200.0 }
 ]
+var _calibration_table = CALIBRATION_TABLE
 
 var _club_data = {
 	"Dr": { "vla": 11.5, "spin": 2500.0, "speed_mult": 0.92 },
@@ -47,6 +48,32 @@ var _club_data = {
 	"Lw": { "vla": 56.0, "spin": 9500.0, "speed_mult": 1.80 },
 	"Pt": { "vla": 0.0, "spin": 50.0, "speed_mult": 1.0 }
 }
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_VISIBILITY_CHANGED:
+		if visible:
+			if not UIFocusGuard.is_locked() or UIFocusGuard.current_lock_root() != self:
+				UIFocusGuard.push_lock(self)
+			call_deferred("_grab_initial_focus")
+		else:
+			if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == self:
+				UIFocusGuard.pop_lock(true)
+
+
+func _grab_initial_focus() -> void:
+	if not is_visible_in_tree():
+		return
+	var first_btn := find_child("50 Yards", true, false) as Button
+	if first_btn != null and is_instance_valid(first_btn):
+		first_btn.grab_focus()
+		return
+	if has_node("/root/KeybindingManager"):
+		KeybindingManager.focus_first_control(self)
+
+
+func _on_focus_lock_popped() -> void:
+	visible = false
+
 
 func _ready() -> void:
 	# Styling
@@ -184,41 +211,45 @@ func _add_distance_button(label: String, distance_yards: float) -> void:
 	btn.pressed.connect(func(): _inject_shot_for_distance(distance_yards))
 	_vbox.add_child(btn)
 
-func _on_hit_aim_distance() -> void:
-	if aim_target_node == null or current_ball_node == null:
-		print("Distance Menu: Aim target or ball node not set!")
-		return
-		
-	var ball_pos = current_ball_node.global_position
-	var target_pos = Vector3.ZERO
-	if aim_target_node is Vector3:
-		target_pos = aim_target_node
-	else:
-		target_pos = aim_target_node.global_position
-		
+static func calculate_aim_distance_yards(ball_pos: Vector3, target_pos: Vector3) -> float:
 	# Calculate flat horizontal distance
 	var p1_flat = Vector2(ball_pos.x, ball_pos.z)
 	var p2_flat = Vector2(target_pos.x, target_pos.z)
 	var horizontal_dist_yards = p1_flat.distance_to(p2_flat) * 1.09361
-	
+
 	# Adjust for elevation difference (Godot Y is up, so +Y is uphill)
 	var elevation_diff_yards = (target_pos.y - ball_pos.y) * 1.09361
-	
+
 	# Effective distance = horizontal distance + elevation difference
 	# Uphill shots require more distance, downhill shots require less
 	var distance_yards = horizontal_dist_yards + elevation_diff_yards
-	if distance_yards < 1.0:
-		distance_yards = 1.0
-		
-	_inject_shot_for_distance(distance_yards)
+	return maxf(1.0, distance_yards)
 
-func _inject_shot_for_distance(distance_yards: float) -> void:
-	var payload = _interpolate_payload(distance_yards)
-	var selected_club = _get_selected_club()
-	
-	var data := {}
-	
-	if selected_club == "Pt":
+static func interpolate_payload(distance_yards: float) -> Dictionary:
+	var count = CALIBRATION_TABLE.size()
+	if distance_yards <= CALIBRATION_TABLE[0]["distance"]:
+		return CALIBRATION_TABLE[0].duplicate()
+	if distance_yards >= CALIBRATION_TABLE[count - 1]["distance"]:
+		return CALIBRATION_TABLE[count - 1].duplicate()
+
+	for i in range(count - 1):
+		var p1 = CALIBRATION_TABLE[i]
+		var p2 = CALIBRATION_TABLE[i+1]
+		if distance_yards >= p1["distance"] and distance_yards <= p2["distance"]:
+			var t = (distance_yards - p1["distance"]) / (p2["distance"] - p1["distance"])
+			return {
+				"speed": lerpf(p1["speed"], p2["speed"], t),
+				"vla": lerpf(p1["vla"], p2["vla"], t),
+				"spin": lerpf(p1["spin"], p2["spin"], t)
+			}
+
+	return CALIBRATION_TABLE[0].duplicate()
+
+static func build_shot_payload(distance_yards: float, selected_club: String = "Dr", extra_metrics: Dictionary = {}) -> Dictionary:
+	var payload = interpolate_payload(distance_yards)
+	var data: Dictionary = {}
+
+	if selected_club.to_lower() in ["pt", "putt", "putter"]:
 		# Special handling for putter: no vertical loft, immediate ground rollout
 		# Deceleration formula v = sqrt(2 * friction * g * distance_meters)
 		# Green rolling friction u_kr is ~0.03. For in-game realism, speed_mph = 1.8 * sqrt(distance_yards)
@@ -229,31 +260,50 @@ func _inject_shot_for_distance(distance_yards: float) -> void:
 			"HLA": 0.0,
 			"TotalSpin": 50.0,
 			"SpinAxis": 0.0,
+			"Club": "Pt",
 			"ShotType": "putt"
 		}
 	else:
-		var speed = payload["speed"]
-		var vla = payload["vla"]
-		var spin = payload["spin"]
-		
-		# Bypassing the club-specific overrides so that the calibrated payload
-		# parameters are used directly. This guarantees the ball travels the
-		# targeted distance accurately regardless of the selected club.
-			
 		data = {
-			"Speed": speed,
-			"VLA": vla,
+			"Speed": payload["speed"],
+			"VLA": payload["vla"],
 			"HLA": 0.0,
-			"TotalSpin": spin,
-			"SpinAxis": 0.0
+			"TotalSpin": payload["spin"],
+			"SpinAxis": 0.0,
+			"Club": selected_club
 		}
 
-	# Always include club delivery and impact metrics so graphics show up and can be tested
-	data["FaceAngle"] = _face_angle_spin.value if _face_angle_spin != null else 0.0
-	data["ClubPath"] = _club_path_spin.value if _club_path_spin != null else 0.0
-	data["HorizontalFaceImpact"] = _impact_h_spin.value if _impact_h_spin != null else 0.0
-	data["VerticalFaceImpact"] = _impact_v_spin.value if _impact_v_spin != null else 0.0
-	
+	# Merge club delivery and impact metrics
+	data["FaceAngle"] = extra_metrics.get("FaceAngle", 0.0)
+	data["ClubPath"] = extra_metrics.get("ClubPath", 0.0)
+	data["HorizontalFaceImpact"] = extra_metrics.get("HorizontalFaceImpact", 0.0)
+	data["VerticalFaceImpact"] = extra_metrics.get("VerticalFaceImpact", 0.0)
+	return data
+
+func _on_hit_aim_distance() -> void:
+	if aim_target_node == null or current_ball_node == null:
+		print("Distance Menu: Aim target or ball node not set!")
+		return
+
+	var ball_pos = current_ball_node.global_position
+	var target_pos = Vector3.ZERO
+	if aim_target_node is Vector3:
+		target_pos = aim_target_node
+	else:
+		target_pos = aim_target_node.global_position
+
+	var distance_yards = calculate_aim_distance_yards(ball_pos, target_pos)
+	_inject_shot_for_distance(distance_yards)
+
+func _inject_shot_for_distance(distance_yards: float) -> void:
+	var selected_club = _get_selected_club()
+	var extra_metrics = {
+		"FaceAngle": _face_angle_spin.value if _face_angle_spin != null else 0.0,
+		"ClubPath": _club_path_spin.value if _club_path_spin != null else 0.0,
+		"HorizontalFaceImpact": _impact_h_spin.value if _impact_h_spin != null else 0.0,
+		"VerticalFaceImpact": _impact_v_spin.value if _impact_v_spin != null else 0.0
+	}
+	var data = build_shot_payload(distance_yards, selected_club, extra_metrics)
 	emit_signal("inject_shot", data)
 	close()
 
@@ -340,24 +390,7 @@ func _create_spinbox_row(parent: Node, label_text: String, min_v: float, max_v: 
 	return sb
 
 func _interpolate_payload(distance_yards: float) -> Dictionary:
-	var count = _calibration_table.size()
-	if distance_yards <= _calibration_table[0]["distance"]:
-		return _calibration_table[0].duplicate()
-	if distance_yards >= _calibration_table[count - 1]["distance"]:
-		return _calibration_table[count - 1].duplicate()
-		
-	for i in range(count - 1):
-		var p1 = _calibration_table[i]
-		var p2 = _calibration_table[i+1]
-		if distance_yards >= p1["distance"] and distance_yards <= p2["distance"]:
-			var t = (distance_yards - p1["distance"]) / (p2["distance"] - p1["distance"])
-			return {
-				"speed": lerpf(p1["speed"], p2["speed"], t),
-				"vla": lerpf(p1["vla"], p2["vla"], t),
-				"spin": lerpf(p1["spin"], p2["spin"], t)
-			}
-			
-	return _calibration_table[0].duplicate()
+	return interpolate_payload(distance_yards)
 
 func _apply_material_button_style(btn: Button, bg_color: Color):
 	var style_normal = StyleBoxFlat.new()
@@ -380,9 +413,18 @@ func _apply_material_button_style(btn: Button, bg_color: Color):
 	var style_disabled = style_normal.duplicate()
 	style_disabled.bg_color = Color(0.3, 0.3, 0.3, 0.5)
 
+	var style_focus = style_normal.duplicate()
+	style_focus.border_width_left = 3
+	style_focus.border_width_top = 3
+	style_focus.border_width_right = 3
+	style_focus.border_width_bottom = 3
+	style_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
+
+	btn.focus_mode = Control.FOCUS_ALL
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_pressed)
+	btn.add_theme_stylebox_override("focus", style_focus)
 	btn.add_theme_stylebox_override("disabled", style_disabled)
 	btn.add_theme_color_override("font_color", Color.WHITE)
 	btn.add_theme_color_override("font_hover_color", Color.WHITE)

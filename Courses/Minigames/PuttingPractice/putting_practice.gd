@@ -127,7 +127,7 @@ func _ready() -> void:
 	
 	# 3. Generate Surrounding Environment (Trees & Bushes)
 	_generate_trees()
-	var q = "Low" if (GlobalSettings != null and GlobalSettings.is_low_graphics()) else "High"
+	var q = GlobalSettings.get_graphics_quality() if GlobalSettings != null else "High"
 	MobilePerformance.apply_graphics_quality(self, q)
 	
 	# 4. Setup Player
@@ -173,9 +173,6 @@ func _ready() -> void:
 		if not tcp_server.HitBall.is_connected(_on_launch_monitor_hit_ball):
 			tcp_server.HitBall.connect(_on_launch_monitor_hit_ball)
 
-
-func _exit_tree() -> void:
-	GlobalSettings.is_putting_minigame = false
 
 
 func _init_player_names() -> void:
@@ -333,8 +330,8 @@ func _setup_environment() -> void:
 	var env = Environment.new()
 	env.background_mode = Environment.BG_SKY
 	var sky = Sky.new()
-	if is_mobile:
-		sky.process_mode = Sky.PROCESS_MODE_QUALITY
+	sky.process_mode = Sky.PROCESS_MODE_REALTIME
+	sky.radiance_size = Sky.RADIANCE_SIZE_128 if is_mobile else Sky.RADIANCE_SIZE_256
 	var sky_mat = ProceduralSkyMaterial.new()
 	sky_mat.sky_top_color = Color(0.25, 0.55, 0.88)
 	sky_mat.sky_horizon_color = Color(0.60, 0.78, 0.92)
@@ -371,6 +368,10 @@ func _setup_environment() -> void:
 	add_child(camera)
 	if has_node("/root/TensionManager"):
 		TensionManager.register_camera(camera, 55.0)
+	if has_node("/root/ScreenOffsetManager"):
+		ScreenOffsetManager.register_camera(camera)
+		ScreenOffsetManager.set_putter_active(true)
+		ScreenOffsetManager.on_ready_for_shot(0.0, true)
 
 # ----------------- PROCEDURAL TERRAIN -----------------
 
@@ -1116,6 +1117,8 @@ func _select_hole(index: int, reset_ball: bool = true) -> void:
 		_reset_ball_position()
 	else:
 		_update_aim_and_camera()
+		if has_node("/root/ScreenOffsetManager"):
+			ScreenOffsetManager.on_ready_for_shot()
 		_update_hole_button_labels()
 	
 	if pvp_mode:
@@ -1235,6 +1238,8 @@ func _teleport_ball(pos: Vector3) -> void:
 	
 	# Recompute camera and orientation
 	_update_aim_and_camera()
+	if has_node("/root/ScreenOffsetManager"):
+		ScreenOffsetManager.on_ready_for_shot()
 	_update_hole_button_labels()
 
 	if putting_cam_widget != null:
@@ -1359,6 +1364,8 @@ func _on_launch_monitor_hit_ball(data: Dictionary) -> void:
 
 	shot_counter += 1
 	shot_in_progress = true
+	if has_node("/root/ScreenOffsetManager"):
+		ScreenOffsetManager.on_shot_started()
 	if pvp_mode and not players_list.is_empty():
 		var cur_p = players_list[active_player_index % players_list.size()]
 		cur_p["shots"] = cur_p.get("shots", 0) + 1
@@ -1395,7 +1402,7 @@ func _physics_process(delta: float) -> void:
 			var ball_pos = player.ball.global_position
 			var target_cam_pos = ball_pos + last_camera_offset
 			$Camera3D.global_position = $Camera3D.global_position.lerp(target_cam_pos, delta * 8.0)
-			$Camera3D.look_at(ball_pos)
+			# Follow the ball while maintaining the current address camera angle
 		else:
 			if camera_following:
 				camera_following = false
@@ -1403,6 +1410,8 @@ func _physics_process(delta: float) -> void:
 					TensionManager.stop_tension()
 				_update_aim_and_camera()
 				_update_hole_button_labels()
+				if has_node("/root/ScreenOffsetManager"):
+					ScreenOffsetManager.on_ready_for_shot()
 
 func _on_ball_rest(_shot_data: Dictionary) -> void:
 	if has_node("/root/TensionManager"):
@@ -1750,6 +1759,11 @@ func _setup_ui() -> void:
 	music_toggle_btn.custom_minimum_size = Vector2(52, 52)
 	music_toggle_btn.pressed.connect(_toggle_music)
 	ctrl_hbox.add_child(music_toggle_btn)
+
+	# Screen Offset Launcher
+	var so_ctrl_class = load("res://UI/ScreenOffset/screen_offset_control.gd")
+	if so_ctrl_class != null and so_ctrl_class.has_method("create_minigame_launcher"):
+		so_ctrl_class.call("create_minigame_launcher", self, ctrl_hbox, Callable(self, "_apply_btn_style"))
 	
 	# 5. Settings Button
 	var settings_btn = Button.new()
@@ -2374,3 +2388,11 @@ func _close_settings() -> void:
 		var launch_monitor = get_node("/root/LaunchMonitorManager")
 		if launch_monitor != null and launch_monitor.has_method("_update_hud_display"):
 			launch_monitor.call("_update_hud_display")
+
+
+func _exit_tree() -> void:
+	GlobalSettings.is_putting_minigame = false
+	if has_node("/root/ScreenOffsetManager"):
+		if has_node("Camera3D"):
+			ScreenOffsetManager.unregister_camera($Camera3D)
+		ScreenOffsetManager.set_putter_active(false)

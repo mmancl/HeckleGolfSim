@@ -41,7 +41,7 @@ public partial class OsmMapLoader : Node
     [Signal]
     public delegate void DownloadProgressEventHandler(string statusMessage);
 
-    private record GolfSearchResult(string Name, double Lat, double Lon, string Location, int HoleCount = 0, string LastUpdated = "");
+    private record GolfSearchResult(string Name, double Lat, double Lon, string Location, int HoleCount = 0, string LastUpdated = "", bool IsCatalog = false);
 
     private void ReportProgress(string message)
     {
@@ -143,9 +143,124 @@ public partial class OsmMapLoader : Node
         EmitCourseGenerated(success);
     }
 
+    private static string GetCourseGeometrySlug(string courseName)
+    {
+        var sb = new StringBuilder();
+        foreach (char c in courseName.ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(c))
+                sb.Append(c);
+            else if (c == ' ' || c == '_' || c == '-' || c == '(' || c == ')' || c == '.')
+            {
+                if (sb.Length > 0 && sb[sb.Length - 1] != '_')
+                    sb.Append('_');
+            }
+        }
+        return sb.ToString().Trim('_');
+    }
+
+    private static async Task<string> TryLoadPrepackagedGeometryAsync(string courseName)
+    {
+        string slug = GetCourseGeometrySlug(courseName);
+        if (string.IsNullOrWhiteSpace(slug))
+            return "";
+
+        string[] candidatePaths = new[]
+        {
+            $"res://Courses/CachedGeometry/{slug}.json.gz",
+            $"res://Courses/CachedGeometry/{slug}.json",
+            $"user://cached_geometry/{slug}.json.gz",
+            $"user://cached_geometry/{slug}.json"
+        };
+
+        foreach (var path in candidatePaths)
+        {
+            if (!Godot.FileAccess.FileExists(path))
+                continue;
+
+            try
+            {
+                using var fa = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
+                if (fa == null) continue;
+
+                if (path.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
+                {
+                    byte[] gzBytes = fa.GetBuffer((long)fa.GetLength());
+                    using var ms = new MemoryStream(gzBytes);
+                    using var gzStream = new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionMode.Decompress);
+                    using var reader = new StreamReader(gzStream, Encoding.UTF8);
+                    string decompressed = await reader.ReadToEndAsync();
+                    if (!string.IsNullOrWhiteSpace(decompressed))
+                    {
+                        GD.Print($"{LogPrefix} Successfully loaded pre-packaged geometry for '{courseName}' from {path} (0 API calls)!");
+                        return decompressed;
+                    }
+                }
+                else
+                {
+                    string json = fa.GetAsText();
+                    if (!string.IsNullOrWhiteSpace(json))
+                    {
+                        GD.Print($"{LogPrefix} Successfully loaded pre-packaged geometry for '{courseName}' from {path} (0 API calls)!");
+                        return json;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{LogPrefix} Error reading pre-packaged geometry at {path}: {ex.Message}");
+            }
+        }
+
+        return "";
+    }
+
+    private static void TrySaveUserCachedGeometry(string courseName, string json)
+    {
+        try
+        {
+            string slug = GetCourseGeometrySlug(courseName);
+            if (string.IsNullOrWhiteSpace(slug)) return;
+
+            string userCacheDir = "user://cached_geometry";
+            string globalUserCacheDir = ProjectSettings.GlobalizePath(userCacheDir);
+            if (!Directory.Exists(globalUserCacheDir))
+            {
+                Directory.CreateDirectory(globalUserCacheDir);
+            }
+
+            string gzPath = $"{userCacheDir}/{slug}.json.gz";
+            byte[] utf8Bytes = Encoding.UTF8.GetBytes(json);
+            using var ms = new MemoryStream();
+            using (var gz = new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionLevel.Optimal, true))
+            {
+                gz.Write(utf8Bytes, 0, utf8Bytes.Length);
+            }
+            byte[] compressed = ms.ToArray();
+
+            using var fa = Godot.FileAccess.Open(gzPath, Godot.FileAccess.ModeFlags.Write);
+            if (fa != null)
+            {
+                fa.StoreBuffer(compressed);
+                GD.Print($"{LogPrefix} Saved geometry to user cache at {gzPath} ({utf8Bytes.Length / 1024} KB -> {compressed.Length / 1024} KB).");
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Failed to save geometry to user cache: {ex.Message}");
+        }
+    }
+
     private async Task<string> DownloadOsmDataAsync(double lat, double lon, string courseName)
     {
-        GD.Print($"{LogPrefix} Downloading OSM data for course '{courseName}' around {lat}, {lon}...");
+        // 1. Check if pre-packaged or locally cached geometry exists (instant & 0 API calls)
+        string prepackaged = await TryLoadPrepackagedGeometryAsync(courseName);
+        if (!string.IsNullOrWhiteSpace(prepackaged))
+        {
+            return prepackaged;
+        }
+
+        GD.Print($"{LogPrefix} No pre-packaged geometry found for '{courseName}'. Downloading from Overpass around {lat}, {lon}...");
         // Reduced radius to 1000 to prevent Gateway Timeout on Overpass API, query timeout to 60s, and removed natural=tree since we scan satellite imagery
         // Use FormattableString.Invariant to ensure lat/lon always use '.' as decimal separator regardless of system locale
         string latStr = lat.ToString(CultureInfo.InvariantCulture);
@@ -182,6 +297,7 @@ public partial class OsmMapLoader : Node
                     string result = await response.Content.ReadAsStringAsync();
                     if (!string.IsNullOrWhiteSpace(result))
                     {
+                        TrySaveUserCachedGeometry(courseName, result);
                         return result;
                     }
                 }
@@ -2225,7 +2341,8 @@ public partial class OsmMapLoader : Node
             var sky = new Sky 
             { 
                 SkyMaterial = skyMaterial,
-                ProcessMode = isMobilePlatform ? Sky.ProcessModeEnum.Quality : Sky.ProcessModeEnum.Automatic
+                ProcessMode = Sky.ProcessModeEnum.Realtime,
+                RadianceSize = isMobilePlatform ? Sky.RadianceSizeEnum.Size128 : Sky.RadianceSizeEnum.Size256
             };
             var env = new Godot.Environment
             {
@@ -2577,6 +2694,7 @@ public partial class OsmMapLoader : Node
                     dict["location"] = item.Location;
                     dict["hole_count"] = item.HoleCount;
                     dict["last_updated"] = item.LastUpdated;
+                    dict["is_catalog"] = item.IsCatalog;
                     godotResults.Add(dict);
                 }
                 EmitSignal(SignalName.SearchCompleted, godotResults);
@@ -2592,6 +2710,91 @@ public partial class OsmMapLoader : Node
                     EmitSignal(SignalName.SearchCompleted, new Godot.Collections.Array());
                 }
             }).CallDeferred();
+        }
+    }
+
+    private static List<GolfSearchResult>? _bundledCatalogCache = null;
+    private static readonly object _catalogLock = new();
+
+    private static List<GolfSearchResult> LoadBundledCatalog()
+    {
+        lock (_catalogLock)
+        {
+            if (_bundledCatalogCache != null)
+                return _bundledCatalogCache;
+
+            var list = new List<GolfSearchResult>();
+            string catalogResPath = "res://Courses/Catalog/golf_courses.json";
+
+            if (Godot.FileAccess.FileExists(catalogResPath))
+            {
+                try
+                {
+                    using var fa = Godot.FileAccess.Open(catalogResPath, Godot.FileAccess.ModeFlags.Read);
+                    if (fa != null)
+                    {
+                        string json = fa.GetAsText();
+                        if (!string.IsNullOrWhiteSpace(json))
+                        {
+                            using var doc = JsonDocument.Parse(json);
+                            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (var elem in doc.RootElement.EnumerateArray())
+                                {
+                                    string name = elem.TryGetProperty("name", out var np) ? np.GetString() ?? "" : "";
+                                    double lat = 0;
+                                    double lon = 0;
+
+                                    if (elem.TryGetProperty("lat", out var lp))
+                                    {
+                                        if (lp.ValueKind == JsonValueKind.Number)
+                                            lat = lp.GetDouble();
+                                        else if (lp.ValueKind == JsonValueKind.String && double.TryParse(lp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var pLat))
+                                            lat = pLat;
+                                    }
+
+                                    if (elem.TryGetProperty("lon", out var lnp))
+                                    {
+                                        if (lnp.ValueKind == JsonValueKind.Number)
+                                            lon = lnp.GetDouble();
+                                        else if (lnp.ValueKind == JsonValueKind.String && double.TryParse(lnp.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var pLon))
+                                            lon = pLon;
+                                    }
+
+                                    string location = elem.TryGetProperty("location", out var locp) ? locp.GetString() ?? "" : "";
+                                    int holes = 18;
+                                    if (elem.TryGetProperty("hole_count", out var hp))
+                                    {
+                                        if (hp.ValueKind == JsonValueKind.Number)
+                                            holes = hp.GetInt32();
+                                        else if (hp.ValueKind == JsonValueKind.String && int.TryParse(hp.GetString(), out var pHoles))
+                                            holes = pHoles;
+                                    }
+
+                                    string updated = elem.TryGetProperty("last_updated", out var up) ? up.GetString() ?? "" : "";
+
+                                    if (!string.IsNullOrWhiteSpace(name) && (lat != 0 || lon != 0))
+                                    {
+                                        list.Add(new GolfSearchResult(name, lat, lon, location, holes, updated, IsCatalog: true));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"{LogPrefix} Failed to load bundled golf catalog: {ex.Message}");
+                }
+            }
+            else
+            {
+                GD.Print($"{LogPrefix} Bundled catalog file not found at {catalogResPath}");
+            }
+
+            _bundledCatalogCache = list;
+            GD.Print($"{LogPrefix} Loaded {_bundledCatalogCache.Count} courses into offline catalog cache.");
+            return _bundledCatalogCache;
         }
     }
 
@@ -2631,6 +2834,7 @@ public partial class OsmMapLoader : Node
         bool include18Hole = true;
         bool includeAllHoles = false;
         bool requireLeisureGolf = true;
+        bool forceOnline = false;
         string customTagsRaw = "";
 
         if (options != null)
@@ -2643,9 +2847,82 @@ public partial class OsmMapLoader : Node
                 includeAllHoles = options["include_all_holes"].AsBool();
             if (options.ContainsKey("require_leisure_golf"))
                 requireLeisureGolf = options["require_leisure_golf"].AsBool();
+            if (options.ContainsKey("force_online"))
+                forceOnline = options["force_online"].AsBool();
             if (options.ContainsKey("custom_tags"))
                 customTagsRaw = options["custom_tags"].AsString() ?? "";
         }
+
+        string cleanQuery = queryText.Trim();
+
+        // 0. Check bundled offline course catalog first (unless force_online is requested)
+        if (!forceOnline)
+        {
+            var catalog = LoadBundledCatalog();
+            if (catalog.Count > 0)
+            {
+                var queryTokens = cleanQuery.ToLowerInvariant()
+                    .Split(new[] { ' ', ',', '-', '/', '.', '(', ')' }, StringSplitOptions.RemoveEmptyEntries);
+
+                var catalogMatches = new List<GolfSearchResult>();
+                foreach (var course in catalog)
+                {
+                    bool holeMatch = false;
+                    if (includeAllHoles)
+                    {
+                        holeMatch = true;
+                    }
+                    else
+                    {
+                        if (include9Hole && course.HoleCount == 9) holeMatch = true;
+                        if (include18Hole && course.HoleCount == 18) holeMatch = true;
+                        if (course.HoleCount != 9 && course.HoleCount != 18 && includeAllHoles) holeMatch = true;
+                    }
+                    if (!holeMatch) continue;
+
+                    string courseNameLower = course.Name.ToLowerInvariant();
+                    string courseLocLower = course.Location.ToLowerInvariant();
+
+                    bool allTokensMatch = true;
+                    foreach (var token in queryTokens)
+                    {
+                        if (!courseNameLower.Contains(token) && !courseLocLower.Contains(token))
+                        {
+                            allTokensMatch = false;
+                            break;
+                        }
+                    }
+
+                    if (allTokensMatch)
+                    {
+                        catalogMatches.Add(course);
+                    }
+                }
+
+                if (catalogMatches.Count > 0)
+                {
+                    catalogMatches.Sort((a, b) =>
+                    {
+                        bool aStarts = a.Name.StartsWith(cleanQuery, StringComparison.OrdinalIgnoreCase);
+                        bool bStarts = b.Name.StartsWith(cleanQuery, StringComparison.OrdinalIgnoreCase);
+                        if (aStarts && !bStarts) return -1;
+                        if (!aStarts && bStarts) return 1;
+
+                        bool aContains = a.Name.IndexOf(cleanQuery, StringComparison.OrdinalIgnoreCase) >= 0;
+                        bool bContains = b.Name.IndexOf(cleanQuery, StringComparison.OrdinalIgnoreCase) >= 0;
+                        if (aContains && !bContains) return -1;
+                        if (!aContains && bContains) return 1;
+
+                        return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                    });
+
+                    GD.Print($"{LogPrefix} Found {catalogMatches.Count} course(s) in bundled offline catalog matching '{cleanQuery}'. Skipping online queries.");
+                    return catalogMatches.Take(25).ToList();
+                }
+            }
+        }
+
+        GD.Print($"{LogPrefix} No matches in bundled catalog (or force_online={forceOnline}). Searching online OpenStreetMap for '{cleanQuery}' (Photon -> Nominatim -> Overpass)...");
 
         var customTagList = new List<string>();
         if (!string.IsNullOrWhiteSpace(customTagsRaw))
@@ -2661,7 +2938,6 @@ public partial class OsmMapLoader : Node
             }
         }
 
-        string cleanQuery = queryText.Trim();
         var rawCandidates = new List<SearchCandidate>();
 
         // 1. Primary Search: Query Photon API
@@ -6149,6 +6425,8 @@ public partial class OsmMapLoader : Node
             Rotation = new Vector3(0f, rotationY, 0f)
         };
         staticBody.SetMeta("surface_type", 2); // Treated as rough collision for the ball
+        staticBody.SetMeta("is_rock", true);
+        staticBody.AddToGroup("rocks");
         
         var meshInstance = new MeshInstance3D
         {

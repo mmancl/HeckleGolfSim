@@ -291,6 +291,7 @@ func _ready() -> void:
 	_setup_tcp_monitor_section()
 	_setup_hecklelinks_announcer_section()
 	_setup_keybindings_section()
+	_setup_developer_debugging_section()
 
 	# Wind Simulation toggle in Gameplay tab
 	var wind_toggle_row = _create_toggle_setting_row("Wind Simulation", "wind_enabled")
@@ -672,7 +673,7 @@ func _ready() -> void:
 	fx_label.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
 	camera_vbox.add_child(fx_label)
 	
-	var graphics_row = _create_option_setting_row("Graphics Quality", "graphics_quality", ["Low", "High"])
+	var graphics_row = _create_option_setting_row("Graphics Quality", "graphics_quality", ["Low", "Medium", "High"])
 	camera_vbox.add_child(graphics_row)
 	
 	var visual_toggles: Array[Control] = []
@@ -738,11 +739,13 @@ func _ready() -> void:
 
 func request_close() -> void:
 	visible = false
-	var curr: Node = get_parent()
-	while curr != null:
+	var curr: Node = get_parent() if is_inside_tree() else null
+	while curr != null and is_instance_valid(curr):
 		if curr is CanvasLayer or curr.name == "SettingsLayer" or curr.name.ends_with("Settings") or curr.name == "SettingsModalLayer":
 			if "visible" in curr:
 				curr.visible = false
+		if not curr.is_inside_tree():
+			break
 		curr = curr.get_parent()
 	var vp = get_viewport()
 	if vp != null:
@@ -755,11 +758,13 @@ func _on_close_settings_requested() -> void:
 	if not is_inside_tree():
 		return
 	visible = false
-	var curr: Node = get_parent()
-	while curr != null:
+	var curr: Node = get_parent() if is_inside_tree() else null
+	while curr != null and is_instance_valid(curr):
 		if curr is CanvasLayer or curr.name == "SettingsLayer" or curr.name.ends_with("Settings") or curr.name == "SettingsModalLayer":
 			if "visible" in curr:
 				curr.visible = false
+		if not curr.is_inside_tree():
+			break
 		curr = curr.get_parent()
 	var vp = get_viewport()
 	if vp != null:
@@ -1393,8 +1398,8 @@ func _refresh_square_devices(preferred_device_id: String = "") -> void:
 			return live_a
 		var rssi_a = int(dev_a.get("rssi", 0))
 		var rssi_b = int(dev_b.get("rssi", 0))
-		var eff_a = rssi_a if (rssi_a < 0 and live_a) else -999
-		var eff_b = rssi_b if (rssi_b < 0 and live_b) else -999
+		var eff_a = rssi_a if (rssi_a <= -10 and rssi_a >= -120 and live_a) else -999
+		var eff_b = rssi_b if (rssi_b <= -10 and rssi_b >= -120 and live_b) else -999
 		return eff_a > eff_b
 	)
 
@@ -1403,7 +1408,7 @@ func _refresh_square_devices(preferred_device_id: String = "") -> void:
 		if bool(launch_monitor.devices[k].get("is_discovered", false)):
 			active_live_keys.append(k)
 
-	if preferred_device_id != "" and matching_keys.has(preferred_device_id):
+	if preferred_device_id != "" and matching_keys.has(preferred_device_id) and bool(launch_monitor.devices[preferred_device_id].get("is_discovered", false)):
 		selected_device = preferred_device_id
 	else:
 		var current_is_live := matching_keys.has(selected_device) and bool(launch_monitor.devices[selected_device].get("is_discovered", false))
@@ -1559,7 +1564,7 @@ func _on_square_device_discovered(device_id: String, name: String, rssi: int) ->
 	_square_debug("Device discovered event received for %s (rssi=%d)" % [device_id, rssi])
 	var launch_monitor = get_node_or_null("/root/LaunchMonitorManager")
 	var dev = launch_monitor.devices.get(device_id, {}) if launch_monitor != null else {}
-	var is_live: bool = bool(dev.get("is_discovered", false)) or (rssi != 0)
+	var is_live: bool = bool(dev.get("is_discovered", false)) or ((rssi <= -10 and rssi >= -120) or (rssi != 0 and rssi != -1))
 	var pref_id := device_id if is_live else ""
 	_refresh_square_devices(pref_id)
 	if is_live and launch_monitor != null and (launch_monitor.status == "Scanning" or launch_monitor.status.contains("Searching")):
@@ -3027,3 +3032,91 @@ func _open_rebind_conflict_dialog(action_name: String, action_label: String, new
 	add_child(overlay)
 	_rebind_conflict_modal = overlay
 	confirm_btn.grab_focus()
+
+
+func _setup_developer_debugging_section() -> void:
+	var tab_container = get_node_or_null("MarginContainer/VBoxContainer/TabContainer")
+	if tab_container == null:
+		return
+
+	var scroll: ScrollContainer = tab_container.get_node_or_null("DeveloperDebug")
+	if scroll == null:
+		scroll = ScrollContainer.new()
+		scroll.name = "DeveloperDebug"
+		scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		scroll.follow_focus = true
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+		tab_container.add_child(scroll)
+		var t_idx = scroll.get_index()
+		tab_container.set_tab_title(t_idx, "🛠 Developer")
+
+	for c in scroll.get_children():
+		c.queue_free()
+
+	ThemeManager.apply_scroll_container_style(scroll, 28)
+
+	var margin = MarginContainer.new()
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_top", 16)
+	margin.add_theme_constant_override("margin_right", 36)
+	margin.add_theme_constant_override("margin_bottom", 16)
+	scroll.add_child(margin)
+
+	var root = VBoxContainer.new()
+	root.name = "DevDebugVBox"
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 16)
+	margin.add_child(root)
+
+	# --- Header & Description Card ---
+	var header_card := PanelContainer.new()
+	ThemeManager.apply_card_panel_style(header_card, true, 10, 16, 14, 16, 14)
+
+	var header_vbox := VBoxContainer.new()
+	header_vbox.add_theme_constant_override("separation", 8)
+
+	var header_title := Label.new()
+	header_title.text = "🛠 Developer Debugging"
+	header_title.add_theme_font_size_override("font_size", 20)
+	header_title.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	header_vbox.add_child(header_title)
+
+	var header_desc := Label.new()
+	header_desc.text = "Tools and live 3D visualizers for diagnosing physics, trajectory predictions, and suspense triggers."
+	header_desc.add_theme_font_size_override("font_size", 16)
+	header_desc.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	header_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	header_vbox.add_child(header_desc)
+
+	header_card.add_child(header_vbox)
+	root.add_child(header_card)
+
+	# --- Visualizers Section Card ---
+	var viz_card := PanelContainer.new()
+	ThemeManager.apply_card_panel_style(viz_card, false, 8, 16, 14, 16, 14)
+	var viz_vbox := VBoxContainer.new()
+	viz_vbox.add_theme_constant_override("separation", 12)
+
+	var viz_sec_title := Label.new()
+	viz_sec_title.text = "Suspense & Trajectory Visualizers"
+	viz_sec_title.add_theme_font_size_override("font_size", 18)
+	viz_sec_title.add_theme_color_override("font_color", ThemeManager.COLOR_PRIMARY_NORMAL)
+	viz_vbox.add_child(viz_sec_title)
+
+	# Toggle row for cone of vision
+	var cone_toggle_row = _create_toggle_setting_row("Show Suspense Vision Cone", "debug_show_suspense_cone")
+	viz_vbox.add_child(cone_toggle_row)
+
+	var cone_hint := Label.new()
+	cone_hint.text = "Displays a real-time 3D cone of vision projecting from the ball in the world. Green/Cyan indicates the hole is within the suspense vision cone; Red/Orange indicates the hole is outside the cone."
+	cone_hint.add_theme_font_size_override("font_size", 14)
+	cone_hint.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	cone_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	viz_vbox.add_child(cone_hint)
+
+	viz_card.add_child(viz_vbox)
+	root.add_child(viz_card)

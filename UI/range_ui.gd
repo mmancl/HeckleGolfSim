@@ -29,6 +29,7 @@ var _detached_window: Window = null
 var _detached_modal: Control = null
 var _right_panel: VBoxContainer = null
 var _home_btn: Button = null
+var _settings_btn: Button = null
 var _exit_confirm_dialog: Control = null
 var _hide_helpers_btn: Button = null
 var _stats_btn: Button = null
@@ -36,12 +37,13 @@ var _map_btn: Button = null
 var _skip_btn: Button = null
 var _announcer_btn: Button = null
 var _tension_btn: Button = null
+var _screen_offset_ctrl: Control = null
 var _dist_btn: Button = null
 var _golfer_cam_btn: Button = null
 var _putting_cam_btn: Button = null
 var _shot_analysis_btn: Button = null
 var _shot_traces_btn: Button = null
-var _shot_traces_active: bool = false
+var _shot_traces_active: bool = true
 var _dispersion_overlay: Control = null
 var _golfer_cam_panel: PanelContainer = null
 var _camera_feed_rect: TextureRect = null
@@ -194,14 +196,7 @@ func _ready() -> void:
 				emit_signal("manage_players_requested")
 			)
 	
-	var is_course_play = true
-	var parent = get_parent()
-	if parent:
-		var parent_name = parent.name.to_lower()
-		var parent_path = parent.scene_file_path.to_lower()
-		var parent_is_range = (parent_name == "range" or parent_path.contains("range.tscn"))
-		if parent_is_range:
-			is_course_play = false
+	var is_course_play = not is_driving_range()
 
 	# Hide default SettingsButton from HBoxContainer
 	var default_settings_btn = $HBoxContainer/SettingsButton
@@ -233,6 +228,7 @@ func _ready() -> void:
 		settings_btn.offset_bottom = 84
 		settings_btn.pressed.connect(_on_toggle_settings_requested)
 		$OverlayLayer.add_child(settings_btn)
+		_settings_btn = settings_btn
 
 		# Home / Main Menu Button (Icon Only) - positioned between Settings and HideHelpers
 		var home_btn = Button.new()
@@ -308,6 +304,7 @@ func _ready() -> void:
 				apply_circular_button_style(hide_helpers_btn, Color(0.25, 0.45, 0.7, 0.9))
 			else:
 				apply_circular_button_style(hide_helpers_btn, Color(0.15, 0.15, 0.15, 0.85))
+			call_deferred("_update_hud_focus_neighbors")
 		)
 		
 		toggles_scroll.add_child(toggles_container)
@@ -367,6 +364,18 @@ func _ready() -> void:
 		)
 		toggles_container.add_child(tension_btn)
 		_tension_btn = tension_btn
+
+		# Screen Offset Toggle & Slider
+		var so_script = load("res://UI/ScreenOffset/screen_offset_control.gd")
+		var so_ctrl = so_script.new()
+		so_ctrl.name = "ScreenOffsetControl"
+		so_ctrl.style_button = func(btn: Button, is_on: bool):
+			var c = Color(0.2, 0.5, 0.75, 0.85) if is_on else Color(0.5, 0.5, 0.5, 0.85)
+			apply_material_button_style(btn, c)
+		toggles_container.add_child(so_ctrl)
+		_screen_offset_ctrl = so_ctrl
+		if so_ctrl.has_signal("offset_toggled"):
+			so_ctrl.offset_toggled.connect(func(_on): call_deferred("_update_hud_focus_neighbors"))
 
 		# Distance Menu Button
 		var dist_btn = Button.new()
@@ -478,10 +487,11 @@ func _ready() -> void:
 		# Shot Traces Overlay Toggle Button (HotKey: T)
 		var shot_traces_btn = Button.new()
 		shot_traces_btn.name = "ShotTracesButton"
-		shot_traces_btn.text = "📈 Shot Traces: OFF"
+		shot_traces_btn.text = "📈 Shot Traces: ON" if _shot_traces_active else "📈 Shot Traces: OFF"
 		shot_traces_btn.tooltip_text = "Toggle Flight Arc Traces & Dispersion View for current club (Hotkey: T)"
 		shot_traces_btn.custom_minimum_size = Vector2(180, 56)
-		apply_material_button_style(shot_traces_btn, Color(0.3, 0.35, 0.45, 0.85))
+		var initial_traces_color = Color(0.15, 0.65, 0.85, 0.85) if _shot_traces_active else Color(0.3, 0.35, 0.45, 0.85)
+		apply_material_button_style(shot_traces_btn, initial_traces_color)
 		shot_traces_btn.pressed.connect(func():
 			toggle_shot_traces()
 		)
@@ -586,19 +596,69 @@ func _ready() -> void:
 	if has_node("/root/KeybindingManager"):
 		KeybindingManager.keybindings_changed.connect(_update_tooltips)
 	_update_tooltips()
+	call_deferred("_update_hud_focus_neighbors")
 
 
+
+var _putting_cam_server_process_time: float = 0.0
+const PUTTING_CAM_PROCESS_INTERVAL: float = 0.04
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if is_golfer_camera_enabled() or _is_putting_cam_enabled:
 		if _camera_feed_rect != null and _camera_feed_rect.texture == null:
-			if not _use_phone_stream and CameraServer.get_feed_count() > 0:
+			if not _use_phone_stream and CameraServer.is_monitoring_feeds() and CameraServer.get_feed_count() > 0:
 				_update_camera_feed(true)
+		
+		# Drive putting state machine when fed by CameraServer
+		if _is_putting_cam_enabled and not _use_phone_stream and _putting_state_machine != null and _camera_feed_rect != null and _camera_feed_rect.texture != null:
+			var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
+			var bridge_active: bool = pose_bridge != null and pose_bridge.has_method("is_desktop_camera_active") and pose_bridge.is_desktop_camera_active()
+			if not bridge_active:
+				_putting_cam_server_process_time += delta
+				if _putting_cam_server_process_time >= PUTTING_CAM_PROCESS_INTERVAL:
+					_putting_cam_server_process_time = 0.0
+					var img: Image = null
+					var tex = _camera_feed_rect.texture
+					if tex != null and tex.has_method("get_image"):
+						img = tex.get_image()
+						if img != null and not img.is_empty():
+							if img.is_compressed():
+								img.decompress()
+							if img.get_format() != Image.FORMAT_RGBA8 and img.get_format() != Image.FORMAT_RGB8:
+								img.convert(Image.FORMAT_RGBA8)
+					if (img == null or img.is_empty()) and is_inside_tree():
+						var vp = get_viewport()
+						if vp != null:
+							var vp_tex = vp.get_texture()
+							if vp_tex != null:
+								var full_img = vp_tex.get_image()
+								if full_img != null and not full_img.is_empty():
+									if full_img.is_compressed():
+										full_img.decompress()
+									if full_img.get_format() != Image.FORMAT_RGBA8 and full_img.get_format() != Image.FORMAT_RGB8:
+										full_img.convert(Image.FORMAT_RGBA8)
+									var target_rect: Rect2 = _camera_feed_rect.get_global_rect()
+									var vp_sz = vp.get_visible_rect().size
+									if target_rect.size.x > 10 and target_rect.size.y > 10:
+										var crop_x = clamp(int(target_rect.position.x), 0, int(vp_sz.x - 10))
+										var crop_y = clamp(int(target_rect.position.y), 0, int(vp_sz.y - 10))
+										var crop_w = clamp(int(target_rect.size.x), 10, int(vp_sz.x - crop_x))
+										var crop_h = clamp(int(target_rect.size.y), 10, int(vp_sz.y - crop_y))
+										if crop_w > 0 and crop_h > 0:
+											img = full_img.get_region(Rect2i(crop_x, crop_y, crop_w, crop_h))
+					if img != null and not img.is_empty():
+						var active_img = img
+						if _camera_rotation_deg != 0:
+							active_img = img.duplicate()
+							_apply_image_rotation(active_img, _camera_rotation_deg)
+						_last_putting_feed_image = active_img
+						_putting_state_machine.process_frame(active_img, Time.get_ticks_usec())
 
 
 func set_data(data: Dictionary, is_final_rest: bool = false) -> void:
-	_last_shot_data = data.duplicate()
+	if is_final_rest and _is_valid_shot_data(data):
+		_last_shot_data = _prepare_modal_shot_data(data)
 	var is_imperial: bool = GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL if has_node("/root/GlobalSettings") else true
 
 	var grid = get_node_or_null("GridCanvas")
@@ -725,25 +785,151 @@ func _prepare_modal_shot_data(data: Dictionary) -> Dictionary:
 	return modal_data
 
 
+func _get_dict_metric_str(dict: Dictionary, keys: Array, default_val: String = "---") -> String:
+	for k in keys:
+		if dict.has(k):
+			var v = dict[k]
+			if v != null:
+				var s = str(v).strip_edges()
+				if s != "" and s != "---":
+					return s
+	return default_val
+
+
+func _get_dict_metric_float(dict: Dictionary, keys: Array, default_val: float = 0.0) -> float:
+	var s = _get_dict_metric_str(dict, keys, "")
+	if s == "":
+		return default_val
+	return float(s)
+
+
+func _is_valid_shot_data(d: Dictionary) -> bool:
+	if d.is_empty():
+		return false
+	var spd = _get_dict_metric_float(d, ["Speed", "BallSpeed", "speed", "ball_speed"])
+	var dist = _get_dict_metric_float(d, ["Distance", "Carry", "TotalDistance", "CarryDistance", "distance", "carry", "total_distance", "carry_distance"])
+	return spd > 0.0 or dist > 0.0
+
+
+func _format_shot_details_text(data: Dictionary) -> String:
+	var is_imperial: bool = GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL if has_node("/root/GlobalSettings") else true
+	var dist_u := "yds" if is_imperial else "m"
+	var spd_u := "mph" if is_imperial else "m/s"
+	var h_u := "ft" if is_imperial else "m"
+	
+	var lines: Array[String] = []
+	var club_str = str(data.get("Club", data.get("club", "---")))
+	if club_str != "---" and not club_str.is_empty():
+		lines.append("Club: %s" % club_str)
+	var player_str = str(data.get("player", data.get("Player", "")))
+	if not player_str.is_empty():
+		lines.append("Player: %s" % player_str)
+	
+	var spd = str(data.get("Speed", data.get("BallSpeed", data.get("speed", "---"))))
+	lines.append("Ball Speed: %s %s" % [spd, spd_u])
+	
+	var carry = str(data.get("Carry", data.get("CarryDistance", data.get("carry", "---"))))
+	lines.append("Carry Distance: %s %s" % [carry, dist_u])
+	
+	var tot_dist = str(data.get("Distance", data.get("TotalDistance", data.get("distance", "---"))))
+	lines.append("Total Distance: %s %s" % [tot_dist, dist_u])
+	
+	var apex_val = str(data.get("Apex", data.get("apex", "---")))
+	lines.append("Apex: %s %s" % [apex_val, h_u])
+	
+	var off_val = str(data.get("Offline", data.get("SideDistance", data.get("offline", "---"))))
+	lines.append("Offline: %s %s" % [off_val, dist_u])
+	
+	var vla = str(data.get("VLA", data.get("LaunchAngle", "---")))
+	lines.append("Launch Angle (VLA): %s°" % vla)
+	
+	var hla = str(data.get("HLA", data.get("LaunchDirection", "---")))
+	lines.append("Launch Direction (HLA): %s°" % hla)
+	
+	var b_spin = str(data.get("BackSpin", "---"))
+	lines.append("Back Spin: %s rpm" % b_spin)
+	
+	var s_spin = str(data.get("SideSpin", "---"))
+	lines.append("Side Spin: %s rpm" % s_spin)
+	
+	var t_spin = str(data.get("TotalSpin", "---"))
+	lines.append("Total Spin: %s rpm" % t_spin)
+	
+	var s_axis = str(data.get("SpinAxis", "---"))
+	lines.append("Spin Axis: %s°" % s_axis)
+	
+	if data.has("ClubSpeed") and str(data["ClubSpeed"]) != "---":
+		lines.append("Club Speed: %s %s" % [str(data["ClubSpeed"]), spd_u])
+	if data.has("SmashFactor") and str(data["SmashFactor"]) != "---":
+		lines.append("Smash Factor: %s" % str(data["SmashFactor"]))
+	if data.has("ClubPath") and str(data["ClubPath"]) != "---":
+		lines.append("Club Path: %s" % str(data["ClubPath"]))
+	if data.has("FaceAngle") and str(data["FaceAngle"]) != "---":
+		lines.append("Face Angle: %s" % str(data["FaceAngle"]))
+	
+	return "\n".join(lines)
+
+
+func _ensure_last_shot_data() -> bool:
+	if _is_valid_shot_data(_last_shot_data):
+		return true
+	var p = get_parent()
+	if p != null:
+		var history = null
+		if "shot_history" in p:
+			history = p.shot_history as Array
+		elif p.has_meta("shot_history"):
+			history = p.get_meta("shot_history") as Array
+		elif p.get("shot_history") != null:
+			history = p.get("shot_history") as Array
+		if history != null and not history.is_empty():
+			for i in range(history.size() - 1, -1, -1):
+				var item = history[i] as Dictionary
+				if _is_valid_shot_data(item):
+					var p_node = p.get_node_or_null("Player")
+					var units = GlobalSettings.range_settings.range_units.value if has_node("/root/GlobalSettings") else PhysicsEnums.Units.IMPERIAL
+					var formatted = ShotFormatter.format_ball_display(item, p_node, units, true)
+					_last_shot_data = _prepare_modal_shot_data(formatted)
+					return true
+	return false
+
+
 func trigger_swing_replay_modal(data: Dictionary) -> void:
 	var cam_active: bool = is_golfer_camera_enabled()
 	var analysis_active: bool = is_shot_analysis_enabled()
-	if not cam_active and not analysis_active:
-		return
 
-	# Strictly ensure the shot has completed and the ball has come to a rest
+	# Strictly ensure the ball is not currently mid-flight
 	var p_node = get_parent().get_node_or_null("Player") if get_parent() != null else null
 	if p_node != null and p_node.get("ball") != null:
 		var ball = p_node.ball
-		if "state" in ball and ball.state != PhysicsEnums.BallState.REST:
+		if "state" in ball and (ball.state == PhysicsEnums.BallState.FLIGHT or ball.state == PhysicsEnums.BallState.ROLLOUT):
 			return
 
-	# Only display after the ball flight happens and the ball comes to a rest (requires final Distance or Carry)
-	var dist_str = str(data.get("Distance", data.get("Carry", data.get("TotalDistance", "---"))))
-	var speed_str = str(data.get("Speed", data.get("BallSpeed", "---")))
-	if dist_str == "---" or speed_str == "---":
+	# Only display after the ball flight happens and valid metrics are recorded
+	if not _is_valid_shot_data(data):
+		if _prev_shot_popup != null:
+			if _prev_shot_data_label != null:
+				_prev_shot_data_label.text = "No completed shot data recorded yet.\nTake a swing on the range or course to view your swing replay, club delivery visuals, and AI flaw analysis."
+			_prev_shot_popup.visible = true
+			UIFocusGuard.push_lock(_prev_shot_popup)
+			var c_btn = _prev_shot_popup.find_child("CloseBtn", true, false)
+			if c_btn != null and is_instance_valid(c_btn):
+				c_btn.call_deferred("grab_focus")
+			else:
+				KeybindingManager.focus_first_control(_prev_shot_popup)
 		return
-	if float(speed_str) <= 0.0 or float(dist_str) <= 0.0:
+
+	if not cam_active and not analysis_active:
+		if _prev_shot_popup != null:
+			if _prev_shot_data_label != null:
+				_prev_shot_data_label.text = _format_shot_details_text(data)
+			_prev_shot_popup.visible = true
+			UIFocusGuard.push_lock(_prev_shot_popup)
+			var c_btn = _prev_shot_popup.find_child("CloseBtn", true, false)
+			if c_btn != null and is_instance_valid(c_btn):
+				c_btn.call_deferred("grab_focus")
+			else:
+				KeybindingManager.focus_first_control(_prev_shot_popup)
 		return
 
 	# If detached window is already open, focus it and update shot data
@@ -1037,7 +1223,12 @@ func _refresh_profile_selector() -> void:
 	_populate_profile_selector(current_sel)
 
 func _on_profile_option_selected(_idx: int) -> void:
-	var p_name = get_selected_player_name()
+	var p_name = ""
+	if _profile_option != null and is_instance_valid(_profile_option) and _idx >= 0 and _idx < _profile_option.item_count:
+		_profile_option.selected = _idx
+		p_name = _profile_option.get_item_text(_idx)
+	else:
+		p_name = get_selected_player_name()
 	if has_node("HBoxContainer/PlayerName"):
 		$HBoxContainer/PlayerName.text = p_name
 	_update_club_selector_bag(p_name)
@@ -1292,13 +1483,21 @@ func _setup_prev_shot_ui() -> void:
 	vbox.add_child(scroll)
 	
 	var close_btn = Button.new()
+	close_btn.name = "CloseBtn"
 	close_btn.text = "Close"
 	close_btn.custom_minimum_size = Vector2(140, 48)
 	close_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	ThemeManager.apply_primary_button_style(close_btn, 8)
-	close_btn.pressed.connect(func(): _prev_shot_popup.visible = false)
+	close_btn.pressed.connect(func():
+		_prev_shot_popup.visible = false
+		if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == _prev_shot_popup:
+			UIFocusGuard.pop_lock(true)
+	)
 	vbox.add_child(close_btn)
 	
+	_prev_shot_popup.set_meta("on_focus_lock_popped", func():
+		_prev_shot_popup.visible = false
+	)
 	_prev_shot_popup.add_child(vbox)
 	add_child(_prev_shot_popup)
 
@@ -1308,12 +1507,11 @@ func _update_prev_shot_analysis_visibility() -> void:
 		var cam_active: bool = is_golfer_camera_enabled()
 		var analysis_active: bool = is_shot_analysis_enabled()
 		_prev_shot_btn.visible = cam_active or analysis_active
+		call_deferred("_update_hud_focus_neighbors")
 
 
 func _on_prev_shot_analysis_pressed() -> void:
-	if _last_shot_data.is_empty():
-		return
-	trigger_swing_replay_modal(_last_shot_data)
+	toggle_prev_shot_analysis()
 
 
 func get_active_swing_replay_modal() -> Control:
@@ -1350,14 +1548,22 @@ func toggle_prev_shot_analysis() -> void:
 	# 3. If prev shot popup panel is visible, hide it
 	if _prev_shot_popup != null and is_instance_valid(_prev_shot_popup) and _prev_shot_popup.visible:
 		_prev_shot_popup.visible = false
+		if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == _prev_shot_popup:
+			UIFocusGuard.pop_lock(true)
 		return
 
 	# 4. Otherwise, open previous shot analysis
-	if _last_shot_data.is_empty():
+	if not _ensure_last_shot_data():
 		if _prev_shot_popup != null:
 			if _prev_shot_data_label != null:
-				_prev_shot_data_label.text = "No shot data recorded yet.\nTake a swing on the range or course to view your swing replay, club delivery visuals, and AI flaw analysis."
+				_prev_shot_data_label.text = "No completed shot data recorded yet.\nTake a swing on the range or course to view your swing replay, club delivery visuals, and AI flaw analysis."
 			_prev_shot_popup.visible = true
+			UIFocusGuard.push_lock(_prev_shot_popup)
+			var c_btn = _prev_shot_popup.find_child("CloseBtn", true, false)
+			if c_btn != null and is_instance_valid(c_btn):
+				c_btn.call_deferred("grab_focus")
+			else:
+				KeybindingManager.focus_first_control(_prev_shot_popup)
 		return
 	
 	trigger_swing_replay_modal(_last_shot_data)
@@ -1424,7 +1630,7 @@ func apply_material_button_style(btn: Button, bg_color: Color):
 	style_focus.border_width_right = 3
 	style_focus.border_width_bottom = 3
 
-	btn.focus_mode = Control.FOCUS_NONE
+	btn.focus_mode = Control.FOCUS_ALL
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_pressed)
@@ -1464,7 +1670,7 @@ func apply_circular_button_style(btn: Button, bg_color: Color):
 	style_focus.border_width_right = 3
 	style_focus.border_width_bottom = 3
 
-	btn.focus_mode = Control.FOCUS_NONE
+	btn.focus_mode = Control.FOCUS_ALL
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_pressed)
@@ -2527,6 +2733,8 @@ func _update_camera_rotate_button_text() -> void:
 func _on_rotate_camera_pressed() -> void:
 	_camera_rotation_deg = (_camera_rotation_deg + 90) % 360
 	_update_camera_rotate_button_text()
+	if _camera_feed_rect != null and _camera_feed_rect.material is ShaderMaterial:
+		_camera_feed_rect.material.set_shader_parameter("manual_rotation_rad", deg_to_rad(float(_camera_rotation_deg)))
 	if _putting_state_machine != null:
 		_putting_state_machine.reset()
 	print("[RangeUI] Camera rotation set to: %d°" % _camera_rotation_deg)
@@ -2572,7 +2780,9 @@ func _on_desktop_frame_received(_img: Image, tex: Texture2D, _landmarks: Diction
 		if active_img != null:
 			_last_putting_feed_image = active_img
 		if _putting_state_machine != null and active_img != null:
-			_putting_state_machine.process_frame(active_img)
+			var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
+			var ts_usec: int = bridge.last_capture_timestamp_usec if (bridge != null and "last_capture_timestamp_usec" in bridge and bridge.last_capture_timestamp_usec > 0) else Time.get_ticks_usec()
+			_putting_state_machine.process_frame(active_img, ts_usec)
 
 
 func _stop_local_camera_stream() -> void:
@@ -2582,15 +2792,13 @@ func _stop_local_camera_stream() -> void:
 			pose_bridge.stop_desktop_camera()
 		if pose_bridge.has_method("stop_android_camera"):
 			pose_bridge.stop_android_camera()
+	if _camera_feed_rect != null:
+		_camera_feed_rect.material = null
 	if CameraServer.is_monitoring_feeds():
 		for feed in CameraServer.feeds():
 			if feed != null:
 				feed.feed_is_active = false
 		CameraServer.set_monitoring_feeds(false)
-	else:
-		for feed in CameraServer.feeds():
-			if feed != null:
-				feed.feed_is_active = false
 
 
 func _stop_phone_camera_stream() -> void:
@@ -2605,26 +2813,14 @@ func _connect_local_camera(sel_idx: int) -> void:
 	_stop_phone_camera_stream()
 	_use_phone_stream = false
 	_current_camera_feed_index = sel_idx
-	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android"
 	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
 
-	if is_android:
-		# Deactivate any CameraServer feeds if any were registered
-		if CameraServer.is_monitoring_feeds():
-			for f in CameraServer.feeds():
-				if f != null:
-					f.feed_is_active = false
-			CameraServer.set_monitoring_feeds(false)
-		if _camera_feed_rect != null:
-			_camera_feed_rect.material = null
-		if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
-			pose_bridge.select_desktop_camera(sel_idx)
-			_update_status_overlay("", false)
-		return
+	if not CameraServer.is_monitoring_feeds():
+		CameraServer.set_monitoring_feeds(true)
 
 	var feeds = CameraServer.feeds()
 	if feeds.size() > 0:
-		_activate_camera_feed_index(sel_idx)
+		_activate_camera_feed_index(clamp(sel_idx, 0, feeds.size() - 1))
 	elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
 		if _camera_feed_rect != null:
 			_camera_feed_rect.material = null
@@ -2690,18 +2886,17 @@ func _update_camera_feed(active: bool) -> void:
 			)
 			return
 
-	if is_android:
-		_connect_local_camera(_current_camera_feed_index)
-		return
-
-	CameraServer.set_monitoring_feeds(true)
+	if not CameraServer.is_monitoring_feeds():
+		CameraServer.set_monitoring_feeds(true)
 
 	var feeds = CameraServer.feeds()
 	var count = feeds.size()
 
 	if count > 0:
-		var selected_index = _find_default_camera_index(feeds)
-		_current_camera_feed_index = selected_index
+		var selected_index = _current_camera_feed_index
+		if selected_index < 0 or selected_index >= count:
+			selected_index = _find_default_camera_index(feeds)
+			_current_camera_feed_index = selected_index
 		_activate_camera_feed_index(selected_index)
 	elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
 		var sel_idx = clamp(_current_camera_feed_index, 0, pose_bridge.desktop_cameras.size() - 1)
@@ -2714,16 +2909,18 @@ func _update_camera_feed(active: bool) -> void:
 		if _camera_feed_rect != null:
 			_camera_feed_rect.material = null
 			_camera_feed_rect.texture = null
-		_update_status_overlay("SEARCHING FOR WEBCAMS...\n[ Click ⚙️ Connect Camera for setup ]", true)
+		_update_status_overlay("SEARCHING FOR CAMERAS...\n[ Click ⚙️ Connect Camera for setup ]", true)
 		if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
 			pose_bridge.fetch_desktop_cameras()
 		# Schedule asynchronous re-scan
 		if get_tree() != null:
 			get_tree().create_timer(0.6).timeout.connect(func():
 				if (is_golfer_camera_enabled() or _is_putting_cam_enabled) and not _use_phone_stream:
+					if not CameraServer.is_monitoring_feeds():
+						CameraServer.set_monitoring_feeds(true)
 					var rescan_feeds = CameraServer.feeds()
 					if rescan_feeds.size() > 0:
-						var sel_idx = _find_default_camera_index(rescan_feeds)
+						var sel_idx = _find_default_camera_index(rescan_feeds) if _current_camera_feed_index < 0 or _current_camera_feed_index >= rescan_feeds.size() else _current_camera_feed_index
 						_current_camera_feed_index = sel_idx
 						_activate_camera_feed_index(sel_idx)
 					elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
@@ -2734,7 +2931,7 @@ func _update_camera_feed(active: bool) -> void:
 						pose_bridge.select_desktop_camera(sel_idx)
 						_update_status_overlay("", false)
 					elif _phone_cam_url.is_empty():
-						_update_status_overlay("NO LOCAL WEBCAM DETECTED\n[ Click ⚙️ Connect Camera for Phone WiFi Stream ]", true)
+						_update_status_overlay("NO LOCAL CAMERA DETECTED\n[ Click ⚙️ Connect Camera for Phone WiFi Stream ]", true)
 			)
 
 
@@ -2798,9 +2995,16 @@ shader_type canvas_item;
 uniform sampler2D y_tex : hint_default_black;
 uniform sampler2D cbcr_tex : hint_default_black;
 uniform mat3 feed_transform;
+uniform float manual_rotation_rad : default_value(0.0);
 
 void fragment() {
-	vec2 uv = (feed_transform * vec3(UV, 1.0)).xy;
+	vec2 center = vec2(0.5);
+	vec2 uv_rot = UV - center;
+	float c = cos(manual_rotation_rad);
+	float s = sin(manual_rotation_rad);
+	uv_rot = vec2(c * uv_rot.x - s * uv_rot.y, s * uv_rot.x + c * uv_rot.y) + center;
+
+	vec2 uv = (feed_transform * vec3(uv_rot, 1.0)).xy;
 	float y = texture(y_tex, uv).r;
 	vec2 cbcr = texture(cbcr_tex, uv).rg;
 
@@ -2819,6 +3023,7 @@ void fragment() {
 			mat.set_shader_parameter("y_tex", y_tex)
 			mat.set_shader_parameter("cbcr_tex", cbcr_tex)
 			mat.set_shader_parameter("feed_transform", feed.get_transform())
+			mat.set_shader_parameter("manual_rotation_rad", deg_to_rad(float(_camera_rotation_deg)))
 
 			if _camera_feed_rect != null:
 				_camera_feed_rect.material = mat
@@ -3088,13 +3293,24 @@ func _open_camera_setup_dialog(for_putting: Variant = null) -> void:
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	ThemeManager.apply_scroll_container_style(scroll, 24)
 	outer_vbox.add_child(scroll)
+
+	var scroll_margin = MarginContainer.new()
+	scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll_margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var scroll_pad_right = 64 if is_mob else 36
+	scroll_margin.add_theme_constant_override("margin_right", scroll_pad_right)
+	scroll_margin.add_theme_constant_override("margin_left", 6)
+	scroll_margin.add_theme_constant_override("margin_top", 4)
+	scroll_margin.add_theme_constant_override("margin_bottom", 6)
+	scroll.add_child(scroll_margin)
 
 	var vbox = VBoxContainer.new()
 	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_theme_constant_override("separation", 12)
-	scroll.add_child(vbox)
+	scroll_margin.add_child(vbox)
 
 	# Section 1: System / Built-in Webcams
 	var webcams_label = Label.new()
@@ -3115,10 +3331,12 @@ func _open_camera_setup_dialog(for_putting: Variant = null) -> void:
 	var populate_feeds = func():
 		if not is_instance_valid(popup) or not is_instance_valid(webcams_label) or not is_instance_valid(cam_option):
 			return
+		if not CameraServer.is_monitoring_feeds():
+			CameraServer.set_monitoring_feeds(true)
 		var feeds = CameraServer.feeds()
 		var desk_cams: Array = pose_bridge.desktop_cameras if (pose_bridge != null and "desktop_cameras" in pose_bridge) else []
 		var total_count = max(feeds.size(), desk_cams.size())
-		if is_android and total_count < 2:
+		if is_android and total_count < 2 and desk_cams.is_empty() and feeds.is_empty():
 			total_count = 2
 		
 		# Prevent wiping and rebuilding OptionButton if count hasn't changed
@@ -3129,14 +3347,7 @@ func _open_camera_setup_dialog(for_putting: Variant = null) -> void:
 		webcams_label.text = "1. Local / Built-in Webcams (%d detected):" % total_count
 		cam_option.clear()
 		
-		if is_android:
-			cam_option.disabled = false
-			cam_option.add_item("Camera 0 (Back Camera)", 0)
-			cam_option.add_item("Camera 1 (Front Camera)", 1)
-			for i in range(2, total_count):
-				cam_option.add_item("Camera %d (Device)" % i, i)
-			cam_option.select(clamp(_current_camera_feed_index, 0, cam_option.item_count - 1))
-		elif feeds.size() > 0:
+		if feeds.size() > 0:
 			cam_option.disabled = false
 			for i in range(feeds.size()):
 				var feed = feeds[i]
@@ -3160,6 +3371,13 @@ func _open_camera_setup_dialog(for_putting: Variant = null) -> void:
 				var c_name: String = cam_info.get("name", "System Camera %d" % i)
 				cam_option.add_item(c_name, i)
 			cam_option.select(clamp(_current_camera_feed_index, 0, desk_cams.size() - 1))
+		elif is_android:
+			cam_option.disabled = false
+			cam_option.add_item("Camera 0 (Back Camera)", 0)
+			cam_option.add_item("Camera 1 (Front Camera)", 1)
+			for i in range(2, total_count):
+				cam_option.add_item("Camera %d (Device)" % i, i)
+			cam_option.select(clamp(_current_camera_feed_index, 0, cam_option.item_count - 1))
 		else:
 			cam_option.add_item("No local webcams detected", 0)
 			cam_option.disabled = true
@@ -3781,7 +3999,7 @@ func _on_phone_cam_frame_received(result: int, response_code: int, _headers: Pac
 			if _is_putting_cam_enabled:
 				_last_putting_feed_image = img
 				if _putting_state_machine != null:
-					_putting_state_machine.process_frame(img)
+					_putting_state_machine.process_frame(img, Time.get_ticks_usec())
 		else:
 			_try_fallback_endpoint_or_error(result, response_code, "Invalid image encoding received")
 	else:
@@ -3893,6 +4111,20 @@ func update_suspense_button_state() -> void:
 		apply_material_button_style(_tension_btn, Color(0.5, 0.5, 0.5, 0.85))
 
 
+func is_driving_range() -> bool:
+	var parent = get_parent()
+	if parent != null:
+		var parent_path = parent.scene_file_path.to_lower() if "scene_file_path" in parent else ""
+		if parent_path.ends_with("range/range.tscn") or parent_path.ends_with("range.tscn") or parent_path.ends_with("range.scn"):
+			return true
+		if "is_driving_range" in parent and bool(parent.is_driving_range):
+			return true
+		var parent_name = parent.name.to_lower()
+		if parent_name == "range" and not parent_path.contains("course"):
+			return true
+	return false
+
+
 func toggle_distance_menu() -> void:
 	if _dist_btn != null and is_instance_valid(_dist_btn):
 		_dist_btn.emit_signal("pressed")
@@ -3909,7 +4141,7 @@ func toggle_shot_traces() -> void:
 			apply_material_button_style(_shot_traces_btn, Color(0.3, 0.35, 0.45, 0.85))
 
 	shot_traces_toggled.emit(_shot_traces_active)
-	if not _shot_traces_active and _dispersion_overlay != null:
+	if (not _shot_traces_active or not is_driving_range()) and _dispersion_overlay != null:
 		_dispersion_overlay.visible = false
 
 
@@ -3918,7 +4150,9 @@ func is_shot_traces_active() -> bool:
 
 
 func show_dispersion(shots: Array[Dictionary], club_name: String) -> void:
-	if not _shot_traces_active:
+	if not _shot_traces_active or not is_driving_range():
+		if _dispersion_overlay != null:
+			_dispersion_overlay.visible = false
 		return
 	if _dispersion_overlay == null:
 		var overlay_script = load("res://UI/dispersion_overlay.gd")
@@ -3943,3 +4177,144 @@ func show_dispersion(shots: Array[Dictionary], club_name: String) -> void:
 func hide_dispersion() -> void:
 	if _dispersion_overlay != null:
 		_dispersion_overlay.visible = false
+
+
+func _update_hud_focus_neighbors() -> void:
+	var add_remove_btn: Control = get_node_or_null("GridCanvas/AddRemoveButton")
+	var club_sel = get_node_or_null("OverlayLayer/ClubSelector")
+	var club_btn: Control = null
+	if club_sel != null and "club_button" in club_sel:
+		club_btn = club_sel.club_button
+
+	var toggles_scroll_node = _right_panel.get_node_or_null("TogglesScroll") if _right_panel != null else null
+	var helpers_open = (toggles_scroll_node != null and is_instance_valid(toggles_scroll_node) and toggles_scroll_node.visible)
+
+	# 1. Stats button (Bottom-Left)
+	if _stats_btn != null and is_instance_valid(_stats_btn):
+		if add_remove_btn != null and is_instance_valid(add_remove_btn) and add_remove_btn.visible:
+			_stats_btn.focus_neighbor_top = _stats_btn.get_path_to(add_remove_btn)
+		elif _profile_option != null and is_instance_valid(_profile_option) and _profile_option.visible:
+			_stats_btn.focus_neighbor_top = _stats_btn.get_path_to(_profile_option)
+		if _prev_shot_btn != null and is_instance_valid(_prev_shot_btn) and _prev_shot_btn.visible:
+			_stats_btn.focus_neighbor_right = _stats_btn.get_path_to(_prev_shot_btn)
+		elif _map_btn != null and is_instance_valid(_map_btn):
+			_stats_btn.focus_neighbor_right = _stats_btn.get_path_to(_map_btn)
+		if _map_btn != null and is_instance_valid(_map_btn):
+			_stats_btn.focus_neighbor_left = _stats_btn.get_path_to(_map_btn)
+
+	# 2. Previous Shot button (Bottom-Center)
+	if _prev_shot_btn != null and is_instance_valid(_prev_shot_btn) and _prev_shot_btn.visible:
+		if _stats_btn != null and is_instance_valid(_stats_btn):
+			_prev_shot_btn.focus_neighbor_left = _prev_shot_btn.get_path_to(_stats_btn)
+		if _map_btn != null and is_instance_valid(_map_btn):
+			_prev_shot_btn.focus_neighbor_right = _prev_shot_btn.get_path_to(_map_btn)
+		if _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
+			_prev_shot_btn.focus_neighbor_top = _prev_shot_btn.get_path_to(_hide_helpers_btn)
+
+	# 3. Add/Remove button (Left middle)
+	if add_remove_btn != null and is_instance_valid(add_remove_btn) and add_remove_btn.visible:
+		if _stats_btn != null and is_instance_valid(_stats_btn):
+			add_remove_btn.focus_neighbor_bottom = add_remove_btn.get_path_to(_stats_btn)
+		if _profile_option != null and is_instance_valid(_profile_option) and _profile_option.visible:
+			add_remove_btn.focus_neighbor_top = add_remove_btn.get_path_to(_profile_option)
+		if _prev_shot_btn != null and is_instance_valid(_prev_shot_btn) and _prev_shot_btn.visible:
+			add_remove_btn.focus_neighbor_right = add_remove_btn.get_path_to(_prev_shot_btn)
+		elif _map_btn != null and is_instance_valid(_map_btn):
+			add_remove_btn.focus_neighbor_right = add_remove_btn.get_path_to(_map_btn)
+
+	# 4. Profile Option (Top-Left)
+	if _profile_option != null and is_instance_valid(_profile_option) and _profile_option.visible:
+		if add_remove_btn != null and is_instance_valid(add_remove_btn) and add_remove_btn.visible:
+			_profile_option.focus_neighbor_bottom = _profile_option.get_path_to(add_remove_btn)
+		elif _stats_btn != null and is_instance_valid(_stats_btn):
+			_profile_option.focus_neighbor_bottom = _profile_option.get_path_to(_stats_btn)
+		if _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
+			_profile_option.focus_neighbor_right = _profile_option.get_path_to(_hide_helpers_btn)
+		if _settings_btn != null and is_instance_valid(_settings_btn):
+			_profile_option.focus_neighbor_left = _profile_option.get_path_to(_settings_btn)
+
+	# 5. Map button (Bottom-Right)
+	if _map_btn != null and is_instance_valid(_map_btn):
+		if _prev_shot_btn != null and is_instance_valid(_prev_shot_btn) and _prev_shot_btn.visible:
+			_map_btn.focus_neighbor_left = _map_btn.get_path_to(_prev_shot_btn)
+		elif _stats_btn != null and is_instance_valid(_stats_btn):
+			_map_btn.focus_neighbor_left = _map_btn.get_path_to(_stats_btn)
+		if _stats_btn != null and is_instance_valid(_stats_btn):
+			_map_btn.focus_neighbor_right = _map_btn.get_path_to(_stats_btn)
+		if _settings_btn != null and is_instance_valid(_settings_btn):
+			_map_btn.focus_neighbor_top = _map_btn.get_path_to(_settings_btn)
+
+	# 6. Settings button (Top-Right)
+	if _settings_btn != null and is_instance_valid(_settings_btn):
+		if _home_btn != null and is_instance_valid(_home_btn):
+			_settings_btn.focus_neighbor_left = _settings_btn.get_path_to(_home_btn)
+		if club_btn != null and is_instance_valid(club_btn) and club_btn.visible:
+			_settings_btn.focus_neighbor_bottom = _settings_btn.get_path_to(club_btn)
+		elif _map_btn != null and is_instance_valid(_map_btn):
+			_settings_btn.focus_neighbor_bottom = _settings_btn.get_path_to(_map_btn)
+
+	# 7. Home button (Top-Right)
+	if _home_btn != null and is_instance_valid(_home_btn):
+		if _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
+			_home_btn.focus_neighbor_left = _home_btn.get_path_to(_hide_helpers_btn)
+		if _settings_btn != null and is_instance_valid(_settings_btn):
+			_home_btn.focus_neighbor_right = _home_btn.get_path_to(_settings_btn)
+		if club_btn != null and is_instance_valid(club_btn) and club_btn.visible:
+			_home_btn.focus_neighbor_bottom = _home_btn.get_path_to(club_btn)
+		elif _prev_shot_btn != null and is_instance_valid(_prev_shot_btn) and _prev_shot_btn.visible:
+			_home_btn.focus_neighbor_bottom = _home_btn.get_path_to(_prev_shot_btn)
+		elif _map_btn != null and is_instance_valid(_map_btn):
+			_home_btn.focus_neighbor_bottom = _home_btn.get_path_to(_map_btn)
+
+	# 8. Hide Helpers button (Top-Right)
+	if _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
+		if _profile_option != null and is_instance_valid(_profile_option) and _profile_option.visible:
+			_hide_helpers_btn.focus_neighbor_left = _hide_helpers_btn.get_path_to(_profile_option)
+		elif add_remove_btn != null and is_instance_valid(add_remove_btn) and add_remove_btn.visible:
+			_hide_helpers_btn.focus_neighbor_left = _hide_helpers_btn.get_path_to(add_remove_btn)
+		if _home_btn != null and is_instance_valid(_home_btn):
+			_hide_helpers_btn.focus_neighbor_right = _hide_helpers_btn.get_path_to(_home_btn)
+		
+		if helpers_open and _announcer_btn != null and is_instance_valid(_announcer_btn):
+			_hide_helpers_btn.focus_neighbor_bottom = _hide_helpers_btn.get_path_to(_announcer_btn)
+		elif club_btn != null and is_instance_valid(club_btn) and club_btn.visible:
+			_hide_helpers_btn.focus_neighbor_bottom = _hide_helpers_btn.get_path_to(club_btn)
+
+	# 9. Club selector button
+	if club_btn != null and is_instance_valid(club_btn) and club_btn.visible:
+		if _home_btn != null and is_instance_valid(_home_btn):
+			club_btn.focus_neighbor_top = club_btn.get_path_to(_home_btn)
+		elif _settings_btn != null and is_instance_valid(_settings_btn):
+			club_btn.focus_neighbor_top = club_btn.get_path_to(_settings_btn)
+		if helpers_open and _announcer_btn != null and is_instance_valid(_announcer_btn):
+			club_btn.focus_neighbor_bottom = club_btn.get_path_to(_announcer_btn)
+		elif _map_btn != null and is_instance_valid(_map_btn):
+			club_btn.focus_neighbor_bottom = club_btn.get_path_to(_map_btn)
+
+	# 10. Wire helper vertical list if open
+	if helpers_open and toggles_scroll_node != null:
+		var helper_controls: Array[Control] = []
+		var container = toggles_scroll_node.get_node_or_null("TogglesContainer")
+		if container != null:
+			for ch in container.get_children():
+				if ch is Button and ch.visible:
+					helper_controls.append(ch)
+				elif ch is ScreenOffsetControl and ch.visible:
+					for foc in ch.get_focusables():
+						helper_controls.append(foc)
+		for i in range(helper_controls.size()):
+			var h_ctrl = helper_controls[i]
+			if i == 0:
+				if club_btn != null and is_instance_valid(club_btn) and club_btn.visible:
+					h_ctrl.focus_neighbor_top = h_ctrl.get_path_to(club_btn)
+				elif _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
+					h_ctrl.focus_neighbor_top = h_ctrl.get_path_to(_hide_helpers_btn)
+			else:
+				h_ctrl.focus_neighbor_top = h_ctrl.get_path_to(helper_controls[i - 1])
+			if i < helper_controls.size() - 1:
+				h_ctrl.focus_neighbor_bottom = h_ctrl.get_path_to(helper_controls[i + 1])
+			else:
+				if _map_btn != null and is_instance_valid(_map_btn):
+					h_ctrl.focus_neighbor_bottom = h_ctrl.get_path_to(_map_btn)
+				elif _prev_shot_btn != null and is_instance_valid(_prev_shot_btn) and _prev_shot_btn.visible:
+					h_ctrl.focus_neighbor_bottom = h_ctrl.get_path_to(_prev_shot_btn)

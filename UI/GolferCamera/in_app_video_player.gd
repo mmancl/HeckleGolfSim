@@ -134,6 +134,9 @@ func _process(delta: float) -> void:
 	var scale_x: float = float(win_size.x) / max(vp_size.x, 1.0)
 	var scale_y: float = float(win_size.y) / max(vp_size.y, 1.0)
 
+	if _video_frame == null or not is_instance_valid(_video_frame):
+		return
+
 	var g_pos: Vector2 = _video_frame.get_global_position()
 	var f_size: Vector2 = _video_frame.size
 	var is_vis: bool = is_visible_in_tree() and _video_frame.is_visible_in_tree()
@@ -255,6 +258,7 @@ func _build_ui() -> void:
 
 	var min_h = 220.0 if is_mobile_view else 340.0
 	_video_frame.custom_minimum_size = Vector2(0, min_h)
+	_video_frame.focus_mode = Control.FOCUS_ALL
 
 	var frame_style = StyleBoxFlat.new()
 	frame_style.bg_color = Color(0.04, 0.04, 0.06, 1.0)
@@ -268,6 +272,14 @@ func _build_ui() -> void:
 	frame_style.corner_radius_bottom_left = 8
 	frame_style.corner_radius_bottom_right = 8
 	_video_frame.add_theme_stylebox_override("panel", frame_style)
+
+	var frame_focus = frame_style.duplicate() as StyleBoxFlat
+	frame_focus.border_color = Color(1.0, 0.85, 0.25, 1.0)
+	frame_focus.border_width_left = 3
+	frame_focus.border_width_top = 3
+	frame_focus.border_width_right = 3
+	frame_focus.border_width_bottom = 3
+	_video_frame.add_theme_stylebox_override("focus", frame_focus)
 
 	# Thumbnail background image (TextureRect)
 	_thumbnail_rect = TextureRect.new()
@@ -357,9 +369,13 @@ func _build_ui() -> void:
 	bar_hflow.add_theme_constant_override("h_separation", 10)
 	bar_hflow.add_theme_constant_override("v_separation", 8)
 
+	bar_panel.add_child(bar_hflow)
+	add_child(bar_panel)
+
 	if not on_desktop_win or is_mobile_view:
 		# Mobile-optimized primary touch buttons
 		var mob_watch_btn = Button.new()
+		mob_watch_btn.name = "MobWatchBtn"
 		mob_watch_btn.text = "▶ Open in YouTube App"
 		mob_watch_btn.custom_minimum_size = Vector2(210, 52)
 		mob_watch_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -368,15 +384,27 @@ func _build_ui() -> void:
 		bar_hflow.add_child(mob_watch_btn)
 
 		_copy_btn = Button.new()
+		_copy_btn.name = "CopyBtn"
 		_copy_btn.text = "📋 Copy Video Link"
 		_copy_btn.custom_minimum_size = Vector2(170, 52)
 		_copy_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_apply_btn_style(_copy_btn, Color(0.20, 0.28, 0.38))
 		_copy_btn.pressed.connect(_on_copy_link_pressed.bind(_copy_btn))
 		bar_hflow.add_child(_copy_btn)
+
+		mob_watch_btn.focus_neighbor_right = mob_watch_btn.get_path_to(_copy_btn)
+		mob_watch_btn.focus_neighbor_left = mob_watch_btn.get_path_to(_copy_btn)
+		_copy_btn.focus_neighbor_left = _copy_btn.get_path_to(mob_watch_btn)
+		_copy_btn.focus_neighbor_right = _copy_btn.get_path_to(mob_watch_btn)
+
+		if _video_frame != null:
+			_video_frame.focus_neighbor_bottom = _video_frame.get_path_to(mob_watch_btn)
+			mob_watch_btn.focus_neighbor_top = mob_watch_btn.get_path_to(_video_frame)
+			_copy_btn.focus_neighbor_top = _copy_btn.get_path_to(_video_frame)
 	else:
 		# Desktop Windows control buttons
 		_browser_btn = Button.new()
+		_browser_btn.name = "BrowserBtn"
 		_browser_btn.text = "↗ Open in External Browser"
 		_browser_btn.custom_minimum_size = Vector2(190, 42)
 		_apply_btn_style(_browser_btn, Color(0.25, 0.32, 0.42))
@@ -384,6 +412,7 @@ func _build_ui() -> void:
 		bar_hflow.add_child(_browser_btn)
 
 		_copy_btn = Button.new()
+		_copy_btn.name = "CopyBtn"
 		_copy_btn.text = "📋 Copy Link"
 		_copy_btn.custom_minimum_size = Vector2(130, 42)
 		_apply_btn_style(_copy_btn, Color(0.20, 0.28, 0.38))
@@ -391,6 +420,7 @@ func _build_ui() -> void:
 		bar_hflow.add_child(_copy_btn)
 
 		_play_btn = Button.new()
+		_play_btn.name = "PlayBtn"
 		_play_btn.text = "🔄 Reload Player"
 		_play_btn.custom_minimum_size = Vector2(140, 42)
 		_apply_btn_style(_play_btn, Color(0.20, 0.45, 0.35))
@@ -398,18 +428,32 @@ func _build_ui() -> void:
 		bar_hflow.add_child(_play_btn)
 
 		_stop_btn = Button.new()
+		_stop_btn.name = "StopBtn"
 		_stop_btn.text = "⏹ Stop Video"
 		_stop_btn.custom_minimum_size = Vector2(120, 42)
 		_apply_btn_style(_stop_btn, Color(0.55, 0.20, 0.20))
 		_stop_btn.pressed.connect(_on_stop_pressed)
 		bar_hflow.add_child(_stop_btn)
 
-	bar_panel.add_child(bar_hflow)
-	add_child(bar_panel)
+		_browser_btn.focus_neighbor_left = _browser_btn.get_path_to(_stop_btn)
+		_browser_btn.focus_neighbor_right = _browser_btn.get_path_to(_copy_btn)
+		_copy_btn.focus_neighbor_left = _copy_btn.get_path_to(_browser_btn)
+		_copy_btn.focus_neighbor_right = _copy_btn.get_path_to(_play_btn)
+		_play_btn.focus_neighbor_left = _play_btn.get_path_to(_copy_btn)
+		_play_btn.focus_neighbor_right = _play_btn.get_path_to(_stop_btn)
+		_stop_btn.focus_neighbor_left = _stop_btn.get_path_to(_play_btn)
+		_stop_btn.focus_neighbor_right = _stop_btn.get_path_to(_browser_btn)
+
+		if _video_frame != null:
+			_video_frame.focus_neighbor_bottom = _video_frame.get_path_to(_browser_btn)
+			_browser_btn.focus_neighbor_top = _browser_btn.get_path_to(_video_frame)
+			_copy_btn.focus_neighbor_top = _copy_btn.get_path_to(_video_frame)
+			_play_btn.focus_neighbor_top = _play_btn.get_path_to(_video_frame)
+			_stop_btn.focus_neighbor_top = _stop_btn.get_path_to(_video_frame)
 
 
 func _on_thumbnail_gui_input(event: InputEvent) -> void:
-	if (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed) or (event is InputEventScreenTouch and event.pressed):
+	if (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed) or (event is InputEventScreenTouch and event.pressed) or event.is_action_pressed("ui_accept"):
 		_on_open_browser_pressed()
 
 
@@ -433,8 +477,8 @@ func _start_in_app_player() -> void:
 			_status_lbl.text = "No video tutorial available for this shot type."
 		return
 
-	if not is_desktop_windows():
-		# On mobile / non-Windows platforms, interactive thumbnail card handles playback via YouTube app
+	if not is_desktop_windows() or DisplayServer.get_name() == "headless":
+		# On mobile / non-Windows platforms or in headless tests, do not launch native browser process
 		if _status_lbl != null:
 			_status_lbl.text = "🎬 Tap preview or button below to watch on YouTube."
 		return
@@ -580,9 +624,17 @@ func _apply_btn_style(btn: Button, bg_col: Color) -> void:
 	var pressed_style = style.duplicate()
 	pressed_style.bg_color = bg_col.darkened(0.15)
 
+	var focus_style = style.duplicate()
+	focus_style.border_width_left = 3
+	focus_style.border_width_right = 3
+	focus_style.border_width_top = 3
+	focus_style.border_width_bottom = 3
+	focus_style.border_color = Color(0.2, 0.8, 1.0, 0.95)
+
 	btn.add_theme_stylebox_override("normal", style)
 	btn.add_theme_stylebox_override("hover", hover_style)
 	btn.add_theme_stylebox_override("pressed", pressed_style)
-	btn.add_theme_stylebox_override("focus", style)
+	btn.add_theme_stylebox_override("focus", focus_style)
+	btn.focus_mode = Control.FOCUS_ALL
 	btn.add_theme_font_size_override("font_size", 14 if not is_mobile_view else 15)
 	btn.add_theme_color_override("font_color", Color.WHITE)
