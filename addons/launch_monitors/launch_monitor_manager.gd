@@ -231,7 +231,7 @@ func start_scan() -> void:
 		_start_square_scan()
 	else:
 		_start_square_scan()
-		if OS.get_name() == "Android":
+		if OS.get_name() == "Android" or OS.get_name() == "macOS":
 			get_tree().create_timer(0.2).timeout.connect(_start_garmin_scan)
 		else:
 			_start_garmin_scan()
@@ -1180,10 +1180,14 @@ func _update_hud_display() -> void:
 
 func _debug_log(message: String) -> void:
 	print("%s %s" % [SQUARE_LOG_PREFIX, message])
+	if has_node("/root/DebugLogger"):
+		get_node("/root/DebugLogger").log_bluetooth("%s %s" % [SQUARE_LOG_PREFIX, message])
 
 
 func _debug_error(message: String) -> void:
 	push_error("%s %s" % [SQUARE_LOG_PREFIX, message])
+	if has_node("/root/DebugLogger"):
+		get_node("/root/DebugLogger").log_error("%s %s" % [SQUARE_LOG_PREFIX, message])
 
 
 func _is_transient_square_connect_error(message: String) -> bool:

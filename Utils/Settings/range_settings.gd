@@ -68,6 +68,8 @@ var debug_show_suspense_cone := Setting.new(false)
 var screen_offset_enabled := Setting.new(false)
 var screen_offset_value := Setting.new(0.0, -1.0, 1.0)
 var screen_offset_putter_value := Setting.new(0.0, -1.0, 1.0)
+var debug_logging_enabled := Setting.new(false)
+var debug_log_path := Setting.new("user://debug.log")
 
 func _init():
 	init({
@@ -138,6 +140,8 @@ func _init():
 		"screen_offset_enabled": screen_offset_enabled,
 		"screen_offset_value": screen_offset_value,
 		"screen_offset_putter_value": screen_offset_putter_value,
+		"debug_logging_enabled": debug_logging_enabled,
+		"debug_log_path": debug_log_path,
 	})
 
 

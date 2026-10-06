@@ -68,11 +68,79 @@ internal static class ObjCRuntime
     [DllImport(LibObjC, EntryPoint = "objc_msgSend")]
     public static extern IntPtr objc_msgSend_bytes(IntPtr receiver, IntPtr selector, byte[] arg1, UIntPtr arg2);
 
+    [DllImport(LibObjC, EntryPoint = "objc_msgSend")]
+    public static extern IntPtr objc_msgSend_bool_val(IntPtr receiver, IntPtr selector, bool arg1);
+
+    [DllImport(LibSystem, EntryPoint = "dispatch_async_f")]
+    public static extern void dispatch_async_f(IntPtr queue, IntPtr context, IntPtr work);
+
     [DllImport(LibObjC, EntryPoint = "objc_autoreleasePoolPush")]
     public static extern IntPtr objc_autoreleasePoolPush();
 
     [DllImport(LibObjC, EntryPoint = "objc_autoreleasePoolPop")]
     public static extern void objc_autoreleasePoolPop(IntPtr pool);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void DispatchFunction(IntPtr context);
+
+    private static readonly DispatchFunction _dispatchWorkDelegate = RunDispatchWork;
+
+    private static void RunDispatchWork(IntPtr context)
+    {
+        var handle = GCHandle.FromIntPtr(context);
+        try
+        {
+            if (handle.Target is Action action)
+            {
+                action();
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLoggerBridge.LogError($"[AppleBLE] Dispatch error: {ex.Message}");
+        }
+        finally
+        {
+            handle.Free();
+        }
+    }
+
+    public static System.Threading.Tasks.Task DispatchAsync(IntPtr queue, Action action)
+    {
+        if (queue == IntPtr.Zero)
+        {
+            action();
+            return System.Threading.Tasks.Task.CompletedTask;
+        }
+
+        var tcs = new System.Threading.Tasks.TaskCompletionSource<bool>(System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
+        Action wrapper = () =>
+        {
+            try
+            {
+                action();
+                tcs.TrySetResult(true);
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        };
+
+        var handle = GCHandle.Alloc(wrapper);
+        dispatch_async_f(queue, GCHandle.ToIntPtr(handle), Marshal.GetFunctionPointerForDelegate(_dispatchWorkDelegate));
+        return tcs.Task;
+    }
+
+    public static IntPtr CreateScanOptionsDictionary(bool allowDuplicates)
+    {
+        IntPtr nsNumberClass = objc_getClass("NSNumber");
+        IntPtr boolVal = objc_msgSend_bool_val(nsNumberClass, sel_registerName("numberWithBool:"), allowDuplicates);
+        IntPtr keyNs = CreateNSString("kCBScanOptionAllowDuplicates");
+        IntPtr nsDictClass = objc_getClass("NSDictionary");
+        return objc_msgSend(nsDictClass, sel_registerName("dictionaryWithObject:forKey:"), boolVal, keyNs);
+    }
+
 
     public static void EnsureFrameworksLoaded()
     {

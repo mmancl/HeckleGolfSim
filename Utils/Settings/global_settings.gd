@@ -264,6 +264,11 @@ func load_settings() -> void:
 		range_settings.gspro_selected_device.set_value("mlm2pro")
 		migrated = true
 
+	var log_path_val = str(range_settings.debug_log_path.value).strip_edges()
+	if log_path_val.is_empty():
+		range_settings.debug_log_path.set_value("user://debug.log")
+		migrated = true
+
 	if migrated:
 		save_settings()
 	

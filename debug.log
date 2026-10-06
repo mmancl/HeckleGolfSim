@@ -1,0 +1,81 @@
+================================================================================
+                   HECKLE GOLF SIMULATOR - DIAGNOSTIC DEBUG LOG
+================================================================================
+App Name:             Heckle Golf Simulator
+App Version:          0.98.1
+Engine Version:       Godot Engine v4.7.0.stable (official)
+Session Timestamp:    2026-10-05T18:15:00 (Local) / 2026-10-05T23:15:00 (UTC)
+Log Output Path:      debug.log
+Executable Path:      C:/Users/micha/Downloads/Godot_v4.7-stable_mono_win64/Godot_v4.7-stable_mono_win64/Godot_v4.7-stable_mono_win64.exe
+User Data Directory:  C:/Users/micha/AppData/Roaming/Godot/app_userdata/Heckle Golf Simulator
+--------------------------------------------------------------------------------
+SYSTEM & ENVIRONMENT SPECS:
+  OS Platform:        Windows
+  OS Version / Build: 10.0.26200
+  Device / Model:     Alienware x17 R1
+  Architecture:       x86_64
+  Processor (CPU):    11th Gen Intel(R) Core(TM) i7-11800H @ 2.30GHz (16 logical threads)
+  Static Memory:      229.99 MB (Peak: 250.61 MB)
+  Video Adapter (GPU):NVIDIA GeForce RTX 3080 Laptop GPU (Vendor: NVIDIA)
+  Graphics Driver/API:1.4.341
+  Display Mode:       0 (Screen size: (1920, 1080))
+  C# / .NET Support:  true (Assembly: HeckleGolfSim)
+--------------------------------------------------------------------------------
+LAUNCH MONITOR CONFIGURATION SNAPSHOT:
+  LM Enabled:         true
+  Configured Device:  SquareGolf(131b) (ID: 242459548390171, Type: square)
+  Current LM Status:  No launch monitors found
+  Club Code:          0204
+  Handedness:         Right
+  GSPro TCP Server:   0.0.0.0:921
+  Foam Ball Boost:    false (100.0%)
+--------------------------------------------------------------------------------
+APPLICATION INTEGRITY & FILE SIZE ANALYSIS:
+Checking critical application files, native libraries, and configurations:
+  [EXE] Godot_v4.7-stable_mono_win64.exe : 170.78 MB (179074568 bytes)
+  [FILE] project.godot                                                : 3.0 KB (3027 bytes)
+  [FILE] export_presets.cfg                                           : 16.0 KB (16376 bytes)
+  [FILE] addons/launch_monitors/launch_monitor_manager.gd             : 41.4 KB (42370 bytes)
+  [FILE] addons/launch_monitors/common/bluetooth/apple/AppleBluetoothGattClient.cs : 36.5 KB (37399 bytes)
+  [FILE] addons/launch_monitors/common/bluetooth/apple/ObjCRuntime.cs : 7.8 KB (7986 bytes)
+  [FILE] addons/launch_monitors/common/bluetooth/windows/WindowsBluetoothGattClient.cs : 17.1 KB (17561 bytes)
+  [FILE] addons/launch_monitors/common/bluetooth/linux/LinuxBluetoothGattClient.cs : 15.4 KB (15777 bytes)
+  [FILE] addons/launch_monitors/common/bluetooth/android/AndroidBluetoothGattClient.cs : 24.0 KB (24577 bytes)
+  [FILE] addons/launch_monitors/common/tcp_server/TcpServer.cs        : 11.0 KB (11263 bytes)
+  [FILE] addons/launch_monitors/square/SquareLaunchMonitor.cs         : 5.2 KB (5317 bytes)
+  [FILE] addons/launch_monitors/square/SquareConnectionSession.cs     : 24.5 KB (25078 bytes)
+  [FILE] addons/launch_monitors/square/SquareProtocol.cs              : 8.6 KB (8773 bytes)
+  [FILE] addons/launch_monitors/square/SquareCommandBuilder.cs        : 1.4 KB (1466 bytes)
+  [FILE] addons/launch_monitors/square/SquareShotDataMapper.cs        : 3.6 KB (3677 bytes)
+  [FILE] addons/launch_monitors/garmin/GarminLaunchMonitor.cs         : 5.1 KB (5194 bytes)
+  [FILE] addons/launch_monitors/garmin/GarminConnectionSession.cs     : 33.9 KB (34703 bytes)
+  [FILE] addons/launch_monitors/garmin/GarminProtocol.cs              : 3.3 KB (3364 bytes)
+  [FILE] Player/player.gd                                             : 19.2 KB (19683 bytes)
+  [FILE] Utils/Settings/global_settings.gd                            : 26.8 KB (27460 bytes)
+  [FILE] Utils/Settings/range_settings.gd                             : 6.5 KB (6650 bytes)
+  [FILE] UI/Settings/RangeSettings/range_settings.gd                  : 128.6 KB (131728 bytes)
+  [FILE] Utils/debug_logger.gd                                        : 21.0 KB (21520 bytes)
+  [FILE] user://global_settings.cfg                                   : 2.1 KB (2132 bytes)
+  [FILE] user://square_launch_monitor.cfg                             : 220 B (220 bytes)
+  [FILE] user://logs/godot.log                                        : 10.1 KB (10295 bytes)
+  User Directory Inventory (C:/Users/micha/AppData/Roaming/Godot/app_userdata/Heckle Golf Simulator):
+    -> debug.log                      : 6.3 KB (6490 bytes)
+    -> global_settings.cfg            : 2.1 KB (2132 bytes)
+    -> layout.cfg                     : 309 B (309 bytes)
+    -> osm_download_settings.cfg      : 143 B (143 bytes)
+    -> Player1_2026-07-07_1.json      : 77 B (77 bytes)
+    -> Player1_2026-08-03_1.json      : 77 B (77 bytes)
+    -> Player1_2026-08-29_1.json      : 77 B (77 bytes)
+    -> players_registry.json          : 1.5 KB (1577 bytes)
+    -> player_achievements.json       : 270 B (270 bytes)
+    -> player_club_stats.json         : 345.7 KB (353979 bytes)
+    -> player_swing_issues.json       : 5.4 KB (5547 bytes)
+    -> session_data.save              : 68 B (68 bytes)
+    -> square_launch_monitor.cfg      : 220 B (220 bytes)
+Integrity Summary: 26 files verified, 0 missing critical files.
+================================================================================
+REAL-TIME DIAGNOSTIC TELEMETRY BEGINS:
+================================================================================
+[2026-10-05T18:15:01] [ENGINE_ERR] ERROR: Could not create directory: 'user:/'.
+[2026-10-05T18:15:01] [ENGINE_ERR] ERROR: [DebugLogger] Failed to open debug log file 'user:/debug.log': error 7
+[2026-10-05T18:15:01] [ENGINE_ERR]    at: push_error (core/variant/variant_utility.cpp:1023)

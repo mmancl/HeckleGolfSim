@@ -369,6 +369,8 @@ func _on_tcp_client_hit_ball(data: Dictionary) -> void:
 	side_distance = 0.0
 	create_new_tracer()
 	print("[player.gd] Hitting ball from TCP! ball.aim_yaw_offset_deg = ", ball.aim_yaw_offset_deg)
+	if has_node("/root/DebugLogger"):
+		get_node("/root/DebugLogger").log_shot(data)
 	ball.hit_from_data(data)
 	if current_tracer != null:
 		current_tracer.start_trail(ball.position)
@@ -392,6 +394,8 @@ func _on_range_ui_hit_shot(data: Variant) -> void:
 	shot_data = data.duplicate()
 	shot_data["TargetDistance"] = target_dist
 	print("Local shot injection payload: ", JSON.stringify(shot_data))
+	if has_node("/root/DebugLogger") and shot_data is Dictionary:
+		get_node("/root/DebugLogger").log_shot(shot_data)
 
 	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
 	if mp_mgr != null and not mp_mgr.players.is_empty():

@@ -3120,3 +3120,217 @@ func _setup_developer_debugging_section() -> void:
 
 	viz_card.add_child(viz_vbox)
 	root.add_child(viz_card)
+
+	# --- Diagnostic Logging Section Card ---
+	var log_card := PanelContainer.new()
+	ThemeManager.apply_card_panel_style(log_card, false, 8, 16, 14, 16, 14)
+	var log_vbox := VBoxContainer.new()
+	log_vbox.add_theme_constant_override("separation", 12)
+
+	var log_sec_title := Label.new()
+	log_sec_title.text = "Diagnostic Logging"
+	log_sec_title.add_theme_font_size_override("font_size", 18)
+	log_sec_title.add_theme_color_override("font_color", ThemeManager.COLOR_PRIMARY_NORMAL)
+	log_vbox.add_child(log_sec_title)
+
+	var log_toggle_row = _create_toggle_setting_row("Enable Debug Logging", "debug_logging_enabled")
+	log_vbox.add_child(log_toggle_row)
+
+	var log_hint := Label.new()
+	log_hint.text = "When enabled, captures application version, hardware & OS analysis, file integrity checks, Bluetooth launch monitor telemetry, shot metrics, and engine errors to a diagnostic log file."
+	log_hint.add_theme_font_size_override("font_size", 14)
+	log_hint.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	log_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	log_vbox.add_child(log_hint)
+
+	var log_sep := HSeparator.new()
+	log_vbox.add_child(log_sep)
+
+	var path_header := Label.new()
+	path_header.text = "Debug Log File Path"
+	path_header.add_theme_font_size_override("font_size", 16)
+	path_header.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	log_vbox.add_child(path_header)
+
+	var path_row := HBoxContainer.new()
+	path_row.add_theme_constant_override("separation", 8)
+
+	var path_input := LineEdit.new()
+	var current_path := ""
+	if GlobalSettings.range_settings.settings.has("debug_log_path"):
+		current_path = str(GlobalSettings.range_settings.debug_log_path.value)
+	if current_path.is_empty():
+		current_path = "user://debug.log"
+	path_input.text = current_path
+	path_input.placeholder_text = "user://debug.log"
+	path_input.custom_minimum_size = Vector2(280, 44)
+	path_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ThemeManager.apply_input_style(path_input, 8)
+	path_row.add_child(path_input)
+
+	var browse_btn := Button.new()
+	browse_btn.text = "Browse..."
+	browse_btn.custom_minimum_size = Vector2(100, 44)
+	ThemeManager.apply_secondary_button_style(browse_btn, 8)
+	path_row.add_child(browse_btn)
+
+	var reset_path_btn := Button.new()
+	reset_path_btn.text = "Default"
+	reset_path_btn.tooltip_text = "Reset path to user://debug.log"
+	reset_path_btn.custom_minimum_size = Vector2(80, 44)
+	ThemeManager.apply_secondary_button_style(reset_path_btn, 8)
+	path_row.add_child(reset_path_btn)
+
+	log_vbox.add_child(path_row)
+
+	# Action Buttons Row
+	var actions_row := HBoxContainer.new()
+	actions_row.add_theme_constant_override("separation", 8)
+
+	var copy_path_btn := Button.new()
+	copy_path_btn.text = "📋 Copy Path"
+	copy_path_btn.custom_minimum_size = Vector2(120, 38)
+	ThemeManager.apply_secondary_button_style(copy_path_btn, 8)
+	actions_row.add_child(copy_path_btn)
+
+	var open_folder_btn := Button.new()
+	open_folder_btn.text = "📁 Open Folder"
+	open_folder_btn.custom_minimum_size = Vector2(130, 38)
+	ThemeManager.apply_secondary_button_style(open_folder_btn, 8)
+	actions_row.add_child(open_folder_btn)
+
+	var flush_btn := Button.new()
+	flush_btn.text = "⚡ Write Diagnostics Now"
+	flush_btn.tooltip_text = "Immediately write environment diagnostics and file integrity scan into the log file"
+	flush_btn.custom_minimum_size = Vector2(190, 38)
+	ThemeManager.apply_secondary_button_style(flush_btn, 8)
+	actions_row.add_child(flush_btn)
+
+	log_vbox.add_child(actions_row)
+
+	# Resolved System Path Info Label
+	var resolved_path_label := Label.new()
+	var global_path: String = ProjectSettings.globalize_path(current_path)
+	resolved_path_label.text = "System path: %s" % global_path
+	resolved_path_label.add_theme_font_size_override("font_size", 13)
+	resolved_path_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	resolved_path_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	log_vbox.add_child(resolved_path_label)
+
+	# Status Label
+	var status_label := Label.new()
+	status_label.add_theme_font_size_override("font_size", 14)
+	log_vbox.add_child(status_label)
+
+	var update_status = func():
+		if not is_instance_valid(status_label):
+			return
+		var is_enabled := false
+		if GlobalSettings.range_settings.settings.has("debug_logging_enabled"):
+			is_enabled = bool(GlobalSettings.range_settings.debug_logging_enabled.value)
+		if is_enabled:
+			var bytes_cnt := 0
+			var lines_cnt := 0
+			if has_node("/root/DebugLogger"):
+				var dl = get_node("/root/DebugLogger")
+				bytes_cnt = dl.get_bytes_written()
+				lines_cnt = dl.get_session_log_count()
+			status_label.text = "● Logging Active (%d bytes written, %d events recorded)" % [bytes_cnt, lines_cnt]
+			status_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_SUCCESS)
+		else:
+			status_label.text = "○ Logging Inactive (Toggle above to activate diagnostic recording)"
+			status_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+
+	update_status.call()
+
+	# Connect input handlers
+	path_input.text_changed.connect(func(new_text: String):
+		var clean := new_text.strip_edges()
+		if clean.is_empty():
+			clean = "user://debug.log"
+		GlobalSettings.range_settings.debug_log_path.set_value(clean)
+		resolved_path_label.text = "System path: %s" % ProjectSettings.globalize_path(clean)
+	)
+
+	reset_path_btn.pressed.connect(func():
+		path_input.text = "user://debug.log"
+		GlobalSettings.range_settings.debug_log_path.set_value("user://debug.log")
+		resolved_path_label.text = "System path: %s" % ProjectSettings.globalize_path("user://debug.log")
+	)
+
+	copy_path_btn.pressed.connect(func():
+		var target := path_input.text.strip_edges()
+		if target.is_empty():
+			target = "user://debug.log"
+		DisplayServer.clipboard_set(ProjectSettings.globalize_path(target))
+		copy_path_btn.text = "✓ Copied!"
+		var t := get_tree().create_timer(1.5)
+		t.timeout.connect(func():
+			if is_instance_valid(copy_path_btn):
+				copy_path_btn.text = "📋 Copy Path"
+		)
+	)
+
+	open_folder_btn.pressed.connect(func():
+		var target := path_input.text.strip_edges()
+		if target.is_empty():
+			target = "user://debug.log"
+		var full := ProjectSettings.globalize_path(target)
+		var folder := full.get_base_dir()
+		if not DirAccess.dir_exists_absolute(folder):
+			DirAccess.make_dir_recursive_absolute(folder)
+		OS.shell_open(folder)
+	)
+
+	flush_btn.pressed.connect(func():
+		if has_node("/root/DebugLogger"):
+			var dl = get_node("/root/DebugLogger")
+			dl.refresh_logger()
+			dl.log_info("Manual diagnostics report requested from settings UI.")
+			update_status.call()
+			flush_btn.text = "✓ Written!"
+			var t := get_tree().create_timer(1.5)
+			t.timeout.connect(func():
+				if is_instance_valid(flush_btn):
+					flush_btn.text = "⚡ Write Diagnostics Now"
+			)
+	)
+
+	# FileDialog for Browse button
+	var file_dialog := FileDialog.new()
+	file_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	file_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	file_dialog.use_native_dialog = true
+	file_dialog.filters = PackedStringArray(["*.log ; Log Files", "*.txt ; Text Files", "* ; All Files"])
+	file_dialog.current_file = "debug.log"
+	file_dialog.file_selected.connect(func(selected_path: String):
+		path_input.text = selected_path
+		GlobalSettings.range_settings.debug_log_path.set_value(selected_path)
+		resolved_path_label.text = "System path: %s" % ProjectSettings.globalize_path(selected_path)
+	)
+	add_child(file_dialog)
+
+	browse_btn.pressed.connect(func():
+		file_dialog.popup_centered(Vector2i(700, 500))
+	)
+
+	if has_node("/root/DebugLogger"):
+		var dl = get_node("/root/DebugLogger")
+		var on_state_changed = func(_enabled, _p):
+			if is_instance_valid(status_label):
+				update_status.call()
+		var on_entry_written = func(_entry):
+			if is_instance_valid(status_label):
+				update_status.call()
+		dl.logging_state_changed.connect(on_state_changed)
+		dl.log_written.connect(on_entry_written)
+		tree_exited.connect(func():
+			if is_instance_valid(dl):
+				if dl.logging_state_changed.is_connected(on_state_changed):
+					dl.logging_state_changed.disconnect(on_state_changed)
+				if dl.log_written.is_connected(on_entry_written):
+					dl.log_written.disconnect(on_entry_written)
+		)
+
+	log_card.add_child(log_vbox)
+	root.add_child(log_card)

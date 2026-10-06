@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using Godot;
+using LaunchMonitors.Common;
 using LaunchMonitors.Common.Bluetooth;
 using LaunchMonitors.Garmin;
 using GodotDictionary = Godot.Collections.Dictionary;
@@ -177,11 +178,11 @@ public partial class GarminLaunchMonitor : Node
 
     private static void LogInfo(string message)
     {
-        GD.Print($"{LogPrefix} {message}");
+        DebugLoggerBridge.LogBluetooth($"{LogPrefix} {message}");
     }
 
     private static void LogError(string message)
     {
-        GD.PrintErr($"{LogPrefix} {message}");
+        DebugLoggerBridge.LogError($"{LogPrefix} {message}");
     }
 }

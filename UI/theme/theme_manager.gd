@@ -37,6 +37,7 @@ const COLOR_TEXT_WARNING = Color(1.0, 0.82, 0.32)    # High-contrast warm amber 
 const COLOR_TEXT_DANGER = Color(1.0, 0.42, 0.42)     # High-luminance coral red (clearly readable on dark backgrounds)
 const COLOR_TEXT_SUCCESS = Color(0.35, 0.95, 0.55)   # Vibrant mint green for under-par and ready states
 const COLOR_TEXT_ACCENT = Color(0.35, 0.82, 1.0)     # Crisp vivid cyan for section titles and headers
+const COLOR_SUCCESS = COLOR_TEXT_SUCCESS
 
 # --- Helper Methods for Button Styling ---
 
