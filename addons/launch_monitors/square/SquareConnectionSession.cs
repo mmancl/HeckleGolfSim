@@ -188,8 +188,22 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
 
     public void SetHandedness(int handedness)
     {
-        _handedness = handedness == 1 ? 1 : 0;
-        _logInfo($"SetHandedness requested. handedness={_handedness}");
+        _ = RunAsync(() => SetHandednessAsync(handedness));
+    }
+
+    public async Task SetHandednessAsync(int handedness, CancellationToken cancellationToken = default)
+    {
+        var targetHandedness = handedness == 1 ? 1 : 0;
+        var changed = _handedness != targetHandedness;
+        _handedness = targetHandedness;
+        _logInfo($"SetHandedness requested. handedness={_handedness}, changed={changed}");
+
+        if (_isConnected && changed)
+        {
+            await WriteCommandAsync(SquareCommandBuilder.Club(NextSequence(), _clubCode, _handedness), cancellationToken);
+            await _delayAsync(_options.ConnectionReadyDelay, cancellationToken);
+            await SetReadyAsync(cancellationToken);
+        }
     }
 
     public async Task SetReadyAsync(CancellationToken cancellationToken = default)
@@ -225,13 +239,27 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         var battery = await _bluetoothClient.ReadCharacteristicAsync(_options.BatteryCharacteristicUuid, cancellationToken);
         if (battery.Length > 0)
         {
-            EmitBattery(battery[0]);
+            _logInfo($"Battery read from 0x2A19: {battery[0]}% (hex={Convert.ToHexString(battery)})");
+            // Standard battery 0x2A19 is unimplemented on Square Omni and returns 0% (or stub value).
+            // A powered-on launch monitor communicating over BLE will not have a 0% battery.
+            // Ignore 0% reads so we do not trigger false low-battery alerts on Omni devices
+            // (Omni reports its true battery via 0x91 notifications).
+            if (battery[0] > 0 && battery[0] <= 100)
+            {
+                EmitBattery(battery[0]);
+            }
+            else
+            {
+                _logInfo($"Ignoring 0x2A19 battery reading of {battery[0]}% (unimplemented on Square Omni; awaiting 0x91 notification).");
+            }
         }
 
         var firmware = await _bluetoothClient.ReadCharacteristicAsync(_options.FirmwareCharacteristicUuid, cancellationToken);
         if (firmware.Length > 0)
         {
-            EmitFirmware(ParseFirmware(firmware));
+            var fwStr = ParseFirmware(firmware);
+            _logInfo($"Firmware read: '{fwStr}' (hex={Convert.ToHexString(firmware)})");
+            EmitFirmware(fwStr);
         }
     }
 
@@ -283,7 +311,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
                 command,
                 writeMode,
                 cancellationToken);
-            _logInfo($"Wrote command ({command.Length} bytes, mode={writeMode}).");
+            _logInfo($"Wrote command ({command.Length} bytes, mode={writeMode}, hex={Convert.ToHexString(command)}).");
         }
         finally
         {
@@ -420,6 +448,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
 
         if (value.CharacteristicUuid == _options.BatteryCharacteristicUuid && value.Value.Length > 0)
         {
+            _logInfo($"Battery notification received: {value.Value[0]}% (hex={Convert.ToHexString(value.Value)})");
             EmitBattery(value.Value[0]);
         }
     }
@@ -428,6 +457,18 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
     {
         // Debug: log full packet hex for diagnosing club data byte layout
         _logInfo($"Notification received: {data.Length} bytes, hex={Convert.ToHexString(data)}");
+
+        if (SquareProtocol.TryParseBattery(data, out var batteryLevel, out var chargingState))
+        {
+            _logInfo($"Square battery notification (0x91) received: {batteryLevel}% (chargingState={chargingState}, hex={Convert.ToHexString(data)})");
+            EmitBattery(batteryLevel);
+            return;
+        }
+
+        if (SquareProtocol.IsClockPacket(data))
+        {
+            return;
+        }
 
         if (SquareProtocol.TryParseClubData(data, out var clubMetrics))
         {

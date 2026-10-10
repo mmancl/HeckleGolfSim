@@ -52,6 +52,10 @@ var last_shot_info: Dictionary = {}
 func _ready() -> void:
 	if has_node("/root/EventBus"):
 		get_node("/root/EventBus").connect("club_selected", Callable(self, "_on_club_selected"))
+	if has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("_connect_multiplayer_signals"):
+			lm._connect_multiplayer_signals()
 
 func _on_club_selected(club_name: String) -> void:
 	current_club = club_name
@@ -103,8 +107,9 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 	clear_last_shot()
 	practice_mode_active = false
 
-	if has_node("/root/GlobalSettings"):
-		get_node("/root/GlobalSettings").start_round_wind(true)
+	var gs_wind = _get_global_settings()
+	if gs_wind != null and gs_wind.has_method("start_round_wind"):
+		gs_wind.start_round_wind(true)
 
 	# Default 2v2 Scramble teams if not provided
 	if game_mode == "2v2 Scramble" and team_assignments.is_empty():
@@ -137,6 +142,7 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 		var p_avatar = config.get("avatar", reg.get("avatar", ""))
 		var p_bag = config.get("bag", reg.get("bag", []))
 		var p_skill = config.get("skill_level", reg.get("skill_level", "mid_handicap"))
+		var p_handedness = int(config.get("handedness", reg.get("handedness", 0)))
 
 		var p := {
 			"name": p_name,
@@ -146,6 +152,7 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 			"avatar": p_avatar,
 			"bag": p_bag,
 			"skill_level": p_skill,
+			"handedness": p_handedness,
 			"strokes": 0,
 			"total_strokes": 0,
 			"last_hole_score": 0,
@@ -171,7 +178,7 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 			"last_starting_pos": Vector3.ZERO
 		}
 		players.append(p)
-		register_player(p_name, p_email, p_avatar, p_bag, config.get("tee", "Blue"), p_skill)
+		register_player(p_name, p_email, p_avatar, p_bag, config.get("tee", "Blue"), p_skill, p_handedness)
 		skins_won[p_name] = 0
 		
 	course_title = config_data.get("Title", "")
@@ -1512,6 +1519,7 @@ func add_new_player_with_mode(player_name: String, tee_color: String, mode: Stri
 	var reg = get_registered_player(player_name)
 	var p_email = reg.get("email", "")
 	var p_avatar = reg.get("avatar", "")
+	var p_handedness = int(reg.get("handedness", 0))
 
 	var p := {
 		"name": player_name,
@@ -1532,6 +1540,7 @@ func add_new_player_with_mode(player_name: String, tee_color: String, mode: Stri
 		"lie_type": "teebox",
 		"email": p_email,
 		"avatar": p_avatar,
+		"handedness": p_handedness,
 		"color": player_colors[players.size() % player_colors.size()],
 		"mulligan_history": {},
 		"last_shot_tracer_points": [],
@@ -1545,7 +1554,7 @@ func add_new_player_with_mode(player_name: String, tee_color: String, mode: Stri
 	
 	if mode == "catch_up" and current_hole_index > 0:
 		players.append(p)
-		register_player(player_name, p_email, p_avatar)
+		register_player(player_name, p_email, p_avatar, [], "", "mid_handicap", p_handedness)
 		print("[MultiplayerManager] Added player %s mid-game in catch-up mode." % player_name)
 		start_catch_up_mode(p, 0, current_hole_index, false)
 	else:
@@ -1566,7 +1575,7 @@ func add_new_player_with_mode(player_name: String, tee_color: String, mode: Stri
 			p["last_starting_pos"] = p["position"]
 			
 		players.append(p)
-		register_player(player_name, p_email, p_avatar)
+		register_player(player_name, p_email, p_avatar, [], "", "mid_handicap", p_handedness)
 		print("[MultiplayerManager] Added new player mid-game: %s on hole %d" % [player_name, get_current_hole_number()])
 		save_current_match()
 
@@ -2138,7 +2147,7 @@ func get_registered_player(player_name: String) -> Dictionary:
 			return p
 	return {}
 
-func update_player_profile(player_name: String, email: String, avatar: String, preferred_tee: String = "", skill_level: String = "mid_handicap") -> bool:
+func update_player_profile(player_name: String, email: String, avatar: String, preferred_tee: String = "", skill_level: String = "mid_handicap", handedness: int = 0) -> bool:
 	var registered = get_registered_players()
 	for p in registered:
 		if p.get("name", "").to_lower() == player_name.to_lower():
@@ -2146,7 +2155,18 @@ func update_player_profile(player_name: String, email: String, avatar: String, p
 			p["avatar"] = avatar.strip_edges()
 			p["preferred_tee"] = preferred_tee.strip_edges()
 			p["skill_level"] = skill_level.strip_edges() if not skill_level.is_empty() else "mid_handicap"
+			p["handedness"] = handedness
 			save_registered_players(registered)
+			# Update actively playing participants if this player is in match
+			for pl in players:
+				if pl.get("name", "").to_lower() == player_name.to_lower():
+					pl["email"] = p["email"]
+					pl["avatar"] = p["avatar"]
+					pl["skill_level"] = p["skill_level"]
+					pl["handedness"] = handedness
+			var cur_p = get_active_player()
+			if not cur_p.is_empty() and cur_p.get("name", "").to_lower() == player_name.to_lower():
+				_sync_launch_monitor_for_player(cur_p)
 			return true
 	return false
 
@@ -2165,6 +2185,29 @@ func get_player_avatar(player_name: String) -> String:
 func get_player_preferred_tee(player_name: String) -> String:
 	var p = get_registered_player(player_name)
 	return p.get("preferred_tee", "")
+
+func get_player_handedness(player_name: String) -> int:
+	var p = get_registered_player(player_name)
+	return int(p.get("handedness", 0))
+
+func get_player_handedness_name(player_name: String) -> String:
+	return "Left" if get_player_handedness(player_name) == 1 else "Right"
+
+func _get_launch_monitor_manager() -> Node:
+	if is_inside_tree() and has_node("/root/LaunchMonitorManager"):
+		return get_node("/root/LaunchMonitorManager")
+	var main_loop = Engine.get_main_loop()
+	if main_loop is SceneTree and main_loop.root != null and main_loop.root.has_node("LaunchMonitorManager"):
+		return main_loop.root.get_node("LaunchMonitorManager")
+	return null
+
+func _sync_launch_monitor_for_player(player: Dictionary) -> void:
+	if player.is_empty():
+		return
+	var lm = _get_launch_monitor_manager()
+	if lm != null and lm.has_method("set_handedness"):
+		var hand = int(player.get("handedness", 0))
+		lm.set_handedness(hand)
 
 func get_player_bag(player_name: String) -> Array:
 	if player_name.is_empty():
@@ -2207,7 +2250,7 @@ func set_player_bag(player_name: String, bag: Array) -> bool:
 	emit_signal("player_bag_changed", player_name, clean_bag)
 	return found
 
-func register_player(player_name: String, email: String = "", avatar: String = "", bag: Array = [], preferred_tee: String = "", skill_level: String = "mid_handicap") -> void:
+func register_player(player_name: String, email: String = "", avatar: String = "", bag: Array = [], preferred_tee: String = "", skill_level: String = "mid_handicap", handedness: int = 0) -> void:
 	if player_name.is_empty():
 		return
 	var registered = get_registered_players()
@@ -2229,6 +2272,9 @@ func register_player(player_name: String, email: String = "", avatar: String = "
 			if not skill_level.is_empty() and p.get("skill_level", "") != skill_level:
 				p["skill_level"] = skill_level.strip_edges()
 				changed = true
+			if p.get("handedness", 0) != handedness:
+				p["handedness"] = handedness
+				changed = true
 			if changed:
 				save_registered_players(registered)
 			return # Already exists
@@ -2240,6 +2286,7 @@ func register_player(player_name: String, email: String = "", avatar: String = "
 		"bag": bag,
 		"preferred_tee": preferred_tee.strip_edges(),
 		"skill_level": skill_level.strip_edges() if not skill_level.is_empty() else "mid_handicap",
+		"handedness": handedness,
 		"created_at": Time.get_unix_time_from_system()
 	}
 	registered.append(new_player)

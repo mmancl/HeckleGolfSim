@@ -450,6 +450,7 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
             if (value.Value.Length > 0)
             {
                 var level = value.Value[0];
+                _logInfo($"[Garmin] Battery characteristic data: {level}% (hex={value.Value.ToHexString()})");
                 EmitBattery(level);
             }
             return;
@@ -567,7 +568,7 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
             var ack = GarminByteExtensions.HexStringToBytes("8813").Concat(msg[..2]).Concat(ackBody).ToArray();
             _ = WriteFramedMessageAsync(ack, CancellationToken.None);
 
-            _logInfo($"[Garmin] Received B313 notification/request: len={msg.Length}");
+            _logInfo($"[Garmin] Received B313 notification/request: len={msg.Length}, hex={hex}");
 
             if (msg.Length > 16)
             {
@@ -810,6 +811,7 @@ internal sealed class GarminConnectionSession : IAsyncDisposable
         try
         {
             byte[] packet = [.. bytes.Prepend(_header)];
+            _logInfo($"[Garmin] Wrote packet ({packet.Length} bytes): hex={packet.ToHexString()}");
             await _bluetoothClient.WriteCharacteristicAsync(
                 DeviceInterfaceWriterUuid,
                 packet,

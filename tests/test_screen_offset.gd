@@ -112,22 +112,35 @@ func _run_tests() -> void:
 	som.set_putter_active(true)
 	assert(is_equal_approx(som.get_target(), -0.6), "When putter active, target should be putter offset value (-0.6)")
 
-	# Verify Course Play UI mode (no recenter button, no percent label, dual sliders present)
+	# Verify Course Play UI mode (recenter buttons and value labels present for both general and putter offsets)
 	var cp_so_ctrl = so_ctrl_script.new()
 	cp_so_ctrl.is_course_play = true
 	cp_so_ctrl.show_putter_slider = true
 	root.add_child(cp_so_ctrl)
 
-	assert(cp_so_ctrl._center_btn == null, "Recenter button must not exist in Course Play mode")
-	assert(cp_so_ctrl._value_label == null, "Percent value label must not exist in Course Play mode")
+	assert(cp_so_ctrl._center_btn != null, "General recenter button must exist in Course Play mode")
+	assert(cp_so_ctrl._value_label != null, "General percent value label must exist in Course Play mode")
+	assert(cp_so_ctrl._putter_center_btn != null, "Putter recenter button must exist in Course Play mode")
+	assert(cp_so_ctrl._putter_value_label != null, "Putter percent value label must exist in Course Play mode")
 	assert(cp_so_ctrl._putter_slider != null, "Putter slider must exist when show_putter_slider is true")
 	assert(cp_so_ctrl._slider != null, "General offset slider must exist")
 
+	# Test centering functionality
+	cp_so_ctrl._slider.value = 0.5
+	cp_so_ctrl._on_center_pressed()
+	assert(is_zero_approx(cp_so_ctrl._slider.value), "General offset slider must reset to 0 on center pressed")
+
+	cp_so_ctrl._putter_slider.value = -0.4
+	cp_so_ctrl._on_putter_center_pressed()
+	assert(is_zero_approx(cp_so_ctrl._putter_slider.value), "Putter offset slider must reset to 0 on putter center pressed")
+
 	var cp_focusables = cp_so_ctrl.get_focusables()
-	assert(cp_focusables.size() == 3, "Focusables in course play should be [ToggleBtn, GeneralSlider, PutterSlider]")
+	assert(cp_focusables.size() == 5, "Focusables in course play should be [ToggleBtn, GeneralSlider, CenterBtn, PutterSlider, PutterCenterBtn]")
 	assert(cp_focusables[0] == cp_so_ctrl._toggle_btn)
 	assert(cp_focusables[1] == cp_so_ctrl._slider)
-	assert(cp_focusables[2] == cp_so_ctrl._putter_slider)
+	assert(cp_focusables[2] == cp_so_ctrl._center_btn)
+	assert(cp_focusables[3] == cp_so_ctrl._putter_slider)
+	assert(cp_focusables[4] == cp_so_ctrl._putter_center_btn)
 
 	cp_so_ctrl.queue_free()
 	som.set_putter_active(false)

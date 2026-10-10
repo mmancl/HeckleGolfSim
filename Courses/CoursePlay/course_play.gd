@@ -65,6 +65,7 @@ var range_ui: Control = null
 var top_bar: HBoxContainer = null
 var right_panel: VBoxContainer = null
 var toggles_scroll: ScrollContainer = null
+var toggles_container: VBoxContainer = null
 var settings_btn: Button = null
 var home_btn: Button = null
 var hide_helpers_btn: Button = null
@@ -77,6 +78,7 @@ var golfer_cam_btn: Button = null
 var putting_cam_btn: Button = null
 var announcer_btn: Button = null
 var tension_btn: Button = null
+var dist_btn: Button = null
 var _screen_offset_ctrl: Control = null
 var club_selector_node: Control = null
 
@@ -882,10 +884,11 @@ func _setup_hud() -> void:
 	toggles_scroll.follow_focus = true
 	ThemeManager.apply_scroll_container_style(toggles_scroll, 28)
 	
-	var toggles_container = VBoxContainer.new()
+	toggles_container = VBoxContainer.new()
 	toggles_container.name = "TogglesContainer"
 	toggles_container.add_theme_constant_override("separation", 12)
-	toggles_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	toggles_container.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	toggles_container.custom_minimum_size = Vector2(256, 0)
 	
 	hide_helpers_btn.pressed.connect(func():
 		var new_vis = not toggles_scroll.visible
@@ -894,6 +897,13 @@ func _setup_hud() -> void:
 	
 	toggles_scroll.add_child(toggles_container)
 	right_panel.add_child(toggles_scroll)
+
+	var v_bar = toggles_scroll.get_v_scroll_bar()
+	if v_bar != null:
+		v_bar.visibility_changed.connect(func(): _update_helpers_scroll_layout.call_deferred())
+	toggles_scroll.visibility_changed.connect(func(): _update_helpers_scroll_layout.call_deferred())
+	toggles_scroll.resized.connect(func(): _update_helpers_scroll_layout.call_deferred())
+	toggles_container.resized.connect(func(): _update_helpers_scroll_layout.call_deferred())
 
 	# Announcer Mute/Unmute Toggle Button
 	announcer_btn = Button.new()
@@ -960,7 +970,10 @@ func _setup_hud() -> void:
 	toggles_container.add_child(so_ctrl)
 	_screen_offset_ctrl = so_ctrl
 	if so_ctrl.has_signal("offset_toggled"):
-		so_ctrl.offset_toggled.connect(func(_on): call_deferred("_update_hud_focus_neighbors"))
+		so_ctrl.offset_toggled.connect(func(_on):
+			_update_helpers_scroll_layout.call_deferred()
+			call_deferred("_update_hud_focus_neighbors")
+		)
 
 	# Distance Menu setup
 	var distance_menu_script = load("res://UI/distance_menu.gd")
@@ -975,7 +988,7 @@ func _setup_hud() -> void:
 	)
 	
 	# Distance Menu Button
-	var dist_btn = Button.new()
+	dist_btn = Button.new()
 	dist_btn.name = "HitDistanceButton"
 	dist_btn.text = "🎯 Hit Distance"
 	dist_btn.custom_minimum_size = Vector2(180, 56)
@@ -2480,6 +2493,49 @@ func _unhandled_input(event: InputEvent) -> void:
 				range_ui.call("toggle_prev_shot_analysis")
 				get_viewport().set_input_as_handled()
 				return
+		elif event.is_action_pressed("aerial_aim"):
+			if map_btn != null and is_instance_valid(map_btn) and map_btn.visible and not map_btn.disabled:
+				map_btn.emit_signal("pressed")
+			elif course_instance != null and course_instance.has_method("_on_map_button_pressed"):
+				course_instance.call("_on_map_button_pressed")
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("toggle_helpers"):
+			if hide_helpers_btn != null and is_instance_valid(hide_helpers_btn) and hide_helpers_btn.visible and not hide_helpers_btn.disabled:
+				hide_helpers_btn.emit_signal("pressed")
+			elif range_ui != null and range_ui.has_method("toggle_helpers"):
+				range_ui.call("toggle_helpers")
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("distance_menu_toggle"):
+			var dist_b = dist_btn if (dist_btn != null and is_instance_valid(dist_btn)) else (toggles_container.get_node_or_null("HitDistanceButton") as Button if toggles_container != null else null)
+			if dist_b != null and is_instance_valid(dist_b) and dist_b.visible and not dist_b.disabled:
+				dist_b.emit_signal("pressed")
+			elif range_ui != null and range_ui.has_method("toggle_distance_menu"):
+				range_ui.call("toggle_distance_menu")
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("shot_traces_toggle"):
+			if range_ui != null and range_ui.has_method("toggle_shot_traces"):
+				range_ui.call("toggle_shot_traces")
+			elif course_instance != null and course_instance.has_method("_toggle_shot_traces"):
+				course_instance.call("_toggle_shot_traces")
+			get_viewport().set_input_as_handled()
+			return
+		elif _check_stat_toggle_input(event):
+			get_viewport().set_input_as_handled()
+			return
+
+
+func _check_stat_toggle_input(event: InputEvent) -> bool:
+	for stat in StatDefinitions.STATS:
+		var stat_id = str(stat.get("id", ""))
+		var act = "stat_toggle_" + stat_id
+		if event.is_action_pressed(act):
+			if has_node("/root/KeybindingManager"):
+				KeybindingManager.toggle_stat(stat_id)
+				return true
+	return false
 
 
 func _cycle_club(longer: bool) -> void:
@@ -2525,6 +2581,8 @@ func _update_hud_tooltips() -> void:
 		announcer_btn.tooltip_text = "Toggle Announcer Commentary [%s]" % km.get_action_summary_str("announcer_toggle")
 	if tension_btn != null and is_instance_valid(tension_btn):
 		tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision [%s]" % km.get_action_summary_str("suspense_toggle")
+	if dist_btn != null and is_instance_valid(dist_btn):
+		dist_btn.tooltip_text = "Hit Distance Menu [%s]" % km.get_action_summary_str("distance_menu_toggle")
 	if club_selector_node != null and is_instance_valid(club_selector_node):
 		var club_btn = club_selector_node.get("club_button") as Button
 		if club_btn != null and is_instance_valid(club_btn):
@@ -4643,6 +4701,22 @@ func update_map_button_text(is_aerial: bool) -> void:
 			apply_circular_button_style(target_btn, Color(0.18, 0.45, 0.25, 0.85))
 
 
+func _update_helpers_scroll_layout() -> void:
+	if right_panel == null:
+		return
+	if toggles_scroll == null:
+		toggles_scroll = right_panel.get_node_or_null("TogglesScroll")
+	if toggles_scroll == null:
+		return
+	var v_bar = toggles_scroll.get_v_scroll_bar()
+	var is_bar_visible = v_bar != null and v_bar.visible and toggles_scroll.visible
+	var scroll_w = int(v_bar.size.x) if (v_bar != null and is_bar_visible) else 0
+	if scroll_w <= 0 and is_bar_visible and v_bar != null:
+		scroll_w = int(v_bar.custom_minimum_size.x)
+	var shift = (scroll_w + 6) if scroll_w > 0 else 0
+	right_panel.offset_left = -280 - shift
+
+
 func _set_helpers_visible(is_vis: bool) -> void:
 	if toggles_scroll == null and right_panel != null:
 		toggles_scroll = right_panel.get_node_or_null("TogglesScroll")
@@ -4654,6 +4728,7 @@ func _set_helpers_visible(is_vis: bool) -> void:
 		else:
 			apply_circular_button_style(hide_helpers_btn, Color(0.15, 0.15, 0.15, 0.85))
 	_update_hud_focus_neighbors()
+	_update_helpers_scroll_layout()
 
 
 func update_practice_ui_visibility(is_aerial: bool) -> void:

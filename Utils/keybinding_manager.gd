@@ -452,6 +452,9 @@ func load_keybindings() -> void:
 				if saved_joy is int:
 					_actions[action_name]["current_joy"] = saved_joy
 
+	_apply_all_to_input_map()
+	emit_signal("keybindings_changed")
+
 
 func save_keybindings() -> void:
 	var config = ConfigFile.new()

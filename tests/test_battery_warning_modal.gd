@@ -28,6 +28,11 @@ func _run_tests() -> void:
 	await process_frame
 	assert(root.get_node_or_null("BatteryWarningModal") == null, "No modal should be shown for -1 battery")
 
+	lm.trigger_test_battery_warning(0)
+	await process_frame
+	await process_frame
+	assert(root.get_node_or_null("BatteryWarningModal") == null, "No modal should be shown for 0% uninitialized battery")
+
 	lm.trigger_test_battery_warning(85)
 	await process_frame
 	await process_frame

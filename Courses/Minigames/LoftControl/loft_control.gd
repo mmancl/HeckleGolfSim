@@ -1110,6 +1110,7 @@ func _reset_game() -> void:
 	current_turn_symbol = "X"
 	_hide_game_over_banner()
 	_init_player_names()
+	_sync_launch_monitor_player()
 	
 	# Clear 3D symbols
 	for i in range(symbol_3d_nodes.size()):
@@ -1137,6 +1138,7 @@ func _reset_ball_only() -> void:
 		shot_in_progress = false
 		if tic_tac_toe_mode and winner_symbol.is_empty() and not is_draw:
 			current_turn_symbol = "O" if current_turn_symbol == "X" else "X"
+			_sync_launch_monitor_player()
 			
 	if player and player.ball:
 		var start_pos = Vector3(0.0, 0.05, 0.0)
@@ -1848,3 +1850,12 @@ func _close_settings() -> void:
 func _exit_tree() -> void:
 	if has_node("/root/ScreenOffsetManager") and camera != null and is_instance_valid(camera):
 		ScreenOffsetManager.unregister_camera(camera)
+
+
+func _sync_launch_monitor_player() -> void:
+	if not tic_tac_toe_mode:
+		return
+	if has_node("/root/LaunchMonitorManager") and has_node("/root/MultiplayerManager"):
+		var cur_name = player_x_name if current_turn_symbol == "X" else player_o_name
+		var hand = MultiplayerManager.get_player_handedness(cur_name)
+		get_node("/root/LaunchMonitorManager").set_handedness(hand)

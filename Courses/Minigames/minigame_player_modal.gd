@@ -424,6 +424,10 @@ func _add_player_pressed() -> void:
 		chosen_name = test_name
 	
 	var new_player = create_player(chosen_name, players.size(), total_targets)
+	if has_node("/root/MultiplayerManager"):
+		var mp = get_node("/root/MultiplayerManager")
+		if mp.has_method("get_player_handedness"):
+			new_player["handedness"] = mp.get_player_handedness(chosen_name)
 	players.append(new_player)
 	
 	# Ensure registered persistently in MultiplayerManager

@@ -13,7 +13,9 @@ public partial class TestSquareBle : Node
         TestStatusPacketParsing();
         TestClubDataPacketParsing();
         TestShotPacketParsing();
+        TestBatteryPacketParsing();
         TestCommandBuilder();
+        TestDeviceNameMatching();
 
         GD.Print("==================================================");
         GD.Print("ALL SQUARE BLE & PROTOCOL TESTS PASSED SUCCESSFULLY!");
@@ -37,33 +39,22 @@ public partial class TestSquareBle : Node
         if (!SquareProtocol.TryParseStatus(status4, out var code4) || code4 != SquareProtocol.StatusShot)
             throw new Exception($"Expected StatusShot (0x05), got 0x{code4:X2}");
 
-        // 9-byte packet (club delivery): MUST NOT be treated as status packet!
-        byte[] clubPacket9 = [0x11, 0x03, 0x01, 0x02, 0xFE, 0x01, 0x0A, 0x00, 0x01];
-        if (SquareProtocol.IsStatusPacket(clubPacket9))
-            throw new Exception("9-byte club delivery packet was falsely recognized as status packet!");
+        // 9-byte heartbeat ack / status packet: [0x11, 0x03, 0x01 (seq), 0x04 (Ready), 0x00, ...]
+        // MUST be recognized as status packet, NOT as club data!
+        byte[] status9 = [0x11, 0x03, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00];
+        if (!SquareProtocol.IsStatusPacket(status9))
+            throw new Exception("9-byte status/heartbeat ack packet was not recognized!");
+        if (!SquareProtocol.TryParseStatus(status9, out var code9) || code9 != SquareProtocol.StatusReady)
+            throw new Exception($"Expected StatusReady (0x04) in 9-byte packet, got 0x{code9:X2}");
+        if (SquareProtocol.IsClubDataPacket(status9))
+            throw new Exception("9-byte status packet was falsely recognized as club data packet!");
 
-        GD.Print("PASS: Status packets parsed correctly without misidentifying 9-byte club packets.");
+        GD.Print("PASS: Status packets (including 9-byte heartbeat acks) parsed correctly.");
     }
 
     private static void TestClubDataPacketParsing()
     {
         GD.Print("\n--- Test 2: Club Data Packet Parsing ---");
-        // Test 9-byte 0x11 0x03 format:
-        // [0] 0x11, [1] 0x03, [2] seq 0x01, [3] face: 2 (+2.0 open), [4] path: -2 (0xFE = -2 in-to-out/out-to-in), [5] attack: -3 (0xFD), [6] loft: 12
-        byte[] club9 = [0x11, 0x03, 0x01, 0x02, 0xFE, 0xFD, 12, 0x00, 0x01];
-        if (!SquareProtocol.IsClubDataPacket(club9))
-            throw new Exception("9-byte club data packet not recognized!");
-        if (!SquareProtocol.TryParseClubData(club9, out var metrics9))
-            throw new Exception("Failed to parse 9-byte club data!");
-        if (MathF.Abs(metrics9.FaceAngle - 2.0f) > 0.001f)
-            throw new Exception($"FaceAngle mismatch: expected 2.0, got {metrics9.FaceAngle}");
-        if (MathF.Abs(metrics9.ClubPath - (-2.0f)) > 0.001f)
-            throw new Exception($"ClubPath mismatch: expected -2.0, got {metrics9.ClubPath}");
-        if (MathF.Abs(metrics9.AttackAngle - (-3.0f)) > 0.001f)
-            throw new Exception($"AttackAngle mismatch: expected -3.0, got {metrics9.AttackAngle}");
-        if (MathF.Abs(metrics9.DynamicLoft - 12.0f) > 0.001f)
-            throw new Exception($"DynamicLoft mismatch: expected 12.0, got {metrics9.DynamicLoft}");
-
         // Test 11-byte 0x11 0x07 format:
         // Path = +1.50 (150 = 0x0096), Face = -0.75 (-75 = 0xFFB5), Attack = -2.10 (-210 = 0xFF2E), Loft = 10.50 (1050 = 0x041A)
         byte[] club11 = [
@@ -86,7 +77,29 @@ public partial class TestSquareBle : Node
         if (MathF.Abs(metrics11.DynamicLoft - 10.50f) > 0.01f)
             throw new Exception($"DynamicLoft mismatch in 11-byte packet: {metrics11.DynamicLoft}");
 
-        GD.Print("PASS: Both 9-byte (0x03) and 11-byte (0x07) club delivery packets parsed accurately.");
+        GD.Print("PASS: 11-byte (0x07) club delivery packets parsed accurately.");
+    }
+
+    private static void TestBatteryPacketParsing()
+    {
+        GD.Print("\n--- Test 2b: Battery & Clock Packet Parsing ---");
+        // Square Omni battery packet: [0x91, 0x45 (69%), 0x01 (charging)]
+        byte[] batPacket = [0x91, 0x45, 0x01];
+        if (!SquareProtocol.IsBatteryPacket(batPacket))
+            throw new Exception("0x91 battery packet not recognized!");
+        if (!SquareProtocol.TryParseBattery(batPacket, out var level, out var chargingState))
+            throw new Exception("Failed to parse 0x91 battery packet!");
+        if (level != 69)
+            throw new Exception($"Expected battery level 69%, got {level}%");
+        if (chargingState != 1)
+            throw new Exception($"Expected chargingState 1, got {chargingState}");
+
+        // Clock packet: [0x71, ...]
+        byte[] clockPacket = [0x71, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        if (!SquareProtocol.IsClockPacket(clockPacket))
+            throw new Exception("0x71 clock packet not recognized!");
+
+        GD.Print("PASS: 0x91 battery and 0x71 clock packets recognized and parsed accurately.");
     }
 
     private static void TestShotPacketParsing()
@@ -162,5 +175,45 @@ public partial class TestSquareBle : Node
             throw new Exception($"DetectBall hex mismatch: {Convert.ToHexString(detect)}");
 
         GD.Print("PASS: Command byte sequences verified.");
+    }
+
+    private static void TestDeviceNameMatching()
+    {
+        GD.Print("\n--- Test 5: Bluetooth Device Name Matching (including SGO models) ---");
+        // Square Golf naming tests
+        if (!LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch("SquareGolf", "SquareGolf"))
+            throw new Exception("Exact 'SquareGolf' name failed match!");
+        if (!LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch("Square Golf", "SquareGolf"))
+            throw new Exception("'Square Golf' with space failed match!");
+        if (!LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch("SquareGolf_1234", "SquareGolf"))
+            throw new Exception("'SquareGolf_1234' failed match!");
+        if (!LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch("SGO300A", "SquareGolf"))
+            throw new Exception("'SGO300A' model failed match for SquareGolf prefix!");
+        if (!LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch("SGO-300", "SquareGolf"))
+            throw new Exception("'SGO-300' model failed match for SquareGolf prefix!");
+        if (!LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch("sgo_300", "SquareGolf"))
+            throw new Exception("'sgo_300' model failed match for SquareGolf prefix!");
+        if (LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch("Approach R10", "SquareGolf"))
+            throw new Exception("'Approach R10' falsely matched SquareGolf prefix!");
+
+        // Garmin Approach naming tests
+        if (!LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch("Approach R10", "Approach"))
+            throw new Exception("'Approach R10' failed match for Approach prefix!");
+        if (!LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch("Garmin Approach R10", "Approach"))
+            throw new Exception("'Garmin Approach R10' failed match for Approach prefix!");
+        if (!LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch("R10 [1234]", "Approach"))
+            throw new Exception("'R10 [1234]' failed match for Approach prefix!");
+        if (LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch("SGO300A", "Approach"))
+            throw new Exception("'SGO300A' falsely matched Approach prefix!");
+
+        // Edge cases
+        if (LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch(null, "SquareGolf"))
+            throw new Exception("null name should not match!");
+        if (LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch("Unknown", "SquareGolf"))
+            throw new Exception("'Unknown' name should not match!");
+        if (!LaunchMonitors.Common.Bluetooth.BluetoothDeviceFilter.IsDeviceNameMatch("SGO300A", null))
+            throw new Exception("null prefix should match any valid device!");
+
+        GD.Print("PASS: Bluetooth device name matching successfully validates Square Golf, SGO models, and Garmin devices.");
     }
 }

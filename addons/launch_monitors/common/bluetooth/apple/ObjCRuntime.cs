@@ -184,9 +184,19 @@ internal static class ObjCRuntime
     public static string? NSStringToString(IntPtr nsString)
     {
         if (nsString == IntPtr.Zero) return null;
-        IntPtr utf8Ptr = objc_msgSend(nsString, sel_registerName("UTF8String"));
-        if (utf8Ptr == IntPtr.Zero) return null;
-        return Marshal.PtrToStringUTF8(utf8Ptr);
+        try
+        {
+            IntPtr responds = objc_msgSend(nsString, sel_registerName("respondsToSelector:"), sel_registerName("UTF8String"));
+            if (responds == IntPtr.Zero) return null;
+
+            IntPtr utf8Ptr = objc_msgSend(nsString, sel_registerName("UTF8String"));
+            if (utf8Ptr == IntPtr.Zero) return null;
+            return Marshal.PtrToStringUTF8(utf8Ptr);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public static IntPtr CreateNSData(byte[] bytes)

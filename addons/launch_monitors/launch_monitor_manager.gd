@@ -94,6 +94,8 @@ func _ready() -> void:
 	if EventBus.has_signal("club_selected"):
 		EventBus.club_selected.connect(_on_club_selected)
 	battery_changed.connect(_check_battery_warning)
+	_connect_multiplayer_signals()
+	call_deferred("_connect_multiplayer_signals")
 
 
 func _setup_audio_player() -> void:
@@ -191,7 +193,7 @@ func is_square_device_name(name: String) -> bool:
 	if n == "":
 		return false
 	var stripped := n.replace(" ", "").replace("-", "").replace("_", "")
-	return stripped.begins_with(SQUARE_DEVICE_PREFIX) or stripped.contains("square")
+	return stripped.begins_with(SQUARE_DEVICE_PREFIX) or stripped.contains("square") or stripped.begins_with("sgo")
 
 
 func is_auto_connecting() -> bool:
@@ -323,7 +325,14 @@ func connect_to_device(device_id: String, is_auto: bool = false) -> void:
 			if _is_manual_connect:
 				emit_signal("error_occurred", msg)
 			return
-		_square.call("SetHandedness", int(settings.get("handedness", 0)))
+		var cur_hand := int(settings.get("handedness", 0))
+		var mp = _get_multiplayer_manager()
+		if mp != null and mp.has_method("get_active_player"):
+			var ap = mp.get_active_player()
+			if not ap.is_empty():
+				cur_hand = int(ap.get("handedness", cur_hand))
+		settings["handedness"] = cur_hand
+		_square.call("SetHandedness", cur_hand)
 		_square.call("SetClub", str(settings.get("club_code", DEFAULT_CLUB_CODE)))
 		_square.call("ConnectToDevice", device_id)
 
@@ -389,6 +398,42 @@ func set_handedness(handedness: int) -> void:
 	_save_settings()
 	if _square != null:
 		_square.call("SetHandedness", handedness)
+
+
+func get_handedness() -> int:
+	return int(settings.get("handedness", 0))
+
+
+func _get_multiplayer_manager() -> Node:
+	if is_inside_tree() and has_node("/root/MultiplayerManager"):
+		return get_node("/root/MultiplayerManager")
+	var main_loop = Engine.get_main_loop()
+	if main_loop is SceneTree and main_loop.root != null and main_loop.root.has_node("MultiplayerManager"):
+		return main_loop.root.get_node("MultiplayerManager")
+	return null
+
+
+func _connect_multiplayer_signals() -> void:
+	var mp = _get_multiplayer_manager()
+	if mp != null and mp.has_signal("active_player_changed") and not mp.active_player_changed.is_connected(_on_active_player_changed):
+		mp.active_player_changed.connect(_on_active_player_changed)
+		var cur_p = mp.get_active_player() if mp.has_method("get_active_player") else {}
+		if not cur_p.is_empty():
+			_on_active_player_changed(cur_p)
+
+
+func _on_active_player_changed(player: Dictionary) -> void:
+	if player.is_empty():
+		return
+	var hand: int = 0
+	if player.has("handedness"):
+		hand = int(player.get("handedness", 0))
+	else:
+		var mp = _get_multiplayer_manager()
+		var p_name = str(player.get("name", ""))
+		if not p_name.is_empty() and mp != null and mp.has_method("get_player_handedness"):
+			hand = mp.get_player_handedness(p_name)
+	set_handedness(hand)
 
 
 var _pending_ready_ding := false
@@ -817,7 +862,7 @@ func _on_square_battery_changed(level: int) -> void:
 
 
 func _check_battery_warning(level: int) -> void:
-	if level < 0 or level > 100:
+	if level <= 0 or level > 100:
 		return
 
 	if level <= 10:
@@ -1199,7 +1244,7 @@ func _is_transient_square_connect_error(message: String) -> bool:
 
 
 func _is_square_device_name(name: String) -> bool:
-	return name.strip_edges().to_lower().begins_with(SQUARE_DEVICE_PREFIX)
+	return is_square_device_name(name)
 
 
 func _on_club_selected(club_name: String) -> void:

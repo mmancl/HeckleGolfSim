@@ -510,30 +510,8 @@ internal sealed partial class AndroidBluetoothGattClient : IBluetoothGattClient
         }
     }
 
-    private static bool IsDeviceNameMatch(string? name, string? prefix)
-    {
-        if (string.IsNullOrWhiteSpace(prefix))
-        {
-            return true;
-        }
-
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return false;
-        }
-
-        var trimmedName = name.Trim();
-        if (trimmedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
-            trimmedName.Contains(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var normalizedName = trimmedName.Replace(" ", "").Replace("-", "").Replace("_", "");
-        var normalizedPrefix = prefix.Replace(" ", "").Replace("-", "").Replace("_", "");
-        return normalizedName.StartsWith(normalizedPrefix, StringComparison.OrdinalIgnoreCase) ||
-               normalizedName.Contains(normalizedPrefix, StringComparison.OrdinalIgnoreCase);
-    }
+    private static bool IsDeviceNameMatch(string? name, string? prefix) =>
+        BluetoothDeviceFilter.IsDeviceNameMatch(name, prefix);
     
     internal void OnConnectionStateChange(int status, int newState)
     {

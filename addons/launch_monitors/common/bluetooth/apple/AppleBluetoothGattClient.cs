@@ -225,6 +225,9 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         _connectionOptions = options;
         await EnsureCentralReadyAsync(cancellationToken);
 
+        // CoreBluetooth best practice: Stop scanning once connection process begins to eliminate queue contention and duplicate callbacks
+        await StopScanAsync(cancellationToken);
+
         IntPtr peripheral = IntPtr.Zero;
         if (_discoveredPeripherals.TryGetValue(deviceId, out var p))
         {
@@ -233,15 +236,18 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         else if (Guid.TryParse(deviceId, out var guid))
         {
             // CoreBluetooth retrievePeripheralsWithIdentifiers: expects an NSArray of NSUUID instances
-            IntPtr nsUuid = ObjCRuntime.CreateNSUUID(guid);
-            IntPtr nsArrayClass = ObjCRuntime.objc_getClass("NSArray");
-            IntPtr idArray = ObjCRuntime.objc_msgSend(nsArrayClass, ObjCRuntime.sel_registerName("arrayWithObject:"), nsUuid);
-            IntPtr retrievedArray = ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("retrievePeripheralsWithIdentifiers:"), idArray);
-            int count = (int)(long)ObjCRuntime.objc_msgSend(retrievedArray, ObjCRuntime.sel_registerName("count"));
-            if (count > 0)
+            await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
             {
-                peripheral = ObjCRuntime.objc_msgSend(retrievedArray, ObjCRuntime.sel_registerName("objectAtIndex:"), (IntPtr)0);
-            }
+                IntPtr nsUuid = ObjCRuntime.CreateNSUUID(guid);
+                IntPtr nsArrayClass = ObjCRuntime.objc_getClass("NSArray");
+                IntPtr idArray = ObjCRuntime.objc_msgSend(nsArrayClass, ObjCRuntime.sel_registerName("arrayWithObject:"), nsUuid);
+                IntPtr retrievedArray = ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("retrievePeripheralsWithIdentifiers:"), idArray);
+                int count = (int)(long)ObjCRuntime.objc_msgSend(retrievedArray, ObjCRuntime.sel_registerName("count"));
+                if (count > 0)
+                {
+                    peripheral = ObjCRuntime.objc_msgSend(retrievedArray, ObjCRuntime.sel_registerName("objectAtIndex:"), (IntPtr)0);
+                }
+            });
         }
 
         if (peripheral == IntPtr.Zero)
@@ -275,14 +281,24 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
     {
         if (_centralManager != IntPtr.Zero && _activePeripheral != IntPtr.Zero)
         {
-            int state = (int)(long)ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("state"));
+            int state = 0;
+            await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
+            {
+                if (_activePeripheral != IntPtr.Zero)
+                {
+                    state = (int)(long)ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("state"));
+                }
+            });
             if (state == 1 || state == 2) // Connecting or Connected
             {
                 var disconnectTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _disconnectTcs = disconnectTcs;
                 await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
                 {
-                    ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("cancelPeripheralConnection:"), _activePeripheral);
+                    if (_centralManager != IntPtr.Zero && _activePeripheral != IntPtr.Zero)
+                    {
+                        ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("cancelPeripheralConnection:"), _activePeripheral);
+                    }
                 });
                 using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
                 using var reg = cts.Token.Register(() => disconnectTcs.TrySetResult(true));
@@ -312,8 +328,14 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
         _readTcsMap[characteristicUuid] = tcs;
 
-        // [peripheral readValueForCharacteristic:characteristic]
-        ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("readValueForCharacteristic:"), characteristic);
+        // [peripheral readValueForCharacteristic:characteristic] dispatched to _dispatchQueue for thread confinement
+        await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
+        {
+            if (_activePeripheral != IntPtr.Zero)
+            {
+                ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("readValueForCharacteristic:"), characteristic);
+            }
+        });
 
         // Bound read with a 3-second timeout so unacknowledged reads (like firmware) do not hang the connection
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
@@ -347,8 +369,14 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _subscribeTcsMap[characteristicUuid] = tcs;
 
-        // [peripheral setNotifyValue:YES forCharacteristic:characteristic]
-        ObjCRuntime.objc_msgSend_bool(_activePeripheral, ObjCRuntime.sel_registerName("setNotifyValue:forCharacteristic:"), 1, characteristic);
+        // [peripheral setNotifyValue:YES forCharacteristic:characteristic] dispatched to _dispatchQueue
+        await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
+        {
+            if (_activePeripheral != IntPtr.Zero)
+            {
+                ObjCRuntime.objc_msgSend_bool(_activePeripheral, ObjCRuntime.sel_registerName("setNotifyValue:forCharacteristic:"), 1, characteristic);
+            }
+        });
 
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
@@ -376,7 +404,11 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         }
 
         // Adapt write mode based on characteristic properties (0x04 = WriteWithoutResponse, 0x08 = WriteWithResponse)
-        ulong properties = (ulong)(long)ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("properties"));
+        ulong properties = 0;
+        await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
+        {
+            properties = (ulong)(long)ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("properties"));
+        });
         bool canWriteWithoutResponse = (properties & 0x04) != 0;
         bool canWriteWithResponse = (properties & 0x08) != 0;
 
@@ -398,8 +430,14 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _writeTcsMap[characteristicUuid] = tcs;
 
-            // [peripheral writeValue:nsData forCharacteristic:characteristic type:writeType]
-            ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, writeType);
+            // [peripheral writeValue:nsData forCharacteristic:characteristic type:writeType] dispatched to _dispatchQueue
+            await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
+            {
+                if (_activePeripheral != IntPtr.Zero)
+                {
+                    ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, writeType);
+                }
+            });
 
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
@@ -411,7 +449,13 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             catch (OperationCanceledException) when (canWriteWithoutResponse && !cancellationToken.IsCancellationRequested)
             {
                 Log($"Write with response timed out for {characteristicUuid}; falling back to write without response.");
-                ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, (IntPtr)1);
+                await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
+                {
+                    if (_activePeripheral != IntPtr.Zero)
+                    {
+                        ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, (IntPtr)1);
+                    }
+                });
             }
             finally
             {
@@ -420,7 +464,13 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         }
         else
         {
-            ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, writeType);
+            await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
+            {
+                if (_activePeripheral != IntPtr.Zero)
+                {
+                    ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, writeType);
+                }
+            });
         }
     }
 
@@ -479,328 +529,388 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
 
     private static void Central_DidUpdateState(IntPtr self, IntPtr _cmd, IntPtr central)
     {
-        if (!_instances.TryGetValue(self, out var client)) return;
-        int state = (int)(long)ObjCRuntime.objc_msgSend(central, ObjCRuntime.sel_registerName("state"));
-        client._centralState = state;
-        Log($"CBCentralManager state updated: {state} (0=Unknown, 1=Resetting, 2=Unsupported, 3=Unauthorized, 4=PoweredOff, 5=PoweredOn)");
-        if (state == 5) // CBManagerStatePoweredOn
+        try
         {
-            client._statePoweredOnTcs?.TrySetResult(true);
+            if (!_instances.TryGetValue(self, out var client)) return;
+            int state = (int)(long)ObjCRuntime.objc_msgSend(central, ObjCRuntime.sel_registerName("state"));
+            client._centralState = state;
+            Log($"CBCentralManager state updated: {state} (0=Unknown, 1=Resetting, 2=Unsupported, 3=Unauthorized, 4=PoweredOff, 5=PoweredOn)");
+            if (state == 5) // CBManagerStatePoweredOn
+            {
+                client._statePoweredOnTcs?.TrySetResult(true);
+            }
+            else if (state == 3) // CBManagerStateUnauthorized
+            {
+                LogErr("Bluetooth permission denied by user / OS. Please check System Settings -> Privacy & Security -> Bluetooth.");
+                client._statePoweredOnTcs?.TrySetException(new UnauthorizedAccessException("Bluetooth permission denied by macOS/iOS. Please check System Settings -> Privacy & Security -> Bluetooth."));
+            }
+            else if (state == 2) // CBManagerStateUnsupported
+            {
+                LogErr("Bluetooth Low Energy is unsupported on this hardware.");
+                client._statePoweredOnTcs?.TrySetException(new NotSupportedException("Bluetooth Low Energy is unsupported on this hardware."));
+            }
+            else if (state == 4) // CBManagerStatePoweredOff
+            {
+                LogErr("Bluetooth is powered off. Please turn on Bluetooth in System Settings.");
+                client._statePoweredOnTcs?.TrySetException(new InvalidOperationException("Bluetooth is turned off. Please turn on Bluetooth in System Settings."));
+            }
         }
-        else if (state == 3) // CBManagerStateUnauthorized
+        catch (Exception ex)
         {
-            LogErr("Bluetooth permission denied by user / OS. Please check System Settings -> Privacy & Security -> Bluetooth.");
-            client._statePoweredOnTcs?.TrySetException(new UnauthorizedAccessException("Bluetooth permission denied by macOS/iOS. Please check System Settings -> Privacy & Security -> Bluetooth."));
-        }
-        else if (state == 2) // CBManagerStateUnsupported
-        {
-            LogErr("Bluetooth Low Energy is unsupported on this hardware.");
-            client._statePoweredOnTcs?.TrySetException(new NotSupportedException("Bluetooth Low Energy is unsupported on this hardware."));
-        }
-        else if (state == 4) // CBManagerStatePoweredOff
-        {
-            LogErr("Bluetooth is powered off. Please turn on Bluetooth in System Settings.");
-            client._statePoweredOnTcs?.TrySetException(new InvalidOperationException("Bluetooth is turned off. Please turn on Bluetooth in System Settings."));
+            LogErr($"Central_DidUpdateState unhandled exception: {ex}");
         }
     }
 
     private static void Central_DidDiscoverPeripheral(IntPtr self, IntPtr _cmd, IntPtr central, IntPtr peripheral, IntPtr advData, IntPtr rssi)
     {
-        if (!_instances.TryGetValue(self, out var client)) return;
-
-        IntPtr identifier = ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("identifier"));
-        IntPtr uuidStringNs = ObjCRuntime.objc_msgSend(identifier, ObjCRuntime.sel_registerName("UUIDString"));
-        string deviceId = ObjCRuntime.NSStringToString(uuidStringNs) ?? string.Empty;
-
-        IntPtr nameNs = ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("name"));
-        string? name = ObjCRuntime.NSStringToString(nameNs);
-
-        // 1. Check local name in advertisement data
-        if (string.IsNullOrWhiteSpace(name) && advData != IntPtr.Zero)
+        try
         {
-            IntPtr localNameKey = ObjCRuntime.CreateNSString("kCBAdvDataLocalName");
-            IntPtr localNameNs = ObjCRuntime.objc_msgSend(advData, ObjCRuntime.sel_registerName("objectForKey:"), localNameKey);
-            name = ObjCRuntime.NSStringToString(localNameNs);
-        }
+            if (!_instances.TryGetValue(self, out var client)) return;
 
-        // 2. If peripheral name is not in advertisement, inspect advertised service UUIDs for known launch monitors
-        if (string.IsNullOrWhiteSpace(name) && advData != IntPtr.Zero)
-        {
-            IntPtr serviceUuidsKey = ObjCRuntime.CreateNSString("kCBAdvDataServiceUUIDs");
-            IntPtr serviceUuidsArray = ObjCRuntime.objc_msgSend(advData, ObjCRuntime.sel_registerName("objectForKey:"), serviceUuidsKey);
-            if (serviceUuidsArray != IntPtr.Zero)
+            IntPtr identifier = ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("identifier"));
+            IntPtr uuidStringNs = ObjCRuntime.objc_msgSend(identifier, ObjCRuntime.sel_registerName("UUIDString"));
+            string deviceId = ObjCRuntime.NSStringToString(uuidStringNs) ?? string.Empty;
+
+            IntPtr nameNs = ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("name"));
+            string? name = ObjCRuntime.NSStringToString(nameNs);
+
+            // 1. Check local name in advertisement data
+            if (string.IsNullOrWhiteSpace(name) && advData != IntPtr.Zero)
             {
-                int uuidCount = (int)(long)ObjCRuntime.objc_msgSend(serviceUuidsArray, ObjCRuntime.sel_registerName("count"));
-                for (int i = 0; i < uuidCount; i++)
+                IntPtr localNameKey = ObjCRuntime.CreateNSString("kCBAdvDataLocalName");
+                IntPtr localNameNs = ObjCRuntime.objc_msgSend(advData, ObjCRuntime.sel_registerName("objectForKey:"), localNameKey);
+                name = ObjCRuntime.NSStringToString(localNameNs);
+            }
+
+            bool matchesServiceUuid = false;
+
+            // 2. Inspect advertised service UUIDs for known launch monitors
+            if (advData != IntPtr.Zero)
+            {
+                IntPtr serviceUuidsKey = ObjCRuntime.CreateNSString("kCBAdvDataServiceUUIDs");
+                IntPtr serviceUuidsArray = ObjCRuntime.objc_msgSend(advData, ObjCRuntime.sel_registerName("objectForKey:"), serviceUuidsKey);
+                if (serviceUuidsArray != IntPtr.Zero)
                 {
-                    IntPtr cbUuid = ObjCRuntime.objc_msgSend(serviceUuidsArray, ObjCRuntime.sel_registerName("objectAtIndex:"), (IntPtr)i);
-                    IntPtr serviceUuidNs = ObjCRuntime.objc_msgSend(cbUuid, ObjCRuntime.sel_registerName("UUIDString"));
-                    string? uuidStr = ObjCRuntime.NSStringToString(serviceUuidNs)?.ToLowerInvariant();
-                    if (!string.IsNullOrEmpty(uuidStr))
+                    int uuidCount = (int)(long)ObjCRuntime.objc_msgSend(serviceUuidsArray, ObjCRuntime.sel_registerName("count"));
+                    for (int i = 0; i < uuidCount; i++)
                     {
-                        if (uuidStr.Contains("8660"))
+                        IntPtr cbUuid = ObjCRuntime.objc_msgSend(serviceUuidsArray, ObjCRuntime.sel_registerName("objectAtIndex:"), (IntPtr)i);
+                        IntPtr serviceUuidNs = ObjCRuntime.objc_msgSend(cbUuid, ObjCRuntime.sel_registerName("UUIDString"));
+                        string? uuidStr = ObjCRuntime.NSStringToString(serviceUuidNs)?.ToLowerInvariant();
+                        if (!string.IsNullOrEmpty(uuidStr))
+                        {
+                            if (uuidStr.Contains("8660"))
+                            {
+                                if (string.IsNullOrWhiteSpace(name) || name == "Unknown")
+                                {
+                                    name = "Square Golf";
+                                }
+                                if (client._scanOptions?.DeviceNamePrefix?.Contains("square", StringComparison.OrdinalIgnoreCase) == true)
+                                {
+                                    matchesServiceUuid = true;
+                                }
+                                break;
+                            }
+                            else if (uuidStr.Contains("6a4e"))
+                            {
+                                if (string.IsNullOrWhiteSpace(name) || name == "Unknown")
+                                {
+                                    name = "Approach R10";
+                                }
+                                if (client._scanOptions?.DeviceNamePrefix?.Contains("approach", StringComparison.OrdinalIgnoreCase) == true ||
+                                    client._scanOptions?.DeviceNamePrefix?.Contains("garmin", StringComparison.OrdinalIgnoreCase) == true)
+                                {
+                                    matchesServiceUuid = true;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Inspect Manufacturer Data if name is still unknown
+            if (string.IsNullOrWhiteSpace(name) && advData != IntPtr.Zero)
+            {
+                IntPtr mfgKey = ObjCRuntime.CreateNSString("kCBAdvDataManufacturerData");
+                IntPtr mfgDataNs = ObjCRuntime.objc_msgSend(advData, ObjCRuntime.sel_registerName("objectForKey:"), mfgKey);
+                if (mfgDataNs != IntPtr.Zero)
+                {
+                    byte[] mfgBytes = ObjCRuntime.NSDataToBytes(mfgDataNs);
+                    if (mfgBytes.Length > 0)
+                    {
+                        string mfgStr = System.Text.Encoding.ASCII.GetString(mfgBytes);
+                        if (mfgStr.Contains("Square", StringComparison.OrdinalIgnoreCase))
                         {
                             name = "Square Golf";
-                            break;
-                        }
-                        else if (uuidStr.Contains("6a4e"))
-                        {
-                            name = "Approach R10";
-                            break;
                         }
                     }
                 }
             }
-        }
 
-        // 3. Inspect Manufacturer Data if name is still unknown
-        if (string.IsNullOrWhiteSpace(name) && advData != IntPtr.Zero)
-        {
-            IntPtr mfgKey = ObjCRuntime.CreateNSString("kCBAdvDataManufacturerData");
-            IntPtr mfgDataNs = ObjCRuntime.objc_msgSend(advData, ObjCRuntime.sel_registerName("objectForKey:"), mfgKey);
-            if (mfgDataNs != IntPtr.Zero)
+            name ??= "Unknown";
+            int rssiVal = (int)(long)ObjCRuntime.objc_msgSend(rssi, ObjCRuntime.sel_registerName("intValue"));
+
+            if (!client._discoveredPeripherals.ContainsKey(deviceId))
             {
-                byte[] mfgBytes = ObjCRuntime.NSDataToBytes(mfgDataNs);
-                if (mfgBytes.Length > 0)
+                ObjCRuntime.Retain(peripheral);
+                client._discoveredPeripherals[deviceId] = peripheral;
+            }
+
+            if (!matchesServiceUuid && !IsDeviceNameMatch(name, client._scanOptions?.DeviceNamePrefix))
+            {
+                if (client._loggedUnknownDevices.TryAdd(deviceId, true))
                 {
-                    string mfgStr = System.Text.Encoding.ASCII.GetString(mfgBytes);
-                    if (mfgStr.Contains("Square", StringComparison.OrdinalIgnoreCase))
-                    {
-                        name = "Square Golf";
-                    }
+                    Log($"[AppleBLE Discovery] Ignored non-matching peripheral: Name='{name}', DeviceId={deviceId}, RSSI={rssiVal}");
                 }
+                return;
             }
-        }
 
-        name ??= "Unknown";
-        int rssiVal = (int)(long)ObjCRuntime.objc_msgSend(rssi, ObjCRuntime.sel_registerName("intValue"));
-
-        if (!client._discoveredPeripherals.ContainsKey(deviceId))
-        {
-            ObjCRuntime.Retain(peripheral);
-            client._discoveredPeripherals[deviceId] = peripheral;
-        }
-
-        if (!IsDeviceNameMatch(name, client._scanOptions.DeviceNamePrefix))
-        {
-            if (client._loggedUnknownDevices.TryAdd(deviceId, true))
+            // Only emit discovered event once per device or if name became more specific
+            if (client._reportedDeviceNames.TryGetValue(deviceId, out var prevName) && prevName == name)
             {
-                Log($"[AppleBLE Discovery] Ignored non-matching peripheral: Name='{name}', DeviceId={deviceId}, RSSI={rssiVal}");
+                return;
             }
-            return;
-        }
+            client._reportedDeviceNames[deviceId] = name;
 
-        // Only emit discovered event once per device or if name became more specific
-        if (client._reportedDeviceNames.TryGetValue(deviceId, out var prevName) && prevName == name)
+            Log($"Device discovered: {name} ({deviceId}) RSSI={rssiVal}");
+            client.DeviceDiscovered?.Invoke(new BluetoothDevice(deviceId, name, rssiVal));
+        }
+        catch (Exception ex)
         {
-            return;
+            LogErr($"Central_DidDiscoverPeripheral unhandled exception: {ex}");
         }
-        client._reportedDeviceNames[deviceId] = name;
-
-        Log($"Device discovered: {name} ({deviceId}) RSSI={rssiVal}");
-        client.DeviceDiscovered?.Invoke(new BluetoothDevice(deviceId, name, rssiVal));
     }
 
-    private static bool IsDeviceNameMatch(string name, string? prefix)
-    {
-        if (string.IsNullOrWhiteSpace(prefix)) return true;
-        if (string.IsNullOrWhiteSpace(name) || name == "Unknown") return false;
-
-        // 1. Direct prefix or contains check
-        if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
-            name.Contains(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        // 2. Whitespace/dash stripped comparison (e.g. "Square Golf" vs "SquareGolf")
-        var normName = name.Replace(" ", "").Replace("-", "").Replace("_", "");
-        var normPrefix = prefix.Replace(" ", "").Replace("-", "").Replace("_", "");
-        if (normName.Contains(normPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        // 3. Special handling for Square Golf: match any name containing "Square"
-        if (normPrefix.Contains("square", StringComparison.OrdinalIgnoreCase) &&
-            normName.Contains("square", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return false;
-    }
+    private static bool IsDeviceNameMatch(string name, string? prefix) =>
+        BluetoothDeviceFilter.IsDeviceNameMatch(name, prefix);
 
     private static void Central_DidConnectPeripheral(IntPtr self, IntPtr _cmd, IntPtr central, IntPtr peripheral)
     {
-        if (!_instances.TryGetValue(self, out var client)) return;
-        Log("Central connected to peripheral. Discovering services...");
+        try
+        {
+            if (!_instances.TryGetValue(self, out var client)) return;
+            Log("Central connected to peripheral. Discovering services...");
 
-        // Set peripheral delegate to client's peripheral delegate
-        ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("setDelegate:"), client._peripheralDelegate);
+            // Set peripheral delegate to client's peripheral delegate
+            ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("setDelegate:"), client._peripheralDelegate);
 
-        // [peripheral discoverServices:nil]
-        ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("discoverServices:"), IntPtr.Zero);
+            // [peripheral discoverServices:nil]
+            ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("discoverServices:"), IntPtr.Zero);
+        }
+        catch (Exception ex)
+        {
+            LogErr($"Central_DidConnectPeripheral unhandled exception: {ex}");
+        }
     }
 
     private static void Central_DidFailToConnectPeripheral(IntPtr self, IntPtr _cmd, IntPtr central, IntPtr peripheral, IntPtr error)
     {
-        if (!_instances.TryGetValue(self, out var client)) return;
-        string errorDesc = error != IntPtr.Zero ? ObjCRuntime.NSStringToString(ObjCRuntime.objc_msgSend(error, ObjCRuntime.sel_registerName("localizedDescription"))) ?? "Unknown error" : "Connection failed";
-        LogErr($"Failed to connect to peripheral: {errorDesc}");
-        client._connectTcs?.TrySetException(new InvalidOperationException(errorDesc));
+        try
+        {
+            if (!_instances.TryGetValue(self, out var client)) return;
+            string errorDesc = error != IntPtr.Zero ? ObjCRuntime.NSStringToString(ObjCRuntime.objc_msgSend(error, ObjCRuntime.sel_registerName("localizedDescription"))) ?? "Unknown error" : "Connection failed";
+            LogErr($"Failed to connect to peripheral: {errorDesc}");
+            client._connectTcs?.TrySetException(new InvalidOperationException(errorDesc));
+        }
+        catch (Exception ex)
+        {
+            LogErr($"Central_DidFailToConnectPeripheral unhandled exception: {ex}");
+        }
     }
 
     private static void Central_DidDisconnectPeripheral(IntPtr self, IntPtr _cmd, IntPtr central, IntPtr peripheral, IntPtr error)
     {
-        if (!_instances.TryGetValue(self, out var client)) return;
-        Log("Peripheral disconnected.");
-        client._disconnectTcs?.TrySetResult(true);
-        if (client._connectTcs != null && !client._connectTcs.Task.IsCompleted)
+        try
         {
-            client._connectTcs.TrySetException(new InvalidOperationException("Peripheral disconnected during connection attempt."));
+            if (!_instances.TryGetValue(self, out var client)) return;
+            Log("Peripheral disconnected.");
+            client._disconnectTcs?.TrySetResult(true);
+            if (client._connectTcs != null && !client._connectTcs.Task.IsCompleted)
+            {
+                client._connectTcs.TrySetException(new InvalidOperationException("Peripheral disconnected during connection attempt."));
+            }
+            client.Disconnected?.Invoke();
         }
-        client.Disconnected?.Invoke();
+        catch (Exception ex)
+        {
+            LogErr($"Central_DidDisconnectPeripheral unhandled exception: {ex}");
+        }
     }
 
     private static void Peripheral_DidDiscoverServices(IntPtr self, IntPtr _cmd, IntPtr peripheral, IntPtr error)
     {
-        if (!_instances.TryGetValue(self, out var client)) return;
-        if (error != IntPtr.Zero)
+        try
         {
-            string errorDesc = ObjCRuntime.NSStringToString(ObjCRuntime.objc_msgSend(error, ObjCRuntime.sel_registerName("localizedDescription"))) ?? "Service discovery failed";
-            LogErr($"Error discovering services: {errorDesc}");
-            client._connectTcs?.TrySetException(new InvalidOperationException(errorDesc));
-            return;
+            if (!_instances.TryGetValue(self, out var client)) return;
+            if (error != IntPtr.Zero)
+            {
+                string errorDesc = ObjCRuntime.NSStringToString(ObjCRuntime.objc_msgSend(error, ObjCRuntime.sel_registerName("localizedDescription"))) ?? "Service discovery failed";
+                LogErr($"Error discovering services: {errorDesc}");
+                client._connectTcs?.TrySetException(new InvalidOperationException(errorDesc));
+                return;
+            }
+
+            IntPtr servicesArray = ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("services"));
+            int count = (int)(long)ObjCRuntime.objc_msgSend(servicesArray, ObjCRuntime.sel_registerName("count"));
+            Log($"Discovered {count} services. Discovering characteristics for each...");
+
+            for (int i = 0; i < count; i++)
+            {
+                IntPtr service = ObjCRuntime.objc_msgSend(servicesArray, ObjCRuntime.sel_registerName("objectAtIndex:"), (IntPtr)i);
+                ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("discoverCharacteristics:forService:"), IntPtr.Zero, service);
+            }
         }
-
-        IntPtr servicesArray = ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("services"));
-        int count = (int)(long)ObjCRuntime.objc_msgSend(servicesArray, ObjCRuntime.sel_registerName("count"));
-        Log($"Discovered {count} services. Discovering characteristics for each...");
-
-        for (int i = 0; i < count; i++)
+        catch (Exception ex)
         {
-            IntPtr service = ObjCRuntime.objc_msgSend(servicesArray, ObjCRuntime.sel_registerName("objectAtIndex:"), (IntPtr)i);
-            ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("discoverCharacteristics:forService:"), IntPtr.Zero, service);
+            LogErr($"Peripheral_DidDiscoverServices unhandled exception: {ex}");
         }
     }
 
     private static void Peripheral_DidDiscoverCharacteristics(IntPtr self, IntPtr _cmd, IntPtr peripheral, IntPtr service, IntPtr error)
     {
-        if (!_instances.TryGetValue(self, out var client)) return;
-        if (error != IntPtr.Zero)
+        try
         {
-            string errorDesc = ObjCRuntime.NSStringToString(ObjCRuntime.objc_msgSend(error, ObjCRuntime.sel_registerName("localizedDescription"))) ?? "Characteristic discovery failed";
-            LogErr($"Error discovering characteristics: {errorDesc}");
-            return;
-        }
-
-        IntPtr charsArray = ObjCRuntime.objc_msgSend(service, ObjCRuntime.sel_registerName("characteristics"));
-        int count = (int)(long)ObjCRuntime.objc_msgSend(charsArray, ObjCRuntime.sel_registerName("count"));
-
-        for (int i = 0; i < count; i++)
-        {
-            IntPtr characteristic = ObjCRuntime.objc_msgSend(charsArray, ObjCRuntime.sel_registerName("objectAtIndex:"), (IntPtr)i);
-            IntPtr cbUuid = ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("UUID"));
-            var guid = ObjCRuntime.CBUUIDToGuid(cbUuid);
-            if (guid.HasValue)
+            if (!_instances.TryGetValue(self, out var client)) return;
+            if (error != IntPtr.Zero)
             {
-                if (!client._characteristics.ContainsKey(guid.Value))
+                string errorDesc = ObjCRuntime.NSStringToString(ObjCRuntime.objc_msgSend(error, ObjCRuntime.sel_registerName("localizedDescription"))) ?? "Characteristic discovery failed";
+                LogErr($"Error discovering characteristics: {errorDesc}");
+                return;
+            }
+
+            IntPtr charsArray = ObjCRuntime.objc_msgSend(service, ObjCRuntime.sel_registerName("characteristics"));
+            int count = (int)(long)ObjCRuntime.objc_msgSend(charsArray, ObjCRuntime.sel_registerName("count"));
+
+            for (int i = 0; i < count; i++)
+            {
+                IntPtr characteristic = ObjCRuntime.objc_msgSend(charsArray, ObjCRuntime.sel_registerName("objectAtIndex:"), (IntPtr)i);
+                IntPtr cbUuid = ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("UUID"));
+                var guid = ObjCRuntime.CBUUIDToGuid(cbUuid);
+                if (guid.HasValue)
                 {
-                    ObjCRuntime.Retain(characteristic);
-                    client._characteristics[guid.Value] = characteristic;
-                    Log($"Characteristic mapped: {guid.Value}");
+                    if (!client._characteristics.ContainsKey(guid.Value))
+                    {
+                        ObjCRuntime.Retain(characteristic);
+                        client._characteristics[guid.Value] = characteristic;
+                        Log($"Characteristic mapped: {guid.Value}");
+                    }
                 }
             }
-        }
 
-        // Check if all required characteristics are discovered
-        bool allRequiredFound = true;
-        foreach (var reqUuid in client._connectionOptions.RequiredCharacteristicUuids)
-        {
-            if (!client._characteristics.ContainsKey(reqUuid))
+            // Check if all required characteristics are discovered
+            bool allRequiredFound = true;
+            foreach (var reqUuid in client._connectionOptions.RequiredCharacteristicUuids)
             {
-                allRequiredFound = false;
-                break;
+                if (!client._characteristics.ContainsKey(reqUuid))
+                {
+                    allRequiredFound = false;
+                    break;
+                }
+            }
+
+            if (allRequiredFound && client._connectTcs != null && !client._connectTcs.Task.IsCompleted)
+            {
+                client._connectTcs.TrySetResult(true);
             }
         }
-
-        if (allRequiredFound && client._connectTcs != null && !client._connectTcs.Task.IsCompleted)
+        catch (Exception ex)
         {
-            client._connectTcs.TrySetResult(true);
+            LogErr($"Peripheral_DidDiscoverCharacteristics unhandled exception: {ex}");
         }
     }
 
     private static void Peripheral_DidUpdateValue(IntPtr self, IntPtr _cmd, IntPtr peripheral, IntPtr characteristic, IntPtr error)
     {
-        if (!_instances.TryGetValue(self, out var client)) return;
-
-        IntPtr cbUuid = ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("UUID"));
-        var guid = ObjCRuntime.CBUUIDToGuid(cbUuid);
-        if (!guid.HasValue) return;
-
-        if (error != IntPtr.Zero)
+        try
         {
-            string errorDesc = ObjCRuntime.NSStringToString(ObjCRuntime.objc_msgSend(error, ObjCRuntime.sel_registerName("localizedDescription"))) ?? "Read value failed";
-            if (client._readTcsMap.TryRemove(guid.Value, out var readTcs))
+            if (!_instances.TryGetValue(self, out var client)) return;
+
+            IntPtr cbUuid = ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("UUID"));
+            var guid = ObjCRuntime.CBUUIDToGuid(cbUuid);
+            if (!guid.HasValue) return;
+
+            if (error != IntPtr.Zero)
             {
-                readTcs.TrySetException(new InvalidOperationException(errorDesc));
+                string errorDesc = ObjCRuntime.NSStringToString(ObjCRuntime.objc_msgSend(error, ObjCRuntime.sel_registerName("localizedDescription"))) ?? "Read value failed";
+                if (client._readTcsMap.TryRemove(guid.Value, out var readTcs))
+                {
+                    readTcs.TrySetException(new InvalidOperationException(errorDesc));
+                }
+                return;
             }
-            return;
+
+            IntPtr nsData = ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("value"));
+            byte[] value = ObjCRuntime.NSDataToBytes(nsData);
+
+            if (client._readTcsMap.TryRemove(guid.Value, out var tcs))
+            {
+                tcs.TrySetResult(value);
+            }
+
+            client.CharacteristicValueChanged?.Invoke(new BluetoothCharacteristicValue(guid.Value, value));
         }
-
-        IntPtr nsData = ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("value"));
-        byte[] value = ObjCRuntime.NSDataToBytes(nsData);
-
-        if (client._readTcsMap.TryRemove(guid.Value, out var tcs))
+        catch (Exception ex)
         {
-            tcs.TrySetResult(value);
+            LogErr($"Peripheral_DidUpdateValue unhandled exception: {ex}");
         }
-
-        client.CharacteristicValueChanged?.Invoke(new BluetoothCharacteristicValue(guid.Value, value));
     }
 
     private static void Peripheral_DidWriteValue(IntPtr self, IntPtr _cmd, IntPtr peripheral, IntPtr characteristic, IntPtr error)
     {
-        if (!_instances.TryGetValue(self, out var client)) return;
-
-        IntPtr cbUuid = ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("UUID"));
-        var guid = ObjCRuntime.CBUUIDToGuid(cbUuid);
-        if (!guid.HasValue) return;
-
-        if (client._writeTcsMap.TryRemove(guid.Value, out var writeTcs))
+        try
         {
-            if (error != IntPtr.Zero)
+            if (!_instances.TryGetValue(self, out var client)) return;
+
+            IntPtr cbUuid = ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("UUID"));
+            var guid = ObjCRuntime.CBUUIDToGuid(cbUuid);
+            if (!guid.HasValue) return;
+
+            if (client._writeTcsMap.TryRemove(guid.Value, out var writeTcs))
             {
-                string errorDesc = ObjCRuntime.NSStringToString(ObjCRuntime.objc_msgSend(error, ObjCRuntime.sel_registerName("localizedDescription"))) ?? "Write value failed";
-                writeTcs.TrySetException(new InvalidOperationException(errorDesc));
+                if (error != IntPtr.Zero)
+                {
+                    string errorDesc = ObjCRuntime.NSStringToString(ObjCRuntime.objc_msgSend(error, ObjCRuntime.sel_registerName("localizedDescription"))) ?? "Write value failed";
+                    writeTcs.TrySetException(new InvalidOperationException(errorDesc));
+                }
+                else
+                {
+                    writeTcs.TrySetResult(true);
+                }
             }
-            else
-            {
-                writeTcs.TrySetResult(true);
-            }
+        }
+        catch (Exception ex)
+        {
+            LogErr($"Peripheral_DidWriteValue unhandled exception: {ex}");
         }
     }
 
     private static void Peripheral_DidUpdateNotificationState(IntPtr self, IntPtr _cmd, IntPtr peripheral, IntPtr characteristic, IntPtr error)
     {
-        if (!_instances.TryGetValue(self, out var client)) return;
-
-        IntPtr cbUuid = ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("UUID"));
-        var guid = ObjCRuntime.CBUUIDToGuid(cbUuid);
-        if (!guid.HasValue) return;
-
-        if (client._subscribeTcsMap.TryRemove(guid.Value, out var subTcs))
+        try
         {
-            if (error != IntPtr.Zero)
+            if (!_instances.TryGetValue(self, out var client)) return;
+
+            IntPtr cbUuid = ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("UUID"));
+            var guid = ObjCRuntime.CBUUIDToGuid(cbUuid);
+            if (!guid.HasValue) return;
+
+            if (client._subscribeTcsMap.TryRemove(guid.Value, out var subTcs))
             {
-                string errorDesc = ObjCRuntime.NSStringToString(ObjCRuntime.objc_msgSend(error, ObjCRuntime.sel_registerName("localizedDescription"))) ?? "Subscribe failed";
-                subTcs.TrySetException(new InvalidOperationException(errorDesc));
+                if (error != IntPtr.Zero)
+                {
+                    string errorDesc = ObjCRuntime.NSStringToString(ObjCRuntime.objc_msgSend(error, ObjCRuntime.sel_registerName("localizedDescription"))) ?? "Subscribe failed";
+                    subTcs.TrySetException(new InvalidOperationException(errorDesc));
+                }
+                else
+                {
+                    subTcs.TrySetResult(true);
+                }
             }
-            else
-            {
-                subTcs.TrySetResult(true);
-            }
+        }
+        catch (Exception ex)
+        {
+            LogErr($"Peripheral_DidUpdateNotificationState unhandled exception: {ex}");
         }
     }
 }

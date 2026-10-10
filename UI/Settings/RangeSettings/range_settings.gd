@@ -788,6 +788,7 @@ func _on_settings_opened() -> void:
 	_last_opened_msec = now
 	_sync_wind_slider()
 	_sync_fullscreen_toggle()
+	_refresh_keybinding_buttons()
 	if has_node("/root/AnnouncerEngine"):
 		get_node("/root/AnnouncerEngine").call("SpeakSettingsOpened")
 	call_deferred("_focus_initial_control")

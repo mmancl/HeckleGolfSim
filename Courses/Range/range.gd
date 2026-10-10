@@ -432,6 +432,11 @@ func _ready() -> void:
 			$SessionRecorder.username = init_player
 		if has_node("Player") and $Player.has_method("set_profile"):
 			$Player.set_profile(init_player)
+		var mp_mgr_init = get_node_or_null("/root/MultiplayerManager")
+		if mp_mgr_init != null and has_node("/root/LaunchMonitorManager"):
+			var lm_init = get_node("/root/LaunchMonitorManager")
+			if lm_init != null and lm_init.has_method("set_handedness"):
+				lm_init.set_handedness(mp_mgr_init.get_player_handedness(init_player))
 
 	if is_driving_range:
 		_setup_shot_trace_overlay()
@@ -4719,6 +4724,14 @@ func _on_player_profile_changed(player_name: String) -> void:
 	# Update Player 3D tracers to match newly selected profile
 	if has_node("Player") and $Player.has_method("set_profile"):
 		$Player.set_profile(player_name)
+
+	# Update launch monitor handedness for current profile if LM manager exists
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and not player_name.is_empty() and has_node("/root/LaunchMonitorManager"):
+		var lm = get_node("/root/LaunchMonitorManager")
+		if lm != null and lm.has_method("set_handedness"):
+			var hand = mp_mgr.get_player_handedness(player_name)
+			lm.set_handedness(hand)
 
 	# Update Shot Traces overlay & dispersion for newly selected profile
 	var club = _get_current_club()

@@ -18,6 +18,7 @@ import json
 import math
 import os
 import re
+import shutil
 import ssl
 import sys
 import threading
@@ -39,7 +40,19 @@ DEFAULT_CATALOG_PATH = os.path.join(PROJECT_ROOT, "Courses", "Catalog", "golf_co
 DEFAULT_DOWNLOAD_DIR = os.path.join(PROJECT_ROOT, "tmp", "osm_extracts")
 
 GEOFABRIK_REGIONS = {
-    # Country-level extracts (faster, ~95% of world golf courses in much smaller downloads):
+    # US Regional extracts (1-3.5 GB each, fast and safe memory footprint on standard PCs):
+    "us-midwest": "https://download.geofabrik.de/north-america/us-midwest-latest.osm.pbf",
+    "us-northeast": "https://download.geofabrik.de/north-america/us-northeast-latest.osm.pbf",
+    "us-pacific": "https://download.geofabrik.de/north-america/us-pacific-latest.osm.pbf",
+    "us-south": "https://download.geofabrik.de/north-america/us-south-latest.osm.pbf",
+    "us-west": "https://download.geofabrik.de/north-america/us-west-latest.osm.pbf",
+    # Top individual golf states (quick 500 MB - 1.2 GB extracts):
+    "california": "https://download.geofabrik.de/north-america/us/california-latest.osm.pbf",
+    "florida": "https://download.geofabrik.de/north-america/us/florida-latest.osm.pbf",
+    "texas": "https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf",
+    "new-york": "https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf",
+    "scotland": "https://download.geofabrik.de/europe/great-britain/scotland-latest.osm.pbf",
+    # Country-level extracts:
     "us": "https://download.geofabrik.de/north-america/us-latest.osm.pbf",
     "canada": "https://download.geofabrik.de/north-america/canada-latest.osm.pbf",
     "great-britain": "https://download.geofabrik.de/europe/great-britain-latest.osm.pbf",
@@ -56,13 +69,23 @@ GEOFABRIK_REGIONS = {
 
 PRESETS = {
     "top-golf": {
-        "name": "Top Golf Countries (Recommended)",
-        "description": "US, UK, Canada, Ireland, Australia (~18 GB) - covers ~95% of world golf courses",
-        "regions": ["us", "great-britain", "canada", "ireland", "australia"]
+        "name": "Top Golf Countries & US Regions (Recommended)",
+        "description": "US Regions (Pacific, South, Midwest, Northeast, West) + UK, Ireland, Canada, Australia (~18 GB total across safe chunks)",
+        "regions": ["us-pacific", "us-south", "us-midwest", "us-northeast", "us-west", "great-britain", "ireland", "canada", "australia"]
+    },
+    "top-states": {
+        "name": "Iconic Golf States & Scotland (Fastest)",
+        "description": "California, Florida, Texas, New York, Scotland (~3.5 GB total)",
+        "regions": ["california", "florida", "texas", "new-york", "scotland"]
+    },
+    "us-regions": {
+        "name": "All 5 US Subregions",
+        "description": "US Pacific, South, Midwest, Northeast, West (~11.5 GB in safe regional chunks)",
+        "regions": ["us-pacific", "us-south", "us-midwest", "us-northeast", "us-west"]
     },
     "us-only": {
-        "name": "United States Only",
-        "description": "US only (~11.5 GB)",
+        "name": "United States Monolithic (Large)",
+        "description": "US full extract (~11.6 GB monolithic; auto-switches to disk-backed index)",
         "regions": ["us"]
     },
     "uk-ireland": {
@@ -72,7 +95,7 @@ PRESETS = {
     },
     "continents": {
         "name": "Entire Continents (Very Large)",
-        "description": "Full North America + Europe (~43 GB)",
+        "description": "Full North America + Europe (~43 GB, auto-switches to disk-backed index)",
         "regions": ["north-america", "europe"]
     },
 }
@@ -446,22 +469,50 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
         self.course_targets = course_targets  # list of course dicts
         self.course_data = {c["slug"]: {"nodes": {}, "ways": [], "relations": []} for c in course_targets}
 
-    def _in_bbox(self, lat, lon, bbox):
-        return bbox[0] <= lat <= bbox[2] and bbox[1] <= lon <= bbox[3]
+        # Spatial grid index for O(1) candidate lookup
+        self.grid_cell_size = 0.05  # ~5 km grid
+        self.grid = {}
+        for c in course_targets:
+            min_lat, min_lon, max_lat, max_lon = c["bbox"]
+            gx_min = int(math.floor(min_lat / self.grid_cell_size))
+            gx_max = int(math.floor(max_lat / self.grid_cell_size))
+            gy_min = int(math.floor(min_lon / self.grid_cell_size))
+            gy_max = int(math.floor(max_lon / self.grid_cell_size))
+            for gx in range(gx_min, gx_max + 1):
+                for gy in range(gy_min, gy_max + 1):
+                    key = (gx, gy)
+                    if key not in self.grid:
+                        self.grid[key] = []
+                    self.grid[key].append(c)
+
+    def _get_matching_courses(self, lat, lon):
+        gx = int(math.floor(lat / self.grid_cell_size))
+        gy = int(math.floor(lon / self.grid_cell_size))
+        candidates = self.grid.get((gx, gy))
+        if not candidates:
+            return []
+        matches = []
+        for c in candidates:
+            bbox = c["bbox"]
+            if bbox[0] <= lat <= bbox[2] and bbox[1] <= lon <= bbox[3]:
+                matches.append(c)
+        return matches
 
     def node(self, n):
         if not n.is_valid():
             return
+        matches = self._get_matching_courses(n.lat, n.lon)
+        if not matches:
+            return
         tags = {t.k: t.v for t in n.tags}
-        for c in self.course_targets:
-            if self._in_bbox(n.lat, n.lon, c["bbox"]):
-                self.course_data[c["slug"]]["nodes"][n.id] = {
-                    "type": "node",
-                    "id": n.id,
-                    "lat": n.lat,
-                    "lon": n.lon,
-                    "tags": tags
-                }
+        for c in matches:
+            self.course_data[c["slug"]]["nodes"][n.id] = {
+                "type": "node",
+                "id": n.id,
+                "lat": n.lat,
+                "lon": n.lon,
+                "tags": tags
+            }
 
     def way(self, w):
         tags = {t.k: t.v for t in w.tags}
@@ -489,87 +540,139 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
         avg_lat = sum(way_lats) / len(way_lats)
         avg_lon = sum(way_lons) / len(way_lons)
 
-        for c in self.course_targets:
-            if self._in_bbox(avg_lat, avg_lon, c["bbox"]):
-                self.course_data[c["slug"]]["ways"].append({
-                    "type": "way",
-                    "id": w.id,
-                    "nodes": node_refs,
-                    "tags": tags
-                })
-                # Ensure all way nodes are recorded
-                for n in w.nodes:
-                    if n.is_valid():
-                        self.course_data[c["slug"]]["nodes"][n.ref] = {
-                            "type": "node",
-                            "id": n.ref,
-                            "lat": n.lat,
-                            "lon": n.lon,
-                            "tags": {}
-                        }
+        matches = self._get_matching_courses(avg_lat, avg_lon)
+        if not matches:
+            return
+
+        for c in matches:
+            self.course_data[c["slug"]]["ways"].append({
+                "type": "way",
+                "id": w.id,
+                "nodes": node_refs,
+                "tags": tags
+            })
+            # Ensure all way nodes are recorded
+            for n in w.nodes:
+                if n.is_valid():
+                    self.course_data[c["slug"]]["nodes"][n.ref] = {
+                        "type": "node",
+                        "id": n.ref,
+                        "lat": n.lat,
+                        "lon": n.lon,
+                        "tags": {}
+                    }
 
 
-def process_pbf_file(pbf_path: str, cache_dir: str, max_courses: int = 2500) -> list:
+def process_pbf_file(
+    pbf_path: str,
+    cache_dir: str,
+    max_courses: int = 2500,
+    idx_type: str = "auto",
+    temp_dir: str = None
+) -> list:
     """Extract golf courses from a PBF file and write compressed vector geometries."""
     os.makedirs(cache_dir, exist_ok=True)
+    file_size_gb = (os.path.getsize(pbf_path) / (1024 * 1024 * 1024)) if os.path.exists(pbf_path) else 0.0
+
+    # Configure adaptive node location indexing strategy
+    temp_idx_file = None
+    if idx_type == "auto":
+        # Extracts >= 2.5 GB have hundreds of millions of nodes; flex_mem causes std::bad_alloc (MemoryError).
+        if file_size_gb >= 2.5:
+            chosen_idx = "sparse_file_array"
+        else:
+            chosen_idx = "sparse_mem_array"
+    else:
+        chosen_idx = idx_type
+
+    if chosen_idx.startswith("sparse_file_array") or chosen_idx.startswith("dense_file_array"):
+        if "," in chosen_idx:
+            actual_idx = chosen_idx
+        else:
+            if not temp_dir:
+                temp_dir = os.path.dirname(pbf_path)
+            temp_idx_file = os.path.join(temp_dir, f"_osmium_node_idx_{os.getpid()}.dat")
+            actual_idx = f"{chosen_idx},{temp_idx_file}"
+
+        free_bytes = shutil.disk_usage(os.path.dirname(temp_idx_file or pbf_path)).free
+        free_gb = free_bytes / (1024 * 1024 * 1024)
+        print(f"Using disk-backed node location index ({chosen_idx}) to prevent memory errors.")
+        print(f"  PBF Size: {file_size_gb:.1f} GB | Available Disk: {free_gb:.1f} GB")
+        est_needed_gb = file_size_gb * 1.8
+        if free_gb < est_needed_gb:
+            print(f"  [Warning] Disk-backed index may require ~{est_needed_gb:.1f} GB, but only {free_gb:.1f} GB is free.")
+            print(f"  If disk space is limited, consider using regional extracts (e.g. us-pacific, us-midwest, california).")
+    else:
+        actual_idx = chosen_idx
+        print(f"Using in-memory node location index: {actual_idx}")
+
     print(f"\n[Step 1/2] Scanning '{os.path.basename(pbf_path)}' for golf courses with osmium...")
 
-    id_handler = GolfCourseIdentifier()
-    id_handler.apply_file(pbf_path, locations=True)
-    identified = id_handler.courses
+    try:
+        id_handler = GolfCourseIdentifier()
+        id_handler.apply_file(pbf_path, locations=True, idx=actual_idx)
+        identified = id_handler.courses
 
-    # Deduplicate identified courses by slug and proximity
-    unique_courses = {}
-    for c in identified:
-        slug = c["slug"]
-        if slug not in unique_courses:
-            unique_courses[slug] = c
+        # Deduplicate identified courses by slug and proximity
+        unique_courses = {}
+        for c in identified:
+            slug = c["slug"]
+            if slug not in unique_courses:
+                unique_courses[slug] = c
 
-    course_list = list(unique_courses.values())
-    if max_courses > 0:
-        course_list = course_list[:max_courses]
+        course_list = list(unique_courses.values())
+        if max_courses > 0:
+            course_list = course_list[:max_courses]
 
-    print(f"Identified {len(course_list)} unique named golf course(s) to extract.")
+        print(f"Identified {len(course_list)} unique named golf course(s) to extract.")
 
-    print(f"[Step 2/2] Extracting feature geometries and generating compressed packages...")
-    feat_handler = CourseFeatureExtractor(course_list)
-    feat_handler.apply_file(pbf_path, locations=True)
+        print(f"[Step 2/2] Extracting feature geometries and generating compressed packages...")
+        feat_handler = CourseFeatureExtractor(course_list)
+        feat_handler.apply_file(pbf_path, locations=True, idx=actual_idx)
 
-    generated_catalog_entries = []
-    saved_count = 0
+        generated_catalog_entries = []
+        saved_count = 0
 
-    for c in course_list:
-        slug = c["slug"]
-        data = feat_handler.course_data.get(slug)
-        if not data or not data["ways"]:
-            continue
+        for c in course_list:
+            slug = c["slug"]
+            data = feat_handler.course_data.get(slug)
+            if not data or not data["ways"]:
+                continue
 
-        elements = list(data["nodes"].values()) + data["ways"]
-        osm_json = {
-            "version": 0.6,
-            "generator": "HeckleGolfSim-OsmSync/1.0",
-            "elements": elements
-        }
+            elements = list(data["nodes"].values()) + data["ways"]
+            osm_json = {
+                "version": 0.6,
+                "generator": "HeckleGolfSim-OsmSync/1.0",
+                "elements": elements
+            }
 
-        json_bytes = json.dumps(osm_json, ensure_ascii=False).encode("utf-8")
-        compressed_bytes = gzip.compress(json_bytes, compresslevel=9)
+            json_bytes = json.dumps(osm_json, ensure_ascii=False).encode("utf-8")
+            compressed_bytes = gzip.compress(json_bytes, compresslevel=9)
 
-        out_path = os.path.join(cache_dir, f"{slug}.json.gz")
-        with open(out_path, "wb") as f_out:
-            f_out.write(compressed_bytes)
+            out_path = os.path.join(cache_dir, f"{slug}.json.gz")
+            with open(out_path, "wb") as f_out:
+                f_out.write(compressed_bytes)
 
-        generated_catalog_entries.append({
-            "name": c["name"],
-            "lat": round(c["lat"], 6),
-            "lon": round(c["lon"], 6),
-            "location": c["location"],
-            "hole_count": c["hole_count"],
-            "last_updated": c["last_updated"]
-        })
-        saved_count += 1
+            generated_catalog_entries.append({
+                "name": c["name"],
+                "lat": round(c["lat"], 6),
+                "lon": round(c["lon"], 6),
+                "location": c["location"],
+                "hole_count": c["hole_count"],
+                "last_updated": c["last_updated"]
+            })
+            saved_count += 1
 
-    print(f"Successfully generated {saved_count} pre-packaged course geometries in: {cache_dir}")
-    return generated_catalog_entries
+        print(f"Successfully generated {saved_count} pre-packaged course geometries in: {cache_dir}")
+        return generated_catalog_entries
+
+    finally:
+        if temp_idx_file and os.path.exists(temp_idx_file):
+            try:
+                os.remove(temp_idx_file)
+                print(f"Cleaned up temporary node location index: {temp_idx_file}")
+            except Exception as e:
+                print(f"Notice: Temporary index file {temp_idx_file} can be removed after process exits: {e}")
 
 
 def update_global_catalog(new_entries: list, catalog_path: str):
@@ -613,7 +716,9 @@ def run_monthly_sync(
     clean,
     num_threads=8,
     chunk_size_mb=8,
-    single_thread=False
+    single_thread=False,
+    idx_type="auto",
+    temp_dir=None
 ):
     print("=" * 70)
     print("  HeckleGolfSim Monthly OpenStreetMap Course Sync & Pre-Packager")
@@ -624,6 +729,7 @@ def run_monthly_sync(
     print(f"Global Catalog     : {catalog_path}")
     print(f"Max Courses/Region : {max_courses if max_courses > 0 else 'Unlimited'}")
     print(f"Download Mode      : {'Single-threaded' if single_thread else f'Parallel ({num_threads} threads, {chunk_size_mb} MB chunks)'}")
+    print(f"Location Indexing  : {idx_type} (auto switches to disk-backed for large extracts)")
     print("=" * 70)
 
     all_catalog_entries = []
@@ -656,7 +762,13 @@ def run_monthly_sync(
         else:
             print(f"Using existing PBF file: {pbf_path}")
 
-        extracted_entries = process_pbf_file(pbf_path, cache_dir, max_courses=max_courses)
+        extracted_entries = process_pbf_file(
+            pbf_path,
+            cache_dir,
+            max_courses=max_courses,
+            idx_type=idx_type,
+            temp_dir=temp_dir
+        )
         all_catalog_entries.extend(extracted_entries)
 
         if clean and os.path.exists(pbf_path):
@@ -680,15 +792,15 @@ def main():
         choices=list(PRESETS.keys()) + ["none"],
         default="top-golf",
         help=(
-            "Predefined region preset. 'top-golf' downloads US, UK, Canada, Ireland, Australia (~18GB, ~95%% of world courses). "
-            "'continents' downloads full North America and Europe (~43GB). (default: top-golf)"
+            "Predefined region preset. 'top-golf' downloads safe US regions + UK, Ireland, Canada, Australia. "
+            "'top-states' downloads iconic golf states. 'us-regions' downloads all 5 US subregions. (default: top-golf)"
         )
     )
     parser.add_argument(
         "--regions",
         nargs="+",
         default=None,
-        help="Custom Geofabrik regions to process (e.g. us great-britain canada). Overrides --preset."
+        help="Custom Geofabrik regions to process (e.g. us-pacific california great-britain). Overrides --preset."
     )
     parser.add_argument(
         "--threads",
@@ -706,6 +818,20 @@ def main():
         "--single-thread",
         action="store_true",
         help="Use basic single-stream download instead of parallel chunk streams."
+    )
+    parser.add_argument(
+        "--idx-type",
+        choices=["auto", "sparse_file_array", "sparse_mem_array", "flex_mem", "dense_file_array"],
+        default="auto",
+        help=(
+            "Osmium node location index strategy. 'auto' selects sparse_file_array (on-disk) for extracts >= 2.5 GB "
+            "to prevent MemoryError: bad allocation, and sparse_mem_array for smaller extracts. (default: auto)"
+        )
+    )
+    parser.add_argument(
+        "--temp-dir",
+        default=None,
+        help="Custom directory for temporary disk-backed index files when using sparse_file_array."
     )
     parser.add_argument(
         "--download-dir",
@@ -749,7 +875,7 @@ def main():
         print(f"Applying Preset: {preset_info['name']} - {preset_info['description']}")
         selected_regions = preset_info["regions"]
     else:
-        selected_regions = ["us"]
+        selected_regions = ["us-pacific"]
 
     run_monthly_sync(
         regions=selected_regions,
@@ -761,7 +887,9 @@ def main():
         clean=args.clean,
         num_threads=args.threads,
         chunk_size_mb=args.chunk_size_mb,
-        single_thread=args.single_thread
+        single_thread=args.single_thread,
+        idx_type=args.idx_type,
+        temp_dir=args.temp_dir
     )
 
 

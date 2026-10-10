@@ -76,6 +76,7 @@ var new_player_avatar_path: String = ""
 var avatar_preview_btn: Button = Button.new()
 var new_player_tee_opt: OptionButton = OptionButton.new()
 var new_player_skill_opt: OptionButton = OptionButton.new()
+var new_player_handedness_opt: OptionButton = OptionButton.new()
 var avatar_picker_callback: Callable
 var avatar_picker_selected_path: String = ""
 var avatar_picker_content: VBoxContainer = VBoxContainer.new()
@@ -86,6 +87,7 @@ var edit_profile_email_input: LineEdit = LineEdit.new()
 var edit_profile_avatar_path: String = ""
 var edit_profile_tee_opt: OptionButton = OptionButton.new()
 var edit_profile_skill_opt: OptionButton = OptionButton.new()
+var edit_profile_handedness_opt: OptionButton = OptionButton.new()
 var edit_profile_content: VBoxContainer = VBoxContainer.new()
 var edit_profile_avatar_preview_container: Control = null
 var back_btn: Button = null
@@ -276,6 +278,16 @@ func _ready() -> void:
 	new_player_skill_opt.custom_minimum_size = Vector2(0, 50)
 	ThemeManager.apply_option_button_style(new_player_skill_opt, 17, Vector2(0, 50))
 	reg_section.add_child(new_player_skill_opt)
+
+	new_player_handedness_opt.name = "NewPlayerHandednessOpt"
+	new_player_handedness_opt.clear()
+	new_player_handedness_opt.add_item("Dexterity: Right-Handed", 0)
+	new_player_handedness_opt.add_item("Dexterity: Left-Handed", 1)
+	new_player_handedness_opt.selected = 0
+	new_player_handedness_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	new_player_handedness_opt.custom_minimum_size = Vector2(0, 50)
+	ThemeManager.apply_option_button_style(new_player_handedness_opt, 17, Vector2(0, 50))
+	reg_section.add_child(new_player_handedness_opt)
 
 	var reg_btn_hbox = HBoxContainer.new()
 	reg_btn_hbox.add_theme_constant_override("separation", 10)
@@ -604,12 +616,15 @@ func _on_register_pressed() -> void:
 		var raw_t = new_player_tee_opt.get_item_text(new_player_tee_opt.selected)
 		pref_tee = raw_t.replace("Preferred Tee: ", "").strip_edges()
 	var skill_level = _skill_index_to_key(new_player_skill_opt.selected)
-	MultiplayerManager.register_player(name_text, email_text, new_player_avatar_path, [], pref_tee, skill_level)
+	var handedness = new_player_handedness_opt.selected if new_player_handedness_opt != null else 0
+	MultiplayerManager.register_player(name_text, email_text, new_player_avatar_path, [], pref_tee, skill_level, handedness)
 	new_player_input.clear()
 	new_player_email_input.clear()
 	new_player_avatar_path = ""
 	new_player_tee_opt.selected = 0
 	new_player_skill_opt.selected = 0
+	if new_player_handedness_opt != null:
+		new_player_handedness_opt.selected = 0
 	_update_new_player_avatar_preview()
 	_select_player(name_text)
 
@@ -927,6 +942,32 @@ func _open_edit_profile_dialog(player_name: String) -> void:
 	edit_profile_skill_opt.selected = _skill_key_to_index(cur_skill)
 	skill_sec.add_child(edit_profile_skill_opt)
 
+	# Dexterity / Handedness Section
+	var hand_sec = VBoxContainer.new()
+	hand_sec.add_theme_constant_override("separation", 6)
+	edit_profile_content.add_child(hand_sec)
+
+	var hand_title = Label.new()
+	hand_title.text = "Player Dexterity / Handedness:"
+	hand_title.add_theme_font_size_override("font_size", 15)
+	hand_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	hand_sec.add_child(hand_title)
+
+	var hand_hint = Label.new()
+	hand_hint.text = "ℹ️ Configures launch monitors requiring handedness tracking (e.g. Square Golf)."
+	hand_hint.add_theme_font_size_override("font_size", 13)
+	hand_hint.add_theme_color_override("font_color", Color(0.65, 0.85, 1.0))
+	hand_sec.add_child(hand_hint)
+
+	edit_profile_handedness_opt = OptionButton.new()
+	edit_profile_handedness_opt.add_item("Right-Handed", 0)
+	edit_profile_handedness_opt.add_item("Left-Handed", 1)
+	edit_profile_handedness_opt.custom_minimum_size = Vector2(0, 50)
+	ThemeManager.apply_option_button_style(edit_profile_handedness_opt, 18, Vector2(0, 50))
+	var cur_hand = int(reg.get("handedness", 0))
+	edit_profile_handedness_opt.selected = cur_hand
+	hand_sec.add_child(edit_profile_handedness_opt)
+
 	# Bag Section
 	var bag_sec = VBoxContainer.new()
 	bag_sec.add_theme_constant_override("separation", 6)
@@ -1042,7 +1083,8 @@ func _on_edit_profile_confirmed() -> void:
 	if edit_profile_tee_opt != null and edit_profile_tee_opt.selected > 0:
 		new_tee = edit_profile_tee_opt.get_item_text(edit_profile_tee_opt.selected)
 	var new_skill = _skill_index_to_key(edit_profile_skill_opt.selected)
-	MultiplayerManager.update_player_profile(edit_profile_player_name, new_email, edit_profile_avatar_path, new_tee, new_skill)
+	var new_handedness = edit_profile_handedness_opt.selected if edit_profile_handedness_opt != null else 0
+	MultiplayerManager.update_player_profile(edit_profile_player_name, new_email, edit_profile_avatar_path, new_tee, new_skill, new_handedness)
 	_refresh_players_list()
 	_render_player_profile(edit_profile_player_name)
 
@@ -1184,6 +1226,13 @@ func _render_player_profile(player_name: String) -> void:
 	skill_lbl.add_theme_font_size_override("font_size", 14)
 	skill_lbl.add_theme_color_override("font_color", Color(0.4, 0.9, 0.6))
 	info_vbox.add_child(skill_lbl)
+
+	var p_hand = int(reg_p.get("handedness", 0))
+	var hand_lbl = Label.new()
+	hand_lbl.text = "🏌️ Dexterity: " + ("Left-Handed" if p_hand == 1 else "Right-Handed")
+	hand_lbl.add_theme_font_size_override("font_size", 14)
+	hand_lbl.add_theme_color_override("font_color", Color(0.95, 0.82, 0.45))
+	info_vbox.add_child(hand_lbl)
 
 	var edit_profile_btn = Button.new()
 	edit_profile_btn.name = "EditProfileBtn"

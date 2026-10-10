@@ -28,6 +28,7 @@ var _prev_shot_btn: Button = null
 var _detached_window: Window = null
 var _detached_modal: Control = null
 var _right_panel: VBoxContainer = null
+var _toggles_scroll: ScrollContainer = null
 var _home_btn: Button = null
 var _settings_btn: Button = null
 var _exit_confirm_dialog: Control = null
@@ -292,11 +293,15 @@ func _ready() -> void:
 		toggles_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		toggles_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 		toggles_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+		toggles_scroll.follow_focus = true
+		ThemeManager.apply_scroll_container_style(toggles_scroll, 28)
+		_toggles_scroll = toggles_scroll
 		
 		var toggles_container = VBoxContainer.new()
 		toggles_container.name = "TogglesContainer"
 		toggles_container.add_theme_constant_override("separation", 12)
-		toggles_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		toggles_container.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		toggles_container.custom_minimum_size = Vector2(256, 0)
 		
 		hide_helpers_btn.pressed.connect(func():
 			toggles_scroll.visible = not toggles_scroll.visible
@@ -304,11 +309,19 @@ func _ready() -> void:
 				apply_circular_button_style(hide_helpers_btn, Color(0.25, 0.45, 0.7, 0.9))
 			else:
 				apply_circular_button_style(hide_helpers_btn, Color(0.15, 0.15, 0.15, 0.85))
+			_update_helpers_scroll_layout()
 			call_deferred("_update_hud_focus_neighbors")
 		)
 		
 		toggles_scroll.add_child(toggles_container)
 		right_panel.add_child(toggles_scroll)
+
+		var v_bar = toggles_scroll.get_v_scroll_bar()
+		if v_bar != null:
+			v_bar.visibility_changed.connect(func(): _update_helpers_scroll_layout.call_deferred())
+		toggles_scroll.visibility_changed.connect(func(): _update_helpers_scroll_layout.call_deferred())
+		toggles_scroll.resized.connect(func(): _update_helpers_scroll_layout.call_deferred())
+		toggles_container.resized.connect(func(): _update_helpers_scroll_layout.call_deferred())
 
 		# Announcer Mute/Unmute Toggle Button
 		var announcer_btn = Button.new()
@@ -375,7 +388,10 @@ func _ready() -> void:
 		toggles_container.add_child(so_ctrl)
 		_screen_offset_ctrl = so_ctrl
 		if so_ctrl.has_signal("offset_toggled"):
-			so_ctrl.offset_toggled.connect(func(_on): call_deferred("_update_hud_focus_neighbors"))
+			so_ctrl.offset_toggled.connect(func(_on):
+				_update_helpers_scroll_layout.call_deferred()
+				call_deferred("_update_hud_focus_neighbors")
+			)
 
 		# Distance Menu Button
 		var dist_btn = Button.new()
@@ -4318,3 +4334,19 @@ func _update_hud_focus_neighbors() -> void:
 					h_ctrl.focus_neighbor_bottom = h_ctrl.get_path_to(_map_btn)
 				elif _prev_shot_btn != null and is_instance_valid(_prev_shot_btn) and _prev_shot_btn.visible:
 					h_ctrl.focus_neighbor_bottom = h_ctrl.get_path_to(_prev_shot_btn)
+
+
+func _update_helpers_scroll_layout() -> void:
+	if _right_panel == null:
+		return
+	if _toggles_scroll == null:
+		_toggles_scroll = _right_panel.get_node_or_null("TogglesScroll")
+	if _toggles_scroll == null:
+		return
+	var v_bar = _toggles_scroll.get_v_scroll_bar()
+	var is_bar_visible = v_bar != null and v_bar.visible and _toggles_scroll.visible
+	var scroll_w = int(v_bar.size.x) if (v_bar != null and is_bar_visible) else 0
+	if scroll_w <= 0 and is_bar_visible and v_bar != null:
+		scroll_w = int(v_bar.custom_minimum_size.x)
+	var shift = (scroll_w + 6) if scroll_w > 0 else 0
+	_right_panel.offset_left = -280 - shift

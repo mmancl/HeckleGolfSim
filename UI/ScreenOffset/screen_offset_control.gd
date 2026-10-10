@@ -112,28 +112,27 @@ func _build_ui() -> void:
 	r_lbl.add_theme_color_override("font_color", Color(0.8, 0.85, 0.9))
 	slider_row.add_child(r_lbl)
 
-	# Details row for standard slider (only in non-course-play mode)
-	if not is_course_play:
-		var info_row = HBoxContainer.new()
-		info_row.add_theme_constant_override("separation", 6)
-		info_row.alignment = BoxContainer.ALIGNMENT_CENTER
-		info_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_slider_container.add_child(info_row)
+	# Details row for standard slider
+	var info_row = HBoxContainer.new()
+	info_row.add_theme_constant_override("separation", 6)
+	info_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	info_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_slider_container.add_child(info_row)
 
-		_value_label = Label.new()
-		_value_label.text = "Center"
-		_value_label.add_theme_font_size_override("font_size", 13)
-		_value_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
-		_value_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		info_row.add_child(_value_label)
+	_value_label = Label.new()
+	_value_label.text = "Center"
+	_value_label.add_theme_font_size_override("font_size", 13)
+	_value_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
+	_value_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info_row.add_child(_value_label)
 
-		_center_btn = Button.new()
-		_center_btn.name = "CenterButton"
-		_center_btn.text = "⟲ Center"
-		_center_btn.custom_minimum_size = Vector2(76, 32)
-		_center_btn.add_theme_font_size_override("font_size", 12)
-		_center_btn.pressed.connect(_on_center_pressed)
-		info_row.add_child(_center_btn)
+	_center_btn = Button.new()
+	_center_btn.name = "CenterButton"
+	_center_btn.text = "⟲ Center"
+	_center_btn.custom_minimum_size = Vector2(76, 32)
+	_center_btn.add_theme_font_size_override("font_size", 12)
+	_center_btn.pressed.connect(_on_center_pressed)
+	info_row.add_child(_center_btn)
 
 	# Putter slider (used in Course Play)
 	if show_putter_slider:
@@ -174,27 +173,26 @@ func _build_ui() -> void:
 		p_r_lbl.add_theme_color_override("font_color", Color(0.8, 0.85, 0.9))
 		putter_row.add_child(p_r_lbl)
 
-		if not is_course_play:
-			var p_info_row = HBoxContainer.new()
-			p_info_row.add_theme_constant_override("separation", 6)
-			p_info_row.alignment = BoxContainer.ALIGNMENT_CENTER
-			p_info_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			_slider_container.add_child(p_info_row)
+		var p_info_row = HBoxContainer.new()
+		p_info_row.add_theme_constant_override("separation", 6)
+		p_info_row.alignment = BoxContainer.ALIGNMENT_CENTER
+		p_info_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_slider_container.add_child(p_info_row)
 
-			_putter_value_label = Label.new()
-			_putter_value_label.text = "Center"
-			_putter_value_label.add_theme_font_size_override("font_size", 13)
-			_putter_value_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
-			_putter_value_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			p_info_row.add_child(_putter_value_label)
+		_putter_value_label = Label.new()
+		_putter_value_label.text = "Center"
+		_putter_value_label.add_theme_font_size_override("font_size", 13)
+		_putter_value_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
+		_putter_value_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		p_info_row.add_child(_putter_value_label)
 
-			_putter_center_btn = Button.new()
-			_putter_center_btn.name = "PutterCenterButton"
-			_putter_center_btn.text = "⟲ Center"
-			_putter_center_btn.custom_minimum_size = Vector2(76, 32)
-			_putter_center_btn.add_theme_font_size_override("font_size", 12)
-			_putter_center_btn.pressed.connect(_on_putter_center_pressed)
-			p_info_row.add_child(_putter_center_btn)
+		_putter_center_btn = Button.new()
+		_putter_center_btn.name = "PutterCenterButton"
+		_putter_center_btn.text = "⟲ Center"
+		_putter_center_btn.custom_minimum_size = Vector2(76, 32)
+		_putter_center_btn.add_theme_font_size_override("font_size", 12)
+		_putter_center_btn.pressed.connect(_on_putter_center_pressed)
+		p_info_row.add_child(_putter_center_btn)
 
 
 func _on_toggle_pressed() -> void:
@@ -344,15 +342,21 @@ func _sync_from_manager() -> void:
 	if is_on and _slider != null and _toggle_btn != null:
 		_toggle_btn.focus_neighbor_bottom = _slider.get_path()
 		_slider.focus_neighbor_top = _toggle_btn.get_path()
-		if _putter_slider != null:
-			_slider.focus_neighbor_bottom = _putter_slider.get_path()
-			_putter_slider.focus_neighbor_top = _slider.get_path()
-			if _center_btn != null:
-				_putter_slider.focus_neighbor_bottom = _center_btn.get_path()
-				_center_btn.focus_neighbor_top = _putter_slider.get_path()
-		elif _center_btn != null:
+		if _center_btn != null:
 			_slider.focus_neighbor_bottom = _center_btn.get_path()
 			_center_btn.focus_neighbor_top = _slider.get_path()
+			if _putter_slider != null:
+				_center_btn.focus_neighbor_bottom = _putter_slider.get_path()
+				_putter_slider.focus_neighbor_top = _center_btn.get_path()
+				if _putter_center_btn != null:
+					_putter_slider.focus_neighbor_bottom = _putter_center_btn.get_path()
+					_putter_center_btn.focus_neighbor_top = _putter_slider.get_path()
+		elif _putter_slider != null:
+			_slider.focus_neighbor_bottom = _putter_slider.get_path()
+			_putter_slider.focus_neighbor_top = _slider.get_path()
+			if _putter_center_btn != null:
+				_putter_slider.focus_neighbor_bottom = _putter_center_btn.get_path()
+				_putter_center_btn.focus_neighbor_top = _putter_slider.get_path()
 
 	emit_signal("offset_toggled", is_on)
 
@@ -386,10 +390,10 @@ func get_focusables() -> Array[Control]:
 	if _slider_container != null and _slider_container.visible:
 		if _slider != null and _slider.visible:
 			result.append(_slider)
-		if _putter_slider != null and _putter_slider.visible:
-			result.append(_putter_slider)
 		if _center_btn != null and _center_btn.visible:
 			result.append(_center_btn)
+		if _putter_slider != null and _putter_slider.visible:
+			result.append(_putter_slider)
 		if _putter_center_btn != null and _putter_center_btn.visible:
 			result.append(_putter_center_btn)
 	return result

@@ -432,31 +432,8 @@ internal sealed class WindowsBluetoothGattClient : IBluetoothGattClient
         return data;
     }
 
-    private bool IsDeviceNameMatch(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return false;
-        }
-
-        var prefix = _scanOptions.DeviceNamePrefix;
-        if (string.IsNullOrWhiteSpace(prefix))
-        {
-            return true;
-        }
-
-        var trimmedName = name.Trim();
-        if (trimmedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
-            trimmedName.Contains(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var normalizedName = trimmedName.Replace(" ", "").Replace("-", "").Replace("_", "");
-        var normalizedPrefix = prefix.Replace(" ", "").Replace("-", "").Replace("_", "");
-        return normalizedName.StartsWith(normalizedPrefix, StringComparison.OrdinalIgnoreCase) ||
-               normalizedName.Contains(normalizedPrefix, StringComparison.OrdinalIgnoreCase);
-    }
+    private bool IsDeviceNameMatch(string? name) =>
+        BluetoothDeviceFilter.IsDeviceNameMatch(name, _scanOptions.DeviceNamePrefix);
 
     private void OnDeviceConnectionStatusChanged(BluetoothLEDevice sender, object args)
     {

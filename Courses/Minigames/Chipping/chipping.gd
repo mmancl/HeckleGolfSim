@@ -220,6 +220,7 @@ func _reset_game() -> void:
 	_update_hud()
 	_update_island_buttons()
 	_update_players_button_label()
+	_sync_launch_monitor_player()
 
 
 func _get_next_uncompleted_island(player_idx: int) -> int:
@@ -256,6 +257,7 @@ func _open_players_modal() -> void:
 		_update_island_buttons()
 		_update_target_ring_color()
 		_update_hud()
+		_sync_launch_monitor_player()
 	)
 	modal.reset_match_requested.connect(func():
 		_reset_game()
@@ -1635,7 +1637,16 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 			_select_target_island(next_target, false)
 			var next_name = get_active_player_name()
 			_show_banner("🎯 %s's Turn! Target: %d YDS" % [next_name, island_distances_yards[next_target]])
+			_sync_launch_monitor_player()
 	_reset_ball_position()
+
+func _sync_launch_monitor_player() -> void:
+	if not pvp_mode or players_list.is_empty():
+		return
+	if has_node("/root/LaunchMonitorManager") and has_node("/root/MultiplayerManager"):
+		var cur_name = get_active_player_name()
+		var hand = MultiplayerManager.get_player_handedness(cur_name)
+		get_node("/root/LaunchMonitorManager").set_handedness(hand)
 
 # ========================================
 # GUI SETUP

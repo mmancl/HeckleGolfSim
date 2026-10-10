@@ -311,9 +311,14 @@ func load_settings() -> void:
 	if announcer:
 		_apply_announcer_settings(announcer)
 
+	if has_node("/root/KeybindingManager"):
+		get_node("/root/KeybindingManager").load_keybindings()
+
 
 func save_settings() -> void:
 	var config = ConfigFile.new()
+	# Load existing file first to preserve other sections (keybindings, controller bindings, etc.)
+	config.load("user://global_settings.cfg")
 	
 	# Save RangeSettings
 	for key in range_settings.settings.keys():
@@ -335,6 +340,16 @@ func save_settings() -> void:
 		
 	for key in _loaded_announcer_settings.keys():
 		config.set_value("announcer", key.to_lower(), _loaded_announcer_settings[key])
+
+	# Also save/sync keybindings if KeybindingManager is active
+	if has_node("/root/KeybindingManager"):
+		var km = get_node("/root/KeybindingManager")
+		var actions = km.get_all_actions()
+		for action_name in actions.keys():
+			var code = actions[action_name]["current_key"] as int
+			config.set_value("keybindings", action_name, code)
+			var joy = actions[action_name].get("current_joy", -1) as int
+			config.set_value("controller_bindings", action_name, joy)
 			
 	var err = config.save("user://global_settings.cfg")
 	if err != OK:

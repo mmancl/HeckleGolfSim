@@ -392,7 +392,8 @@ func _add_player_ui(p_name: String, tee: String = "") -> void:
 		resolved_tee = MultiplayerManager.get_player_preferred_tee(p_name)
 		if resolved_tee.is_empty():
 			resolved_tee = "Blue"
-	var player_data = {"name": p_name, "tee": resolved_tee, "avatar": avatar_path, "email": email}
+	var hand = MultiplayerManager.get_player_handedness(p_name)
+	var player_data = {"name": p_name, "tee": resolved_tee, "avatar": avatar_path, "email": email, "handedness": hand}
 	players_to_add.append(player_data)
 	
 	var row = HBoxContainer.new()
@@ -427,11 +428,23 @@ func _add_player_ui(p_name: String, tee: String = "") -> void:
 		badge.add_child(badge_lbl)
 		row.add_child(badge)
 
+	var name_vbox = VBoxContainer.new()
+	name_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	name_vbox.add_theme_constant_override("separation", 2)
+
 	var name_lbl = Label.new()
 	name_lbl.text = p_name
-	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name_lbl.add_theme_font_size_override("font_size", 24)
-	row.add_child(name_lbl)
+	name_lbl.add_theme_font_size_override("font_size", 22)
+	name_vbox.add_child(name_lbl)
+
+	var hand_sub_lbl = Label.new()
+	hand_sub_lbl.text = "🏌️ " + ("Left-Handed" if hand == 1 else "Right-Handed")
+	hand_sub_lbl.add_theme_font_size_override("font_size", 13)
+	hand_sub_lbl.add_theme_color_override("font_color", Color(0.85, 0.85, 0.75, 0.8))
+	name_vbox.add_child(hand_sub_lbl)
+
+	row.add_child(name_vbox)
 	
 	var player_tee_opt = OptionButton.new()
 	player_tee_opt.add_item("Blue", 0)
