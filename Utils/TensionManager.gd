@@ -8,8 +8,9 @@ signal tension_stopped()
 
 const PUTT_THRESHOLD_METERS := 9.144   # 30 feet in meters (zone where suspense heartbeat builds for putts)
 const CHIP_THRESHOLD_METERS := 15.24   # 50 feet in meters (zone for chip/pitch rollouts)
-const PUTT_MIN_SUSPENSE_DISTANCE_METERS := 1.20 # ~4 feet in meters (filters out trivial tap-ins under 4ft)
-const CHIP_MIN_SUSPENSE_DISTANCE_METERS := 2.50 # ~8 feet in meters
+const MIN_INITIAL_SHOT_DISTANCE_METERS := 6.096 # 20 feet in meters (20.0 * 0.3048) - suspense never triggers on shots starting under 20ft
+const PUTT_MIN_SUSPENSE_DISTANCE_METERS := 6.096 # 20 feet in meters (alias)
+const CHIP_MIN_SUSPENSE_DISTANCE_METERS := 6.096 # 20 feet in meters (alias)
 const MAX_PROJECTED_LANDING_DISTANCE_METERS := 18.288 # 20 yards in meters (20.0 * 0.9144)
 const PAST_HOLE_THRESHOLD_METERS := 0.3048         # 1 foot past the hole in meters (1.0 * 0.3048)
 const CYCLE_DURATION := 0.80          # ~75 BPM double-thump heartbeat cycle
@@ -323,7 +324,7 @@ func get_projected_reach_distance(ball_pos: Vector3, ball_vel: Vector3, is_airbo
 	var decel = get_effective_rolling_deceleration()
 
 	if is_airborne:
-		var target_y = target_pos.y if not target_pos.is_zero_approx() else 0.0
+		var target_y = target_pos.y if not target_pos.is_zero_approx() else ball_pos.y
 		var h = maxf(0.0, ball_pos.y - target_y)
 		var g = 9.81
 		var vy = ball_vel.y
@@ -339,7 +340,7 @@ func get_projected_reach_distance(ball_pos: Vector3, ball_vel: Vector3, is_airbo
 
 # ---------------- SUSPENSE ELIGIBILITY ----------------
 
-func is_shot_eligible_for_suspense(start_pos: Vector3, target_pos: Vector3, is_putt: bool, _is_sand: bool = false) -> bool:
+func is_shot_eligible_for_suspense(start_pos: Vector3, target_pos: Vector3, _is_putt: bool = false, _is_sand: bool = false) -> bool:
 	if not is_course_play_active() or _shot_suspense_locked_out or _tree_hit_this_shot:
 		return false
 	if target_pos.is_zero_approx():
@@ -347,11 +348,8 @@ func is_shot_eligible_for_suspense(start_pos: Vector3, target_pos: Vector3, is_p
 	var dist_2d = Vector2(start_pos.x, start_pos.z).distance_to(Vector2(target_pos.x, target_pos.z))
 	if dist_2d < 0.05:
 		return false
-	# Use small epsilon (0.01m / ~0.4 in) to avoid floating point precision rounding dropouts
-	if is_putt:
-		return (dist_2d + 0.01) >= PUTT_MIN_SUSPENSE_DISTANCE_METERS
-	else:
-		return (dist_2d + 0.01) >= CHIP_MIN_SUSPENSE_DISTANCE_METERS
+	# Suspense must never trigger on any shot starting less than 20 feet (6.096m) from the hole before being hit
+	return (dist_2d + 0.01) >= MIN_INITIAL_SHOT_DISTANCE_METERS
 
 # ---------------- TRAJECTORY PREDICTION ----------------
 
@@ -530,19 +528,27 @@ func predict_shot_outcome(start_pos: Vector3, launch_vel: Vector3, is_putt: bool
 		# Tighten putt validation: must be directed towards hole and stop within contender window
 		if forward_dot > 0.85:
 			is_contender = holed_out or (min_dist_2d <= CONTENDER_RADIUS_PUTT_METERS)
-		if forward_dot <= 0.0 or (forward_dot < 0.75 and min_dist_2d > CONTENDER_RADIUS_PUTT_METERS):
+		if forward_dot <= 0.0 or (forward_dot < 0.75 and min_dist_2d > CONTENDER_RADIUS_PUTT_METERS) or (not holed_out and min_dist_2d > CONTENDER_RADIUS_PUTT_METERS):
 			is_confirmed_miss = true
 	else:
 		# Airborne / chip shot:
 		var start_to_hole = (target_2d - Vector2(start_pos.x, start_pos.z)).normalized() if Vector2(start_pos.x, start_pos.z).distance_to(target_2d) > 0.001 else Vector2.ZERO
 		var chip_launch_dir = Vector2(launch_vel.x, launch_vel.z).normalized()
 		var forward_dot = chip_launch_dir.dot(start_to_hole)
+		var land_dist_to_hole = Vector2(p_land.x, p_land.z).distance_to(target_2d)
+
 		if forward_dot < 0.2:
 			is_confirmed_miss = true # Hit backwards or extreme shank
 		else:
-			# Do not permanently lock out airborne shots from toy simulation!
-			# Validate as contender if aimed toward green (forward_dot >= 0.70 or min_dist <= 16m)
-			is_contender = holed_out or (min_dist_2d <= 16.0) or (forward_dot >= 0.70)
+			var is_on_track = forward_dot >= 0.70
+			# Power check: ball must have the power to land within reasonable distance of the hole (<= 20 yards)
+			var has_landing_power = holed_out or (did_land and land_dist_to_hole <= MAX_PROJECTED_LANDING_DISTANCE_METERS)
+			var finishes_near_hole = holed_out or (min_dist_2d <= CONTENDER_RADIUS_METERS) or (ending_dist_2d <= CHIP_THRESHOLD_METERS)
+
+			if is_on_track and has_landing_power and finishes_near_hole:
+				is_contender = true
+			elif not has_landing_power and not holed_out and min_dist_2d > CHIP_THRESHOLD_METERS:
+				is_confirmed_miss = true
 
 	if is_confirmed_miss:
 		suspense_state = SuspenseState.SPENT
@@ -652,7 +658,7 @@ func check_ball_proximity(
 	ball_pos: Vector3,
 	target_pos: Vector3,
 	is_putt: bool,
-	shot_start_pos: Vector3 = Vector3.ZERO,
+	shot_start_pos: Vector3 = Vector3(INF, INF, INF),
 	_is_sand: bool = false,
 	is_airborne: bool = false,
 	ball_vel: Vector3 = Vector3.ZERO,
@@ -697,6 +703,14 @@ func check_ball_proximity(
 	# STATE: IDLE / READY -> ACTIVE (Predictive Activation)
 	# ========================================================
 	if suspense_state == SuspenseState.READY or suspense_state == SuspenseState.IDLE:
+		# Verify initial distance eligibility (never trigger for shots starting < 20 feet from hole)
+		var start_p = shot_start_pos if shot_start_pos.x != INF else ball_pos
+		if not is_shot_eligible_for_suspense(start_p, target_pos, is_putt, _is_sand):
+			suspense_state = SuspenseState.SPENT
+			_shot_suspense_locked_out = true
+			_last_cone_valid = false
+			return false
+
 		# In READY state, trajectory validation must have passed
 		if suspense_state == SuspenseState.READY and not shot_validated:
 			suspense_state = SuspenseState.SPENT
@@ -704,10 +718,12 @@ func check_ball_proximity(
 			_last_cone_valid = false
 			return false
 
-		# In IDLE state, verify basic distance eligibility
-		if suspense_state == SuspenseState.IDLE:
-			var start_p = shot_start_pos if not shot_start_pos.is_zero_approx() else ball_pos
-			if not is_shot_eligible_for_suspense(start_p, target_pos, is_putt, _is_sand):
+		# Airborne power check: ensure predicted landing was within reasonable distance of the hole
+		if is_airborne and predicted_land_pos != Vector3.ZERO:
+			var pred_land_dist = Vector2(predicted_land_pos.x, predicted_land_pos.z).distance_to(hole_pos_2d)
+			if pred_land_dist > MAX_PROJECTED_LANDING_DISTANCE_METERS and not predicted_holed_out and _predicted_ending_dist > CONTENDER_RADIUS_METERS:
+				suspense_state = SuspenseState.SPENT
+				_shot_suspense_locked_out = true
 				_last_cone_valid = false
 				return false
 
@@ -746,9 +762,9 @@ func check_ball_proximity(
 				var dist_land = dynamic_land_2d.distance_to(hole_pos_2d)
 
 				# Airborne shot triggers when descending, travel direction within tight cone,
-				# speed reaches target, and projected landing within realistic proximity window
+				# speed reaches target, and projected landing within realistic proximity window (<= 20 yards)
 				var max_land_proximity = clampf(dist_2d * 0.45 + 1.5, 3.0, 8.0)
-				if cos_theta_cur >= min_cos and is_reachable and (dist_land <= max_land_proximity or dist_land <= CUP_RADIUS_METERS):
+				if cos_theta_cur >= min_cos and is_reachable and dist_land <= MAX_PROJECTED_LANDING_DISTANCE_METERS and (dist_land <= max_land_proximity or dist_land <= CUP_RADIUS_METERS):
 					cone_valid = true
 			else:
 				# Putting / on-ground rollout:
@@ -813,8 +829,8 @@ func check_ball_proximity(
 			stop_tension(true)
 			return false
 
-		var start_pos_2d = Vector2(shot_start_pos.x, shot_start_pos.z) if not shot_start_pos.is_zero_approx() else Vector2.ZERO
-		if not start_pos_2d.is_zero_approx():
+		var start_pos_2d = Vector2(shot_start_pos.x, shot_start_pos.z) if shot_start_pos.x != INF else Vector2.ZERO
+		if shot_start_pos.x != INF:
 			var shot_vec = hole_pos_2d - start_pos_2d
 			if shot_vec.length_squared() > 0.01:
 				var shot_dir = shot_vec.normalized()

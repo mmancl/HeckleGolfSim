@@ -65,6 +65,8 @@ var putting_mishit_filter_enabled := Setting.new(true)
 var windowed_fullscreen := Setting.new(true)
 var shot_curve_sensitivity := Setting.new(1.0, 0.5, 2.0)
 var debug_show_suspense_cone := Setting.new(false)
+var debug_show_hit_distance := Setting.new(false)
+var debug_bypass_osm_limit := Setting.new(false)
 var screen_offset_enabled := Setting.new(false)
 var screen_offset_value := Setting.new(0.0, -1.0, 1.0)
 var screen_offset_putter_value := Setting.new(0.0, -1.0, 1.0)
@@ -137,6 +139,8 @@ func _init():
 		"windowed_fullscreen": windowed_fullscreen,
 		"shot_curve_sensitivity": shot_curve_sensitivity,
 		"debug_show_suspense_cone": debug_show_suspense_cone,
+		"debug_show_hit_distance": debug_show_hit_distance,
+		"debug_bypass_osm_limit": debug_bypass_osm_limit,
 		"screen_offset_enabled": screen_offset_enabled,
 		"screen_offset_value": screen_offset_value,
 		"screen_offset_putter_value": screen_offset_putter_value,

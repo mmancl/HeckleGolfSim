@@ -226,7 +226,7 @@ func _on_delete_course_pressed() -> void:
 	confirm.min_size = Vector2(480, 200)
 	ThemeManager.apply_dialog_style(confirm)
 	confirm.confirmed.connect(func():
-		_delete_course_dir(course_dir)
+		_delete_course_dir(course_dir, course_title)
 		_request_course_reload()
 		confirm.queue_free()
 	)
@@ -237,7 +237,7 @@ func _on_delete_course_pressed() -> void:
 	confirm.popup_centered()
 
 
-func _delete_course_dir(dir_path: String) -> void:
+func _delete_course_dir(dir_path: String, course_title: String = "") -> void:
 	var global_path = ProjectSettings.globalize_path(dir_path)
 	var dir = DirAccess.open(dir_path)
 	if dir == null:
@@ -259,6 +259,47 @@ func _delete_course_dir(dir_path: String) -> void:
 	if parent_dir != null:
 		parent_dir.remove(dir_path.get_file())
 		print("[CourseSelector] Deleted course directory: %s" % dir_path)
+
+	# Clean up any corresponding geometry cache in user://cached_geometry
+	_delete_user_cached_geometry(dir_path.get_file(), course_title)
+
+
+func _delete_user_cached_geometry(folder_name: String, course_title: String = "") -> void:
+	var user_cache_dir = "user://cached_geometry"
+	if not DirAccess.dir_exists_absolute(user_cache_dir):
+		return
+
+	var candidates: Array[String] = [
+		folder_name,
+		folder_name.to_lower(),
+		_slugify_name(folder_name),
+	]
+	if not course_title.is_empty():
+		candidates.append(course_title.to_lower().replace(" ", "_"))
+		candidates.append(_slugify_name(course_title))
+
+	for cand in candidates:
+		if cand.is_empty():
+			continue
+		for ext in [".json.gz", ".json"]:
+			var file_path = user_cache_dir.path_join(cand + ext)
+			if FileAccess.file_exists(file_path):
+				DirAccess.remove_absolute(file_path)
+				print("[CourseSelector] Cleaned up cached geometry file: %s" % file_path)
+
+
+static func _slugify_name(text: String) -> String:
+	var res = ""
+	var prev_sep = false
+	for ch in text.to_lower():
+		if (ch >= 'a' and ch <= 'z') or (ch >= '0' and ch <= '9'):
+			res += ch
+			prev_sep = false
+		elif ch in [' ', '_', '-', '(', ')', '.']:
+			if not prev_sep and not res.is_empty():
+				res += "_"
+				prev_sep = true
+	return res.strip_edges().trim_prefix("_").trim_suffix("_")
 
 
 func _on_course_selected(index: int) -> void:

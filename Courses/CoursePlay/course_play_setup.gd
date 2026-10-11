@@ -8,6 +8,9 @@ var delete_confirm_dialog: ConfirmationDialog
 
 var available_courses: Array[Dictionary] = []
 var players_to_add: Array[Dictionary] = []
+var current_course_tees: Array[String] = ["Blue", "Red", "White", "Black", "Gold"]
+var add_row_tee_opt: OptionButton = null
+var player_tee_options: Array[OptionButton] = []
 
 var selected_length: String = "Full 18"
 var front_9_btn: Button
@@ -155,11 +158,9 @@ func _ready() -> void:
 	refresh_player_select.call()
 	
 	var tee_opt = OptionButton.new()
-	tee_opt.add_item("Blue", 0)
-	tee_opt.add_item("Red", 1)
-	tee_opt.add_item("White", 2)
-	tee_opt.add_item("Black", 3)
-	tee_opt.add_item("Gold", 4)
+	add_row_tee_opt = tee_opt
+	for t_idx in range(current_course_tees.size()):
+		tee_opt.add_item(current_course_tees[t_idx], t_idx)
 	ThemeManager.apply_option_button_style(tee_opt, 22, Vector2(160, 56))
 	add_row.add_child(tee_opt)
 	
@@ -447,11 +448,10 @@ func _add_player_ui(p_name: String, tee: String = "") -> void:
 	row.add_child(name_vbox)
 	
 	var player_tee_opt = OptionButton.new()
-	player_tee_opt.add_item("Blue", 0)
-	player_tee_opt.add_item("Red", 1)
-	player_tee_opt.add_item("White", 2)
-	player_tee_opt.add_item("Black", 3)
-	player_tee_opt.add_item("Gold", 4)
+	player_tee_opt.set_meta("player_data", player_data)
+	player_tee_options.append(player_tee_opt)
+	for t_idx in range(current_course_tees.size()):
+		player_tee_opt.add_item(current_course_tees[t_idx], t_idx)
 	player_tee_opt.selected = 0
 	for t_idx in range(player_tee_opt.item_count):
 		if player_tee_opt.get_item_text(t_idx).to_lower() == resolved_tee.to_lower():
@@ -470,6 +470,7 @@ func _add_player_ui(p_name: String, tee: String = "") -> void:
 	ThemeManager.apply_danger_button_style(remove_btn)
 	remove_btn.pressed.connect(func():
 		players_to_add.erase(player_data)
+		player_tee_options.erase(player_tee_opt)
 		row.queue_free()
 		_update_start_button()
 	)
@@ -1265,6 +1266,61 @@ func _update_course_length_options(idx: int) -> void:
 			else:
 				back_9_btn.disabled = false
 				_select_length(selected_length)
+
+			var course_info = parsed.get("Course Info", {})
+			var tees_raw = course_info.get("Tee Colors", [])
+			var detected_tees: Array[String] = []
+			if tees_raw is Array:
+				for tc in tees_raw:
+					var tc_str = str(tc).strip_edges()
+					if not tc_str.is_empty() and not detected_tees.has(tc_str):
+						detected_tees.append(tc_str)
+			if detected_tees.is_empty():
+				for h in holes.values():
+					if h is Dictionary and h.has("Tee Boxes"):
+						for k in h["Tee Boxes"].keys():
+							var k_str = str(k).strip_edges()
+							if not k_str.is_empty() and not detected_tees.has(k_str):
+								detected_tees.append(k_str)
+			if not detected_tees.is_empty():
+				current_course_tees = detected_tees
+			else:
+				current_course_tees = ["Blue", "Red", "White", "Black", "Gold"]
+			_refresh_tee_dropdowns()
+
+
+func _refresh_tee_dropdowns() -> void:
+	if add_row_tee_opt != null and is_instance_valid(add_row_tee_opt):
+		var prev_sel = add_row_tee_opt.get_item_text(add_row_tee_opt.selected) if add_row_tee_opt.selected >= 0 else ""
+		add_row_tee_opt.clear()
+		for i in range(current_course_tees.size()):
+			add_row_tee_opt.add_item(current_course_tees[i], i)
+		var found = false
+		for i in range(add_row_tee_opt.item_count):
+			if add_row_tee_opt.get_item_text(i).to_lower() == prev_sel.to_lower():
+				add_row_tee_opt.selected = i
+				found = true
+				break
+		if not found:
+			add_row_tee_opt.selected = 0
+
+	for opt in player_tee_options:
+		if opt != null and is_instance_valid(opt):
+			var prev_sel = opt.get_item_text(opt.selected) if opt.selected >= 0 else ""
+			opt.clear()
+			for i in range(current_course_tees.size()):
+				opt.add_item(current_course_tees[i], i)
+			var found = false
+			for i in range(opt.item_count):
+				if opt.get_item_text(i).to_lower() == prev_sel.to_lower():
+					opt.selected = i
+					found = true
+					break
+			if not found:
+				opt.selected = 0
+			if opt.has_meta("player_data"):
+				var pd = opt.get_meta("player_data")
+				pd["tee"] = opt.get_item_text(opt.selected)
 
 
 func apply_button_style(btn: Button, bg_color: Color) -> void:

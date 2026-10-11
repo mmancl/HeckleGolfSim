@@ -2735,8 +2735,12 @@ func calculate_player_club_averages(player_name: String) -> Dictionary:
 		var shots: Array = player_club_stats.get(club, [])
 		var shot_count = shots.size()
 		if shot_count == 0:
+			var p_hand_empty = get_player_handedness(player_name)
 			result[club] = {
 				"club": club,
+				"player": player_name,
+				"handedness": p_hand_empty,
+				"is_lefty": p_hand_empty == 1,
 				"display_name": get_club_display_name(club),
 				"shot_count": 0,
 				"avg_carry_m": 0.0,
@@ -2815,8 +2819,12 @@ func calculate_player_club_averages(player_name: String) -> Dictionary:
 				})
 				
 		var cnt = float(shot_count)
+		var p_hand = get_player_handedness(player_name)
 		result[club] = {
 			"club": club,
+			"player": player_name,
+			"handedness": p_hand,
+			"is_lefty": p_hand == 1,
 			"display_name": get_club_display_name(club),
 			"shot_count": shot_count,
 			"avg_carry_m": sum_carry / cnt,

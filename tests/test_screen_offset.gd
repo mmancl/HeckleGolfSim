@@ -41,8 +41,8 @@ func _run_tests() -> void:
 	assert(is_equal_approx(som.get_target(), 0.5), "Target should restore when unsuppressed")
 	print("  PASS: Settings & Target Calculation verified.")
 
-	# Test 2: Physical Lateral Displacement & Perspective Preservation
-	print("\n--- Test 2: Physical Lateral Displacement & Perspective Preservation ---")
+	# Test 2: Optical Frustum Displacement & Perspective Preservation
+	print("\n--- Test 2: Optical Frustum Displacement & Perspective Preservation ---")
 	var cam = Camera3D.new()
 	cam.fov = 75.0
 	cam.near = 0.05
@@ -56,20 +56,30 @@ func _run_tests() -> void:
 	# Apply 0 offset: no displacement, perspective intact
 	som._apply(0.0)
 	assert(cam.projection == Camera3D.PROJECTION_PERSPECTIVE, "0 offset must use PERSPECTIVE")
-	assert(is_equal_approx(cam.global_position.x, orig_x), "0 offset should not translate camera")
+	assert(is_equal_approx(cam.global_position.x, orig_x), "0 offset should not translate camera position")
+	assert(is_zero_approx(cam.frustum_offset.x), "0 offset must have zero frustum_offset")
 
-	# Apply 0.5 offset: physical right shift
+	# Apply 0.5 offset: optical frustum shift (negative frustum_offset shifts rendered scene right)
 	som._apply(0.5)
-	assert(cam.projection == Camera3D.PROJECTION_PERSPECTIVE, "Offset must maintain standard PERSPECTIVE (no frustum distortion)")
-	var expected_shift = 0.5 * som.MAX_LATERAL_OFFSET_METERS
-	assert(is_equal_approx(cam.global_position.x, orig_x + expected_shift), "0.5 offset must physically translate camera right by expected meters")
-	print("  PASS: Physical Lateral Displacement & Perspective Preservation verified.")
+	assert(cam.projection == Camera3D.PROJECTION_FRUSTUM, "Offset must use FRUSTUM projection for on-screen lateral shift")
+	assert(is_equal_approx(cam.global_position.x, orig_x), "Camera 3D position must remain centered behind ball")
+	assert(cam.frustum_offset.x < 0.0, "Positive offset (Right) must set negative frustum_offset to shift scene right on screen")
+
+	# Apply -0.5 offset: optical frustum shift left
+	som._apply(-0.5)
+	assert(cam.projection == Camera3D.PROJECTION_FRUSTUM, "Negative offset must use FRUSTUM projection")
+	assert(is_equal_approx(cam.global_position.x, orig_x), "Camera 3D position must remain centered behind ball")
+	assert(cam.frustum_offset.x > 0.0, "Negative offset (Left) must set positive frustum_offset to shift scene left on screen")
+	som._apply(0.5)
+	print("  PASS: Optical Frustum Displacement & Perspective Preservation verified.")
 
 	# Test 3: Shot Sequence & Return
 	print("\n--- Test 3: Shot Sequence & Return ---")
 	som.on_ready_for_shot(0.0, true)
 	assert(is_equal_approx(som._current, 0.5), "Current offset should be 0.5 at address")
-	assert(is_equal_approx(cam.global_position.x, orig_x + expected_shift), "Camera should remain shifted at address")
+	assert(is_equal_approx(cam.global_position.x, orig_x), "Camera position should remain centered behind ball at address")
+	assert(cam.projection == Camera3D.PROJECTION_FRUSTUM, "Camera should use FRUSTUM at address")
+	assert(cam.frustum_offset.x < 0.0, "Frustum offset should be active at address")
 
 	som.on_shot_started()
 	assert(is_equal_approx(som.get_target(), 0.0), "Target in flight must be 0")
@@ -95,6 +105,7 @@ func _run_tests() -> void:
 	print("\n--- Test 5: Camera Unregister ---")
 	som.unregister_camera(cam)
 	assert(cam.projection == Camera3D.PROJECTION_PERSPECTIVE, "Unregistering must restore PERSPECTIVE")
+	assert(is_zero_approx(cam.frustum_offset.x), "Unregistering must zero frustum offset")
 	assert(is_equal_approx(cam.global_position.x, orig_x), "Unregistering must restore original camera position")
 	cam.queue_free()
 	print("  PASS: Camera Unregister verified.")

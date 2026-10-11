@@ -9,6 +9,9 @@
         <meta-data
             android:name="org.godotengine.plugin.v2.MediaPipePosePlugin"
             android:value="org.godotengine.plugin.android.mediapipepose.MediaPipePosePlugin" />
+        <meta-data
+            android:name="org.godotengine.plugin.v1.MediaPipePosePlugin"
+            android:value="org.godotengine.plugin.android.mediapipepose.MediaPipePosePlugin" />
     </application>
 
 </manifest>

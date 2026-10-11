@@ -19,6 +19,7 @@ func _on_frame() -> void:
 	test_club_face_angle_visual()
 	test_club_specific_impact_visual()
 	test_club_path_visual()
+	test_lefty_delivery_visuals()
 	test_delivery_panel_single_shot()
 	test_delivery_panel_missing_data_placeholders()
 	test_multiplayer_manager_profile_storage_and_averages()
@@ -94,6 +95,62 @@ func test_club_path_visual() -> void:
 	assert(vis.sample_count == 22, "Sample count must be 22")
 	vis.free()
 	print("  PASS: ClubPathVisual properties and setters working.")
+
+
+func test_lefty_delivery_visuals() -> void:
+	print("\n--- TEST: Lefty Delivery Visuals & Graphic Flipping ---")
+	# 1. Lefty helper detection
+	assert(ClubDeliveryVisuals.is_left_handed({"is_lefty": true}), "is_lefty=true must detect lefty")
+	assert(ClubDeliveryVisuals.is_left_handed({"is_left_handed": true}), "is_left_handed=true must detect lefty")
+	assert(ClubDeliveryVisuals.is_left_handed({"handedness": 1}), "handedness=1 must detect lefty")
+	assert(not ClubDeliveryVisuals.is_left_handed({"handedness": 0}), "handedness=0 must detect righty")
+	assert(not ClubDeliveryVisuals.is_left_handed({}), "empty dict defaults to righty")
+
+	# 2. ClubFaceAngleVisual lefty flag
+	var face_lefty = ClubDeliveryVisuals.ClubFaceAngleVisual.new(2.0, false, 0, "driver", true)
+	assert(face_lefty.is_lefty, "ClubFaceAngleVisual must have is_lefty=true")
+	assert(is_equal_approx(face_lefty.face_angle, 2.0), "Face angle preserved")
+	face_lefty.set_data(-1.5, false, 0, "mid_iron", false)
+	assert(not face_lefty.is_lefty, "ClubFaceAngleVisual must update is_lefty to false")
+	face_lefty.free()
+
+	# 3. ClubPathVisual lefty flag
+	var path_lefty = ClubDeliveryVisuals.ClubPathVisual.new(3.0, false, 0, "driver", true)
+	assert(path_lefty.is_lefty, "ClubPathVisual must have is_lefty=true")
+	assert(is_equal_approx(path_lefty.club_path, 3.0), "Club path preserved")
+	path_lefty.set_data(-2.0, false, 0, "driver", false)
+	assert(not path_lefty.is_lefty, "ClubPathVisual must update is_lefty to false")
+	path_lefty.free()
+
+	# 4. ClubDeliveryVisualsPanel propagation of lefty view
+	var lefty_shot = {
+		"Club": "Driver",
+		"FaceAngle": 1.8,
+		"ClubPath": 2.5,
+		"HorizontalFaceImpact": 2.0,
+		"VerticalFaceImpact": 0.0,
+		"is_lefty": true
+	}
+	var panel_lefty = ClubDeliveryVisuals.create_panel(lefty_shot, false)
+	assert(panel_lefty.is_lefty, "Panel must be in lefty mode")
+	assert(panel_lefty.face_visual != null and panel_lefty.face_visual.is_lefty, "Face visual must be lefty")
+	assert(panel_lefty.path_visual != null and panel_lefty.path_visual.is_lefty, "Path visual must be lefty")
+	panel_lefty.free()
+
+	# 5. Propagation via handedness: 1
+	var handed_shot = {
+		"Club": "Driver",
+		"FaceAngle": -1.0,
+		"ClubPath": -1.5,
+		"handedness": 1
+	}
+	var panel_handed = ClubDeliveryVisuals.create_panel(handed_shot, false)
+	assert(panel_handed.is_lefty, "Panel must detect lefty from handedness: 1")
+	assert(panel_handed.face_visual.is_lefty, "Face visual must inherit lefty from handedness: 1")
+	assert(panel_handed.path_visual.is_lefty, "Path visual must inherit lefty from handedness: 1")
+	panel_handed.free()
+
+	print("  PASS: Lefty delivery visuals detection, property updates, and panel propagation verified.")
 
 
 func test_delivery_panel_single_shot() -> void:

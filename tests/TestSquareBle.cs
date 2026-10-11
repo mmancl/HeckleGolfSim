@@ -16,6 +16,7 @@ public partial class TestSquareBle : Node
         TestBatteryPacketParsing();
         TestCommandBuilder();
         TestDeviceNameMatching();
+        TestBluetoothClientFactoryAndAppleClientSafeInit();
 
         GD.Print("==================================================");
         GD.Print("ALL SQUARE BLE & PROTOCOL TESTS PASSED SUCCESSFULLY!");
@@ -215,5 +216,25 @@ public partial class TestSquareBle : Node
             throw new Exception("null prefix should match any valid device!");
 
         GD.Print("PASS: Bluetooth device name matching successfully validates Square Golf, SGO models, and Garmin devices.");
+    }
+
+    private static void TestBluetoothClientFactoryAndAppleClientSafeInit()
+    {
+        GD.Print("\n--- Test 6: Bluetooth Client Factory & Apple BLE Safe Initialization ---");
+        
+        // 1. Verify factory produces a valid client without throwing
+        var client = LaunchMonitors.Common.Bluetooth.BluetoothGattClientFactory.Create();
+        if (client == null)
+            throw new Exception("BluetoothGattClientFactory.Create() returned null!");
+
+        // 2. Verify Apple client constructor is lightweight and does not trigger native crashes or throw
+        var appleClient = new LaunchMonitors.Common.Bluetooth.Apple.AppleBluetoothGattClient();
+        if (appleClient == null)
+            throw new Exception("AppleBluetoothGattClient constructor returned null!");
+
+        // 3. Verify clean disposal of uninitialized client
+        appleClient.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        GD.Print("PASS: Bluetooth Client Factory and Apple BLE safe lazy initialization verified.");
     }
 }

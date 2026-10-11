@@ -141,7 +141,7 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 			ball_data["FaceAngle"] = "%.1f C" % abs(est_face)
 		ball_data["RawFaceAngle"] = est_face
 	else:
-		ball_data["FaceAngle"] = "---"
+		ball_data["FaceAngle"] = "N/A"
 
 	# Club Path
 	var has_club_path := raw_ball_data.has("ClubPath") or raw_ball_data.has("Path") or raw_ball_data.has("RawClubPath")
@@ -164,7 +164,7 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 			ball_data["ClubPath"] = "%.1f Out-In" % abs(est_path)
 		ball_data["RawClubPath"] = est_path
 	else:
-		ball_data["ClubPath"] = "---"
+		ball_data["ClubPath"] = "N/A"
 
 	# Face to Path
 	var has_face_to_path := raw_ball_data.has("FaceToPath") or raw_ball_data.has("RawFaceToPath")
@@ -187,24 +187,35 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 			ball_data["FaceToPath"] = "%.1f C" % abs(face_to_path)
 		ball_data["RawFaceToPath"] = face_to_path
 	else:
-		ball_data["FaceToPath"] = "---"
+		ball_data["FaceToPath"] = "N/A"
 
 	# Attack Angle (AoA)
 	if raw_ball_data.has("AttackAngle") or raw_ball_data.has("AngleOfAttack"):
-		var attack_angle = float(raw_ball_data.get("AttackAngle", raw_ball_data.get("AngleOfAttack", 0.0)))
-		ball_data["AttackAngle"] = ("+%.1f" % attack_angle) if attack_angle > 0.0 else ("%.1f" % attack_angle)
+		var raw_aoa = raw_ball_data.get("AttackAngle", raw_ball_data.get("AngleOfAttack", 0.0))
+		var attack_angle := 0.0
+		if typeof(raw_aoa) == TYPE_INT or typeof(raw_aoa) == TYPE_FLOAT:
+			attack_angle = float(raw_aoa)
+		elif typeof(raw_aoa) == TYPE_STRING and str(raw_aoa) != "---" and str(raw_aoa) != "N/A":
+			var cleaned_aoa = str(raw_aoa).strip_edges().replace("+", "")
+			if cleaned_aoa.is_valid_float():
+				attack_angle = float(cleaned_aoa)
+		if abs(attack_angle) < 0.001:
+			ball_data["AttackAngle"] = "N/A"
+		else:
+			ball_data["AttackAngle"] = ("+%.1f" % attack_angle) if attack_angle > 0.0 else ("%.1f" % attack_angle)
+			ball_data["RawAttackAngle"] = attack_angle
 	else:
-		ball_data["AttackAngle"] = "---"
+		ball_data["AttackAngle"] = "N/A"
 
 	# Dynamic Loft
 	if raw_ball_data.has("DynamicLoft") and float(raw_ball_data.get("DynamicLoft", 0.0)) > 0.01:
 		var dynamic_loft = float(raw_ball_data.get("DynamicLoft", 0.0))
 		ball_data["DynamicLoft"] = "%.1f" % dynamic_loft
 	else:
-		ball_data["DynamicLoft"] = "---"
+		ball_data["DynamicLoft"] = "N/A"
 
 	# Clubhead Speed & Smash Factor
-	var has_club_speed := raw_ball_data.has("ClubSpeed") and float(raw_ball_data.get("ClubSpeed", 0.0)) > 0.0
+	var has_club_speed := raw_ball_data.has("ClubSpeed") and float(raw_ball_data.get("ClubSpeed", 0.0)) > 0.01
 	var has_smash_factor := raw_ball_data.has("SmashFactor") and float(raw_ball_data.get("SmashFactor", 0.0)) > 0.05
 
 	var club_speed_mph := 0.0
@@ -215,14 +226,14 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 		else:
 			ball_data["ClubSpeed"] = "%.1f" % (club_speed_mph * 0.44704)
 	else:
-		ball_data["ClubSpeed"] = "---"
+		ball_data["ClubSpeed"] = "N/A"
 
 	if has_smash_factor:
 		ball_data["SmashFactor"] = "%.2f" % float(raw_ball_data.get("SmashFactor", 0.0))
 	elif has_club_speed and raw_speed_mph > 0.0 and club_speed_mph > 0.0:
 		ball_data["SmashFactor"] = "%.2f" % (raw_speed_mph / club_speed_mph)
 	else:
-		ball_data["SmashFactor"] = "---"
+		ball_data["SmashFactor"] = "N/A"
 
 	# Club identification
 	if raw_ball_data.has("Club") and not str(raw_ball_data["Club"]).is_empty():

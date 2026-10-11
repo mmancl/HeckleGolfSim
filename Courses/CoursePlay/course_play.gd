@@ -139,6 +139,13 @@ func _ready() -> void:
 		if player_node != null:
 			active_ball = player_node.get("ball")
 
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.range_settings != null and gs.range_settings.settings.has("debug_show_hit_distance"):
+			var setting = gs.range_settings.debug_show_hit_distance
+			if not setting.setting_changed.is_connected(_on_debug_hit_distance_setting_changed):
+				setting.setting_changed.connect(_on_debug_hit_distance_setting_changed)
+
 	_setup_hud()
 
 	# Start first player's turn
@@ -1003,6 +1010,7 @@ func _setup_hud() -> void:
 	)
 	toggles_container.add_child(dist_btn)
 	toggles_container.add_child(dist_menu)
+	_update_hit_distance_button_visibility()
 
 	# Golfer Cam Toggle Button
 	golfer_cam_btn = Button.new()
@@ -1771,11 +1779,16 @@ func _setup_hud() -> void:
 	
 	var m_tee_opt = OptionButton.new()
 	m_tee_opt.name = "TeeOpt"
-	m_tee_opt.add_item("Blue", 0)
-	m_tee_opt.add_item("Red", 1)
-	m_tee_opt.add_item("White", 2)
-	m_tee_opt.add_item("Black", 3)
-	m_tee_opt.add_item("Gold", 4)
+	var course_tees: Array = []
+	for h in MultiplayerManager.hole_info.values():
+		if h is Dictionary and h.has("Tee Boxes"):
+			for k in h["Tee Boxes"].keys():
+				if not course_tees.has(str(k)):
+					course_tees.append(str(k))
+	if course_tees.is_empty():
+		course_tees = ["Blue", "Red", "White", "Black", "Gold"]
+	for t_idx in range(course_tees.size()):
+		m_tee_opt.add_item(course_tees[t_idx], t_idx)
 	add_row.add_child(m_tee_opt)
 
 	m_player_select_opt.item_selected.connect(func(index):
@@ -2508,11 +2521,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		elif event.is_action_pressed("distance_menu_toggle"):
-			var dist_b = dist_btn if (dist_btn != null and is_instance_valid(dist_btn)) else (toggles_container.get_node_or_null("HitDistanceButton") as Button if toggles_container != null else null)
-			if dist_b != null and is_instance_valid(dist_b) and dist_b.visible and not dist_b.disabled:
-				dist_b.emit_signal("pressed")
-			elif range_ui != null and range_ui.has_method("toggle_distance_menu"):
-				range_ui.call("toggle_distance_menu")
+			var is_dist_enabled := false
+			if has_node("/root/GlobalSettings"):
+				var gs = get_node("/root/GlobalSettings")
+				if gs.range_settings != null and gs.range_settings.settings.has("debug_show_hit_distance"):
+					is_dist_enabled = bool(gs.range_settings.debug_show_hit_distance.value)
+			if is_dist_enabled:
+				var dist_b = dist_btn if (dist_btn != null and is_instance_valid(dist_btn)) else (toggles_container.get_node_or_null("HitDistanceButton") as Button if toggles_container != null else null)
+				if dist_b != null and is_instance_valid(dist_b) and dist_b.visible and not dist_b.disabled:
+					dist_b.emit_signal("pressed")
+				elif range_ui != null and range_ui.has_method("toggle_distance_menu"):
+					range_ui.call("toggle_distance_menu")
 			get_viewport().set_input_as_handled()
 			return
 		elif event.is_action_pressed("shot_traces_toggle"):
@@ -2656,6 +2675,26 @@ func _update_course_putting_cam_btn_state() -> void:
 		else:
 			putting_cam_btn.text = "🎯 Putting Cam: ON"
 			apply_material_button_style(putting_cam_btn, Color(0.15, 0.6, 0.3, 0.85))
+
+
+func _on_debug_hit_distance_setting_changed(_val) -> void:
+	_update_hit_distance_button_visibility()
+
+
+func _update_hit_distance_button_visibility() -> void:
+	if dist_btn == null or not is_instance_valid(dist_btn):
+		return
+	var enabled := false
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.range_settings != null and gs.range_settings.settings.has("debug_show_hit_distance"):
+			enabled = bool(gs.range_settings.debug_show_hit_distance.value)
+	dist_btn.visible = enabled
+	var menu = toggles_container.get_node_or_null("DistanceMenu") if toggles_container != null else null
+	if not enabled and menu != null and menu.visible:
+		menu.visible = false
+	_update_helpers_scroll_layout.call_deferred()
+	call_deferred("_update_hud_focus_neighbors")
 
 
 func _get_current_green_vertices() -> PackedVector3Array:
@@ -4784,12 +4823,9 @@ func _on_scorecard_toggle_pressed() -> void:
 func _get_hole_distance(hole_id: String, tee_color: String) -> int:
 	var hole = MultiplayerManager.hole_info.get(hole_id, {})
 	var tee_boxes = hole.get("Tee Boxes", {})
-	var tee_pos = tee_boxes.get(tee_color)
-	if tee_pos == null:
-		if not tee_boxes.is_empty():
-			tee_pos = tee_boxes.values()[0]
+	var tee_pos = MultiplayerManager.get_tee_position_from_boxes(tee_boxes, tee_color)
 	var hole_loc = hole.get("Hole Location", [0.0, 0.0])
-	if tee_pos != null and hole_loc != null:
+	if tee_pos != null and tee_pos.size() >= 2 and hole_loc != null and hole_loc.size() >= 2:
 		var t_vec = Vector2(tee_pos[0], tee_pos[1])
 		var h_vec = Vector2(hole_loc[0], hole_loc[1])
 		return int(t_vec.distance_to(h_vec) * 1.09361)

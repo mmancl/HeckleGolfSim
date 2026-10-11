@@ -425,7 +425,7 @@ class GolfCourseIdentifier(osmium.SimpleHandler):
 
         if geom_type == "way":
             for n in obj.nodes:
-                if n.is_valid():
+                if n.location.valid():
                     lat_sum += n.lat
                     lon_sum += n.lon
                     count += 1
@@ -499,7 +499,7 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
         return matches
 
     def node(self, n):
-        if not n.is_valid():
+        if not n.location.valid():
             return
         matches = self._get_matching_courses(n.lat, n.lon)
         if not matches:
@@ -520,7 +520,7 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
         is_relevant = (
             "golf" in tags or
             tags.get("leisure") == "golf_course" or
-            tags.get("natural") in ("water", "wood") or
+            tags.get("natural") in ("water", "wood", "tree_row", "tree") or
             tags.get("landuse") == "forest"
         )
         if not is_relevant:
@@ -530,7 +530,7 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
         way_lats, way_lons = [], []
         for n in w.nodes:
             node_refs.append(n.ref)
-            if n.is_valid():
+            if n.location.valid():
                 way_lats.append(n.lat)
                 way_lons.append(n.lon)
 
@@ -553,7 +553,7 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
             })
             # Ensure all way nodes are recorded
             for n in w.nodes:
-                if n.is_valid():
+                if n.location.valid():
                     self.course_data[c["slug"]]["nodes"][n.ref] = {
                         "type": "node",
                         "id": n.ref,

@@ -70,23 +70,34 @@ func is_ready() -> bool:
 
 # ─── Android Plugin Backend ──────────────────────────────────────────────────
 
-func _init_android_plugin() -> void:
+func _ensure_android_plugin() -> bool:
+	if not _is_android:
+		return false
+	if _plugin != null:
+		return true
 	if Engine.has_singleton("MediaPipePosePlugin"):
 		_plugin = Engine.get_singleton("MediaPipePosePlugin")
-		if _plugin.has_signal("pose_result"):
+		if _plugin.has_signal("pose_result") and not _plugin.is_connected("pose_result", _on_android_pose_result):
 			_plugin.connect("pose_result", _on_android_pose_result)
-		if _plugin.has_signal("camera_frame"):
+		if _plugin.has_signal("camera_frame") and not _plugin.is_connected("camera_frame", _on_android_camera_frame):
 			_plugin.connect("camera_frame", _on_android_camera_frame)
 		_server_is_ready = true
-		var is_loaded: bool = _plugin.call("isModelLoaded") if _plugin.has_method("isModelLoaded") else true
-		var is_gpu: bool = _plugin.call("isGpuAccelerated") if _plugin.has_method("isGpuAccelerated") else false
 		if _plugin.has_method("setLiveInferenceEnabled"):
 			_plugin.call("setLiveInferenceEnabled", false)
+		print("[PoseDetectionBridge] Android MediaPipe plugin connected dynamically.")
+		return true
+	return false
+
+
+func _init_android_plugin() -> void:
+	if _ensure_android_plugin():
+		var is_loaded: bool = _plugin.call("isModelLoaded") if _plugin.has_method("isModelLoaded") else true
+		var is_gpu: bool = _plugin.call("isGpuAccelerated") if _plugin.has_method("isGpuAccelerated") else false
 		print("[PoseDetectionBridge] Android On-Device MediaPipe plugin loaded. (Model ready: %s, GPU: %s, Live inference: deferred)" % [is_loaded, is_gpu])
 		server_ready.emit()
 		fetch_desktop_cameras()
 	else:
-		print("[PoseDetectionBridge] Android native MediaPipe plugin not found.")
+		print("[PoseDetectionBridge] Android native MediaPipe plugin not ready yet; will acquire dynamically on demand.")
 		_server_is_ready = false
 		pose_lost.emit()
 		fetch_desktop_cameras()
@@ -138,32 +149,46 @@ func request_camera_permission_if_needed() -> bool:
 		if OS.has_method("request_permission"):
 			OS.call("request_permission", "android.permission.CAMERA")
 		elif OS.has_method("request_permissions"):
-			OS.call("request_permission", "android.permission.CAMERA")
+			OS.call("request_permissions")
 		return false
 	return true
 
 
 func start_android_camera(facing: int = 0) -> void:
-	if _is_android and _plugin != null and _plugin.has_method("startCamera"):
-		if not request_camera_permission_if_needed():
-			# Retry shortly in case user just accepted permission dialog
-			if is_inside_tree():
-				get_tree().create_timer(1.2).timeout.connect(func():
-					if active_desktop_camera_index >= 0 and not is_android_camera_active():
-						_plugin.call("startCamera", facing)
-				)
-			return
+	if not _is_android:
+		return
+	_ensure_android_plugin()
+	if not request_camera_permission_if_needed():
+		# Retry shortly in case user just accepted permission dialog
+		if is_inside_tree():
+			get_tree().create_timer(1.2).timeout.connect(func():
+				if active_desktop_camera_index >= 0 and not is_android_camera_active():
+					start_android_camera(facing)
+			)
+			get_tree().create_timer(3.0).timeout.connect(func():
+				if active_desktop_camera_index >= 0 and not is_android_camera_active():
+					start_android_camera(facing)
+			)
+		return
+	if _plugin != null and _plugin.has_method("startCamera"):
 		_plugin.call("startCamera", facing)
+		print("[PoseDetectionBridge] Android camera started with facing %d." % facing)
+	else:
+		push_warning("[PoseDetectionBridge] Android plugin startCamera not available.")
 
 
 func stop_android_camera() -> void:
-	if _is_android and _plugin != null and _plugin.has_method("stopCamera"):
-		_plugin.call("stopCamera")
+	if _is_android:
+		_ensure_android_plugin()
+		if _plugin != null and _plugin.has_method("stopCamera"):
+			_plugin.call("stopCamera")
 
 
 func is_android_camera_active() -> bool:
-	if _is_android and _plugin != null and _plugin.has_method("isCameraActive"):
-		return _plugin.call("isCameraActive")
+	if _is_android:
+		_ensure_android_plugin()
+		if _plugin != null and _plugin.has_method("isCameraActive"):
+			return _plugin.call("isCameraActive")
 	return false
 
 
@@ -345,20 +370,18 @@ func _on_health_response(_result: int, response_code: int, _headers: PackedStrin
 func fetch_desktop_cameras() -> void:
 	if _is_android:
 		desktop_cameras = []
-		if _plugin != null and _plugin.has_method("hasCamera") and _plugin.call("hasCamera"):
-			var count: int = 2
-			if _plugin.has_method("getCameraCount"):
-				var plugin_count: int = _plugin.call("getCameraCount")
-				if plugin_count > 0:
-					count = plugin_count
-			desktop_cameras.append({"id": 0, "name": "Back Camera (Device)", "facing": 0})
-			if count > 1:
-				desktop_cameras.append({"id": 1, "name": "Front Camera (Device)", "facing": 1})
-			for i in range(2, count):
-				desktop_cameras.append({"id": i, "name": "Camera %d (Device)" % i, "facing": i})
-			print("[PoseDetectionBridge] Android cameras detected via native plugin (%d available)." % desktop_cameras.size())
-		else:
-			print("[PoseDetectionBridge] No native MediaPipe Android camera plugin detected; desktop_cameras left empty to allow Godot CameraServer.")
+		_ensure_android_plugin()
+		var count: int = 2
+		if _plugin != null and _plugin.has_method("getCameraCount"):
+			var plugin_count: int = _plugin.call("getCameraCount")
+			if plugin_count > 0:
+				count = plugin_count
+		desktop_cameras.append({"id": 0, "name": "Back Camera (Device)", "facing": 0})
+		if count > 1:
+			desktop_cameras.append({"id": 1, "name": "Front Camera (Device)", "facing": 1})
+		for i in range(2, count):
+			desktop_cameras.append({"id": i, "name": "Camera %d (Device)" % i, "facing": i})
+		print("[PoseDetectionBridge] Android cameras detected (%d available)." % desktop_cameras.size())
 		desktop_cameras_updated.emit(desktop_cameras)
 		return
 	
@@ -399,6 +422,7 @@ func select_desktop_camera(index: int) -> void:
 	active_desktop_camera_index = index
 	if _is_android:
 		if index >= 0:
+			_ensure_android_plugin()
 			var facing: int = 0
 			if index < desktop_cameras.size():
 				facing = desktop_cameras[index].get("facing", index)

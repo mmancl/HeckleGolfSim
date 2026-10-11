@@ -186,7 +186,7 @@ func test_suspense_state_machine_and_cone() -> void:
 	assert(range_prox == false, "Driving range proximity must never trigger suspense")
 	print("  PASS: Driving Range strictly excludes suspense and prediction.")
 
-	# Switch back to course play scene for short putt support (~8ft / 2.5m)
+	# Switch back to course play scene to test <20ft lockout rule (~8ft / 2.5m)
 	current_scene = mock_course
 	if gs != null and gs.has_method("set_mock_active_scene"):
 		gs.set_mock_active_scene(mock_course)
@@ -195,27 +195,19 @@ func test_suspense_state_machine_and_cone() -> void:
 	tm.reset_for_new_shot()
 	var short_putt_hole = Vector3(2.5, 0.0, 0.0)
 	var short_putt_start = Vector3(0.0, 0.0, 0.0)
-	assert(tm.is_shot_eligible_for_suspense(short_putt_start, short_putt_hole, true) == true, "8ft putt must be eligible for suspense on course")
+	assert(tm.is_shot_eligible_for_suspense(short_putt_start, short_putt_hole, true) == false, "8ft putt (<20ft) must NOT be eligible for suspense on course")
 
-	# Hitting directly towards hole with 1.8 m/s
+	# Even if hit directly towards hole with 1.8 m/s, under 20ft shots must be rejected
 	var short_vel = Vector3(1.8, 0.0, 0.0)
 	var pred_short = tm.predict_shot_outcome(short_putt_start, short_vel, true, short_putt_hole)
-	assert(pred_short.get("shot_validated") == true, "Short on-line putt must be validated")
-	assert(tm.suspense_state == tm.SuspenseState.READY, "Validated short putt transitions to READY")
+	assert(pred_short.get("shot_validated") == false, "Short putt under 20ft must not be validated")
+	assert(tm.suspense_state == tm.SuspenseState.SPENT, "Ineligible short putt transitions to SPENT")
 
-	# Rolling at 1.5m from hole inside cone:
+	# Proximity check for shot starting under 20ft must return false
 	var trig_short = tm.check_ball_proximity(Vector3(1.0, 0.0, 0.0), short_putt_hole, true, short_putt_start, false, false, Vector3(1.5, 0.0, 0.0))
-	assert(trig_short == true, "Rolling on-line on course must activate suspense")
-	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "State must transition to ACTIVE")
-	assert(tm.is_active() == true, "Tension must be active")
-	print("  PASS: Short putt activates ACTIVE state inside cone.")
-
-	# Ball enters cup (dist <= CUP_RADIUS_METERS)
-	var prox_sunk = tm.check_ball_proximity(Vector3(2.5, 0.0, 0.0), short_putt_hole, true, short_putt_start, false, false, Vector3(0.2, 0.0, 0.0))
-	assert(not prox_sunk, "Ball entering cup must stop suspense")
-	assert(tm.suspense_state == tm.SuspenseState.SPENT, "Sunk ball transitions to SPENT")
-	assert(not tm.is_active(), "Tension must stop when ball drops in cup")
-	print("  PASS: Ball entering cup cleanly deactivates to SPENT.")
+	assert(trig_short == false, "Under 20ft shot must never activate suspense")
+	assert(not tm.is_active(), "Tension must remain inactive for under 20ft shot")
+	print("  PASS: Under 20ft shot (<20ft) correctly locked out from suspense.")
 
 	# --- Case E: 20+ Foot Putt (24ft / 7.3m) Full Pipeline ---
 	print("\n  Testing 20+ Foot Putt (24ft / 7.3m)...")
@@ -336,7 +328,43 @@ func test_suspense_state_machine_and_cone() -> void:
 		assert(tm._cone_mesh_instance.visible == false, "Vision cone must be hidden when debug toggle is OFF")
 		print("  PASS: Debug vision cone is hidden when toggle is OFF.")
 
-	# --- Case K: Smooth Touchdown Cone Sizing & 3D Flight Trajectory Orientation ---
+	# --- Case K: Power & Landing Distance Checks (100-Yard Hole, 10-Yard Shot vs Full Shot) ---
+	print("\n  Testing Power & Landing Distance Requirements on 100-Yard Hole...")
+	tm.reset_for_new_shot()
+	var hole_100yd = Vector3(91.44, 0.0, 0.0) # 100 yards
+	var start_100yd = Vector3(0.0, 0.0, 0.0)
+	assert(tm.is_shot_eligible_for_suspense(start_100yd, hole_100yd, false) == true, "100-yard shot must be eligible for suspense")
+
+	# Subcase K1: Ball hit only 10 yards when 100 yards away (on-line, but lacks landing power)
+	# Launch with only 10 yards carry power (~8 m/s horizontal, 4 m/s vertical) directly at hole
+	var weak_shot_vel = Vector3(8.0, 4.0, 0.0)
+	var pred_weak = tm.predict_shot_outcome(start_100yd, weak_shot_vel, false, hole_100yd)
+	assert(pred_weak.get("shot_validated") == false, "10-yard shot from 100 yards away MUST NOT be validated for suspense")
+	assert(pred_weak.get("will_enter_zone") == false, "10-yard shot will_enter_zone must be false")
+	assert(tm.suspense_state == tm.SuspenseState.SPENT, "10-yard shot from 100 yards must transition to SPENT (miss due to lack of power)")
+	var prox_weak = tm.check_ball_proximity(Vector3(5.0, 1.0, 0.0), hole_100yd, false, start_100yd, false, true, Vector3(7.0, -1.0, 0.0))
+	assert(prox_weak == false, "Proximity check for weak shot must return false")
+	print("  PASS: 10-yard shot from 100 yards correctly rejected and transitions to SPENT due to lack of landing power.")
+
+	# Subcase K2: Approach shot with full power to land within 20 yards of hole
+	tm.reset_for_new_shot()
+	var full_shot_vel = Vector3(32.0, 16.0, 0.0)
+	var pred_full = tm.predict_shot_outcome(start_100yd, full_shot_vel, false, hole_100yd)
+	if not pred_full.get("shot_validated"):
+		print("DEBUG K2 pred_full: ", pred_full, " p_land: ", tm.predicted_land_pos, " land_dist: ", Vector2(tm.predicted_land_pos.x, tm.predicted_land_pos.z).distance_to(Vector2(hole_100yd.x, hole_100yd.z)))
+	assert(pred_full.get("shot_validated") == true, "Shot landing within 20 yards of 100yd hole MUST be validated")
+	assert(pred_full.get("will_enter_zone") == true, "Shot landing near hole must have will_enter_zone == true")
+	assert(tm.suspense_state == tm.SuspenseState.READY, "Validated approach shot must transition to READY")
+	print("  PASS: Approach shot with sufficient power to land near hole validates into READY.")
+
+	# Subcase K3: Strict 20-Foot Lockout Check for any shot starting < 20ft
+	assert(tm.is_shot_eligible_for_suspense(Vector3.ZERO, Vector3(4.57, 0, 0), false) == false, "15ft chip (<20ft) must NOT be eligible")
+	assert(tm.is_shot_eligible_for_suspense(Vector3.ZERO, Vector3(4.57, 0, 0), true) == false, "15ft putt (<20ft) must NOT be eligible")
+	assert(tm.is_shot_eligible_for_suspense(Vector3.ZERO, Vector3(6.00, 0, 0), false) == false, "19.7ft shot (<20ft) must NOT be eligible")
+	assert(tm.is_shot_eligible_for_suspense(Vector3.ZERO, Vector3(6.15, 0, 0), false) == true, "20.2ft shot (>20ft) must be eligible")
+	print("  PASS: 20-foot initial distance lockout verified for chips and putts.")
+
+	# --- Case L: Smooth Touchdown Cone Sizing & 3D Flight Trajectory Orientation ---
 	print("\n  Testing Smooth Touchdown Cone Sizing & 3D Flight Trajectory...")
 	# 1. In flight: vision cone half-angle is 5 degrees (tightened from 15 degrees)
 	var angle_air = tm.get_vision_cone_half_angle(10.0, false, true)
@@ -413,14 +441,14 @@ func test_suspense_state_machine_and_cone() -> void:
 	# --- Case M: Dynamic Vision Reach & Coming Up Short Deactivation ---
 	print("\n  Testing Dynamic Vision Reach & Coming Up Short Rejection...")
 	tm.reset_for_new_shot()
-	var test_hole = Vector3(6.0, 0.0, 0.0) # 6 meters away (~20ft)
+	var test_hole = Vector3(7.62, 0.0, 0.0) # 25 feet away (>= 20ft eligible)
 
-	# 1. Putt moving at slow speed (1.0 m/s): projected reach ~1.66m (< 6.0m)
+	# 1. Putt moving at slow speed (1.0 m/s): projected reach ~1.66m (< 7.62m)
 	# Ball is aimed straight at the hole, but clearly coming up short
 	var slow_putt_vel = Vector3(1.0, 0.0, 0.0)
 	var reach_slow = tm.get_projected_reach_distance(Vector3.ZERO, slow_putt_vel, false, test_hole)
 	assert(reach_slow < 3.0, "Projected reach at 1.0 m/s must be under 3.0 meters")
-	assert(reach_slow < 6.0, "Ball must be recognized as clearly short of 6m hole")
+	assert(reach_slow < 7.62, "Ball must be recognized as clearly short of 25ft hole")
 
 	# Proximity check must reject activation because vision does not reach the hole
 	var trig_slow = tm.check_ball_proximity(Vector3.ZERO, test_hole, true, Vector3.ZERO, false, false, slow_putt_vel)
@@ -428,32 +456,32 @@ func test_suspense_state_machine_and_cone() -> void:
 	assert(tm.suspense_state != tm.SuspenseState.ACTIVE, "State must not be ACTIVE when ball is clearly short")
 	print("  PASS: Weak/slow putt clearly ending short is rejected (suspense does not run).")
 
-	# 2. Putt moving with proper speed (3.0 m/s): projected reach ~8.9m (>= 6.0m)
-	var proper_putt_vel = Vector3(3.0, 0.0, 0.0)
+	# 2. Putt moving with proper speed (3.2 m/s): projected reach ~9.8m (>= 7.62m)
+	var proper_putt_vel = Vector3(3.2, 0.0, 0.0)
 	var reach_proper = tm.get_projected_reach_distance(Vector3.ZERO, proper_putt_vel, false, test_hole)
-	assert(reach_proper >= 6.0, "Projected reach at 3.0 m/s must comfortably reach the 6m hole")
+	assert(reach_proper >= 7.62, "Projected reach at 3.2 m/s must comfortably reach the 25ft hole")
 	var trig_proper = tm.check_ball_proximity(Vector3.ZERO, test_hole, true, Vector3.ZERO, false, false, proper_putt_vel)
 	assert(trig_proper, "Putt with sufficient speed tracking toward hole must activate suspense")
 	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "State must transition to ACTIVE")
 	print("  PASS: On-target putt with adequate speed successfully activates suspense.")
 
-	# 3. As the ball rolls, speed drops significantly (slows to 0.5 m/s when still 4.0m from hole)
-	# Projected reach is now only ~0.98m (< 4.0m), so ball will clearly die short
+	# 3. As the ball rolls, speed drops significantly (slows to 0.5 m/s when still 3.6m from hole)
+	# Projected reach is now only ~0.98m (< 3.6m), so ball will clearly die short
 	var crawling_vel = Vector3(0.5, 0.0, 0.0)
-	var trig_crawl = tm.check_ball_proximity(Vector3(2.0, 0.0, 0.0), test_hole, true, Vector3.ZERO, false, false, crawling_vel)
+	var trig_crawl = tm.check_ball_proximity(Vector3(4.0, 0.0, 0.0), test_hole, true, Vector3.ZERO, false, false, crawling_vel)
 	assert(not trig_crawl, "Ball slowing down and coming up clearly short must deactivate suspense")
 	assert(tm.suspense_state == tm.SuspenseState.SPENT, "State must transition to SPENT when ball will end short")
 	assert(not tm.is_active(), "Tension must stop when ball will clearly end short")
 	print("  PASS: Ball decelerating short of hole cleanly deactivates ACTIVE -> SPENT.")
 
-	# 4. Near-miss close call: ball within 2.0m moving at 1.2 m/s (projected reach ~2.06m >= 2.0m)
+	# 4. Shot starting under 20ft (e.g. 2.0m away) must never activate suspense
 	tm.reset_for_new_shot()
 	var close_hole = Vector3(2.0, 0.0, 0.0)
 	var close_vel = Vector3(1.2, 0.0, 0.0)
 	var trig_close = tm.check_ball_proximity(Vector3.ZERO, close_hole, true, Vector3.ZERO, false, false, close_vel)
-	assert(trig_close, "Close-call near-miss within margin MUST activate suspense")
-	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "Close call must transition to ACTIVE")
-	print("  PASS: Close call near the cup remains active within margin.")
+	assert(not trig_close, "Shot starting under 20ft (2.0m) must NEVER trigger suspense")
+	assert(tm.suspense_state == tm.SuspenseState.SPENT, "Under 20ft shot transitions to SPENT")
+	print("  PASS: Under 20ft putt cleanly rejected from suspense.")
 
 	if gs != null and gs.has_method("set_mock_active_scene"):
 		gs.set_mock_active_scene(null)

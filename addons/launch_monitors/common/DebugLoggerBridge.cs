@@ -24,18 +24,18 @@ public static class DebugLoggerBridge
     public static void LogInfo(string message)
     {
         GD.Print(message);
-        GetLoggerNode()?.Call("log_info", message);
+        GetLoggerNode()?.CallDeferred("log_info", message);
     }
 
     public static void LogBluetooth(string message)
     {
         GD.Print(message);
-        GetLoggerNode()?.Call("log_bluetooth", message);
+        GetLoggerNode()?.CallDeferred("log_bluetooth", message);
     }
 
     public static void LogError(string message)
     {
         GD.PrintErr(message);
-        GetLoggerNode()?.Call("log_error", message);
+        GetLoggerNode()?.CallDeferred("log_error", message);
     }
 }

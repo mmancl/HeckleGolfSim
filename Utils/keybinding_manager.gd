@@ -34,6 +34,21 @@ func _ready() -> void:
 	_init_action_definitions()
 	load_keybindings()
 	_apply_all_to_input_map()
+	call_deferred("_connect_settings_listener")
+
+
+func _connect_settings_listener() -> void:
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.range_settings != null and gs.range_settings.settings.has("debug_show_hit_distance"):
+			var setting = gs.range_settings.debug_show_hit_distance
+			if not setting.setting_changed.is_connected(_on_debug_hit_distance_setting_changed):
+				setting.setting_changed.connect(_on_debug_hit_distance_setting_changed)
+
+
+func _on_debug_hit_distance_setting_changed(_val) -> void:
+	_apply_action_to_input_map("distance_menu_toggle")
+	emit_signal("keybindings_changed")
 
 
 func _on_joy_connection_changed(device_id: int, connected: bool) -> void:
@@ -386,6 +401,13 @@ func _apply_action_to_input_map(action_name: String) -> void:
 		InputMap.add_action(s_name)
 	else:
 		InputMap.action_erase_events(s_name)
+
+	if action_name == "distance_menu_toggle":
+		if has_node("/root/GlobalSettings"):
+			var gs = get_node("/root/GlobalSettings")
+			if gs.range_settings != null and gs.range_settings.settings.has("debug_show_hit_distance"):
+				if not bool(gs.range_settings.debug_show_hit_distance.value):
+					return
 
 	var keycode = _actions[action_name].get("current_key", KEY_NONE) as Key
 	if keycode != KEY_NONE and keycode != 0:

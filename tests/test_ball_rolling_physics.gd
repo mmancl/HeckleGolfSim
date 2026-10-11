@@ -62,6 +62,27 @@ func _initialize() -> void:
 		assert(forces_low.x < 0.0, "Ball at 0.2 m/s must experience braking force to reach rest")
 		print("PASS: Downhill slope force properly bounded without endless creep.")
 
+	# Test 3: Verify Ball Visual Mesh Scaling and Rolling Surface Height
+	print("\n--- Test 3: Verifying Ball Visual Mesh Scaling & Rolling Surface Elevation ---")
+	var expected_scale = ball._ball_radius / 1.007168
+	assert(is_equal_approx(ball._ball_mesh.scale.x, expected_scale), "Ball mesh scale must match physical radius")
+	print("PASS: Ball mesh scale correctly matched to physical radius: %.5f (radius: %.5f)" % [ball._ball_mesh.scale.x, ball._ball_radius])
+
+	# While rolling in rough, ball must NOT sink underground (target_y = 0.0)
+	ball.state = PhysicsEnums.BallState.ROLLOUT
+	ball.lie_type = "rough"
+	ball.set_surface(PhysicsEnums.SurfaceType.ROUGH)
+	ball._process(0.016)
+	assert(is_equal_approx(ball._ball_mesh.position.y, 0.0), "Rolling ball in rough must stay at Y=0 on surface, not sink")
+	print("PASS: Ball rolling in rough stays on surface without sinking.")
+
+	# When ball comes to rest in rough, ball settles into grass
+	ball.state = PhysicsEnums.BallState.REST
+	for i in range(30):
+		ball._process(0.016)
+	assert(ball._ball_mesh.position.y < -0.010, "Ball resting in rough must settle into grass")
+	print("PASS: Ball resting in rough settles into grass (mesh Y: %.4f)." % ball._ball_mesh.position.y)
+
 	ball.queue_free()
 	print("\n==================================================")
 	print("All Ball Rolling Physics Tests PASSED!")

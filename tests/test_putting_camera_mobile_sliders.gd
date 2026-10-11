@@ -112,8 +112,40 @@ func _initialize() -> void:
 	assert(right_margin >= 32, "MarginContainer right margin must be >= 32 to clear scrollbar, got %d" % right_margin)
 	print("PASS: ScrollContainer contains MarginContainer with %dpx right margin, ensuring vertical scrollbar does not cover controls." % right_margin)
 
+	# --- Test 6: Prevent Multiple Setup Windows on Repeated Clicks ---
+	print("\n--- Test 6: Prevent Multiple Setup Windows on Repeated Clicks ---")
+	# Call _open_camera_setup_dialog multiple times consecutively
+	for i in range(5):
+		widget._open_camera_setup_dialog()
+	
+	var all_dialogs = root.find_children("CameraSetupDialog*", "Control", true, false)
+	assert(all_dialogs.size() == 1, "There must be exactly 1 CameraSetupDialog instance, got %d" % all_dialogs.size())
+	var group_dialogs = root.get_tree().get_nodes_in_group("camera_setup_dialog")
+	assert(group_dialogs.size() == 1, "Group camera_setup_dialog must have exactly 1 member, got %d" % group_dialogs.size())
+	print("PASS: Calling _open_camera_setup_dialog repeatedly does not spawn multiple windows.")
+
+	var setup_btn = widget.find_child("SetupButton", true, false) as Button
+	assert(setup_btn != null, "PuttingCameraWidget must have SetupButton")
+
+	# Press setup_btn when dialog is open -> should toggle closed
+	setup_btn.pressed.emit()
+	assert(widget._find_active_camera_setup_dialog() == null, "Pressing SetupButton when open must close the dialog")
+	print("PASS: Pressing SetupButton toggles the dialog closed.")
+
+	# Press setup_btn when dialog is closed -> should re-open
+	setup_btn.pressed.emit()
+	assert(widget._find_active_camera_setup_dialog() != null, "Pressing SetupButton when closed must re-open the dialog")
+	print("PASS: Pressing SetupButton toggles the dialog open.")
+
+	# Rapid simulated clicks (e.g. 6 clicks)
+	for i in range(6):
+		setup_btn.pressed.emit()
+		var count = root.find_children("CameraSetupDialog*", "Control", true, false).size()
+		assert(count <= 1, "At no point may multiple setup dialogs exist! Found %d at click %d" % [count, i])
+	print("PASS: Rapid clicking on SetupButton never spawns multiple windows.")
+
 	# Cleanup dialog and widget
-	setup_dialog.queue_free()
+	widget._close_camera_setup_dialog()
 	widget.queue_free()
 
 	print("\n==================================================")

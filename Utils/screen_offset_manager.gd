@@ -1,12 +1,14 @@
 extends Node
 
-## Manages screen offset (full physical camera truck shift) for players hitting off-center in simulator bays.
-## Shifts camera and look target laterally at address so that straight aim aligns with the player's physical hitting strip.
+## Manages screen offset (optical off-axis projection shift) for players hitting off-center in simulator bays.
+## Shifts the rendered camera view horizontally across the screen at address so that straight aim aligns with the player's physical hitting strip.
+## The camera stays centered directly behind the ball and target line, keeping the centered view framing intact while shifting it across the screen.
 ## Smoothly centers the camera during ball flight and returns smoothly to the offset at address.
 
 signal offset_changed(target: float)
 
-const MAX_LATERAL_OFFSET_METERS := 6.0 # Maximum physical shift across golf bay (in meters, ~19.7 ft)
+const MAX_LATERAL_OFFSET_METERS := 6.0 # Deprecated legacy physical shift reference
+const MAX_SCREEN_SHIFT_FRACTION := 0.5 # Shift up to 50% of half-screen width at full slider
 const TO_CENTER_DURATION := 0.6
 const TO_OFFSET_DURATION := 1.0
 
@@ -217,9 +219,19 @@ func _apply(s: float) -> void:
 	if _camera == null or not is_instance_valid(_camera):
 		return
 
-	# If camera is orthogonal (e.g. 2D minimap or overhead map), ignore
+	# Revert any previously applied physical 3D displacement so camera stays centered behind the ball
+	if not _applied_displacement.is_zero_approx():
+		_camera.global_position -= _applied_displacement
+		var parent = _camera.get_parent()
+		if parent != null and parent.has_node("Camera3D"):
+			var c = parent.get_node("Camera3D") as Camera3D
+			if c != null and c != _camera:
+				c.global_position -= _applied_displacement
+		_applied_displacement = Vector3.ZERO
+	_last_shifted_pos = Vector3.INF
+
 	var pcam = _camera if _camera is PhantomCamera3D else null
-	var res = pcam.camera_3d_resource if pcam != null and "camera_3d_resource" in pcam else null
+	var res: Camera3DResource = pcam.camera_3d_resource if pcam != null and "camera_3d_resource" in pcam else null
 	var cam3d: Camera3D = null
 	if pcam == null and _camera is Camera3D:
 		cam3d = _camera as Camera3D
@@ -230,57 +242,90 @@ func _apply(s: float) -> void:
 			if parent != null:
 				cam3d = parent.get_node_or_null("Camera3D")
 
-	if res != null and res.projection == Camera3D.PROJECTION_ORTHOGONAL:
+	# If camera is orthogonal (e.g. 2D minimap or overhead map), ignore
+	if res != null and res.projection == 1: # ORTHOGONAL
 		return
 	if cam3d != null and cam3d.projection == Camera3D.PROJECTION_ORTHOGONAL:
 		return
 
-	# Ensure standard perspective projection (no frustum distortion)
-	_ensure_perspective(_camera)
+	if is_zero_approx(s):
+		_reset_to_perspective(pcam, res, cam3d)
+		return
 
-	# Detect if camera position changed externally (e.g. aim re-anchored or reset)
-	var cur_pos = _camera.global_position
-	if _last_shifted_pos != Vector3.INF and not cur_pos.is_equal_approx(_last_shifted_pos):
-		_applied_displacement = Vector3.ZERO
+	# Determine FOV, near clipping plane, and viewport aspect ratio
+	var fov_deg: float = 75.0
+	if cam3d != null and cam3d.fov > 0.0:
+		fov_deg = cam3d.fov
+	elif res != null and res.fov > 0.0:
+		fov_deg = res.fov
+	elif has_node("/root/GlobalSettings") and GlobalSettings.range_settings != null:
+		fov_deg = GlobalSettings.range_settings.camera_fov.value
 
-	# Calculate desired lateral displacement along camera's right vector (basis.x)
-	var right_dir = _camera.global_transform.basis.x.normalized()
-	# Ensure horizontal right vector (ignore slight pitch tilting)
-	right_dir.y = 0.0
-	if right_dir.is_zero_approx():
-		right_dir = _camera.global_transform.basis.x.normalized()
-	else:
-		right_dir = right_dir.normalized()
+	var near_val: float = 0.05
+	if cam3d != null and cam3d.near > 0.0:
+		near_val = cam3d.near
+	elif res != null and res.near > 0.0:
+		near_val = res.near
 
-	var target_displacement = right_dir * (s * MAX_LATERAL_OFFSET_METERS)
-	var delta_shift = target_displacement - _applied_displacement
+	var v_size: float = 2.0 * near_val * tan(deg_to_rad(fov_deg) / 2.0)
 
-	if not delta_shift.is_zero_approx():
-		_camera.global_position += delta_shift
-		if cam3d != null and cam3d != _camera:
-			cam3d.global_position += delta_shift
-		_applied_displacement = target_displacement
+	var aspect: float = 16.0 / 9.0
+	var vp: Viewport = null
+	if cam3d != null and cam3d.is_inside_tree():
+		vp = cam3d.get_viewport()
+	elif _camera.is_inside_tree():
+		vp = _camera.get_viewport()
+	if vp != null and vp.size.y > 0:
+		aspect = float(vp.size.x) / float(vp.size.y)
 
-	_last_shifted_pos = _camera.global_position
+	var half_width: float = (v_size / 2.0) * aspect
+	# Negative sign because shifting the near frustum window left (negative) shifts the rendered on-screen image right (positive)
+	var offset_x: float = -s * (half_width * MAX_SCREEN_SHIFT_FRACTION)
+	var target_frustum_offset: Vector2 = Vector2(offset_x, 0.0)
+
+	# Apply frustum projection and offset to PhantomCamera resource and direct Camera3D
+	if res != null:
+		res.projection = 2 # FRUSTUM
+		res.size = v_size
+		res.frustum_offset = target_frustum_offset
+	if pcam != null:
+		pcam.projection = 2 # FRUSTUM
+		pcam.size = v_size
+		pcam.frustum_offset = target_frustum_offset
+	if cam3d != null:
+		cam3d.projection = Camera3D.PROJECTION_FRUSTUM
+		cam3d.size = v_size
+		cam3d.frustum_offset = target_frustum_offset
+
+
+func _reset_to_perspective(pcam: Node, res: Resource, cam3d: Camera3D) -> void:
+	if res != null:
+		if res.projection == 2: # FRUSTUM
+			res.projection = 0 # PERSPECTIVE
+		res.frustum_offset = Vector2.ZERO
+	if pcam != null:
+		if pcam.projection == 2: # FRUSTUM
+			pcam.projection = 0 # PERSPECTIVE
+		pcam.frustum_offset = Vector2.ZERO
+	if cam3d != null:
+		if cam3d.projection == Camera3D.PROJECTION_FRUSTUM:
+			cam3d.projection = Camera3D.PROJECTION_PERSPECTIVE
+		cam3d.frustum_offset = Vector2.ZERO
 
 
 func _ensure_perspective(cam: Node) -> void:
 	if cam == null or not is_instance_valid(cam):
 		return
-	if cam is PhantomCamera3D and "camera_3d_resource" in cam and cam.camera_3d_resource != null:
-		if cam.camera_3d_resource.projection == 2: # FRUSTUM
-			cam.camera_3d_resource.projection = 0 # PERSPECTIVE
-			cam.camera_3d_resource.frustum_offset = Vector2.ZERO
-	if cam is Camera3D:
-		if cam.projection == Camera3D.PROJECTION_FRUSTUM:
-			cam.projection = Camera3D.PROJECTION_PERSPECTIVE
-			cam.frustum_offset = Vector2.ZERO
-	var parent = cam.get_parent()
-	if parent != null and parent.has_node("Camera3D"):
-		var c = parent.get_node("Camera3D") as Camera3D
-		if c != null and c.projection == Camera3D.PROJECTION_FRUSTUM:
-			c.projection = Camera3D.PROJECTION_PERSPECTIVE
-			c.frustum_offset = Vector2.ZERO
+	var pcam = cam if cam is PhantomCamera3D else null
+	var res = pcam.camera_3d_resource if pcam != null and "camera_3d_resource" in pcam else null
+	var cam3d: Camera3D = null
+	if pcam == null and cam is Camera3D:
+		cam3d = cam as Camera3D
+	elif pcam != null:
+		cam3d = cam.get_node_or_null("^../Camera3D")
+		if cam3d == null and cam.get_parent() != null:
+			cam3d = cam.get_parent().get_node_or_null("Camera3D")
+	_reset_to_perspective(pcam, res, cam3d)
 
 
 func _reset_camera(cam: Node) -> void:

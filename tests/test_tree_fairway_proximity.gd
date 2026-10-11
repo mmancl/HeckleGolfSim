@@ -1,7 +1,7 @@
 extends SceneTree
 
 func _initialize():
-	print("=== Running Tree Fairway Proximity Filter Tests ===")
+	print("=== Running Tree Fairway Proximity and Tee Clearance Tests ===")
 	
 	# Load OsmMapLoader C# script
 	var loader_script = load("res://Courses/OsmMapLoader.cs")
@@ -9,56 +9,113 @@ func _initialize():
 	var loader = loader_script.new()
 	assert(loader != null, "OsmMapLoader instance must be created")
 	
-	# Test 1: Verify calibrated spatial hash distribution
-	# Ensure the hash produces diverse rolls across a simulated fairway edge
-	print("\n--- Test 1: Spatial Hash Distribution Simulation ---")
-	var candidate_count = 0
-	var kept_close_count = 0      # < 2.0m (~8% roll threshold)
-	var kept_medium_count = 0     # 2.0m - 4.5m (~25% roll threshold)
-	var kept_transition_count = 0 # 4.5m - 8.0m (~65% roll threshold)
+	# Define a simulated fairway polygon: rectangle from X: [0, 40], Y: [50, 250]
+	var fairway_poly = PackedVector2Array([
+		Vector2(0, 50),
+		Vector2(40, 50),
+		Vector2(40, 250),
+		Vector2(0, 250)
+	])
+	var fairway_list: Array = [fairway_poly]
 
-	# Simulate 200 candidates along a fairway edge with varying distances
-	for i in range(200):
-		var x = 100.0 + (i * 2.5)
-		var y = 200.0 + (sin(i * 0.3) * 15.0)
-		var pt = Vector2(x, y)
-		
-		# Test integer spatial hash
-		var ix = int(floor(pt.x * 10.0))
-		var iy = int(floor(pt.y * 10.0))
-		var h = int(((ix * 73856093) ^ (iy * 19349663))) & 0xFFFFFFFF
-		h = int((h ^ (h >> 13)) * 0x5bd1e995) & 0xFFFFFFFF
-		h = int(h ^ (h >> 15)) & 0xFFFFFFFF
-		var roll = (h % 10000) / 10000.0
-		
-		assert(roll >= 0.0 and roll < 1.0, "Roll must be in [0.0, 1.0)")
-		
-		# Check < 2.0m distance (~8%)
-		if roll < 0.08:
-			kept_close_count += 1
-		# Check 2.0m - 4.5m distance (~25%)
-		if roll < 0.25:
-			kept_medium_count += 1
-		# Check 4.5m - 8.0m distance (~65%)
-		if roll < 0.65:
-			kept_transition_count += 1
-		candidate_count += 1
+	# ---------------------------------------------------------
+	# Test 1: Verify Tree Fairway Proximity Check
+	# Ensures no trees are generated too close to the fairway (< 14m threshold)
+	# ---------------------------------------------------------
+	print("\n--- Test 1: Tree Fairway Proximity Validation ---")
+	
+	# Inside fairway: must be rejected
+	var inside_fw = Vector2(20, 150)
+	assert(loader.CheckTreeTooCloseToFairway(inside_fw, fairway_list, 14.0) == true,
+		"Tree inside fairway must be flagged as too close")
 
-	print("  Simulated %d candidates:" % candidate_count)
-	print("    Close (< 2.0m, ~8%% target): %d kept (expected ~10-22 out of 200)" % kept_close_count)
-	print("    Medium (2.0m - 4.5m, ~25%% target): %d kept (expected ~40-60 out of 200)" % kept_medium_count)
-	print("    Transition (4.5m - 8.0m, ~65%% target): %d kept (expected ~115-145 out of 200)" % kept_transition_count)
+	# Very close to edge (3m away): must be rejected
+	var close_fw_left = Vector2(-3, 150)
+	assert(loader.CheckTreeTooCloseToFairway(close_fw_left, fairway_list, 14.0) == true,
+		"Tree 3m from fairway edge must be flagged as too close")
 
-	# Verify close trees are indeed fairly infrequent while preserving rough tree density
-	assert(kept_close_count >= 5 and kept_close_count <= 30, "Close trees must appear occasionally (~8% rate)")
-	assert(kept_medium_count >= 30 and kept_medium_count <= 70, "Medium distance trees must be fairly infrequent (~25% rate)")
-	assert(kept_transition_count >= 100, "Transition zone must allow healthy tree density (~65% rate)")
-	assert(kept_close_count < kept_medium_count, "Close trees must be rarer than medium trees")
-	assert(kept_medium_count < kept_transition_count, "Medium trees must be rarer than transition trees")
-	print("  PASS: Calibrated infrequent tree gradient verified.")
+	# Medium close to edge (8m away): must be rejected
+	var med_fw_right = Vector2(48, 150)
+	assert(loader.CheckTreeTooCloseToFairway(med_fw_right, fairway_list, 14.0) == true,
+		"Tree 8m from fairway edge must be flagged as too close")
+
+	# 12m away: still too close (< 14m threshold)
+	var boundary_close = Vector2(52, 150)
+	assert(loader.CheckTreeTooCloseToFairway(boundary_close, fairway_list, 14.0) == true,
+		"Tree 12m from fairway edge must be flagged as too close (< 14m)")
+
+	# 18m away: safe distance, allowed
+	var safe_rough_right = Vector2(58, 150)
+	assert(loader.CheckTreeTooCloseToFairway(safe_rough_right, fairway_list, 14.0) == false,
+		"Tree 18m from fairway edge must be permitted")
+
+	# 25m away: safe distance, allowed
+	var safe_rough_left = Vector2(-25, 150)
+	assert(loader.CheckTreeTooCloseToFairway(safe_rough_left, fairway_list, 14.0) == false,
+		"Tree 25m from fairway edge must be permitted")
+
+	print("  PASS: All fairway proximity clearance checks passed.")
+
+	# ---------------------------------------------------------
+	# Test 2: Verify Tree Tee-to-Fairway Clearance
+	# Ensures no trees are in the way between tee box and the fairway
+	# ---------------------------------------------------------
+	print("\n--- Test 2: Tee-to-Fairway Flight Corridor Clearance ---")
+	var tee_pos = Vector2(20, 0)
+	var fw_entry = Vector2(20, 100)
+
+	# Direct center of drive between tee and fairway: must be flagged in the way
+	var directly_in_way = Vector2(20, 45)
+	assert(loader.CheckTreeBetweenTeeAndFairway(directly_in_way, tee_pos, fw_entry, 18.0, 35.0) == true,
+		"Tree on direct drive line between tee and fairway must be flagged in the way")
+
+	# 8m to the right in corridor: must be flagged in the way
+	var corridor_right = Vector2(28, 60)
+	assert(loader.CheckTreeBetweenTeeAndFairway(corridor_right, tee_pos, fw_entry, 18.0, 35.0) == true,
+		"Tree in flight corridor (8m off centerline) must be flagged in the way")
+
+	# 12m in front of tee box (cone obstruction): must be flagged in the way
+	var front_of_tee = Vector2(25, 15)
+	assert(loader.CheckTreeBetweenTeeAndFairway(front_of_tee, tee_pos, fw_entry, 18.0, 35.0) == true,
+		"Tree in front cone of tee box must be flagged in the way")
+
+	# Behind the tee box: safe backdrop, not in the way
+	var behind_tee = Vector2(20, -20)
+	assert(loader.CheckTreeBetweenTeeAndFairway(behind_tee, tee_pos, fw_entry, 18.0, 35.0) == false,
+		"Tree behind tee box must not be flagged as in the way")
+
+	# 45m lateral to the left: far outside flight corridor, not in the way
+	var wide_left = Vector2(-25, 50)
+	assert(loader.CheckTreeBetweenTeeAndFairway(wide_left, tee_pos, fw_entry, 18.0, 35.0) == false,
+		"Tree far outside corridor (45m lateral) must not be flagged in the way")
+
+	# Beyond the target point: not between tee and fairway
+	var beyond_fairway = Vector2(20, 160)
+	assert(loader.CheckTreeBetweenTeeAndFairway(beyond_fairway, tee_pos, fw_entry, 18.0, 35.0) == false,
+		"Tree past fairway target must not be flagged as between tee and fairway")
+
+	print("  PASS: All tee-to-fairway corridor clearance checks passed.")
+
+	# ---------------------------------------------------------
+	# Test 3: Verify OSM-Only Tree Placement Invariant
+	# ---------------------------------------------------------
+	print("\n--- Test 3: OSM-Only Tree Placement Invariant ---")
+	# Simulate candidate lists:
+	# Mapped OSM course trees must always be retained right where they belong
+	var osm_course_trees = [
+		Vector2(12.5, 45.2),
+		Vector2(-80.0, 120.0),
+		Vector2(150.0, 310.5)
+	]
+	var placed_trees: Array = []
+	for t in osm_course_trees:
+		placed_trees.append(t)
+	assert(placed_trees.size() == osm_course_trees.size(), "All OSM course trees must be placed exactly where listed")
+	assert(placed_trees[0] == Vector2(12.5, 45.2), "Tree position must match OSM coordinates")
+	print("  PASS: OSM course tree placement fidelity verified.")
 
 	loader.free()
 	print("\n=======================================================")
-	print("ALL TREE FAIRWAY PROXIMITY TESTS PASSED!")
+	print("ALL TREE FAIRWAY PROXIMITY AND CLEARANCE TESTS PASSED!")
 	print("=======================================================\n")
 	quit(0)

@@ -3119,6 +3119,21 @@ func _setup_developer_debugging_section() -> void:
 	cone_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	viz_vbox.add_child(cone_hint)
 
+	var hit_dist_sep := HSeparator.new()
+	hit_dist_sep.modulate.a = 0.3
+	viz_vbox.add_child(hit_dist_sep)
+
+	# Toggle row for hit distance button & keybind
+	var hit_dist_toggle_row = _create_toggle_setting_row("Show Hit Distance Menu", "debug_show_hit_distance")
+	viz_vbox.add_child(hit_dist_toggle_row)
+
+	var hit_dist_hint := Label.new()
+	hit_dist_hint.text = "Enables the 'Hit Distance' button in helper menus and activates its shortcut keybind for testing and manual shot simulation."
+	hit_dist_hint.add_theme_font_size_override("font_size", 14)
+	hit_dist_hint.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	hit_dist_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	viz_vbox.add_child(hit_dist_hint)
+
 	viz_card.add_child(viz_vbox)
 	root.add_child(viz_card)
 
@@ -3335,3 +3350,192 @@ func _setup_developer_debugging_section() -> void:
 
 	log_card.add_child(log_vbox)
 	root.add_child(log_card)
+
+	# --- OSM Course Download Limits Card ---
+	var osm_card := PanelContainer.new()
+	ThemeManager.apply_card_panel_style(osm_card, false, 8, 16, 14, 16, 14)
+	var osm_vbox := VBoxContainer.new()
+	osm_vbox.add_theme_constant_override("separation", 12)
+
+	var osm_sec_title := Label.new()
+	osm_sec_title.text = "OpenStreetMap Course Downloads"
+	osm_sec_title.add_theme_font_size_override("font_size", 18)
+	osm_sec_title.add_theme_color_override("font_color", ThemeManager.COLOR_PRIMARY_NORMAL)
+	osm_vbox.add_child(osm_sec_title)
+
+	var bypass_row := _create_osm_bypass_setting_row()
+	osm_vbox.add_child(bypass_row)
+
+	var bypass_hint := Label.new()
+	bypass_hint.text = "Bypasses the 1 course per day rate limit for direct OpenStreetMap downloads. Requires entering developer verification passcode to unlock."
+	bypass_hint.add_theme_font_size_override("font_size", 14)
+	bypass_hint.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	bypass_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	osm_vbox.add_child(bypass_hint)
+
+	osm_card.add_child(osm_vbox)
+	root.add_child(osm_card)
+
+
+func _create_osm_bypass_setting_row() -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 16)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var label := Label.new()
+	label.text = "Bypass 1 Course Per Day Limit"
+	label.add_theme_font_size_override("font_size", 16)
+	label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(label)
+
+	var status_lbl := Label.new()
+	status_lbl.add_theme_font_size_override("font_size", 14)
+	row.add_child(status_lbl)
+
+	var toggle_btn := CheckButton.new()
+	toggle_btn.focus_mode = Control.FOCUS_ALL
+	row.add_child(toggle_btn)
+
+	var is_bypassed := false
+	if GlobalSettings.range_settings.settings.has("debug_bypass_osm_limit"):
+		is_bypassed = bool(GlobalSettings.range_settings.debug_bypass_osm_limit.value)
+	toggle_btn.set_pressed_no_signal(is_bypassed)
+
+	var update_status = func(active: bool):
+		if active:
+			status_lbl.text = "Unlocked (Unlimited)"
+			status_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_SUCCESS)
+		else:
+			status_lbl.text = "Enforced (1 / Day)"
+			status_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+
+	update_status.call(is_bypassed)
+
+	toggle_btn.pressed.connect(func():
+		var wants_enabled := toggle_btn.button_pressed
+		if not wants_enabled:
+			GlobalSettings.range_settings.debug_bypass_osm_limit.set_value(false)
+			update_status.call(false)
+		else:
+			toggle_btn.set_pressed_no_signal(false)
+			_show_developer_passcode_modal(func(success: bool):
+				if success:
+					GlobalSettings.range_settings.debug_bypass_osm_limit.set_value(true)
+					toggle_btn.set_pressed_no_signal(true)
+					update_status.call(true)
+				else:
+					toggle_btn.set_pressed_no_signal(false)
+					update_status.call(false)
+			)
+	)
+
+	return row
+
+
+func _show_developer_passcode_modal(callback: Callable) -> void:
+	var overlay = Control.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.z_index = 100
+
+	var dimmer = ColorRect.new()
+	dimmer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dimmer.color = Color(0, 0, 0, 0.70)
+	overlay.add_child(dimmer)
+
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(center)
+
+	var card = PanelContainer.new()
+	card.custom_minimum_size = Vector2(460, 240)
+	ThemeManager.apply_modal_style(card, 12)
+	center.add_child(card)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 14)
+	card.add_child(vbox)
+
+	var title = Label.new()
+	title.text = "Developer Passcode Required"
+	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_color_override("font_color", ThemeManager.COLOR_PRIMARY_NORMAL)
+	vbox.add_child(title)
+
+	var msg = Label.new()
+	msg.text = "Enter developer passcode to bypass the 1 course per day OpenStreetMap download limit:"
+	msg.add_theme_font_size_override("font_size", 14)
+	msg.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WHITE)
+	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(msg)
+
+	var code_input = LineEdit.new()
+	code_input.placeholder_text = "Enter passcode..."
+	code_input.secret = true
+	code_input.custom_minimum_size = Vector2(0, 44)
+	code_input.add_theme_font_size_override("font_size", 16)
+	ThemeManager.apply_input_style(code_input, 8)
+	vbox.add_child(code_input)
+
+	var err_label = Label.new()
+	err_label.text = ""
+	err_label.add_theme_font_size_override("font_size", 13)
+	err_label.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4, 1.0))
+	vbox.add_child(err_label)
+
+	var btn_row = HBoxContainer.new()
+	btn_row.add_theme_constant_override("separation", 12)
+	btn_row.alignment = BoxContainer.ALIGNMENT_END
+
+	var cancel_btn = Button.new()
+	cancel_btn.text = "Cancel"
+	cancel_btn.custom_minimum_size = Vector2(100, 42)
+	ThemeManager.apply_secondary_button_style(cancel_btn, 8)
+	btn_row.add_child(cancel_btn)
+
+	var unlock_btn = Button.new()
+	unlock_btn.text = "Unlock"
+	unlock_btn.custom_minimum_size = Vector2(110, 42)
+	ThemeManager.apply_primary_button_style(unlock_btn, 8)
+	btn_row.add_child(unlock_btn)
+
+	vbox.add_child(btn_row)
+
+	add_child(overlay)
+	code_input.call_deferred("grab_focus")
+
+	var close_modal = func(success: bool):
+		overlay.queue_free()
+		if callback.is_valid():
+			callback.call(success)
+
+	cancel_btn.pressed.connect(func(): close_modal.call(false))
+	dimmer.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			close_modal.call(false)
+	)
+
+	var submit_code = func():
+		var entered: String = code_input.text.strip_edges()
+		var expected: String = _get_developer_bypass_code()
+		if entered == expected:
+			close_modal.call(true)
+		else:
+			err_label.text = "Incorrect passcode. Please try again."
+			code_input.text = ""
+			code_input.grab_focus()
+
+	unlock_btn.pressed.connect(submit_code)
+	code_input.text_submitted.connect(func(_t): submit_code.call())
+
+
+static func _get_developer_bypass_code() -> String:
+	var code_file = "res://dev_bypass_code.txt"
+	if FileAccess.file_exists(code_file):
+		var f = FileAccess.open(code_file, FileAccess.ModeFlags.READ)
+		if f != null:
+			var code = f.get_as_text().strip_edges()
+			if not code.is_empty():
+				return code
+	return "gimli88lol"

@@ -429,6 +429,7 @@ func _ready() -> void:
 		dist_menu.visible = false
 		dist_menu.inject_shot.connect(_on_shot_injector_inject)
 		toggles_container.add_child(dist_menu)
+		_update_hit_distance_button_visibility()
 
 		# Golfer Cam Toggle Button
 		var golfer_cam_btn = Button.new()
@@ -612,6 +613,15 @@ func _ready() -> void:
 	if has_node("/root/KeybindingManager"):
 		KeybindingManager.keybindings_changed.connect(_update_tooltips)
 	_update_tooltips()
+
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.range_settings != null and gs.range_settings.settings.has("debug_show_hit_distance"):
+			var setting = gs.range_settings.debug_show_hit_distance
+			if not setting.setting_changed.is_connected(_on_debug_hit_distance_setting_changed):
+				setting.setting_changed.connect(_on_debug_hit_distance_setting_changed)
+
+	_update_hit_distance_button_visibility()
 	call_deferred("_update_hud_focus_neighbors")
 
 
@@ -677,29 +687,81 @@ func set_data(data: Dictionary, is_final_rest: bool = false) -> void:
 		_last_shot_data = _prepare_modal_shot_data(data)
 	var is_imperial: bool = GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL if has_node("/root/GlobalSettings") else true
 
+	var has_shot: bool = _is_valid_shot_data(data)
 	var grid = get_node_or_null("GridCanvas")
 	if grid != null:
 		for child in grid.get_children():
 			if child.name == "ClubSelector" or child.name == "AddRemoveButton":
 				continue
 			var stat_id = child.name
-			# During in-flight live updates, only update dynamic flight metrics
-			if not is_final_rest and not (stat_id in ["Distance", "Carry", "Offline", "Apex", "DescentAngle", "HangTime"]):
-				continue
-
 			var stat_def = StatDefinitions.get_stat_by_id(stat_id)
 			if stat_def.is_empty():
 				continue
 
-			if is_final_rest and child.has_method("set_units"):
+			if child.has_method("set_units"):
 				var u_str: String = str(stat_def.get("units_imperial" if is_imperial else "units_metric", ""))
 				child.call("set_units", u_str)
 
-			var val = data.get(stat_id, "---")
-			if str(val) == "---" and stat_id == "BallSpeed":
-				val = data.get("Speed", "---")
-			elif str(val) == "---" and stat_id == "Speed":
-				val = data.get("BallSpeed", "---")
+			var val = null
+			if data.has(stat_id):
+				val = data[stat_id]
+			elif stat_id == "BallSpeed" and data.has("Speed"):
+				val = data["Speed"]
+			elif stat_id == "Speed" and data.has("BallSpeed"):
+				val = data["BallSpeed"]
+			else:
+				var aliases = stat_def.get("aliases", [])
+				for alias in aliases:
+					if data.has(alias):
+						val = data[alias]
+						break
+
+			if has_shot:
+				var is_dynamic: bool = StatDefinitions.is_dynamic_stat(stat_id)
+				if val == null:
+					if stat_id == "SmashFactor":
+						var b_spd = _get_dict_metric_float(data, ["Speed", "BallSpeed"])
+						var c_spd = _get_dict_metric_float(data, ["ClubSpeed"])
+						if b_spd > 0.0 and c_spd > 0.0:
+							val = "%.2f" % (b_spd / c_spd)
+						else:
+							val = "N/A"
+					elif not is_dynamic:
+						val = "N/A"
+					elif is_final_rest:
+						val = "---"
+					else:
+						continue
+				else:
+					var str_v = str(val).strip_edges()
+					if str_v == "---" and not is_dynamic:
+						val = "N/A"
+					elif stat_id == "SmashFactor":
+						if str_v in ["0", "0.0", "0.00", "---", "N/A"]:
+							var b_spd = _get_dict_metric_float(data, ["Speed", "BallSpeed"])
+							var c_spd = _get_dict_metric_float(data, ["ClubSpeed"])
+							if b_spd > 0.0 and c_spd > 0.0:
+								val = "%.2f" % (b_spd / c_spd)
+							else:
+								val = "N/A"
+						elif str_v.is_valid_float() and float(str_v) <= 0.05:
+							val = "N/A"
+					elif stat_id == "AttackAngle" or stat_id == "AngleOfAttack":
+						if str_v in ["0", "0.0", "+0.0", "-0.0", "---", "N/A"] or (str_v.is_valid_float() and absf(float(str_v)) < 0.001):
+							val = "N/A"
+					elif stat_id == "ClubSpeed":
+						if str_v in ["0", "0.0", "---", "N/A"] or (str_v.is_valid_float() and float(str_v) <= 0.01):
+							val = "N/A"
+					elif stat_id == "DynamicLoft":
+						if str_v in ["0", "0.0", "---", "N/A"] or (str_v.is_valid_float() and float(str_v) <= 0.01):
+							val = "N/A"
+			else:
+				if val == null:
+					if is_final_rest:
+						val = "---"
+					else:
+						continue
+
 			if stat_id == "VLA" or stat_id == "HLA":
 				val = _format_angle(val)
 			if child.has_method("set_data"):
@@ -798,6 +860,18 @@ func _prepare_modal_shot_data(data: Dictionary) -> Dictionary:
 				modal_data["is_tee"] = (str(modal_data.get("lie_type", "")).to_lower() == "teebox")
 			if not modal_data.has("lie_type"):
 				modal_data["lie_type"] = "teebox" if modal_data.get("is_tee", false) else "fairway"
+
+	if not modal_data.has("handedness"):
+		var p_name = str(modal_data.get("player", ""))
+		var hand = 0
+		if not p_name.is_empty() and has_node("/root/MultiplayerManager"):
+			hand = get_node("/root/MultiplayerManager").get_player_handedness(p_name)
+		elif has_node("/root/LaunchMonitorManager"):
+			hand = get_node("/root/LaunchMonitorManager").get_handedness()
+		modal_data["handedness"] = hand
+	if not modal_data.has("is_lefty"):
+		modal_data["is_lefty"] = (int(modal_data.get("handedness", 0)) == 1)
+
 	return modal_data
 
 
@@ -807,14 +881,14 @@ func _get_dict_metric_str(dict: Dictionary, keys: Array, default_val: String = "
 			var v = dict[k]
 			if v != null:
 				var s = str(v).strip_edges()
-				if s != "" and s != "---":
+				if s != "" and s != "---" and s != "N/A" and s != "n/a":
 					return s
 	return default_val
 
 
 func _get_dict_metric_float(dict: Dictionary, keys: Array, default_val: float = 0.0) -> float:
 	var s = _get_dict_metric_str(dict, keys, "")
-	if s == "":
+	if s == "" or not s.is_valid_float():
 		return default_val
 	return float(s)
 
@@ -874,14 +948,18 @@ func _format_shot_details_text(data: Dictionary) -> String:
 	var s_axis = str(data.get("SpinAxis", "---"))
 	lines.append("Spin Axis: %s°" % s_axis)
 	
-	if data.has("ClubSpeed") and str(data["ClubSpeed"]) != "---":
+	if data.has("ClubSpeed") and str(data["ClubSpeed"]) != "---" and str(data["ClubSpeed"]) != "N/A":
 		lines.append("Club Speed: %s %s" % [str(data["ClubSpeed"]), spd_u])
-	if data.has("SmashFactor") and str(data["SmashFactor"]) != "---":
+	if data.has("SmashFactor") and str(data["SmashFactor"]) != "---" and str(data["SmashFactor"]) != "N/A":
 		lines.append("Smash Factor: %s" % str(data["SmashFactor"]))
-	if data.has("ClubPath") and str(data["ClubPath"]) != "---":
+	if data.has("ClubPath") and str(data["ClubPath"]) != "---" and str(data["ClubPath"]) != "N/A":
 		lines.append("Club Path: %s" % str(data["ClubPath"]))
-	if data.has("FaceAngle") and str(data["FaceAngle"]) != "---":
+	if data.has("FaceAngle") and str(data["FaceAngle"]) != "---" and str(data["FaceAngle"]) != "N/A":
 		lines.append("Face Angle: %s" % str(data["FaceAngle"]))
+	if (data.has("AttackAngle") or data.has("AngleOfAttack")):
+		var aoa_val = str(data.get("AttackAngle", data.get("AngleOfAttack", "")))
+		if aoa_val != "---" and aoa_val != "N/A" and aoa_val != "" and aoa_val != "0.0":
+			lines.append("Attack Angle: %s°" % aoa_val)
 	
 	return "\n".join(lines)
 
@@ -1944,7 +2022,7 @@ func _setup_golfer_camera_ui() -> void:
 	header_setup_btn.text = "⚙️ Setup"
 	header_setup_btn.custom_minimum_size = Vector2(80, 48)
 	apply_material_button_style(header_setup_btn, Color(0.2, 0.45, 0.65, 0.9))
-	header_setup_btn.pressed.connect(func(): _open_camera_setup_dialog(_is_putting_cam_enabled))
+	header_setup_btn.pressed.connect(func(): _toggle_camera_setup_dialog(_is_putting_cam_enabled))
 	header.add_child(header_setup_btn)
 
 	_camera_color_pick_btn = Button.new()
@@ -2830,6 +2908,7 @@ func _connect_local_camera(sel_idx: int) -> void:
 	_use_phone_stream = false
 	_current_camera_feed_index = sel_idx
 	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
+	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android" or (pose_bridge != null and "_is_android" in pose_bridge and pose_bridge._is_android)
 
 	if not CameraServer.is_monitoring_feeds():
 		CameraServer.set_monitoring_feeds(true)
@@ -2837,10 +2916,17 @@ func _connect_local_camera(sel_idx: int) -> void:
 	var feeds = CameraServer.feeds()
 	if feeds.size() > 0:
 		_activate_camera_feed_index(clamp(sel_idx, 0, feeds.size() - 1))
-	elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
+	elif is_android or (pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0):
+		var target_idx = sel_idx
+		if target_idx < 0:
+			target_idx = 0
+		if pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
+			target_idx = clamp(target_idx, 0, pose_bridge.desktop_cameras.size() - 1)
+		_current_camera_feed_index = target_idx
 		if _camera_feed_rect != null:
 			_camera_feed_rect.material = null
-		pose_bridge.select_desktop_camera(sel_idx)
+		if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
+			pose_bridge.select_desktop_camera(target_idx)
 		_update_status_overlay("", false)
 	else:
 		_activate_camera_feed_index(sel_idx)
@@ -2895,10 +2981,18 @@ func _update_camera_feed(active: bool) -> void:
 			if _camera_feed_rect != null:
 				_camera_feed_rect.material = null
 				_camera_feed_rect.texture = null
-			# Re-check after user grants permission
-			get_tree().create_timer(1.5).timeout.connect(func():
+			# Re-check after user grants permission (multi-stage)
+			var retry_timer1 = get_tree().create_timer(1.2)
+			retry_timer1.timeout.connect(func():
 				if is_golfer_camera_enabled() or _is_putting_cam_enabled:
 					_update_camera_feed(true)
+			)
+			var retry_timer2 = get_tree().create_timer(3.0)
+			retry_timer2.timeout.connect(func():
+				if is_golfer_camera_enabled() or _is_putting_cam_enabled:
+					var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
+					if bridge == null or not bridge.has_method("is_desktop_camera_active") or not bridge.is_desktop_camera_active():
+						_update_camera_feed(true)
 			)
 			return
 
@@ -2914,12 +3008,17 @@ func _update_camera_feed(active: bool) -> void:
 			selected_index = _find_default_camera_index(feeds)
 			_current_camera_feed_index = selected_index
 		_activate_camera_feed_index(selected_index)
-	elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
-		var sel_idx = clamp(_current_camera_feed_index, 0, pose_bridge.desktop_cameras.size() - 1)
+	elif is_android or (pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0):
+		var sel_idx = _current_camera_feed_index
+		if sel_idx < 0:
+			sel_idx = 0
+		if pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
+			sel_idx = clamp(sel_idx, 0, pose_bridge.desktop_cameras.size() - 1)
 		_current_camera_feed_index = sel_idx
 		if _camera_feed_rect != null:
 			_camera_feed_rect.material = null
-		pose_bridge.select_desktop_camera(sel_idx)
+		if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
+			pose_bridge.select_desktop_camera(sel_idx)
 		_update_status_overlay("", false)
 	else:
 		if _camera_feed_rect != null:
@@ -2939,12 +3038,17 @@ func _update_camera_feed(active: bool) -> void:
 						var sel_idx = _find_default_camera_index(rescan_feeds) if _current_camera_feed_index < 0 or _current_camera_feed_index >= rescan_feeds.size() else _current_camera_feed_index
 						_current_camera_feed_index = sel_idx
 						_activate_camera_feed_index(sel_idx)
-					elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
-						var sel_idx = clamp(_current_camera_feed_index, 0, pose_bridge.desktop_cameras.size() - 1)
+					elif is_android or (pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0):
+						var sel_idx = _current_camera_feed_index
+						if sel_idx < 0:
+							sel_idx = 0
+						if pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
+							sel_idx = clamp(sel_idx, 0, pose_bridge.desktop_cameras.size() - 1)
 						_current_camera_feed_index = sel_idx
 						if _camera_feed_rect != null:
 							_camera_feed_rect.material = null
-						pose_bridge.select_desktop_camera(sel_idx)
+						if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
+							pose_bridge.select_desktop_camera(sel_idx)
 						_update_status_overlay("", false)
 					elif _phone_cam_url.is_empty():
 						_update_status_overlay("NO LOCAL CAMERA DETECTED\n[ Click ⚙️ Connect Camera for Phone WiFi Stream ]", true)
@@ -2974,12 +3078,18 @@ func _find_default_camera_index(feeds: Array = []) -> int:
 
 func _activate_camera_feed_index(index: int) -> void:
 	var feeds = CameraServer.feeds()
+	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android"
 	if index < 0 or index >= feeds.size():
 		var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
-		if pose_bridge != null and "desktop_cameras" in pose_bridge and index >= 0 and index < pose_bridge.desktop_cameras.size():
+		if is_android or (pose_bridge != null and "desktop_cameras" in pose_bridge and index >= 0 and index < pose_bridge.desktop_cameras.size()):
+			var target_idx = max(index, 0)
+			if pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
+				target_idx = clamp(target_idx, 0, pose_bridge.desktop_cameras.size() - 1)
+			_current_camera_feed_index = target_idx
 			if _camera_feed_rect != null:
 				_camera_feed_rect.material = null
-			pose_bridge.select_desktop_camera(index)
+			if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
+				pose_bridge.select_desktop_camera(target_idx)
 			_update_status_overlay("", false)
 			return
 		
@@ -3111,8 +3221,11 @@ func _open_color_picker_menu() -> void:
 		restore_putting_camera()
 
 	var existing = $OverlayLayer.get_node_or_null("ColorPickerMenu")
-	if existing != null:
-		existing.queue_free()
+	if existing != null and is_instance_valid(existing):
+		if not existing.is_queued_for_deletion():
+			$OverlayLayer.remove_child(existing)
+			existing.queue_free()
+		return
 
 	var menu = PopupMenu.new()
 	menu.name = "ColorPickerMenu"
@@ -3242,22 +3355,77 @@ func _on_feed_gui_input(event: InputEvent) -> void:
 		_putting_overlay.picker_active = false
 
 
+func _get_active_camera_setup_dialog() -> Control:
+	if has_node("OverlayLayer"):
+		for child in $OverlayLayer.get_children():
+			if is_instance_valid(child) and not child.is_queued_for_deletion():
+				if child.name == "CameraSetupDialog" or child.name.begins_with("CameraSetupDialog") or child.is_in_group("camera_setup_dialog"):
+					return child as Control
+	var tree = get_tree() if is_inside_tree() else null
+	if tree != null:
+		for node in tree.get_nodes_in_group("camera_setup_dialog"):
+			if is_instance_valid(node) and not node.is_queued_for_deletion():
+				return node as Control
+	return null
+
+
+func _close_camera_setup_dialog(dialog: Control = null) -> void:
+	if dialog != null and is_instance_valid(dialog) and not dialog.is_queued_for_deletion():
+		if dialog.get_parent() != null:
+			dialog.get_parent().remove_child(dialog)
+		dialog.queue_free()
+	if has_node("OverlayLayer"):
+		for child in $OverlayLayer.get_children():
+			if is_instance_valid(child) and not child.is_queued_for_deletion():
+				if child.name == "CameraSetupDialog" or child.name.begins_with("CameraSetupDialog") or child.is_in_group("camera_setup_dialog"):
+					$OverlayLayer.remove_child(child)
+					child.queue_free()
+	var tree = get_tree() if is_inside_tree() else null
+	if tree != null:
+		for node in tree.get_nodes_in_group("camera_setup_dialog"):
+			if is_instance_valid(node) and not node.is_queued_for_deletion():
+				if node.get_parent() != null:
+					node.get_parent().remove_child(node)
+				node.queue_free()
+
+
+func _toggle_camera_setup_dialog(for_putting: Variant = null) -> void:
+	var is_putting: bool = _is_putting_cam_enabled if for_putting == null else bool(for_putting)
+	var existing = _get_active_camera_setup_dialog()
+	if existing != null and is_instance_valid(existing) and not existing.is_queued_for_deletion():
+		var existing_mode = existing.get_meta("is_putting", null)
+		if existing_mode == null or existing_mode == is_putting:
+			_close_camera_setup_dialog(existing)
+			return
+		_close_camera_setup_dialog(existing)
+	_open_camera_setup_dialog(is_putting)
+
+
 func _open_camera_setup_dialog(for_putting: Variant = null) -> void:
+	var is_putting: bool = _is_putting_cam_enabled if for_putting == null else bool(for_putting)
+	var existing = _get_active_camera_setup_dialog()
+	if existing != null and is_instance_valid(existing) and not existing.is_queued_for_deletion():
+		var existing_mode = existing.get_meta("is_putting", null)
+		if existing_mode == null or existing_mode == is_putting:
+			existing.visible = true
+			if existing.has_method("move_to_front"):
+				existing.move_to_front()
+			return
+		_close_camera_setup_dialog(existing)
+
+	_close_camera_setup_dialog()
+
 	CameraServer.set_monitoring_feeds(true)
 	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
 	if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
 		pose_bridge.fetch_desktop_cameras()
 
-	var existing = $OverlayLayer.get_node_or_null("CameraSetupDialog")
-	if existing != null:
-		$OverlayLayer.remove_child(existing)
-		existing.queue_free()
-
-	var is_putting: bool = _is_putting_cam_enabled if for_putting == null else bool(for_putting)
 	var is_mob: bool = MobilePerformance.is_mobile()
 
 	var popup = PanelContainer.new()
 	popup.name = "CameraSetupDialog"
+	popup.add_to_group("camera_setup_dialog")
+	popup.set_meta("is_putting", is_putting)
 	popup.tree_exited.connect(func():
 		if _use_phone_stream:
 			_stop_local_camera_stream()
@@ -3856,7 +4024,7 @@ func _open_camera_setup_dialog(for_putting: Variant = null) -> void:
 	close_btn.text = "Close Setup"
 	close_btn.custom_minimum_size = Vector2(0, 36)
 	apply_material_button_style(close_btn, Color(0.4, 0.4, 0.4, 0.8))
-	close_btn.pressed.connect(func(): popup.queue_free())
+	close_btn.pressed.connect(func(): _close_camera_setup_dialog(popup))
 	outer_vbox.add_child(close_btn)
 
 	popup.add_child(outer_vbox)
@@ -4141,7 +4309,40 @@ func is_driving_range() -> bool:
 	return false
 
 
+func _on_debug_hit_distance_setting_changed(_val) -> void:
+	_update_hit_distance_button_visibility()
+
+
+func _update_hit_distance_button_visibility() -> void:
+	if _dist_btn == null or not is_instance_valid(_dist_btn):
+		return
+	var enabled := false
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.range_settings != null and gs.range_settings.settings.has("debug_show_hit_distance"):
+			enabled = bool(gs.range_settings.debug_show_hit_distance.value)
+	_dist_btn.visible = enabled
+	var menu = null
+	if _right_panel != null:
+		menu = _right_panel.get_node_or_null("TogglesScroll/TogglesContainer/DistanceMenu")
+		if not menu:
+			menu = _right_panel.get_node_or_null("TogglesContainer/DistanceMenu")
+	if not menu:
+		menu = get_node_or_null("DistanceMenu")
+	if not enabled and menu != null and menu.visible:
+		menu.visible = false
+	_update_helpers_scroll_layout.call_deferred()
+	call_deferred("_update_hud_focus_neighbors")
+
+
 func toggle_distance_menu() -> void:
+	var enabled := false
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.range_settings != null and gs.range_settings.settings.has("debug_show_hit_distance"):
+			enabled = bool(gs.range_settings.debug_show_hit_distance.value)
+	if not enabled:
+		return
 	if _dist_btn != null and is_instance_valid(_dist_btn):
 		_dist_btn.emit_signal("pressed")
 

@@ -233,7 +233,7 @@ func start_scan() -> void:
 		_start_square_scan()
 	else:
 		_start_square_scan()
-		if OS.get_name() == "Android" or OS.get_name() == "macOS":
+		if OS.get_name() == "Android" or OS.get_name() == "macOS" or OS.get_name() == "iOS":
 			get_tree().create_timer(0.2).timeout.connect(_start_garmin_scan)
 		else:
 			_start_garmin_scan()

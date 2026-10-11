@@ -777,11 +777,25 @@ func _ready() -> void:
 						
 						var first_hole = hole_info_data.get(start_hole_id, hole_info_data[hole_keys[0]])
 						var tee_boxes = first_hole.get("Tee Boxes", {})
-						var tee_pos = tee_boxes.get("Blue")
-						if tee_pos == null:
+						var player_tee = "Blue"
+						if mp_mgr != null and not mp_mgr.players.is_empty():
+							var ap = mp_mgr.get_active_player()
+							if not ap.is_empty() and not str(ap.get("tee", "")).is_empty():
+								player_tee = ap.get("tee")
+
+						var tee_pos = null
+						if tee_boxes.has(player_tee):
+							tee_pos = tee_boxes[player_tee]
+						else:
 							for k in tee_boxes.keys():
-								tee_pos = tee_boxes[k]
-								break
+								if str(k).to_lower() == player_tee.to_lower():
+									tee_pos = tee_boxes[k]
+									break
+						if tee_pos == null:
+							if tee_boxes.has("Blue"):
+								tee_pos = tee_boxes["Blue"]
+							elif not tee_boxes.is_empty():
+								tee_pos = tee_boxes.values()[0]
 						if tee_pos != null:
 							var spawn_pos = Vector3(tee_pos[0], get_height(tee_pos[0], tee_pos[1]) + 0.059435, tee_pos[1])
 							practice_start_pos = spawn_pos
@@ -1729,6 +1743,11 @@ func _toggle_suspense() -> void:
 
 
 func _toggle_distance_menu() -> void:
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.range_settings != null and gs.range_settings.settings.has("debug_show_hit_distance"):
+			if not bool(gs.range_settings.debug_show_hit_distance.value):
+				return
 	if has_node("RangeUI"):
 		$RangeUI.call("toggle_distance_menu")
 
@@ -2612,11 +2631,26 @@ func load_practice_hole(idx: int) -> void:
 	var hole_data = hole_info_data[hole_key]
 	
 	var tee_boxes = hole_data.get("Tee Boxes", {})
-	var tee_pos = tee_boxes.get("Blue")
-	if tee_pos == null:
+	var player_tee = "Blue"
+	var mp_mgr_ref = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr_ref != null and not mp_mgr_ref.players.is_empty():
+		var ap = mp_mgr_ref.get_active_player()
+		if not ap.is_empty() and not str(ap.get("tee", "")).is_empty():
+			player_tee = ap.get("tee")
+
+	var tee_pos = null
+	if tee_boxes.has(player_tee):
+		tee_pos = tee_boxes[player_tee]
+	else:
 		for k in tee_boxes.keys():
-			tee_pos = tee_boxes[k]
-			break
+			if str(k).to_lower() == player_tee.to_lower():
+				tee_pos = tee_boxes[k]
+				break
+	if tee_pos == null:
+		if tee_boxes.has("Blue"):
+			tee_pos = tee_boxes["Blue"]
+		elif not tee_boxes.is_empty():
+			tee_pos = tee_boxes.values()[0]
 			
 	if tee_pos != null:
 		var spawn_pos = Vector3(tee_pos[0], get_height(tee_pos[0], tee_pos[1]) + 0.059435, tee_pos[1])

@@ -139,6 +139,15 @@ func _ready() -> void:
 		)
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_RESUMED or what == NOTIFICATION_WM_WINDOW_FOCUS_IN:
+		if _is_active and not _use_phone_stream:
+			var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
+			var is_desk_active = bridge != null and bridge.has_method("is_desktop_camera_active") and bridge.is_desktop_camera_active()
+			if not is_desk_active:
+				_update_camera_feed(true)
+
+
 func _exit_tree() -> void:
 	set_camera_active(false)
 
@@ -251,11 +260,12 @@ func _build_ui() -> void:
 
 	# Setup Button
 	var setup_btn = Button.new()
+	setup_btn.name = "SetupButton"
 	setup_btn.text = "⚙️"
 	setup_btn.tooltip_text = "Camera Setup (Connect Phone WiFi Stream or select Webcam)"
 	setup_btn.custom_minimum_size = Vector2(44, 44) if is_mob else Vector2(36, 32)
 	_apply_btn_style(setup_btn, Color(0.2, 0.45, 0.65, 0.9))
-	setup_btn.pressed.connect(_open_camera_setup_dialog)
+	setup_btn.pressed.connect(_toggle_camera_setup_dialog)
 	header.add_child(setup_btn)
 
 	# Color Picker / Profile Button
@@ -476,6 +486,13 @@ func get_panel_size() -> Vector2:
 
 
 func _open_color_picker_menu() -> void:
+	var existing = get_node_or_null("ColorPickerMenu")
+	if existing != null and is_instance_valid(existing):
+		if not existing.is_queued_for_deletion():
+			remove_child(existing)
+			existing.queue_free()
+		return
+
 	var menu = PopupMenu.new()
 	menu.name = "ColorPickerMenu"
 	menu.add_item("🏐 Pick Ball Color (Click Ball on Feed)", 0)
@@ -809,9 +826,18 @@ func _update_camera_feed(active: bool) -> void:
 			if _camera_feed_rect != null:
 				_camera_feed_rect.material = null
 				_camera_feed_rect.texture = null
-			get_tree().create_timer(1.5).timeout.connect(func():
+			# Multi-stage retry after user grants permission
+			var retry_timer1 = get_tree().create_timer(1.2)
+			retry_timer1.timeout.connect(func():
 				if _is_active:
 					_update_camera_feed(true)
+			)
+			var retry_timer2 = get_tree().create_timer(3.0)
+			retry_timer2.timeout.connect(func():
+				if _is_active:
+					var bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
+					if bridge == null or not bridge.has_method("is_desktop_camera_active") or not bridge.is_desktop_camera_active():
+						_update_camera_feed(true)
 			)
 			return
 
@@ -825,11 +851,17 @@ func _update_camera_feed(active: bool) -> void:
 			selected_index = _find_default_camera_index(feeds)
 			_current_camera_feed_index = selected_index
 		_activate_camera_feed_index(selected_index)
-	elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
-		var sel_idx = clamp(_current_camera_feed_index, 0, pose_bridge.desktop_cameras.size() - 1)
+	elif is_android or (pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0):
+		var sel_idx = _current_camera_feed_index
+		if sel_idx < 0:
+			sel_idx = 0
+		if pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
+			sel_idx = clamp(sel_idx, 0, pose_bridge.desktop_cameras.size() - 1)
+		_current_camera_feed_index = sel_idx
 		if _camera_feed_rect != null:
 			_camera_feed_rect.material = null
-		pose_bridge.select_desktop_camera(sel_idx)
+		if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
+			pose_bridge.select_desktop_camera(sel_idx)
 		_update_status_overlay("", false)
 	else:
 		if _camera_feed_rect != null:
@@ -848,12 +880,17 @@ func _update_camera_feed(active: bool) -> void:
 						var sel_idx = _find_default_camera_index(rescan_feeds) if _current_camera_feed_index < 0 or _current_camera_feed_index >= rescan_feeds.size() else _current_camera_feed_index
 						_current_camera_feed_index = sel_idx
 						_activate_camera_feed_index(sel_idx)
-					elif pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
-						var sel_idx = clamp(_current_camera_feed_index, 0, pose_bridge.desktop_cameras.size() - 1)
+					elif is_android or (pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0):
+						var sel_idx = _current_camera_feed_index
+						if sel_idx < 0:
+							sel_idx = 0
+						if pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
+							sel_idx = clamp(sel_idx, 0, pose_bridge.desktop_cameras.size() - 1)
 						_current_camera_feed_index = sel_idx
 						if _camera_feed_rect != null:
 							_camera_feed_rect.material = null
-						pose_bridge.select_desktop_camera(sel_idx)
+						if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
+							pose_bridge.select_desktop_camera(sel_idx)
 						_update_status_overlay("", false)
 					elif _phone_cam_url.is_empty():
 						_update_status_overlay("NO LOCAL CAMERA DETECTED\n[ Click ⚙️ Setup for Phone Stream ]", true)
@@ -864,12 +901,18 @@ func _activate_camera_feed_index(index: int) -> void:
 	if not CameraServer.is_monitoring_feeds():
 		CameraServer.set_monitoring_feeds(true)
 	var feeds = CameraServer.feeds()
+	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android"
 	if index < 0 or index >= feeds.size():
 		var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
-		if pose_bridge != null and "desktop_cameras" in pose_bridge and index >= 0 and index < pose_bridge.desktop_cameras.size():
+		if is_android or (pose_bridge != null and "desktop_cameras" in pose_bridge and index >= 0 and index < pose_bridge.desktop_cameras.size()):
+			var target_idx = max(index, 0)
+			if pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
+				target_idx = clamp(target_idx, 0, pose_bridge.desktop_cameras.size() - 1)
+			_current_camera_feed_index = target_idx
 			if _camera_feed_rect != null:
 				_camera_feed_rect.material = null
-			pose_bridge.select_desktop_camera(index)
+			if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
+				pose_bridge.select_desktop_camera(target_idx)
 			_update_status_overlay("", false)
 			return
 		if _camera_feed_rect != null:
@@ -980,14 +1023,14 @@ func _on_flip_camera_pressed() -> void:
 		_stop_phone_camera_stream()
 		_use_phone_stream = false
 
-	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android"
+	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android" or (pose_bridge != null and "_is_android" in pose_bridge and pose_bridge._is_android)
 	if not CameraServer.is_monitoring_feeds():
 		CameraServer.set_monitoring_feeds(true)
 	var feeds = CameraServer.feeds()
 	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
 	var desk_cams: Array = pose_bridge.desktop_cameras if (pose_bridge != null and "desktop_cameras" in pose_bridge) else []
 	var total_count = max(feeds.size(), desk_cams.size())
-	if is_android and total_count < 2 and feeds.is_empty() and desk_cams.is_empty():
+	if is_android and total_count < 2:
 		total_count = 2
 
 	if total_count > 1:
@@ -1209,12 +1252,65 @@ func _apply_btn_style(btn: Button, bg_color: Color) -> void:
 	btn.add_theme_stylebox_override("focus", focus)
 
 
+func _find_active_camera_setup_dialog() -> Control:
+	var tree = get_tree() if is_inside_tree() else null
+	if tree != null:
+		for node in tree.get_nodes_in_group("camera_setup_dialog"):
+			if is_instance_valid(node) and not node.is_queued_for_deletion():
+				return node as Control
+	var parent_canvas: Node = tree.root if tree != null else (get_parent() if get_parent() != null else self)
+	if parent_canvas != null:
+		for child in parent_canvas.get_children():
+			if is_instance_valid(child) and not child.is_queued_for_deletion():
+				if child.name == "CameraSetupDialog" or child.name.begins_with("CameraSetupDialog") or child.is_in_group("camera_setup_dialog"):
+					return child as Control
+		var found = parent_canvas.find_child("CameraSetupDialog*", true, false)
+		if found != null and is_instance_valid(found) and not found.is_queued_for_deletion():
+			return found as Control
+	return null
+
+
+func _close_camera_setup_dialog(dialog: Control = null) -> void:
+	if dialog != null and is_instance_valid(dialog) and not dialog.is_queued_for_deletion():
+		if dialog.get_parent() != null:
+			dialog.get_parent().remove_child(dialog)
+		dialog.queue_free()
+	var tree = get_tree() if is_inside_tree() else null
+	if tree != null:
+		for node in tree.get_nodes_in_group("camera_setup_dialog"):
+			if is_instance_valid(node) and not node.is_queued_for_deletion():
+				if node.get_parent() != null:
+					node.get_parent().remove_child(node)
+				node.queue_free()
+	var parent_canvas: Node = tree.root if tree != null else (get_parent() if get_parent() != null else self)
+	if parent_canvas != null:
+		for child in parent_canvas.get_children():
+			if is_instance_valid(child) and not child.is_queued_for_deletion():
+				if child.name == "CameraSetupDialog" or child.name.begins_with("CameraSetupDialog") or child.is_in_group("camera_setup_dialog"):
+					parent_canvas.remove_child(child)
+					child.queue_free()
+
+
+func _toggle_camera_setup_dialog() -> void:
+	var existing = _find_active_camera_setup_dialog()
+	if existing != null and is_instance_valid(existing) and not existing.is_queued_for_deletion():
+		_close_camera_setup_dialog(existing)
+		return
+	_open_camera_setup_dialog()
+
+
 func _open_camera_setup_dialog() -> void:
 	var tree = get_tree() if is_inside_tree() else null
 	var parent_canvas: Node = tree.root if tree != null else (get_parent() if get_parent() != null else self)
-	var existing = parent_canvas.find_child("CameraSetupDialog", true, false)
-	if existing != null:
-		existing.queue_free()
+	var existing = _find_active_camera_setup_dialog()
+	if existing != null and is_instance_valid(existing) and not existing.is_queued_for_deletion():
+		existing.visible = true
+		if existing.has_method("move_to_front"):
+			existing.move_to_front()
+		return
+
+	# Ensure any orphaned or queued dialogs are cleaned up
+	_close_camera_setup_dialog()
 
 	var is_mob: bool = MobilePerformance.is_mobile()
 	var vp_size = parent_canvas.get_viewport().get_visible_rect().size if parent_canvas.get_viewport() != null else Vector2(1728, 972)
@@ -1223,6 +1319,7 @@ func _open_camera_setup_dialog() -> void:
 
 	var popup = PanelContainer.new()
 	popup.name = "CameraSetupDialog"
+	popup.add_to_group("camera_setup_dialog")
 	popup.tree_exited.connect(func():
 		if _use_phone_stream:
 			_stop_local_camera_stream()
@@ -1662,7 +1759,7 @@ func _open_camera_setup_dialog() -> void:
 	close_btn.custom_minimum_size = Vector2(0, 48 if is_mob else 38)
 	close_btn.add_theme_font_size_override("font_size", 16 if is_mob else 14)
 	_apply_btn_style(close_btn, Color(0.35, 0.35, 0.35, 0.8))
-	close_btn.pressed.connect(func(): popup.queue_free())
+	close_btn.pressed.connect(func(): _close_camera_setup_dialog(popup))
 	outer_vbox.add_child(close_btn)
 
 	popup.add_child(outer_vbox)

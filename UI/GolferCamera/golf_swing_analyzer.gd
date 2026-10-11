@@ -183,7 +183,8 @@ static func _build_comparison_table(shot_data: Dictionary, benchmark: Dictionary
 		smash_factor = ball_speed / club_speed
 	var vla = _get_float_val(shot_data, ["VLA", "VerticalLaunchAngle"], 14.0)
 	var total_spin = _get_float_val(shot_data, ["TotalSpin", "BackSpin"], 0.0)
-	var attack_angle = _get_float_val(shot_data, ["AttackAngle", "AngleOfAttack"], 999.0)
+	var raw_aoa = _get_float_val(shot_data, ["AttackAngle", "AngleOfAttack"], 999.0)
+	var attack_angle = raw_aoa if (raw_aoa < 900.0 and abs(raw_aoa) >= 0.1) else 999.0
 	var spin_axis = _get_float_val(shot_data, ["SpinAxis", "SideSpinAxis"], 0.0)
 	var carry = _get_float_val(shot_data, ["Carry", "CarryDistance", "Distance"], 0.0)
 	var apex = _get_float_val(shot_data, ["Apex", "PeakHeight", "MaxHeight"], 0.0)
@@ -263,7 +264,7 @@ static func _build_comparison_table(shot_data: Dictionary, benchmark: Dictionary
 		})
 
 	# 5. Angle of Attack (AoA)
-	if attack_angle < 900.0:
+	if attack_angle < 900.0 and abs(attack_angle) >= 0.1:
 		var aoa_min = float(benchmark.get("aoa_min", -2.5))
 		var aoa_max = float(benchmark.get("aoa_max", 1.5))
 		var aoa_status = "OPTIMAL"
@@ -424,7 +425,8 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 		else:
 			spin_axis = clamp(side_spin / 95.0, -25.0, 25.0)
 
-	var attack_angle: float = _get_float_val(shot_data, ["AttackAngle", "AngleOfAttack"], 999.0) # 999 indicates not directly provided
+	var raw_aoa: float = _get_float_val(shot_data, ["AttackAngle", "AngleOfAttack"], 999.0)
+	var attack_angle: float = raw_aoa if (raw_aoa < 900.0 and abs(raw_aoa) >= 0.1) else 999.0 # 999 indicates not directly provided or dummy
 	var club_path: float = _get_float_val(shot_data, ["ClubPath", "Path"], 0.0)
 	var face_angle: float = _get_float_val(shot_data, ["FaceAngle", "ClubFaceAngle"], 0.0)
 	var face_to_path: float = _get_float_val(shot_data, ["FaceToPath"], 999.0)
@@ -517,7 +519,11 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 	var is_mild_hook: bool = spin_axis < -4.0 or face_to_path < -2.0
 
 	if is_severe_slice:
+		var has_retrieved_path: bool = (shot_data.has("ClubPath") or shot_data.has("Path") or shot_data.has("RawClubPath")) and str(shot_data.get("ClubPath", shot_data.get("Path", shot_data.get("RawClubPath", "")))) != "---" and str(shot_data.get("ClubPath", shot_data.get("Path", shot_data.get("RawClubPath", "")))) != "N/A"
 		var path_str = ("%.1f° Out-to-In" % abs(club_path)) if club_path < 0 else ("%.1f° In-to-Out" % club_path)
+		var pv_str = "Spin Axis: +%.1f° | Face-to-Path: %+.1f°" % [spin_axis, face_to_path]
+		if has_retrieved_path:
+			pv_str += " | Path: %s" % path_str
 		var r = {
 			"priority": 1,
 			"score": 94 + int(abs(spin_axis) * 0.4),
@@ -527,7 +533,7 @@ static func analyze_launch_monitor(shot_data: Dictionary) -> Array[Dictionary]:
 			"title": "Open Face Relative to Path (+%.1f° Spin Axis Slice)" % spin_axis,
 			"camera_flaw": "Clubface delivered open relative to swing path at impact.",
 			"launch_effect": "Face-to-Path of %+.1f° creates heavy clockwise sidespin, slicing ball offline right." % face_to_path,
-			"player_val": "Spin Axis: +%.1f° | Face-to-Path: %+.1f° | Path: %s" % [spin_axis, face_to_path, path_str],
+			"player_val": pv_str,
 			"benchmark_val": "Target: -2.0° to +2.0° Face-to-Path | ±3.0° Axis",
 			"fix_instruction": "Strengthen lead hand grip slightly. At transition, shallow the club onto an inside delivery path and train lead wrist flexion (flatter wrist) into impact.",
 			"drill": "⛳ HackMotion Barrier Drill: Place a second ball or headcover 5 inches outside the ball to block the over-the-top path; pair with the Motorcycle Drill to flex lead wrist and square the face."
@@ -1402,10 +1408,14 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 	var chicken_wing: bool = skeleton.get("impact_chicken_wing", false)
 
 	var spin_axis: float = _get_float_val(shot_data, ["SpinAxis"], 0.0)
-	var has_smash_data: bool = shot_data.has("SmashFactor") and float(shot_data.get("SmashFactor", 0.0)) > 0.5
-	var smash: float = _get_float_val(shot_data, ["SmashFactor"], 0.0)
-	var aoa: float = _get_float_val(shot_data, ["AttackAngle", "AngleOfAttack"], 999.0)
 	var ball_speed: float = _get_float_val(shot_data, ["Speed", "BallSpeed"], 0.0)
+	var club_speed: float = _get_float_val(shot_data, ["ClubSpeed"], 0.0)
+	var smash: float = _get_float_val(shot_data, ["SmashFactor"], 0.0)
+	if smash <= 0.5 and ball_speed > 0.0 and club_speed > 0.0:
+		smash = ball_speed / club_speed
+	var has_smash_data: bool = smash > 0.5
+	var raw_aoa: float = _get_float_val(shot_data, ["AttackAngle", "AngleOfAttack"], 999.0)
+	var aoa: float = raw_aoa if (raw_aoa < 900.0 and abs(raw_aoa) >= 0.1) else 999.0
 	var carry: float = _get_float_val(shot_data, ["Carry", "CarryDistance"], 0.0)
 
 	var used_lm_types: Array[String] = []
@@ -1484,7 +1494,7 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 		final_recs.append(r)
 
 	# ─── CORRELATION 3: DRIVER STEEP AOA + FLAT ADDRESS SHOULDERS / REVERSE TILT ───
-	if club_cat == "driver" and is_tee and aoa < -1.0 and aoa > -20.0:
+	if club_cat == "driver" and is_tee and aoa < -1.0 and aoa > -20.0 and aoa < 900.0:
 		if shoulder_tilt < 4.0:
 			used_lm_types.append("Steep Driver Attack Angle")
 			var yds_recov = int(abs(aoa - 3.0) * 4.2)
@@ -1505,8 +1515,13 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 			}
 			_attach_video_metadata(r, "one_metric_aoa")
 			final_recs.append(r)
-	elif club_cat == "wood" and not is_tee and (aoa > 0.8 or spine_loss > 4.5):
+	elif club_cat == "wood" and not is_tee and ((aoa < 900.0 and aoa > 0.8) or spine_loss > 4.5):
 		used_lm_types.append("Scooping Wood Off Turf")
+		var pv_txt = "Spine Loss: %.1f°" % spine_loss
+		var bench_txt = "Target: Retain Address Posture (< 3.0° Spine Loss)"
+		if aoa < 900.0:
+			pv_txt = "Spine Loss: %.1f° | AoA: %+.1f°" % [spine_loss, aoa]
+			bench_txt = "Target: Retain Address Posture | -1.0° to -3.0° AoA"
 		var r = {
 			"priority": 2,
 			"score": 90,
@@ -1516,8 +1531,8 @@ static func analyze_shot_unified(shot_data: Dictionary, skeleton: Dictionary) ->
 			"title": "Hanging Back on %s (%.1f° Spine Loss)" % [club_disp, spine_loss],
 			"camera_flaw": "Body tilted backward and torso rose %.1f° out of posture trying to lift ball off turf." % spine_loss,
 			"launch_effect": "Causes low-point to fall behind the ball, resulting in fat or topped fairway wood shots.",
-			"player_val": "Spine Loss: %.1f° | AoA: %+.1f°" % [spine_loss, aoa],
-			"benchmark_val": "Target: Retain Address Posture | -1.0° to -3.0° AoA",
+			"player_val": pv_txt,
+			"benchmark_val": bench_txt,
 			"fix_instruction": "Shift weight onto lead side during downswing. Keep your chest facing down toward the turf through impact and sweep the grass.",
 			"drill": "⛳ HackMotion Step-Through Drill: Step your trail foot forward toward target after striking fairway wood to ensure weight shifts fully onto lead side."
 		}
@@ -1715,14 +1730,19 @@ static func _get_float_val(dict: Dictionary, keys: Array, default_val: float) ->
 			if typeof(val) == TYPE_INT or typeof(val) == TYPE_FLOAT:
 				return float(val)
 			elif typeof(val) == TYPE_STRING:
-				# Clean string of trailing labels like " In-Out", " Sq", " O", " C", " yd"
 				var s: String = str(val).strip_edges()
+				if s == "" or s == "---" or s == "N/A" or s == "n/a" or s.to_lower() == "nan":
+					continue
+				# Clean string of trailing labels like " In-Out", " Sq", " O", " C", " yd", "°"
 				var parts = s.split(" ")
 				if parts.size() > 0:
-					var num_str = parts[0].replace("+", "")
-					var parsed = float(num_str)
-					if not is_nan(parsed):
-						return parsed
+					var num_str = parts[0].replace("+", "").replace("°", "")
+					if num_str == "" or num_str == "---" or num_str == "N/A":
+						continue
+					if num_str.is_valid_float():
+						var parsed = float(num_str)
+						if not is_nan(parsed):
+							return parsed
 	return default_val
 
 

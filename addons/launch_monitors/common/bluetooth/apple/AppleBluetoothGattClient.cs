@@ -22,7 +22,10 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
 
     private static readonly ConcurrentDictionary<IntPtr, AppleBluetoothGattClient> _instances = new();
     private static bool _classesRegistered;
-    private static readonly object _initLock = new();
+    private static readonly object _globalClassLock = new();
+
+    private bool _initialized;
+    private readonly object _instanceInitLock = new();
 
     private IntPtr _centralManager;
     private IntPtr _centralDelegate;
@@ -92,19 +95,43 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
 
     public AppleBluetoothGattClient()
     {
-        ObjCRuntime.EnsureFrameworksLoaded();
-        EnsureClassesRegistered();
-        InitializeCentralManager();
+        // Keep constructor lightweight and side-effect free.
+        // Lazy initialization in EnsureInitialized() guarantees that app startup and autoloads
+        // never crash or trigger Bluetooth permission prompts prematurely.
+    }
+
+    private void EnsureInitialized()
+    {
+        if (_initialized) return;
+        lock (_instanceInitLock)
+        {
+            if (_initialized) return;
+            ObjCRuntime.EnsureFrameworksLoaded();
+            EnsureClassesRegistered();
+            InitializeCentralManager();
+            _initialized = true;
+        }
     }
 
     private static void EnsureClassesRegistered()
     {
         if (_classesRegistered) return;
-        lock (_initLock)
+        lock (_globalClassLock)
         {
             if (_classesRegistered) return;
 
+            IntPtr existingCentral = ObjCRuntime.objc_getClass("HeckleBleCentralDelegate");
+            if (existingCentral != IntPtr.Zero)
+            {
+                _classesRegistered = true;
+                return;
+            }
+
             IntPtr nsObjectClass = ObjCRuntime.objc_getClass("NSObject");
+            if (nsObjectClass == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("Failed to resolve NSObject class from Objective-C runtime.");
+            }
 
             // 1. Central Manager Delegate Class
             IntPtr centralClass = ObjCRuntime.objc_allocateClassPair(nsObjectClass, "HeckleBleCentralDelegate", IntPtr.Zero);
@@ -147,26 +174,55 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
 
     private void InitializeCentralManager()
     {
+        IntPtr cbCentralManagerClass = ObjCRuntime.objc_getClass("CBCentralManager");
+        if (cbCentralManagerClass == IntPtr.Zero)
+        {
+            throw new PlatformNotSupportedException("CoreBluetooth CBCentralManager class is not available in the current runtime environment.");
+        }
+
         _statePoweredOnTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         IntPtr centralDelegateCls = ObjCRuntime.objc_getClass("HeckleBleCentralDelegate");
+        if (centralDelegateCls == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("Failed to resolve HeckleBleCentralDelegate class.");
+        }
         _centralDelegate = ObjCRuntime.objc_msgSend(ObjCRuntime.objc_msgSend(centralDelegateCls, ObjCRuntime.sel_registerName("alloc")), ObjCRuntime.sel_registerName("init"));
+        if (_centralDelegate == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("Failed to allocate HeckleBleCentralDelegate.");
+        }
         ObjCRuntime.Retain(_centralDelegate);
         _instances[_centralDelegate] = this;
 
         IntPtr peripheralDelegateCls = ObjCRuntime.objc_getClass("HeckleBlePeripheralDelegate");
+        if (peripheralDelegateCls == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("Failed to resolve HeckleBlePeripheralDelegate class.");
+        }
         _peripheralDelegate = ObjCRuntime.objc_msgSend(ObjCRuntime.objc_msgSend(peripheralDelegateCls, ObjCRuntime.sel_registerName("alloc")), ObjCRuntime.sel_registerName("init"));
+        if (_peripheralDelegate == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("Failed to allocate HeckleBlePeripheralDelegate.");
+        }
         ObjCRuntime.Retain(_peripheralDelegate);
         _instances[_peripheralDelegate] = this;
 
-        IntPtr cbCentralManagerClass = ObjCRuntime.objc_getClass("CBCentralManager");
         IntPtr allocCentral = ObjCRuntime.objc_msgSend(cbCentralManagerClass, ObjCRuntime.sel_registerName("alloc"));
+        if (allocCentral == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("Failed to allocate CBCentralManager instance.");
+        }
 
         // Dedicated dispatch queue ensures CoreBluetooth delegate callbacks run smoothly and are not blocked by the main thread
         _dispatchQueue = ObjCRuntime.dispatch_queue_create("com.hecklegolf.ble", IntPtr.Zero);
 
         // [[CBCentralManager alloc] initWithDelegate:delegate queue:dispatchQueue options:nil]
         _centralManager = ObjCRuntime.objc_msgSend(allocCentral, ObjCRuntime.sel_registerName("initWithDelegate:queue:options:"), _centralDelegate, _dispatchQueue, IntPtr.Zero);
+        if (_centralManager == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("Failed to initialize CBCentralManager instance.");
+        }
         ObjCRuntime.Retain(_centralManager);
 
         Log("CBCentralManager instantiated with dedicated dispatch queue.");
@@ -193,6 +249,7 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
 
     public async Task StartScanAsync(BluetoothScanOptions options, CancellationToken cancellationToken)
     {
+        EnsureInitialized();
         _scanOptions = options;
         _reportedDeviceNames.Clear();
         _loggedUnknownDevices.Clear();
@@ -222,6 +279,7 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
 
     public async Task ConnectAsync(string deviceId, BluetoothConnectionOptions options, CancellationToken cancellationToken)
     {
+        EnsureInitialized();
         _connectionOptions = options;
         await EnsureCentralReadyAsync(cancellationToken);
 
@@ -476,7 +534,7 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
 
     public ValueTask DisposeAsync()
     {
-        if (_isDisposed) return ValueTask.CompletedTask;
+        if (!_initialized || _isDisposed) return ValueTask.CompletedTask;
         _isDisposed = true;
 
         _instances.TryRemove(_centralDelegate, out _);

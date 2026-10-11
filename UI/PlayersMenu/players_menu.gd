@@ -2066,6 +2066,9 @@ func _build_club_distances_tab(player_name: String) -> VBoxContainer:
 
 	for clb in avgs:
 		var c_data = avgs[clb]
+		c_data["player"] = player_name
+		c_data["handedness"] = MultiplayerManager.get_player_handedness(player_name)
+		c_data["is_lefty"] = (int(c_data["handedness"]) == 1)
 		var shot_cnt: int = c_data["shot_count"]
 		var has_shots: bool = (shot_cnt > 0)
 

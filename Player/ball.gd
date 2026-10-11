@@ -347,7 +347,8 @@ func _create_collision_and_model():
 	add_child(collision)
 	# Create model
 	_ball_mesh = ball_model.instantiate()
-	var mesh_scale := 0.05
+	# golf_ball.glb Icosphere has radius ~1.007168m; scale so visual mesh matches physical ball radius
+	var mesh_scale := _ball_radius / 1.007168
 	_ball_mesh.scale = Vector3(mesh_scale, mesh_scale, mesh_scale)
 	add_child(_ball_mesh)
 
@@ -939,15 +940,20 @@ func _update_ground_elevation() -> void:
 func _process(delta: float) -> void:
 	if _ball_mesh != null:
 		var target_y := 0.0
-		var on_green_surface := (lie_type == "green" or surface_type == PhysicsEnums.SurfaceType.GREEN or is_putt or _is_position_on_green(global_position))
+		var on_green_surface := (lie_type == "green" or surface_type == PhysicsEnums.SurfaceType.GREEN or is_putt or (is_inside_tree() and _is_position_on_green(global_position)))
 		var on_fairway_or_tee := (lie_type in ["fairway", "teebox", "fringe"] or surface_type in [PhysicsEnums.SurfaceType.FAIRWAY, PhysicsEnums.SurfaceType.FAIRWAY_SOFT])
 
-		if on_green_surface or on_fairway_or_tee:
-			target_y = 0.0
-		elif is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER or lie_type == "sand":
-			target_y = -0.017 # Sink 1.7 cm in sand traps
-		elif lie_type == "rough" or surface_type == PhysicsEnums.SurfaceType.ROUGH:
-			target_y = -0.014 # Sink 1.4 cm in tall rough
+		# Only sink into tall rough or bunker sand when the ball is at rest.
+		# While rolling or in flight, roll cleanly on top of the surface without visual clipping.
+		if state == PhysicsEnums.BallState.REST:
+			if on_green_surface or on_fairway_or_tee:
+				target_y = 0.0
+			elif is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER or lie_type == "sand":
+				target_y = -0.017 # Sink 1.7 cm in sand traps
+			elif lie_type == "rough" or surface_type == PhysicsEnums.SurfaceType.ROUGH:
+				target_y = -0.014 # Sink 1.4 cm in tall rough
+			else:
+				target_y = 0.0
 		else:
 			target_y = 0.0
 
@@ -1440,6 +1446,15 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 								if velocity.length_squared() > 0.0001:
 									velocity = velocity.normalized() * (p_spd2 * 0.90)
 							global_position.y = col2.get_position().y + (_ball_radius + GROUND_SNAP_OFFSET) / maxf(norm2.y, MIN_GROUND_NORMAL)
+				# Ensure ball Y matches the ground height at the ball's final position after remainder
+				if on_ground:
+					var end_probe := _try_probe_ground()
+					if bool(end_probe.get("hit", false)):
+						var end_hit: Vector3 = end_probe.get("position", Vector3.ZERO)
+						var end_norm: Vector3 = end_probe.get("normal", floor_normal)
+						var end_nys := maxf(end_norm.y, MIN_GROUND_NORMAL)
+						var end_y := end_hit.y + (_ball_radius + GROUND_SNAP_OFFSET) / end_nys
+						global_position.y = maxf(global_position.y, end_y)
 		else:
 			# Wall collision - damped reflection
 			on_ground = false
@@ -1646,8 +1661,17 @@ func _enter_rest_state() -> void:
 	_canopy_time = 0.0
 	if _leaves_player and _leaves_player.playing:
 		_leaves_player.stop()
-	if not is_in_water:
+	if not is_in_water and not is_falling_in_hole:
 		ensure_rock_clearance()
+		var rest_probe := _try_probe_ground()
+		if bool(rest_probe.get("hit", false)):
+			var r_hit: Vector3 = rest_probe.get("position", Vector3.ZERO)
+			var r_norm: Vector3 = rest_probe.get("normal", floor_normal)
+			var r_nys := maxf(r_norm.y, MIN_GROUND_NORMAL)
+			var r_target_y := r_hit.y + (_ball_radius + GROUND_SNAP_OFFSET) / r_nys
+			if absf(global_position.y - r_target_y) < 0.20 or global_position.y < r_target_y:
+				global_position.y = r_target_y
+				on_ground = true
 	emit_signal("rest")
 
 

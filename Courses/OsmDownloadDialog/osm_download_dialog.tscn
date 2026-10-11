@@ -163,17 +163,32 @@ custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 20
-placeholder_text = "Search Course Name (e.g. Pebble Beach)"
+placeholder_text = "Select from cached courses, or if not seen in list search to download from OSM"
 clear_button_enabled = true
 
-[node name="SearchButton" type="Button" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/SearchHBox"]
+[node name="RateLimitWarningPanel" type="PanelContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(130, 48)
+visible = false
 layout_mode = 2
-theme_override_font_sizes/font_size = 20
-theme_override_styles/normal = SubResource("StyleBoxFlat_btn_normal")
-theme_override_styles/hover = SubResource("StyleBoxFlat_btn_hover")
-text = "Search"
+theme_override_styles/panel = SubResource("StyleBoxFlat_warn")
+
+[node name="RateLimitHBox" type="HBoxContainer" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/RateLimitWarningPanel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="RateLimitIcon" type="Label" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/RateLimitWarningPanel/RateLimitHBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "⚠️"
+
+[node name="RateLimitLabel" type="Label" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer/RateLimitWarningPanel/RateLimitHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 0.9, 0.6, 1)
+theme_override_font_sizes/font_size = 15
+text = "You can download another course from OSM in X hours. Additionally, you can still download any of the cached most popular courses which is 5,000+ courses in the US and Europe."
+autowrap_mode = 2
 
 [node name="ResultsList" type="ItemList" parent="CenterContainer/PanelContainer/MarginContainer/VBoxContainer"]
 unique_name_in_owner = true
@@ -416,6 +431,13 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 15
 placeholder_text = "e.g. leisure=golf_course, sport=golf, golf=course"
 clear_button_enabled = true
+
+[node name="CachedOnlyCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+button_pressed = false
+text = " Search cached courses only (Bypass online OSM)"
 
 [node name="ForceOnlineCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
 unique_name_in_owner = true

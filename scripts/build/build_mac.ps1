@@ -168,8 +168,8 @@ try {
         $plistText = $reader.ReadToEnd()
         $reader.Close()
         if ($plistText -notmatch "NSBluetoothAlwaysUsageDescription") {
-            Write-Host "Injecting NSBluetoothAlwaysUsageDescription into macOS Info.plist..." -ForegroundColor Yellow
-            $insert = "`t<key>NSBluetoothAlwaysUsageDescription</key>`n`t<string>Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor.</string>`n</dict>"
+            Write-Host "Injecting Bluetooth permissions into macOS Info.plist..." -ForegroundColor Yellow
+            $insert = "`t<key>NSBluetoothAlwaysUsageDescription</key>`n`t<string>Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor.</string>`n`t<key>NSBluetoothPeripheralUsageDescription</key>`n`t<string>Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor.</string>`n</dict>"
             $plistText = $plistText -replace "</dict>", $insert
             $entryName = $plistEntry.FullName
             $plistEntry.Delete()

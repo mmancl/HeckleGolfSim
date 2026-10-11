@@ -284,6 +284,15 @@ This automatically verifies your templates and downloads official Godot 4.7 Mono
 
 ---
 
+### Pre-Release Course Sync
+Before exporting any new release, ensure you keep the cached courses up to date by running the monthly sync script:
+
+```powershell
+.\scripts\tools\run_monthly_sync.ps1 --preset top-golf --clean
+```
+
+---
+
 ### Building Windows Executable (.exe)
 To export and package a standalone Windows release:
 

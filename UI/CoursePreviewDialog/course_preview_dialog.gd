@@ -36,6 +36,16 @@ var current_zoom_size: float = 300.0
 var base_zoom_size: float = 300.0
 var _is_loading_3d: bool = false
 
+const TEE_COLOR_MAP: Dictionary = {
+	"Black": Color(0.1, 0.1, 0.1),
+	"Blue": Color(0.2, 0.5, 0.9),
+	"White": Color(0.9, 0.9, 0.9),
+	"Red": Color(0.9, 0.2, 0.2),
+	"Gold": Color(0.85, 0.7, 0.2),
+	"Orange": Color(1.0, 0.5, 0.0),
+	"Green": Color(0.2, 0.8, 0.2)
+}
+
 
 func _ready() -> void:
 	var panel = $CenterContainer/PanelContainer
@@ -550,21 +560,13 @@ func _on_layout_2d_draw() -> void:
 		layout_2d_canvas.draw_arc(pin_canvas, 24.0, 0, TAU, 32, Color(0.35, 0.95, 0.5, 0.9), 2.5)
 		layout_2d_canvas.draw_circle(pin_canvas, 5.0, Color.RED)
 
-		var tee_color_map = {
-			"Black": Color(0.1, 0.1, 0.1),
-			"Blue": Color(0.2, 0.5, 0.9),
-			"White": Color(0.9, 0.9, 0.9),
-			"Red": Color(0.9, 0.2, 0.2),
-			"Gold": Color(0.85, 0.7, 0.2)
-		}
-
 		var t_idx = 0
 		for t_name in h["tees"].keys():
 			var t_pos = h["tees"][t_name]
 			var t_dist_m = t_pos.distance_to(pin_pos)
 			var ratio = clamp(1.0 - (t_dist_m / max(dist_m, 1.0)), 0.0, 1.0)
 			var t_canvas = tee_canvas.lerp(pin_canvas, ratio) + Vector2((t_idx - 1) * 16, 0)
-			var c = tee_color_map.get(t_name, Color.YELLOW)
+			var c = TEE_COLOR_MAP.get(t_name, Color.YELLOW)
 
 			layout_2d_canvas.draw_rect(Rect2(t_canvas - Vector2(6, 6), Vector2(12, 12)), c, true)
 			layout_2d_canvas.draw_rect(Rect2(t_canvas - Vector2(6, 6), Vector2(12, 12)), Color.BLACK, false, 1.0)

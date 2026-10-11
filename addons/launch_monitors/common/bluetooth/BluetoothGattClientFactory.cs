@@ -8,27 +8,35 @@ internal static class BluetoothGattClientFactory
 
     public static IBluetoothGattClient Create()
     {
-        if (OperatingSystem.IsWindows())
+        try
         {
-            return CreateWindowsClient();
-        }
+            if (OperatingSystem.IsWindows())
+            {
+                return CreateWindowsClient();
+            }
 
-        if (OperatingSystem.IsLinux())
+            if (OperatingSystem.IsLinux())
+            {
+                return new Linux.LinuxBluetoothGattClient();
+            }
+
+            if (OperatingSystem.IsAndroid())
+            {
+                return new Android.AndroidBluetoothGattClient();
+            }
+
+            if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
+            {
+                return new Apple.AppleBluetoothGattClient();
+            }
+
+            return new UnsupportedBluetoothGattClient("Bluetooth GATT support is only available on Windows, Linux, Android, macOS, and iOS.");
+        }
+        catch (Exception ex)
         {
-            return new Linux.LinuxBluetoothGattClient();
+            Godot.GD.PrintErr($"[BluetoothGattClientFactory] Failed to initialize platform Bluetooth client: {ex.Message}");
+            return new UnsupportedBluetoothGattClient($"Platform Bluetooth support unavailable: {ex.Message}");
         }
-
-        if (OperatingSystem.IsAndroid())
-        {
-            return new Android.AndroidBluetoothGattClient();
-        }
-
-        if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
-        {
-            return new Apple.AppleBluetoothGattClient();
-        }
-
-        return new UnsupportedBluetoothGattClient("Bluetooth GATT support is only available on Windows, Linux, Android, macOS, and iOS.");
     }
 
     private static IBluetoothGattClient CreateWindowsClient()

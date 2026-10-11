@@ -261,7 +261,7 @@ public partial class OsmMapLoader : Node
         }
 
         GD.Print($"{LogPrefix} No pre-packaged geometry found for '{courseName}'. Downloading from Overpass around {lat}, {lon}...");
-        // Reduced radius to 1000 to prevent Gateway Timeout on Overpass API, query timeout to 60s, and removed natural=tree since we scan satellite imagery
+        // Query includes natural=tree, natural=tree_row, and golf=tree to accurately place all OSM course trees
         // Use FormattableString.Invariant to ensure lat/lon always use '.' as decimal separator regardless of system locale
         string latStr = lat.ToString(CultureInfo.InvariantCulture);
         string lonStr = lon.ToString(CultureInfo.InvariantCulture);
@@ -272,6 +272,9 @@ public partial class OsmMapLoader : Node
           nwr(around:1000, {latStr}, {lonStr})[""golf""];
           nwr(around:1000, {latStr}, {lonStr})[""natural""=""water""];
           nwr(around:1000, {latStr}, {lonStr})[""natural""=""wood""];
+          nwr(around:1000, {latStr}, {lonStr})[""natural""=""tree""];
+          nwr(around:1000, {latStr}, {lonStr})[""natural""=""tree_row""];
+          nwr(around:1000, {latStr}, {lonStr})[""golf""=""tree""];
           nwr(around:1000, {latStr}, {lonStr})[""landuse""=""forest""];
         );
         out body;
@@ -640,6 +643,7 @@ public partial class OsmMapLoader : Node
             var exclusionPolygons = new List<ExclusionPolygon>();
             var holeInfo = new Dictionary<string, HoleConfig>();
             var tees = new List<TeeConfig>();
+            var unreferencedTees = new List<(List<string> Colors, Vector2 Location)>();
             var lineOfPlayPaths = new List<List<Vector2>>();
 
             Func<Vector2, bool> isPointInMainCourse = (pt) => {
@@ -674,11 +678,16 @@ public partial class OsmMapLoader : Node
                 return false;
             };
 
-            // Build individual tree nodes list from nodeTags
+            // Build individual tree nodes list from nodeTags and ways
             var treeNodeIds = new List<long>();
+            var additionalTreePositions = new List<Vector2>();
             foreach (var kvp in nodeTags)
             {
-                if (kvp.Value.TryGetValue("natural", out var nat) && nat == "tree")
+                bool isTree = (kvp.Value.TryGetValue("natural", out var nat) && nat == "tree")
+                    || (kvp.Value.TryGetValue("golf", out var g) && g == "tree")
+                    || (kvp.Value.TryGetValue("tree", out var t) && (t == "yes" || t == "true"));
+
+                if (isTree)
                 {
                     if (nodes.TryGetValue(kvp.Key, out var coord))
                     {
@@ -724,6 +733,45 @@ public partial class OsmMapLoader : Node
                         continue;
                 }
 
+                // Extract tree rows or area-mapped trees
+                if (way.Tags.TryGetValue("natural", out var wayNat))
+                {
+                    if (wayNat == "tree_row")
+                    {
+                        foreach (var nId in way.NodeIds)
+                        {
+                            if (nodes.TryGetValue(nId, out var coord))
+                            {
+                                float tx = (float)((coord.Lon - refLon) * metersPerLon);
+                                float tz = -(float)((coord.Lat - refLat) * metersPerLat);
+                                if (isPointInMainCourse(new Vector2(tx, tz)) && !treeNodeIds.Contains(nId))
+                                {
+                                    treeNodeIds.Add(nId);
+                                }
+                            }
+                        }
+                    }
+                    else if (wayNat == "tree")
+                    {
+                        var wayPoints = way.NodeIds
+                            .Where(nodes.ContainsKey)
+                            .Select(id => nodes[id])
+                            .Select(coord => new Vector2(
+                                (float)((coord.Lon - refLon) * metersPerLon),
+                                -(float)((coord.Lat - refLat) * metersPerLat)
+                            ))
+                            .ToList();
+                        if (wayPoints.Count > 0)
+                        {
+                            var center = new Vector2(wayPoints.Average(p => p.X), wayPoints.Average(p => p.Y));
+                            if (isPointInMainCourse(center))
+                            {
+                                additionalTreePositions.Add(center);
+                            }
+                        }
+                    }
+                }
+
                 // Determine golf type early so line features (hole, tee) are handled before polygon guard
                 way.Tags.TryGetValue("golf", out string? golfType);
 
@@ -755,8 +803,6 @@ public partial class OsmMapLoader : Node
 
                     GD.Print($"{LogPrefix} Parsed hole {holeNum}: par {par}, {distanceYards:F0} yards, tee ({teePos.X:F1}, {teePos.Y:F1}) → pin ({pinPos.X:F1}, {pinPos.Y:F1})");
 
-                    // Pre-populate tee boxes from the hole line's first node.
-                    // These defaults are overridden if explicit golf=tee data exists.
                     holeInfo[GetHoleKey(holeNum)] = new HoleConfig
                     {
                         Par = par,
@@ -764,12 +810,7 @@ public partial class OsmMapLoader : Node
                         Name = hName,
                         Distance = distanceYards,
                         HoleLocation = new float[] { pinPos.X, pinPos.Y },
-                        TeeBoxes = new Dictionary<string, float[]>
-                        {
-                            { "Blue", new float[] { teePos.X, teePos.Y } },
-                            { "White", new float[] { teePos.X, teePos.Y } },
-                            { "Red", new float[] { teePos.X, teePos.Y } }
-                        },
+                        TeeBoxes = new Dictionary<string, float[]>(),
                         HolePath = pathList
                     };
                     continue;
@@ -778,26 +819,40 @@ public partial class OsmMapLoader : Node
                 // Handle golf=tee (can be polygon or small way)
                 if (golfType == "tee")
                 {
-                    string? refHole = null;
-                    if (way.Tags.TryGetValue("ref", out refHole) && !string.IsNullOrEmpty(refHole))
-                    {
-                        string teeColor = way.Tags.GetValueOrDefault("tee", "blue").ToLower();
-                        var center = new Vector2(points.Average(pt => pt.X), points.Average(pt => pt.Y));
+                    var parsedColors = ParseTeeColors(way.Tags);
+                    var center = new Vector2(points.Average(pt => pt.X), points.Average(pt => pt.Y));
 
-                        tees.Add(new TeeConfig
+                    string? refHole = null;
+                    if (way.Tags.TryGetValue("ref", out refHole) && !string.IsNullOrWhiteSpace(refHole))
+                    {
+                        var holeRefs = ParseHoleRefs(refHole);
+                        foreach (var hNum in holeRefs)
                         {
-                            HoleNum = refHole,
-                            Color = teeColor,
-                            Location = new float[] { center.X, center.Y }
-                        });
+                            foreach (var col in parsedColors)
+                            {
+                                tees.Add(new TeeConfig
+                                {
+                                    HoleNum = hNum,
+                                    Color = col,
+                                    Location = new float[] { center.X, center.Y }
+                                });
+                            }
+                        }
+                    }
+                    else
+                    {
+                        unreferencedTees.Add((parsedColors, center));
                     }
 
                     // Also render the tee box visually if it has polygon geometry
                     if (points.Count >= 3)
                     {
-                        if (!string.IsNullOrEmpty(refHole))
+                        if (!string.IsNullOrWhiteSpace(refHole))
                         {
-                            holesWithTeePolygons.Add(GetHoleKey(refHole));
+                            foreach (var hNum in ParseHoleRefs(refHole))
+                            {
+                                holesWithTeePolygons.Add(GetHoleKey(hNum));
+                            }
                         }
                         if (points.First() != points.Last())
                             points.Add(points.First());
@@ -1080,6 +1135,53 @@ public partial class OsmMapLoader : Node
                 }
             }
 
+            // 1. Gather tree positions directly from OSM course data.
+            // Any tree listed in the OSM course data is placed right where it belongs (even if close to the fairway).
+            var placedTreePositions = new List<Vector2>();
+            foreach (var tId in treeNodeIds)
+            {
+                if (nodes.TryGetValue(tId, out var coord))
+                {
+                    float tx = (float)((coord.Lon - refLon) * metersPerLon);
+                    float tz = -(float)((coord.Lat - refLat) * metersPerLat);
+                    var pt = new Vector2(tx, tz);
+
+                    // Place tree directly where OSM specified (avoiding duplicates within 0.5m)
+                    bool isDuplicate = false;
+                    for (int i = 0; i < placedTreePositions.Count; i++)
+                    {
+                        if (placedTreePositions[i].DistanceSquaredTo(pt) < 0.25f)
+                        {
+                            isDuplicate = true;
+                            break;
+                        }
+                    }
+                    if (!isDuplicate)
+                    {
+                        placedTreePositions.Add(pt);
+                    }
+                }
+            }
+
+            foreach (var pt in additionalTreePositions)
+            {
+                bool isDuplicate = false;
+                for (int i = 0; i < placedTreePositions.Count; i++)
+                {
+                    if (placedTreePositions[i].DistanceSquaredTo(pt) < 0.25f)
+                    {
+                        isDuplicate = true;
+                        break;
+                    }
+                }
+                if (!isDuplicate)
+                {
+                    placedTreePositions.Add(pt);
+                }
+            }
+
+            GD.Print($"{LogPrefix} Placed {placedTreePositions.Count} authentic trees directly from OSM course data.");
+
             // Distance calculation to closest fairway polygon (or hole corridor if no fairways parsed)
             Func<Vector2, float> getDistToFairway = (pt) =>
             {
@@ -1131,67 +1233,42 @@ public partial class OsmMapLoader : Node
                 return float.MaxValue;
             };
 
-            // Tuned fairway proximity filter:
-            // Keeps some trees close to fairways for natural hazard variety, but tunes down the frequency
-            // so they don't crowd or wall off the edges of fairways, while preserving normal tree density in the rough.
-            Func<Vector2, bool> shouldKeepNearFairway = (pt) =>
+            // Flight corridor obstruction guard: ensures no generated trees are placed between any tee box and fairway target
+            Func<Vector2, bool> isBetweenTeeAndFairway = (pt) =>
             {
-                float dist = getDistToFairway(pt);
-                if (dist >= 8.0f) return true; // Full density throughout the rough and woods
-
-                // Robust 2D integer spatial hash (avoids float-to-int overflow saturation bug)
-                int ix = (int)Math.Floor(pt.X * 10.0f);
-                int iy = (int)Math.Floor(pt.Y * 10.0f);
-                uint h = unchecked((uint)(ix * 73856093) ^ (uint)(iy * 19349663));
-                h = unchecked((h ^ (h >> 13)) * 0x5bd1e995);
-                h ^= h >> 15;
-                float roll = (h % 10000) / 10000.0f;
-
-                // Calibrated proximity gradient:
-                // Directly against fairway (< 2m): fairly infrequent (~8%), allowing occasional hazard trees.
-                // Close to fairway (2m - 4.5m): fairly infrequent framing (~25%).
-                // Rough transition (4.5m - 8m): moderate framing (~65%).
-                // Beyond 8m: 100% full density.
-                if (dist < 2.0f) return roll < 0.08f;
-                if (dist < 4.5f) return roll < 0.25f;
-                return roll < 0.65f;
-            };
-
-            // Gather tree positions from OSM trees
-            var placedTreePositions = new List<Vector2>();
-            foreach (var tId in treeNodeIds)
-            {
-                if (nodes.TryGetValue(tId, out var coord))
+                foreach (var kp in holeInfo)
                 {
-                    float tx = (float)((coord.Lon - refLon) * metersPerLon);
-                    float tz = -(float)((coord.Lat - refLat) * metersPerLat);
-                    var pt = new Vector2(tx, tz);
+                    var h = kp.Value;
+                    if (h.TeeBoxes == null || h.TeeBoxes.Count == 0) continue;
 
-                    // Check play surface exclusions
-                    bool insideExclusion = false;
-                    for (int i = 0; i < exclusionPolygons.Count; i++)
+                    Vector2 target;
+                    if (h.HolePath != null && h.HolePath.Count > 1)
                     {
-                        var excl = exclusionPolygons[i];
-                        if (tx >= excl.MinX && tx <= excl.MaxX && tz >= excl.MinY && tz <= excl.MaxY)
+                        target = new Vector2(h.HolePath[1][0], h.HolePath[1][1]);
+                    }
+                    else if (h.HoleLocation != null && h.HoleLocation.Length >= 2)
+                    {
+                        target = new Vector2(h.HoleLocation[0], h.HoleLocation[1]);
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
+                    foreach (var teeKvp in h.TeeBoxes)
+                    {
+                        if (teeKvp.Value == null || teeKvp.Value.Length < 2) continue;
+                        var teePos = new Vector2(teeKvp.Value[0], teeKvp.Value[1]);
+                        if (IsTreeBetweenTeeAndFairway(pt, teePos, target, 18.0f, 35.0f))
                         {
-                            if (PointInPolygon(pt, excl.Polygon))
-                            {
-                                insideExclusion = true;
-                                break;
-                            }
+                            return true;
                         }
                     }
-                    if (insideExclusion) continue;
-
-                    // If very close to fairway (< 2.5m), apply shouldKeepNearFairway so mapped trees don't crowd
-                    float d = getDistToFairway(pt);
-                    if (d < 2.5f && !shouldKeepNearFairway(pt)) continue;
-
-                    placedTreePositions.Add(pt);
                 }
-            }
+                return false;
+            };
 
-            // Scan satellite imagery for additional trees
+            // Scan satellite imagery for additional trees in the rough and background
             if (satImage != null)
             {
                 ReportProgress("Scanning foliage from satellite imagery...");
@@ -1242,8 +1319,11 @@ public partial class OsmMapLoader : Node
                         }
                         if (insideExclusion) return;
 
-                        // On computer, tune down frequency of trees close to fairways
-                        if (!shouldKeepNearFairway(pt)) return;
+                        // Strictly no generated trees close to fairway (< 10m)
+                        if (getDistToFairway(pt) < 10.0f) return;
+
+                        // Strictly no generated trees between tee box and fairway
+                        if (isBetweenTeeAndFairway(pt)) return;
 
                         // Check line of play safety zone (skip if inside a forest polygon)
                         bool tooCloseToLineOfPlay = false;
@@ -1264,7 +1344,7 @@ public partial class OsmMapLoader : Node
                                 var path = lineOfPlayPaths[pIdx];
                                 for (int i = 0; i < path.Count - 1; i++)
                                 {
-                                    if (DistanceToSegment(pt, path[i], path[i + 1]) < 12.0f)
+                                    if (DistanceToSegment(pt, path[i], path[i + 1]) < 14.0f)
                                     {
                                         tooCloseToLineOfPlay = true;
                                         break;
@@ -1295,7 +1375,7 @@ public partial class OsmMapLoader : Node
 
                 GD.Print($"{LogPrefix} Found {candidatePoints.Count} tree candidate locations from satellite imagery.");
 
-                int maxSatelliteTrees = isComputerPlatform ? 3000 : (isMobilePlatform ? 1000 : 1500); // Capped at 1000 on mobile, 3000 on computer, 1500 on desktop
+                int maxSatelliteTrees = isComputerPlatform ? 3000 : (isMobilePlatform ? 1000 : 1500);
                 var selectedPoints = new List<Vector2>();
                 if (candidatePoints.Count > maxSatelliteTrees)
                 {
@@ -1373,7 +1453,11 @@ public partial class OsmMapLoader : Node
                             }
                             if (insideExclusion) continue;
 
-                            if (!shouldKeepNearFairway(rp)) continue;
+                            // Strictly no generated trees close to fairway (< 10m)
+                            if (getDistToFairway(rp) < 10.0f) continue;
+
+                            // Strictly no generated trees between tee box and fairway
+                            if (isBetweenTeeAndFairway(rp)) continue;
 
                             bool tooClose = false;
                             for (int i = 0; i < placedTreePositions.Count; i++)
@@ -1420,14 +1504,18 @@ public partial class OsmMapLoader : Node
                         }
                     }
 
-                    if (!shouldKeepNearFairway(pt)) return false;
+                    // Strictly no generated trees close to fairway (< 10m)
+                    if (getDistToFairway(pt) < 10.0f) return false;
+
+                    // Strictly no generated trees between tee box and fairway
+                    if (isBetweenTeeAndFairway(pt)) return false;
 
                     for (int pIdx = 0; pIdx < lineOfPlayPaths.Count; pIdx++)
                     {
                         var path = lineOfPlayPaths[pIdx];
                         for (int i = 0; i < path.Count - 1; i++)
                         {
-                            if (DistanceToSegment(pt, path[i], path[i + 1]) < 13.0f)
+                            if (DistanceToSegment(pt, path[i], path[i + 1]) < 15.0f)
                                 return false;
                         }
                     }
@@ -1443,8 +1531,8 @@ public partial class OsmMapLoader : Node
 
                 // Pass A: Hole corridor fairway framing stands
                 float stepA = isComputerPlatform ? 12f : 15f;
-                float[] leftOffsets = isComputerPlatform ? new float[] { -26f, -34f, -42f, -50f } : new float[] { -22f, -32f, -42f };
-                float[] rightOffsets = isComputerPlatform ? new float[] { 26f, 34f, 42f, 50f } : new float[] { 22f, 32f, 42f };
+                float[] leftOffsets = isComputerPlatform ? new float[] { -28f, -36f, -44f, -52f } : new float[] { -26f, -36f, -46f };
+                float[] rightOffsets = isComputerPlatform ? new float[] { 28f, 36f, 44f, 52f } : new float[] { 26f, 36f, 46f };
                 foreach (var path in lineOfPlayPaths)
                 {
                     if (path.Count < 2) continue;
@@ -1452,7 +1540,7 @@ public partial class OsmMapLoader : Node
                     for (int i = 0; i < path.Count - 1; i++) totalLength += path[i].DistanceTo(path[i + 1]);
                     if (totalLength < 40f) continue;
 
-                    for (float d = 25f; d < totalLength - 20f; d += stepA)
+                    for (float d = 30f; d < totalLength - 20f; d += stepA)
                     {
                         var centerPt = GetPointOnPolyline(path, d);
                         var nextPt = GetPointOnPolyline(path, Math.Min(d + 5f, totalLength));
@@ -1501,20 +1589,40 @@ public partial class OsmMapLoader : Node
                     }
                 }
 
-                // Pass C: Tee backdrops
+                // Pass C: Tee backdrops (strictly BEHIND tee boxes, away from fairway)
                 int teeAttempts = isComputerPlatform ? 12 : 6;
                 foreach (var kp in holeInfo)
                 {
                     if (kp.Value.TeeBoxes != null)
                     {
+                        Vector2 target;
+                        if (kp.Value.HolePath != null && kp.Value.HolePath.Count > 1)
+                        {
+                            target = new Vector2(kp.Value.HolePath[1][0], kp.Value.HolePath[1][1]);
+                        }
+                        else if (kp.Value.HoleLocation != null && kp.Value.HoleLocation.Length >= 2)
+                        {
+                            target = new Vector2(kp.Value.HoleLocation[0], kp.Value.HoleLocation[1]);
+                        }
+                        else
+                        {
+                            target = Vector2.Zero;
+                        }
+
                         foreach (var teeKvp in kp.Value.TeeBoxes)
                         {
                             if (teeKvp.Value == null || teeKvp.Value.Length < 2) continue;
                             var teePos = new Vector2(teeKvp.Value[0], teeKvp.Value[1]);
 
+                            Vector2 fwd = (target != Vector2.Zero && target != teePos)
+                                ? (target - teePos).Normalized()
+                                : new Vector2(0, 1);
+                            float baseRearAngle = Mathf.Atan2(-fwd.Y, -fwd.X);
+
                             for (int attempt = 0; attempt < teeAttempts; attempt++)
                             {
-                                float angle = (float)(procRnd.NextDouble() * Math.PI * 2.0);
+                                // Fan out strictly in the rear hemisphere (+/- 60 degrees) behind the tee box
+                                float angle = baseRearAngle + (float)(procRnd.NextDouble() * 2.0 - 1.0) * (Mathf.Pi / 3.0f);
                                 float dist = 12f + (float)procRnd.NextDouble() * 14f;
                                 var cand = teePos + new Vector2(Mathf.Cos(angle) * dist, Mathf.Sin(angle) * dist);
                                 if (isProceduralPointValid(cand))
@@ -1546,7 +1654,7 @@ public partial class OsmMapLoader : Node
                     }
                 }
 
-                GD.Print($"{LogPrefix} Procedural tree placement completed. Total trees: {placedTreePositions.Count}.");
+                GD.Print($"{LogPrefix} Normal tree generation completed. Total trees placed: {placedTreePositions.Count}.");
             }
 
             float cellSize = isMobilePlatform ? 5.0f : 2.0f;
@@ -1747,45 +1855,140 @@ public partial class OsmMapLoader : Node
                     {
                         float tx = (float)((coord.Lon - refLon) * metersPerLon);
                         float tz = -(float)((coord.Lat - refLat) * metersPerLat);
-                        if (!isPointInMainCourse(new Vector2(tx, tz)))
+                        var nodePos = new Vector2(tx, tz);
+                        if (!isPointInMainCourse(nodePos))
                             continue;
 
-                        // If node-based tee has no ref tag, do not assign it to Hole 1.
-                        if (!kvp.Value.TryGetValue("ref", out string? refHole) || string.IsNullOrEmpty(refHole))
+                        var parsedColors = ParseTeeColors(kvp.Value);
+
+                        if (kvp.Value.TryGetValue("ref", out string? refHole) && !string.IsNullOrWhiteSpace(refHole))
                         {
-                            continue;
+                            var holeRefs = ParseHoleRefs(refHole);
+                            foreach (var hNum in holeRefs)
+                            {
+                                foreach (var col in parsedColors)
+                                {
+                                    tees.Add(new TeeConfig
+                                    {
+                                        HoleNum = hNum,
+                                        Color = col,
+                                        Location = new float[] { tx, tz }
+                                    });
+                                }
+                            }
                         }
-
-                        string teeColor = kvp.Value.GetValueOrDefault("tee", "blue").ToLower();
-                        
-                        tees.Add(new TeeConfig
+                        else
                         {
-                            HoleNum = refHole,
-                            Color = teeColor,
-                            Location = new float[] { tx, tz }
-                        });
+                            unreferencedTees.Add((parsedColors, nodePos));
+                        }
                     }
                 }
             }
 
-            // Map tees to their respective holes
+            // Map referenced tees to their respective holes first
             foreach (var tee in tees)
             {
                 if (holeInfo.TryGetValue(GetHoleKey(tee.HoleNum), out var holeConfig))
                 {
-                    string colorKey = char.ToUpper(tee.Color[0]) + tee.Color.Substring(1);
+                    string colorKey = char.ToUpper(tee.Color[0]) + (tee.Color.Length > 1 ? tee.Color.Substring(1).ToLower() : "");
                     holeConfig.TeeBoxes[colorKey] = tee.Location;
                 }
             }
 
-            // Ensure every hole has a default tee if none was parsed
+            // Match unreferenced tee boxes to the closest hole
+            foreach (var unref in unreferencedTees)
+            {
+                string? bestHoleKey = null;
+                float minDistance = float.MaxValue;
+
+                foreach (var kp in holeInfo)
+                {
+                    var hole = kp.Value;
+                    if (hole.HolePath == null || hole.HolePath.Count == 0) continue;
+
+                    Vector2 holeStart = new Vector2(hole.HolePath[0][0], hole.HolePath[0][1]);
+                    float dist = unref.Location.DistanceTo(holeStart);
+
+                    // Also check proximity to any already-assigned tees on this hole
+                    if (hole.TeeBoxes != null)
+                    {
+                        foreach (var existingTee in hole.TeeBoxes.Values)
+                        {
+                            if (existingTee != null && existingTee.Length >= 2)
+                            {
+                                float eDist = unref.Location.DistanceTo(new Vector2(existingTee[0], existingTee[1]));
+                                if (eDist < dist) dist = eDist;
+                            }
+                        }
+                    }
+
+                    if (dist < minDistance)
+                    {
+                        minDistance = dist;
+                        bestHoleKey = kp.Key;
+                    }
+                }
+
+                // Associate if within 150 meters of the hole start / tee area
+                if (bestHoleKey != null && minDistance <= 150f && holeInfo.TryGetValue(bestHoleKey, out var matchedHole))
+                {
+                    foreach (var col in unref.Colors)
+                    {
+                        string colorKey = char.ToUpper(col[0]) + (col.Length > 1 ? col.Substring(1).ToLower() : "");
+                        matchedHole.TeeBoxes[colorKey] = new float[] { unref.Location.X, unref.Location.Y };
+                    }
+                    GD.Print($"{LogPrefix} Matched unreferenced tee ({string.Join("/", unref.Colors)}) at ({unref.Location.X:F1}, {unref.Location.Y:F1}) to {bestHoleKey} (dist: {minDistance:F1}m)");
+                }
+            }
+
+            // Ensure every hole has tee data
             foreach (var kp in holeInfo)
             {
-                if (kp.Value.TeeBoxes.Count == 0)
+                var hole = kp.Value;
+                if (hole.TeeBoxes.Count == 0)
                 {
-                    kp.Value.TeeBoxes["Blue"] = new float[] { 0.0f, 0.0f };
-                    kp.Value.TeeBoxes["Red"] = new float[] { 5.0f, 0.0f };
-                    kp.Value.TeeBoxes["White"] = new float[] { 10.0f, 0.0f };
+                    // No explicit tees at all: use the first node of the hole line
+                    float defX = (hole.HolePath != null && hole.HolePath.Count > 0) ? hole.HolePath[0][0] : 0.0f;
+                    float defZ = (hole.HolePath != null && hole.HolePath.Count > 0) ? hole.HolePath[0][1] : 0.0f;
+                    hole.TeeBoxes["Blue"] = new float[] { defX, defZ };
+                    hole.TeeBoxes["White"] = new float[] { defX, defZ };
+                    hole.TeeBoxes["Red"] = new float[] { defX, defZ };
+                }
+                else
+                {
+                    // If some tees were explicitly parsed, make sure standard colors ("Blue", "White", "Red")
+                    // have a valid mapped tee fallback so players selecting standard tees always land on a real tee pad.
+                    string fallbackKey = hole.TeeBoxes.ContainsKey("Blue") ? "Blue" : hole.TeeBoxes.Keys.First();
+                    var fallbackPos = hole.TeeBoxes[fallbackKey];
+
+                    if (!hole.TeeBoxes.ContainsKey("Blue"))
+                    {
+                        hole.TeeBoxes["Blue"] = (float[])fallbackPos.Clone();
+                    }
+                    if (!hole.TeeBoxes.ContainsKey("White"))
+                    {
+                        hole.TeeBoxes["White"] = (float[])fallbackPos.Clone();
+                    }
+                    if (!hole.TeeBoxes.ContainsKey("Red"))
+                    {
+                        // Red is the forward tee: if any forward tee exists (closest to pin), use it
+                        Vector2 pin = (hole.HoleLocation != null && hole.HoleLocation.Length >= 2)
+                            ? new Vector2(hole.HoleLocation[0], hole.HoleLocation[1])
+                            : Vector2.Zero;
+
+                        string forwardKey = fallbackKey;
+                        float minPinDist = float.MaxValue;
+                        foreach (var kvp in hole.TeeBoxes)
+                        {
+                            float d = new Vector2(kvp.Value[0], kvp.Value[1]).DistanceTo(pin);
+                            if (d < minPinDist)
+                            {
+                                minPinDist = d;
+                                forwardKey = kvp.Key;
+                            }
+                        }
+                        hole.TeeBoxes["Red"] = (float[])hole.TeeBoxes[forwardKey].Clone();
+                    }
                 }
             }
 
@@ -2468,7 +2671,15 @@ public partial class OsmMapLoader : Node
             }
 
             // Generate course.json
-            var teeColors = holeInfo.Values.SelectMany(h => h.TeeBoxes.Keys).Distinct().ToList();
+            var preferredOrder = new[] { "Black", "Gold", "Blue", "White", "Red", "Green", "Orange" };
+            var teeColors = holeInfo.Values
+                .SelectMany(h => h.TeeBoxes.Keys)
+                .Distinct()
+                .OrderBy(c => {
+                    int idx = Array.IndexOf(preferredOrder, c);
+                    return idx >= 0 ? idx : 99;
+                })
+                .ToList();
             if (teeColors.Count == 0) teeColors.Add("Blue");
 
             var courseConfig = new CourseJsonConfig
@@ -2713,6 +2924,139 @@ public partial class OsmMapLoader : Node
         }
     }
 
+    public Godot.Collections.Array GetCachedCourses()
+    {
+        return GetCachedCourses(null);
+    }
+
+    public Godot.Collections.Array GetCachedCourses(Godot.Collections.Dictionary? options)
+    {
+        var list = LoadBundledCatalog();
+        bool include9 = true;
+        bool include18 = true;
+        bool includeAll = false;
+        if (options != null)
+        {
+            if (options.ContainsKey("include_9_hole")) include9 = options["include_9_hole"].AsBool();
+            if (options.ContainsKey("include_18_hole")) include18 = options["include_18_hole"].AsBool();
+            if (options.ContainsKey("include_all_holes")) includeAll = options["include_all_holes"].AsBool();
+        }
+
+        var results = new Godot.Collections.Array();
+        var sorted = list.OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        foreach (var item in sorted)
+        {
+            if (!includeAll)
+            {
+                if (!include9 && item.HoleCount == 9) continue;
+                if (!include18 && item.HoleCount == 18) continue;
+            }
+
+            var dict = new Godot.Collections.Dictionary();
+            dict["name"] = item.Name;
+            dict["lat"] = item.Lat;
+            dict["lon"] = item.Lon;
+            dict["location"] = item.Location;
+            dict["hole_count"] = item.HoleCount;
+            dict["last_updated"] = item.LastUpdated;
+            dict["is_catalog"] = true;
+            dict["is_cached"] = true;
+            results.Add(dict);
+        }
+        return results;
+    }
+
+    public bool IsCourseCached(string courseName)
+    {
+        if (string.IsNullOrWhiteSpace(courseName)) return false;
+        var list = LoadBundledCatalog();
+        if (list.Any(c => string.Equals(c.Name, courseName, StringComparison.OrdinalIgnoreCase)))
+            return true;
+        string slug = GetCourseGeometrySlug(courseName);
+        if (!string.IsNullOrWhiteSpace(slug))
+        {
+            if (Godot.FileAccess.FileExists($"res://Courses/CachedGeometry/{slug}.json.gz") ||
+                Godot.FileAccess.FileExists($"res://Courses/CachedGeometry/{slug}.json"))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public Godot.Collections.Array SearchCachedCourses(string queryText)
+    {
+        return SearchCachedCourses(queryText, null);
+    }
+
+    public Godot.Collections.Array SearchCachedCourses(string queryText, Godot.Collections.Dictionary? options)
+    {
+        if (string.IsNullOrWhiteSpace(queryText))
+        {
+            return GetCachedCourses(options);
+        }
+
+        var list = LoadBundledCatalog();
+        bool include9 = true;
+        bool include18 = true;
+        bool includeAll = false;
+        if (options != null)
+        {
+            if (options.ContainsKey("include_9_hole")) include9 = options["include_9_hole"].AsBool();
+            if (options.ContainsKey("include_18_hole")) include18 = options["include_18_hole"].AsBool();
+            if (options.ContainsKey("include_all_holes")) includeAll = options["include_all_holes"].AsBool();
+        }
+
+        string cleanQuery = queryText.Trim();
+        var queryTokens = cleanQuery.ToLowerInvariant()
+            .Split(new[] { ' ', ',', '-', '/', '.', '(', ')' }, StringSplitOptions.RemoveEmptyEntries);
+
+        var matches = new List<GolfSearchResult>();
+        foreach (var course in list)
+        {
+            if (!includeAll)
+            {
+                if (!include9 && course.HoleCount == 9) continue;
+                if (!include18 && course.HoleCount == 18) continue;
+            }
+
+            string courseNameLower = course.Name.ToLowerInvariant();
+            string courseLocLower = course.Location.ToLowerInvariant();
+
+            bool allTokensMatch = true;
+            foreach (var token in queryTokens)
+            {
+                if (!courseNameLower.Contains(token) && !courseLocLower.Contains(token))
+                {
+                    allTokensMatch = false;
+                    break;
+                }
+            }
+
+            if (allTokensMatch)
+            {
+                matches.Add(course);
+            }
+        }
+
+        var sorted = matches.OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var results = new Godot.Collections.Array();
+        foreach (var item in sorted)
+        {
+            var dict = new Godot.Collections.Dictionary();
+            dict["name"] = item.Name;
+            dict["lat"] = item.Lat;
+            dict["lon"] = item.Lon;
+            dict["location"] = item.Location;
+            dict["hole_count"] = item.HoleCount;
+            dict["last_updated"] = item.LastUpdated;
+            dict["is_catalog"] = true;
+            dict["is_cached"] = true;
+            results.Add(dict);
+        }
+        return results;
+    }
+
     private static List<GolfSearchResult>? _bundledCatalogCache = null;
     private static readonly object _catalogLock = new();
 
@@ -2835,6 +3179,7 @@ public partial class OsmMapLoader : Node
         bool includeAllHoles = false;
         bool requireLeisureGolf = true;
         bool forceOnline = false;
+        bool cachedOnly = false;
         string customTagsRaw = "";
 
         if (options != null)
@@ -2849,6 +3194,8 @@ public partial class OsmMapLoader : Node
                 requireLeisureGolf = options["require_leisure_golf"].AsBool();
             if (options.ContainsKey("force_online"))
                 forceOnline = options["force_online"].AsBool();
+            if (options.ContainsKey("cached_only"))
+                cachedOnly = options["cached_only"].AsBool();
             if (options.ContainsKey("custom_tags"))
                 customTagsRaw = options["custom_tags"].AsString() ?? "";
         }
@@ -2917,9 +3264,15 @@ public partial class OsmMapLoader : Node
                     });
 
                     GD.Print($"{LogPrefix} Found {catalogMatches.Count} course(s) in bundled offline catalog matching '{cleanQuery}'. Skipping online queries.");
-                    return catalogMatches.Take(25).ToList();
+                    return catalogMatches.Take(cachedOnly ? 100 : 25).ToList();
                 }
             }
+        }
+
+        if (cachedOnly)
+        {
+            GD.Print($"{LogPrefix} Cached-only search requested for '{cleanQuery}'. Skipping online queries.");
+            return new List<GolfSearchResult>();
         }
 
         GD.Print($"{LogPrefix} No matches in bundled catalog (or force_online={forceOnline}). Searching online OpenStreetMap for '{cleanQuery}' (Photon -> Nominatim -> Overpass)...");
@@ -4729,6 +5082,98 @@ public partial class OsmMapLoader : Node
         return $"Hole {refVal}";
     }
 
+    public static List<string> ParseHoleRefs(string refVal)
+    {
+        var list = new List<string>();
+        if (string.IsNullOrWhiteSpace(refVal)) return list;
+        var parts = refVal.Split(new[] { ';', ',', '/' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var part in parts)
+        {
+            var cleaned = part.Trim();
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"(?i)^hole\s*", "");
+            cleaned = cleaned.TrimStart('#').Trim();
+            if (!string.IsNullOrWhiteSpace(cleaned))
+            {
+                list.Add(cleaned);
+            }
+        }
+        return list;
+    }
+
+    public static List<string> ParseTeeColors(Dictionary<string, string> tags, string? role = null)
+    {
+        var colors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1. Check "tee" tag (e.g. "blue;white", "gold", "red")
+        if (tags.TryGetValue("tee", out var teeVal) && !string.IsNullOrWhiteSpace(teeVal))
+        {
+            foreach (var part in teeVal.Split(new[] { ';', ',', '/' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var trimmed = part.Trim();
+                if (!string.IsNullOrWhiteSpace(trimmed) &&
+                    !trimmed.Equals("yes", StringComparison.OrdinalIgnoreCase) &&
+                    !trimmed.Equals("true", StringComparison.OrdinalIgnoreCase))
+                {
+                    colors.Add(trimmed);
+                }
+            }
+        }
+
+        // 2. Check "colour", "color", "tee:colour", "tee:color"
+        foreach (var key in new[] { "colour", "color", "tee:colour", "tee:color" })
+        {
+            if (tags.TryGetValue(key, out var colVal) && !string.IsNullOrWhiteSpace(colVal))
+            {
+                foreach (var part in colVal.Split(new[] { ';', ',', '/' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var trimmed = part.Trim();
+                    if (!string.IsNullOrWhiteSpace(trimmed) &&
+                        !trimmed.Equals("yes", StringComparison.OrdinalIgnoreCase) &&
+                        !trimmed.Equals("true", StringComparison.OrdinalIgnoreCase))
+                    {
+                        colors.Add(trimmed);
+                    }
+                }
+            }
+        }
+
+        // 3. Check role if provided, e.g. "tee:blue", "white", "tee_white"
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            string roleClean = role.Replace("tee:", "").Replace("tee_", "").Replace("tee", "").Trim();
+            if (!string.IsNullOrWhiteSpace(roleClean) &&
+                !roleClean.Equals("yes", StringComparison.OrdinalIgnoreCase) &&
+                !roleClean.Equals("true", StringComparison.OrdinalIgnoreCase))
+            {
+                colors.Add(roleClean);
+            }
+        }
+
+        // 4. Check name if no color found yet (e.g. "White Tee", "Blue Tees", "Gold")
+        if (colors.Count == 0 && tags.TryGetValue("name", out var nameVal) && !string.IsNullOrWhiteSpace(nameVal))
+        {
+            var knownColors = new[] { "black", "gold", "blue", "white", "red", "green", "orange", "yellow", "silver" };
+            foreach (var kc in knownColors)
+            {
+                if (nameVal.IndexOf(kc, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    colors.Add(kc);
+                }
+            }
+        }
+
+        // Default if still empty:
+        if (colors.Count == 0)
+        {
+            colors.Add("Blue");
+        }
+
+        return colors
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => char.ToUpper(c[0]) + (c.Length > 1 ? c.Substring(1).ToLower() : ""))
+            .ToList();
+    }
+
     private record OsmWay(long Id, List<long> NodeIds, Dictionary<string, string> Tags);
     private record OsmRelation(long Id, List<(string Type, long Ref, string Role)> Members, Dictionary<string, string> Tags);
     
@@ -4753,7 +5198,7 @@ public partial class OsmMapLoader : Node
         public List<string> TeeColors { get; set; } = new();
     }
 
-    private class HoleConfig
+    public class HoleConfig
     {
         [JsonPropertyName("Par")]
         public int Par { get; set; }
@@ -6266,7 +6711,7 @@ public partial class OsmMapLoader : Node
         return resultPolygons;
     }
 
-    private static bool PointInPolygon(Vector2 pt, Vector2[] poly)
+    public static bool PointInPolygon(Vector2 pt, Vector2[] poly)
     {
         int count = poly.Length;
         if (count < 3) return false;
@@ -6282,7 +6727,7 @@ public partial class OsmMapLoader : Node
         return inside;
     }
 
-    private static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
+    public static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
     {
         Vector2 ab = b - a;
         Vector2 ap = p - a;
@@ -6294,7 +6739,7 @@ public partial class OsmMapLoader : Node
         return p.DistanceTo(projection);
     }
 
-    private static float DistanceToPolygon(Vector2 p, Vector2[] poly)
+    public static float DistanceToPolygon(Vector2 p, Vector2[] poly)
     {
         float minD = float.MaxValue;
         int n = poly.Length;
@@ -6304,6 +6749,144 @@ public partial class OsmMapLoader : Node
             if (d < minD) minD = d;
         }
         return minD;
+    }
+
+    /// <summary>
+    /// Checks whether a tree position is too close to any fairway polygon (closer than minDistance meters).
+    /// </summary>
+    public static bool IsTreeTooCloseToFairway(Vector2 pt, IEnumerable<Vector2[]> fairwayPolygons, float minDistance = 14.0f)
+    {
+        if (fairwayPolygons == null) return false;
+        foreach (var fw in fairwayPolygons)
+        {
+            if (fw == null || fw.Length < 3) continue;
+            if (PointInPolygon(pt, fw))
+            {
+                return true;
+            }
+            if (DistanceToPolygon(pt, fw) < minDistance)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether a tree position is located in the way between any tee box and the fairway target.
+    /// </summary>
+    public static bool IsTreeBetweenTeeAndFairway(Vector2 pt, Vector2 teePos, Vector2 fairwayTarget, float corridorHalfWidth = 18.0f, float minTeeFrontDist = 35.0f)
+    {
+        Vector2 toTarget = fairwayTarget - teePos;
+        float totalDist = toTarget.Length();
+        if (totalDist < 0.001f) return false;
+
+        Vector2 driveDir = toTarget / totalDist;
+        Vector2 toPt = pt - teePos;
+        float forwardProj = toPt.Dot(driveDir);
+
+        // If candidate is behind or at the tee box, it's not between tee and fairway
+        if (forwardProj <= 0f) return false;
+
+        // If candidate is beyond the fairway target, it's not between tee and fairway
+        if (forwardProj > totalDist) return false;
+
+        // Perpendicular distance to drive axis
+        float perpDist = Math.Abs(toPt.X * driveDir.Y - toPt.Y * driveDir.X);
+        if (perpDist < corridorHalfWidth)
+        {
+            return true;
+        }
+
+        // Direct obstruction in front cone of tee
+        if (toPt.Length() < minTeeFrontDist)
+        {
+            float cosAngle = forwardProj / toPt.Length();
+            if (cosAngle > 0.34f) // within ~70 degrees forward cone
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Validates whether a candidate tree point respects fairway and tee box clearance rules.
+    /// </summary>
+    public static bool IsProceduralTreePointValid(
+        Vector2 pt,
+        IEnumerable<Vector2[]> fairwayPolygons,
+        Dictionary<string, HoleConfig>? holeData,
+        float minFairwayDist = 14.0f,
+        float corridorHalfWidth = 18.0f)
+    {
+        // 1. Ensure no trees too close to fairway
+        if (IsTreeTooCloseToFairway(pt, fairwayPolygons, minFairwayDist))
+        {
+            return false;
+        }
+
+        // 2. Ensure no trees between any tee box and fairway
+        if (holeData != null)
+        {
+            foreach (var kvp in holeData)
+            {
+                var h = kvp.Value;
+                if (h.TeeBoxes == null) continue;
+
+                Vector2 target;
+                if (h.HolePath != null && h.HolePath.Count > 1)
+                {
+                    target = new Vector2(h.HolePath[1][0], h.HolePath[1][1]);
+                }
+                else if (h.HoleLocation != null && h.HoleLocation.Length >= 2)
+                {
+                    target = new Vector2(h.HoleLocation[0], h.HoleLocation[1]);
+                }
+                else
+                {
+                    continue;
+                }
+
+                foreach (var teeKvp in h.TeeBoxes)
+                {
+                    if (teeKvp.Value == null || teeKvp.Value.Length < 2) continue;
+                    var teePos = new Vector2(teeKvp.Value[0], teeKvp.Value[1]);
+                    if (IsTreeBetweenTeeAndFairway(pt, teePos, target, corridorHalfWidth))
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    public bool CheckTreeTooCloseToFairway(Vector2 pt, Godot.Collections.Array fairwayPolygons, float minDistance = 14.0f)
+    {
+        var list = new List<Vector2[]>();
+        if (fairwayPolygons != null)
+        {
+            foreach (var item in fairwayPolygons)
+            {
+                if (item.VariantType == Variant.Type.PackedVector2Array)
+                {
+                    list.Add(item.AsVector2Array());
+                }
+                else if (item.Obj is Vector2[] vArr)
+                {
+                    list.Add(vArr);
+                }
+            }
+        }
+        return IsTreeTooCloseToFairway(pt, list, minDistance);
+    }
+
+    public bool CheckTreeBetweenTeeAndFairway(Vector2 pt, Vector2 teePos, Vector2 fairwayTarget, float corridorHalfWidth = 18.0f, float minTeeFrontDist = 35.0f)
+    {
+        return IsTreeBetweenTeeAndFairway(pt, teePos, fairwayTarget, corridorHalfWidth, minTeeFrontDist);
     }
 
     private StandardMaterial3D? _rockMaterial;

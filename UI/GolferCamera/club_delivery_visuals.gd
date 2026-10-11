@@ -17,8 +17,42 @@ const TEX_DRIVER_FACE = preload("res://assets/images/clubs/driver_face.png")
 const TEX_IRON_TOP = preload("res://assets/images/clubs/iron_top.png")
 const TEX_DRIVER_TOP = preload("res://assets/images/clubs/driver_top.png")
 
-static func create_panel(data: Dictionary = {}, is_profile: bool = false) -> PanelContainer:
-	return ClubDeliveryVisualsPanel.new(data, is_profile)
+static func create_panel(data: Dictionary = {}, is_profile: bool = false, is_lefty: Variant = null) -> PanelContainer:
+	return ClubDeliveryVisualsPanel.new(data, is_profile, is_lefty)
+
+
+static func is_left_handed(data: Dictionary = {}) -> bool:
+	if data.has("is_lefty"):
+		return bool(data["is_lefty"])
+	if data.has("is_left_handed"):
+		return bool(data["is_left_handed"])
+	if data.has("handedness"):
+		return int(data["handedness"]) == 1
+	var p_name = str(data.get("Player", data.get("player", "")))
+	if Engine.has_singleton("MultiplayerManager"):
+		var mp = Engine.get_singleton("MultiplayerManager")
+		if mp != null:
+			if not p_name.is_empty() and mp.has_method("get_player_handedness"):
+				return mp.get_player_handedness(p_name) == 1
+			if mp.has_method("get_active_player"):
+				var ap = mp.get_active_player()
+				if ap.has("handedness"):
+					return int(ap.get("handedness", 0)) == 1
+	elif Engine.get_main_loop() != null and Engine.get_main_loop().root != null:
+		var root = Engine.get_main_loop().root
+		if root.has_node("MultiplayerManager"):
+			var mp = root.get_node("MultiplayerManager")
+			if not p_name.is_empty() and mp.has_method("get_player_handedness"):
+				return mp.get_player_handedness(p_name) == 1
+			if mp.has_method("get_active_player"):
+				var ap = mp.get_active_player()
+				if ap.has("handedness"):
+					return int(ap.get("handedness", 0)) == 1
+		if root.has_node("LaunchMonitorManager"):
+			var lm = root.get_node("LaunchMonitorManager")
+			if lm.has_method("get_handedness"):
+				return lm.get_handedness() == 1
+	return false
 
 
 # -----------------------------------------------------------------------------
@@ -29,21 +63,24 @@ class ClubFaceAngleVisual extends Control:
 	var is_average: bool = false
 	var sample_count: int = 0
 	var club_category: String = "driver"
+	var is_lefty: bool = false
 
-	func _init(angle: float = 0.0, is_avg: bool = false, count: int = 0, cat: String = "driver") -> void:
+	func _init(angle: float = 0.0, is_avg: bool = false, count: int = 0, cat: String = "driver", lefty: bool = false) -> void:
 		face_angle = angle
 		is_average = is_avg
 		sample_count = count
 		club_category = cat
+		is_lefty = lefty
 		custom_minimum_size = Vector2(140, 135)
 		size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		size_flags_vertical = Control.SIZE_EXPAND_FILL
 
-	func set_data(angle: float, is_avg: bool = false, count: int = 0, cat: String = "driver") -> void:
+	func set_data(angle: float, is_avg: bool = false, count: int = 0, cat: String = "driver", lefty: bool = false) -> void:
 		face_angle = angle
 		is_average = is_avg
 		sample_count = count
 		club_category = cat
+		is_lefty = lefty
 		queue_redraw()
 
 	func _draw() -> void:
@@ -82,17 +119,23 @@ class ClubFaceAngleVisual extends Control:
 		var square_col = Color(1.0, 0.60, 0.15, 0.95)
 		draw_line(ref_left, ref_right, square_col, 2.2, true)
 		if font != null:
-			draw_string(font, Vector2(center.x + ref_extent - 28, center.y - 4), "0° SQ", HORIZONTAL_ALIGNMENT_RIGHT, 30, 8, Color(1.0, 0.70, 0.25, 0.9))
+			if not is_lefty:
+				draw_string(font, Vector2(center.x + ref_extent - 28, center.y - 4), "0° SQ", HORIZONTAL_ALIGNMENT_RIGHT, 30, 8, Color(1.0, 0.70, 0.25, 0.9))
+			else:
+				draw_string(font, Vector2(center.x - ref_extent, center.y - 4), "0° SQ", HORIZONTAL_ALIGNMENT_LEFT, 30, 8, Color(1.0, 0.70, 0.25, 0.9))
 
-		# 4. Realistic Rotating Club Image (Shaft on Left, Face Up, Toe on Right)
-		var rot_rad = deg_to_rad(clamp(face_angle, -25.0, 25.0))
+		# 4. Realistic Rotating Club Image (Shaft on Left for righty, Shaft on Right for lefty; Face Up)
+		var rot_deg = clamp(face_angle, -25.0, 25.0)
+		var eff_rot_deg = -rot_deg if is_lefty else rot_deg
+		var rot_rad = deg_to_rad(eff_rot_deg)
 		var is_wood = club_category in ["driver", "wood", "hybrid"]
 		var tex = TEX_DRIVER_TOP if is_wood else TEX_IRON_TOP
 
 		var sc = clamp(w / 1100.0, 0.08, 0.13)
 		var pivot = Vector2(512.0, 512.0)
+		var scale_x = -sc if is_lefty else sc
 
-		draw_set_transform(center, rot_rad, Vector2(sc, sc))
+		draw_set_transform(center, rot_rad, Vector2(scale_x, sc))
 		draw_texture(tex, -pivot)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -105,12 +148,18 @@ class ClubFaceAngleVisual extends Control:
 			var angle_col = Color(0.85, 0.45, 0.98, 0.95)
 			draw_line(face_line_start, face_line_end, angle_col, 2.2, true)
 
-			# Angle measurement arc between square line (0°) and face line (rot_rad)
+			# Angle measurement arc between square line (0° for righty, PI for lefty) and face line
 			var arc_r = min(ref_extent * 0.65, 44.0)
-			var start_ang = 0.0 if face_angle >= 0 else rot_rad
-			var end_ang = rot_rad if face_angle >= 0 else 0.0
-			draw_arc(center, arc_r, min(start_ang, end_ang), max(start_ang, end_ang), 16, angle_col, 2.0)
-			draw_circle(center + Vector2(arc_r, 0), 2.0, Color(1.0, 0.65, 0.2, 0.8))
+			if not is_lefty:
+				var start_ang = 0.0 if rot_rad >= 0 else rot_rad
+				var end_ang = rot_rad if rot_rad >= 0 else 0.0
+				draw_arc(center, arc_r, min(start_ang, end_ang), max(start_ang, end_ang), 16, angle_col, 2.0)
+				draw_circle(center + Vector2(arc_r, 0), 2.0, Color(1.0, 0.65, 0.2, 0.8))
+			else:
+				var start_ang = PI if rot_rad <= 0 else (PI + rot_rad)
+				var end_ang = (PI + rot_rad) if rot_rad <= 0 else PI
+				draw_arc(center, arc_r, min(start_ang, end_ang), max(start_ang, end_ang), 16, angle_col, 2.0)
+				draw_circle(center + Vector2(-arc_r, 0), 2.0, Color(1.0, 0.65, 0.2, 0.8))
 
 
 		# 6. Golf Ball at address
@@ -319,21 +368,24 @@ class ClubPathVisual extends Control:
 	var is_average: bool = false
 	var sample_count: int = 0
 	var club_category: String = "driver"
+	var is_lefty: bool = false
 
-	func _init(path_deg: float = 0.0, is_avg: bool = false, count: int = 0, cat: String = "driver") -> void:
+	func _init(path_deg: float = 0.0, is_avg: bool = false, count: int = 0, cat: String = "driver", lefty: bool = false) -> void:
 		club_path = path_deg
 		is_average = is_avg
 		sample_count = count
 		club_category = cat
+		is_lefty = lefty
 		custom_minimum_size = Vector2(140, 135)
 		size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		size_flags_vertical = Control.SIZE_EXPAND_FILL
 
-	func set_data(path_deg: float, is_avg: bool = false, count: int = 0, cat: String = "driver") -> void:
+	func set_data(path_deg: float, is_avg: bool = false, count: int = 0, cat: String = "driver", lefty: bool = false) -> void:
 		club_path = path_deg
 		is_average = is_avg
 		sample_count = count
 		club_category = cat
+		is_lefty = lefty
 		queue_redraw()
 
 	func _draw() -> void:
@@ -364,13 +416,14 @@ class ClubPathVisual extends Control:
 		if font != null:
 			draw_string(font, Vector2(center.x - 22, 10), "TARGET", HORIZONTAL_ALIGNMENT_CENTER, 44, 9, Color(0.6, 0.8, 0.95, 0.7))
 
-		# 3. Realistic Clubhead at address behind the ball (Shaft on Left, Face Up, Toe on Right)
+		# 3. Realistic Clubhead at address behind the ball (Shaft on Left for righty, Shaft on Right for lefty; Face Up)
 		var is_wood = club_category in ["driver", "wood", "hybrid"]
 		var tex = TEX_DRIVER_TOP if is_wood else TEX_IRON_TOP
 
 		var sc = clamp(w / 1150.0, 0.07, 0.12)
 		var pivot = Vector2(512.0, 512.0)
-		draw_set_transform(center + Vector2(0, 10), 0.0, Vector2(sc, sc))
+		var scale_x = -sc if is_lefty else sc
+		draw_set_transform(center + Vector2(0, 10), 0.0, Vector2(scale_x, sc))
 		draw_texture(tex, -pivot)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -381,8 +434,9 @@ class ClubPathVisual extends Control:
 		draw_arc(center, ball_radius, 0, TAU, 24, Color(0.6, 0.65, 0.72), 1.2, true)
 		draw_circle(center + Vector2(-2, -2), 1.5, Color(1, 1, 1, 0.8))
 
-		# 5. Dynamic Path Vector Arrow
-		var path_rad = deg_to_rad(clamp(club_path, -25.0, 25.0))
+		# 5. Dynamic Path Vector Arrow (Flipped for lefty)
+		var eff_path = -club_path if is_lefty else club_path
+		var path_rad = deg_to_rad(clamp(eff_path, -25.0, 25.0))
 		var dir_forward = Vector2(sin(path_rad), -cos(path_rad))
 
 		var abs_path = abs(club_path)
@@ -458,13 +512,19 @@ class ClubDeliveryVisualsPanel extends PanelContainer:
 	var has_face_data: bool = false
 	var has_impact_data: bool = false
 	var has_path_data: bool = false
+	var is_lefty: bool = false
 
-	func _init(shot_data: Dictionary = {}, is_player_profile_mode: bool = false) -> void:
-		setup(shot_data, is_player_profile_mode)
+	func _init(shot_data: Dictionary = {}, is_player_profile_mode: bool = false, lefty: Variant = null) -> void:
+		setup(shot_data, is_player_profile_mode, lefty)
 
-	func setup(data: Dictionary, is_player_profile_mode: bool = false) -> void:
+	func setup(data: Dictionary, is_player_profile_mode: bool = false, lefty: Variant = null) -> void:
 		for c in get_children():
 			c.queue_free()
+
+		if lefty != null:
+			is_lefty = bool(lefty)
+		else:
+			is_lefty = ClubDeliveryVisuals.is_left_handed(data)
 
 		var panel_style = StyleBoxFlat.new()
 		panel_style.bg_color = Color(0.06, 0.09, 0.14, 0.94)
@@ -592,7 +652,7 @@ class ClubDeliveryVisualsPanel extends PanelContainer:
 		var card_1 = _create_card_shell("CLUB FACE ANGLE")
 		if has_face_data:
 			var sample_cnt = int(data.get("face_angle_count", 0))
-			face_visual = ClubFaceAngleVisual.new(face_val, is_player_profile_mode, sample_cnt, club_cat)
+			face_visual = ClubFaceAngleVisual.new(face_val, is_player_profile_mode, sample_cnt, club_cat, is_lefty)
 			card_1.add_child(face_visual)
 		else:
 			card_1.add_child(_create_unavailable_placeholder())
@@ -612,7 +672,7 @@ class ClubDeliveryVisualsPanel extends PanelContainer:
 		var card_3 = _create_card_shell("CLUB PATH")
 		if has_path_data:
 			var sample_cnt = int(data.get("club_path_count", 0))
-			path_visual = ClubPathVisual.new(path_val, is_player_profile_mode, sample_cnt, club_cat)
+			path_visual = ClubPathVisual.new(path_val, is_player_profile_mode, sample_cnt, club_cat, is_lefty)
 			card_3.add_child(path_visual)
 		else:
 			card_3.add_child(_create_unavailable_placeholder())

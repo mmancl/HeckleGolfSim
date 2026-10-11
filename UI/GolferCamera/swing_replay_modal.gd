@@ -486,8 +486,8 @@ void fragment() {
 					cam_tex.which_feed = CameraServer.FEED_RGBA_IMAGE
 					cam_tex.camera_is_active = true
 					feed_rect.texture = cam_tex
-		elif not OS.has_feature("mobile"):
-			var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
+		else:
+			var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
 			if pose_bridge != null and pose_bridge.has_signal("desktop_frame_received"):
 				pose_bridge.desktop_frame_received.connect(func(_img, tex, _landmarks):
 					if _replay_feed_rect != null and _recorded_frames.is_empty():
@@ -1077,13 +1077,16 @@ func _create_telemetry_panel() -> PanelContainer:
 	# VLA (Launch Angle)
 	flow.add_child(_create_stat_card("LAUNCH (VLA)", "%.1f°" % vla_val, Color(0.85, 0.75, 1.0)))
 	# Smash Factor
-	if str(smash_val) != "" and str(smash_val) != "---":
+	if str(smash_val) != "" and str(smash_val) != "---" and str(smash_val) != "N/A":
 		var sf = float(smash_val)
-		var sf_col = Color(0.35, 0.95, 0.6) if sf >= 1.45 else (Color(1.0, 0.8, 0.3) if sf >= 1.35 else Color(1.0, 0.4, 0.4))
-		flow.add_child(_create_stat_card("SMASH", str(smash_val), sf_col))
+		if sf > 0.05:
+			var sf_col = Color(0.35, 0.95, 0.6) if sf >= 1.45 else (Color(1.0, 0.8, 0.3) if sf >= 1.35 else Color(1.0, 0.4, 0.4))
+			flow.add_child(_create_stat_card("SMASH", str(smash_val), sf_col))
 	# AoA
-	if str(aoa_val) != "" and str(aoa_val) != "---":
-		flow.add_child(_create_stat_card("AOA", "%s°" % str(aoa_val), Color(0.7, 0.85, 1.0)))
+	if str(aoa_val) != "" and str(aoa_val) != "---" and str(aoa_val) != "N/A":
+		var aoa_num = float(str(aoa_val).replace("+", "").replace("°", ""))
+		if abs(aoa_num) >= 0.1:
+			flow.add_child(_create_stat_card("AOA", "%s°" % str(aoa_val), Color(0.7, 0.85, 1.0)))
 
 	telem_panel.add_child(flow)
 	return telem_panel
@@ -2090,13 +2093,23 @@ func _build_data_comparison_content(container: VBoxContainer, rec: Dictionary, i
 		var parts = player_val.split("|")
 		for part in parts:
 			var part_str = part.strip_edges()
-			if part_str != "":
-				var val_lbl = Label.new()
-				val_lbl.text = "• " + part_str
-				val_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-				val_lbl.add_theme_font_size_override("font_size", 17 if is_mob else 18)
-				val_lbl.add_theme_color_override("font_color", Color.WHITE)
-				your_vbox.add_child(val_lbl)
+			if part_str == "" or part_str == "---" or part_str == "N/A":
+				continue
+			# Filter out dummy/unretrieved AoA
+			if ("aoa" in part_str.to_lower() or "attack" in part_str.to_lower()) and ("0.0" in part_str or "n/a" in part_str.to_lower() or "---" in part_str):
+				continue
+			# Filter out dummy/unretrieved Smash
+			if "smash" in part_str.to_lower() and ("0.0" in part_str or "n/a" in part_str.to_lower() or "---" in part_str):
+				continue
+			# Filter out dummy Path
+			if "path: 0.0" in part_str.to_lower() and not (shot_data.has("ClubPath") or shot_data.has("Path") or shot_data.has("RawClubPath")):
+				continue
+			var val_lbl = Label.new()
+			val_lbl.text = "• " + part_str
+			val_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			val_lbl.add_theme_font_size_override("font_size", 17 if is_mob else 18)
+			val_lbl.add_theme_color_override("font_color", Color.WHITE)
+			your_vbox.add_child(val_lbl)
 
 		your_panel.add_child(your_vbox)
 		comp_flow.add_child(your_panel)
@@ -2129,7 +2142,11 @@ func _build_data_comparison_content(container: VBoxContainer, rec: Dictionary, i
 		pro_vbox.add_child(pro_title)
 
 		var bench_lbl = Label.new()
-		bench_lbl.text = str(rec.get("benchmark_val", "---"))
+		var bench_text = str(rec.get("benchmark_val", "---"))
+		var has_aoa_in_shot = (shot_data.has("AttackAngle") or shot_data.has("AngleOfAttack")) and abs(float(str(shot_data.get("AttackAngle", shot_data.get("AngleOfAttack", 0.0))).replace("+", "").replace("°", ""))) >= 0.1
+		if not has_aoa_in_shot and "AoA" in bench_text:
+			bench_text = bench_text.replace("| -1.0° to -3.0° AoA", "").replace("| +2.0° to +5.0° AoA", "").strip_edges()
+		bench_lbl.text = bench_text
 		bench_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		bench_lbl.add_theme_font_size_override("font_size", 17 if is_mob else 18)
 		bench_lbl.add_theme_color_override("font_color", Color.WHITE)

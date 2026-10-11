@@ -5,11 +5,53 @@ namespace LaunchMonitors.Common.Bluetooth.Apple;
 
 internal static class ObjCRuntime
 {
-    private const string LibObjC = "/usr/lib/libobjc.A.dylib";
-    private const string LibSystem = "/usr/lib/libSystem.B.dylib";
+    private const string LibObjC = "libobjc";
+    private const string LibSystem = "libSystem";
 
     private static bool _frameworksLoaded;
     private static readonly object _lock = new();
+
+    static ObjCRuntime()
+    {
+        if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
+        {
+            try
+            {
+                NativeLibrary.SetDllImportResolver(typeof(ObjCRuntime).Assembly, ResolveDllImport);
+            }
+            catch
+            {
+                // Can only be registered once per assembly
+            }
+        }
+    }
+
+    private static IntPtr ResolveDllImport(string libraryName, System.Reflection.Assembly assembly, DllImportSearchPath? searchPath)
+    {
+        if (libraryName == LibObjC || libraryName == "libobjc" || libraryName.Contains("libobjc"))
+        {
+            string[] candidates = ["/usr/lib/libobjc.A.dylib", "/usr/lib/libobjc.dylib", "libobjc", "libobjc.A.dylib", "__Internal"];
+            foreach (var candidate in candidates)
+            {
+                if (NativeLibrary.TryLoad(candidate, assembly, searchPath, out var handle))
+                {
+                    return handle;
+                }
+            }
+        }
+        else if (libraryName == LibSystem || libraryName == "libSystem" || libraryName.Contains("libSystem"))
+        {
+            string[] candidates = ["/usr/lib/libSystem.B.dylib", "/usr/lib/libSystem.dylib", "libSystem", "libSystem.B.dylib", "__Internal"];
+            foreach (var candidate in candidates)
+            {
+                if (NativeLibrary.TryLoad(candidate, assembly, searchPath, out var handle))
+                {
+                    return handle;
+                }
+            }
+        }
+        return IntPtr.Zero;
+    }
 
     [DllImport(LibSystem, EntryPoint = "dlopen")]
     public static extern IntPtr dlopen(string path, int mode);
@@ -149,25 +191,59 @@ internal static class ObjCRuntime
         {
             if (_frameworksLoaded) return;
 
+            try
+            {
+                IntPtr existingCls = objc_getClass("CBCentralManager");
+                if (existingCls != IntPtr.Zero)
+                {
+                    _frameworksLoaded = true;
+                    return;
+                }
+            }
+            catch
+            {
+            }
+
             const int RTLD_NOW = 2;
             const int RTLD_GLOBAL = 8;
             int flags = RTLD_NOW | RTLD_GLOBAL;
 
-            // Load Foundation & CoreBluetooth
-            IntPtr fHandle = dlopen("/System/Library/Frameworks/Foundation.framework/Foundation", flags);
-            if (fHandle == IntPtr.Zero)
+            try
             {
-                _ = dlopen("Foundation", flags);
+                // Load Foundation
+                IntPtr fHandle = dlopen("/System/Library/Frameworks/Foundation.framework/Foundation", flags);
+                if (fHandle == IntPtr.Zero)
+                {
+                    fHandle = dlopen("Foundation.framework/Foundation", flags);
+                }
+                if (fHandle == IntPtr.Zero)
+                {
+                    _ = dlopen("Foundation", flags);
+                }
+            }
+            catch
+            {
             }
 
-            IntPtr cbHandle = dlopen("/System/Library/Frameworks/CoreBluetooth.framework/CoreBluetooth", flags);
-            if (cbHandle == IntPtr.Zero)
+            try
             {
-                cbHandle = dlopen("CoreBluetooth.framework/CoreBluetooth", flags);
+                // Load CoreBluetooth
+                IntPtr cbHandle = dlopen("/System/Library/Frameworks/CoreBluetooth.framework/CoreBluetooth", flags);
+                if (cbHandle == IntPtr.Zero)
+                {
+                    cbHandle = dlopen("CoreBluetooth.framework/CoreBluetooth", flags);
+                }
+                if (cbHandle == IntPtr.Zero)
+                {
+                    cbHandle = dlopen("CoreBluetooth", flags);
+                }
+                if (cbHandle == IntPtr.Zero)
+                {
+                    cbHandle = dlopen("/System/Library/Frameworks/CoreBluetooth.framework/Versions/Current/CoreBluetooth", flags);
+                }
             }
-            if (cbHandle == IntPtr.Zero)
+            catch
             {
-                _ = dlopen("CoreBluetooth", flags);
             }
 
             _frameworksLoaded = true;
