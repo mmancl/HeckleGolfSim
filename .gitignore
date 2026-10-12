@@ -77,6 +77,7 @@ scripts/tools/commercial_generator/
 *.pbf
 /tmp/
 scratch_aar/
+Courses/CachedGeometry/
 
 # Developer bypass code
 dev_bypass_code.txt

@@ -6,13 +6,18 @@ This catalog allows players to search and select golf courses instantly without 
 external geocoding (Photon/Nominatim) or Overpass APIs, preventing rate-limiting and bans.
 """
 
+import concurrent.futures
+import glob
+import gzip
 import json
 import os
+import re
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 CATALOG_PATH = os.path.join(PROJECT_ROOT, "Courses", "Catalog", "golf_courses.json")
+CACHE_DIR = os.path.join(PROJECT_ROOT, "Courses", "CachedGeometry")
 
 # Curated catalog of iconic, championship, and popular golf courses worldwide
 # Each entry contains: name, lat, lon, location, hole_count, last_updated
@@ -208,18 +213,126 @@ DEFAULT_COURSES = [
 ]
 
 
-def generate_catalog():
+def slugify(text: str) -> str:
+    """Generate a clean, normalized filesystem slug from a course name."""
+    clean = re.sub(r'[^a-zA-Z0-9]+', '_', text.lower()).strip('_')
+    return clean
+
+
+def _extract_course_from_geometry_file(file_path: str, curated_by_slug: dict) -> dict:
+    base = os.path.basename(file_path).replace('.json.gz', '').replace('.json', '')
+    if base in curated_by_slug:
+        return curated_by_slug[base]
+
+    try:
+        if file_path.endswith('.gz'):
+            with gzip.open(file_path, 'rt', encoding='utf-8') as fp:
+                data = json.load(fp)
+        else:
+            with open(file_path, 'r', encoding='utf-8') as fp:
+                data = json.load(fp)
+
+        target_name = None
+        target_holes = 18
+        lat, lon = 0.0, 0.0
+
+        elements = data.get('elements', [])
+
+        # 1. Match element whose slug equals base
+        for el in elements:
+            t = el.get('tags', {})
+            if t.get('name') and (t.get('leisure') == 'golf_course' or 'golf' in t):
+                if slugify(t['name']) == base:
+                    target_name = t['name'].strip()
+                    if 'holes' in t:
+                        try:
+                            target_holes = int(t['holes'])
+                        except (ValueError, TypeError):
+                            pass
+                    break
+
+        # 2. Fallback to any leisure=golf_course with a name
+        if not target_name:
+            for el in elements:
+                t = el.get('tags', {})
+                if t.get('leisure') == 'golf_course' and t.get('name') and t.get('sport') != 'disc_golf':
+                    target_name = t['name'].strip()
+                    if 'holes' in t:
+                        try:
+                            target_holes = int(t['holes'])
+                        except (ValueError, TypeError):
+                            pass
+                    break
+
+        # 3. Fallback to base name formatted as title
+        if not target_name:
+            target_name = base.replace('_', ' ').title()
+
+        # Find approximate lat/lon from nodes
+        for el in elements:
+            if el.get('type') == 'node' and 'lat' in el and 'lon' in el:
+                lat = round(float(el['lat']), 6)
+                lon = round(float(el['lon']), 6)
+                break
+
+        return {
+            'name': target_name,
+            'lat': lat,
+            'lon': lon,
+            'location': 'Cached Course',
+            'hole_count': target_holes,
+            'last_updated': '2026-10-12'
+        }
+    except Exception:
+        return None
+
+
+def generate_catalog(scan_cache: bool = True):
     os.makedirs(os.path.dirname(CATALOG_PATH), exist_ok=True)
 
-    # Sort courses alphabetically by name
-    courses = sorted(DEFAULT_COURSES, key=lambda c: c["name"].lower())
+    curated_map = {c['name'].lower(): dict(c) for c in DEFAULT_COURSES}
+    curated_by_slug = {slugify(c['name']): c for c in DEFAULT_COURSES}
+
+    merged = dict(curated_map)
+
+    if scan_cache and os.path.isdir(CACHE_DIR):
+        pattern = os.path.join(CACHE_DIR, '*.json*')
+        cache_files = glob.glob(pattern)
+        print(f"Found {len(cache_files)} cached geometry files in {CACHE_DIR}.")
+
+        if cache_files:
+            workers = min(16, (os.cpu_count() or 4) * 2)
+            print(f"Extracting course metadata using {workers} parallel threads...")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                extracted_results = list(pool.map(
+                    lambda f: _extract_course_from_geometry_file(f, curated_by_slug),
+                    cache_files
+                ))
+
+            added_count = 0
+            for item in extracted_results:
+                if not item or not item.get('name'):
+                    continue
+                k = item['name'].lower()
+                if k not in merged:
+                    merged[k] = item
+                    added_count += 1
+                else:
+                    if merged[k].get('lat', 0.0) == 0.0 and item.get('lat', 0.0) != 0.0:
+                        merged[k]['lat'] = item['lat']
+                        merged[k]['lon'] = item['lon']
+
+            print(f"Extracted {added_count} new courses from cached geometry folder.")
+
+    final_courses = sorted(merged.values(), key=lambda c: c["name"].lower())
 
     with open(CATALOG_PATH, "w", encoding="utf-8") as f:
-        json.dump(courses, f, indent=2, ensure_ascii=False)
+        json.dump(final_courses, f, indent=2, ensure_ascii=False)
 
     print(f"Successfully generated offline golf catalog at:\n  {CATALOG_PATH}")
-    print(f"Total courses: {len(courses)}")
+    print(f"Total courses: {len(final_courses)}")
 
 
 if __name__ == "__main__":
     generate_catalog()
+

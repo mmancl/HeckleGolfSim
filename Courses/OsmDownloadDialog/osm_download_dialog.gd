@@ -40,6 +40,7 @@ const INSTRUCTION_HEADER_TEXT = "Select from the cached courses, or if not seen 
 
 var _loader: Node = null
 var _all_cached_courses: Array = []
+var _cached_names_set: Dictionary = {}
 var _displayed_courses: Array = []
 var _download_in_progress: bool = false
 var _download_token: int = 0
@@ -261,6 +262,8 @@ func record_osm_download_success(course_name: String) -> void:
 
 func _load_cached_courses() -> void:
 	_all_cached_courses.clear()
+	_cached_names_set.clear()
+
 	var catalog_path = "res://Courses/Catalog/golf_courses.json"
 	if FileAccess.file_exists(catalog_path):
 		var file = FileAccess.open(catalog_path, FileAccess.ModeFlags.READ)
@@ -275,19 +278,23 @@ func _load_cached_courses() -> void:
 						entry["is_catalog"] = true
 						entry["is_cached"] = true
 						_all_cached_courses.append(entry)
+						var c_name = entry.get("name", "")
+						if not c_name.is_empty():
+							_cached_names_set[c_name.to_lower()] = true
 
 	if _loader != null and _loader.has_method("GetCachedCourses"):
 		var loader_courses = _loader.call("GetCachedCourses")
 		if loader_courses is Array and not loader_courses.is_empty():
 			for lc in loader_courses:
-				var exists = false
-				var lc_name = lc.get("name", "")
-				for ec in _all_cached_courses:
-					if ec.get("name", "").nocasecmp_to(lc_name) == 0:
-						exists = true
-						break
-				if not exists:
-					_all_cached_courses.append(lc)
+				if lc is Dictionary:
+					var lc_name = lc.get("name", "")
+					var lower_name = lc_name.to_lower()
+					if not lower_name.is_empty() and not _cached_names_set.has(lower_name):
+						_cached_names_set[lower_name] = true
+						_all_cached_courses.append(lc)
+
+	# Also scan user://cached_geometry and res://Courses/CachedGeometry for loose geometry files
+	_scan_loose_cached_geometries()
 
 	# Sort all cached courses alphabetically by name
 	_all_cached_courses.sort_custom(func(a, b):
@@ -295,16 +302,51 @@ func _load_cached_courses() -> void:
 	)
 
 
+func _scan_loose_cached_geometries() -> void:
+	var cache_dirs = ["user://cached_geometry", "res://Courses/CachedGeometry"]
+	for c_dir in cache_dirs:
+		if not DirAccess.dir_exists_absolute(c_dir):
+			continue
+		var dir = DirAccess.open(c_dir)
+		if dir == null:
+			continue
+		dir.list_dir_begin()
+		var file_name = dir.get_next()
+		while file_name != "":
+			if not dir.current_is_dir() and (file_name.ends_with(".json.gz") or file_name.ends_with(".json")):
+				var f_slug = file_name.replace(".json.gz", "").replace(".json", "")
+				var lower_slug = f_slug.to_lower()
+				var readable_title = f_slug.replace("_", " ").capitalize()
+				var lower_title = readable_title.to_lower()
+				if not _cached_names_set.has(lower_slug) and not _cached_names_set.has(lower_title):
+					_cached_names_set[lower_slug] = true
+					_cached_names_set[lower_title] = true
+					var entry = {
+						"name": readable_title,
+						"lat": 0.0,
+						"lon": 0.0,
+						"location": "Cached Course",
+						"hole_count": 18,
+						"last_updated": "",
+						"is_catalog": false,
+						"is_cached": true
+					}
+					_all_cached_courses.append(entry)
+			file_name = dir.get_next()
+		dir.list_dir_end()
+
+
 func _is_course_cached(course: Dictionary) -> bool:
 	if course.get("is_catalog", false) or course.get("is_cached", false):
 		return true
 	var c_name = course.get("name", "")
 	if not c_name.is_empty():
-		for cached in _all_cached_courses:
-			if cached.get("name", "").nocasecmp_to(c_name) == 0:
-				return true
+		var lower_name = c_name.to_lower()
+		if _cached_names_set.has(lower_name):
+			return true
 		if _loader != null and _loader.has_method("IsCourseCached"):
 			if bool(_loader.call("IsCourseCached", c_name)):
+				_cached_names_set[lower_name] = true
 				return true
 	return false
 

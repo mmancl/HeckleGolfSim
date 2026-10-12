@@ -640,6 +640,7 @@ func _setup_hud() -> void:
 	hud_widget.add_theme_constant_override("separation", 0)
 	hud_top_left_widget = hud_widget
 	top_bar.add_child(hud_widget)
+	hud_widget.resized.connect(func(): _update_minimap_position.call_deferred())
 	
 	# Row 1: Player Name (Left) | Overall Score (Right)
 	var row1 = HBoxContainer.new()
@@ -1907,6 +1908,7 @@ func _setup_hud() -> void:
 			_refresh_manage_players_dropdown()
 			_populate_manage_players()
 			_populate_scorecard("toggle")
+			_update_distance_queue()
 			select_opt.call_deferred("grab_focus")
 	)
 	
@@ -3058,14 +3060,20 @@ func _update_distance_queue() -> void:
 
 func _get_normal_minimap_top_y() -> float:
 	var base_top = 30.0
-	var widget_h = 104.0 # Default base height of Row 1 + Row 2
+	var base_card_h = 104.0 # Base height of Row 1 + Row 2
+	var gap = 8.0
+	if hud_distance_queue_panel != null and hud_distance_queue_panel.visible and hud_distance_queue_vbox != null:
+		var row_count = hud_distance_queue_vbox.get_child_count()
+		if row_count > 0:
+			var queue_h = 10.0 + float(row_count) * 22.0 + float(max(0, row_count - 1)) * 3.0
+			return base_top + base_card_h + queue_h + gap
 	if hud_top_left_widget != null and is_instance_valid(hud_top_left_widget):
 		var min_h = hud_top_left_widget.get_combined_minimum_size().y
 		if min_h > 0.0:
-			widget_h = min_h
+			return base_top + min_h + gap
 		elif hud_top_left_widget.size.y > 0.0:
-			widget_h = hud_top_left_widget.size.y
-	return base_top + widget_h + 8.0
+			return base_top + hud_top_left_widget.size.y + gap
+	return base_top + base_card_h + gap
 
 func _get_normal_minimap_height() -> float:
 	var target_bottom = 478.0
@@ -5873,6 +5881,7 @@ func _populate_manage_players() -> void:
 				MultiplayerManager.toggle_player_active(i, true)
 				_populate_manage_players()
 				_populate_scorecard("toggle")
+				_update_distance_queue()
 			)
 		row.add_child(toggle_btn)
 		list_node.add_child(row)
@@ -6025,6 +6034,7 @@ func _show_add_player_dialog(p_name: String, tee_color: String) -> void:
 		_refresh_manage_players_dropdown()
 		_populate_manage_players()
 		_populate_scorecard("toggle")
+		_update_distance_queue()
 		var players_btn = find_child("ManagePlayersButton", true, false) as Control
 		if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
 			players_btn.call_deferred("grab_focus")
@@ -6048,6 +6058,7 @@ func _show_add_player_dialog(p_name: String, tee_color: String) -> void:
 		_populate_manage_players()
 		_populate_scorecard("toggle")
 		_update_catch_up_hud()
+		_update_distance_queue()
 		var players_btn = find_child("ManagePlayersButton", true, false) as Control
 		if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
 			players_btn.call_deferred("grab_focus")

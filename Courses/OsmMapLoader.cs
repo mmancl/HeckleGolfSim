@@ -3182,6 +3182,52 @@ public partial class OsmMapLoader : Node
             dict["is_cached"] = true;
             results.Add(dict);
         }
+
+        // Also discover any loose cached geometry files not in the catalog
+        var seenSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in sorted)
+        {
+            string s = GetCourseGeometrySlug(item.Name);
+            if (!string.IsNullOrEmpty(s))
+                seenSlugs.Add(s);
+        }
+
+        string[] cacheDirs = new[] { "user://cached_geometry", "res://Courses/CachedGeometry" };
+        foreach (var cDir in cacheDirs)
+        {
+            if (!Godot.DirAccess.DirExistsAbsolute(cDir)) continue;
+            using var dir = Godot.DirAccess.Open(cDir);
+            if (dir == null) continue;
+            dir.ListDirBegin();
+            string f = dir.GetNext();
+            while (!string.IsNullOrEmpty(f))
+            {
+                if (!dir.CurrentIsDir() && (f.EndsWith(".json.gz", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
+                {
+                    string fSlug = f.EndsWith(".json.gz", StringComparison.OrdinalIgnoreCase)
+                        ? f.Substring(0, f.Length - 8)
+                        : f.Substring(0, f.Length - 5);
+                    if (!seenSlugs.Contains(fSlug))
+                    {
+                        seenSlugs.Add(fSlug);
+                        string title = System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(fSlug.Replace('_', ' '));
+                        var dict = new Godot.Collections.Dictionary();
+                        dict["name"] = title;
+                        dict["lat"] = 0.0;
+                        dict["lon"] = 0.0;
+                        dict["location"] = "Cached Course";
+                        dict["hole_count"] = 18;
+                        dict["last_updated"] = "";
+                        dict["is_catalog"] = false;
+                        dict["is_cached"] = true;
+                        results.Add(dict);
+                    }
+                }
+                f = dir.GetNext();
+            }
+            dir.ListDirEnd();
+        }
+
         return results;
     }
 
@@ -3195,7 +3241,9 @@ public partial class OsmMapLoader : Node
         if (!string.IsNullOrWhiteSpace(slug))
         {
             if (Godot.FileAccess.FileExists($"res://Courses/CachedGeometry/{slug}.json.gz") ||
-                Godot.FileAccess.FileExists($"res://Courses/CachedGeometry/{slug}.json"))
+                Godot.FileAccess.FileExists($"res://Courses/CachedGeometry/{slug}.json") ||
+                Godot.FileAccess.FileExists($"user://cached_geometry/{slug}.json.gz") ||
+                Godot.FileAccess.FileExists($"user://cached_geometry/{slug}.json"))
             {
                 return true;
             }

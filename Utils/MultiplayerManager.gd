@@ -507,7 +507,7 @@ func get_target_pin_position() -> Vector3:
 
 func get_distance_queue(custom_pin_pos: Variant = null) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
-	if players.size() <= 1:
+	if players.size() <= 1 or is_in_catch_up:
 		return result
 	
 	var active_p = get_active_player()
@@ -553,9 +553,36 @@ func get_distance_queue(custom_pin_pos: Variant = null) -> Array[Dictionary]:
 			"score_str": score_str
 		})
 	
-	eligible.sort_custom(func(a, b):
-		return a["distance_yards"] > b["distance_yards"]
-	)
+	var mode = turn_order_mode
+	var gs_mode = _get_global_settings()
+	if mode.is_empty() and gs_mode != null and gs_mode.range_settings != null and gs_mode.range_settings.turn_order_mode != null:
+		mode = gs_mode.range_settings.turn_order_mode.value
+
+	if game_mode in ["Scramble", "2v2 Scramble"]:
+		eligible.sort_custom(func(a, b):
+			var a_strokes = a["player"].get("strokes", 0)
+			var b_strokes = b["player"].get("strokes", 0)
+			if a_strokes != b_strokes:
+				return a_strokes < b_strokes
+			return a["distance_yards"] > b["distance_yards"]
+		)
+	elif mode == "Stay Up":
+		eligible.sort_custom(func(a, b):
+			var a_tee = (a["player"].get("strokes", 0) == 0)
+			var b_tee = (b["player"].get("strokes", 0) == 0)
+			if a_tee != b_tee:
+				return a_tee
+			return a["distance_yards"] > b["distance_yards"]
+		)
+	elif mode == "Full Hole":
+		eligible.sort_custom(func(a, b):
+			return players.find(a["player"]) < players.find(b["player"])
+		)
+	else:
+		# Classic and default: furthest from pin hits next
+		eligible.sort_custom(func(a, b):
+			return a["distance_yards"] > b["distance_yards"]
+		)
 	
 	if eligible.size() > 3:
 		eligible = eligible.slice(0, 3)
@@ -972,6 +999,7 @@ func select_next_player() -> void:
 
 	if game_mode == "Closest to Pin":
 		_select_next_player_ctp()
+		emit_signal("distance_queue_updated")
 		return
 
 	var remaining_players = players.filter(func(p): return p.get("active", true) and not p.get("paused", false) and not p["holed_out"])
@@ -1008,6 +1036,7 @@ func select_next_player() -> void:
 			active_player_index = players.find(next_player)
 			emit_signal("active_player_changed", get_active_player())
 			print("[MultiplayerManager] Scramble next player: %s" % get_active_player()["name"])
+			emit_signal("distance_queue_updated")
 			return
 
 	var mode = turn_order_mode
@@ -1022,6 +1051,105 @@ func select_next_player() -> void:
 			_select_next_player_classic(remaining_players)
 		_:
 			_select_next_player_stay_up(remaining_players)
+
+	emit_signal("distance_queue_updated")
+
+
+func recalculate_turn_order() -> void:
+	if players.is_empty():
+		return
+
+	if is_in_catch_up:
+		emit_signal("distance_queue_updated")
+		return
+
+	var old_active_idx = active_player_index
+	var target_active_idx = _determine_next_player_index()
+
+	if target_active_idx >= 0 and target_active_idx < players.size() and target_active_idx != old_active_idx:
+		active_player_index = target_active_idx
+		emit_signal("active_player_changed", get_active_player())
+		print("[MultiplayerManager] Turn order recalculated: active player is now %s" % get_active_player().get("name", "Player"))
+
+	emit_signal("distance_queue_updated")
+
+
+func _determine_next_player_index() -> int:
+	var remaining_players = players.filter(func(p): return p.get("active", true) and not p.get("paused", false) and not p.get("holed_out", false))
+	if remaining_players.is_empty():
+		return active_player_index
+
+	var cur_player = get_active_player()
+
+	if game_mode == "Closest to Pin":
+		if not cur_player.is_empty() and cur_player.get("strokes", 0) == 0 and cur_player.get("active", true) and not cur_player.get("paused", false):
+			return active_player_index
+		var unplayed = remaining_players.filter(func(p): return p.get("strokes", 0) == 0)
+		if not unplayed.is_empty():
+			return players.find(unplayed[0])
+		return active_player_index
+
+	if game_mode in ["Scramble", "2v2 Scramble"]:
+		var min_strokes = 9999
+		for p in remaining_players:
+			if p.get("strokes", 0) < min_strokes:
+				min_strokes = p.get("strokes", 0)
+		if not cur_player.is_empty() and cur_player.get("strokes", 0) == min_strokes and cur_player.get("active", true) and not cur_player.get("paused", false) and not cur_player.get("holed_out", false):
+			return active_player_index
+		var min_stroke_players = remaining_players.filter(func(p): return p.get("strokes", 0) == min_strokes)
+		if not min_stroke_players.is_empty():
+			return players.find(min_stroke_players[0])
+		return active_player_index
+
+	var mode = turn_order_mode
+	var gs_mode = _get_global_settings()
+	if mode.is_empty() and gs_mode != null and gs_mode.range_settings != null and gs_mode.range_settings.turn_order_mode != null:
+		mode = gs_mode.range_settings.turn_order_mode.value
+
+	match mode:
+		"Full Hole":
+			if not cur_player.is_empty() and (cur_player in remaining_players):
+				return active_player_index
+			for p in players:
+				if p in remaining_players:
+					return players.find(p)
+			return active_player_index
+
+		"Classic":
+			var target_pin := _get_target_pin_position()
+			var furthest_player = null
+			var max_dist := -1.0
+			for p in remaining_players:
+				var flat_pos := Vector3(p["position"].x, 0.0, p["position"].z)
+				var dist = flat_pos.distance_to(target_pin)
+				if dist > max_dist:
+					max_dist = dist
+					furthest_player = p
+			if furthest_player != null:
+				return players.find(furthest_player)
+			return active_player_index
+
+		_: # "Stay Up" (default)
+			# 1. Tee shots: All players tee off first
+			var tee_players = remaining_players.filter(func(p): return p.get("strokes", 0) == 0)
+			if not tee_players.is_empty():
+				if not cur_player.is_empty() and (cur_player in tee_players):
+					return active_player_index
+				return players.find(tee_players[0])
+
+			# 2. Furthest from hole hits
+			var target_pin := _get_target_pin_position()
+			var furthest_player = null
+			var max_dist := -1.0
+			for p in remaining_players:
+				var flat_pos := Vector3(p["position"].x, 0.0, p["position"].z)
+				var dist = flat_pos.distance_to(target_pin)
+				if dist > max_dist:
+					max_dist = dist
+					furthest_player = p
+			if furthest_player != null:
+				return players.find(furthest_player)
+			return active_player_index
 
 
 func _get_target_pin_position() -> Vector3:
@@ -1444,6 +1572,7 @@ func resume_player(idx: int, mode: String = "auto") -> void:
 			emit_signal("active_player_changed", get_active_player())
 		else:
 			select_next_player()
+		recalculate_turn_order()
 	elif mode == "current_hole":
 		# Group has advanced; player chooses to skip missed holes with dashes
 		player["paused"] = false
@@ -1471,6 +1600,7 @@ func resume_player(idx: int, mode: String = "auto") -> void:
 			
 		print("[MultiplayerManager] Player %s skipped missed holes with dashes and joined Hole %d." % [player["name"], get_current_hole_number()])
 		select_next_player()
+		recalculate_turn_order()
 	elif mode == "catch_up":
 		# Group has advanced; player chooses to catch up solo from where they paused!
 		player["paused"] = false
@@ -1722,6 +1852,7 @@ func add_new_player_with_mode(player_name: String, tee_color: String, mode: Stri
 		register_player(player_name, p_email, p_avatar, [], "", "mid_handicap", p_handedness)
 		print("[MultiplayerManager] Added player %s mid-game in catch-up mode." % player_name)
 		start_catch_up_mode(p, 0, current_hole_index, false)
+		recalculate_turn_order()
 	else:
 		# Mark all previous holes as "-" (null)
 		for i in range(current_hole_index):
@@ -1743,6 +1874,7 @@ func add_new_player_with_mode(player_name: String, tee_color: String, mode: Stri
 		register_player(player_name, p_email, p_avatar, [], "", "mid_handicap", p_handedness)
 		print("[MultiplayerManager] Added new player mid-game: %s on hole %d" % [player_name, get_current_hole_number()])
 		save_current_match()
+		recalculate_turn_order()
 
 func toggle_player_active(idx: int, active: bool) -> void:
 	if idx < 0 or idx >= players.size():
@@ -1767,6 +1899,8 @@ func toggle_player_active(idx: int, active: bool) -> void:
 		# If they were the active player, select next
 		if active_player_index == idx:
 			select_next_player()
+		else:
+			recalculate_turn_order()
 	else:
 		# Mark all completed holes as "-" (null) if they don't have a score
 		for i in range(current_hole_index):
@@ -1797,6 +1931,7 @@ func toggle_player_active(idx: int, active: bool) -> void:
 		if current_active.is_empty() or not current_active.get("active", true):
 			active_player_index = idx
 			emit_signal("active_player_changed", get_active_player())
+		recalculate_turn_order()
 			
 	save_current_match()
 
