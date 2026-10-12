@@ -386,6 +386,12 @@ func get_height(x: float, z: float) -> float:
 		
 	return base_slope + undulation + outer_mound
 
+func clamp_camera_position(pos: Vector3, min_clearance: float = 0.35) -> Vector3:
+	var terrain_h = get_height(pos.x, pos.z)
+	if pos.y < terrain_h + min_clearance:
+		pos.y = terrain_h + min_clearance
+	return pos
+
 func get_green_radius(angle: float) -> float:
 	var r = 18.0
 	# North-South elongation
@@ -1135,6 +1141,7 @@ func _update_hole_button_labels() -> void:
 	for i in range(holes.size()):
 		if i < hole_buttons.size():
 			var dist_ft = hole_data[i]["dist_ft"]
+			var is_selected = (i == selected_hole_index)
 			if pvp_mode:
 				var marks: Array[String] = []
 				for p in players_list:
@@ -1142,21 +1149,25 @@ func _update_hole_button_labels() -> void:
 					if p.has("completed") and i < p["completed"].size():
 						is_done = p["completed"][i]
 					marks.append("✓" if is_done else "○")
-				var prefix = "▶ " if i == selected_hole_index else "  "
+				var prefix = "▶ " if is_selected else "  "
 				var marks_str = "|".join(marks)
 				hole_buttons[i].text = "%s%d ft [%s]" % [prefix, dist_ft, marks_str]
-				if i == selected_hole_index:
+				if is_selected:
 					var active_col = get_active_player_color()
 					hole_buttons[i].add_theme_color_override("font_color", active_col)
+					_apply_btn_style(hole_buttons[i], Color(0.18, 0.38, 0.55), Color(0.24, 0.48, 0.70))
 				else:
 					hole_buttons[i].remove_theme_color_override("font_color")
+					_apply_btn_style(hole_buttons[i], Color(0.12, 0.20, 0.28), Color(0.18, 0.30, 0.42))
 			else:
-				if i == selected_hole_index:
+				if is_selected:
 					hole_buttons[i].text = "Hole %d (%d ft) ▶" % [i + 1, dist_ft]
 					hole_buttons[i].add_theme_color_override("font_color", Color(0.0, 0.8, 1.0))
+					_apply_btn_style(hole_buttons[i], Color(0.18, 0.38, 0.55), Color(0.24, 0.48, 0.70))
 				else:
 					hole_buttons[i].text = "Hole %d (%d ft)" % [i + 1, dist_ft]
 					hole_buttons[i].remove_theme_color_override("font_color")
+					_apply_btn_style(hole_buttons[i], Color(0.12, 0.20, 0.28), Color(0.18, 0.30, 0.42))
 
 func _spawn_flagpole(pos: Vector3) -> void:
 	if has_node("FlagPin"):
@@ -1268,7 +1279,8 @@ func _update_aim_and_camera() -> void:
 	
 	# Position camera behind the ball closer to ball and ground so slope is easy to read
 	var back_dir = Vector3(-cos(angle_rad), 0.0, -sin(angle_rad)).normalized()
-	var cam_pos = ball_pos + back_dir * 1.05 + Vector3.UP * 0.6
+	var cam_pos = ball_pos + back_dir * 1.35 + Vector3.UP * 0.8
+	cam_pos = clamp_camera_position(cam_pos, 0.35)
 	
 	var dist = ball_pos.distance_to(target_hole)
 	var look_dist = clamp(dist * 0.4, 2.0, 6.0)
@@ -1400,9 +1412,20 @@ func _physics_process(delta: float) -> void:
 		if ball_state == PhysicsEnums.BallState.FLIGHT or ball_state == PhysicsEnums.BallState.ROLLOUT:
 			camera_following = true
 			var ball_pos = player.ball.global_position
-			var target_cam_pos = ball_pos + last_camera_offset
-			$Camera3D.global_position = $Camera3D.global_position.lerp(target_cam_pos, delta * 8.0)
-			# Follow the ball while maintaining the current address camera angle
+			# Safety boundary check: keep ball on generated terrain
+			if Vector2(ball_pos.x, ball_pos.z).length() > 42.0:
+				player.ball.velocity = Vector3.ZERO
+				player.ball._enter_rest_state()
+				return
+
+			var target_cam_pos = clamp_camera_position(ball_pos + last_camera_offset, 0.35)
+			var cur_cam_pos = $Camera3D.global_position
+			var new_cam_pos = cur_cam_pos.lerp(target_cam_pos, delta * 8.0)
+			$Camera3D.global_position = clamp_camera_position(new_cam_pos, 0.35)
+			# Follow the ball while maintaining view of target/ball
+			var look_target = ball_pos + Vector3.UP * 0.15
+			if not $Camera3D.global_position.is_equal_approx(look_target):
+				$Camera3D.look_at(look_target)
 		else:
 			if camera_following:
 				camera_following = false
@@ -2092,11 +2115,20 @@ func _apply_btn_style(btn: Button, norm_color: Color, hov_color: Color) -> void:
 	style_hover.border_width_bottom = 1
 	style_hover.border_color = Color(1, 1, 1, 0.3)
 	
+	var style_focus = style_hover.duplicate()
+	style_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	style_focus.border_width_left = 3
+	style_focus.border_width_top = 3
+	style_focus.border_width_right = 3
+	style_focus.border_width_bottom = 3
+	
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_hover)
-	btn.add_theme_stylebox_override("focus", style_normal)
+	btn.add_theme_stylebox_override("focus", style_focus)
 	btn.add_theme_color_override("font_color", Color.WHITE)
+	btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	btn.add_theme_color_override("font_focus_color", Color.WHITE)
 	if btn.custom_minimum_size.y < 48:
 		btn.custom_minimum_size.y = 48
 	if not btn.has_theme_font_size_override("font_size"):
@@ -2121,10 +2153,17 @@ func _apply_circular_button_style(btn: Button, bg_color: Color) -> void:
 	style_hover.bg_color = bg_color.lightened(0.15)
 	style_hover.border_color = Color(1.0, 1.0, 1.0, 0.5)
 
+	var style_focus = style_hover.duplicate()
+	style_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	style_focus.border_width_left = 3
+	style_focus.border_width_top = 3
+	style_focus.border_width_right = 3
+	style_focus.border_width_bottom = 3
+
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_hover)
-	btn.add_theme_stylebox_override("focus", style_normal)
+	btn.add_theme_stylebox_override("focus", style_focus)
 
 func is_stats_visible() -> bool:
 	if grid_canvas == null:

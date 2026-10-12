@@ -58,9 +58,27 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 			else:
 				side_text = ("R" if side_distance >= 0 else "L") + ("%.1f" % abs(side_distance))
 			ball_data["Offline"] = side_text
+			var rollout_enabled := true
+			if Engine.has_singleton("GlobalSettings"):
+				var gs = Engine.get_singleton("GlobalSettings")
+				if gs.get("range_settings") != null and gs.range_settings.get("ball_rollout_enabled") != null:
+					rollout_enabled = bool(gs.range_settings.ball_rollout_enabled.value)
+			elif is_instance_valid(Engine.get_main_loop()):
+				var root = Engine.get_main_loop().get("root") if Engine.get_main_loop().has_method("get") else null
+				if root != null and root.has_node("GlobalSettings"):
+					var gs = root.get_node("GlobalSettings")
+					if gs.get("range_settings") != null and gs.range_settings.get("ball_rollout_enabled") != null:
+						rollout_enabled = bool(gs.range_settings.ball_rollout_enabled.value)
+
+			if not rollout_enabled or not is_final_rest:
+				ball_data["Rollout"] = "---"
+			else:
+				var rollout_yd = maxf(0.0, (dist_m - carry_val) * m2yd)
+				ball_data["Rollout"] = "%.1f" % rollout_yd
 		else:
 			ball_data["Distance"] = "---"
 			ball_data["Carry"] = "---"
+			ball_data["Rollout"] = "---"
 			ball_data["Apex"] = "---"
 			ball_data["Offline"] = "---"
 	else:
@@ -85,9 +103,28 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 			else:
 				side_text = ("R" if side_distance >= 0 else "L") + ("%.1f" % abs(side_distance))
 			ball_data["Offline"] = side_text
+
+			var rollout_enabled := true
+			if Engine.has_singleton("GlobalSettings"):
+				var gs = Engine.get_singleton("GlobalSettings")
+				if gs.get("range_settings") != null and gs.range_settings.get("ball_rollout_enabled") != null:
+					rollout_enabled = bool(gs.range_settings.ball_rollout_enabled.value)
+			elif is_instance_valid(Engine.get_main_loop()):
+				var root = Engine.get_main_loop().get("root") if Engine.get_main_loop().has_method("get") else null
+				if root != null and root.has_node("GlobalSettings"):
+					var gs = root.get_node("GlobalSettings")
+					if gs.get("range_settings") != null and gs.range_settings.get("ball_rollout_enabled") != null:
+						rollout_enabled = bool(gs.range_settings.ball_rollout_enabled.value)
+
+			if not rollout_enabled or not is_final_rest:
+				ball_data["Rollout"] = "---"
+			else:
+				var rollout_m = maxf(0.0, dist_m - carry_val)
+				ball_data["Rollout"] = "%.1f" % rollout_m
 		else:
 			ball_data["Distance"] = "---"
 			ball_data["Carry"] = "---"
+			ball_data["Rollout"] = "---"
 			ball_data["Apex"] = "---"
 			ball_data["Offline"] = "---"
 	

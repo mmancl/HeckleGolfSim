@@ -215,6 +215,11 @@ public partial class OsmMapLoader : Node
         return "";
     }
 
+    public string LoadPrepackagedGeometry(string courseName)
+    {
+        return TryLoadPrepackagedGeometryAsync(courseName).GetAwaiter().GetResult();
+    }
+
     private static void TrySaveUserCachedGeometry(string courseName, string json)
     {
         try
@@ -268,14 +273,14 @@ public partial class OsmMapLoader : Node
         string query = $@"
         [out:json][timeout:60];
         (
-          nwr(around:1000, {latStr}, {lonStr})[""leisure""=""golf_course""];
-          nwr(around:1000, {latStr}, {lonStr})[""golf""];
-          nwr(around:1000, {latStr}, {lonStr})[""natural""=""water""];
-          nwr(around:1000, {latStr}, {lonStr})[""natural""=""wood""];
-          nwr(around:1000, {latStr}, {lonStr})[""natural""=""tree""];
-          nwr(around:1000, {latStr}, {lonStr})[""natural""=""tree_row""];
-          nwr(around:1000, {latStr}, {lonStr})[""golf""=""tree""];
-          nwr(around:1000, {latStr}, {lonStr})[""landuse""=""forest""];
+          nwr(around:1800, {latStr}, {lonStr})[""leisure""=""golf_course""];
+          nwr(around:1800, {latStr}, {lonStr})[""golf""];
+          nwr(around:1800, {latStr}, {lonStr})[""natural""=""water""];
+          nwr(around:1800, {latStr}, {lonStr})[""natural""=""wood""];
+          nwr(around:1800, {latStr}, {lonStr})[""natural""=""tree""];
+          nwr(around:1800, {latStr}, {lonStr})[""natural""=""tree_row""];
+          nwr(around:1800, {latStr}, {lonStr})[""golf""=""tree""];
+          nwr(around:1800, {latStr}, {lonStr})[""landuse""=""forest""];
         );
         out body;
         >;
@@ -336,6 +341,10 @@ public partial class OsmMapLoader : Node
         string jsonPath = $"{courseDir}/course.json";
         string globalJsonPath = ProjectSettings.GlobalizePath(jsonPath);
         string globalCourseDir = Path.GetDirectoryName(globalJsonPath) ?? "";
+        if (!string.IsNullOrEmpty(globalCourseDir) && !Directory.Exists(globalCourseDir))
+        {
+            Directory.CreateDirectory(globalCourseDir);
+        }
         bool isMobilePlatform = OS.GetName() == "Android" || OS.GetName() == "iOS";
         bool isComputerPlatform = OS.GetName() == "Windows" || OS.GetName() == "macOS" || OS.GetName() == "Linux";
 
@@ -344,10 +353,6 @@ public partial class OsmMapLoader : Node
         {
             try
             {
-                if (!Directory.Exists(globalCourseDir))
-                {
-                    Directory.CreateDirectory(globalCourseDir);
-                }
                 string satPath = Path.Combine(globalCourseDir, "satellite.png");
                 File.WriteAllBytes(satPath, satImageBytes);
                 GD.Print($"{LogPrefix} Saved satellite image to: {satPath}");
@@ -478,9 +483,61 @@ public partial class OsmMapLoader : Node
             string elevationPath = Path.Combine(globalCourseDir, "elevation.dat");
             LoadElevationMap(elevationPath, refLat, refLon, metersPerLat, metersPerLon);
 
+            // Assemble multipolygon surface relations (fairway, green, bunker, water, wood, forest, tee)
+            // into unified synthetic OsmWay objects. Outer member ways are stitched together,
+            // while inner member ways (greens, bunkers, cutouts) are preserved.
+            var waysToRemove = new HashSet<long>();
+            var syntheticWays = new List<OsmWay>();
+            long nextSyntheticWayId = -100000;
+
+            foreach (var rel in relations)
+            {
+                if (rel.Tags.TryGetValue("type", out var relType) && relType == "multipolygon")
+                {
+                    bool isSurface = rel.Tags.ContainsKey("golf") ||
+                                     (rel.Tags.TryGetValue("natural", out var n) && (n == "water" || n == "wood")) ||
+                                     (rel.Tags.TryGetValue("landuse", out var lu) && lu == "forest");
+
+                    if (isSurface)
+                    {
+                        var chains = AssembleRelationNodeChains(rel, ways, nodes);
+                        foreach (var chain in chains)
+                        {
+                            if (chain.Count >= 3)
+                            {
+                                var synTags = new Dictionary<string, string>(rel.Tags);
+                                syntheticWays.Add(new OsmWay(nextSyntheticWayId--, chain, synTags));
+                            }
+                        }
+
+                        // Mark outer member ways of this relation for removal so they aren't processed as fragmented pieces
+                        foreach (var member in rel.Members)
+                        {
+                            if (member.Type == "way" && (member.Role == "outer" || string.IsNullOrEmpty(member.Role)))
+                            {
+                                waysToRemove.Add(member.Ref);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (waysToRemove.Count > 0)
+            {
+                ways.RemoveAll(w => waysToRemove.Contains(w.Id));
+            }
+            if (syntheticWays.Count > 0)
+            {
+                ways.AddRange(syntheticWays);
+            }
+
             // Copy tags from relations to member ways and nodes
             foreach (var rel in relations)
             {
+                // Multipolygon surface relations have already been assembled into synthetic ways above
+                if (rel.Tags.TryGetValue("type", out var rType) && rType == "multipolygon")
+                    continue;
+
                 var relTagsToCopy = new Dictionary<string, string>();
                 foreach (var tag in rel.Tags)
                 {
@@ -494,6 +551,9 @@ public partial class OsmMapLoader : Node
                 {
                     foreach (var member in rel.Members)
                     {
+                        if (member.Role == "inner")
+                            continue;
+
                         if (member.Type == "way")
                         {
                             var targetWay = ways.FirstOrDefault(w => w.Id == member.Ref);
@@ -710,6 +770,82 @@ public partial class OsmMapLoader : Node
             var forestPolygons = new List<Vector2[]>();
             var holesWithTeePolygons = new HashSet<string>();
 
+            // Pre-process hole ways to assign consecutive unique hole keys ("Hole 01", "Hole 02", ...)
+            // and support multi-course / sub-course layouts (e.g. golf:course:name="Red", "White", "Blue")
+            var holeWays = ways
+                .Where(w => w.Tags.TryGetValue("golf", out var g) && g == "hole" && w.NodeIds.Count(nodes.ContainsKey) >= 2)
+                .ToList();
+
+            var holeWayMapping = new Dictionary<long, (string HoleKey, string DisplayName, string SubCourse, string OriginalRef)>();
+            if (holeWays.Count > 0)
+            {
+                bool hasSubCourses = holeWays.Any(w => !string.IsNullOrEmpty(ExtractSubCourseName(w.Tags)));
+                if (hasSubCourses)
+                {
+                    // Group by sub-course name (e.g. "Blue", "Red", "White"), ordering groups alphabetically
+                    var groups = holeWays
+                        .GroupBy(w => ExtractSubCourseName(w.Tags))
+                        .OrderBy(g => g.Key)
+                        .ToList();
+
+                    int assignedIdx = 1;
+                    foreach (var grp in groups)
+                    {
+                        string subName = grp.Key;
+                        var sortedHoles = grp
+                            .OrderBy(w => int.TryParse(w.Tags.GetValueOrDefault("ref", "0"), out int r) ? r : 999)
+                            .ThenBy(w => w.Tags.GetValueOrDefault("name", ""))
+                            .ToList();
+
+                        foreach (var hw in sortedHoles)
+                        {
+                            string origRef = hw.Tags.GetValueOrDefault("ref", assignedIdx.ToString());
+                            string holeKey = GetHoleKey(assignedIdx.ToString());
+                            string displayName = hw.Tags.GetValueOrDefault("name", "");
+                            if (string.IsNullOrWhiteSpace(displayName) || displayName.Equals($"Hole {origRef}", StringComparison.OrdinalIgnoreCase))
+                            {
+                                displayName = !string.IsNullOrWhiteSpace(subName) ? $"{subName} {origRef}" : $"Hole {assignedIdx}";
+                            }
+                            holeWayMapping[hw.Id] = (holeKey, displayName, subName, origRef);
+                            assignedIdx++;
+                        }
+                    }
+                }
+                else
+                {
+                    var refsCount = holeWays.GroupBy(w => w.Tags.GetValueOrDefault("ref", "")).ToDictionary(g => g.Key, g => g.Count());
+                    bool hasDuplicateRefs = refsCount.Values.Any(cnt => cnt > 1);
+
+                    if (hasDuplicateRefs)
+                    {
+                        int assignedIdx = 1;
+                        var sortedHoles = holeWays
+                            .OrderBy(w => int.TryParse(w.Tags.GetValueOrDefault("ref", "0"), out int r) ? r : 999)
+                            .ThenBy(w => w.Tags.GetValueOrDefault("name", ""))
+                            .ToList();
+
+                        foreach (var hw in sortedHoles)
+                        {
+                            string origRef = hw.Tags.GetValueOrDefault("ref", assignedIdx.ToString());
+                            string holeKey = GetHoleKey(assignedIdx.ToString());
+                            string displayName = hw.Tags.GetValueOrDefault("name", $"Hole {assignedIdx}");
+                            holeWayMapping[hw.Id] = (holeKey, displayName, "", origRef);
+                            assignedIdx++;
+                        }
+                    }
+                    else
+                    {
+                        foreach (var hw in holeWays)
+                        {
+                            string origRef = hw.Tags.GetValueOrDefault("ref", "1");
+                            string holeKey = GetHoleKey(origRef);
+                            string displayName = hw.Tags.GetValueOrDefault("name", $"Hole {origRef}");
+                            holeWayMapping[hw.Id] = (holeKey, displayName, "", origRef);
+                        }
+                    }
+                }
+            }
+
             foreach (var way in ways)
             {
                 var points = way.NodeIds
@@ -778,9 +914,23 @@ public partial class OsmMapLoader : Node
                 // Handle golf=hole as a LINE of play (tee → green), not a polygon
                 if (golfType == "hole")
                 {
-                    lineOfPlayPaths.Add(new List<Vector2>(points));
-                    string holeNum = way.Tags.GetValueOrDefault("ref", "1");
-                    string hName = way.Tags.GetValueOrDefault("name", $"Hole {holeNum}");
+                    string holeKey = GetHoleKey(way.Tags.GetValueOrDefault("ref", "1"));
+                    string hName = way.Tags.GetValueOrDefault("name", "");
+                    string subCourse = "";
+                    string origRef = way.Tags.GetValueOrDefault("ref", "1");
+
+                    if (holeWayMapping.TryGetValue(way.Id, out var mapping))
+                    {
+                        holeKey = mapping.HoleKey;
+                        hName = mapping.DisplayName;
+                        subCourse = mapping.SubCourse;
+                        origRef = mapping.OriginalRef;
+                    }
+                    else
+                    {
+                        if (string.IsNullOrWhiteSpace(hName)) hName = $"Hole {origRef}";
+                    }
+
                     int par = int.TryParse(way.Tags.GetValueOrDefault("par", "4"), out var p) ? p : 4;
                     int handicap = int.TryParse(way.Tags.GetValueOrDefault("handicap", "1"), out var h) ? h : 1;
 
@@ -801,18 +951,40 @@ public partial class OsmMapLoader : Node
                     }
                     float distanceYards = totalDistanceMeters * 1.09361f;
 
-                    GD.Print($"{LogPrefix} Parsed hole {holeNum}: par {par}, {distanceYards:F0} yards, tee ({teePos.X:F1}, {teePos.Y:F1}) → pin ({pinPos.X:F1}, {pinPos.Y:F1})");
+                    if (holeInfo.TryGetValue(holeKey, out var existingHole))
+                    {
+                        // Avoid junior/pitch-and-putt mini holes (< 100 yds) replacing regulation holes
+                        if (existingHole.Distance >= 100f && distanceYards < 100f)
+                        {
+                            GD.Print($"{LogPrefix} Ignoring junior/short hole {hName} ({distanceYards:F0} yds) in favor of regulation hole ({existingHole.Distance:F0} yds)");
+                            continue;
+                        }
+                        if (existingHole.Distance < 100f && distanceYards >= 100f)
+                        {
+                            GD.Print($"{LogPrefix} Replacing short/junior hole {hName} ({existingHole.Distance:F0} yds) with regulation hole ({distanceYards:F0} yds)");
+                        }
+                        else if (distanceYards < existingHole.Distance)
+                        {
+                            GD.Print($"{LogPrefix} Keeping longer hole {hName} ({existingHole.Distance:F0} yds) over shorter one ({distanceYards:F0} yds)");
+                            continue;
+                        }
+                    }
 
-                    holeInfo[GetHoleKey(holeNum)] = new HoleConfig
+                    GD.Print($"{LogPrefix} Parsed hole {holeKey} ({hName}): par {par}, {distanceYards:F0} yards, tee ({teePos.X:F1}, {teePos.Y:F1}) → pin ({pinPos.X:F1}, {pinPos.Y:F1})");
+
+                    holeInfo[holeKey] = new HoleConfig
                     {
                         Par = par,
                         Handicap = handicap,
                         Name = hName,
                         Distance = distanceYards,
                         HoleLocation = new float[] { pinPos.X, pinPos.Y },
-                        TeeBoxes = new Dictionary<string, float[]>(),
-                        HolePath = pathList
+                        TeeBoxes = existingHole?.TeeBoxes ?? new Dictionary<string, float[]>(),
+                        HolePath = pathList,
+                        SubCourse = subCourse,
+                        OriginalRef = origRef
                     };
+                    lineOfPlayPaths.Add(new List<Vector2>(points));
                     continue;
                 }
 
@@ -821,6 +993,7 @@ public partial class OsmMapLoader : Node
                 {
                     var parsedColors = ParseTeeColors(way.Tags);
                     var center = new Vector2(points.Average(pt => pt.X), points.Average(pt => pt.Y));
+                    string teeSubCourse = ExtractSubCourseName(way.Tags);
 
                     string? refHole = null;
                     if (way.Tags.TryGetValue("ref", out refHole) && !string.IsNullOrWhiteSpace(refHole))
@@ -834,7 +1007,8 @@ public partial class OsmMapLoader : Node
                                 {
                                     HoleNum = hNum,
                                     Color = col,
-                                    Location = new float[] { center.X, center.Y }
+                                    Location = new float[] { center.X, center.Y },
+                                    SubCourse = teeSubCourse
                                 });
                             }
                         }
@@ -958,6 +1132,487 @@ public partial class OsmMapLoader : Node
                     }
                 }
 
+            }
+
+            // Gather node-based tees from nodeTags list
+            foreach (var kvp in nodeTags)
+            {
+                if (kvp.Value.TryGetValue("golf", out var golfVal) && golfVal == "tee")
+                {
+                    if (nodes.TryGetValue(kvp.Key, out var coord))
+                    {
+                        float tx = (float)((coord.Lon - refLon) * metersPerLon);
+                        float tz = -(float)((coord.Lat - refLat) * metersPerLat);
+                        var nodePos = new Vector2(tx, tz);
+                        if (!isPointInMainCourse(nodePos))
+                            continue;
+
+                        var parsedColors = ParseTeeColors(kvp.Value);
+                        string teeSubCourse = ExtractSubCourseName(kvp.Value);
+
+                        if (kvp.Value.TryGetValue("ref", out string? refHole) && !string.IsNullOrWhiteSpace(refHole))
+                        {
+                            var holeRefs = ParseHoleRefs(refHole);
+                            foreach (var hNum in holeRefs)
+                            {
+                                foreach (var col in parsedColors)
+                                {
+                                    tees.Add(new TeeConfig
+                                    {
+                                        HoleNum = hNum,
+                                        Color = col,
+                                        Location = new float[] { tx, tz },
+                                        SubCourse = teeSubCourse
+                                    });
+                                }
+                            }
+                        }
+                        else
+                        {
+                            unreferencedTees.Add((parsedColors, nodePos));
+                        }
+                    }
+                }
+            }
+
+            // Map referenced tees to their respective holes first
+            foreach (var tee in tees)
+            {
+                string? matchedHoleKey = null;
+                float minTeeDist = float.MaxValue;
+
+                foreach (var kp in holeInfo)
+                {
+                    var hole = kp.Value;
+                    bool refMatch = hole.OriginalRef == tee.HoleNum || kp.Key == GetHoleKey(tee.HoleNum);
+                    if (!refMatch) continue;
+
+                    if (!string.IsNullOrEmpty(tee.SubCourse) && !string.IsNullOrEmpty(hole.SubCourse))
+                    {
+                        if (!string.Equals(tee.SubCourse, hole.SubCourse, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                    }
+
+                    if (hole.HolePath != null && hole.HolePath.Count > 0)
+                    {
+                        var hStart = new Vector2(hole.HolePath[0][0], hole.HolePath[0][1]);
+                        float dist = new Vector2(tee.Location[0], tee.Location[1]).DistanceTo(hStart);
+                        if (dist < minTeeDist)
+                        {
+                            minTeeDist = dist;
+                            matchedHoleKey = kp.Key;
+                        }
+                    }
+                    else if (matchedHoleKey == null)
+                    {
+                        matchedHoleKey = kp.Key;
+                    }
+                }
+
+                if (matchedHoleKey != null && holeInfo.TryGetValue(matchedHoleKey, out var matchedHole))
+                {
+                    string colorKey = char.ToUpper(tee.Color[0]) + (tee.Color.Length > 1 ? tee.Color.Substring(1).ToLower() : "");
+                    matchedHole.TeeBoxes[colorKey] = tee.Location;
+                }
+            }
+
+            // Match unreferenced tee boxes to the closest hole
+            foreach (var unref in unreferencedTees)
+            {
+                string? bestHoleKey = null;
+                float minDistance = float.MaxValue;
+
+                foreach (var kp in holeInfo)
+                {
+                    var hole = kp.Value;
+                    if (hole.HolePath == null || hole.HolePath.Count == 0) continue;
+
+                    Vector2 holeStart = new Vector2(hole.HolePath[0][0], hole.HolePath[0][1]);
+                    float dist = unref.Location.DistanceTo(holeStart);
+
+                    // Also check proximity to any already-assigned tees on this hole
+                    if (hole.TeeBoxes != null)
+                    {
+                        foreach (var existingTee in hole.TeeBoxes.Values)
+                        {
+                            if (existingTee != null && existingTee.Length >= 2)
+                            {
+                                float eDist = unref.Location.DistanceTo(new Vector2(existingTee[0], existingTee[1]));
+                                if (eDist < dist) dist = eDist;
+                            }
+                        }
+                    }
+
+                    if (dist < minDistance)
+                    {
+                        minDistance = dist;
+                        bestHoleKey = kp.Key;
+                    }
+                }
+
+                // Associate if within 150 meters of the hole start / tee area
+                if (bestHoleKey != null && minDistance <= 150f && holeInfo.TryGetValue(bestHoleKey, out var matchedHole))
+                {
+                    foreach (var col in unref.Colors)
+                    {
+                        string colorKey = char.ToUpper(col[0]) + (col.Length > 1 ? col.Substring(1).ToLower() : "");
+                        matchedHole.TeeBoxes[colorKey] = new float[] { unref.Location.X, unref.Location.Y };
+                    }
+                    GD.Print($"{LogPrefix} Matched unreferenced tee ({string.Join("/", unref.Colors)}) at ({unref.Location.X:F1}, {unref.Location.Y:F1}) to {bestHoleKey} (dist: {minDistance:F1}m)");
+                }
+            }
+
+            // Ensure every hole has tee data
+            foreach (var kp in holeInfo)
+            {
+                var hole = kp.Value;
+                if (hole.TeeBoxes.Count == 0)
+                {
+                    // No explicit tees at all: use the first node of the hole line
+                    float defX = (hole.HolePath != null && hole.HolePath.Count > 0) ? hole.HolePath[0][0] : 0.0f;
+                    float defZ = (hole.HolePath != null && hole.HolePath.Count > 0) ? hole.HolePath[0][1] : 0.0f;
+                    hole.TeeBoxes["Blue"] = new float[] { defX, defZ };
+                    hole.TeeBoxes["White"] = new float[] { defX, defZ };
+                    hole.TeeBoxes["Red"] = new float[] { defX, defZ };
+                }
+                else
+                {
+                    // If some tees were explicitly parsed, make sure standard colors ("Blue", "White", "Red")
+                    // have a valid mapped tee fallback so players selecting standard tees always land on a real tee pad.
+                    string fallbackKey = hole.TeeBoxes.ContainsKey("Blue") ? "Blue" : hole.TeeBoxes.Keys.First();
+                    var fallbackPos = hole.TeeBoxes[fallbackKey];
+
+                    if (!hole.TeeBoxes.ContainsKey("Blue"))
+                    {
+                        hole.TeeBoxes["Blue"] = (float[])fallbackPos.Clone();
+                    }
+                    if (!hole.TeeBoxes.ContainsKey("White"))
+                    {
+                        hole.TeeBoxes["White"] = (float[])fallbackPos.Clone();
+                    }
+                    if (!hole.TeeBoxes.ContainsKey("Red"))
+                    {
+                        // Red is the forward tee: if any forward tee exists (closest to pin), use it
+                        Vector2 pin = (hole.HoleLocation != null && hole.HoleLocation.Length >= 2)
+                            ? new Vector2(hole.HoleLocation[0], hole.HoleLocation[1])
+                            : Vector2.Zero;
+
+                        string forwardKey = fallbackKey;
+                        float minPinDist = float.MaxValue;
+                        foreach (var kvp in hole.TeeBoxes)
+                        {
+                            float d = new Vector2(kvp.Value[0], kvp.Value[1]).DistanceTo(pin);
+                            if (d < minPinDist)
+                            {
+                                minPinDist = d;
+                                forwardKey = kvp.Key;
+                            }
+                        }
+                        hole.TeeBoxes["Red"] = (float[])hole.TeeBoxes[forwardKey].Clone();
+                    }
+                }
+            }
+
+            // If no holes parsed, create a default Hole 1
+            if (holeInfo.Count == 0)
+            {
+                holeInfo["1"] = new HoleConfig
+                {
+                    Par = 4,
+                    Handicap = 1,
+                    Name = "Opening Hole",
+                    HoleLocation = new float[] { 150.0f, 0.0f },
+                    TeeBoxes = new Dictionary<string, float[]>
+                    {
+                        { "Blue", new float[] { 0.0f, 0.0f } },
+                        { "Red", new float[] { 5.0f, 0.0f } },
+                        { "White", new float[] { 10.0f, 0.0f } }
+                    }
+                };
+            }
+
+            bool madeUpFairways = false;
+            bool madeUpGreens = false;
+
+            if (parsedFairwaysCount == 0 && holeInfo.Count > 0)
+            {
+                madeUpFairways = true;
+                foreach (var kp in holeInfo)
+                {
+                    var hole = kp.Value;
+                    if (hole.HolePath == null || hole.HolePath.Count < 2) continue;
+
+                    var pathPoints = new List<Vector2>();
+                    foreach (var p in hole.HolePath)
+                    {
+                        pathPoints.Add(new Vector2(p[0], p[1]));
+                    }
+
+                    float totalLen = 0f;
+                    for (int i = 0; i < pathPoints.Count - 1; i++)
+                    {
+                        totalLen += pathPoints[i].DistanceTo(pathPoints[i + 1]);
+                    }
+
+                    float startDist = Math.Min(totalLen * 0.15f, 40f);
+                    float endDist = Math.Max(totalLen - 15f, totalLen * 0.85f);
+                    if (endDist > startDist + 5f)
+                    {
+                        var fairwayCenterLine = new List<Vector2>();
+                        fairwayCenterLine.Add(GetPointOnPolyline(pathPoints, startDist));
+
+                        float acc = 0f;
+                        for (int i = 0; i < pathPoints.Count - 1; i++)
+                        {
+                            float d = pathPoints[i].DistanceTo(pathPoints[i + 1]);
+                            float nextAcc = acc + d;
+                            if (nextAcc > startDist && nextAcc < endDist)
+                            {
+                                fairwayCenterLine.Add(pathPoints[i + 1]);
+                            }
+                            acc = nextAcc;
+                        }
+
+                        fairwayCenterLine.Add(GetPointOnPolyline(pathPoints, endDist));
+
+                        var uniqueCenterLine = new List<Vector2>();
+                        foreach (var p in fairwayCenterLine)
+                        {
+                            if (uniqueCenterLine.Count == 0 || uniqueCenterLine[^1].DistanceTo(p) > 0.1f)
+                            {
+                                uniqueCenterLine.Add(p);
+                            }
+                        }
+
+                        // Smooth the centerline to round side corners
+                        var smoothedCenterLine = SmoothPath(uniqueCenterLine, 3);
+
+                        int k = smoothedCenterLine.Count - 1;
+                        if (k >= 1)
+                        {
+                            Vector2[] leftPoints = new Vector2[k + 1];
+                            Vector2[] rightPoints = new Vector2[k + 1];
+                            float fairwayHalfWidth = 15f; // 30 meters total width
+
+                            for (int i = 0; i <= k; i++)
+                            {
+                                Vector2 forward;
+                                if (i == 0)
+                                {
+                                    forward = (smoothedCenterLine[1] - smoothedCenterLine[0]).Normalized();
+                                }
+                                else if (i == k)
+                                {
+                                    forward = (smoothedCenterLine[k] - smoothedCenterLine[k - 1]).Normalized();
+                                }
+                                else
+                                {
+                                    Vector2 f1 = (smoothedCenterLine[i] - smoothedCenterLine[i - 1]).Normalized();
+                                    Vector2 f2 = (smoothedCenterLine[i + 1] - smoothedCenterLine[i]).Normalized();
+                                    forward = (f1 + f2).Normalized();
+                                }
+
+                                Vector2 normal = new Vector2(-forward.Y, forward.X);
+                                leftPoints[i] = smoothedCenterLine[i] - normal * fairwayHalfWidth;
+                                rightPoints[i] = smoothedCenterLine[i] + normal * fairwayHalfWidth;
+                            }
+
+                            // Assemble polygon with rounded caps at both ends
+                            var fairwayPolygon = new List<Vector2>();
+
+                            // Start cap (at C_0): round from leftPoints[0] to rightPoints[0]
+                            Vector2 startForward = (smoothedCenterLine[1] - smoothedCenterLine[0]).Normalized();
+                            Vector2 startNormal = new Vector2(-startForward.Y, startForward.X);
+                            int capSteps = 6;
+                            for (int i = 0; i <= capSteps; i++)
+                            {
+                                float angle = -Mathf.Pi / 2f + (i * Mathf.Pi / capSteps);
+                                Vector2 capPoint = smoothedCenterLine[0] - startForward * fairwayHalfWidth * Mathf.Cos(angle) + startNormal * fairwayHalfWidth * Mathf.Sin(angle);
+                                fairwayPolygon.Add(capPoint);
+                            }
+
+                            // Right side: from rightPoints[1] to rightPoints[k-1]
+                            for (int i = 1; i < k; i++)
+                            {
+                                fairwayPolygon.Add(rightPoints[i]);
+                            }
+
+                            // End cap (at C_k): round from rightPoints[k] to leftPoints[k]
+                            Vector2 endForward = (smoothedCenterLine[k] - smoothedCenterLine[k - 1]).Normalized();
+                            Vector2 endNormal = new Vector2(-endForward.Y, endForward.X);
+                            for (int i = 0; i <= capSteps; i++)
+                            {
+                                float angle = -Mathf.Pi / 2f + (i * Mathf.Pi / capSteps);
+                                Vector2 capPoint = smoothedCenterLine[k] + endForward * fairwayHalfWidth * Mathf.Cos(angle) - endNormal * fairwayHalfWidth * Mathf.Sin(angle);
+                                fairwayPolygon.Add(capPoint);
+                            }
+
+                            // Left side: from leftPoints[k-1] down to leftPoints[1]
+                            for (int i = k - 1; i >= 1; i--)
+                            {
+                                fairwayPolygon.Add(leftPoints[i]);
+                            }
+
+                            // Clip the fairway against all water hazard polygons
+                            var currentPolygons = new List<Vector2[]> { fairwayPolygon.ToArray() };
+                            foreach (var waterPoly in waterPolygons)
+                            {
+                                var nextPolygons = new List<Vector2[]>();
+                                foreach (var poly in currentPolygons)
+                                {
+                                    var clipped = Geometry2D.ClipPolygons(poly, waterPoly);
+                                    if (clipped != null)
+                                    {
+                                        foreach (var cp in clipped)
+                                        {
+                                            if (cp.Length >= 3)
+                                            {
+                                                nextPolygons.Add(cp);
+                                            }
+                                        }
+                                    }
+                                }
+                                currentPolygons = nextPolygons;
+                            }
+
+                            // Render each unclipped portion of the fairway
+                            int partIdx = 0;
+                            foreach (var poly in currentPolygons)
+                            {
+                                string suffix = currentPolygons.Count > 1 
+                                    ? $"{kp.Key.Replace(" ", "_")}_part{partIdx++}" 
+                                    : kp.Key.Replace(" ", "_");
+                                CreateGolfSurfaceMesh(rootNode, poly, "fairway", $"madeup_{suffix}", exclusionPolygons);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (parsedGreensCount == 0 && holeInfo.Count > 0)
+            {
+                madeUpGreens = true;
+                foreach (var kp in holeInfo)
+                {
+                    var hole = kp.Value;
+                    if (hole.HolePath == null || hole.HolePath.Count == 0) continue;
+
+                    var lastPt = hole.HolePath[hole.HolePath.Count - 1];
+                    Vector2 greenCenter = new Vector2(lastPt[0], lastPt[1]);
+
+                    // Generate a smooth organic oval instead of an octagon
+                    int greenPointCount = 24;
+                    var greenPoints = new Vector2[greenPointCount];
+                    float baseRadius = 12.0f;
+                    for (int i = 0; i < greenPointCount; i++)
+                    {
+                        float angle = i * Mathf.Pi * 2f / greenPointCount;
+                        // Create organic oval with gentle variation so it looks natural
+                        float radius = baseRadius + 2.0f * Mathf.Sin(angle * 2f) + 1.0f * Mathf.Cos(angle * 3f);
+                        greenPoints[i] = greenCenter + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius;
+                    }
+
+                    CreateGolfSurfaceMesh(rootNode, greenPoints, "green", $"madeup_{kp.Key.Replace(" ", "_")}", exclusionPolygons);
+                }
+            }
+
+            bool madeUpTees = false;
+            if (holeInfo.Count > 0)
+            {
+                foreach (var kp in holeInfo)
+                {
+                    var holeKey = kp.Key;
+                    var hole = kp.Value;
+                    if (hole.TeeBoxes != null && hole.TeeBoxes.Count > 0)
+                    {
+                        foreach (var teeBoxKvp in hole.TeeBoxes)
+                        {
+                            var teeColorName = teeBoxKvp.Key;
+                            var teeBoxPos = teeBoxKvp.Value;
+                            
+                            // Check if this tee position is already inside an explicit tee polygon
+                            bool alreadyHasPolygon = false;
+                            Vector2 pos2d = new Vector2(teeBoxPos[0], teeBoxPos[1]);
+                            foreach (var excl in exclusionPolygons)
+                            {
+                                if (excl.GolfType == "tee" && Geometry2D.IsPointInPolygon(pos2d, excl.Polygon))
+                                {
+                                    alreadyHasPolygon = true;
+                                    break;
+                                }
+                            }
+                            
+                            if (!alreadyHasPolygon)
+                            {
+                                madeUpTees = true;
+                                Vector2 center = pos2d;
+                                Vector2 forward = Vector2.Right;
+                                if (hole.HolePath != null && hole.HolePath.Count >= 2)
+                                {
+                                    Vector2 p0 = new Vector2(hole.HolePath[0][0], hole.HolePath[0][1]);
+                                    Vector2 p1 = new Vector2(hole.HolePath[1][0], hole.HolePath[1][1]);
+                                    if (p0.DistanceTo(p1) > 0.1f)
+                                    {
+                                        forward = (p1 - p0).Normalized();
+                                    }
+                                }
+                                Vector2 right = new Vector2(-forward.Y, forward.X);
+                                
+                                var teeBoxPoints = new Vector2[4]
+                                {
+                                    center - forward * 3f - right * 2f,
+                                    center - forward * 3f + right * 2f,
+                                    center + forward * 3f + right * 2f,
+                                    center + forward * 3f - right * 2f
+                                };
+                                
+                                CreateTeeBoxMesh(rootNode, teeBoxPoints, $"{kp.Key.Replace(" ", "_")}_{teeColorName}", exclusionPolygons);
+                            }
+                        }
+                    }
+                    else if (hole.HolePath != null && hole.HolePath.Count > 0)
+                    {
+                        var teeBoxPos = hole.HolePath[0];
+                        Vector2 pos2d = new Vector2(teeBoxPos[0], teeBoxPos[1]);
+                        
+                        bool alreadyHasPolygon = false;
+                        foreach (var excl in exclusionPolygons)
+                        {
+                            if (excl.GolfType == "tee" && Geometry2D.IsPointInPolygon(pos2d, excl.Polygon))
+                            {
+                                alreadyHasPolygon = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!alreadyHasPolygon)
+                        {
+                            madeUpTees = true;
+                            Vector2 center = pos2d;
+                            Vector2 forward = Vector2.Right;
+                            if (hole.HolePath.Count >= 2)
+                            {
+                                Vector2 p0 = new Vector2(hole.HolePath[0][0], hole.HolePath[0][1]);
+                                Vector2 p1 = new Vector2(hole.HolePath[1][0], hole.HolePath[1][1]);
+                                if (p0.DistanceTo(p1) > 0.1f)
+                                {
+                                    forward = (p1 - p0).Normalized();
+                                }
+                            }
+                            Vector2 right = new Vector2(-forward.Y, forward.X);
+                            
+                            var teeBoxPoints = new Vector2[4]
+                            {
+                                center - forward * 3f - right * 2f,
+                                center - forward * 3f + right * 2f,
+                                center + forward * 3f + right * 2f,
+                                center + forward * 3f - right * 2f
+                            };
+                            
+                            CreateTeeBoxMesh(rootNode, teeBoxPoints, $"{kp.Key.Replace(" ", "_")}_default", exclusionPolygons);
+                        }
+                    }
+                }
             }
 
             // Find the bounding box of the entire course using all features
@@ -1846,454 +2501,6 @@ public partial class OsmMapLoader : Node
                 GD.Print($"{LogPrefix} Placed {bushCount} bushes clustered around trees.");
             }
 
-            // Gather node-based tees from nodeTags list
-            foreach (var kvp in nodeTags)
-            {
-                if (kvp.Value.TryGetValue("golf", out var golfVal) && golfVal == "tee")
-                {
-                    if (nodes.TryGetValue(kvp.Key, out var coord))
-                    {
-                        float tx = (float)((coord.Lon - refLon) * metersPerLon);
-                        float tz = -(float)((coord.Lat - refLat) * metersPerLat);
-                        var nodePos = new Vector2(tx, tz);
-                        if (!isPointInMainCourse(nodePos))
-                            continue;
-
-                        var parsedColors = ParseTeeColors(kvp.Value);
-
-                        if (kvp.Value.TryGetValue("ref", out string? refHole) && !string.IsNullOrWhiteSpace(refHole))
-                        {
-                            var holeRefs = ParseHoleRefs(refHole);
-                            foreach (var hNum in holeRefs)
-                            {
-                                foreach (var col in parsedColors)
-                                {
-                                    tees.Add(new TeeConfig
-                                    {
-                                        HoleNum = hNum,
-                                        Color = col,
-                                        Location = new float[] { tx, tz }
-                                    });
-                                }
-                            }
-                        }
-                        else
-                        {
-                            unreferencedTees.Add((parsedColors, nodePos));
-                        }
-                    }
-                }
-            }
-
-            // Map referenced tees to their respective holes first
-            foreach (var tee in tees)
-            {
-                if (holeInfo.TryGetValue(GetHoleKey(tee.HoleNum), out var holeConfig))
-                {
-                    string colorKey = char.ToUpper(tee.Color[0]) + (tee.Color.Length > 1 ? tee.Color.Substring(1).ToLower() : "");
-                    holeConfig.TeeBoxes[colorKey] = tee.Location;
-                }
-            }
-
-            // Match unreferenced tee boxes to the closest hole
-            foreach (var unref in unreferencedTees)
-            {
-                string? bestHoleKey = null;
-                float minDistance = float.MaxValue;
-
-                foreach (var kp in holeInfo)
-                {
-                    var hole = kp.Value;
-                    if (hole.HolePath == null || hole.HolePath.Count == 0) continue;
-
-                    Vector2 holeStart = new Vector2(hole.HolePath[0][0], hole.HolePath[0][1]);
-                    float dist = unref.Location.DistanceTo(holeStart);
-
-                    // Also check proximity to any already-assigned tees on this hole
-                    if (hole.TeeBoxes != null)
-                    {
-                        foreach (var existingTee in hole.TeeBoxes.Values)
-                        {
-                            if (existingTee != null && existingTee.Length >= 2)
-                            {
-                                float eDist = unref.Location.DistanceTo(new Vector2(existingTee[0], existingTee[1]));
-                                if (eDist < dist) dist = eDist;
-                            }
-                        }
-                    }
-
-                    if (dist < minDistance)
-                    {
-                        minDistance = dist;
-                        bestHoleKey = kp.Key;
-                    }
-                }
-
-                // Associate if within 150 meters of the hole start / tee area
-                if (bestHoleKey != null && minDistance <= 150f && holeInfo.TryGetValue(bestHoleKey, out var matchedHole))
-                {
-                    foreach (var col in unref.Colors)
-                    {
-                        string colorKey = char.ToUpper(col[0]) + (col.Length > 1 ? col.Substring(1).ToLower() : "");
-                        matchedHole.TeeBoxes[colorKey] = new float[] { unref.Location.X, unref.Location.Y };
-                    }
-                    GD.Print($"{LogPrefix} Matched unreferenced tee ({string.Join("/", unref.Colors)}) at ({unref.Location.X:F1}, {unref.Location.Y:F1}) to {bestHoleKey} (dist: {minDistance:F1}m)");
-                }
-            }
-
-            // Ensure every hole has tee data
-            foreach (var kp in holeInfo)
-            {
-                var hole = kp.Value;
-                if (hole.TeeBoxes.Count == 0)
-                {
-                    // No explicit tees at all: use the first node of the hole line
-                    float defX = (hole.HolePath != null && hole.HolePath.Count > 0) ? hole.HolePath[0][0] : 0.0f;
-                    float defZ = (hole.HolePath != null && hole.HolePath.Count > 0) ? hole.HolePath[0][1] : 0.0f;
-                    hole.TeeBoxes["Blue"] = new float[] { defX, defZ };
-                    hole.TeeBoxes["White"] = new float[] { defX, defZ };
-                    hole.TeeBoxes["Red"] = new float[] { defX, defZ };
-                }
-                else
-                {
-                    // If some tees were explicitly parsed, make sure standard colors ("Blue", "White", "Red")
-                    // have a valid mapped tee fallback so players selecting standard tees always land on a real tee pad.
-                    string fallbackKey = hole.TeeBoxes.ContainsKey("Blue") ? "Blue" : hole.TeeBoxes.Keys.First();
-                    var fallbackPos = hole.TeeBoxes[fallbackKey];
-
-                    if (!hole.TeeBoxes.ContainsKey("Blue"))
-                    {
-                        hole.TeeBoxes["Blue"] = (float[])fallbackPos.Clone();
-                    }
-                    if (!hole.TeeBoxes.ContainsKey("White"))
-                    {
-                        hole.TeeBoxes["White"] = (float[])fallbackPos.Clone();
-                    }
-                    if (!hole.TeeBoxes.ContainsKey("Red"))
-                    {
-                        // Red is the forward tee: if any forward tee exists (closest to pin), use it
-                        Vector2 pin = (hole.HoleLocation != null && hole.HoleLocation.Length >= 2)
-                            ? new Vector2(hole.HoleLocation[0], hole.HoleLocation[1])
-                            : Vector2.Zero;
-
-                        string forwardKey = fallbackKey;
-                        float minPinDist = float.MaxValue;
-                        foreach (var kvp in hole.TeeBoxes)
-                        {
-                            float d = new Vector2(kvp.Value[0], kvp.Value[1]).DistanceTo(pin);
-                            if (d < minPinDist)
-                            {
-                                minPinDist = d;
-                                forwardKey = kvp.Key;
-                            }
-                        }
-                        hole.TeeBoxes["Red"] = (float[])hole.TeeBoxes[forwardKey].Clone();
-                    }
-                }
-            }
-
-            // If no holes parsed, create a default Hole 1
-            if (holeInfo.Count == 0)
-            {
-                holeInfo["1"] = new HoleConfig
-                {
-                    Par = 4,
-                    Handicap = 1,
-                    Name = "Opening Hole",
-                    HoleLocation = new float[] { 150.0f, 0.0f },
-                    TeeBoxes = new Dictionary<string, float[]>
-                    {
-                        { "Blue", new float[] { 0.0f, 0.0f } },
-                        { "Red", new float[] { 5.0f, 0.0f } },
-                        { "White", new float[] { 10.0f, 0.0f } }
-                    }
-                };
-            }
-
-            bool madeUpFairways = false;
-            bool madeUpGreens = false;
-
-            if (parsedFairwaysCount == 0 && holeInfo.Count > 0)
-            {
-                madeUpFairways = true;
-                foreach (var kp in holeInfo)
-                {
-                    var hole = kp.Value;
-                    if (hole.HolePath == null || hole.HolePath.Count < 2) continue;
-
-                    var pathPoints = new List<Vector2>();
-                    foreach (var p in hole.HolePath)
-                    {
-                        pathPoints.Add(new Vector2(p[0], p[1]));
-                    }
-
-                    float totalLen = 0f;
-                    for (int i = 0; i < pathPoints.Count - 1; i++)
-                    {
-                        totalLen += pathPoints[i].DistanceTo(pathPoints[i + 1]);
-                    }
-
-                    float startDist = Math.Min(totalLen * 0.15f, 40f);
-                    float endDist = Math.Max(totalLen - 15f, totalLen * 0.85f);
-                    if (endDist > startDist + 5f)
-                    {
-                        var fairwayCenterLine = new List<Vector2>();
-                        fairwayCenterLine.Add(GetPointOnPolyline(pathPoints, startDist));
-
-                        float acc = 0f;
-                        for (int i = 0; i < pathPoints.Count - 1; i++)
-                        {
-                            float d = pathPoints[i].DistanceTo(pathPoints[i + 1]);
-                            float nextAcc = acc + d;
-                            if (nextAcc > startDist && nextAcc < endDist)
-                            {
-                                fairwayCenterLine.Add(pathPoints[i + 1]);
-                            }
-                            acc = nextAcc;
-                        }
-
-                        fairwayCenterLine.Add(GetPointOnPolyline(pathPoints, endDist));
-
-                        var uniqueCenterLine = new List<Vector2>();
-                        foreach (var p in fairwayCenterLine)
-                        {
-                            if (uniqueCenterLine.Count == 0 || uniqueCenterLine[^1].DistanceTo(p) > 0.1f)
-                            {
-                                uniqueCenterLine.Add(p);
-                            }
-                        }
-
-                        // Smooth the centerline to round side corners
-                        var smoothedCenterLine = SmoothPath(uniqueCenterLine, 3);
-
-                        int k = smoothedCenterLine.Count - 1;
-                        if (k >= 1)
-                        {
-                            Vector2[] leftPoints = new Vector2[k + 1];
-                            Vector2[] rightPoints = new Vector2[k + 1];
-                            float fairwayHalfWidth = 15f; // 30 meters total width
-
-                            for (int i = 0; i <= k; i++)
-                            {
-                                Vector2 forward;
-                                if (i == 0)
-                                {
-                                    forward = (smoothedCenterLine[1] - smoothedCenterLine[0]).Normalized();
-                                }
-                                else if (i == k)
-                                {
-                                    forward = (smoothedCenterLine[k] - smoothedCenterLine[k - 1]).Normalized();
-                                }
-                                else
-                                {
-                                    Vector2 f1 = (smoothedCenterLine[i] - smoothedCenterLine[i - 1]).Normalized();
-                                    Vector2 f2 = (smoothedCenterLine[i + 1] - smoothedCenterLine[i]).Normalized();
-                                    forward = (f1 + f2).Normalized();
-                                }
-
-                                Vector2 normal = new Vector2(-forward.Y, forward.X);
-                                leftPoints[i] = smoothedCenterLine[i] - normal * fairwayHalfWidth;
-                                rightPoints[i] = smoothedCenterLine[i] + normal * fairwayHalfWidth;
-                            }
-
-                            // Assemble polygon with rounded caps at both ends
-                            var fairwayPolygon = new List<Vector2>();
-
-                            // Start cap (at C_0): round from leftPoints[0] to rightPoints[0]
-                            Vector2 startForward = (smoothedCenterLine[1] - smoothedCenterLine[0]).Normalized();
-                            Vector2 startNormal = new Vector2(-startForward.Y, startForward.X);
-                            int capSteps = 6;
-                            for (int i = 0; i <= capSteps; i++)
-                            {
-                                float angle = -Mathf.Pi / 2f + (i * Mathf.Pi / capSteps);
-                                Vector2 capPoint = smoothedCenterLine[0] - startForward * fairwayHalfWidth * Mathf.Cos(angle) + startNormal * fairwayHalfWidth * Mathf.Sin(angle);
-                                fairwayPolygon.Add(capPoint);
-                            }
-
-                            // Right side: from rightPoints[1] to rightPoints[k-1]
-                            for (int i = 1; i < k; i++)
-                            {
-                                fairwayPolygon.Add(rightPoints[i]);
-                            }
-
-                            // End cap (at C_k): round from rightPoints[k] to leftPoints[k]
-                            Vector2 endForward = (smoothedCenterLine[k] - smoothedCenterLine[k - 1]).Normalized();
-                            Vector2 endNormal = new Vector2(-endForward.Y, endForward.X);
-                            for (int i = 0; i <= capSteps; i++)
-                            {
-                                float angle = -Mathf.Pi / 2f + (i * Mathf.Pi / capSteps);
-                                Vector2 capPoint = smoothedCenterLine[k] + endForward * fairwayHalfWidth * Mathf.Cos(angle) - endNormal * fairwayHalfWidth * Mathf.Sin(angle);
-                                fairwayPolygon.Add(capPoint);
-                            }
-
-                            // Left side: from leftPoints[k-1] down to leftPoints[1]
-                            for (int i = k - 1; i >= 1; i--)
-                            {
-                                fairwayPolygon.Add(leftPoints[i]);
-                            }
-
-                            // Clip the fairway against all water hazard polygons
-                            var currentPolygons = new List<Vector2[]> { fairwayPolygon.ToArray() };
-                            foreach (var waterPoly in waterPolygons)
-                            {
-                                var nextPolygons = new List<Vector2[]>();
-                                foreach (var poly in currentPolygons)
-                                {
-                                    var clipped = Geometry2D.ClipPolygons(poly, waterPoly);
-                                    if (clipped != null)
-                                    {
-                                        foreach (var cp in clipped)
-                                        {
-                                            if (cp.Length >= 3)
-                                            {
-                                                nextPolygons.Add(cp);
-                                            }
-                                        }
-                                    }
-                                }
-                                currentPolygons = nextPolygons;
-                            }
-
-                            // Render each unclipped portion of the fairway
-                            int partIdx = 0;
-                            foreach (var poly in currentPolygons)
-                            {
-                                string suffix = currentPolygons.Count > 1 
-                                    ? $"{kp.Key.Replace(" ", "_")}_part{partIdx++}" 
-                                    : kp.Key.Replace(" ", "_");
-                                CreateGolfSurfaceMesh(rootNode, poly, "fairway", $"madeup_{suffix}", exclusionPolygons);
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (parsedGreensCount == 0 && holeInfo.Count > 0)
-            {
-                madeUpGreens = true;
-                foreach (var kp in holeInfo)
-                {
-                    var hole = kp.Value;
-                    if (hole.HolePath == null || hole.HolePath.Count == 0) continue;
-
-                    var lastPt = hole.HolePath[hole.HolePath.Count - 1];
-                    Vector2 greenCenter = new Vector2(lastPt[0], lastPt[1]);
-
-                    // Generate a smooth organic oval instead of an octagon
-                    int greenPointCount = 24;
-                    var greenPoints = new Vector2[greenPointCount];
-                    float baseRadius = 12.0f;
-                    for (int i = 0; i < greenPointCount; i++)
-                    {
-                        float angle = i * Mathf.Pi * 2f / greenPointCount;
-                        // Create organic oval with gentle variation so it looks natural
-                        float radius = baseRadius + 2.0f * Mathf.Sin(angle * 2f) + 1.0f * Mathf.Cos(angle * 3f);
-                        greenPoints[i] = greenCenter + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius;
-                    }
-
-                    CreateGolfSurfaceMesh(rootNode, greenPoints, "green", $"madeup_{kp.Key.Replace(" ", "_")}", exclusionPolygons);
-                }
-            }
-
-            bool madeUpTees = false;
-            if (holeInfo.Count > 0)
-            {
-                foreach (var kp in holeInfo)
-                {
-                    var holeKey = kp.Key;
-                    var hole = kp.Value;
-                    if (hole.TeeBoxes != null && hole.TeeBoxes.Count > 0)
-                    {
-                        foreach (var teeBoxKvp in hole.TeeBoxes)
-                        {
-                            var teeColorName = teeBoxKvp.Key;
-                            var teeBoxPos = teeBoxKvp.Value;
-                            
-                            // Check if this tee position is already inside an explicit tee polygon
-                            bool alreadyHasPolygon = false;
-                            Vector2 pos2d = new Vector2(teeBoxPos[0], teeBoxPos[1]);
-                            foreach (var excl in exclusionPolygons)
-                            {
-                                if (excl.GolfType == "tee" && Geometry2D.IsPointInPolygon(pos2d, excl.Polygon))
-                                {
-                                    alreadyHasPolygon = true;
-                                    break;
-                                }
-                            }
-                            
-                            if (!alreadyHasPolygon)
-                            {
-                                madeUpTees = true;
-                                Vector2 center = pos2d;
-                                Vector2 forward = Vector2.Right;
-                                if (hole.HolePath != null && hole.HolePath.Count >= 2)
-                                {
-                                    Vector2 p0 = new Vector2(hole.HolePath[0][0], hole.HolePath[0][1]);
-                                    Vector2 p1 = new Vector2(hole.HolePath[1][0], hole.HolePath[1][1]);
-                                    if (p0.DistanceTo(p1) > 0.1f)
-                                    {
-                                        forward = (p1 - p0).Normalized();
-                                    }
-                                }
-                                Vector2 right = new Vector2(-forward.Y, forward.X);
-                                
-                                var teeBoxPoints = new Vector2[4]
-                                {
-                                    center - forward * 3f - right * 2f,
-                                    center - forward * 3f + right * 2f,
-                                    center + forward * 3f + right * 2f,
-                                    center + forward * 3f - right * 2f
-                                };
-                                
-                                CreateTeeBoxMesh(rootNode, teeBoxPoints, $"{kp.Key.Replace(" ", "_")}_{teeColorName}", exclusionPolygons);
-                            }
-                        }
-                    }
-                    else if (hole.HolePath != null && hole.HolePath.Count > 0)
-                    {
-                        var teeBoxPos = hole.HolePath[0];
-                        Vector2 pos2d = new Vector2(teeBoxPos[0], teeBoxPos[1]);
-                        
-                        bool alreadyHasPolygon = false;
-                        foreach (var excl in exclusionPolygons)
-                        {
-                            if (excl.GolfType == "tee" && Geometry2D.IsPointInPolygon(pos2d, excl.Polygon))
-                            {
-                                alreadyHasPolygon = true;
-                                break;
-                            }
-                        }
-                        
-                        if (!alreadyHasPolygon)
-                        {
-                            madeUpTees = true;
-                            Vector2 center = pos2d;
-                            Vector2 forward = Vector2.Right;
-                            if (hole.HolePath.Count >= 2)
-                            {
-                                Vector2 p0 = new Vector2(hole.HolePath[0][0], hole.HolePath[0][1]);
-                                Vector2 p1 = new Vector2(hole.HolePath[1][0], hole.HolePath[1][1]);
-                                if (p0.DistanceTo(p1) > 0.1f)
-                                {
-                                    forward = (p1 - p0).Normalized();
-                                }
-                            }
-                            Vector2 right = new Vector2(-forward.Y, forward.X);
-                            
-                            var teeBoxPoints = new Vector2[4]
-                            {
-                                center - forward * 3f - right * 2f,
-                                center - forward * 3f + right * 2f,
-                                center + forward * 3f + right * 2f,
-                                center + forward * 3f - right * 2f
-                            };
-                            
-                            CreateTeeBoxMesh(rootNode, teeBoxPoints, $"{kp.Key.Replace(" ", "_")}_default", exclusionPolygons);
-                        }
-                    }
-                }
-            }
-
             // Procedurally spawn rock decorations around water hazards (skipped on mobile for performance)
             if (!isMobilePlatform)
             {
@@ -2716,6 +2923,12 @@ public partial class OsmMapLoader : Node
 
     private async Task GenerateAerialPreviewsAsync(Node3D rootNode, string courseDir, string globalCourseDir, Dictionary<string, HoleConfig> holeInfo, bool isMobilePlatform)
     {
+        if (DisplayServer.GetName() == "headless")
+        {
+            GD.Print($"{LogPrefix} Headless mode: skipping top-down aerial snapshot generation.");
+            return;
+        }
+
         SubViewport? subViewport = null;
         try
         {
@@ -2796,7 +3009,10 @@ public partial class OsmMapLoader : Node
             );
 
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-            await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+            if (DisplayServer.GetName() != "headless")
+            {
+                await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+            }
             var courseImg = subViewport.GetTexture().GetImage();
             if (courseImg != null)
             {
@@ -2851,7 +3067,10 @@ public partial class OsmMapLoader : Node
                 );
 
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-                await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+                if (DisplayServer.GetName() != "headless")
+                {
+                    await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+                }
                 var holeImg = subViewport.GetTexture().GetImage();
                 if (holeImg != null)
                 {
@@ -2948,8 +3167,8 @@ public partial class OsmMapLoader : Node
         {
             if (!includeAll)
             {
-                if (!include9 && item.HoleCount == 9) continue;
-                if (!include18 && item.HoleCount == 18) continue;
+                if (!include9 && (item.HoleCount == 9 || (item.HoleCount > 9 && item.HoleCount % 9 == 0))) continue;
+                if (!include18 && (item.HoleCount == 18 || item.HoleCount >= 18)) continue;
             }
 
             var dict = new Godot.Collections.Dictionary();
@@ -3016,8 +3235,8 @@ public partial class OsmMapLoader : Node
         {
             if (!includeAll)
             {
-                if (!include9 && course.HoleCount == 9) continue;
-                if (!include18 && course.HoleCount == 18) continue;
+                if (!include9 && (course.HoleCount == 9 || (course.HoleCount > 9 && course.HoleCount % 9 == 0))) continue;
+                if (!include18 && (course.HoleCount == 18 || course.HoleCount >= 18)) continue;
             }
 
             string courseNameLower = course.Name.ToLowerInvariant();
@@ -3151,6 +3370,7 @@ public partial class OsmMapLoader : Node
         public int HoleCount { get; set; }
         public string LastUpdated { get; set; } = "";
         public HashSet<int> HoleRefs { get; } = new();
+        public HashSet<string> DistinctHoleKeys { get; } = new();
         public int BoundaryHoles { get; set; }
     }
 
@@ -3221,8 +3441,8 @@ public partial class OsmMapLoader : Node
                     }
                     else
                     {
-                        if (include9Hole && course.HoleCount == 9) holeMatch = true;
-                        if (include18Hole && course.HoleCount == 18) holeMatch = true;
+                        if (include9Hole && (course.HoleCount == 9 || (course.HoleCount > 9 && course.HoleCount % 9 == 0))) holeMatch = true;
+                        if (include18Hole && (course.HoleCount == 18 || course.HoleCount >= 18)) holeMatch = true;
                         if (course.HoleCount != 9 && course.HoleCount != 18 && includeAllHoles) holeMatch = true;
                     }
                     if (!holeMatch) continue;
@@ -3383,6 +3603,28 @@ public partial class OsmMapLoader : Node
                 if ((string.IsNullOrWhiteSpace(nomJson) || nomJson == "[]") && requireLeisureGolf && !cleanQuery.Contains("golf", StringComparison.OrdinalIgnoreCase))
                 {
                     string nomRetryUrl = $"https://nominatim.openstreetmap.org/search?q={Uri.EscapeDataString(cleanQuery + " golf")}&format=json&limit=15";
+                    nomResp = await HttpClient.GetAsync(nomRetryUrl);
+                    if (nomResp.IsSuccessStatusCode)
+                    {
+                        nomJson = await nomResp.Content.ReadAsStringAsync();
+                    }
+                }
+
+                // If still empty and cleanQuery has "valley", retry with "vallee", and vice-versa
+                if ((string.IsNullOrWhiteSpace(nomJson) || nomJson == "[]") && cleanQuery.Contains("valley", StringComparison.OrdinalIgnoreCase))
+                {
+                    string altQuery = System.Text.RegularExpressions.Regex.Replace(cleanQuery, "(?i)valley", "vallee");
+                    string nomRetryUrl = $"https://nominatim.openstreetmap.org/search?q={Uri.EscapeDataString(altQuery)}&format=json&limit=15";
+                    nomResp = await HttpClient.GetAsync(nomRetryUrl);
+                    if (nomResp.IsSuccessStatusCode)
+                    {
+                        nomJson = await nomResp.Content.ReadAsStringAsync();
+                    }
+                }
+                else if ((string.IsNullOrWhiteSpace(nomJson) || nomJson == "[]") && cleanQuery.Contains("vallee", StringComparison.OrdinalIgnoreCase))
+                {
+                    string altQuery = System.Text.RegularExpressions.Regex.Replace(cleanQuery, "(?i)vallee", "valley");
+                    string nomRetryUrl = $"https://nominatim.openstreetmap.org/search?q={Uri.EscapeDataString(altQuery)}&format=json&limit=15";
                     nomResp = await HttpClient.GetAsync(nomRetryUrl);
                     if (nomResp.IsSuccessStatusCode)
                     {
@@ -3554,9 +3796,20 @@ public partial class OsmMapLoader : Node
 
                             if (golfVal == "hole")
                             {
+                                string subCourse = "";
+                                if (tagsProp.TryGetProperty("golf:course:name", out var gcnProp))
+                                    subCourse = gcnProp.GetString() ?? "";
+                                else if (tagsProp.TryGetProperty("course:name", out var cnProp))
+                                    subCourse = cnProp.GetString() ?? "";
+                                else if (tagsProp.TryGetProperty("golf:course", out var gcProp2))
+                                    subCourse = gcProp2.GetString() ?? "";
+                                else if (tagsProp.TryGetProperty("course", out var cProp))
+                                    subCourse = cProp.GetString() ?? "";
+
+                                string refStr = "";
                                 if (tagsProp.TryGetProperty("ref", out var refProp))
                                 {
-                                    string refStr = refProp.GetString() ?? "";
+                                    refStr = refProp.GetString() ?? "";
                                     if (int.TryParse(refStr, out int hNum) && hNum >= 1 && hNum <= 36)
                                     {
                                         c.HoleRefs.Add(hNum);
@@ -3568,8 +3821,17 @@ public partial class OsmMapLoader : Node
                                     var match = System.Text.RegularExpressions.Regex.Match(nStr, @"\b([1-9]|[1-2][0-9]|3[0-6])\b");
                                     if (match.Success && int.TryParse(match.Groups[1].Value, out int hNum))
                                     {
+                                        refStr = match.Groups[1].Value;
                                         c.HoleRefs.Add(hNum);
                                     }
+                                }
+
+                                if (!string.IsNullOrWhiteSpace(refStr))
+                                {
+                                    string dKey = !string.IsNullOrWhiteSpace(subCourse)
+                                        ? $"{subCourse.Trim().ToLowerInvariant()}:{refStr.Trim()}"
+                                        : refStr.Trim();
+                                    c.DistinctHoleKeys.Add(dKey);
                                 }
                             }
 
@@ -3608,7 +3870,7 @@ public partial class OsmMapLoader : Node
         var validCandidates = new List<SearchCandidate>();
         foreach (var c in candidatesToVerify)
         {
-            int holes = c.HoleRefs.Count > 0 ? c.HoleRefs.Count : c.BoundaryHoles;
+            int holes = c.DistinctHoleKeys.Count > 0 ? c.DistinctHoleKeys.Count : (c.HoleRefs.Count > 0 ? c.HoleRefs.Count : c.BoundaryHoles);
             c.HoleCount = holes;
 
             bool matches = false;
@@ -3618,8 +3880,8 @@ public partial class OsmMapLoader : Node
             }
             else
             {
-                if (include9Hole && holes == 9) matches = true;
-                if (include18Hole && holes == 18) matches = true;
+                if (include9Hole && (holes == 9 || (holes > 9 && holes % 9 == 0))) matches = true;
+                if (include18Hole && (holes == 18 || holes >= 18)) matches = true;
             }
 
             if (matches)
@@ -5073,6 +5335,31 @@ public partial class OsmMapLoader : Node
         }
     }
 
+    public string ExtractSubCourseName(Godot.Collections.Dictionary tags)
+    {
+        if (tags == null) return "";
+        var sysDict = new Dictionary<string, string>();
+        foreach (var key in tags.Keys)
+        {
+            sysDict[key.AsString()] = tags[key].AsString();
+        }
+        return ExtractSubCourseName(sysDict);
+    }
+
+    public static string ExtractSubCourseName(Dictionary<string, string> tags)
+    {
+        if (tags == null) return "";
+        if (tags.TryGetValue("golf:course:name", out var gcn) && !string.IsNullOrWhiteSpace(gcn))
+            return gcn.Trim();
+        if (tags.TryGetValue("course:name", out var cn) && !string.IsNullOrWhiteSpace(cn))
+            return cn.Trim();
+        if (tags.TryGetValue("golf:course", out var gc) && !string.IsNullOrWhiteSpace(gc) && gc != "18_hole" && gc != "9_hole")
+            return gc.Trim();
+        if (tags.TryGetValue("course", out var c) && !string.IsNullOrWhiteSpace(c))
+            return c.Trim();
+        return "";
+    }
+
     private static string GetHoleKey(string refVal)
     {
         if (int.TryParse(refVal, out var holeInt))
@@ -5220,6 +5507,12 @@ public partial class OsmMapLoader : Node
 
         [JsonPropertyName("Hole Path")]
         public List<float[]> HolePath { get; set; } = new();
+
+        [JsonIgnore]
+        public string SubCourse { get; set; } = "";
+
+        [JsonIgnore]
+        public string OriginalRef { get; set; } = "";
     }
 
     private class TeeConfig
@@ -5227,6 +5520,7 @@ public partial class OsmMapLoader : Node
         public string HoleNum { get; set; } = "1";
         public string Color { get; set; } = "blue";
         public float[] Location { get; set; } = new float[2];
+        public string SubCourse { get; set; } = "";
     }
 
     private class ExclusionPolygon
@@ -6589,14 +6883,10 @@ public partial class OsmMapLoader : Node
         GD.Print($"{LogPrefix} Unified terrain created successfully.");
     }
 
-    private static List<Vector2[]> AssembleRelationPolygons(
+    private static List<List<long>> AssembleRelationNodeChains(
         OsmRelation rel, 
         List<OsmWay> allWays, 
-        Dictionary<long, (double Lat, double Lon)> nodes, 
-        double refLat, 
-        double refLon, 
-        double metersPerLat, 
-        double metersPerLon)
+        Dictionary<long, (double Lat, double Lon)> nodes)
     {
         var outerMemberWays = rel.Members
             .Where(m => m.Type == "way" && (m.Role == "outer" || string.IsNullOrEmpty(m.Role)))
@@ -6604,7 +6894,7 @@ public partial class OsmMapLoader : Node
             .Where(w => w != null && w.NodeIds.Count >= 2)
             .ToList();
 
-        var resultPolygons = new List<Vector2[]>();
+        var resultChains = new List<List<long>>();
         var unvisitedWays = new List<List<long>>();
 
         foreach (var w in outerMemberWays)
@@ -6616,14 +6906,7 @@ public partial class OsmMapLoader : Node
                 // If already a closed loop
                 if (validNodes.First() == validNodes.Last() && validNodes.Count >= 4)
                 {
-                    var pts = validNodes
-                        .Select(id => nodes[id])
-                        .Select(coord => new Vector2(
-                            (float)((coord.Lon - refLon) * metersPerLon),
-                            -(float)((coord.Lat - refLat) * metersPerLat)
-                        ))
-                        .ToArray();
-                    resultPolygons.Add(pts);
+                    resultChains.Add(validNodes);
                 }
                 else
                 {
@@ -6683,27 +6966,45 @@ public partial class OsmMapLoader : Node
                 }
             }
 
-            if (currentChain.Count >= 4)
+            if (currentChain.Count >= 4 && currentChain.First() == currentChain.Last())
             {
-                var pts = currentChain
-                    .Select(id => nodes[id])
-                    .Select(coord => new Vector2(
-                        (float)((coord.Lon - refLon) * metersPerLon),
-                        -(float)((coord.Lat - refLat) * metersPerLat)
-                    ))
-                    .ToArray();
-                resultPolygons.Add(pts);
+                resultChains.Add(currentChain);
             }
             else if (currentChain.Count >= 3)
             {
                 currentChain.Add(currentChain.First());
-                var pts = currentChain
-                    .Select(id => nodes[id])
-                    .Select(coord => new Vector2(
-                        (float)((coord.Lon - refLon) * metersPerLon),
-                        -(float)((coord.Lat - refLat) * metersPerLat)
-                    ))
-                    .ToArray();
+                resultChains.Add(currentChain);
+            }
+        }
+
+        return resultChains;
+    }
+
+    private static List<Vector2[]> AssembleRelationPolygons(
+        OsmRelation rel, 
+        List<OsmWay> allWays, 
+        Dictionary<long, (double Lat, double Lon)> nodes, 
+        double refLat, 
+        double refLon, 
+        double metersPerLat, 
+        double metersPerLon)
+    {
+        var chains = AssembleRelationNodeChains(rel, allWays, nodes);
+        var resultPolygons = new List<Vector2[]>();
+
+        foreach (var chain in chains)
+        {
+            var pts = chain
+                .Where(nodes.ContainsKey)
+                .Select(id => nodes[id])
+                .Select(coord => new Vector2(
+                    (float)((coord.Lon - refLon) * metersPerLon),
+                    -(float)((coord.Lat - refLat) * metersPerLat)
+                ))
+                .ToArray();
+
+            if (pts.Length >= 3)
+            {
                 resultPolygons.Add(pts);
             }
         }

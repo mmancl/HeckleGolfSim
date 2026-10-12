@@ -20,11 +20,13 @@ import os
 import re
 import shutil
 import ssl
+import subprocess
 import sys
 import threading
 import time
 import urllib.request
 import urllib.error
+import uuid
 
 try:
     import osmium
@@ -40,53 +42,158 @@ DEFAULT_CATALOG_PATH = os.path.join(PROJECT_ROOT, "Courses", "Catalog", "golf_co
 DEFAULT_DOWNLOAD_DIR = os.path.join(PROJECT_ROOT, "tmp", "osm_extracts")
 
 GEOFABRIK_REGIONS = {
-    # US Regional extracts (1-3.5 GB each, fast and safe memory footprint on standard PCs):
+    # 50 US States + DC & Puerto Rico:
+    "alabama": "https://download.geofabrik.de/north-america/us/alabama-latest.osm.pbf",
+    "alaska": "https://download.geofabrik.de/north-america/us/alaska-latest.osm.pbf",
+    "arizona": "https://download.geofabrik.de/north-america/us/arizona-latest.osm.pbf",
+    "arkansas": "https://download.geofabrik.de/north-america/us/arkansas-latest.osm.pbf",
+    "california": "https://download.geofabrik.de/north-america/us/california-latest.osm.pbf",
+    "colorado": "https://download.geofabrik.de/north-america/us/colorado-latest.osm.pbf",
+    "connecticut": "https://download.geofabrik.de/north-america/us/connecticut-latest.osm.pbf",
+    "delaware": "https://download.geofabrik.de/north-america/us/delaware-latest.osm.pbf",
+    "district-of-columbia": "https://download.geofabrik.de/north-america/us/district-of-columbia-latest.osm.pbf",
+    "florida": "https://download.geofabrik.de/north-america/us/florida-latest.osm.pbf",
+    "georgia": "https://download.geofabrik.de/north-america/us/georgia-latest.osm.pbf",
+    "hawaii": "https://download.geofabrik.de/north-america/us/hawaii-latest.osm.pbf",
+    "idaho": "https://download.geofabrik.de/north-america/us/idaho-latest.osm.pbf",
+    "illinois": "https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf",
+    "indiana": "https://download.geofabrik.de/north-america/us/indiana-latest.osm.pbf",
+    "iowa": "https://download.geofabrik.de/north-america/us/iowa-latest.osm.pbf",
+    "kansas": "https://download.geofabrik.de/north-america/us/kansas-latest.osm.pbf",
+    "kentucky": "https://download.geofabrik.de/north-america/us/kentucky-latest.osm.pbf",
+    "louisiana": "https://download.geofabrik.de/north-america/us/louisiana-latest.osm.pbf",
+    "maine": "https://download.geofabrik.de/north-america/us/maine-latest.osm.pbf",
+    "maryland": "https://download.geofabrik.de/north-america/us/maryland-latest.osm.pbf",
+    "massachusetts": "https://download.geofabrik.de/north-america/us/massachusetts-latest.osm.pbf",
+    "michigan": "https://download.geofabrik.de/north-america/us/michigan-latest.osm.pbf",
+    "minnesota": "https://download.geofabrik.de/north-america/us/minnesota-latest.osm.pbf",
+    "mississippi": "https://download.geofabrik.de/north-america/us/mississippi-latest.osm.pbf",
+    "missouri": "https://download.geofabrik.de/north-america/us/missouri-latest.osm.pbf",
+    "montana": "https://download.geofabrik.de/north-america/us/montana-latest.osm.pbf",
+    "nebraska": "https://download.geofabrik.de/north-america/us/nebraska-latest.osm.pbf",
+    "nevada": "https://download.geofabrik.de/north-america/us/nevada-latest.osm.pbf",
+    "new-hampshire": "https://download.geofabrik.de/north-america/us/new-hampshire-latest.osm.pbf",
+    "new-jersey": "https://download.geofabrik.de/north-america/us/new-jersey-latest.osm.pbf",
+    "new-mexico": "https://download.geofabrik.de/north-america/us/new-mexico-latest.osm.pbf",
+    "new-york": "https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf",
+    "north-carolina": "https://download.geofabrik.de/north-america/us/north-carolina-latest.osm.pbf",
+    "north-dakota": "https://download.geofabrik.de/north-america/us/north-dakota-latest.osm.pbf",
+    "ohio": "https://download.geofabrik.de/north-america/us/ohio-latest.osm.pbf",
+    "oklahoma": "https://download.geofabrik.de/north-america/us/oklahoma-latest.osm.pbf",
+    "oregon": "https://download.geofabrik.de/north-america/us/oregon-latest.osm.pbf",
+    "pennsylvania": "https://download.geofabrik.de/north-america/us/pennsylvania-latest.osm.pbf",
+    "puerto-rico": "https://download.geofabrik.de/north-america/us/puerto-rico-latest.osm.pbf",
+    "rhode-island": "https://download.geofabrik.de/north-america/us/rhode-island-latest.osm.pbf",
+    "south-carolina": "https://download.geofabrik.de/north-america/us/south-carolina-latest.osm.pbf",
+    "south-dakota": "https://download.geofabrik.de/north-america/us/south-dakota-latest.osm.pbf",
+    "tennessee": "https://download.geofabrik.de/north-america/us/tennessee-latest.osm.pbf",
+    "texas": "https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf",
+    "utah": "https://download.geofabrik.de/north-america/us/utah-latest.osm.pbf",
+    "vermont": "https://download.geofabrik.de/north-america/us/vermont-latest.osm.pbf",
+    "virginia": "https://download.geofabrik.de/north-america/us/virginia-latest.osm.pbf",
+    "washington": "https://download.geofabrik.de/north-america/us/washington-latest.osm.pbf",
+    "west-virginia": "https://download.geofabrik.de/north-america/us/west-virginia-latest.osm.pbf",
+    "wisconsin": "https://download.geofabrik.de/north-america/us/wisconsin-latest.osm.pbf",
+    "wyoming": "https://download.geofabrik.de/north-america/us/wyoming-latest.osm.pbf",
+
+    # European Countries & Regions:
+    "austria": "https://download.geofabrik.de/europe/austria-latest.osm.pbf",
+    "belgium": "https://download.geofabrik.de/europe/belgium-latest.osm.pbf",
+    "croatia": "https://download.geofabrik.de/europe/croatia-latest.osm.pbf",
+    "cyprus": "https://download.geofabrik.de/europe/cyprus-latest.osm.pbf",
+    "czech-republic": "https://download.geofabrik.de/europe/czech-republic-latest.osm.pbf",
+    "denmark": "https://download.geofabrik.de/europe/denmark-latest.osm.pbf",
+    "estonia": "https://download.geofabrik.de/europe/estonia-latest.osm.pbf",
+    "finland": "https://download.geofabrik.de/europe/finland-latest.osm.pbf",
+    "france": "https://download.geofabrik.de/europe/france-latest.osm.pbf",
+    "germany": "https://download.geofabrik.de/europe/germany-latest.osm.pbf",
+    "great-britain": "https://download.geofabrik.de/europe/great-britain-latest.osm.pbf",
+    "greece": "https://download.geofabrik.de/europe/greece-latest.osm.pbf",
+    "hungary": "https://download.geofabrik.de/europe/hungary-latest.osm.pbf",
+    "iceland": "https://download.geofabrik.de/europe/iceland-latest.osm.pbf",
+    "ireland": "https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf",
+    "italy": "https://download.geofabrik.de/europe/italy-latest.osm.pbf",
+    "latvia": "https://download.geofabrik.de/europe/latvia-latest.osm.pbf",
+    "lithuania": "https://download.geofabrik.de/europe/lithuania-latest.osm.pbf",
+    "luxembourg": "https://download.geofabrik.de/europe/luxembourg-latest.osm.pbf",
+    "netherlands": "https://download.geofabrik.de/europe/netherlands-latest.osm.pbf",
+    "norway": "https://download.geofabrik.de/europe/norway-latest.osm.pbf",
+    "poland": "https://download.geofabrik.de/europe/poland-latest.osm.pbf",
+    "portugal": "https://download.geofabrik.de/europe/portugal-latest.osm.pbf",
+    "romania": "https://download.geofabrik.de/europe/romania-latest.osm.pbf",
+    "scotland": "https://download.geofabrik.de/europe/great-britain/scotland-latest.osm.pbf",
+    "slovakia": "https://download.geofabrik.de/europe/slovakia-latest.osm.pbf",
+    "slovenia": "https://download.geofabrik.de/europe/slovenia-latest.osm.pbf",
+    "spain": "https://download.geofabrik.de/europe/spain-latest.osm.pbf",
+    "sweden": "https://download.geofabrik.de/europe/sweden-latest.osm.pbf",
+    "switzerland": "https://download.geofabrik.de/europe/switzerland-latest.osm.pbf",
+    "turkey": "https://download.geofabrik.de/europe/turkey-latest.osm.pbf",
+
+    # Other Golf Countries:
+    "canada": "https://download.geofabrik.de/north-america/canada-latest.osm.pbf",
+    "australia": "https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf",
+    "japan": "https://download.geofabrik.de/asia/japan-latest.osm.pbf",
+
+    # US Multi-State Regional extracts (large chunks):
     "us-midwest": "https://download.geofabrik.de/north-america/us-midwest-latest.osm.pbf",
     "us-northeast": "https://download.geofabrik.de/north-america/us-northeast-latest.osm.pbf",
     "us-pacific": "https://download.geofabrik.de/north-america/us-pacific-latest.osm.pbf",
     "us-south": "https://download.geofabrik.de/north-america/us-south-latest.osm.pbf",
     "us-west": "https://download.geofabrik.de/north-america/us-west-latest.osm.pbf",
-    # Top individual golf states (quick 500 MB - 1.2 GB extracts):
-    "california": "https://download.geofabrik.de/north-america/us/california-latest.osm.pbf",
-    "florida": "https://download.geofabrik.de/north-america/us/florida-latest.osm.pbf",
-    "texas": "https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf",
-    "new-york": "https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf",
-    "scotland": "https://download.geofabrik.de/europe/great-britain/scotland-latest.osm.pbf",
-    # Country-level extracts:
+
+    # Full monolithic extracts:
     "us": "https://download.geofabrik.de/north-america/us-latest.osm.pbf",
-    "canada": "https://download.geofabrik.de/north-america/canada-latest.osm.pbf",
-    "great-britain": "https://download.geofabrik.de/europe/great-britain-latest.osm.pbf",
-    "ireland": "https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf",
-    "australia": "https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf",
-    "germany": "https://download.geofabrik.de/europe/germany-latest.osm.pbf",
-    "spain": "https://download.geofabrik.de/europe/spain-latest.osm.pbf",
-    "japan": "https://download.geofabrik.de/asia/japan-latest.osm.pbf",
-    "australia-oceania": "https://download.geofabrik.de/australia-oceania-latest.osm.pbf",
-    # Full continent extracts (very large, ~43 GB combined):
     "north-america": "https://download.geofabrik.de/north-america-latest.osm.pbf",
     "europe": "https://download.geofabrik.de/europe-latest.osm.pbf",
 }
 
+ALL_US_STATES = [
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut", "delaware",
+    "district-of-columbia", "florida", "georgia", "hawaii", "idaho", "illinois", "indiana", "iowa",
+    "kansas", "kentucky", "louisiana", "maine", "maryland", "massachusetts", "michigan", "minnesota",
+    "mississippi", "missouri", "montana", "nebraska", "nevada", "new-hampshire", "new-jersey",
+    "new-mexico", "new-york", "north-carolina", "north-dakota", "ohio", "oklahoma", "oregon",
+    "pennsylvania", "puerto-rico", "rhode-island", "south-carolina", "south-dakota", "tennessee",
+    "texas", "utah", "vermont", "virginia", "washington", "west-virginia", "wisconsin", "wyoming"
+]
+
+ALL_EUROPE_COUNTRIES = [
+    "great-britain", "ireland", "spain", "france", "germany", "italy", "portugal", "sweden",
+    "denmark", "netherlands", "belgium", "austria", "switzerland", "norway", "finland", "czech-republic",
+    "poland", "hungary", "greece", "turkey", "slovakia", "slovenia", "croatia", "iceland", "romania",
+    "cyprus", "estonia", "latvia", "lithuania", "luxembourg"
+]
+
 PRESETS = {
-    "top-golf": {
-        "name": "Top Golf Countries & US Regions (Recommended)",
-        "description": "US Regions (Pacific, South, Midwest, Northeast, West) + UK, Ireland, Canada, Australia (~18 GB total across safe chunks)",
-        "regions": ["us-pacific", "us-south", "us-midwest", "us-northeast", "us-west", "great-britain", "ireland", "canada", "australia"]
+    "us-and-europe": {
+        "name": "All 50 US States + Top European Golf Countries (Fastest & Small Extracts)",
+        "description": "Iterates individual state & country extracts (<1 GB each) in memory with progress tracking",
+        "regions": ALL_US_STATES + ALL_EUROPE_COUNTRIES
+    },
+    "us-states": {
+        "name": "All 50 US States (Individual State Extracts)",
+        "description": "All 50 US states + DC & Puerto Rico processed individually using in-memory indexing",
+        "regions": ALL_US_STATES
+    },
+    "europe-countries": {
+        "name": "Individual European Golf Countries",
+        "description": "UK, Ireland, Spain, France, Germany, and European golfing nations individually",
+        "regions": ALL_EUROPE_COUNTRIES
     },
     "top-states": {
-        "name": "Iconic Golf States & Scotland (Fastest)",
+        "name": "Iconic Golf States & Scotland (Ultra Fast)",
         "description": "California, Florida, Texas, New York, Scotland (~3.5 GB total)",
         "regions": ["california", "florida", "texas", "new-york", "scotland"]
     },
-    "us-regions": {
-        "name": "All 5 US Subregions",
-        "description": "US Pacific, South, Midwest, Northeast, West (~11.5 GB in safe regional chunks)",
-        "regions": ["us-pacific", "us-south", "us-midwest", "us-northeast", "us-west"]
+    "top-golf": {
+        "name": "Top Golf Countries & US Regions (Legacy)",
+        "description": "US Regions (Pacific, South, Midwest, Northeast, West) + UK, Ireland, Canada, Australia",
+        "regions": ["us-pacific", "us-south", "us-midwest", "us-northeast", "us-west", "great-britain", "ireland", "canada", "australia"]
     },
-    "us-only": {
-        "name": "United States Monolithic (Large)",
-        "description": "US full extract (~11.6 GB monolithic; auto-switches to disk-backed index)",
-        "regions": ["us"]
+    "us-regions": {
+        "name": "All 5 US Subregions (Multi-State Blocks)",
+        "description": "US Pacific, South, Midwest, Northeast, West (~11.5 GB in regional chunks)",
+        "regions": ["us-pacific", "us-south", "us-midwest", "us-northeast", "us-west"]
     },
     "uk-ireland": {
         "name": "UK & Ireland Only",
@@ -95,7 +202,7 @@ PRESETS = {
     },
     "continents": {
         "name": "Entire Continents (Very Large)",
-        "description": "Full North America + Europe (~43 GB, auto-switches to disk-backed index)",
+        "description": "Full North America + Europe (~43 GB, monolithic extracts)",
         "regions": ["north-america", "europe"]
     },
 }
@@ -141,6 +248,112 @@ def slugify(text: str) -> str:
     """Generate a normalized, filesystem-safe slug matching C# GetCourseGeometrySlug."""
     clean = re.sub(r'[^a-zA-Z0-9]+', '_', text.lower()).strip('_')
     return clean
+
+
+def log_timestamp(message: str):
+    """Print message prefixed with current wall-clock timestamp [HH:MM:SS]."""
+    now = time.strftime("%H:%M:%S")
+    print(f"[{now}] {message}", flush=True)
+
+
+class StepHeartbeat:
+    """Background heartbeat timer that periodically prints progress while long-running steps execute."""
+
+    def __init__(self, step_name: str, interval: float = 60.0):
+        self.step_name = step_name
+        self.interval = interval
+        self.stop_event = threading.Event()
+        self.start_time = time.time()
+        self.counter_callback = None
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def set_counter(self, callback):
+        self.counter_callback = callback
+        return self
+
+    def start(self):
+        self.thread.start()
+        return self
+
+    def stop(self):
+        self.stop_event.set()
+        self.thread.join(timeout=1.0)
+
+    def _run(self):
+        while not self.stop_event.wait(self.interval):
+            elapsed = time.time() - self.start_time
+            m, s = divmod(int(elapsed), 60)
+            extra = ""
+            if self.counter_callback:
+                try:
+                    extra = f" | {self.counter_callback()}"
+                except Exception:
+                    pass
+            log_timestamp(f"[Heartbeat] {self.step_name} still running... (elapsed: {m}m {s:02d}s{extra})")
+
+
+
+# Well-known PGA Tour, DP World Tour, Major Championship, and prestigious golf venues
+PGA_TOUR_AND_MAJOR_COURSES = {
+    # Iconic Major & US Open / PGA Championship venues
+    "augusta national", "pebble beach", "cypress point", "pinehurst", "oakmont",
+    "shinnecock hills", "merion", "winge foot", "winged foot", "baltusrol", "bethpage",
+    "oak hill", "southern hills", "whistling straits", "hazeltine", "torrey pines",
+    "tpc sawgrass", "tpc scottsdale", "tpc southwind", "tpc river highlands",
+    "tpc summerlin", "tpc deer run", "tpc boston", "tpc san antonio", "tpc louisiana",
+    "tpc twin cities", "tpc potomac", "quail hollow", "harbour town", "riviera",
+    "bay hill", "muirfield village", "innisbrook", "colonial country club",
+    "east lake", "kapalua", "waialae", "pete dye golf club", "kiawah island", "ocean course",
+    "erin hills", "chambers bay", "olympic club", "medinah", "valhalla", "charlotte country club",
+    "scripps ranch", "sea island", "conway farms", "cog hill", "sedgefield", "detroit golf club",
+    "tpc craig ranch", "memorial park", "pebble beach golf links", "spyglass hill",
+    "monterey peninsula", "cypress point club", "los angeles country club", "lacc",
+    "bel air country club", "bellerive", "aronomink", "plainfield", "liberty national",
+    "ridgewood country club", "cherry hills", "crooked stick", "scioto", "inverness club",
+    "olympia fields", "interlachen", "minikahda", "sand hills", "bandon dunes",
+    "pacific dunes", "bandon trails", "old macdonald", "sheep ranch", "bandon preserve",
+    "cabot cliffs", "cabot links", "banff springs", "st george's", "hamilton golf",
+    # Iconic Open Championship (UK & Europe) venues
+    "st andrews", "old course", "carnoustie", "muirfield", "royal troon",
+    "royal birkdale", "royal lytham", "royal st george", "royal liverpool", "hoylake",
+    "turnberry", "ailsa", "royal portrush", "dunluce", "prestwick",
+    "kingsbarns", "north berwick", "gullane", "western gailes", "cruden bay",
+    "royal dornoch", "castle stuart", "trump international golf links", "gleneagles",
+    "ballyliffin", "lahinch", "ballybunion", "portmarnock", "the k club", "k club",
+    "mount juliet", "druids glen", "adare manor", "rosapenna", "waterville",
+    "county sligo", "county louth", "baltray", "tralee", "royal county down",
+    "wentworth", "sunningdale", "walton heath", "swinley forest", "woodhall spa",
+    "the belfry", "belfry", "le golf national", "valderrama", "real club valderrama",
+    "rcg sotogrande", "finca cortesin", "pga catalunya", "camiral", "marco simone",
+    "olgiata", "crans sur sierre", "golf club gut larchenhof", "green eagle",
+    "bro hof slott", "kennemer", "hilversumsche", "bernardus"
+}
+
+
+def compute_course_priority(c: dict) -> tuple:
+    """Compute sorting priority for a course:
+    1. Rating or PGA tour status (primary selection)
+       - Rating score derived from explicit OSM rating/stars tags or known PGA/Major venue status.
+    2. Most recently updated timestamp (secondary selection)
+    3. Hole count (18-hole courses prioritized over uncompleted layouts)
+    """
+    has_pga = bool(c.get("is_pga_tour", False))
+    rating = float(c.get("rating", 0.0))
+    rating_or_pga_score = 0.0
+
+    if has_pga:
+        rating_or_pga_score = max(rating_or_pga_score, 100.0 + rating)
+    elif rating > 0.0:
+        rating_or_pga_score = max(rating_or_pga_score, rating)
+
+    # Secondary selection: last_updated timestamp (YYYY-MM-DD or ISO string)
+    updated_str = str(c.get("last_updated", "")).strip()
+
+    # Hole count weighting (prefer 18 or 9 complete layouts over 0/unknown)
+    holes = int(c.get("hole_count", 0))
+
+    return (rating_or_pga_score, updated_str, holes)
+
 
 
 def download_file_parallel(
@@ -388,11 +601,12 @@ def download_file_resumable(url: str, dest_path: str, chunk_size: int = 1024 * 1
 
 
 class GolfCourseIdentifier(osmium.SimpleHandler):
-    """Pass 1: Identifies golf courses and their bounding perimeters from the PBF."""
+    """Pass 1: Identifies golf courses, bounding perimeters, and tagged nodes from the PBF."""
 
     def __init__(self):
         super().__init__()
         self.courses = []
+        self.ways_scanned = 0
 
     def _extract_course_info(self, obj, geom_type):
         tags = obj.tags
@@ -444,6 +658,40 @@ class GolfCourseIdentifier(osmium.SimpleHandler):
         deg_margin = 0.008
         bbox = (min_lat - deg_margin, min_lon - deg_margin, max_lat + deg_margin, max_lon + deg_margin)
 
+        # Determine rating and PGA Tour / prestigious tournament status
+        clean_name = " " + re.sub(r'[^a-z0-9]+', ' ', name.lower()).strip() + " "
+        is_pga = False
+        for kw in PGA_TOUR_AND_MAJOR_COURSES:
+            if f" {kw} " in clean_name or clean_name.strip() == kw:
+                is_pga = True
+                break
+
+        # Check tags for explicit PGA status or tournament indicators
+        tournament_tag = tags.get("tournament", "").lower()
+        operator_tag = tags.get("operator", "").lower()
+        if "pga" in tournament_tag or "pga" in operator_tag or "pga tour" in tags.get("description", "").lower():
+            is_pga = True
+
+        # Extract numeric or stars rating from OSM tags if present
+        rating = 0.0
+        for r_key in ["rating", "stars", "user_rating", "golf:rating"]:
+            if r_key in tags:
+                try:
+                    val = float(re.findall(r'(\d+(?:\.\d+)?)', str(tags[r_key]))[0])
+                    rating = max(rating, val)
+                except (IndexError, ValueError):
+                    pass
+
+        # Extract object last_updated timestamp if available from OSM metadata
+        obj_ts = getattr(obj, "timestamp", None)
+        if obj_ts:
+            try:
+                last_updated = obj_ts.strftime("%Y-%m-%d") if hasattr(obj_ts, "strftime") else str(obj_ts)[:10]
+            except Exception:
+                last_updated = time.strftime("%Y-%m-%d")
+        else:
+            last_updated = time.strftime("%Y-%m-%d")
+
         self.courses.append({
             "id": obj.id,
             "type": geom_type,
@@ -453,11 +701,17 @@ class GolfCourseIdentifier(osmium.SimpleHandler):
             "lon": center_lon,
             "location": location,
             "hole_count": holes,
-            "last_updated": time.strftime("%Y-%m-%d"),
+            "last_updated": last_updated,
+            "is_pga_tour": is_pga,
+            "rating": rating,
             "bbox": bbox
         })
 
     def way(self, w):
+        self.ways_scanned += 1
+        tags = w.tags
+        if tags.get("leisure") != "golf_course":
+            return
         self._extract_course_info(w, "way")
 
 
@@ -468,12 +722,26 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
         super().__init__()
         self.course_targets = course_targets  # list of course dicts
         self.course_data = {c["slug"]: {"nodes": {}, "ways": [], "relations": []} for c in course_targets}
+        self.ways_scanned = 0
+        self.ways_matched = 0
+        self.relations_scanned = 0
+        self.relations_matched = 0
 
         # Spatial grid index for O(1) candidate lookup
         self.grid_cell_size = 0.05  # ~5 km grid
         self.grid = {}
+        self.min_all_lat = 90.0
+        self.max_all_lat = -90.0
+        self.min_all_lon = 180.0
+        self.max_all_lon = -180.0
+
         for c in course_targets:
             min_lat, min_lon, max_lat, max_lon = c["bbox"]
+            self.min_all_lat = min(self.min_all_lat, min_lat)
+            self.max_all_lat = max(self.max_all_lat, max_lat)
+            self.min_all_lon = min(self.min_all_lon, min_lon)
+            self.max_all_lon = max(self.max_all_lon, max_lon)
+
             gx_min = int(math.floor(min_lat / self.grid_cell_size))
             gx_max = int(math.floor(max_lat / self.grid_cell_size))
             gy_min = int(math.floor(min_lon / self.grid_cell_size))
@@ -486,6 +754,9 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
                     self.grid[key].append(c)
 
     def _get_matching_courses(self, lat, lon):
+        # Extremely fast global boundary check
+        if lat < self.min_all_lat or lat > self.max_all_lat or lon < self.min_all_lon or lon > self.max_all_lon:
+            return []
         gx = int(math.floor(lat / self.grid_cell_size))
         gy = int(math.floor(lon / self.grid_cell_size))
         candidates = self.grid.get((gx, gy))
@@ -515,9 +786,11 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
             }
 
     def way(self, w):
+        self.ways_scanned += 1
         tags = {t.k: t.v for t in w.tags}
-        # Keep relevant golf and landscape layers
+        # Keep relevant golf and landscape layers, OR untagged ways (which may be relation members e.g. multipolygon fairways/greens)
         is_relevant = (
+            not tags or
             "golf" in tags or
             tags.get("leisure") == "golf_course" or
             tags.get("natural") in ("water", "wood", "tree_row", "tree") or
@@ -528,11 +801,20 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
 
         node_refs = []
         way_lats, way_lons = [], []
+        first_checked = False
         for n in w.nodes:
             node_refs.append(n.ref)
             if n.location.valid():
-                way_lats.append(n.lat)
-                way_lons.append(n.lon)
+                lat = n.lat
+                lon = n.lon
+                # Fast reject: if the first node is miles outside the overall region bounding box, skip entire way
+                if not first_checked:
+                    first_checked = True
+                    if lat < (self.min_all_lat - 0.1) or lat > (self.max_all_lat + 0.1) or \
+                       lon < (self.min_all_lon - 0.1) or lon > (self.max_all_lon + 0.1):
+                        return
+                way_lats.append(lat)
+                way_lons.append(lon)
 
         if not way_lats:
             return
@@ -544,6 +826,7 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
         if not matches:
             return
 
+        self.ways_matched += 1
         for c in matches:
             self.course_data[c["slug"]]["ways"].append({
                 "type": "way",
@@ -562,20 +845,67 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
                         "tags": {}
                     }
 
+    def relation(self, r):
+        self.relations_scanned += 1
+        tags = {t.k: t.v for t in r.tags}
+        # Keep relevant golf and landscape relations (multipolygons, course boundaries)
+        is_relevant = (
+            "golf" in tags or
+            tags.get("leisure") == "golf_course" or
+            tags.get("natural") in ("water", "wood", "tree_row", "tree") or
+            tags.get("landuse") == "forest"
+        )
+        if not is_relevant:
+            return
 
-def process_pbf_file(
+        members = []
+        member_way_refs = set()
+        for m in r.members:
+            m_type = "way" if m.type == 'w' else ("node" if m.type == 'n' else "relation")
+            members.append({
+                "type": m_type,
+                "ref": m.ref,
+                "role": m.role
+            })
+            if m.type == 'w':
+                member_way_refs.add(m.ref)
+
+        rel_obj = {
+            "type": "relation",
+            "id": r.id,
+            "members": members,
+            "tags": tags
+        }
+
+        # Match relation to courses whose extracted ways include any of this relation's member ways
+        matched_any = False
+        for c in self.course_targets:
+            slug = c["slug"]
+            c_ways = self.course_data[slug]["ways"]
+            if any(w["id"] in member_way_refs for w in c_ways):
+                self.course_data[slug]["relations"].append(rel_obj)
+                matched_any = True
+        if matched_any:
+            self.relations_matched += 1
+
+
+def _worker_extract_pbf(
     pbf_path: str,
     cache_dir: str,
-    max_courses: int = 2500,
-    idx_type: str = "auto",
-    temp_dir: str = None
-) -> list:
-    """Extract golf courses from a PBF file and write compressed vector geometries."""
+    max_courses: int,
+    idx_type: str,
+    temp_idx_file: str,
+    results_file: str
+):
+    """Worker process: extracts courses and writes geometry packages.
+
+    Runs in a dedicated process so that on Windows, osmium file mappings are fully
+    released by the OS upon process exit, preventing WinError 32 locking.
+    """
     os.makedirs(cache_dir, exist_ok=True)
     file_size_gb = (os.path.getsize(pbf_path) / (1024 * 1024 * 1024)) if os.path.exists(pbf_path) else 0.0
 
     # Configure adaptive node location indexing strategy
-    temp_idx_file = None
     if idx_type == "auto":
         # Extracts >= 2.5 GB have hundreds of millions of nodes; flex_mem causes std::bad_alloc (MemoryError).
         if file_size_gb >= 2.5:
@@ -589,9 +919,6 @@ def process_pbf_file(
         if "," in chosen_idx:
             actual_idx = chosen_idx
         else:
-            if not temp_dir:
-                temp_dir = os.path.dirname(pbf_path)
-            temp_idx_file = os.path.join(temp_dir, f"_osmium_node_idx_{os.getpid()}.dat")
             actual_idx = f"{chosen_idx},{temp_idx_file}"
 
         free_bytes = shutil.disk_usage(os.path.dirname(temp_idx_file or pbf_path)).free
@@ -606,73 +933,214 @@ def process_pbf_file(
         actual_idx = chosen_idx
         print(f"Using in-memory node location index: {actual_idx}")
 
-    print(f"\n[Step 1/2] Scanning '{os.path.basename(pbf_path)}' for golf courses with osmium...")
+    log_timestamp(f"[Step 1/2] Scanning '{os.path.basename(pbf_path)}' for golf courses with osmium...")
+    step1_start = time.time()
+
+    m = osmium.index.create_map(actual_idx)
+    lh = osmium.NodeLocationsForWays(m)
+    lh.ignore_errors()
+
+    id_handler = GolfCourseIdentifier()
+    hb_step1 = StepHeartbeat(
+        "[Step 1/2] Course Scan",
+        interval=60.0
+    ).set_counter(
+        lambda: f"{id_handler.ways_scanned:,} ways scanned, {len(id_handler.courses):,} courses found"
+    ).start()
+
+    # Step 1: Stream nodes (populating location index m) and ways (identifying courses and bounding boxes)
+    try:
+        with osmium.io.Reader(pbf_path, osmium.osm.osm_entity_bits.NODE | osmium.osm.osm_entity_bits.WAY) as rd:
+            osmium.apply(rd, lh, id_handler)
+    finally:
+        hb_step1.stop()
+
+    step1_duration = time.time() - step1_start
+    log_timestamp(f"[Step 1/2] Complete! Scanned {id_handler.ways_scanned:,} ways in {format_time(step1_duration)}.")
+
+    identified = id_handler.courses
+
+    # Deduplicate identified courses by slug and proximity
+    unique_courses = {}
+    for c in identified:
+        slug = c["slug"]
+        if slug not in unique_courses:
+            unique_courses[slug] = c
+
+    # Sort by primary (rating / PGA tour status) and secondary (most recently updated timestamp, hole count)
+    all_unique = list(unique_courses.values())
+    all_unique.sort(key=compute_course_priority, reverse=True)
+
+    course_list = all_unique
+    if max_courses > 0:
+        course_list = course_list[:max_courses]
+
+    pga_count = sum(1 for c in course_list if c.get("is_pga_tour"))
+    rated_count = sum(1 for c in course_list if c.get("rating", 0) > 0 and not c.get("is_pga_tour"))
+    log_timestamp(f"Identified {len(unique_courses)} total course(s). Selected {len(course_list)} prioritized courses "
+                  f"({pga_count} PGA/Major venues, {rated_count} rated, remainder by latest updated date).")
+
+    log_timestamp(f"[Step 2/2] Extracting feature geometries (ways) using pre-populated index...")
+    step2_start = time.time()
+    feat_handler = CourseFeatureExtractor(course_list)
+
+    hb_step2 = StepHeartbeat(
+        "[Step 2/2] Feature Geometry Extraction",
+        interval=60.0
+    ).set_counter(
+        lambda: f"{feat_handler.ways_scanned:,} ways scanned ({feat_handler.ways_matched:,} matched), {feat_handler.relations_scanned:,} relations scanned ({feat_handler.relations_matched:,} matched)"
+    ).start()
+
+    # Step 2: Stream WAYS and RELATIONS using the pre-populated index m!
+    # Does NOT re-populate the index, does NOT resize the index file on disk, avoiding ENOSPC errors.
+    try:
+        with osmium.io.Reader(pbf_path, osmium.osm.osm_entity_bits.WAY | osmium.osm.osm_entity_bits.RELATION) as rd:
+            osmium.apply(rd, lh, feat_handler)
+    finally:
+        hb_step2.stop()
+
+    step2_duration = time.time() - step2_start
+    log_timestamp(f"[Step 2/2] Complete! Scanned {feat_handler.ways_scanned:,} ways & {feat_handler.relations_scanned:,} relations in {format_time(step2_duration)}.")
+
+    # Attach standalone tagged nodes collected during Step 1
+    if hasattr(id_handler, "tagged_nodes"):
+        for tn in id_handler.tagged_nodes:
+            matches = feat_handler._get_matching_courses(tn["lat"], tn["lon"])
+            for c in matches:
+                feat_handler.course_data[c["slug"]]["nodes"][tn["id"]] = tn
+
+    generated_catalog_entries = []
+    saved_count = 0
+
+    for c in course_list:
+        slug = c["slug"]
+        data = feat_handler.course_data.get(slug)
+        if not data or not data["ways"]:
+            continue
+
+        # Prune untagged ways that are not referenced in any relation
+        rel_way_refs = {m["ref"] for rel in data.get("relations", []) for m in rel.get("members", []) if m.get("type") == "way"}
+        data["ways"] = [w for w in data["ways"] if w.get("tags") or w["id"] in rel_way_refs]
+
+        elements = list(data["nodes"].values()) + data["ways"] + data.get("relations", [])
+        osm_json = {
+            "version": 0.6,
+            "generator": "HeckleGolfSim-OsmSync/1.0",
+            "elements": elements
+        }
+
+        json_bytes = json.dumps(osm_json, ensure_ascii=False).encode("utf-8")
+        compressed_bytes = gzip.compress(json_bytes, compresslevel=9)
+
+        out_path = os.path.join(cache_dir, f"{slug}.json.gz")
+        with open(out_path, "wb") as f_out:
+            f_out.write(compressed_bytes)
+
+        catalog_entry = {
+            "name": c["name"],
+            "lat": round(c["lat"], 6),
+            "lon": round(c["lon"], 6),
+            "location": c["location"],
+            "hole_count": c["hole_count"],
+            "last_updated": c["last_updated"]
+        }
+        if c.get("is_pga_tour"):
+            catalog_entry["is_pga_tour"] = True
+        if c.get("rating", 0.0) > 0.0:
+            catalog_entry["rating"] = round(float(c["rating"]), 1)
+
+        generated_catalog_entries.append(catalog_entry)
+        saved_count += 1
+
+    log_timestamp(f"Successfully generated {saved_count} pre-packaged course geometries in: {cache_dir}")
+    with open(results_file, "w", encoding="utf-8") as f:
+        json.dump(generated_catalog_entries, f)
+
+
+def process_pbf_file(
+    pbf_path: str,
+    cache_dir: str,
+    max_courses: int = 2500,
+    idx_type: str = "auto",
+    temp_dir: str = None
+) -> list:
+    """Extract golf courses from a PBF file and write compressed vector geometries.
+
+    Executes in a dedicated worker subprocess so memory-mapped file handles
+    are cleanly dropped by Windows on completion, preventing WinError 32 lockup.
+    """
+    if not temp_dir:
+        temp_dir = os.path.dirname(pbf_path)
+    os.makedirs(temp_dir, exist_ok=True)
+    os.makedirs(cache_dir, exist_ok=True)
+
+    uid = uuid.uuid4().hex[:8]
+    temp_idx_file = os.path.join(temp_dir, f"_osmium_node_idx_{uid}.dat")
+    results_file = os.path.join(temp_dir, f"_osmium_results_{uid}.json")
+
+    cmd = [
+        sys.executable,
+        os.path.abspath(__file__),
+        "--worker-extract",
+        "--worker-pbf", os.path.abspath(pbf_path),
+        "--worker-cache-dir", os.path.abspath(cache_dir),
+        "--worker-max-courses", str(max_courses),
+        "--worker-idx-type", str(idx_type),
+        "--worker-temp-idx", os.path.abspath(temp_idx_file),
+        "--worker-results-file", os.path.abspath(results_file)
+    ]
 
     try:
-        id_handler = GolfCourseIdentifier()
-        id_handler.apply_file(pbf_path, locations=True, idx=actual_idx)
-        identified = id_handler.courses
+        proc = subprocess.run(cmd)
+        if proc.returncode != 0:
+            raise RuntimeError(f"OSM extraction worker failed with exit code {proc.returncode}")
 
-        # Deduplicate identified courses by slug and proximity
-        unique_courses = {}
-        for c in identified:
-            slug = c["slug"]
-            if slug not in unique_courses:
-                unique_courses[slug] = c
+        if not os.path.exists(results_file):
+            raise RuntimeError(f"OSM extraction worker completed but results file not found: {results_file}")
 
-        course_list = list(unique_courses.values())
-        if max_courses > 0:
-            course_list = course_list[:max_courses]
-
-        print(f"Identified {len(course_list)} unique named golf course(s) to extract.")
-
-        print(f"[Step 2/2] Extracting feature geometries and generating compressed packages...")
-        feat_handler = CourseFeatureExtractor(course_list)
-        feat_handler.apply_file(pbf_path, locations=True, idx=actual_idx)
-
-        generated_catalog_entries = []
-        saved_count = 0
-
-        for c in course_list:
-            slug = c["slug"]
-            data = feat_handler.course_data.get(slug)
-            if not data or not data["ways"]:
-                continue
-
-            elements = list(data["nodes"].values()) + data["ways"]
-            osm_json = {
-                "version": 0.6,
-                "generator": "HeckleGolfSim-OsmSync/1.0",
-                "elements": elements
-            }
-
-            json_bytes = json.dumps(osm_json, ensure_ascii=False).encode("utf-8")
-            compressed_bytes = gzip.compress(json_bytes, compresslevel=9)
-
-            out_path = os.path.join(cache_dir, f"{slug}.json.gz")
-            with open(out_path, "wb") as f_out:
-                f_out.write(compressed_bytes)
-
-            generated_catalog_entries.append({
-                "name": c["name"],
-                "lat": round(c["lat"], 6),
-                "lon": round(c["lon"], 6),
-                "location": c["location"],
-                "hole_count": c["hole_count"],
-                "last_updated": c["last_updated"]
-            })
-            saved_count += 1
-
-        print(f"Successfully generated {saved_count} pre-packaged course geometries in: {cache_dir}")
-        return generated_catalog_entries
+        with open(results_file, "r", encoding="utf-8") as f:
+            catalog_entries = json.load(f)
+        return catalog_entries
 
     finally:
-        if temp_idx_file and os.path.exists(temp_idx_file):
+        # Worker subprocess has terminated, so OS has closed all file mappings.
+        if os.path.exists(temp_idx_file):
             try:
                 os.remove(temp_idx_file)
                 print(f"Cleaned up temporary node location index: {temp_idx_file}")
             except Exception as e:
-                print(f"Notice: Temporary index file {temp_idx_file} can be removed after process exits: {e}")
+                print(f"Notice: Could not remove temporary index file {temp_idx_file}: {e}")
+
+        if os.path.exists(results_file):
+            try:
+                os.remove(results_file)
+            except Exception:
+                pass
+
+
+def cleanup_osm_temp_files(directories: list, clean_all_pbfs: bool = False):
+    """Find and remove leftover temporary index files (_osmium_node_idx_*.dat) and stale artifacts."""
+    for d in set(directories):
+        if not d or not os.path.exists(d):
+            continue
+        try:
+            for item in os.listdir(d):
+                p = os.path.join(d, item)
+                if (item.startswith("_osmium_node_idx_") and item.endswith(".dat")) or \
+                   (item.startswith("_osmium_results_") and item.endswith(".json")):
+                    try:
+                        os.remove(p)
+                        print(f"Cleaned up orphaned temporary file: {p}")
+                    except Exception:
+                        pass
+                elif clean_all_pbfs and item.endswith(".osm.pbf"):
+                    try:
+                        os.remove(p)
+                        print(f"Cleaned up extract: {p}")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
 
 def update_global_catalog(new_entries: list, catalog_path: str):
@@ -693,10 +1161,15 @@ def update_global_catalog(new_entries: list, catalog_path: str):
         if key not in merged:
             merged[key] = entry
         else:
-            # Update hole count or date if newly available
-            if entry["hole_count"] > 0:
+            # Update hole count, date, PGA status, or rating if newly available
+            if entry.get("hole_count", 0) > 0:
                 merged[key]["hole_count"] = entry["hole_count"]
-            merged[key]["last_updated"] = entry["last_updated"]
+            if entry.get("last_updated"):
+                merged[key]["last_updated"] = entry["last_updated"]
+            if entry.get("is_pga_tour"):
+                merged[key]["is_pga_tour"] = True
+            if entry.get("rating", 0.0) > 0.0:
+                merged[key]["rating"] = max(merged[key].get("rating", 0.0), entry["rating"])
 
     final_list = sorted(merged.values(), key=lambda x: x["name"].lower())
     with open(catalog_path, "w", encoding="utf-8") as f:
@@ -730,57 +1203,79 @@ def run_monthly_sync(
     print(f"Max Courses/Region : {max_courses if max_courses > 0 else 'Unlimited'}")
     print(f"Download Mode      : {'Single-threaded' if single_thread else f'Parallel ({num_threads} threads, {chunk_size_mb} MB chunks)'}")
     print(f"Location Indexing  : {idx_type} (auto switches to disk-backed for large extracts)")
+    print(f"Auto-Clean Disk    : {'Enabled (reclaims PBF and index files immediately)' if clean else 'Disabled'}")
     print("=" * 70)
+
+    # Initial cleanup to reclaim any disk space from previously aborted runs
+    cleanup_osm_temp_files([download_dir, temp_dir])
 
     all_catalog_entries = []
 
-    for reg in regions:
-        url = GEOFABRIK_REGIONS.get(reg.lower())
-        if not url:
-            print(f"Unknown region '{reg}'. Supported: {', '.join(GEOFABRIK_REGIONS.keys())}")
-            continue
-
-        pbf_filename = f"{reg}-latest.osm.pbf"
-        pbf_path = os.path.join(download_dir, pbf_filename)
-
-        print(f"\n>>> Processing Region: {reg.upper()} <<<")
-        if not skip_download or not os.path.exists(pbf_path):
-            print(f"Fetching latest extract from:\n  {url}")
-            if single_thread:
-                success = download_file_resumable(url, pbf_path)
-            else:
-                success = download_file_parallel(
-                    url,
-                    pbf_path,
-                    num_threads=num_threads,
-                    chunk_size_mb=chunk_size_mb
-                )
-
-            if not success:
-                print(f"Failed to download {reg}. Skipping.")
+    total_regions = len(regions)
+    try:
+        for idx_reg, reg in enumerate(regions, start=1):
+            url = GEOFABRIK_REGIONS.get(reg.lower())
+            if not url:
+                print(f"[{idx_reg}/{total_regions}] Unknown region '{reg}'. Supported: {', '.join(GEOFABRIK_REGIONS.keys())}")
                 continue
-        else:
-            print(f"Using existing PBF file: {pbf_path}")
 
-        extracted_entries = process_pbf_file(
-            pbf_path,
-            cache_dir,
-            max_courses=max_courses,
-            idx_type=idx_type,
-            temp_dir=temp_dir
-        )
-        all_catalog_entries.extend(extracted_entries)
+            pbf_filename = f"{reg}-latest.osm.pbf"
+            pbf_path = os.path.join(download_dir, pbf_filename)
 
-        if clean and os.path.exists(pbf_path):
-            print(f"Cleaning up {pbf_path} to reclaim disk space...")
-            os.remove(pbf_path)
+            pct = (idx_reg / total_regions) * 100.0
+            print(f"\n" + "=" * 70)
+            print(f"[{idx_reg}/{total_regions}] ({pct:.1f}% Complete) >>> Processing Region: {reg.upper()} <<<")
+            print("=" * 70)
+            free_bytes = shutil.disk_usage(download_dir).free
+            free_gb = free_bytes / (1024 * 1024 * 1024)
+            print(f"Available Disk Space: {free_gb:.1f} GB")
 
-    if all_catalog_entries:
-        update_global_catalog(all_catalog_entries, catalog_path)
+            try:
+                if not skip_download or not os.path.exists(pbf_path):
+                    print(f"[{idx_reg}/{total_regions}] Downloading ({reg}):\n  {url}")
+                    if single_thread:
+                        success = download_file_resumable(url, pbf_path)
+                    else:
+                        success = download_file_parallel(
+                            url,
+                            pbf_path,
+                            num_threads=num_threads,
+                            chunk_size_mb=chunk_size_mb
+                        )
 
-    print("\n" + "=" * 70)
-    print("Monthly OpenStreetMap sync complete! Enjoy fast, offline course play.")
-    print("=" * 70)
+                    if not success:
+                        print(f"Failed to download {reg}. Skipping.")
+                        continue
+                else:
+                    print(f"Using existing PBF file: {pbf_path}")
+
+                extracted_entries = process_pbf_file(
+                    pbf_path,
+                    cache_dir,
+                    max_courses=max_courses,
+                    idx_type=idx_type,
+                    temp_dir=temp_dir
+                )
+                all_catalog_entries.extend(extracted_entries)
+
+            finally:
+                if clean and os.path.exists(pbf_path):
+                    print(f"Cleaning up {pbf_path} to reclaim disk space...")
+                    try:
+                        os.remove(pbf_path)
+                    except Exception as e:
+                        print(f"Notice: Could not remove {pbf_path}: {e}")
+
+        if all_catalog_entries:
+            update_global_catalog(all_catalog_entries, catalog_path)
+
+        print("\n" + "=" * 70)
+        print("Monthly OpenStreetMap sync complete! Enjoy fast, offline course play.")
+        print("=" * 70)
+
+    finally:
+        # Final cleanup of any lingering temporary index files
+        cleanup_osm_temp_files([download_dir, temp_dir])
 
 
 def main():
@@ -864,8 +1359,56 @@ def main():
         action="store_true",
         help="Remove large .osm.pbf extract files after processing to save disk space."
     )
+    parser.add_argument(
+        "--worker-extract",
+        action="store_true",
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--worker-pbf",
+        default="",
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--worker-cache-dir",
+        default="",
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--worker-max-courses",
+        type=int,
+        default=2500,
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--worker-idx-type",
+        default="auto",
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--worker-temp-idx",
+        default="",
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--worker-results-file",
+        default="",
+        help=argparse.SUPPRESS
+    )
 
     args = parser.parse_args()
+
+    # If launched as an isolated extraction worker subprocess, execute and exit immediately
+    if args.worker_extract:
+        _worker_extract_pbf(
+            pbf_path=args.worker_pbf,
+            cache_dir=args.worker_cache_dir,
+            max_courses=args.worker_max_courses,
+            idx_type=args.worker_idx_type,
+            temp_idx_file=args.worker_temp_idx,
+            results_file=args.worker_results_file
+        )
+        sys.exit(0)
 
     # Determine regions to process
     if args.regions:

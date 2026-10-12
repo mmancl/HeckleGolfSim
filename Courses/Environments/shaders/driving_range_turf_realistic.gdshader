@@ -34,9 +34,9 @@ uniform float tee_start_x : hint_range(-50.0, 10.0) = -12.0;
 uniform float tee_blend_x : hint_range(0.1, 15.0) = 4.0;
 uniform float max_range_dist : hint_range(100.0, 600.0) = 320.04;
 
-// -- UV Tiling scales per surface --
-uniform float uv_scale_fairway : hint_range(0.01, 1.0) = 0.12;
-uniform float uv_scale_rough   : hint_range(0.01, 1.0) = 0.08;
+// -- UV Tiling scales per surface (Tuned for high-resolution turf detail at golfer scale) --
+uniform float uv_scale_fairway : hint_range(0.01, 1.0) = 0.44;
+uniform float uv_scale_rough   : hint_range(0.01, 1.0) = 0.38;
 
 // -- PBR & Visual Tuning --
 uniform float normal_depth : hint_range(0.0, 2.0) = 0.85;
@@ -82,50 +82,37 @@ void fragment() {
     vec2 uv_f = v_world_pos.xz * uv_scale_fairway;
     vec2 uv_r = v_world_pos.xz * uv_scale_rough;
 
-    // 3. Multi-Scale Albedo Sampling & Lush Championship Color Grading
-    // Rough:
-    vec3 r_base  = texture(tex_rough, uv_r).rgb;
-    vec3 r_macro = texture(tex_rough, uv_r * 0.35).rgb;
-    vec3 col_r   = mix(r_base, r_macro, 0.35) * vec3(0.92, 1.16, 0.88);
+    // 3. Multi-Scale Albedo Sampling & Natural Turf
+    // Rough: Rich championship emerald rough (cleans out dead yellow thatch with dual-octave detail)
+    vec3 r_fine  = texture(tex_rough, uv_r).rgb;
+    vec3 r_broad = texture(tex_rough, uv_r * 0.43 + vec2(0.37, 0.71)).rgb;
+    vec3 r_base  = mix(r_fine, r_broad, 0.25);
+    vec3 col_rough = mix(r_base, r_base * vec3(0.82, 1.14, 0.78), 0.60);
 
-    // Natural landscape clumping (~5.5m clusters)
-    float clump_val = gnoise(v_world_pos.xz * 0.18);
-    vec3 rough_deep = col_r * vec3(0.85, 0.95, 0.82); // deep shadow pockets
-    vec3 rough_lush = col_r * vec3(1.10, 1.18, 0.96); // sunlit lush tufts
-    vec3 col_rough = mix(rough_deep, rough_lush, clump_val * 0.5 + 0.5);
+    // Fairway: Championship turf with alternating directional mower roller stripes
+    vec3 f_fine  = texture(tex_fairway, uv_f).rgb;
+    vec3 f_broad = texture(tex_fairway, uv_f * 0.41 + vec2(0.53, 0.29)).rgb;
+    vec3 col_f   = mix(f_fine, f_broad, 0.25);
 
-    // Fairway:
-    vec3 f_base  = texture(tex_fairway, uv_f).rgb;
-    vec3 f_macro = texture(tex_fairway, uv_f * 0.30).rgb;
-    vec3 col_f   = mix(f_base, f_macro, 0.30) * vec3(1.00, 1.25, 0.96);
-
-    // Bay Hill & Moon Bay high-contrast alternating mower striping
+    // Moon Bay alternating mower stripes (~3.5m width along corridor)
     vec2 stripe_dir = vec2(0.707, 0.707);
-    float stripe_coord = dot(v_world_pos.xz, stripe_dir) * 0.85;
-    float stripe_val = smoothstep(0.25, 0.75, sin(stripe_coord) * 0.5 + 0.5);
+    float stripe_coord = dot(v_world_pos.xz, stripe_dir) * 0.90;
+    float stripe_val = smoothstep(0.20, 0.80, sin(stripe_coord) * 0.5 + 0.5);
+
+    // Light / dark roller nap compression
+    vec3 stripe_bright = col_f * 1.07;
+    vec3 stripe_dark   = col_f * 0.92;
+    vec3 col_fairway   = mix(stripe_dark, stripe_bright, stripe_val);
+
+    // Camera view sheen: looking along roller nap creates silky light sheen
     vec3 view_dir = normalize(v_world_pos - v_cam_pos);
     float view_grain = dot(view_dir.xz, stripe_dir);
-    float stripe_aniso = (stripe_val - 0.5) * 0.18 * (0.6 + 0.4 * view_grain);
+    col_fairway *= (1.0 + (stripe_val - 0.5) * 0.08 * (0.5 + 0.5 * view_grain));
 
-    vec3 stripe_bright = col_f * vec3(1.14, 1.16, 0.96); // sunlit golden-lime green
-    vec3 stripe_dark   = col_f * vec3(0.82, 0.88, 0.82); // deep rich emerald green
-    vec3 col_fairway   = mix(stripe_dark, stripe_bright, stripe_val);
-    col_fairway = clamp(col_fairway * (1.0 + stripe_aniso), 0.0, 1.0);
-
-    // Fairway-to-rough intermediate first-cut collar
-    float fringe_val = smoothstep(0.04, 0.30, fairway_w) * (1.0 - smoothstep(0.60, 0.96, fairway_w));
-    vec3 col_first_cut = mix(col_fairway, col_rough, 0.45) * vec3(0.96, 1.05, 0.90);
+    // Bay Hill first-cut collar ribbon: distinct darker green border framing the fairway
+    float fringe_val = smoothstep(0.02, 0.22, fairway_w) * (1.0 - smoothstep(0.30, 0.65, fairway_w));
+    vec3 col_first_cut = col_fairway * vec3(0.72, 0.84, 0.68);
     col_fairway = mix(col_fairway, col_first_cut, fringe_val * 0.65);
-
-    // 4. Close-Range (< 12m) Procedural Grass Blade Detail at Player Perspective
-    float dist_to_cam = length(v_world_pos - v_cam_pos);
-    float blade_lod = clamp(1.0 - smoothstep(1.5, 12.0, dist_to_cam), 0.0, 1.0);
-    vec2 bp = v_world_pos.xz * 24.0;
-    float blade_shape = min(abs(fract(bp.x * 0.707 + bp.y * 0.707) - 0.5) * 2.0,
-                            abs(fract(bp.x * -0.707 + bp.y * 0.707) - 0.5) * 2.0);
-    float blade_highlight = smoothstep(0.25, 0.75, blade_shape);
-    col_rough   = mix(col_rough,   col_rough   * mix(vec3(0.85), vec3(1.12), blade_highlight), blade_lod * 0.40);
-    col_fairway = mix(col_fairway, col_fairway * mix(vec3(0.90), vec3(1.08), blade_highlight), blade_lod * 0.30);
 
     ALBEDO = clamp(col_fairway * fairway_w + col_rough * rough_w, 0.0, 1.0);
 

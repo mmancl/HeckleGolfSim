@@ -202,6 +202,8 @@ func _create_minigame_tile(title: String, desc: String, icon_path: String, on_cl
 	play_btn.custom_minimum_size = Vector2(0, 42)
 	ThemeManager.apply_primary_button_style(play_btn)
 	play_btn.pressed.connect(on_click)
+	play_btn.focus_entered.connect(func(): ThemeManager.apply_card_panel_style(panel, true, 12))
+	play_btn.focus_exited.connect(func(): ThemeManager.apply_card_panel_style(panel, false, 12))
 	vbox.add_child(play_btn)
 	
 	return panel

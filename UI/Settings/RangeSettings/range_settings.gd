@@ -632,6 +632,7 @@ func _ready() -> void:
 	var minigame_music_toggle = _create_toggle_setting_row("Minigame Music Soundtrack", "minigame_music_enabled")
 	var suspense_toggle = _create_toggle_setting_row("Course Play Suspense", "tension_effects_enabled")
 	var shot_analysis_toggle = _create_toggle_setting_row("Shot Analysis Suggestions", "shot_analysis_enabled")
+	var ball_rollout_toggle = _create_toggle_setting_row("Ball Rollout", "ball_rollout_enabled")
 
 	var audio_toggles_grid = _create_toggle_grid([
 		custom_next_player_toggle,
@@ -640,7 +641,8 @@ func _ready() -> void:
 		menu_music_toggle,
 		minigame_music_toggle,
 		suspense_toggle,
-		shot_analysis_toggle
+		shot_analysis_toggle,
+		ball_rollout_toggle
 	], 3)
 	gameplay_vbox.add_child(audio_toggles_grid)
 
@@ -673,7 +675,11 @@ func _ready() -> void:
 	fx_label.add_theme_color_override("font_color", Color(0.8, 0.95, 0.8))
 	camera_vbox.add_child(fx_label)
 	
-	var graphics_row = _create_option_setting_row("Graphics Quality", "graphics_quality", ["Low", "Medium", "High"])
+	var graphics_options: Array[String] = (["Low", "Medium"] as Array[String]) if MobilePerformance.is_mobile() else (["Low", "Medium", "High"] as Array[String])
+	if MobilePerformance.is_mobile() and GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("graphics_quality"):
+		if str(GlobalSettings.range_settings.settings["graphics_quality"].value) == "High":
+			GlobalSettings.range_settings.settings["graphics_quality"].set_value("Medium")
+	var graphics_row = _create_option_setting_row("Graphics Quality", "graphics_quality", graphics_options)
 	camera_vbox.add_child(graphics_row)
 	
 	var visual_toggles: Array[Control] = []

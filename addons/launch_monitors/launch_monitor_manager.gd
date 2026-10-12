@@ -89,7 +89,7 @@ func _ready() -> void:
 	if _square == null and _garmin == null:
 		_debug_error("Neither Square nor Garmin monitor could be loaded: Square='%s', Garmin='%s'" % [_square_init_error, _garmin_init_error])
 	if DisplayServer.get_name() != "headless" and bool(settings.get("enabled", false)):
-		_connect_saved_device_on_startup(str(settings.get("device_id", "")))
+		call_deferred("_connect_saved_device_on_startup", str(settings.get("device_id", "")))
 	
 	if EventBus.has_signal("club_selected"):
 		EventBus.club_selected.connect(_on_club_selected)

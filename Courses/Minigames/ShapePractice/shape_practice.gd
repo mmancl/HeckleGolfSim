@@ -2305,11 +2305,20 @@ func _apply_btn_style(btn: Button, norm_color: Color, hov_color: Color) -> void:
 	style_hov.border_width_bottom = 1
 	style_hov.border_color = Color(1, 1, 1, 0.35)
 	
+	var style_focus = style_hov.duplicate()
+	style_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	style_focus.border_width_left = 3
+	style_focus.border_width_top = 3
+	style_focus.border_width_right = 3
+	style_focus.border_width_bottom = 3
+	
 	btn.add_theme_stylebox_override("normal", style_norm)
 	btn.add_theme_stylebox_override("hover", style_hov)
 	btn.add_theme_stylebox_override("pressed", style_hov)
-	btn.add_theme_stylebox_override("focus", style_norm)
+	btn.add_theme_stylebox_override("focus", style_focus)
 	btn.add_theme_color_override("font_color", Color.WHITE)
+	btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	btn.add_theme_color_override("font_focus_color", Color.WHITE)
 	if btn.custom_minimum_size.y < 48:
 		btn.custom_minimum_size.y = 48
 	if not btn.has_theme_font_size_override("font_size"):
@@ -2332,10 +2341,17 @@ func _apply_circular_button_style(btn: Button, bg_color: Color) -> void:
 	style_hover.bg_color = bg_color.lightened(0.15)
 	style_hover.border_color = Color(1.0, 1.0, 1.0, 0.5)
 
+	var style_focus = style_hover.duplicate()
+	style_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	style_focus.border_width_left = 3
+	style_focus.border_width_top = 3
+	style_focus.border_width_right = 3
+	style_focus.border_width_bottom = 3
+
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_hover)
-	btn.add_theme_stylebox_override("focus", style_normal)
+	btn.add_theme_stylebox_override("focus", style_focus)
 
 func is_stats_visible() -> bool:
 	if grid_canvas == null:

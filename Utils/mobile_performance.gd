@@ -139,6 +139,9 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 	if quality != "Low" and quality != "Medium" and quality != "High":
 		quality = "High"
 
+	if is_mobile() and quality == "High":
+		quality = "Medium"
+
 	var is_low = quality == "Low"
 	var is_med = quality == "Medium"
 	var is_high = quality == "High"
@@ -351,6 +354,17 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 
 		for child in n.get_children():
 			stack.append(child)
+
+	if is_high and not is_mobile():
+		if ResourceLoader.exists("res://HighFidelity/Core/high_fidelity_builder.gd"):
+			var builder_script = load("res://HighFidelity/Core/high_fidelity_builder.gd")
+			if builder_script != null:
+				builder_script.apply_high_fidelity(scene_root)
+	else:
+		if ResourceLoader.exists("res://HighFidelity/Core/high_fidelity_builder.gd"):
+			var builder_script = load("res://HighFidelity/Core/high_fidelity_builder.gd")
+			if builder_script != null:
+				builder_script.remove_high_fidelity(scene_root)
 
 
 static var _low_tree_materials: Dictionary = {}

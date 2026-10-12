@@ -226,6 +226,13 @@ func _process(_delta: float) -> bool:
 	DirAccess.remove_absolute(temp_user_cache)
 	print("  PASS: Only pre-bundled catalog courses qualify for cached course exemption.")
 
+	# 9. Verify that when courses are displayed from an OSM search, the cached instruction header is not present
+	instance._display_courses_in_list([{"name": "St Andrews Links", "is_catalog": false, "lat": 56.34, "lon": -2.80}], true)
+	assert(instance.results_list.item_count == 1, "OSM search results should only contain courses, without the cached courses header")
+	assert(not instance.results_list.get_item_text(0).contains("Select from the cached courses"), "First item must not be the cached courses instruction header")
+	instance._on_item_selected(0)
+	assert(instance.download_button.disabled == false, "Selecting index 0 in OSM search results must select the course directly")
+
 	# Restore original settings file if existed
 	if FileAccess.file_exists(backup_file):
 		DirAccess.copy_absolute(backup_file, settings_file)

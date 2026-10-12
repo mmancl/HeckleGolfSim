@@ -6,6 +6,8 @@ signal game_over(scores: Array)
 signal gimme_awarded(player: Dictionary, extra_strokes: int)
 signal catch_up_mode_changed(is_active: bool, player_name: String, current_hole_num: int, target_hole_num: int)
 signal player_bag_changed(player_name: String, bag: Array)
+signal distance_queue_updated()
+signal shot_recorded(player: Dictionary, shot_data: Dictionary)
 
 var last_gimme_strokes: int = 0
 
@@ -189,24 +191,13 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 	hole_info = config_data.get("Hole Info", {})
 	var all_hole_ids = hole_info.keys()
 	all_hole_ids.sort_custom(func(a, b):
-		var num_a = int(a.replace("Hole ", ""))
-		var num_b = int(b.replace("Hole ", ""))
+		var num_a = get_hole_number_from_id(str(a))
+		var num_b = get_hole_number_from_id(str(b))
 		return num_a < num_b
 	)
 	
 	selected_course_length = course_length
-	hole_ids = []
-	if selected_course_length == "Front 9":
-		for i in range(min(9, all_hole_ids.size())):
-			hole_ids.append(all_hole_ids[i])
-	elif selected_course_length == "Back 9":
-		if all_hole_ids.size() >= 10:
-			for i in range(9, min(18, all_hole_ids.size())):
-				hole_ids.append(all_hole_ids[i])
-		else:
-			hole_ids = all_hole_ids.duplicate()
-	else:
-		hole_ids = all_hole_ids.duplicate()
+	hole_ids = filter_hole_ids_by_length(all_hole_ids, selected_course_length)
 		
 	current_hole_index = 0
 	
@@ -224,12 +215,76 @@ func get_hole_number(idx: int) -> int:
 	if hole_ids.is_empty():
 		if selected_course_length == "Back 9":
 			return idx + 10
+		elif selected_course_length == "Extra Holes":
+			return idx + 19
 		return idx + 1
 	var safe_idx = clamp(idx, 0, hole_ids.size() - 1)
 	return get_hole_number_from_id(hole_ids[safe_idx], safe_idx)
 
 func get_current_hole_number() -> int:
 	return get_hole_number(current_hole_index)
+
+static func filter_hole_ids_by_length(all_hole_ids: Array, length_str: String) -> Array:
+	var has_front_9 := false
+	var has_back_9 := false
+	var has_extra_holes := false
+
+	if length_str == "Full 18":
+		has_front_9 = true
+		has_back_9 = true
+	elif length_str == "Front 9":
+		has_front_9 = true
+	elif length_str == "Back 9":
+		has_back_9 = true
+	elif length_str == "Extra Holes":
+		has_extra_holes = true
+	else:
+		has_front_9 = "Front 9" in length_str
+		has_back_9 = "Back 9" in length_str
+		has_extra_holes = "Extra Holes" in length_str
+
+	# Check whether holes are explicitly numbered beyond 18
+	var has_numbered_extra := false
+	for h_id in all_hole_ids:
+		if get_hole_number_from_id(str(h_id)) >= 19:
+			has_numbered_extra = true
+			break
+
+	var front_list: Array = []
+	var back_list: Array = []
+	var extra_list: Array = []
+
+	if has_numbered_extra:
+		for i in range(all_hole_ids.size()):
+			var h_id = all_hole_ids[i]
+			var num = get_hole_number_from_id(str(h_id), i)
+			if num <= 9:
+				front_list.append(h_id)
+			elif num <= 18:
+				back_list.append(h_id)
+			else:
+				extra_list.append(h_id)
+	else:
+		for i in range(all_hole_ids.size()):
+			var h_id = all_hole_ids[i]
+			if i < 9:
+				front_list.append(h_id)
+			elif i < 18:
+				back_list.append(h_id)
+			else:
+				extra_list.append(h_id)
+
+	var result: Array = []
+	if has_front_9:
+		result.append_array(front_list)
+	if has_back_9:
+		result.append_array(back_list)
+	if has_extra_holes:
+		result.append_array(extra_list)
+
+	if result.is_empty():
+		result = all_hole_ids.duplicate()
+	return result
 
 static func get_hole_number_from_id(hole_id: String, fallback_idx: int = 0) -> int:
 	if hole_id.is_empty():
@@ -398,7 +453,114 @@ func start_hole() -> void:
 			
 	emit_signal("active_player_changed", get_active_player())
 	print("[MultiplayerManager] Starting Hole: %s. Active Player: %s" % [hole_id, get_active_player().get("name", "None")])
+	emit_signal("distance_queue_updated")
 	save_current_match()
+
+static func format_queue_player_name(full_name: String) -> String:
+	var trimmed = full_name.strip_edges()
+	var parts = trimmed.split(" ", false)
+	if parts.size() >= 2:
+		var first_initial = parts[0].substr(0, 1).to_upper() + "."
+		var last_name = parts[parts.size() - 1]
+		var combined = first_initial + " " + last_name
+		if combined.length() > 14:
+			return combined.substr(0, 13) + "…"
+		return combined
+	else:
+		if trimmed.length() > 14:
+			return trimmed.substr(0, 13) + "…"
+		return trimmed
+
+func _get_player_points(p: Dictionary) -> int:
+	var pts := 0
+	for h_id in hole_ids:
+		pts += int(p.get("hole_scores", {}).get(h_id, 0))
+	return pts
+
+func _format_player_score_clean(p: Dictionary) -> String:
+	if game_mode == "Skins":
+		var p_skins = skins_won.get(p.get("name", ""), 0)
+		return "%dS" % p_skins
+	elif game_mode == "Closest to Pin":
+		var pts = _get_player_points(p)
+		return "%d" % pts
+	else:
+		var total_diff := 0
+		var completed_any := false
+		for h_id in hole_ids:
+			var sc = p.get("hole_scores", {}).get(h_id)
+			if sc != null and sc > 0:
+				var par = int(hole_info.get(h_id, {}).get("Par", 4))
+				total_diff += int(sc) - par
+				completed_any = true
+		if completed_any:
+			if total_diff > 0:
+				return "+" + str(total_diff)
+			elif total_diff < 0:
+				return str(total_diff)
+			else:
+				return "E"
+		return "E"
+
+func get_target_pin_position() -> Vector3:
+	return _get_target_pin_position()
+
+func get_distance_queue(custom_pin_pos: Variant = null) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	if players.size() <= 1:
+		return result
+	
+	var active_p = get_active_player()
+	var active_name = active_p.get("name", "")
+	
+	var target_pin: Vector3
+	if custom_pin_pos is Vector3 and not (custom_pin_pos as Vector3).is_zero_approx():
+		target_pin = custom_pin_pos
+	else:
+		target_pin = _get_target_pin_position()
+	var flat_pin := Vector3(target_pin.x, 0.0, target_pin.z)
+	
+	var eligible: Array[Dictionary] = []
+	for p in players:
+		if p.get("name", "") == active_name:
+			continue
+		if not p.get("active", true) or p.get("paused", false):
+			continue
+		if p.get("holed_out", false):
+			continue
+		
+		var p_pos = p.get("position", Vector3.ZERO)
+		var flat_pos := Vector3(p_pos.x, 0.0, p_pos.z)
+		var dist_meters := flat_pos.distance_to(flat_pin)
+		var dist_yds := int(round(dist_meters * 1.09361))
+		
+		var strokes = p.get("strokes", 0)
+		var is_in_teebox = (strokes == 0)
+		var lie_str = str(p.get("lie_type", "")).to_lower()
+		var is_on_green = (lie_str == "green")
+		var is_fringe = (lie_str == "fringe")
+		var p_name = p.get("name", "Player")
+		var club = get_suggested_club(p_name, dist_yds, is_in_teebox, is_on_green, is_fringe)
+		var score_str := _format_player_score_clean(p)
+		
+		eligible.append({
+			"player": p,
+			"name": p_name,
+			"formatted_name": format_queue_player_name(p_name),
+			"distance_yards": dist_yds,
+			"distance_str": "%d Yds" % int(dist_yds),
+			"suggested_club": club,
+			"score_str": score_str
+		})
+	
+	eligible.sort_custom(func(a, b):
+		return a["distance_yards"] > b["distance_yards"]
+	)
+	
+	if eligible.size() > 3:
+		eligible = eligible.slice(0, 3)
+		
+	return eligible
 
 func get_active_player() -> Dictionary:
 	if players.is_empty():
@@ -592,6 +754,9 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 	if has_node("/root/AchievementManager") and not practice_mode_active:
 		var total_yds = (raw_shot_data.get("TotalDistance", 0.0) as float) * 1.09361
 		get_node("/root/AchievementManager").check_shot_achievements(active_player.get("name", ""), current_club, total_yds, prev_longest_drive)
+
+	emit_signal("shot_recorded", active_player, raw_shot_data)
+	emit_signal("distance_queue_updated")
 
 	# Check for holing out/clap triggers
 	if not practice_mode_active:
@@ -1718,24 +1883,13 @@ func resume_match(match_data: Dictionary) -> void:
 				hole_info = parsed.get("Hole Info", {})
 				var all_hole_ids = hole_info.keys()
 				all_hole_ids.sort_custom(func(a, b):
-					var num_a = int(a.replace("Hole ", ""))
-					var num_b = int(b.replace("Hole ", ""))
+					var num_a = get_hole_number_from_id(str(a))
+					var num_b = get_hole_number_from_id(str(b))
 					return num_a < num_b
 				)
 				
 				# Filter hole_ids
-				hole_ids = []
-				if selected_course_length == "Front 9":
-					for i in range(min(9, all_hole_ids.size())):
-						hole_ids.append(all_hole_ids[i])
-				elif selected_course_length == "Back 9":
-					if all_hole_ids.size() >= 10:
-						for i in range(9, min(18, all_hole_ids.size())):
-							hole_ids.append(all_hole_ids[i])
-					else:
-						hole_ids = all_hole_ids.duplicate()
-				else:
-					hole_ids = all_hole_ids.duplicate()
+				hole_ids = filter_hole_ids_by_length(all_hole_ids, selected_course_length)
 			
 	# Fallback if hole_info is empty but match_data has saved hole_pars
 	if hole_info.is_empty() and match_data.has("hole_pars"):
@@ -1746,8 +1900,8 @@ func resume_match(match_data: Dictionary) -> void:
 			if hole_ids.is_empty():
 				var all_hole_ids = hole_info.keys()
 				all_hole_ids.sort_custom(func(a, b):
-					var num_a = int(a.replace("Hole ", ""))
-					var num_b = int(b.replace("Hole ", ""))
+					var num_a = get_hole_number_from_id(str(a))
+					var num_b = get_hole_number_from_id(str(b))
 					return num_a < num_b
 				)
 				hole_ids = all_hole_ids.duplicate()

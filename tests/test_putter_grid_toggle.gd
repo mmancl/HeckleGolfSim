@@ -1,12 +1,10 @@
 extends SceneTree
 
-class MockBall extends Node:
+class MockBall extends Node3D:
 	signal rest
 	var aim_yaw_offset_deg := 0.0
 	var lie_type := "fairway"
 	var spawn_position := Vector3.ZERO
-	var global_position := Vector3.ZERO
-	var position := Vector3.ZERO
 	var is_in_sand := false
 	var is_putt := false
 	var current_selected_club := "7i"
@@ -16,9 +14,9 @@ class MockBall extends Node:
 	func _update_surface_from_underneath(): pass
 	func set_surface(_val): pass
 
-class MockPlayer extends Node:
+class MockPlayer extends Node3D:
 	signal rest
-	var ball: Node = null
+	var ball: Node3D = null
 	var current_lie_type: String = "fairway"
 	var current_shot_reduction := 0.0
 	func reset_ball(): pass
@@ -135,7 +133,7 @@ func _initialize():
 	range_instance._user_custom_club = "Pt"
 	var fringe_offset = range_instance.get_camera_local_offset()
 	print("  Fringe camera local offset: ", fringe_offset)
-	assert(fringe_offset.is_equal_approx(Vector3(-1.05, 0.6, 0)), "Fringe with Pt must use close putting camera offset (-1.05, 0.6, 0)")
+	assert(fringe_offset.is_equal_approx(Vector3(-1.35, 0.8, 0)), "Fringe with Pt must use close putting camera offset (-1.35, 0.8, 0)")
 	var fringe_target_look = range_instance.get_camera_target_look(range_instance.current_hole_location, ball_node.global_position)
 	var expected_dir = (range_instance.current_hole_location - ball_node.global_position).normalized()
 	var expected_look = ball_node.global_position + expected_dir * 3.5
@@ -152,7 +150,7 @@ func _initialize():
 	range_instance._user_custom_club = "Pt"
 	var fairway_pt_offset = range_instance.get_camera_local_offset()
 	print("  Fairway with Pt camera offset: ", fairway_pt_offset)
-	assert(fairway_pt_offset.is_equal_approx(Vector3(-1.05, 0.6, 0)), "Putter selected anywhere must use putting camera offset (-1.05, 0.6, 0)")
+	assert(fairway_pt_offset.is_equal_approx(Vector3(-1.35, 0.8, 0)), "Putter selected anywhere must use putting camera offset (-1.35, 0.8, 0)")
 	var fairway_pt_look = range_instance.get_camera_target_look(range_instance.current_hole_location, ball_node.global_position)
 	var pt_dir = (range_instance.current_hole_location - ball_node.global_position).normalized()
 	assert(fairway_pt_look.is_equal_approx(ball_node.global_position + pt_dir * 3.5), "Putter selected must use 3.5m putting look-at")
@@ -164,7 +162,7 @@ func _initialize():
 	range_instance._user_custom_club = "Dr"
 	var dr_offset = range_instance.get_camera_local_offset()
 	print("  Fairway with Dr camera offset: ", dr_offset)
-	assert(not dr_offset.is_equal_approx(Vector3(-1.05, 0.6, 0)), "Driver on fairway must not use putting camera view")
+	assert(not dr_offset.is_equal_approx(Vector3(-1.35, 0.8, 0)), "Driver on fairway must not use putting camera view")
 	print("  PASS: Driver on fairway uses full shot camera view.")
 
 	# Test 9: Putting camera follow mode follows at current camera angle without zooming out
@@ -182,7 +180,7 @@ func _initialize():
 	print("  Putting follow offset: ", pcam.follow_offset)
 	print("  Putting look_at mode: ", pcam.look_at_mode)
 	assert(pcam.follow_mode == 2, "Follow mode should be SIMPLE (2)")
-	assert(pcam.follow_offset.is_equal_approx(Vector3(-1.05, 0.6, 0.0)), "Putting camera must follow at address offset (-1.05, 0.6, 0) without zooming out")
+	assert(pcam.follow_offset.is_equal_approx(Vector3(-1.35, 0.8, 0.0)), "Putting camera must follow at address offset (-1.35, 0.8, 0) without zooming out")
 	assert(pcam.look_at_mode == 0, "Putting camera look_at_mode must be NONE (0) to maintain current camera angle")
 	print("  PASS: Putting camera follows ball at current camera angle without zooming out.")
 

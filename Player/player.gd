@@ -14,7 +14,7 @@ var _last_aim_yaw_offset_deg : float = 0.0
 var current_shot_reduction : float = 0.0
 var current_lie_type : String = "fairway"
 
-var max_tracers : int = 4
+var max_tracers : int = 10
 var min_tracers : int = 0
 var tracers : Array = []
 var current_tracer : MeshInstance3D = null

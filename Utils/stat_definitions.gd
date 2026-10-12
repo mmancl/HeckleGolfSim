@@ -1,7 +1,7 @@
 class_name StatDefinitions
 extends Object
 
-const MAX_DISPLAYED_STATS := 13
+const MAX_DISPLAYED_STATS := 14
 
 const DEFAULT_ENABLED_STAT_IDS: Array[String] = [
 	"Distance",
@@ -21,6 +21,7 @@ const DEFAULT_ENABLED_STAT_IDS: Array[String] = [
 const DYNAMIC_STAT_IDS: Array[String] = [
 	"Distance",
 	"Carry",
+	"Rollout",
 	"Apex",
 	"Offline",
 	"HangTime",
@@ -49,6 +50,17 @@ const STATS: Array[Dictionary] = [
 		"units_imperial": "yd",
 		"units_metric": "m",
 		"default_enabled": true,
+		"is_dynamic": true
+	},
+	{
+		"id": "Rollout",
+		"short_label": "Rollout",
+		"name": "Rollout Distance",
+		"category": "Ball Flight",
+		"description": "The additional ground distance the ball rolls and bounces after initial turf impact until coming to complete rest.",
+		"units_imperial": "yd",
+		"units_metric": "m",
+		"default_enabled": false,
 		"is_dynamic": true
 	},
 	{

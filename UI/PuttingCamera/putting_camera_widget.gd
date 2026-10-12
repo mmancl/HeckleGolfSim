@@ -1023,11 +1023,11 @@ func _on_flip_camera_pressed() -> void:
 		_stop_phone_camera_stream()
 		_use_phone_stream = false
 
+	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
 	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android" or (pose_bridge != null and "_is_android" in pose_bridge and pose_bridge._is_android)
 	if not CameraServer.is_monitoring_feeds():
 		CameraServer.set_monitoring_feeds(true)
 	var feeds = CameraServer.feeds()
-	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
 	var desk_cams: Array = pose_bridge.desktop_cameras if (pose_bridge != null and "desktop_cameras" in pose_bridge) else []
 	var total_count = max(feeds.size(), desk_cams.size())
 	if is_android and total_count < 2:

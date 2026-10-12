@@ -13,7 +13,7 @@ const ARC_COLORS: Array[Color] = [
 	Color(1.0, 1.0, 1.0),   # White
 	Color(0.2, 1.0, 0.65),  # Mint
 ]
-const MAX_DISPLAYED_TRACES := 25
+const MAX_DISPLAYED_TRACES := 10
 const BallTrailScript = preload("res://Player/ball_trail.gd")
 
 var _trace_nodes: Array[MeshInstance3D] = []

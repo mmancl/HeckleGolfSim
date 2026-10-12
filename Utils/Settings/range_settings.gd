@@ -9,7 +9,7 @@ var ball_reset_timer := Setting.new(1.5, 0.0, 15.0)
 var temperature := Setting.new(75, -40, 120)
 var altitude := Setting.new(0.0, -1000.0, 10000.0)
 var surface_type := Setting.new(PhysicsEnums.SurfaceType.FAIRWAY)
-var shot_tracer_count := Setting.new(4, 0, 4)
+var shot_tracer_count := Setting.new(10, 0, 10)
 var ball_type := Setting.new(0)
 var camera_height := Setting.new(1.65, 0.5, 10.0)
 var camera_distance := Setting.new(5.2, 1.0, 30.0)
@@ -36,6 +36,7 @@ var phone_cam_url := Setting.new("")
 var use_phone_stream := Setting.new(false)
 var tension_effects_enabled := Setting.new(true)
 var shot_analysis_enabled := Setting.new(false)
+var ball_rollout_enabled := Setting.new(true)
 var displayed_stats := Setting.new(StatDefinitions.DEFAULT_ENABLED_STAT_IDS.duplicate())
 var foam_ball_boost_enabled := Setting.new(false)
 var foam_ball_boost_percent := Setting.new(20.0, 0.0, 100.0)
@@ -110,6 +111,7 @@ func _init():
 		"use_phone_stream": use_phone_stream,
 		"tension_effects_enabled": tension_effects_enabled,
 		"shot_analysis_enabled": shot_analysis_enabled,
+		"ball_rollout_enabled": ball_rollout_enabled,
 		"displayed_stats": displayed_stats,
 		"foam_ball_boost_enabled": foam_ball_boost_enabled,
 		"foam_ball_boost_percent": foam_ball_boost_percent,

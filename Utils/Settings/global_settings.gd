@@ -190,8 +190,11 @@ func load_settings() -> void:
 			
 	# Migration for camera settings if updating from older config files with small camera distance
 	var migrated := false
-	if range_settings.shot_tracer_count.value == 1:
-		range_settings.shot_tracer_count.set_value(4)
+	if range_settings.shot_tracer_count.value in [1, 2, 4]:
+		range_settings.shot_tracer_count.set_value(10)
+		migrated = true
+	elif range_settings.shot_tracer_count.value > 10:
+		range_settings.shot_tracer_count.set_value(10)
 		migrated = true
 	if range_settings.camera_distance.value < 14.0:
 		range_settings.camera_distance.set_value(15.0)

@@ -7,10 +7,13 @@ extends VBoxContainer
 ## hides recenter button & percent text, and offers dual sliders (General & Putter).
 
 signal offset_toggled(is_on: bool)
+signal cancel_pressed
 
 var style_button: Callable = Callable()
 var is_course_play: bool = false
 var show_putter_slider: bool = false
+var external_top_neighbor: NodePath = NodePath()
+var external_bottom_neighbor: NodePath = NodePath()
 
 var _toggle_btn: Button = null
 var _slider_container: VBoxContainer = null
@@ -35,10 +38,10 @@ func _init() -> void:
 	name = "ScreenOffsetControl"
 	add_theme_constant_override("separation", 6)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_build_ui()
 
 
 func _ready() -> void:
-	_build_ui()
 	_sync_from_manager()
 	if Engine.has_singleton("ScreenOffsetManager") or has_node("/root/ScreenOffsetManager"):
 		var som = get_node_or_null("/root/ScreenOffsetManager")
@@ -54,6 +57,24 @@ func _exit_tree() -> void:
 
 
 func _build_ui() -> void:
+	var on_cancel_input = func(event: InputEvent):
+		if event.is_action_pressed("ui_cancel") or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B) or (event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE):
+			if cancel_pressed.get_connections().size() > 0:
+				cancel_pressed.emit()
+				get_viewport().set_input_as_handled()
+
+	var slider_focus = StyleBoxFlat.new()
+	slider_focus.draw_center = false
+	slider_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	slider_focus.border_width_left = 2
+	slider_focus.border_width_top = 2
+	slider_focus.border_width_right = 2
+	slider_focus.border_width_bottom = 2
+	slider_focus.corner_radius_top_left = 4
+	slider_focus.corner_radius_top_right = 4
+	slider_focus.corner_radius_bottom_right = 4
+	slider_focus.corner_radius_bottom_left = 4
+
 	# 1. Main Toggle Button
 	_toggle_btn = Button.new()
 	_toggle_btn.name = "ScreenOffsetToggleButton"
@@ -63,6 +84,7 @@ func _build_ui() -> void:
 	_toggle_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_toggle_btn.pressed.connect(_on_toggle_pressed)
 	_toggle_btn.gui_input.connect(_on_toggle_gui_input)
+	_toggle_btn.gui_input.connect(on_cancel_input)
 	add_child(_toggle_btn)
 
 	# 2. Slider container (hidden when toggle is OFF)
@@ -104,6 +126,8 @@ func _build_ui() -> void:
 	_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_slider.value_changed.connect(_on_slider_value_changed)
 	_slider.drag_ended.connect(_on_slider_drag_ended)
+	_slider.add_theme_stylebox_override("focus", slider_focus)
+	_slider.gui_input.connect(on_cancel_input)
 	slider_row.add_child(_slider)
 
 	var r_lbl = Label.new()
@@ -132,6 +156,7 @@ func _build_ui() -> void:
 	_center_btn.custom_minimum_size = Vector2(76, 32)
 	_center_btn.add_theme_font_size_override("font_size", 12)
 	_center_btn.pressed.connect(_on_center_pressed)
+	_center_btn.gui_input.connect(on_cancel_input)
 	info_row.add_child(_center_btn)
 
 	# Putter slider (used in Course Play)
@@ -165,6 +190,8 @@ func _build_ui() -> void:
 		_putter_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		_putter_slider.value_changed.connect(_on_putter_slider_value_changed)
 		_putter_slider.drag_ended.connect(_on_slider_drag_ended)
+		_putter_slider.add_theme_stylebox_override("focus", slider_focus)
+		_putter_slider.gui_input.connect(on_cancel_input)
 		putter_row.add_child(_putter_slider)
 
 		var p_r_lbl = Label.new()
@@ -192,19 +219,32 @@ func _build_ui() -> void:
 		_putter_center_btn.custom_minimum_size = Vector2(76, 32)
 		_putter_center_btn.add_theme_font_size_override("font_size", 12)
 		_putter_center_btn.pressed.connect(_on_putter_center_pressed)
+		_putter_center_btn.gui_input.connect(on_cancel_input)
 		p_info_row.add_child(_putter_center_btn)
 
 
+static func _get_global_settings(node: Node = null) -> Node:
+	if Engine.has_singleton("GlobalSettings"):
+		return Engine.get_singleton("GlobalSettings")
+	if node != null and node.has_node("/root/GlobalSettings"):
+		return node.get_node("/root/GlobalSettings")
+	var main_loop = Engine.get_main_loop()
+	if main_loop is SceneTree and main_loop.root != null and main_loop.root.has_node("GlobalSettings"):
+		return main_loop.root.get_node("GlobalSettings")
+	return null
+
+
 func _on_toggle_pressed() -> void:
-	if not has_node("/root/GlobalSettings"):
+	var gs = _get_global_settings(self)
+	if gs == null:
 		return
-	var current_on = GlobalSettings.range_settings.screen_offset_enabled.value
+	var current_on: bool = gs.range_settings.screen_offset_enabled.value
 	var new_on = not current_on
 	if has_node("/root/ScreenOffsetManager"):
 		get_node("/root/ScreenOffsetManager").set_enabled(new_on)
 	else:
-		GlobalSettings.range_settings.screen_offset_enabled.value = new_on
-		GlobalSettings.save_settings()
+		gs.range_settings.screen_offset_enabled.value = new_on
+		gs.save_settings()
 	_sync_from_manager()
 
 
@@ -221,14 +261,16 @@ func _on_toggle_gui_input(event: InputEvent) -> void:
 			is_right = event.axis_value > 0.0
 
 	if is_left or is_right:
-		var rs = GlobalSettings.range_settings if has_node("/root/GlobalSettings") else null
+		var gs = _get_global_settings(self)
+		var rs = gs.range_settings if gs != null else null
 		if rs != null:
 			if not rs.screen_offset_enabled.value:
 				if has_node("/root/ScreenOffsetManager"):
 					get_node("/root/ScreenOffsetManager").set_enabled(true)
 				else:
 					rs.screen_offset_enabled.value = true
-					GlobalSettings.save_settings()
+					if gs != null:
+						gs.save_settings()
 				_sync_from_manager()
 			var delta := -0.05 if is_left else 0.05
 			var cur_val: float = _slider.value if _slider != null else rs.screen_offset_value.value
@@ -236,8 +278,8 @@ func _on_toggle_gui_input(event: InputEvent) -> void:
 			if _slider != null:
 				_slider.value = new_val
 			_on_slider_value_changed(new_val)
-			if has_node("/root/GlobalSettings"):
-				GlobalSettings.save_settings()
+			if gs != null:
+				gs.save_settings()
 			get_viewport().set_input_as_handled()
 
 
@@ -270,8 +312,9 @@ func _on_putter_slider_value_changed(val: float) -> void:
 
 
 func _on_slider_drag_ended(_val_changed: bool) -> void:
-	if has_node("/root/GlobalSettings"):
-		GlobalSettings.save_settings()
+	var gs = _get_global_settings(self)
+	if gs != null:
+		gs.save_settings()
 
 
 func _on_center_pressed() -> void:
@@ -284,9 +327,11 @@ func _on_center_pressed() -> void:
 			som.set_putter_value(0.0, false)
 		else:
 			som.set_value(0.0, false)
-	elif has_node("/root/GlobalSettings"):
-		GlobalSettings.range_settings.screen_offset_value.value = 0.0
-		GlobalSettings.save_settings()
+	else:
+		var gs = _get_global_settings(self)
+		if gs != null:
+			gs.range_settings.screen_offset_value.value = 0.0
+			gs.save_settings()
 
 
 func _on_putter_center_pressed() -> void:
@@ -295,11 +340,13 @@ func _on_putter_center_pressed() -> void:
 	_update_putter_value_label(0.0)
 	if has_node("/root/ScreenOffsetManager"):
 		get_node("/root/ScreenOffsetManager").set_putter_value(0.0, false)
-	elif has_node("/root/GlobalSettings"):
-		var rs = GlobalSettings.range_settings
-		if "screen_offset_putter_value" in rs:
-			rs.screen_offset_putter_value.value = 0.0
-		GlobalSettings.save_settings()
+	else:
+		var gs = _get_global_settings(self)
+		if gs != null:
+			var rs = gs.range_settings
+			if "screen_offset_putter_value" in rs:
+				rs.screen_offset_putter_value.value = 0.0
+			gs.save_settings()
 
 
 func _on_manager_offset_changed(_val: float) -> void:
@@ -309,10 +356,11 @@ func _on_manager_offset_changed(_val: float) -> void:
 func _sync_from_manager() -> void:
 	if not is_inside_tree():
 		return
-	if not has_node("/root/GlobalSettings"):
+	var gs = _get_global_settings(self)
+	if gs == null:
 		return
 	_updating_ui = true
-	var rs = GlobalSettings.range_settings
+	var rs = gs.range_settings
 	var is_on: bool = rs.screen_offset_enabled.value
 	var val: float = rs.screen_offset_value.value
 	var p_val: float = rs.screen_offset_putter_value.value if "screen_offset_putter_value" in rs else 0.0
@@ -358,6 +406,7 @@ func _sync_from_manager() -> void:
 				_putter_slider.focus_neighbor_bottom = _putter_center_btn.get_path()
 				_putter_center_btn.focus_neighbor_top = _putter_slider.get_path()
 
+	_update_external_focus_wiring()
 	emit_signal("offset_toggled", is_on)
 
 
@@ -381,6 +430,55 @@ func _update_putter_value_label(val: float) -> void:
 		_putter_value_label.text = "Left %d%%" % int(round(absf(val) * 100.0))
 	else:
 		_putter_value_label.text = "Right %d%%" % int(round(val * 100.0))
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not is_visible_in_tree():
+		return
+	if event.is_action_pressed("ui_cancel") or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B) or (event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE):
+		if cancel_pressed.get_connections().size() > 0:
+			cancel_pressed.emit()
+			get_viewport().set_input_as_handled()
+
+
+func set_external_focus_neighbors(top_path: NodePath, bottom_path: NodePath) -> void:
+	external_top_neighbor = top_path
+	external_bottom_neighbor = bottom_path
+	_update_external_focus_wiring()
+
+
+func get_bottom_focusable() -> Control:
+	var gs = _get_global_settings(self)
+	var is_on: bool = (gs != null and gs.range_settings.screen_offset_enabled.value)
+	if is_on:
+		if show_putter_slider and _putter_center_btn != null and _putter_center_btn.is_visible_in_tree():
+			return _putter_center_btn
+		if _center_btn != null and _center_btn.is_visible_in_tree():
+			return _center_btn
+		if _slider != null and _slider.is_visible_in_tree():
+			return _slider
+	if _toggle_btn != null and _toggle_btn.is_visible_in_tree():
+		return _toggle_btn
+	return self
+
+
+func _update_external_focus_wiring() -> void:
+	if _toggle_btn != null and not external_top_neighbor.is_empty():
+		_toggle_btn.focus_neighbor_top = external_top_neighbor
+
+	var gs = _get_global_settings(self)
+	var is_on: bool = (gs != null and gs.range_settings.screen_offset_enabled.value)
+
+	if not external_bottom_neighbor.is_empty():
+		if is_on:
+			var bottom_btn: Control = _center_btn
+			if show_putter_slider and _putter_center_btn != null and _putter_center_btn.visible:
+				bottom_btn = _putter_center_btn
+			if bottom_btn != null:
+				bottom_btn.focus_neighbor_bottom = external_bottom_neighbor
+		else:
+			if _toggle_btn != null:
+				_toggle_btn.focus_neighbor_bottom = external_bottom_neighbor
 
 
 func get_focusables() -> Array[Control]:
@@ -408,6 +506,7 @@ static func create_minigame_launcher(host: Node, ctrl_hbox: HBoxContainer, apply
 	launcher_btn.add_theme_font_size_override("font_size", 15)
 	if apply_style_fn.is_valid():
 		apply_style_fn.call(launcher_btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
+	ctrl_hbox.add_child(launcher_btn)
 
 	# Find canvas or root control to attach floating popup panel
 	var parent_canvas: Node = host
@@ -419,11 +518,11 @@ static func create_minigame_launcher(host: Node, ctrl_hbox: HBoxContainer, apply
 	var popup_panel = PanelContainer.new()
 	popup_panel.name = "ScreenOffsetPopupPanel"
 	popup_panel.visible = false
-	popup_panel.custom_minimum_size = Vector2(240, 140)
+	popup_panel.custom_minimum_size = Vector2(250, 160)
 	
 	# Style the popup container
 	var sbox = StyleBoxFlat.new()
-	sbox.bg_color = Color(0.12, 0.15, 0.20, 0.95)
+	sbox.bg_color = Color(0.12, 0.15, 0.20, 0.96)
 	sbox.border_width_left = 1
 	sbox.border_width_top = 1
 	sbox.border_width_right = 1
@@ -442,35 +541,109 @@ static func create_minigame_launcher(host: Node, ctrl_hbox: HBoxContainer, apply
 	margin.add_theme_constant_override("margin_bottom", 10)
 	popup_panel.add_child(margin)
 
-	var so_script = load("res://UI/ScreenOffset/screen_offset_control.gd") as GDScript
-	var so_ctrl = so_script.new()
+	var content_vbox = VBoxContainer.new()
+	content_vbox.add_theme_constant_override("separation", 6)
+	margin.add_child(content_vbox)
+
+	# Header with title and close button
+	var header_hbox = HBoxContainer.new()
+	header_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content_vbox.add_child(header_hbox)
+
+	var title_lbl = Label.new()
+	title_lbl.text = "Screen Offset"
+	title_lbl.add_theme_font_size_override("font_size", 13)
+	title_lbl.add_theme_color_override("font_color", Color(0.75, 0.85, 0.95))
+	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_hbox.add_child(title_lbl)
+
+	var close_btn = Button.new()
+	close_btn.name = "ScreenOffsetCloseButton"
+	close_btn.text = "✕"
+	close_btn.custom_minimum_size = Vector2(30, 26)
+	close_btn.add_theme_font_size_override("font_size", 12)
+	close_btn.tooltip_text = "Close (B / Esc)"
+	if apply_style_fn.is_valid():
+		apply_style_fn.call(close_btn, Color(0.28, 0.16, 0.16), Color(0.42, 0.22, 0.22))
+	header_hbox.add_child(close_btn)
+
+	var so_ctrl = new()
 	so_ctrl.style_button = func(btn: Button, is_on: bool):
 		if apply_style_fn.is_valid():
 			if is_on:
 				apply_style_fn.call(btn, Color(0.18, 0.45, 0.65), Color(0.25, 0.58, 0.82))
 			else:
 				apply_style_fn.call(btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
-	margin.add_child(so_ctrl)
+	content_vbox.add_child(so_ctrl)
 
 	parent_canvas.add_child(popup_panel)
 
-	# Position popup above launcher button when shown
+	# Style center button with host button styling if available
+	if apply_style_fn.is_valid() and so_ctrl._center_btn != null:
+		apply_style_fn.call(so_ctrl._center_btn, Color(0.20, 0.25, 0.35), Color(0.28, 0.35, 0.48))
+
+	var close_popup = func():
+		if popup_panel.visible:
+			popup_panel.visible = false
+			launcher_btn.text = "↔ Offset"
+			launcher_btn.focus_neighbor_top = NodePath()
+			launcher_btn.grab_focus()
+
+	close_btn.pressed.connect(close_popup)
+	so_ctrl.cancel_pressed.connect(close_popup)
+
+	# Direct cancel input on popup panel
+	popup_panel.gui_input.connect(func(event: InputEvent):
+		if event.is_action_pressed("ui_cancel") or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B) or (event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE):
+			close_popup.call()
+			popup_panel.get_viewport().set_input_as_handled()
+	)
+
+	# External focus navigation wiring
+	var wire_nav = func():
+		if close_btn.is_inside_tree() and launcher_btn.is_inside_tree() and so_ctrl.is_inside_tree() and so_ctrl._toggle_btn != null and so_ctrl._toggle_btn.is_inside_tree():
+			so_ctrl.set_external_focus_neighbors(close_btn.get_path(), launcher_btn.get_path())
+			close_btn.focus_neighbor_bottom = so_ctrl._toggle_btn.get_path()
+			close_btn.focus_neighbor_top = launcher_btn.get_path()
+	wire_nav.call_deferred()
+
+	if so_ctrl.has_signal("offset_toggled"):
+		so_ctrl.offset_toggled.connect(func(_on: bool):
+			so_ctrl._update_external_focus_wiring()
+			if popup_panel.visible:
+				launcher_btn.focus_neighbor_top = so_ctrl.get_bottom_focusable().get_path()
+		)
+
+	# Position popup above launcher button and handle open/close
 	launcher_btn.pressed.connect(func():
-		# Do not open if settings layer is open
 		var sl = host.get("_settings_layer")
 		if sl != null and is_instance_valid(sl):
 			return
 		popup_panel.visible = not popup_panel.visible
 		if popup_panel.visible:
 			var btn_rect = launcher_btn.get_global_rect()
+			var popup_height = popup_panel.size.y if popup_panel.size.y > 0 else 180.0
 			popup_panel.position = Vector2(
-				clampf(btn_rect.position.x - 70, 10, host.get_viewport().get_visible_rect().size.x - 260),
-				btn_rect.position.y - 150
+				clampf(btn_rect.position.x - 70, 10, host.get_viewport().get_visible_rect().size.x - 270),
+				btn_rect.position.y - popup_height - 10
 			)
 			launcher_btn.text = "↔ Offset: ▲"
+			wire_nav.call()
+			so_ctrl._update_external_focus_wiring()
+			launcher_btn.focus_neighbor_top = so_ctrl.get_bottom_focusable().get_path()
+
+			# Transfer focus into popup
+			var is_on = false
+			var gs = _get_global_settings(host)
+			if gs != null and "range_settings" in gs and "screen_offset_enabled" in gs.range_settings:
+				is_on = gs.range_settings.screen_offset_enabled.value
+			if is_on and so_ctrl._slider != null and so_ctrl._slider.is_visible_in_tree():
+				so_ctrl._slider.grab_focus()
+			elif so_ctrl._toggle_btn != null:
+				so_ctrl._toggle_btn.grab_focus()
 		else:
 			launcher_btn.text = "↔ Offset"
+			launcher_btn.focus_neighbor_top = NodePath()
 	)
 
-	ctrl_hbox.add_child(launcher_btn)
 	return launcher_btn

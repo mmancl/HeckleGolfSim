@@ -56,6 +56,28 @@ const SCAN_INTERVAL: float = 0.5
 const SLIDER_REPEAT_INTERVAL := 0.08
 var _last_slider_nav_time: float = 0.0
 
+## Controller repeat timing for UI directional stick navigation.
+const NAV_INITIAL_REPEAT_DELAY := 0.35
+const NAV_REPEAT_INTERVAL := 0.16
+var _stick_nav_neutral_x: bool = true
+var _stick_nav_neutral_y: bool = true
+var _stick_nav_first_repeat_x: bool = true
+var _stick_nav_first_repeat_y: bool = true
+var _last_stick_nav_time_x: float = 0.0
+var _last_stick_nav_time_y: float = 0.0
+var _last_stick_dir_x: int = 0
+var _last_stick_dir_y: int = 0
+
+## Controller repeat timing for analog triggers (e.g. club switching and list paging).
+const TRIGGER_INITIAL_REPEAT_DELAY := 0.40
+const TRIGGER_REPEAT_INTERVAL := 0.22
+var _trigger_lt_neutral: bool = true
+var _trigger_lt_first_repeat: bool = true
+var _last_trigger_lt_time: float = 0.0
+var _trigger_rt_neutral: bool = true
+var _trigger_rt_first_repeat: bool = true
+var _last_trigger_rt_time: float = 0.0
+
 ## Set of OptionButton instance IDs we've already hooked signals onto.
 var _hooked_option_buttons: Dictionary = {}
 
@@ -143,10 +165,102 @@ func _input(event: InputEvent) -> void:
 	# Always validate dropdown popup state so stale open flags never swallow input
 	_validate_option_popup_state()
 
-	# Release stick neutral tracking when analog stick returns near center (< 0.25)
-	if event is InputEventJoypadMotion and abs(event.axis_value) < 0.25:
-		_dropdown_stick_neutral = true
-		_dropdown_press_start_time = 0.0
+	# ── Controller Triggers and Left Stick Repeat Debounce ────────
+	if event is InputEventJoypadMotion:
+		var motion := event as InputEventJoypadMotion
+		var axis := motion.axis
+		var val := motion.axis_value
+
+		# 1. Analog Triggers (LT / RT for club switching and list page up/down)
+		if axis == JOY_AXIS_TRIGGER_LEFT:
+			if val < 0.25:
+				_trigger_lt_neutral = true
+				_trigger_lt_first_repeat = true
+			elif val >= 0.5:
+				var now := Time.get_ticks_msec() / 1000.0
+				if _trigger_lt_neutral:
+					_trigger_lt_neutral = false
+					_trigger_lt_first_repeat = true
+					_last_trigger_lt_time = now
+				else:
+					var delay := TRIGGER_INITIAL_REPEAT_DELAY if _trigger_lt_first_repeat else TRIGGER_REPEAT_INTERVAL
+					if (now - _last_trigger_lt_time) < delay:
+						get_viewport().set_input_as_handled()
+						return
+					_last_trigger_lt_time = now
+					_trigger_lt_first_repeat = false
+
+		elif axis == JOY_AXIS_TRIGGER_RIGHT:
+			if val < 0.25:
+				_trigger_rt_neutral = true
+				_trigger_rt_first_repeat = true
+			elif val >= 0.5:
+				var now := Time.get_ticks_msec() / 1000.0
+				if _trigger_rt_neutral:
+					_trigger_rt_neutral = false
+					_trigger_rt_first_repeat = true
+					_last_trigger_rt_time = now
+				else:
+					var delay := TRIGGER_INITIAL_REPEAT_DELAY if _trigger_rt_first_repeat else TRIGGER_REPEAT_INTERVAL
+					if (now - _last_trigger_rt_time) < delay:
+						get_viewport().set_input_as_handled()
+						return
+					_last_trigger_rt_time = now
+					_trigger_rt_first_repeat = false
+
+		# 2. Left Stick Directional Navigation (X / Y)
+		elif axis == JOY_AXIS_LEFT_X:
+			if abs(val) < 0.25:
+				_stick_nav_neutral_x = true
+				_stick_nav_first_repeat_x = true
+				_last_stick_dir_x = 0
+			elif abs(val) >= 0.5:
+				var vp_check := get_viewport()
+				var focused_ctrl := vp_check.gui_get_focus_owner() if vp_check != null else null
+				var is_slider := focused_ctrl is Range or (focused_ctrl != null and focused_ctrl.get_parent() != null and focused_ctrl.get_parent() is SpinBox)
+				if not is_slider and not _option_popup_open:
+					var dir_x := 1 if val > 0.0 else -1
+					var now := Time.get_ticks_msec() / 1000.0
+					if _stick_nav_neutral_x or dir_x != _last_stick_dir_x:
+						_stick_nav_neutral_x = false
+						_stick_nav_first_repeat_x = true
+						_last_stick_dir_x = dir_x
+						_last_stick_nav_time_x = now
+					else:
+						var delay := NAV_INITIAL_REPEAT_DELAY if _stick_nav_first_repeat_x else NAV_REPEAT_INTERVAL
+						if (now - _last_stick_nav_time_x) < delay:
+							get_viewport().set_input_as_handled()
+							return
+						_last_stick_nav_time_x = now
+						_stick_nav_first_repeat_x = false
+
+		elif axis == JOY_AXIS_LEFT_Y:
+			if abs(val) < 0.25:
+				_stick_nav_neutral_y = true
+				_stick_nav_first_repeat_y = true
+				_last_stick_dir_y = 0
+				_dropdown_stick_neutral = true
+				_dropdown_press_start_time = 0.0
+			elif abs(val) >= 0.5:
+				if not _option_popup_open:
+					var vp_check := get_viewport()
+					var focused_ctrl := vp_check.gui_get_focus_owner() if vp_check != null else null
+					var is_vslider := focused_ctrl is VSlider
+					if not is_vslider:
+						var dir_y := 1 if val > 0.0 else -1
+						var now := Time.get_ticks_msec() / 1000.0
+						if _stick_nav_neutral_y or dir_y != _last_stick_dir_y:
+							_stick_nav_neutral_y = false
+							_stick_nav_first_repeat_y = true
+							_last_stick_dir_y = dir_y
+							_last_stick_nav_time_y = now
+						else:
+							var delay := NAV_INITIAL_REPEAT_DELAY if _stick_nav_first_repeat_y else NAV_REPEAT_INTERVAL
+							if (now - _last_stick_nav_time_y) < delay:
+								get_viewport().set_input_as_handled()
+								return
+							_last_stick_nav_time_y = now
+							_stick_nav_first_repeat_y = false
 
 	var is_motion: bool = (event is InputEventJoypadMotion and abs((event as InputEventJoypadMotion).axis_value) >= 0.5)
 	if not event.is_pressed() and not is_motion:

@@ -8,6 +8,7 @@ func _initialize():
 	test_shot_trace_overlay_profile_filtering()
 	test_player_tracers_profile_isolation()
 	test_range_get_shots_for_club_profile_filtering()
+	test_tracer_capping_and_fifo_replacement()
 
 	print("\n=======================================================")
 	print("ALL PROFILE SHOT TRACER TESTS PASSED! 🎉")
@@ -184,3 +185,60 @@ func test_range_get_shots_for_club_profile_filtering() -> void:
 
 	range_inst.queue_free()
 	print("  PASS: Range _get_shots_for_club correctly filters by player profile.")
+
+func test_tracer_capping_and_fifo_replacement() -> void:
+	print("\n--- Test 4: Tracer capping at 10 and FIFO replacement ---")
+	var PlayerScript = load("res://Player/player.gd")
+	assert(PlayerScript != null, "Player/player.gd must load")
+
+	var player = Node3D.new()
+	player.set_script(PlayerScript)
+	root.add_child(player)
+
+	# Verify max_tracers is 10 by default
+	assert(player.max_tracers == 10, "Player max_tracers must default to 10, got %d" % player.max_tracers)
+
+	# Create 12 tracers in succession
+	var created_tracers: Array = []
+	for i in range(12):
+		var t = player.create_new_tracer()
+		assert(t != null, "Tracer %d must be created" % i)
+		t.start_trail(Vector3.ZERO)
+		t.update_trail(Vector3(0, float(i + 1), float(i * 10)))
+		t.finalize_trail()
+		created_tracers.append(t)
+
+	# Must be capped at exactly 10 tracers
+	assert(player.tracers.size() == 10, "Player tracers must be capped at 10, got %d" % player.tracers.size())
+
+	# The first two tracers (indices 0 and 1) should have been popped and replaced
+	assert(not player.tracers.has(created_tracers[0]), "Oldest tracer 0 must be replaced and not in player.tracers")
+	assert(not player.tracers.has(created_tracers[1]), "Oldest tracer 1 must be replaced and not in player.tracers")
+
+	# Tracers 2 through 11 should be present in order
+	for i in range(2, 12):
+		assert(player.tracers.has(created_tracers[i]), "Tracer %d should remain in player.tracers" % i)
+		assert(player.tracers[i - 2] == created_tracers[i], "Tracer %d should be at position %d" % [i, i - 2])
+
+	# Test ShotTraceOverlay capping at 10
+	var OverlayScript = load("res://UI/shot_trace_overlay.gd")
+	var overlay = Node3D.new()
+	overlay.set_script(OverlayScript)
+	root.add_child(overlay)
+	var empty_history: Array[Dictionary] = []
+	overlay.activate(empty_history, "Dr", "TestGolfer")
+
+	for i in range(12):
+		var shot = {
+			"player": "TestGolfer",
+			"club": "Dr",
+			"tracer_points": [Vector3(0, 0, 0), Vector3(0, float(i + 1), float((i + 1) * 10))]
+		}
+		overlay.on_new_shot(shot)
+
+	assert(overlay._trace_nodes.size() == 10, "ShotTraceOverlay must cap at 10 traces, got %d" % overlay._trace_nodes.size())
+
+	overlay.queue_free()
+	player.queue_free()
+	print("  PASS: Tracers are strictly capped at 10 and oldest tracers are replaced with new.")
+

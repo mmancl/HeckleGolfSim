@@ -12,10 +12,13 @@ var current_course_tees: Array[String] = ["Blue", "Red", "White", "Black", "Gold
 var add_row_tee_opt: OptionButton = null
 var player_tee_options: Array[OptionButton] = []
 
-var selected_length: String = "Full 18"
+var selected_length: String = "Front 9, Back 9"
+var front_9_selected: bool = true
+var back_9_selected: bool = true
+var extra_holes_selected: bool = false
 var front_9_btn: Button
 var back_9_btn: Button
-var full_18_btn: Button
+var extra_holes_btn: Button
 
 var active_course_tab: String = "Real" # "Real" or "Custom"
 var real_tab_btn: Button
@@ -864,19 +867,19 @@ func _create_length_selector() -> PanelContainer:
 	back_9_btn.add_theme_font_size_override("font_size", 16)
 	seg_hbox.add_child(back_9_btn)
 
-	full_18_btn = Button.new()
-	full_18_btn.text = "Full 18"
-	full_18_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	full_18_btn.custom_minimum_size = Vector2(75, 42)
-	full_18_btn.add_theme_font_size_override("font_size", 16)
-	seg_hbox.add_child(full_18_btn)
+	extra_holes_btn = Button.new()
+	extra_holes_btn.text = "Extra Holes"
+	extra_holes_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	extra_holes_btn.custom_minimum_size = Vector2(75, 42)
+	extra_holes_btn.add_theme_font_size_override("font_size", 16)
+	seg_hbox.add_child(extra_holes_btn)
 
 	# Style buttons and setup connections
-	front_9_btn.pressed.connect(func(): _select_length("Front 9"))
-	back_9_btn.pressed.connect(func(): _select_length("Back 9"))
-	full_18_btn.pressed.connect(func(): _select_length("Full 18"))
+	front_9_btn.pressed.connect(func(): _toggle_length("Front 9"))
+	back_9_btn.pressed.connect(func(): _toggle_length("Back 9"))
+	extra_holes_btn.pressed.connect(func(): _toggle_length("Extra Holes"))
 
-	_select_length("Full 18")
+	_update_length_button_styles()
 	return panel
 
 
@@ -1020,7 +1023,10 @@ func _create_quality_selector() -> PanelContainer:
 	quality_high_btn.text = "High (Realistic)"
 	quality_high_btn.custom_minimum_size = Vector2(125, 44)
 	quality_high_btn.add_theme_font_size_override("font_size", 16)
-	seg_hbox.add_child(quality_high_btn)
+	if MobilePerformance.is_mobile():
+		quality_high_btn.visible = false
+	else:
+		seg_hbox.add_child(quality_high_btn)
 
 	quality_desc_lbl = Label.new()
 	quality_desc_lbl.add_theme_font_size_override("font_size", 14)
@@ -1035,18 +1041,26 @@ func _create_quality_selector() -> PanelContainer:
 	var current_q = "Low"
 	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("graphics_quality"):
 		current_q = GlobalSettings.range_settings.settings["graphics_quality"].value
+	if MobilePerformance.is_mobile() and current_q == "High":
+		current_q = "Medium"
 	_select_quality(current_q)
 	return panel
 
 
 func _select_quality(q_name: String) -> void:
+	if MobilePerformance.is_mobile() and q_name == "High":
+		q_name = "Medium"
+
 	if GlobalSettings != null and GlobalSettings.range_settings != null and GlobalSettings.range_settings.settings.has("graphics_quality"):
 		GlobalSettings.range_settings.settings["graphics_quality"].set_value(q_name)
 		GlobalSettings.save_settings()
 
 	_style_seg_button(quality_low_btn, "left", q_name == "Low")
-	_style_seg_button(quality_med_btn, "middle", q_name == "Medium")
-	_style_seg_button(quality_high_btn, "right", q_name == "High")
+	if MobilePerformance.is_mobile():
+		_style_seg_button(quality_med_btn, "right", q_name == "Medium")
+	else:
+		_style_seg_button(quality_med_btn, "middle", q_name == "Medium")
+		_style_seg_button(quality_high_btn, "right", q_name == "High")
 
 	if q_name == "Low":
 		quality_desc_lbl.text = "Low (Fast): Stylized stippled turf with clear high-contrast slope shading. Optimized for mobile and lower-end hardware."
@@ -1237,15 +1251,63 @@ func _get_hover_style(base_style: StyleBoxFlat) -> StyleBoxFlat:
 	return hover
 
 
-func _select_length(length: String) -> void:
-	selected_length = length
-	_style_seg_button(front_9_btn, "left", selected_length == "Front 9")
-	_style_seg_button(back_9_btn, "middle", selected_length == "Back 9")
-	_style_seg_button(full_18_btn, "right", selected_length == "Full 18")
+func _get_selected_length_string() -> String:
+	var parts: Array[String] = []
+	if front_9_selected:
+		parts.append("Front 9")
+	if back_9_selected and not back_9_btn.disabled:
+		parts.append("Back 9")
+	if extra_holes_selected and not extra_holes_btn.disabled:
+		parts.append("Extra Holes")
+	if parts.is_empty():
+		parts.append("Front 9")
+	return ", ".join(parts)
+
+
+func _update_length_button_styles() -> void:
+	selected_length = _get_selected_length_string()
+	if front_9_btn != null and is_instance_valid(front_9_btn):
+		_style_seg_button(front_9_btn, "left", front_9_selected)
+	if back_9_btn != null and is_instance_valid(back_9_btn):
+		_style_seg_button(back_9_btn, "middle", back_9_selected and not back_9_btn.disabled)
+	if extra_holes_btn != null and is_instance_valid(extra_holes_btn):
+		_style_seg_button(extra_holes_btn, "right", extra_holes_selected and not extra_holes_btn.disabled)
+
+
+func _toggle_length(segment: String) -> void:
+	if segment == "Front 9":
+		if front_9_selected:
+			var can_deselect = (back_9_selected and not back_9_btn.disabled) or (extra_holes_selected and not extra_holes_btn.disabled)
+			if can_deselect:
+				front_9_selected = false
+		else:
+			front_9_selected = true
+	elif segment == "Back 9":
+		if back_9_btn.disabled:
+			return
+		if back_9_selected:
+			var can_deselect = front_9_selected or (extra_holes_selected and not extra_holes_btn.disabled)
+			if can_deselect:
+				back_9_selected = false
+		else:
+			back_9_selected = true
+	elif segment == "Extra Holes":
+		if extra_holes_btn.disabled:
+			return
+		if extra_holes_selected:
+			var can_deselect = front_9_selected or (back_9_selected and not back_9_btn.disabled)
+			if can_deselect:
+				extra_holes_selected = false
+		else:
+			extra_holes_selected = true
+
+	_update_length_button_styles()
 
 
 func _update_course_length_options(idx: int) -> void:
 	if back_9_btn == null or not is_instance_valid(back_9_btn):
+		return
+	if extra_holes_btn == null or not is_instance_valid(extra_holes_btn):
 		return
 	var course_data = course_list.get_item_metadata(idx)
 	if course_data == null:
@@ -1257,15 +1319,35 @@ func _update_course_length_options(idx: int) -> void:
 		if typeof(parsed) == TYPE_DICTIONARY:
 			var holes = parsed.get("Hole Info", {})
 			var num_holes = holes.keys().size()
+			var has_extra = false
+			for h_id in holes.keys():
+				if MultiplayerManager.get_hole_number_from_id(str(h_id)) >= 19:
+					has_extra = true
+					break
+			if num_holes > 18:
+				has_extra = true
+
 			if num_holes < 10:
 				back_9_btn.disabled = true
-				if selected_length == "Back 9":
-					_select_length("Front 9")
-				else:
-					_select_length(selected_length)
-			else:
+				back_9_selected = false
+				extra_holes_btn.disabled = true
+				extra_holes_selected = false
+				front_9_selected = true
+			elif num_holes < 18 and not has_extra:
 				back_9_btn.disabled = false
-				_select_length(selected_length)
+				extra_holes_btn.disabled = true
+				extra_holes_selected = false
+				front_9_selected = true
+				back_9_selected = false
+			else:
+				# Course has at least 18 holes (or has extra holes)
+				back_9_btn.disabled = false
+				front_9_selected = true
+				back_9_selected = true
+				extra_holes_selected = false
+				extra_holes_btn.disabled = not has_extra
+
+			_update_length_button_styles()
 
 			var course_info = parsed.get("Course Info", {})
 			var tees_raw = course_info.get("Tee Colors", [])

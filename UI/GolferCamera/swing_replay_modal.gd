@@ -137,7 +137,7 @@ func _process_detail_modal_scroll(event: InputEvent) -> bool:
 	# 1. Analog Right Stick scrolling
 	if event is InputEventJoypadMotion and event.axis == JOY_AXIS_RIGHT_Y:
 		if abs(event.axis_value) >= 0.2:
-			scroll.scroll_vertical += int(event.axis_value * 28.0)
+			scroll.scroll_vertical += int(event.axis_value * 14.0)
 			get_viewport().set_input_as_handled()
 			return true
 

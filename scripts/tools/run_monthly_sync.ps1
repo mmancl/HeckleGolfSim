@@ -5,10 +5,17 @@ Write-Host "==========================================================" -Foregro
 
 $scriptPath = Join-Path $PSScriptRoot "monthly_osm_course_sync.py"
 
-# Default to Top Golf Countries & US Regions (safe memory footprint, ~18 GB total across regional chunks)
-# Fast option for iconic states:  .\run_monthly_sync.ps1 --preset top-states
-# All 5 US subregions:            .\run_monthly_sync.ps1 --preset us-regions
-# UK & Ireland only:             .\run_monthly_sync.ps1 --preset uk-ireland
-# Full continents:               .\run_monthly_sync.ps1 --preset continents
-python $scriptPath --preset top-golf --threads 8 --max-courses 2500 @args
+# Default to All 50 US States + European Golf Countries (fastest, small extracts, in-memory indexing)
+# Recommended single command:      .\run_monthly_sync.ps1 --preset us-and-europe --clean --idx-type sparse_mem_array
+# Iconic golf states & Scotland:   .\run_monthly_sync.ps1 --preset top-states --clean
+# All 50 US states only:           .\run_monthly_sync.ps1 --preset us-states --clean
+# European countries only:         .\run_monthly_sync.ps1 --preset europe-countries --clean
+$defaultArgs = @("--threads", "8", "--max-courses", "2500")
+if (-not ($args -contains "--preset") -and -not ($args -contains "--regions")) {
+    $defaultArgs += @("--preset", "us-and-europe")
+}
+if (-not ($args -contains "--idx-type")) {
+    $defaultArgs += @("--idx-type", "sparse_mem_array")
+}
+python $scriptPath @defaultArgs @args
 

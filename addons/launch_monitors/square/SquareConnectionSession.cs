@@ -29,6 +29,9 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
     private bool _isDetectBallActive;
     private bool _isReady;
     private DateTime _lastSensorPacketTime = DateTime.MinValue;
+    private DateTime _lastSensorLogTime = DateTime.MinValue;
+    private bool _lastLoggedReady;
+    private bool _lastLoggedDetected;
     private DateTime _lastRearmAttemptTime = DateTime.MinValue;
     private SquareShotMetrics? _pendingShotMetrics;
     private CancellationTokenSource? _pendingShotCts;
@@ -208,6 +211,10 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
 
     public async Task SetReadyAsync(CancellationToken cancellationToken = default)
     {
+        if (!_isConnected)
+        {
+            return;
+        }
         _logInfo("Sending DetectBall ready command.");
         await WriteCommandAsync(SquareCommandBuilder.DetectBall(NextSequence(), mode: 1, spinMode: 1), cancellationToken);
         _isDetectBallActive = true;
@@ -455,8 +462,27 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
 
     private async Task HandleNotificationAsync(byte[] data)
     {
-        // Debug: log full packet hex for diagnosing club data byte layout
-        _logInfo($"Notification received: {data.Length} bytes, hex={Convert.ToHexString(data)}");
+        if (SquareProtocol.IsClockPacket(data))
+        {
+            return;
+        }
+
+        if (SquareProtocol.TryParseSensor(data, out var sensor))
+        {
+            _lastSensorPacketTime = DateTime.UtcNow;
+            var ready = sensor.BallReady && sensor.BallDetected;
+            EmitReady(ready);
+            SensorDataReceived?.Invoke(sensor);
+            var now = DateTime.UtcNow;
+            if (ready != _lastLoggedReady || sensor.BallDetected != _lastLoggedDetected || now - _lastSensorLogTime >= TimeSpan.FromSeconds(3))
+            {
+                _lastSensorLogTime = now;
+                _lastLoggedReady = ready;
+                _lastLoggedDetected = sensor.BallDetected;
+                _logInfo($"Sensor packet parsed. ready={ready}, detected={sensor.BallDetected}, pos=({sensor.PositionX}, {sensor.PositionY}, {sensor.PositionZ})");
+            }
+            return;
+        }
 
         if (SquareProtocol.TryParseBattery(data, out var batteryLevel, out var chargingState))
         {
@@ -465,10 +491,8 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
             return;
         }
 
-        if (SquareProtocol.IsClockPacket(data))
-        {
-            return;
-        }
+        // Debug: log full packet hex for non-sensor events (status, club data, shot data, etc.)
+        _logInfo($"Notification received: {data.Length} bytes, hex={Convert.ToHexString(data)}");
 
         if (SquareProtocol.TryParseClubData(data, out var clubMetrics))
         {
@@ -555,15 +579,6 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
             return;
         }
 
-        if (SquareProtocol.TryParseSensor(data, out var sensor))
-        {
-            _lastSensorPacketTime = DateTime.UtcNow;
-            var ready = sensor.BallReady && sensor.BallDetected;
-            EmitReady(ready);
-            SensorDataReceived?.Invoke(sensor);
-            _logInfo($"Sensor packet parsed. ready={ready}, detected={sensor.BallDetected}, pos=({sensor.PositionX}, {sensor.PositionY}, {sensor.PositionZ})");
-            return;
-        }
 
         if (!SquareProtocol.TryParseShot(data, out var metrics))
         {
@@ -660,7 +675,10 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         ShotReceived?.Invoke(metrics);
         _logInfo($"Shot emitted. speed={metrics.BallSpeedMps:F2} m/s ({metrics.BallSpeedMps * 2.23694f:F1} mph), vla={metrics.VerticalAngle:F1}°, hla={metrics.HorizontalAngle:F1}°, spin={metrics.TotalSpinRpm} rpm, spinAxis={metrics.SpinAxis:F1}°, backSpin={metrics.BackSpinRpm}, sideSpin={metrics.SideSpinRpm}, type={metrics.ShotType}, hasClubData={metrics.HasClubData}, faceAngle={metrics.FaceAngle}, clubPath={metrics.ClubPath}");
         await _delayAsync(_options.ConnectionReadyDelay, CancellationToken.None);
-        await SetReadyAsync();
+        if (_isConnected)
+        {
+            await SetReadyAsync();
+        }
     }
 
     private byte NextSequence()
@@ -745,8 +763,11 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
         }
 
         return ex is InvalidOperationException invalidOperationException
-            && invalidOperationException.Message.Contains(
+            && (invalidOperationException.Message.Contains(
                 "Could not open the selected Bluetooth device.",
-                StringComparison.OrdinalIgnoreCase);
+                StringComparison.OrdinalIgnoreCase)
+                || invalidOperationException.Message.Contains(
+                "was not found",
+                StringComparison.OrdinalIgnoreCase));
     }
 }

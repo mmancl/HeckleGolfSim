@@ -256,25 +256,18 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         Log($"StartScanAsync requested for prefix '{options.DeviceNamePrefix}'. Waiting for CentralManager to power on...");
         await EnsureCentralReadyAsync(cancellationToken);
 
-        await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
-        {
-            // CBCentralManagerScanOptionAllowDuplicatesKey = YES ensures scan response packets (holding device name) are processed
-            IntPtr scanOptions = ObjCRuntime.CreateScanOptionsDictionary(allowDuplicates: true);
-            ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("scanForPeripheralsWithServices:options:"), IntPtr.Zero, scanOptions);
-        });
-        Log("Active scanning started with duplicate advertisements enabled for scan response resolution.");
+        ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("scanForPeripheralsWithServices:options:"), IntPtr.Zero, IntPtr.Zero);
+        Log("Active scanning started.");
     }
 
-    public async Task StopScanAsync(CancellationToken cancellationToken)
+    public Task StopScanAsync(CancellationToken cancellationToken)
     {
         if (_centralManager != IntPtr.Zero)
         {
-            await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
-            {
-                ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("stopScan"));
-            });
+            ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("stopScan"));
             Log("Scanning stopped.");
         }
+        return Task.CompletedTask;
     }
 
     public async Task ConnectAsync(string deviceId, BluetoothConnectionOptions options, CancellationToken cancellationToken)
@@ -293,19 +286,32 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         }
         else if (Guid.TryParse(deviceId, out var guid))
         {
-            // CoreBluetooth retrievePeripheralsWithIdentifiers: expects an NSArray of NSUUID instances
-            await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
+            try
             {
+                // CoreBluetooth retrievePeripheralsWithIdentifiers: expects an NSArray of NSUUID instances
                 IntPtr nsUuid = ObjCRuntime.CreateNSUUID(guid);
-                IntPtr nsArrayClass = ObjCRuntime.objc_getClass("NSArray");
-                IntPtr idArray = ObjCRuntime.objc_msgSend(nsArrayClass, ObjCRuntime.sel_registerName("arrayWithObject:"), nsUuid);
-                IntPtr retrievedArray = ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("retrievePeripheralsWithIdentifiers:"), idArray);
-                int count = (int)(long)ObjCRuntime.objc_msgSend(retrievedArray, ObjCRuntime.sel_registerName("count"));
-                if (count > 0)
+                if (nsUuid != IntPtr.Zero)
                 {
-                    peripheral = ObjCRuntime.objc_msgSend(retrievedArray, ObjCRuntime.sel_registerName("objectAtIndex:"), (IntPtr)0);
+                    IntPtr nsArrayClass = ObjCRuntime.objc_getClass("NSArray");
+                    IntPtr idArray = ObjCRuntime.objc_msgSend(nsArrayClass, ObjCRuntime.sel_registerName("arrayWithObject:"), nsUuid);
+                    if (idArray != IntPtr.Zero)
+                    {
+                        IntPtr retrievedArray = ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("retrievePeripheralsWithIdentifiers:"), idArray);
+                        if (retrievedArray != IntPtr.Zero)
+                        {
+                            int count = (int)(long)ObjCRuntime.objc_msgSend(retrievedArray, ObjCRuntime.sel_registerName("count"));
+                            if (count > 0)
+                            {
+                                peripheral = ObjCRuntime.objc_msgSend(retrievedArray, ObjCRuntime.sel_registerName("objectAtIndex:"), (IntPtr)0);
+                            }
+                        }
+                    }
                 }
-            });
+            }
+            catch (Exception ex)
+            {
+                LogErr($"retrievePeripheralsWithIdentifiers failed: {ex.Message}");
+            }
         }
 
         if (peripheral == IntPtr.Zero)
@@ -313,22 +319,24 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             throw new InvalidOperationException($"Peripheral with identifier {deviceId} was not found.");
         }
 
-        if (_activePeripheral != IntPtr.Zero && _activePeripheral != peripheral)
+        if (_activePeripheral != IntPtr.Zero)
         {
             ObjCRuntime.Release(_activePeripheral);
+            _activePeripheral = IntPtr.Zero;
         }
 
         _activePeripheral = peripheral;
         ObjCRuntime.Retain(_activePeripheral);
 
+        foreach (var c in _characteristics.Values)
+        {
+            ObjCRuntime.Release(c);
+        }
         _characteristics.Clear();
         _connectTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         Log($"Connecting to peripheral {deviceId}...");
-        await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
-        {
-            ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("connectPeripheral:options:"), _activePeripheral, IntPtr.Zero);
-        });
+        ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("connectPeripheral:options:"), _activePeripheral, IntPtr.Zero);
 
         using var reg = cancellationToken.Register(() => _connectTcs.TrySetCanceled());
         await _connectTcs.Task;
@@ -339,25 +347,13 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
     {
         if (_centralManager != IntPtr.Zero && _activePeripheral != IntPtr.Zero)
         {
-            int state = 0;
-            await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
-            {
-                if (_activePeripheral != IntPtr.Zero)
-                {
-                    state = (int)(long)ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("state"));
-                }
-            });
+            int state = (int)(long)ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("state"));
             if (state == 1 || state == 2) // Connecting or Connected
             {
                 var disconnectTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _disconnectTcs = disconnectTcs;
-                await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
-                {
-                    if (_centralManager != IntPtr.Zero && _activePeripheral != IntPtr.Zero)
-                    {
-                        ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("cancelPeripheralConnection:"), _activePeripheral);
-                    }
-                });
+                ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("cancelPeripheralConnection:"), _activePeripheral);
+
                 using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
                 using var reg = cts.Token.Register(() => disconnectTcs.TrySetResult(true));
                 try
@@ -386,14 +382,7 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
         _readTcsMap[characteristicUuid] = tcs;
 
-        // [peripheral readValueForCharacteristic:characteristic] dispatched to _dispatchQueue for thread confinement
-        await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
-        {
-            if (_activePeripheral != IntPtr.Zero)
-            {
-                ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("readValueForCharacteristic:"), characteristic);
-            }
-        });
+        ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("readValueForCharacteristic:"), characteristic);
 
         // Bound read with a 3-second timeout so unacknowledged reads (like firmware) do not hang the connection
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
@@ -427,14 +416,7 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _subscribeTcsMap[characteristicUuid] = tcs;
 
-        // [peripheral setNotifyValue:YES forCharacteristic:characteristic] dispatched to _dispatchQueue
-        await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
-        {
-            if (_activePeripheral != IntPtr.Zero)
-            {
-                ObjCRuntime.objc_msgSend_bool(_activePeripheral, ObjCRuntime.sel_registerName("setNotifyValue:forCharacteristic:"), 1, characteristic);
-            }
-        });
+        ObjCRuntime.objc_msgSend_bool(_activePeripheral, ObjCRuntime.sel_registerName("setNotifyValue:forCharacteristic:"), 1, characteristic);
 
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
@@ -462,11 +444,7 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         }
 
         // Adapt write mode based on characteristic properties (0x04 = WriteWithoutResponse, 0x08 = WriteWithResponse)
-        ulong properties = 0;
-        await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
-        {
-            properties = (ulong)(long)ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("properties"));
-        });
+        ulong properties = (ulong)(long)ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("properties"));
         bool canWriteWithoutResponse = (properties & 0x04) != 0;
         bool canWriteWithResponse = (properties & 0x08) != 0;
 
@@ -488,14 +466,7 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _writeTcsMap[characteristicUuid] = tcs;
 
-            // [peripheral writeValue:nsData forCharacteristic:characteristic type:writeType] dispatched to _dispatchQueue
-            await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
-            {
-                if (_activePeripheral != IntPtr.Zero)
-                {
-                    ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, writeType);
-                }
-            });
+            ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, writeType);
 
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
@@ -507,13 +478,10 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             catch (OperationCanceledException) when (canWriteWithoutResponse && !cancellationToken.IsCancellationRequested)
             {
                 Log($"Write with response timed out for {characteristicUuid}; falling back to write without response.");
-                await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
+                if (_activePeripheral != IntPtr.Zero)
                 {
-                    if (_activePeripheral != IntPtr.Zero)
-                    {
-                        ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, (IntPtr)1);
-                    }
-                });
+                    ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, (IntPtr)1);
+                }
             }
             finally
             {
@@ -522,13 +490,7 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         }
         else
         {
-            await ObjCRuntime.DispatchAsync(_dispatchQueue, () =>
-            {
-                if (_activePeripheral != IntPtr.Zero)
-                {
-                    ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, writeType);
-                }
-            });
+            ObjCRuntime.objc_msgSend_write(_activePeripheral, ObjCRuntime.sel_registerName("writeValue:forCharacteristic:type:"), nsData, characteristic, writeType);
         }
     }
 
@@ -619,6 +581,40 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         }
     }
 
+    private static IntPtr _keyLocalName;
+    private static IntPtr _keyServiceUuids;
+    private static IntPtr _keyMfgData;
+
+    private static IntPtr GetLocalNameKey()
+    {
+        if (_keyLocalName == IntPtr.Zero)
+        {
+            _keyLocalName = ObjCRuntime.CreateNSString("kCBAdvDataLocalName");
+            if (_keyLocalName != IntPtr.Zero) ObjCRuntime.Retain(_keyLocalName);
+        }
+        return _keyLocalName;
+    }
+
+    private static IntPtr GetServiceUuidsKey()
+    {
+        if (_keyServiceUuids == IntPtr.Zero)
+        {
+            _keyServiceUuids = ObjCRuntime.CreateNSString("kCBAdvDataServiceUUIDs");
+            if (_keyServiceUuids != IntPtr.Zero) ObjCRuntime.Retain(_keyServiceUuids);
+        }
+        return _keyServiceUuids;
+    }
+
+    private static IntPtr GetMfgDataKey()
+    {
+        if (_keyMfgData == IntPtr.Zero)
+        {
+            _keyMfgData = ObjCRuntime.CreateNSString("kCBAdvDataManufacturerData");
+            if (_keyMfgData != IntPtr.Zero) ObjCRuntime.Retain(_keyMfgData);
+        }
+        return _keyMfgData;
+    }
+
     private static void Central_DidDiscoverPeripheral(IntPtr self, IntPtr _cmd, IntPtr central, IntPtr peripheral, IntPtr advData, IntPtr rssi)
     {
         try
@@ -635,7 +631,7 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             // 1. Check local name in advertisement data
             if (string.IsNullOrWhiteSpace(name) && advData != IntPtr.Zero)
             {
-                IntPtr localNameKey = ObjCRuntime.CreateNSString("kCBAdvDataLocalName");
+                IntPtr localNameKey = GetLocalNameKey();
                 IntPtr localNameNs = ObjCRuntime.objc_msgSend(advData, ObjCRuntime.sel_registerName("objectForKey:"), localNameKey);
                 name = ObjCRuntime.NSStringToString(localNameNs);
             }
@@ -645,7 +641,7 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             // 2. Inspect advertised service UUIDs for known launch monitors
             if (advData != IntPtr.Zero)
             {
-                IntPtr serviceUuidsKey = ObjCRuntime.CreateNSString("kCBAdvDataServiceUUIDs");
+                IntPtr serviceUuidsKey = GetServiceUuidsKey();
                 IntPtr serviceUuidsArray = ObjCRuntime.objc_msgSend(advData, ObjCRuntime.sel_registerName("objectForKey:"), serviceUuidsKey);
                 if (serviceUuidsArray != IntPtr.Zero)
                 {
@@ -690,7 +686,7 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             // 3. Inspect Manufacturer Data if name is still unknown
             if (string.IsNullOrWhiteSpace(name) && advData != IntPtr.Zero)
             {
-                IntPtr mfgKey = ObjCRuntime.CreateNSString("kCBAdvDataManufacturerData");
+                IntPtr mfgKey = GetMfgDataKey();
                 IntPtr mfgDataNs = ObjCRuntime.objc_msgSend(advData, ObjCRuntime.sel_registerName("objectForKey:"), mfgKey);
                 if (mfgDataNs != IntPtr.Zero)
                 {
@@ -750,6 +746,11 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             if (!_instances.TryGetValue(self, out var client)) return;
             Log("Central connected to peripheral. Discovering services...");
 
+            if (client._centralManager != IntPtr.Zero)
+            {
+                ObjCRuntime.objc_msgSend(client._centralManager, ObjCRuntime.sel_registerName("stopScan"));
+            }
+
             // Set peripheral delegate to client's peripheral delegate
             ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("setDelegate:"), client._peripheralDelegate);
 
@@ -788,6 +789,11 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             {
                 client._connectTcs.TrySetException(new InvalidOperationException("Peripheral disconnected during connection attempt."));
             }
+            foreach (var c in client._characteristics.Values)
+            {
+                ObjCRuntime.Release(c);
+            }
+            client._characteristics.Clear();
             client.Disconnected?.Invoke();
         }
         catch (Exception ex)

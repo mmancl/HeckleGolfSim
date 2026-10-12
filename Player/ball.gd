@@ -1412,6 +1412,29 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 					print("  -> Ball grounded, continuing roll at %.2f m/s" % velocity.length())
 				else:
 					on_ground = false
+
+				# If ball rollout is disabled by player in practice, immediately rest the ball at landing spot
+				var rollout_active := true
+				if Engine.has_singleton("GlobalSettings"):
+					var gs = Engine.get_singleton("GlobalSettings")
+					if gs.get("range_settings") != null and gs.range_settings.get("ball_rollout_enabled") != null:
+						rollout_active = bool(gs.range_settings.ball_rollout_enabled.value)
+				elif is_instance_valid(Engine.get_main_loop()):
+					var root = Engine.get_main_loop().get("root") if Engine.get_main_loop().has_method("get") else null
+					if root != null and root.has_node("GlobalSettings"):
+						var gs = root.get_node("GlobalSettings")
+						if gs.get("range_settings") != null and gs.range_settings.get("ball_rollout_enabled") != null:
+							rollout_active = bool(gs.range_settings.ball_rollout_enabled.value)
+
+				if not rollout_active and not is_putt:
+					on_ground = true
+					velocity = Vector3.ZERO
+					omega = Vector3.ZERO
+					var contact_pos := collision.get_position()
+					var nys := maxf(normal.y, MIN_GROUND_NORMAL)
+					global_position.y = contact_pos.y + (_ball_radius + GROUND_SNAP_OFFSET) / nys
+					_enter_rest_state()
+					return
 			else:
 				# Rolling / putting contact on ground
 				on_ground = true
@@ -1573,8 +1596,66 @@ func _try_probe_ground() -> Dictionary:
 	}
 
 
-func _is_ground_normal(normal: Vector3) -> bool:
+static func is_ground_normal(normal: Vector3) -> bool:
 	return normal.y > MIN_GROUND_NORMAL
+
+
+func _is_ground_normal(normal: Vector3) -> bool:
+	return is_ground_normal(normal)
+
+
+## Adjusts launch velocity and spin for golfer stance matching the terrain slope.
+## Decomposes the shot from the flat horizontal frame and reprojects it onto
+## the orthonormal stance frame matching the hill's slope surface and normal.
+## Returns Dictionary { "velocity": Vector3, "omega": Vector3, "shot_direction": Vector3 }
+static func calculate_slope_adjusted_launch(
+	flat_velocity: Vector3,
+	flat_omega: Vector3,
+	aim_fwd_flat: Vector3,
+	slope_normal: Vector3
+) -> Dictionary:
+	if not is_ground_normal(slope_normal) or slope_normal.distance_squared_to(Vector3.UP) <= 0.0001:
+		var flat_dir := Vector3(flat_velocity.x, 0.0, flat_velocity.z)
+		var s_dir := flat_dir.normalized() if flat_dir.length_squared() > 0.0001 else aim_fwd_flat
+		return {
+			"velocity": flat_velocity,
+			"omega": flat_omega,
+			"shot_direction": s_dir
+		}
+
+	# Horizontal reference frame (line of play along flat ground)
+	var f_flat := Vector3(aim_fwd_flat.x, 0.0, aim_fwd_flat.z).normalized()
+	if f_flat.is_zero_approx():
+		f_flat = Vector3.RIGHT
+	var u_flat := Vector3.UP
+	var r_flat := f_flat.cross(u_flat).normalized()
+
+	# Slope reference frame (golfer stance matching the terrain slope)
+	var u_slope := slope_normal.normalized()
+	var f_proj := f_flat - u_slope * f_flat.dot(u_slope)
+	var f_slope := f_proj.normalized() if f_proj.length_squared() > 0.0001 else f_flat
+	var r_slope := f_slope.cross(u_slope).normalized()
+
+	# Rotate launch velocity from flat frame into slope stance frame
+	var v_f := flat_velocity.dot(f_flat)
+	var v_u := flat_velocity.dot(u_flat)
+	var v_r := flat_velocity.dot(r_flat)
+	var adj_velocity := v_f * f_slope + v_u * u_slope + v_r * r_slope
+
+	# Rotate launch angular velocity (spin) to match stance orientation
+	var w_f := flat_omega.dot(f_flat)
+	var w_u := flat_omega.dot(u_flat)
+	var w_r := flat_omega.dot(r_flat)
+	var adj_omega := w_f * f_slope + w_u * u_slope + w_r * r_slope
+
+	var flat_adj := Vector3(adj_velocity.x, 0.0, adj_velocity.z)
+	var adj_dir := flat_adj.normalized() if flat_adj.length_squared() > 0.0001 else f_flat
+
+	return {
+		"velocity": adj_velocity,
+		"omega": adj_omega,
+		"shot_direction": adj_dir
+	}
 
 
 func _remove_velocity_along_normal(source_velocity: Vector3, normal: Vector3) -> Vector3:
@@ -1667,7 +1748,9 @@ func _enter_rest_state() -> void:
 		if bool(rest_probe.get("hit", false)):
 			var r_hit: Vector3 = rest_probe.get("position", Vector3.ZERO)
 			var r_norm: Vector3 = rest_probe.get("normal", floor_normal)
-			var r_nys := maxf(r_norm.y, MIN_GROUND_NORMAL)
+			if is_ground_normal(r_norm):
+				floor_normal = r_norm.normalized()
+			var r_nys := maxf(floor_normal.y, MIN_GROUND_NORMAL)
 			var r_target_y := r_hit.y + (_ball_radius + GROUND_SNAP_OFFSET) / r_nys
 			if absf(global_position.y - r_target_y) < 0.20 or global_position.y < r_target_y:
 				global_position.y = r_target_y
@@ -1737,12 +1820,28 @@ func get_interpolated_position() -> Vector3:
 	return prev_physics_pos.lerp(curr_physics_pos, fraction)
 
 
-func _is_position_on_green(pos: Vector3) -> bool:
+func _is_position_on_wrong_green(pos: Vector3) -> bool:
 	var course = null
 	var player_parent = get_parent()
 	if player_parent != null:
 		course = player_parent.get_parent()
-	if course == null or not (course.has_method("get_distance_to_nearest_green") or course.has_method("is_inside_green")):
+	if course == null or not course.has_method("is_ball_on_wrong_green"):
+		var root = get_tree().current_scene if get_tree() != null else null
+		if root != null:
+			course = root
+	if course != null and course.has_method("is_ball_on_wrong_green"):
+		return bool(course.call("is_ball_on_wrong_green", pos))
+	return false
+
+
+func _is_position_on_green(pos: Vector3) -> bool:
+	if _is_position_on_wrong_green(pos):
+		return false
+	var course = null
+	var player_parent = get_parent()
+	if player_parent != null:
+		course = player_parent.get_parent()
+	if course == null or not (course.has_method("get_distance_to_nearest_green") or course.has_method("is_inside_green") or course.has_method("get_distance_to_current_green")):
 		var root = get_tree().current_scene if get_tree() != null else null
 		if root != null:
 			course = root
@@ -1751,6 +1850,11 @@ func _is_position_on_green(pos: Vector3) -> bool:
 			if course.has_method("is_inside_green"):
 				return course.call("is_inside_green", pos.x, pos.z)
 			return true
+		if course.has_method("get_distance_to_current_green"):
+			var d: float = course.get_distance_to_current_green(pos)
+			if d <= 0.05:
+				return true
+			return false
 		if course.has_method("get_distance_to_nearest_green"):
 			var d: float = course.get_distance_to_nearest_green(pos)
 			if d <= 0.05:
@@ -1758,19 +1862,41 @@ func _is_position_on_green(pos: Vector3) -> bool:
 	return false
 
 
-func _is_position_on_fringe(pos: Vector3) -> bool:
+func _has_course_green_geometry() -> bool:
 	var course = null
 	var player_parent = get_parent()
 	if player_parent != null:
 		course = player_parent.get_parent()
-	if course == null or not course.has_method("get_distance_to_nearest_green"):
+	if course == null or not (course.has_method("get_distance_to_nearest_green") or course.has_method("is_inside_green") or course.has_method("get_distance_to_current_green")):
 		var root = get_tree().current_scene if get_tree() != null else null
-		if root != null and root.has_method("get_distance_to_nearest_green"):
+		if root != null:
 			course = root
-	if course != null and course.has_method("get_distance_to_nearest_green"):
-		var d: float = course.get_distance_to_nearest_green(pos)
-		if d > 0.05 and d <= 2.5:
-			return true
+	if course != null:
+		return course.has_method("get_distance_to_nearest_green") or course.has_method("is_inside_green") or course.has_method("get_distance_to_current_green")
+	return false
+
+
+func _is_position_on_fringe(pos: Vector3) -> bool:
+	if _is_position_on_wrong_green(pos):
+		return false
+	var course = null
+	var player_parent = get_parent()
+	if player_parent != null:
+		course = player_parent.get_parent()
+	if course == null or not (course.has_method("get_distance_to_nearest_green") or course.has_method("get_distance_to_current_green")):
+		var root = get_tree().current_scene if get_tree() != null else null
+		if root != null and (root.has_method("get_distance_to_nearest_green") or root.has_method("get_distance_to_current_green")):
+			course = root
+	if course != null:
+		if course.has_method("get_distance_to_current_green"):
+			var d: float = course.get_distance_to_current_green(pos)
+			if d > 0.05 and d <= 2.5:
+				return true
+			return false
+		if course.has_method("get_distance_to_nearest_green"):
+			var d: float = course.get_distance_to_nearest_green(pos)
+			if d > 0.05 and d <= 2.5:
+				return true
 	return false
 
 
@@ -1803,12 +1929,15 @@ func hit() -> void:
 	var target_pos := Vector3.ZERO
 	var player_node = get_parent()
 	var course = player_node.get_parent() if player_node != null else null
-	if course != null and "aim_target_pos" in course and course.aim_target_pos is Vector3 and not course.aim_target_pos.is_zero_approx():
+	var on_wrong_green = _is_position_on_wrong_green(global_position)
+	var is_on_green = (not on_wrong_green) and (lie_type == "green" or lie_type == "fringe" or _is_position_on_fringe(global_position) or current_selected_club.to_lower() in ["pt", "putt", "putter"])
+
+	if is_on_green:
+		target_pos = get_target_hole_position()
+	elif course != null and "aim_target_pos" in course and course.aim_target_pos is Vector3 and not course.aim_target_pos.is_zero_approx():
 		target_pos = course.aim_target_pos
 	else:
 		target_pos = get_target_hole_position()
-
-	var is_on_green = (lie_type == "green" or lie_type == "fringe" or _is_position_on_fringe(global_position) or current_selected_club.to_lower() in ["pt", "putt", "putter"])
 	
 	# Determine distance and payload
 	var dist_yards := 150.0
@@ -1933,7 +2062,7 @@ func hit_from_data(data: Dictionary) -> void:
 		# Putting stroke with putter or putt shot type: allow putting up to 14.0 deg VLA
 		# (permits natural turf pops off fringe collar grass without converting into an airborne iron flight)
 		is_putt = (vla_deg < 14.0)
-	elif lie_type == "green" or lie_type == "fringe" or _is_position_on_fringe(global_position):
+	elif (not _is_position_on_wrong_green(global_position)) and (lie_type == "green" or lie_type == "fringe" or _is_position_on_fringe(global_position)):
 		is_putt = (vla_deg < 5.5) or (shot_type.to_lower() == "putt") or is_putter
 	else:
 		is_putt = (shot_type.to_lower() == "putt" and vla_deg < 5.5)
@@ -2025,7 +2154,9 @@ func hit_from_data(data: Dictionary) -> void:
 		var probe := _try_probe_ground()
 		if probe.get("hit", false):
 			var hit_pos: Vector3 = probe.get("position", global_position)
-			floor_normal = probe.get("normal", Vector3.UP)
+			var probed_norm: Vector3 = probe.get("normal", Vector3.UP)
+			if is_ground_normal(probed_norm):
+				floor_normal = probed_norm.normalized()
 			var nys := maxf(floor_normal.y, MIN_GROUND_NORMAL)
 			global_position.y = hit_pos.y + (_ball_radius + GROUND_SNAP_OFFSET) / nys
 		var speed_mag := speed_mps
@@ -2041,17 +2172,34 @@ func hit_from_data(data: Dictionary) -> void:
 		# Airborne shots (driver, woods, irons, wedges)
 		var probe := _try_probe_ground()
 		if probe.get("hit", false):
-			var ground_y: float = probe.get("position", Vector3.ZERO).y
+			var probed_norm: Vector3 = probe.get("normal", floor_normal)
+			if is_ground_normal(probed_norm):
+				floor_normal = probed_norm.normalized()
+			var hit_pos: Vector3 = probe.get("position", global_position)
+			var nys := maxf(floor_normal.y, MIN_GROUND_NORMAL)
 			var target_launch_y: float
 			if is_teebox:
 				# Teebox shot: Driver is teed up 1.5 inches above ground; other clubs rest right on grass
-				target_launch_y = ground_y + (TEED_CENTER_HEIGHT if is_driver else GROUND_CENTER_HEIGHT)
+				target_launch_y = hit_pos.y + (TEED_CENTER_HEIGHT if is_driver else GROUND_CENTER_HEIGHT)
 			else:
-				target_launch_y = ground_y + GROUND_CENTER_HEIGHT + 0.005
+				# Sphere center resting on slope is (R + snap) / nys; add 6mm safety clearance
+				target_launch_y = hit_pos.y + (_ball_radius + GROUND_SNAP_OFFSET + 0.006) / nys
 			if global_position.y < target_launch_y:
 				global_position.y = target_launch_y
-		elif global_position.y < (GROUND_CENTER_HEIGHT + 0.005):
-			global_position.y = GROUND_CENTER_HEIGHT + 0.005
+		elif global_position.y < (GROUND_CENTER_HEIGHT + 0.006):
+			global_position.y = GROUND_CENTER_HEIGHT + 0.006
+
+		# Adjust launch vectors for golfer stance matching the terrain slope
+		if not is_teebox and is_ground_normal(floor_normal) and floor_normal.distance_squared_to(Vector3.UP) > 0.0001:
+			var slope_res := calculate_slope_adjusted_launch(
+				launch_velocity,
+				launch_omega,
+				launch_direction,
+				floor_normal
+			)
+			launch_velocity = slope_res.velocity
+			launch_omega = slope_res.omega
+			launch_direction = slope_res.shot_direction
 
 	var lateral_curve_scale: float = 1.0
 	if GlobalSettings != null and GlobalSettings.range_settings != null and "shot_curve_sensitivity" in GlobalSettings.range_settings:
@@ -2182,6 +2330,9 @@ func _print_launch_debug(data: Dictionary, speed_mps: float, vla: float, hla: fl
 	print("Initial velocity: ", velocity)
 	print("Initial omega: ", omega, " (%.0f rpm)" % (omega.length() / 0.10472))
 	print("Shot direction: ", shot_dir)
+	if is_ground_normal(floor_normal) and floor_normal.distance_squared_to(Vector3.UP) > 0.0001:
+		var slope_deg := rad_to_deg(acos(clampf(floor_normal.y, -1.0, 1.0)))
+		print("Lie slope: %.1f deg (normal: %s)" % [slope_deg, floor_normal])
 	print("===================")
 func _update_surface_from_collider(collider: Object) -> void:
 	if collider == null:
@@ -2202,12 +2353,13 @@ func _update_surface_from_collider(collider: Object) -> void:
 	water_collider = null
 
 	var name_lower = collider.name.to_lower()
-	var on_green_geo = _is_position_on_green(global_position)
+	var on_wrong_green = _is_position_on_wrong_green(global_position)
+	var on_green_geo = (not on_wrong_green) and _is_position_on_green(global_position)
 	var is_sand = (collider.has_meta("is_sand") and bool(collider.get_meta("is_sand"))) or name_lower.contains("bunker") or name_lower.contains("sand") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.BUNKER)
-	var is_green = on_green_geo or name_lower.contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.GREEN)
+	var is_green = (not on_wrong_green) and (on_green_geo or name_lower.contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.GREEN))
 	var is_tee = name_lower.contains("tee")
-	var is_fairway = name_lower.contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.FAIRWAY)
-	var is_rough = (not on_green_geo) and (name_lower.contains("rough") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.ROUGH))
+	var is_fairway = on_wrong_green or name_lower.contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.FAIRWAY)
+	var is_rough = (not on_wrong_green) and (not on_green_geo) and (name_lower.contains("rough") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.ROUGH))
 
 	var changed_sand = (is_in_sand != is_sand)
 	is_in_sand = is_sand
@@ -2348,8 +2500,9 @@ func _update_surface_from_underneath() -> void:
 	var on_green_geo = _is_position_on_green(global_position)
 
 	if hit_colliders.is_empty():
+		var has_green_geo := _has_course_green_geometry()
 		# Check if we are on green
-		if on_green_geo or (is_putt and not is_in_sand):
+		if on_green_geo or (is_putt and not is_in_sand and not has_green_geo):
 			is_in_water = false
 			water_collider = null
 			var changed_sand = is_in_sand
@@ -2409,13 +2562,13 @@ func _update_surface_from_underneath() -> void:
 		elif (collider.has_meta("is_sand") and bool(collider.get_meta("is_sand"))) or collider.name.to_lower().contains("bunker") or collider.name.to_lower().contains("sand") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.BUNKER):
 			priority = 5
 		# 3. Check for green
-		elif on_green_geo or collider.name.to_lower().contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.GREEN):
+		elif (not _is_position_on_wrong_green(global_position)) and (on_green_geo or collider.name.to_lower().contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.GREEN)):
 			priority = 4
 		# 4. Check for tee
 		elif collider.name.to_lower().contains("tee"):
 			priority = 3
 		# 5. Check for fairway
-		elif collider.name.to_lower().contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.FAIRWAY):
+		elif _is_position_on_wrong_green(global_position) or collider.name.to_lower().contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.FAIRWAY):
 			priority = 2
 		# 6. Check for rough
 		elif collider.name.to_lower().contains("rough") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.ROUGH):

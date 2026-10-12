@@ -45,6 +45,7 @@ var _putting_cam_btn: Button = null
 var _shot_analysis_btn: Button = null
 var _shot_traces_btn: Button = null
 var _shot_traces_active: bool = true
+var _rollout_btn: Button = null
 var _dispersion_overlay: Control = null
 var _golfer_cam_panel: PanelContainer = null
 var _camera_feed_rect: TextureRect = null
@@ -514,6 +515,21 @@ func _ready() -> void:
 		)
 		toggles_container.add_child(shot_traces_btn)
 		_shot_traces_btn = shot_traces_btn
+
+		# Ball Rollout Toggle Button
+		var rollout_btn = Button.new()
+		rollout_btn.name = "RolloutToggleButton"
+		var is_rollout_on = is_rollout_enabled()
+		rollout_btn.text = "🔄 Rollout: ON" if is_rollout_on else "🔄 Rollout: OFF"
+		rollout_btn.tooltip_text = "Toggle Ball Rollout & Bounce"
+		rollout_btn.custom_minimum_size = Vector2(180, 56)
+		var initial_rollout_color = Color(0.2, 0.6, 0.4, 0.85) if is_rollout_on else Color(0.5, 0.5, 0.5, 0.85)
+		apply_material_button_style(rollout_btn, initial_rollout_color)
+		rollout_btn.pressed.connect(func():
+			toggle_rollout()
+		)
+		toggles_container.add_child(rollout_btn)
+		_rollout_btn = rollout_btn
 
 
 		# Position ClubSelector directly underneath SettingsButton and HideHelpersButton
@@ -4268,6 +4284,8 @@ func _update_tooltips() -> void:
 		_dist_btn.tooltip_text = "Hit Distance Menu [%s]" % km.get_action_summary_str("distance_menu_toggle")
 	if _shot_traces_btn != null and is_instance_valid(_shot_traces_btn):
 		_shot_traces_btn.tooltip_text = "Toggle Flight Arc Traces & Dispersion View for current club [%s]" % km.get_action_summary_str("shot_traces_toggle")
+	if _rollout_btn != null and is_instance_valid(_rollout_btn):
+		_rollout_btn.tooltip_text = "Toggle Ball Rollout & Bounce [%s]" % km.get_action_summary_str("rollout_toggle")
 
 
 func update_announcer_button_state() -> void:
@@ -4293,6 +4311,40 @@ func update_suspense_button_state() -> void:
 	else:
 		_tension_btn.text = "💓 Suspense: OFF"
 		apply_material_button_style(_tension_btn, Color(0.5, 0.5, 0.5, 0.85))
+
+
+func is_rollout_enabled() -> bool:
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.get("range_settings") != null and gs.range_settings.get("ball_rollout_enabled") != null:
+			return bool(gs.range_settings.ball_rollout_enabled.value)
+	return true
+
+
+func set_rollout_enabled(enabled: bool) -> void:
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.get("range_settings") != null and gs.range_settings.get("ball_rollout_enabled") != null:
+			gs.range_settings.ball_rollout_enabled.value = enabled
+			gs.save_settings()
+	update_rollout_button_state()
+
+
+func toggle_rollout() -> void:
+	var new_val = not is_rollout_enabled()
+	set_rollout_enabled(new_val)
+
+
+func update_rollout_button_state() -> void:
+	if _rollout_btn == null or not is_instance_valid(_rollout_btn):
+		return
+	var is_rollout_on = is_rollout_enabled()
+	if is_rollout_on:
+		_rollout_btn.text = "🔄 Rollout: ON"
+		apply_material_button_style(_rollout_btn, Color(0.2, 0.6, 0.4, 0.85))
+	else:
+		_rollout_btn.text = "🔄 Rollout: OFF"
+		apply_material_button_style(_rollout_btn, Color(0.5, 0.5, 0.5, 0.85))
 
 
 func is_driving_range() -> bool:

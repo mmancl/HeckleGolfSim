@@ -51,12 +51,12 @@ uniform sampler2D height_fairway : hint_default_white, filter_linear_mipmap, rep
 uniform sampler2D height_bunker  : hint_default_white, filter_linear_mipmap, repeat_enable;
 uniform sampler2D height_mulch   : hint_default_white, filter_linear_mipmap, repeat_enable;
 
-// -- UV tiling scales per surface type --
-uniform float uv_scale_rough   : hint_range(0.01, 1.0) = 0.10;
-uniform float uv_scale_green   : hint_range(0.01, 1.0) = 0.15;
-uniform float uv_scale_fairway : hint_range(0.01, 1.0) = 0.12;
-uniform float uv_scale_bunker  : hint_range(0.01, 1.0) = 0.17;
-uniform float uv_scale_mulch   : hint_range(0.01, 1.0) = 0.15;
+// -- UV tiling scales per surface type (Tuned for high-resolution turf detail at golfer scale) --
+uniform float uv_scale_rough   : hint_range(0.01, 1.0) = 0.38;
+uniform float uv_scale_green   : hint_range(0.01, 1.0) = 0.50;
+uniform float uv_scale_fairway : hint_range(0.01, 1.0) = 0.44;
+uniform float uv_scale_bunker  : hint_range(0.01, 1.0) = 0.42;
+uniform float uv_scale_mulch   : hint_range(0.01, 1.0) = 0.38;
 
 // -- Per-surface base roughness --
 uniform float roughness_rough   : hint_range(0.0, 1.0) = 0.94;
@@ -179,78 +179,63 @@ void fragment() {
     // 3. Multi-Scale Texture Sampling & Authentic Championship Color Grading
     // -----------------------------------------------------------------------
     
-    // 3A. ROUGH: Rich healthy deep emerald golf turf (100% green, ZERO brown dirt!)
-    vec3 r_base  = texture(tex_rough, uv_rough).rgb;
-    vec3 r_macro = texture(tex_rough, uv_rough * 0.35).rgb;
-    vec3 col_r   = mix(r_base, r_macro, 0.35) * vec3(0.92, 1.16, 0.88);
-    
-    // Natural organic landscape clumping (~5.5m clusters)
-    float clump_val = gnoise(v_world_pos.xz * 0.18);
-    vec3 rough_deep = col_r * vec3(0.85, 0.95, 0.82); // deep shadow pockets
-    vec3 rough_lush = col_r * vec3(1.10, 1.18, 0.96); // sunlit lush tufts
-    vec3 col_rough = mix(rough_deep, rough_lush, clump_val * 0.5 + 0.5);
+    // 3A. ROUGH: Rich championship emerald rough (cleans out dead yellow thatch with dual-octave detail)
+    vec3 r_fine  = texture(tex_rough, uv_rough).rgb;
+    vec3 r_broad = texture(tex_rough, uv_rough * 0.43 + vec2(0.37, 0.71)).rgb;
+    vec3 r_base  = mix(r_fine, r_broad, 0.25);
+    vec3 col_rough = mix(r_base, r_base * vec3(0.82, 1.14, 0.78), 0.60);
 
-    // 3B. FAIRWAY: Crisp sunlit golf green with bold anisotropic mower striping
-    vec3 f_base  = texture(tex_fairway, uv_fairway).rgb;
-    vec3 f_macro = texture(tex_fairway, uv_fairway * 0.30).rgb;
-    vec3 col_f   = mix(f_base, f_macro, 0.30) * vec3(1.00, 1.25, 0.96);
+    // 3B. FAIRWAY: Championship turf with alternating directional mower roller stripes
+    vec3 f_fine  = texture(tex_fairway, uv_fairway).rgb;
+    vec3 f_broad = texture(tex_fairway, uv_fairway * 0.41 + vec2(0.53, 0.29)).rgb;
+    vec3 col_f   = mix(f_fine, f_broad, 0.25);
 
-    // Bold alternating mowing stripes (width ~3.5m)
+    // Moon Bay alternating mower stripes (~3.5m width along hole angle)
     vec2 stripe_dir = vec2(0.707, 0.707);
-    float stripe_coord = dot(v_world_pos.xz, stripe_dir) * 0.85;
-    float stripe_val = smoothstep(0.25, 0.75, sin(stripe_coord) * 0.5 + 0.5);
+    float stripe_coord = dot(v_world_pos.xz, stripe_dir) * 0.90;
+    float stripe_val = smoothstep(0.20, 0.80, sin(stripe_coord) * 0.5 + 0.5);
 
-    // Dynamic camera viewing grain (with roll = silky sheen, against = deep velvet)
+    // Light / dark roller nap compression
+    vec3 stripe_bright = col_f * 1.07;
+    vec3 stripe_dark   = col_f * 0.92;
+    vec3 col_fairway   = mix(stripe_dark, stripe_bright, stripe_val);
+
+    // Camera view sheen: looking along roller nap creates silky light sheen
     vec3 view_dir = normalize(v_world_pos - v_cam_pos);
     float view_grain = dot(view_dir.xz, stripe_dir);
-    float stripe_aniso = (stripe_val - 0.5) * 0.18 * (0.6 + 0.4 * view_grain);
+    col_fairway *= (1.0 + (stripe_val - 0.5) * 0.08 * (0.5 + 0.5 * view_grain));
 
-    // Sunlit golden-emerald stripe vs deep velvet emerald stripe (Bay Hill & Moon Bay style)
-    vec3 stripe_bright = col_f * vec3(1.14, 1.16, 0.96);
-    vec3 stripe_dark   = col_f * vec3(0.82, 0.88, 0.82);
-    vec3 col_fairway   = mix(stripe_dark, stripe_bright, stripe_val);
-    col_fairway = clamp(col_fairway * (1.0 + stripe_aniso), 0.0, 1.0);
-
-    // Fairway-to-rough intermediate first-cut collar
-    float first_cut_w = smoothstep(0.02, 0.20, fairway_w) * (1.0 - smoothstep(0.25, 0.55, fairway_w));
-    vec3 col_first_cut = mix(col_fairway, col_rough, 0.50) * vec3(0.95, 1.02, 0.92);
+    // Bay Hill first-cut collar ribbon: distinct darker green border framing the fairway
+    float first_cut_w = smoothstep(0.01, 0.18, fairway_w) * (1.0 - smoothstep(0.25, 0.60, fairway_w));
+    vec3 col_first_cut = col_fairway * vec3(0.72, 0.84, 0.68);
     col_fairway = mix(col_fairway, col_first_cut, first_cut_w * 0.65);
 
-    // 3C. GREEN: Velvet Short-Mown Bentgrass (Pristine, smooth, zero NaNs!)
-    vec3 g_base = texture(tex_green, uv_green).rgb;
-    vec3 col_green = g_base * vec3(1.05, 1.28, 1.04);
-    
-    // Subtle cross-cut mower grid (~1.8m width)
-    float green_grid = (sin(v_world_pos.x * 3.2) * 0.5 + 0.5) * (sin(v_world_pos.z * 3.2) * 0.5 + 0.5);
-    col_green = mix(col_green * 0.96, col_green * 1.04, green_grid);
+    // 3C. GREEN: Pristine short-mown bentgrass
+    vec3 g_fine  = texture(tex_green, uv_green).rgb;
+    vec3 g_broad = texture(tex_green, uv_green * 0.47 + vec2(0.19, 0.61)).rgb;
+    vec3 col_green = mix(g_fine, g_broad, 0.25) * vec3(1.02, 1.10, 0.98);
 
-    // Smooth green collar fringe
+    // Delicate Augusta/Pinehurst cross-cut mower grid (~1.6m width)
+    float green_grid = (sin(v_world_pos.x * 2.8) * 0.5 + 0.5) * (sin(v_world_pos.z * 2.8) * 0.5 + 0.5);
+    col_green = mix(col_green * 0.97, col_green * 1.03, green_grid);
+
+    // Smooth fringe collar border
     float fringe_w = smoothstep(0.02, 0.25, green_w) * (1.0 - smoothstep(0.65, 0.98, green_w));
-    vec3 col_fringe = mix(col_green, col_fairway, 0.50) * vec3(0.94, 0.98, 0.94);
+    vec3 col_fringe = mix(col_green, col_fairway, 0.55);
     vec3 green_output = mix(col_green, col_fringe, fringe_w);
 
-    // 3D. BUNKER: Clean Crystalline Sand + Pinehurst Organic Soil Lip
-    vec3 col_bunker = texture(tex_bunker, uv_bunker).rgb * 1.15;
-    float rake_wave = sin(dot(v_world_pos.xz, vec2(0.707, -0.707)) * 15.0) * 0.5 + 0.5;
-    col_bunker = clamp(col_bunker * mix(0.95, 1.05, rake_wave), 0.0, 1.0);
+    // 3D. BUNKER: Clean silica sand + dark sculpted organic soil lip
+    vec3 col_bunker = texture(tex_bunker, uv_bunker).rgb * 1.05;
+    float rake_wave = sin(dot(v_world_pos.xz, vec2(0.707, -0.707)) * 18.0) * 0.5 + 0.5;
+    col_bunker = clamp(col_bunker * mix(0.97, 1.03, rake_wave), 0.0, 1.0);
 
     float bunker_lip = smoothstep(0.02, 0.22, bunker_w) * (1.0 - smoothstep(0.35, 0.85, bunker_w));
     float lip_noise = gnoise(v_world_pos.xz * 0.65) * 0.5 + 0.5;
-    vec3 dark_soil = vec3(0.20, 0.14, 0.08) * (0.85 + 0.30 * lip_noise);
-    col_bunker = mix(col_bunker, dark_soil, bunker_lip * 0.80);
+    vec3 dark_soil = vec3(0.20, 0.15, 0.10) * (0.85 + 0.30 * lip_noise);
+    col_bunker = mix(col_bunker, dark_soil, bunker_lip * 0.70);
 
     // 3E. MULCH
     vec3 col_mulch = texture(tex_mulch, uv_mulch).rgb;
-
-    // 3F. Micro Grass Blade Detail at Player Perspective (< 12m)
-    float dist_to_cam = length(v_world_pos - v_cam_pos);
-    float blade_lod = clamp(1.0 - smoothstep(1.5, 12.0, dist_to_cam), 0.0, 1.0);
-    vec2 bp = v_world_pos.xz * 24.0;
-    float blade_shape = min(abs(fract(bp.x * 0.707 + bp.y * 0.707) - 0.5) * 2.0,
-                            abs(fract(bp.x * -0.707 + bp.y * 0.707) - 0.5) * 2.0);
-    float blade_highlight = smoothstep(0.25, 0.75, blade_shape);
-    col_rough   = mix(col_rough,   col_rough   * mix(vec3(0.85), vec3(1.12), blade_highlight), blade_lod * 0.40);
-    col_fairway = mix(col_fairway, col_fairway * mix(vec3(0.90), vec3(1.08), blade_highlight), blade_lod * 0.30);
 
     // -----------------------------------------------------------------------
     // 4. Blend Albedo

@@ -87,11 +87,12 @@ func sync_data_panels():
 	add_remove_btn.visible = stats_currently_visible
 
 static func get_slot_position(index: int) -> Vector2:
-	var row := int(index / 2)
-	var col := int(index % 2)
-	var x := 0.0 if col == 0 else 106.0
-	var y := 360.0 + row * 70.0
+	var row := int(index / 3)
+	var col := int(index % 3)
+	var x := float(col) * 106.0
+	var y := 485.0 + float(row) * 70.0
 	return Vector2(x, y)
+
 
 func _create_add_remove_button() -> Button:
 	var btn := Button.new()

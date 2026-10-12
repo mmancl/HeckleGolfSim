@@ -61,6 +61,8 @@ var _cached_surface_nodes_initialized: bool = false
 var _cached_green_bodies: Array[Dictionary] = []
 var _cached_tee_bodies: Array[Dictionary] = []
 var _cached_fairway_bodies: Array[Dictionary] = []
+var _cached_current_green_pin: Vector3 = Vector3.ZERO
+var _cached_current_green_entry: Dictionary = {}
 
 # Dynamic Course Play active hole variables
 var show_green_grid: bool = false:
@@ -1225,6 +1227,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_shot_traces()
 			get_viewport().set_input_as_handled()
 			return
+		elif event.is_action_pressed("rollout_toggle"):
+			if has_node("RangeUI") and $RangeUI.has_method("toggle_rollout"):
+				$RangeUI.toggle_rollout()
+			get_viewport().set_input_as_handled()
+			return
 		elif event.is_action_pressed("aim_left"):
 			var vp := get_viewport()
 			if vp != null and vp.gui_get_focus_owner() != null:
@@ -1697,7 +1704,14 @@ func _apply_aim_step(turn_deg: float, dist_m: float) -> void:
 			ScreenOffsetManager.on_ready_for_shot()
 
 
+var _last_club_cycle_time: float = 0.0
+const CLUB_CYCLE_MIN_COOLDOWN: float = 0.12
+
 func _cycle_club(longer: bool) -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if (now - _last_club_cycle_time) < CLUB_CYCLE_MIN_COOLDOWN:
+		return
+	_last_club_cycle_time = now
 	var club_sel = get_club_selector()
 	if club_sel != null and is_instance_valid(club_sel):
 		if longer:
@@ -1849,6 +1863,29 @@ func _process(delta: float) -> void:
 							var target_offset = Vector3(-6.0, 1.4, 0).rotated(Vector3.UP, _last_travel_yaw)
 							$PhantomCamera3D.follow_offset = $PhantomCamera3D.follow_offset.lerp(target_offset, delta * 4.0)
 		
+	# Dynamic ground clearance clamping during follow mode (especially on putts and undulating greens)
+	if has_node("PhantomCamera3D") and $PhantomCamera3D.follow_mode == PhantomCamera3D.FollowMode.SIMPLE:
+		var ball_node = $Player.ball if has_node("Player") else null
+		if ball_node != null:
+			var is_putting = ball_node.is_putt or is_putting_view()
+			if is_putting:
+				var ball_p = ball_node.global_position
+				var cur_offset = $PhantomCamera3D.follow_offset
+				var cand_cam_x = ball_p.x + cur_offset.x
+				var cand_cam_z = ball_p.z + cur_offset.z
+				var ground_h = get_height(cand_cam_x, cand_cam_z)
+				var min_clearance = 0.35
+				var needed_y_offset = (ground_h + min_clearance) - ball_p.y
+				var base_y = 0.6
+				var target_offset_y = maxf(base_y, needed_y_offset)
+				if absf($PhantomCamera3D.follow_offset.y - target_offset_y) > 0.01:
+					$PhantomCamera3D.follow_offset.y = lerpf($PhantomCamera3D.follow_offset.y, target_offset_y, delta * 10.0)
+
+	if has_node("Camera3D") and $Camera3D.current:
+		var clamped_cam = clamp_camera_position($Camera3D.global_position, 0.35)
+		if $Camera3D.global_position.y < clamped_cam.y:
+			$Camera3D.global_position.y = clamped_cam.y
+
 	if GlobalSettings.range_settings.dof_enabled.value:
 		update_dof_focus()
 		
@@ -2454,7 +2491,7 @@ func set_camera_follow_mode(value) -> void:
 			update_camera_fov(GlobalSettings.range_settings.camera_fov.value)
 			_putt_close_view_triggered = false
 			# Follow behind the ball at current address putting offset without zooming out
-			var local_offset = Vector3(-1.05, 0.6, 0.0).rotated(Vector3.UP, yaw_rad)
+			var local_offset = Vector3(-1.35, 0.8, 0.0).rotated(Vector3.UP, yaw_rad)
 			camera.follow_offset = local_offset
 			# Retain current camera angle down the putting line instead of looking down at the ball
 			camera.look_at_mode = PhantomCamera3D.LookAtMode.NONE
@@ -3318,6 +3355,8 @@ func toggle_sky_view() -> void:
 
 
 func is_ball_on_green() -> bool:
+	if is_ball_on_wrong_green():
+		return false
 	if has_node("Player") and $Player.ball != null:
 		var ball = $Player.ball
 		var lie = str(ball.get("lie_type")).to_lower()
@@ -3327,6 +3366,12 @@ func is_ball_on_green() -> bool:
 		if lie == "teebox" or p_lie == "teebox" or lie == "sand" or p_lie == "sand" or ball.is_in_sand:
 			return false
 			
+		# Geometric check is ground truth if course mesh is present
+		if has_method("get_distance_to_current_green"):
+			var d_green = get_distance_to_current_green(ball.global_position)
+			if d_green <= 0.001:
+				return true
+				
 		if lie == "green" or p_lie == "green":
 			return true
 			
@@ -3337,7 +3382,6 @@ func is_ball_on_green() -> bool:
 				if ap.get("lie_type", "").to_lower() == "green":
 					return true
 
-		# Geometric check is ground truth if course mesh is present
 		if has_method("get_distance_to_nearest_green"):
 			var d_green = get_distance_to_nearest_green(ball.global_position)
 			if d_green <= 0.001:
@@ -3346,12 +3390,18 @@ func is_ball_on_green() -> bool:
 
 
 func is_ball_on_fringe() -> bool:
+	if is_ball_on_wrong_green():
+		return false
 	if has_node("Player") and $Player.ball != null:
 		var ball = $Player.ball
 		var lie = str(ball.get("lie_type")).to_lower()
 		var p_lie = str($Player.get("current_lie_type")).to_lower()
 		if lie == "teebox" or p_lie == "teebox" or lie == "sand" or p_lie == "sand" or ball.is_in_sand:
 			return false
+		if has_method("get_distance_to_current_green"):
+			var d_green: float = get_distance_to_current_green(ball.global_position)
+			if d_green > 0.001 and d_green <= 2.5:
+				return true
 		if lie == "fringe" or p_lie == "fringe":
 			return true
 		if has_node("/root/MultiplayerManager"):
@@ -3392,7 +3442,7 @@ func get_camera_local_offset(override_is_on_green: Variant = null) -> Vector3:
 	var is_on_green = is_putting_view(override_is_on_green)
 		
 	if is_on_green:
-		return Vector3(-1.05, 0.6, 0)
+		return Vector3(-1.35, 0.8, 0)
 		
 	var cam_dist = 50.0 if is_sky_view_active else GlobalSettings.range_settings.camera_distance.value
 	var cam_height = 15.0 if is_sky_view_active else GlobalSettings.range_settings.camera_height.value
@@ -3433,7 +3483,7 @@ func get_address_camera_position(ball_pos: Vector3, rot_y: float, override_is_on
 	var is_on_green = is_putting_view(override_is_on_green)
 	
 	if is_on_green:
-		var green_offset = Vector3(-1.05, 0.6, 0.0).rotated(Vector3.UP, rot_y)
+		var green_offset = Vector3(-1.35, 0.8, 0.0).rotated(Vector3.UP, rot_y)
 		return clamp_camera_position(ball_pos + green_offset)
 		
 	if is_sky_view_active:
@@ -4146,7 +4196,7 @@ func get_default_club() -> String:
 	
 	# Determine if ball is on the green
 	var is_on_green = is_ball_on_green()
-	if not is_on_green:
+	if not is_on_green and not is_ball_on_wrong_green():
 		var mp_mgr = get_node_or_null("/root/MultiplayerManager")
 		if mp_mgr != null and not mp_mgr.players.is_empty():
 			var active_p = mp_mgr.get_active_player()
@@ -4155,7 +4205,7 @@ func get_default_club() -> String:
 	
 	# Determine if we are in the teebox
 	var is_in_teebox = false
-	if not is_on_green and not practice_mode_active:
+	if not is_on_green and not practice_mode_active and not is_ball_on_wrong_green():
 		is_in_teebox = ($Player.ball.get("lie_type") == "teebox" or $Player.get("current_lie_type") == "teebox")
 		if not is_in_teebox:
 			var mp_mgr = get_node_or_null("/root/MultiplayerManager")
@@ -4169,6 +4219,9 @@ func get_default_club() -> String:
 	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
 	var p_name = _get_current_player_name()
 	var is_fringe = is_ball_on_fringe()
+	if is_ball_on_wrong_green():
+		is_on_green = false
+		is_fringe = false
 	if mp_mgr != null and mp_mgr.has_method("get_suggested_club"):
 		return mp_mgr.get_suggested_club(p_name, float(dist_yards), is_in_teebox, is_on_green, is_fringe)
 	else:
@@ -4200,6 +4253,8 @@ func get_default_club() -> String:
 
 
 func is_default_club_putter() -> bool:
+	if is_ball_on_wrong_green():
+		return false
 	return get_default_club().to_lower() in ["pt", "putt", "putter"]
 
 
@@ -4998,7 +5053,7 @@ func _init_cached_surface_bodies() -> void:
 		var max_x := -999999.0
 		var min_z := 999999.0
 		var max_z := -999999.0
-		var trans: Transform3D = body.global_transform
+		var trans: Transform3D = body.global_transform if body.is_inside_tree() else body.transform
 		
 		for child in body.get_children():
 			if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
@@ -5473,6 +5528,159 @@ func get_distance_to_nearest_green(pos: Vector3) -> float:
 	return min_dist
 
 
+func get_current_green_entry() -> Dictionary:
+	_init_cached_surface_bodies()
+	if _cached_green_bodies.is_empty():
+		return {}
+	var pin_pos = current_hole_location
+	if pin_pos.is_zero_approx():
+		pin_pos = aim_target_pos
+	if pin_pos.is_zero_approx():
+		return {}
+	if pin_pos == _cached_current_green_pin and not _cached_current_green_entry.is_empty():
+		return _cached_current_green_entry
+		
+	var pin_2d = Vector2(pin_pos.x, pin_pos.z)
+	var best_entry: Dictionary = {}
+	var min_dist: float = 999999.0
+	
+	for entry in _cached_green_bodies:
+		var dist_to_center: float = pin_2d.distance_to(entry.center_2d)
+		var d: float = maxf(0.0, dist_to_center - entry.radius)
+		if d < min_dist:
+			var trans: Transform3D = entry.transform
+			var actual_min: float = 999999.0
+			for faces in entry.shapes:
+				for i in range(0, faces.size(), 3):
+					if i + 2 < faces.size():
+						var a_3d = trans * faces[i]
+						var b_3d = trans * faces[i+1]
+						var c_3d = trans * faces[i+2]
+						var a = Vector2(a_3d.x, a_3d.z)
+						var b = Vector2(b_3d.x, b_3d.z)
+						var c = Vector2(c_3d.x, c_3d.z)
+						var tri_d = _distance_to_triangle_2d(pin_2d, a, b, c)
+						if tri_d < actual_min:
+							actual_min = tri_d
+							if actual_min <= 0.001:
+								break
+				if actual_min <= 0.001:
+					break
+			if actual_min < min_dist:
+				min_dist = actual_min
+				best_entry = entry
+				if min_dist <= 0.001:
+					break
+					
+	_cached_current_green_pin = pin_pos
+	_cached_current_green_entry = best_entry
+	return best_entry
+
+
+func get_distance_to_current_green(pos: Vector3) -> float:
+	var entry = get_current_green_entry()
+	if entry.is_empty():
+		if not current_hole_location.is_zero_approx():
+			var dist_pin = pos.distance_to(current_hole_location)
+			return maxf(0.0, dist_pin - 15.0)
+		return 9999.0
+		
+	var pos_2d := Vector2(pos.x, pos.z)
+	var dist_to_center = pos_2d.distance_to(entry.center_2d)
+	if dist_to_center - entry.radius > 50.0:
+		return dist_to_center - entry.radius
+		
+	var trans: Transform3D = entry.transform
+	var min_dist := 9999.0
+	for faces in entry.shapes:
+		for i in range(0, faces.size(), 3):
+			if i + 2 < faces.size():
+				var a_3d = trans * faces[i]
+				var b_3d = trans * faces[i+1]
+				var c_3d = trans * faces[i+2]
+				var a = Vector2(a_3d.x, a_3d.z)
+				var b = Vector2(b_3d.x, b_3d.z)
+				var c = Vector2(c_3d.x, c_3d.z)
+				var dist = _distance_to_triangle_2d(pos_2d, a, b, c)
+				if dist < min_dist:
+					min_dist = dist
+					if min_dist <= 0.001:
+						return 0.0
+	return min_dist
+
+
+func get_distance_to_any_green(pos: Vector3) -> float:
+	_init_cached_surface_bodies()
+	if _cached_green_bodies.is_empty():
+		return 9999.0
+	var pos_2d := Vector2(pos.x, pos.z)
+	var min_dist := 9999.0
+	for entry in _cached_green_bodies:
+		var dist_to_center = pos_2d.distance_to(entry.center_2d)
+		if dist_to_center - entry.radius >= min_dist:
+			continue
+			
+		var trans: Transform3D = entry.transform
+		for faces in entry.shapes:
+			for i in range(0, faces.size(), 3):
+				if i + 2 < faces.size():
+					var a_3d = trans * faces[i]
+					var b_3d = trans * faces[i+1]
+					var c_3d = trans * faces[i+2]
+					var a = Vector2(a_3d.x, a_3d.z)
+					var b = Vector2(b_3d.x, b_3d.z)
+					var c = Vector2(c_3d.x, c_3d.z)
+					var dist = _distance_to_triangle_2d(pos_2d, a, b, c)
+					if dist < min_dist:
+						min_dist = dist
+						if min_dist <= 0.001:
+							return 0.0
+	return min_dist
+
+
+func is_ball_on_wrong_green(override_pos: Vector3 = Vector3.ZERO) -> bool:
+	if is_driving_range:
+		return false
+	var pin_pos = current_hole_location
+	if pin_pos.is_zero_approx():
+		pin_pos = aim_target_pos
+	if pin_pos.is_zero_approx():
+		return false
+		
+	var pos = override_pos
+	if pos.is_zero_approx():
+		if has_node("Player") and $Player.ball != null:
+			pos = $Player.ball.global_position
+		else:
+			return false
+			
+	var d_curr = get_distance_to_current_green(pos)
+	if d_curr <= 2.5:
+		return false
+		
+	var d_any = get_distance_to_any_green(pos)
+	if d_any <= 2.5:
+		return true
+		
+	if has_node("Player") and $Player.ball != null:
+		var ball = $Player.ball
+		if ball.global_position.distance_to(pos) <= 1.0:
+			var l = str(ball.get("lie_type")).to_lower()
+			if l == "green" or l == "fringe":
+				return true
+			if ball.has_method("get_surface") and int(ball.get_surface()) == PhysicsEnums.SurfaceType.GREEN:
+				return true
+				
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and not mp_mgr.players.is_empty():
+		var ap = mp_mgr.get_active_player()
+		var l = str(ap.get("lie_type", "")).to_lower()
+		if (l == "green" or l == "fringe") and pos.distance_to(pin_pos) > 40.0:
+			return true
+			
+	return false
+
+
 func get_distance_to_nearest_teebox(pos: Vector3) -> float:
 	_init_cached_surface_bodies()
 	if _cached_tee_bodies.is_empty():
@@ -5533,28 +5741,34 @@ func update_current_lie_and_reduction() -> void:
 			ball_node.lie_type = "rough"
 			ball_node.set_surface(PhysicsEnums.SurfaceType.ROUGH)
 	else:
-		# Geometric check fallbacks to ensure absolute accuracy for teeboxes, fairways and greens
-		if lie_type != "green" and lie_type != "sand":
-			# Check if we are actually on a green (strictly inside green triangles)
-			if get_distance_to_nearest_green(ball_node.global_position) <= 0.001:
-				lie_type = "green"
-				ball_node.lie_type = "green"
-				ball_node.set_surface(PhysicsEnums.SurfaceType.GREEN)
-			# Check if we are on the fringe / collar bordering the green (within 2.5 meters of green edge)
-			elif get_distance_to_nearest_green(ball_node.global_position) <= 2.5:
-				lie_type = "fringe"
-				ball_node.lie_type = "fringe"
-				ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
-			# Check if we are actually on a tee box (strictly inside tee box triangles or at teebox position)
-			elif ball_node.lie_type == "teebox" or get_distance_to_nearest_teebox(ball_node.global_position) <= 0.5 or (practice_start_pos != Vector3.ZERO and ball_node.global_position.distance_to(practice_start_pos) < 1.5):
-				lie_type = "teebox"
-				ball_node.lie_type = "teebox"
-				ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
-			# Check if we are actually on a fairway (strictly inside fairway triangles)
-			elif get_distance_to_nearest_fairway(ball_node.global_position) <= 0.001:
-				lie_type = "fairway"
-				ball_node.lie_type = "fairway"
-				ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+		if is_ball_on_wrong_green():
+			lie_type = "fairway"
+			reduction = 0.0
+			ball_node.lie_type = "fairway"
+			ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+		else:
+			# Geometric check fallbacks to ensure absolute accuracy for teeboxes, fairways and greens
+			if lie_type != "green" and lie_type != "sand":
+				# Check if we are actually on a green (strictly inside green triangles)
+				if get_distance_to_nearest_green(ball_node.global_position) <= 0.001:
+					lie_type = "green"
+					ball_node.lie_type = "green"
+					ball_node.set_surface(PhysicsEnums.SurfaceType.GREEN)
+				# Check if we are on the fringe / collar bordering the green (within 2.5 meters of green edge)
+				elif get_distance_to_nearest_green(ball_node.global_position) <= 2.5:
+					lie_type = "fringe"
+					ball_node.lie_type = "fringe"
+					ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+				# Check if we are actually on a tee box (strictly inside tee box triangles or at teebox position)
+				elif ball_node.lie_type == "teebox" or get_distance_to_nearest_teebox(ball_node.global_position) <= 0.5 or (practice_start_pos != Vector3.ZERO and ball_node.global_position.distance_to(practice_start_pos) < 1.5):
+					lie_type = "teebox"
+					ball_node.lie_type = "teebox"
+					ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+				# Check if we are actually on a fairway (strictly inside fairway triangles)
+				elif get_distance_to_nearest_fairway(ball_node.global_position) <= 0.001:
+					lie_type = "fairway"
+					ball_node.lie_type = "fairway"
+					ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
 
 		if lie_type == "green" or lie_type == "fairway" or lie_type == "fringe":
 			reduction = 0.0

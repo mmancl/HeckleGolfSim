@@ -319,10 +319,10 @@ func _filter_by_hole_settings(courses: Array) -> Array:
 		return courses
 	var res = []
 	for c in courses:
-		var h = c.get("hole_count", 18)
-		if inc_9 and h == 9:
+		var h = int(c.get("hole_count", 18))
+		if inc_9 and (h == 9 or (h > 18 and h % 9 == 0)):
 			res.append(c)
-		elif inc_18 and h == 18:
+		elif inc_18 and h >= 18:
 			res.append(c)
 	return res
 
@@ -332,9 +332,10 @@ func _display_courses_in_list(courses: Array, is_search_results: bool = false) -
 	_displayed_courses = courses
 	download_button.disabled = true
 
-	# The first line of the search/list always shows the instruction
-	results_list.add_item(INSTRUCTION_HEADER_TEXT)
-	results_list.set_item_custom_fg_color(0, Color(0.65, 0.85, 1.0, 0.95))
+	# The first line of the list shows instructions when browsing/searching cached courses
+	if not is_search_results:
+		results_list.add_item(INSTRUCTION_HEADER_TEXT)
+		results_list.set_item_custom_fg_color(0, Color(0.65, 0.85, 1.0, 0.95))
 
 	for item in courses:
 		var name_text = item.get("name", "Unnamed Course")
@@ -344,6 +345,11 @@ func _display_courses_in_list(courses: Array, is_search_results: bool = false) -
 		var is_cached = _is_course_cached(item)
 
 		var meta_parts = []
+		if item.get("is_pga_tour", false):
+			meta_parts.append("PGA Tour")
+		var rating_val = float(item.get("rating", 0.0))
+		if rating_val > 0.0:
+			meta_parts.append(str(rating_val) + "★")
 		if holes > 0:
 			meta_parts.append(str(holes) + " Holes")
 		elif btn_all_holes != null and btn_all_holes.button_pressed:
@@ -673,14 +679,16 @@ func _perform_search(force_online: bool = false) -> void:
 
 
 func _on_item_selected(index: int) -> void:
-	if index == 0:
-		# Header instruction selected
-		results_list.deselect(0)
-		download_button.disabled = true
-		status_label.text = INSTRUCTION_HEADER_TEXT
-		return
+	if _is_showing_cached:
+		if index == 0:
+			# Header instruction selected
+			results_list.deselect(0)
+			download_button.disabled = true
+			status_label.text = INSTRUCTION_HEADER_TEXT
+			return
+		index -= 1
 
-	var course_idx = index - 1
+	var course_idx = index
 	if course_idx < 0 or course_idx >= _displayed_courses.size():
 		download_button.disabled = true
 		return
@@ -711,9 +719,12 @@ func _on_download_pressed() -> void:
 		return
 
 	var idx = selected_items[0]
-	if idx == 0:
-		return
-	var course_idx = idx - 1
+	if _is_showing_cached:
+		if idx == 0:
+			return
+		idx -= 1
+
+	var course_idx = idx
 	if course_idx < 0 or course_idx >= _displayed_courses.size():
 		return
 

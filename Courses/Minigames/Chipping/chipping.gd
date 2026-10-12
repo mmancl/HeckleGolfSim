@@ -1341,7 +1341,8 @@ func _select_target_island(index: int, reset_ball: bool = true) -> void:
 
 func _update_island_buttons() -> void:
 	for i in range(island_buttons.size()):
-		var prefix = "▶ " if i == selected_island_index else "  "
+		var is_selected = (i == selected_island_index)
+		var prefix = "▶ " if is_selected else "  "
 		if pvp_mode:
 			var marks: Array[String] = []
 			for p in players_list:
@@ -1351,18 +1352,22 @@ func _update_island_buttons() -> void:
 				marks.append("✓" if is_done else "○")
 			var marks_str = "|".join(marks)
 			island_buttons[i].text = "%s%d YDS [%s]" % [prefix, island_distances_yards[i], marks_str]
-			if i == selected_island_index:
+			if is_selected:
 				var active_col = get_active_player_color()
 				island_buttons[i].add_theme_color_override("font_color", active_col)
+				_apply_btn_style(island_buttons[i], Color(0.18, 0.38, 0.55), Color(0.24, 0.48, 0.70))
 			else:
 				island_buttons[i].remove_theme_color_override("font_color")
+				_apply_btn_style(island_buttons[i], Color(0.12, 0.20, 0.28), Color(0.18, 0.30, 0.42))
 		else:
-			if i == selected_island_index:
+			if is_selected:
 				island_buttons[i].text = "▶ %d YDS" % island_distances_yards[i]
 				island_buttons[i].add_theme_color_override("font_color", Color(0.0, 0.85, 1.0))
+				_apply_btn_style(island_buttons[i], Color(0.18, 0.38, 0.55), Color(0.24, 0.48, 0.70))
 			else:
 				island_buttons[i].text = "  %d YDS" % island_distances_yards[i]
 				island_buttons[i].remove_theme_color_override("font_color")
+				_apply_btn_style(island_buttons[i], Color(0.12, 0.20, 0.28), Color(0.18, 0.30, 0.42))
 
 # ========================================
 # PLAYER & AIMING
@@ -2030,11 +2035,20 @@ func _apply_btn_style(btn: Button, norm_color: Color, hov_color: Color) -> void:
 	style_hover.border_width_bottom = 1
 	style_hover.border_color = Color(1, 1, 1, 0.3)
 	
+	var style_focus = style_hover.duplicate()
+	style_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	style_focus.border_width_left = 3
+	style_focus.border_width_top = 3
+	style_focus.border_width_right = 3
+	style_focus.border_width_bottom = 3
+	
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_hover)
-	btn.add_theme_stylebox_override("focus", style_normal)
+	btn.add_theme_stylebox_override("focus", style_focus)
 	btn.add_theme_color_override("font_color", Color.WHITE)
+	btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	btn.add_theme_color_override("font_focus_color", Color.WHITE)
 	if btn.custom_minimum_size.y < 48:
 		btn.custom_minimum_size.y = 48
 	if not btn.has_theme_font_size_override("font_size"):
@@ -2059,10 +2073,17 @@ func _apply_circular_button_style(btn: Button, bg_color: Color) -> void:
 	style_hover.bg_color = bg_color.lightened(0.15)
 	style_hover.border_color = Color(1.0, 1.0, 1.0, 0.5)
 
+	var style_focus = style_hover.duplicate()
+	style_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	style_focus.border_width_left = 3
+	style_focus.border_width_top = 3
+	style_focus.border_width_right = 3
+	style_focus.border_width_bottom = 3
+
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_hover)
-	btn.add_theme_stylebox_override("focus", style_normal)
+	btn.add_theme_stylebox_override("focus", style_focus)
 
 func is_stats_visible() -> bool:
 	if grid_canvas == null:

@@ -288,7 +288,7 @@ This automatically verifies your templates and downloads official Godot 4.7 Mono
 Before exporting any new release, ensure you keep the cached courses up to date by running the monthly sync script:
 
 ```powershell
-.\scripts\tools\run_monthly_sync.ps1 --preset top-golf --clean
+.\scripts\tools\run_monthly_sync.ps1 --clean
 ```
 
 ---
