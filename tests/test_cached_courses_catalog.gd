@@ -21,7 +21,7 @@ func _init() -> void:
 	assert(json.data is Array, "Catalog must be an Array")
 	var course_count = json.data.size()
 	print("  Found %d courses in golf_courses.json." % course_count)
-	assert(course_count > 5000, "Catalog should have thousands of courses, got: %d" % course_count)
+	assert(course_count > 2500, "Catalog should have thousands of verified courses, got: %d" % course_count)
 	print("  PASS: golf_courses.json contains %d courses (far more than 145)." % course_count)
 
 	# 2. Test OsmDownloadDialog loading cached courses
@@ -36,7 +36,7 @@ func _init() -> void:
 	dialog.call("_load_cached_courses")
 	var all_cached: Array = dialog.get("_all_cached_courses")
 	print("  _all_cached_courses loaded: %d courses." % all_cached.size())
-	assert(all_cached.size() > 5000, "Expected > 5000 cached courses, got: %d" % all_cached.size())
+	assert(all_cached.size() > 2500, "Expected > 2500 verified cached courses, got: %d" % all_cached.size())
 	print("  PASS: OsmDownloadDialog loaded %d cached courses." % all_cached.size())
 
 	# Verify PGA Tour & Major courses are prioritized at the top of all_cached

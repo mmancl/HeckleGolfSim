@@ -15,9 +15,9 @@ import re
 import sys
 
 try:
-    from monthly_osm_course_sync import PGA_TOUR_AND_MAJOR_COURSES
+    from monthly_osm_course_sync import PGA_TOUR_AND_MAJOR_COURSES, validate_course_elements
 except ImportError:
-    from .monthly_osm_course_sync import PGA_TOUR_AND_MAJOR_COURSES
+    from .monthly_osm_course_sync import PGA_TOUR_AND_MAJOR_COURSES, validate_course_elements
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
@@ -224,10 +224,8 @@ def slugify(text: str) -> str:
     return clean
 
 
-def _extract_course_from_geometry_file(file_path: str, curated_by_slug: dict) -> dict:
+def _extract_course_from_geometry_file(file_path: str, curated_by_slug: dict, prune_invalid: bool = False) -> dict:
     base = os.path.basename(file_path).replace('.json.gz', '').replace('.json', '')
-    if base in curated_by_slug:
-        return curated_by_slug[base]
 
     try:
         if file_path.endswith('.gz'):
@@ -237,8 +235,24 @@ def _extract_course_from_geometry_file(file_path: str, curated_by_slug: dict) ->
             with open(file_path, 'r', encoding='utf-8') as fp:
                 data = json.load(fp)
 
+        # Validate course elements to ensure course meets search criteria and has required metadata
+        is_valid, verified_holes, reason = validate_course_elements(data)
+        if not is_valid:
+            if prune_invalid:
+                try:
+                    os.remove(file_path)
+                    print(f"Pruned invalid course geometry ({reason}): {os.path.basename(file_path)}")
+                except Exception:
+                    pass
+            return {'_invalid_slug': base}
+
+        if base in curated_by_slug:
+            curated_entry = dict(curated_by_slug[base])
+            curated_entry['hole_count'] = verified_holes
+            return curated_entry
+
         target_name = None
-        target_holes = 18
+        target_holes = verified_holes
         lat, lon = 0.0, 0.0
 
         elements = data.get('elements', [])
@@ -249,11 +263,6 @@ def _extract_course_from_geometry_file(file_path: str, curated_by_slug: dict) ->
             if t.get('name') and (t.get('leisure') == 'golf_course' or 'golf' in t):
                 if slugify(t['name']) == base:
                     target_name = t['name'].strip()
-                    if 'holes' in t:
-                        try:
-                            target_holes = int(t['holes'])
-                        except (ValueError, TypeError):
-                            pass
                     break
 
         # 2. Fallback to any leisure=golf_course with a name
@@ -262,11 +271,6 @@ def _extract_course_from_geometry_file(file_path: str, curated_by_slug: dict) ->
                 t = el.get('tags', {})
                 if t.get('leisure') == 'golf_course' and t.get('name') and t.get('sport') != 'disc_golf':
                     target_name = t['name'].strip()
-                    if 'holes' in t:
-                        try:
-                            target_holes = int(t['holes'])
-                        except (ValueError, TypeError):
-                            pass
                     break
 
         # 3. Fallback to base name formatted as title
@@ -292,7 +296,7 @@ def _extract_course_from_geometry_file(file_path: str, curated_by_slug: dict) ->
         return None
 
 
-def generate_catalog(scan_cache: bool = True):
+def generate_catalog(scan_cache: bool = True, prune_invalid: bool = False):
     os.makedirs(os.path.dirname(CATALOG_PATH), exist_ok=True)
 
     curated_map = {c['name'].lower(): dict(c) for c in DEFAULT_COURSES}
@@ -310,24 +314,30 @@ def generate_catalog(scan_cache: bool = True):
             print(f"Extracting course metadata using {workers} parallel threads...")
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
                 extracted_results = list(pool.map(
-                    lambda f: _extract_course_from_geometry_file(f, curated_by_slug),
+                    lambda f: _extract_course_from_geometry_file(f, curated_by_slug, prune_invalid),
                     cache_files
                 ))
 
             added_count = 0
+            invalid_slugs = set()
             for item in extracted_results:
-                if not item or not item.get('name'):
+                if not item:
+                    continue
+                if item.get('_invalid_slug'):
+                    invalid_slugs.add(item['_invalid_slug'])
+                    continue
+                if not item.get('name'):
                     continue
                 k = item['name'].lower()
-                if k not in merged:
-                    merged[k] = item
-                    added_count += 1
-                else:
-                    if merged[k].get('lat', 0.0) == 0.0 and item.get('lat', 0.0) != 0.0:
-                        merged[k]['lat'] = item['lat']
-                        merged[k]['lon'] = item['lon']
+                merged[k] = item
+                added_count += 1
 
-            print(f"Extracted {added_count} new courses from cached geometry folder.")
+            for bad_slug in invalid_slugs:
+                for c in DEFAULT_COURSES:
+                    if slugify(c['name']) == bad_slug:
+                        merged.pop(c['name'].lower(), None)
+
+            print(f"Extracted {added_count} valid courses from cached geometry folder (purged/excluded {len(invalid_slugs)} invalid).")
 
     def is_pga_tour_course(name: str) -> bool:
         clean = " " + re.sub(r'[^a-z0-9]+', ' ', name.lower()).strip() + " "
@@ -354,5 +364,6 @@ def generate_catalog(scan_cache: bool = True):
 
 
 if __name__ == "__main__":
-    generate_catalog()
+    prune = "--prune-invalid" in sys.argv or "--clean-invalid" in sys.argv
+    generate_catalog(prune_invalid=prune)
 

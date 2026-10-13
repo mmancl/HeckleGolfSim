@@ -355,6 +355,110 @@ def compute_course_priority(c: dict) -> tuple:
     return (rating_or_pga_score, updated_str, holes)
 
 
+def validate_course_elements(data: dict) -> tuple:
+    """
+    Validates whether extracted OSM course elements meet the required metadata
+    criteria to build a playable golf course in HeckleGolfSim.
+
+    Criteria:
+    1. Valid hole count: Must have 9, 18, 27, 36 holes (or multiples of 9 >= 9).
+       Single-hole courses or unmapped/incomplete hole layouts are excluded.
+    2. Fairways defined: At least 1 fairway feature (golf=fairway way or relation).
+    3. Tee boxes required: At least 1 tee box feature (golf=tee way, node, or relation).
+    4. Greens defined: At least 1 green feature (golf=green or golf=pin way, node, or relation).
+
+    Returns:
+        (is_valid: bool, verified_holes: int, reason: str)
+    """
+    if not isinstance(data, dict):
+        return False, 0, "Invalid data structure"
+
+    if "elements" in data:
+        elements = data["elements"]
+        ways = [e for e in elements if isinstance(e, dict) and e.get("type") == "way"]
+        nodes = [e for e in elements if isinstance(e, dict) and e.get("type") == "node"]
+        relations = [e for e in elements if isinstance(e, dict) and e.get("type") == "relation"]
+    else:
+        ways = data.get("ways", [])
+        raw_nodes = data.get("nodes", {})
+        if isinstance(raw_nodes, dict):
+            nodes = list(raw_nodes.values())
+        elif isinstance(raw_nodes, list):
+            nodes = raw_nodes
+        else:
+            nodes = []
+        relations = data.get("relations", [])
+
+    # 1. Fairways
+    fairways = [w for w in ways if w.get("tags", {}).get("golf") == "fairway"]
+    rel_fairways = [r for r in relations if r.get("tags", {}).get("golf") == "fairway"]
+    if (len(fairways) + len(rel_fairways)) == 0:
+        return False, 0, "No fairways defined (course requires defined fairways)"
+
+    # 2. Tee boxes
+    tee_ways = [w for w in ways if w.get("tags", {}).get("golf") == "tee"]
+    tee_nodes = [n for n in nodes if n.get("tags", {}).get("golf") == "tee"]
+    tee_rels = [r for r in relations if r.get("tags", {}).get("golf") == "tee"]
+    if (len(tee_ways) + len(tee_nodes) + len(tee_rels)) == 0:
+        return False, 0, "No tee boxes defined (tee box is required)"
+
+    # 3. Greens
+    green_ways = [w for w in ways if w.get("tags", {}).get("golf") in ("green", "pin")]
+    green_nodes = [n for n in nodes if n.get("tags", {}).get("golf") in ("green", "pin")]
+    green_rels = [r for r in relations if r.get("tags", {}).get("golf") in ("green", "pin")]
+    if (len(green_ways) + len(green_nodes) + len(green_rels)) == 0:
+        return False, 0, "No greens defined (course requires defined greens)"
+
+    # 4. Holes
+    hole_ways = [w for w in ways if w.get("tags", {}).get("golf") == "hole" and len(w.get("nodes", [])) >= 2]
+    hole_rels = [r for r in relations if r.get("tags", {}).get("golf") == "hole"]
+
+    hole_keys = set()
+    for w in hole_ways:
+        tags = w.get("tags", {})
+        sub = (tags.get("golf:course:name") or tags.get("course:name") or
+               tags.get("golf:course") or tags.get("course") or "").strip().lower()
+        ref = tags.get("ref", "").strip()
+        name = tags.get("name", "").strip()
+        if ref:
+            key = f"{sub}:{ref}" if sub else ref
+        else:
+            m = re.search(r'\b([1-9]|[1-2][0-9]|3[0-6])\b', name)
+            if m:
+                key = f"{sub}:{m.group(1)}" if sub else m.group(1)
+            else:
+                key = str(w.get("id"))
+        hole_keys.add(key)
+
+    for r in hole_rels:
+        tags = r.get("tags", {})
+        sub = (tags.get("golf:course:name") or tags.get("course:name") or
+               tags.get("golf:course") or tags.get("course") or "").strip().lower()
+        ref = tags.get("ref", "").strip()
+        name = tags.get("name", "").strip()
+        if ref:
+            key = f"{sub}:{ref}" if sub else ref
+        else:
+            m = re.search(r'\b([1-9]|[1-2][0-9]|3[0-6])\b', name)
+            if m:
+                key = f"{sub}:{m.group(1)}" if sub else m.group(1)
+            else:
+                key = str(r.get("id"))
+        hole_keys.add(key)
+
+    detected_holes = len(hole_keys)
+    if detected_holes == 0:
+        return False, 0, "No holes defined (courses with 0 holes cannot be built)"
+
+    if detected_holes < 9:
+        return False, detected_holes, f"Only {detected_holes} hole(s) defined (search criteria requires 9, 18, 27, or 36 holes)"
+
+    if detected_holes % 9 != 0:
+        return False, detected_holes, f"{detected_holes} holes defined (must be a 9, 18, 27, or 36 hole course)"
+
+    return True, detected_holes, f"Valid {detected_holes}-hole course"
+
+
 
 def download_file_parallel(
     url: str,
@@ -615,6 +719,14 @@ class GolfCourseIdentifier(osmium.SimpleHandler):
 
         name = tags.get("name", "").strip()
         if not name or tags.get("sport") == "disc_golf":
+            return
+
+        # Exclude individual golf features mistakenly tagged with leisure=golf_course
+        if tags.get("golf") in ("green", "tee", "hole", "fairway", "bunker", "water_hazard", "driving_range", "practice_green"):
+            return
+
+        # Exclude individual feature names like "#2 Green", "#8 White Tee", "Tee 1", "green #4"
+        if re.search(r'^(?:#?\d+\s*(?:green|tee|fairway|hole)|(?:tee|green|hole)\s*#?\d+)', name.lower()):
             return
 
         holes = 18
@@ -973,7 +1085,8 @@ def _worker_extract_pbf(
 
     course_list = all_unique
     if max_courses > 0:
-        course_list = course_list[:max_courses]
+        candidate_limit = max(max_courses * 3, 5000)
+        course_list = all_unique[:candidate_limit] if len(all_unique) > candidate_limit else all_unique
 
     pga_count = sum(1 for c in course_list if c.get("is_pga_tour"))
     rated_count = sum(1 for c in course_list if c.get("rating", 0) > 0 and not c.get("is_pga_tour"))
@@ -1011,16 +1124,43 @@ def _worker_extract_pbf(
 
     generated_catalog_entries = []
     saved_count = 0
+    excluded_count = 0
+    exclusion_stats = {
+        "no_ways": 0,
+        "invalid_hole_count": 0,
+        "missing_fairways": 0,
+        "missing_tees": 0,
+        "missing_greens": 0
+    }
 
     for c in course_list:
+        if max_courses > 0 and saved_count >= max_courses:
+            break
+
         slug = c["slug"]
         data = feat_handler.course_data.get(slug)
         if not data or not data["ways"]:
+            excluded_count += 1
+            exclusion_stats["no_ways"] += 1
             continue
 
         # Prune untagged ways that are not referenced in any relation
         rel_way_refs = {m["ref"] for rel in data.get("relations", []) for m in rel.get("members", []) if m.get("type") == "way"}
         data["ways"] = [w for w in data["ways"] if w.get("tags") or w["id"] in rel_way_refs]
+
+        # Validate course elements to ensure course meets search criteria and has required metadata
+        is_valid, verified_holes, reason = validate_course_elements(data)
+        if not is_valid:
+            excluded_count += 1
+            if "fairway" in reason:
+                exclusion_stats["missing_fairways"] += 1
+            elif "tee" in reason:
+                exclusion_stats["missing_tees"] += 1
+            elif "green" in reason:
+                exclusion_stats["missing_greens"] += 1
+            else:
+                exclusion_stats["invalid_hole_count"] += 1
+            continue
 
         elements = list(data["nodes"].values()) + data["ways"] + data.get("relations", [])
         osm_json = {
@@ -1041,7 +1181,7 @@ def _worker_extract_pbf(
             "lat": round(c["lat"], 6),
             "lon": round(c["lon"], 6),
             "location": c["location"],
-            "hole_count": c["hole_count"],
+            "hole_count": verified_holes,
             "last_updated": c["last_updated"]
         }
         if c.get("is_pga_tour"):
@@ -1052,7 +1192,10 @@ def _worker_extract_pbf(
         generated_catalog_entries.append(catalog_entry)
         saved_count += 1
 
-    log_timestamp(f"Successfully generated {saved_count} pre-packaged course geometries in: {cache_dir}")
+    log_timestamp(f"Extraction complete: {saved_count} valid course(s) generated, {excluded_count} invalid course(s) excluded "
+                  f"(invalid hole count: {exclusion_stats['invalid_hole_count']}, missing fairways: {exclusion_stats['missing_fairways']}, "
+                  f"missing tees: {exclusion_stats['missing_tees']}, missing greens: {exclusion_stats['missing_greens']}, "
+                  f"no features: {exclusion_stats['no_ways']}).")
     with open(results_file, "w", encoding="utf-8") as f:
         json.dump(generated_catalog_entries, f)
 
