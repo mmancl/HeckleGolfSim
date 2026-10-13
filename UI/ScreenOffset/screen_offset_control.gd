@@ -10,8 +10,20 @@ signal offset_toggled(is_on: bool)
 signal cancel_pressed
 
 var style_button: Callable = Callable()
-var is_course_play: bool = false
-var show_putter_slider: bool = false
+var is_course_play: bool = false:
+	set(val):
+		is_course_play = val
+		if is_course_play and not show_putter_slider:
+			show_putter_slider = true
+
+var show_putter_slider: bool = false:
+	set(val):
+		if show_putter_slider == val:
+			return
+		show_putter_slider = val
+		if _slider_container != null:
+			_build_sliders_ui()
+
 var external_top_neighbor: NodePath = NodePath()
 var external_bottom_neighbor: NodePath = NodePath()
 
@@ -34,18 +46,21 @@ var _updating_ui: bool = false
 var _last_toggle_nudge_time: float = 0.0
 
 
-func _init() -> void:
+func _init(p_show_putter_slider: bool = false) -> void:
 	name = "ScreenOffsetControl"
 	add_theme_constant_override("separation", 6)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	show_putter_slider = p_show_putter_slider
 	_build_ui()
 
 
 func _ready() -> void:
+	if _slider == null:
+		_build_sliders_ui()
 	_sync_from_manager()
 	if Engine.has_singleton("ScreenOffsetManager") or has_node("/root/ScreenOffsetManager"):
 		var som = get_node_or_null("/root/ScreenOffsetManager")
-		if som != null and som.has_signal("offset_changed"):
+		if som != null and som.has_signal("offset_changed") and not som.offset_changed.is_connected(_on_manager_offset_changed):
 			som.offset_changed.connect(_on_manager_offset_changed)
 
 
@@ -62,18 +77,6 @@ func _build_ui() -> void:
 			if cancel_pressed.get_connections().size() > 0:
 				cancel_pressed.emit()
 				get_viewport().set_input_as_handled()
-
-	var slider_focus = StyleBoxFlat.new()
-	slider_focus.draw_center = false
-	slider_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
-	slider_focus.border_width_left = 2
-	slider_focus.border_width_top = 2
-	slider_focus.border_width_right = 2
-	slider_focus.border_width_bottom = 2
-	slider_focus.corner_radius_top_left = 4
-	slider_focus.corner_radius_top_right = 4
-	slider_focus.corner_radius_bottom_right = 4
-	slider_focus.corner_radius_bottom_left = 4
 
 	# 1. Main Toggle Button
 	_toggle_btn = Button.new()
@@ -94,9 +97,48 @@ func _build_ui() -> void:
 	_slider_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_child(_slider_container)
 
+	_build_sliders_ui()
+
+
+func _build_sliders_ui() -> void:
+	if _slider_container == null:
+		return
+
+	for ch in _slider_container.get_children():
+		_slider_container.remove_child(ch)
+		ch.queue_free()
+
+	_general_header = null
+	_slider = null
+	_value_label = null
+	_center_btn = null
+	_putter_header = null
+	_putter_slider = null
+	_putter_value_label = null
+	_putter_center_btn = null
+
+	var on_cancel_input = func(event: InputEvent):
+		if event.is_action_pressed("ui_cancel") or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_B) or (event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE):
+			if cancel_pressed.get_connections().size() > 0:
+				cancel_pressed.emit()
+				get_viewport().set_input_as_handled()
+
+	var slider_focus = StyleBoxFlat.new()
+	slider_focus.draw_center = false
+	slider_focus.border_color = Color(0.35, 0.82, 1.0, 0.95)
+	slider_focus.border_width_left = 2
+	slider_focus.border_width_top = 2
+	slider_focus.border_width_right = 2
+	slider_focus.border_width_bottom = 2
+	slider_focus.corner_radius_top_left = 4
+	slider_focus.corner_radius_top_right = 4
+	slider_focus.corner_radius_bottom_right = 4
+	slider_focus.corner_radius_bottom_left = 4
+
 	# Optional Header for General Shots (when dual sliders shown)
 	if show_putter_slider:
 		_general_header = Label.new()
+		_general_header.name = "GeneralHeader"
 		_general_header.text = "General Offset:"
 		_general_header.add_theme_font_size_override("font_size", 13)
 		_general_header.add_theme_color_override("font_color", Color(0.75, 0.85, 0.95))
@@ -104,6 +146,7 @@ func _build_ui() -> void:
 
 	# Standard Slider row with L / Slider / R
 	var slider_row = HBoxContainer.new()
+	slider_row.name = "GeneralSliderRow"
 	slider_row.add_theme_constant_override("separation", 8)
 	slider_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	slider_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -138,12 +181,14 @@ func _build_ui() -> void:
 
 	# Details row for standard slider
 	var info_row = HBoxContainer.new()
+	info_row.name = "GeneralInfoRow"
 	info_row.add_theme_constant_override("separation", 6)
 	info_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	info_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_slider_container.add_child(info_row)
 
 	_value_label = Label.new()
+	_value_label.name = "GeneralValueLabel"
 	_value_label.text = "Center"
 	_value_label.add_theme_font_size_override("font_size", 13)
 	_value_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
@@ -162,12 +207,14 @@ func _build_ui() -> void:
 	# Putter slider (used in Course Play)
 	if show_putter_slider:
 		_putter_header = Label.new()
+		_putter_header.name = "PutterHeader"
 		_putter_header.text = "Putter Offset:"
 		_putter_header.add_theme_font_size_override("font_size", 13)
 		_putter_header.add_theme_color_override("font_color", Color(0.75, 0.85, 0.95))
 		_slider_container.add_child(_putter_header)
 
 		var putter_row = HBoxContainer.new()
+		putter_row.name = "PutterSliderRow"
 		putter_row.add_theme_constant_override("separation", 8)
 		putter_row.alignment = BoxContainer.ALIGNMENT_CENTER
 		putter_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -201,12 +248,14 @@ func _build_ui() -> void:
 		putter_row.add_child(p_r_lbl)
 
 		var p_info_row = HBoxContainer.new()
+		p_info_row.name = "PutterInfoRow"
 		p_info_row.add_theme_constant_override("separation", 6)
 		p_info_row.alignment = BoxContainer.ALIGNMENT_CENTER
 		p_info_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_slider_container.add_child(p_info_row)
 
 		_putter_value_label = Label.new()
+		_putter_value_label.name = "PutterValueLabel"
 		_putter_value_label.text = "Center"
 		_putter_value_label.add_theme_font_size_override("font_size", 13)
 		_putter_value_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
@@ -221,6 +270,9 @@ func _build_ui() -> void:
 		_putter_center_btn.pressed.connect(_on_putter_center_pressed)
 		_putter_center_btn.gui_input.connect(on_cancel_input)
 		p_info_row.add_child(_putter_center_btn)
+
+	if is_inside_tree():
+		_sync_from_manager()
 
 
 static func _get_global_settings(node: Node = null) -> Node:
