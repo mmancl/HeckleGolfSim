@@ -818,6 +818,7 @@ func _noise_emitted_3d(noise_output: Transform3D) -> void:
 
 
 func _camera_3d_resource_changed() -> void:
+	if not is_instance_valid(_active_pcam_3d): return
 	if _active_pcam_3d.camera_3d_resource:
 		if Engine.is_editor_hint():
 			if not Engine.get_singleton(&"EditorInterface").get_inspector().property_edited.is_connected(_camera_3d_edited):

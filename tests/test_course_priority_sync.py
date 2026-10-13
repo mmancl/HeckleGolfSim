@@ -114,6 +114,38 @@ class TestMonthlyCoursePriority(unittest.TestCase):
         self.assertTrue(updated["is_pga_tour"])
         self.assertEqual(updated["rating"], 5.0)
 
+    def test_catalog_sorting_prioritizes_pga_courses(self):
+        sample_catalog = [
+            {"name": "Zion Mountain Golf Club", "hole_count": 18, "is_pga_tour": False},
+            {"name": "Pebble Beach Golf Links", "hole_count": 18, "is_pga_tour": True},
+            {"name": "Abilene Country Club", "hole_count": 18, "is_pga_tour": False},
+            {"name": "Augusta National Golf Club", "hole_count": 18, "is_pga_tour": True},
+            {"name": "TPC Sawgrass", "hole_count": 18, "is_pga_tour": False}, # matches keyword in PGA_TOUR_AND_MAJOR_COURSES
+            {"name": "Midland Country Club", "hole_count": 18, "is_pga_tour": False},
+        ]
+
+        # Tag PGA courses and sort
+        for c in sample_catalog:
+            clean = " " + sync.re.sub(r'[^a-z0-9]+', ' ', c["name"].lower()).strip() + " "
+            if any(f" {kw} " in clean or clean.strip() == kw for kw in sync.PGA_TOUR_AND_MAJOR_COURSES):
+                c["is_pga_tour"] = True
+
+        sorted_catalog = sorted(
+            sample_catalog,
+            key=lambda x: (not bool(x.get("is_pga_tour", False)), x["name"].lower())
+        )
+        names = [c["name"] for c in sorted_catalog]
+
+        # First 3 must be PGA Tour courses sorted alphabetically
+        self.assertEqual(names[0], "Augusta National Golf Club")
+        self.assertEqual(names[1], "Pebble Beach Golf Links")
+        self.assertEqual(names[2], "TPC Sawgrass")
+
+        # Next 3 must be non-PGA courses sorted alphabetically
+        self.assertEqual(names[3], "Abilene Country Club")
+        self.assertEqual(names[4], "Midland Country Club")
+        self.assertEqual(names[5], "Zion Mountain Golf Club")
+
 
 if __name__ == "__main__":
     unittest.main()

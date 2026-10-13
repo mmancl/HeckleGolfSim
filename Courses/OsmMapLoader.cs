@@ -41,7 +41,7 @@ public partial class OsmMapLoader : Node
     [Signal]
     public delegate void DownloadProgressEventHandler(string statusMessage);
 
-    private record GolfSearchResult(string Name, double Lat, double Lon, string Location, int HoleCount = 0, string LastUpdated = "", bool IsCatalog = false);
+    private record GolfSearchResult(string Name, double Lat, double Lon, string Location, int HoleCount = 0, string LastUpdated = "", bool IsCatalog = false, bool IsPgaTour = false);
 
     private void ReportProgress(string message)
     {
@@ -94,7 +94,7 @@ public partial class OsmMapLoader : Node
         string globalTscnPath = ProjectSettings.GlobalizePath(tscnPath);
         string globalJsonPath = ProjectSettings.GlobalizePath(jsonPath);
 
-        ReportProgress($"Connecting to OpenStreetMap for '{courseName}'...");
+        ReportProgress($"Preparing map for '{courseName}'...");
         string osmJson = await DownloadOsmDataAsync(lat, lon, courseName);
         if (string.IsNullOrEmpty(osmJson))
         {
@@ -143,35 +143,64 @@ public partial class OsmMapLoader : Node
         EmitCourseGenerated(success);
     }
 
-    private static string GetCourseGeometrySlug(string courseName)
+    private static List<string> GetCourseGeometryCandidateSlugs(string courseName)
     {
-        var sb = new StringBuilder();
+        var slugs = new List<string>();
+        if (string.IsNullOrWhiteSpace(courseName))
+            return slugs;
+
+        // 1. Python-compatible slug: replace any sequence of non-alphanumeric chars with '_'
+        var sbPy = new StringBuilder();
+        foreach (char c in courseName.ToLowerInvariant())
+        {
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+                sbPy.Append(c);
+            else if (sbPy.Length > 0 && sbPy[sbPy.Length - 1] != '_')
+                sbPy.Append('_');
+        }
+        string pySlug = sbPy.ToString().Trim('_');
+        if (!string.IsNullOrEmpty(pySlug))
+            slugs.Add(pySlug);
+
+        // 2. Legacy C# slug (where punctuation was skipped rather than converted to '_')
+        var sbLegacy = new StringBuilder();
         foreach (char c in courseName.ToLowerInvariant())
         {
             if (char.IsLetterOrDigit(c))
-                sb.Append(c);
+                sbLegacy.Append(c);
             else if (c == ' ' || c == '_' || c == '-' || c == '(' || c == ')' || c == '.')
             {
-                if (sb.Length > 0 && sb[sb.Length - 1] != '_')
-                    sb.Append('_');
+                if (sbLegacy.Length > 0 && sbLegacy[sbLegacy.Length - 1] != '_')
+                    sbLegacy.Append('_');
             }
         }
-        return sb.ToString().Trim('_');
+        string legacySlug = sbLegacy.ToString().Trim('_');
+        if (!string.IsNullOrEmpty(legacySlug) && !slugs.Contains(legacySlug))
+            slugs.Add(legacySlug);
+
+        return slugs;
+    }
+
+    private static string GetCourseGeometrySlug(string courseName)
+    {
+        var slugs = GetCourseGeometryCandidateSlugs(courseName);
+        return slugs.Count > 0 ? slugs[0] : "";
     }
 
     private static async Task<string> TryLoadPrepackagedGeometryAsync(string courseName)
     {
-        string slug = GetCourseGeometrySlug(courseName);
-        if (string.IsNullOrWhiteSpace(slug))
+        var slugs = GetCourseGeometryCandidateSlugs(courseName);
+        if (slugs.Count == 0)
             return "";
 
-        string[] candidatePaths = new[]
+        var candidatePaths = new List<string>();
+        foreach (var slug in slugs)
         {
-            $"res://Courses/CachedGeometry/{slug}.json.gz",
-            $"res://Courses/CachedGeometry/{slug}.json",
-            $"user://cached_geometry/{slug}.json.gz",
-            $"user://cached_geometry/{slug}.json"
-        };
+            candidatePaths.Add($"res://Courses/CachedGeometry/{slug}.json.gz");
+            candidatePaths.Add($"res://Courses/CachedGeometry/{slug}.json");
+            candidatePaths.Add($"user://cached_geometry/{slug}.json.gz");
+            candidatePaths.Add($"user://cached_geometry/{slug}.json");
+        }
 
         foreach (var path in candidatePaths)
         {
@@ -262,9 +291,11 @@ public partial class OsmMapLoader : Node
         string prepackaged = await TryLoadPrepackagedGeometryAsync(courseName);
         if (!string.IsNullOrWhiteSpace(prepackaged))
         {
+            ReportProgress($"Loaded pre-packaged map data for '{courseName}' (0 API calls)...");
             return prepackaged;
         }
 
+        ReportProgress($"Connecting to OpenStreetMap for '{courseName}'...");
         GD.Print($"{LogPrefix} No pre-packaged geometry found for '{courseName}'. Downloading from Overpass around {lat}, {lon}...");
         // Query includes natural=tree, natural=tree_row, and golf=tree to accurately place all OSM course trees
         // Use FormattableString.Invariant to ensure lat/lon always use '.' as decimal separator regardless of system locale
@@ -3162,7 +3193,10 @@ public partial class OsmMapLoader : Node
         }
 
         var results = new Godot.Collections.Array();
-        var sorted = list.OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var sorted = list
+            .OrderByDescending(c => c.IsPgaTour)
+            .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
         foreach (var item in sorted)
         {
             if (!includeAll)
@@ -3179,7 +3213,8 @@ public partial class OsmMapLoader : Node
             dict["hole_count"] = item.HoleCount;
             dict["last_updated"] = item.LastUpdated;
             dict["is_catalog"] = true;
-            dict["is_cached"] = true;
+            dict["is_cached"] = IsCourseCached(item.Name);
+            dict["is_pga_tour"] = item.IsPgaTour;
             results.Add(dict);
         }
 
@@ -3187,9 +3222,12 @@ public partial class OsmMapLoader : Node
         var seenSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in sorted)
         {
-            string s = GetCourseGeometrySlug(item.Name);
-            if (!string.IsNullOrEmpty(s))
-                seenSlugs.Add(s);
+            var candidateSlugs = GetCourseGeometryCandidateSlugs(item.Name);
+            foreach (var s in candidateSlugs)
+            {
+                if (!string.IsNullOrEmpty(s))
+                    seenSlugs.Add(s);
+            }
         }
 
         string[] cacheDirs = new[] { "user://cached_geometry", "res://Courses/CachedGeometry" };
@@ -3234,11 +3272,8 @@ public partial class OsmMapLoader : Node
     public bool IsCourseCached(string courseName)
     {
         if (string.IsNullOrWhiteSpace(courseName)) return false;
-        var list = LoadBundledCatalog();
-        if (list.Any(c => string.Equals(c.Name, courseName, StringComparison.OrdinalIgnoreCase)))
-            return true;
-        string slug = GetCourseGeometrySlug(courseName);
-        if (!string.IsNullOrWhiteSpace(slug))
+        var slugs = GetCourseGeometryCandidateSlugs(courseName);
+        foreach (var slug in slugs)
         {
             if (Godot.FileAccess.FileExists($"res://Courses/CachedGeometry/{slug}.json.gz") ||
                 Godot.FileAccess.FileExists($"res://Courses/CachedGeometry/{slug}.json") ||
@@ -3318,7 +3353,7 @@ public partial class OsmMapLoader : Node
             dict["hole_count"] = item.HoleCount;
             dict["last_updated"] = item.LastUpdated;
             dict["is_catalog"] = true;
-            dict["is_cached"] = true;
+            dict["is_cached"] = IsCourseCached(item.Name);
             results.Add(dict);
         }
         return results;
@@ -3383,10 +3418,12 @@ public partial class OsmMapLoader : Node
                                     }
 
                                     string updated = elem.TryGetProperty("last_updated", out var up) ? up.GetString() ?? "" : "";
+                                    bool isPga = elem.TryGetProperty("is_pga_tour", out var pp) &&
+                                        (pp.ValueKind == JsonValueKind.True || (pp.ValueKind == JsonValueKind.String && bool.TryParse(pp.GetString(), out var bp) && bp));
 
                                     if (!string.IsNullOrWhiteSpace(name) && (lat != 0 || lon != 0))
                                     {
-                                        list.Add(new GolfSearchResult(name, lat, lon, location, holes, updated, IsCatalog: true));
+                                        list.Add(new GolfSearchResult(name, lat, lon, location, holes, updated, IsCatalog: true, IsPgaTour: isPga));
                                     }
                                 }
                             }

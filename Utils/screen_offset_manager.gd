@@ -302,15 +302,18 @@ func _reset_to_perspective(pcam: Node, res: Resource, cam3d: Camera3D) -> void:
 	if res != null:
 		if res.projection == 2: # FRUSTUM
 			res.projection = 0 # PERSPECTIVE
-		res.frustum_offset = Vector2.ZERO
+		if res.frustum_offset != Vector2.ZERO:
+			res.frustum_offset = Vector2.ZERO
 	if pcam != null:
 		if pcam.projection == 2: # FRUSTUM
 			pcam.projection = 0 # PERSPECTIVE
-		pcam.frustum_offset = Vector2.ZERO
+		if pcam.frustum_offset != Vector2.ZERO:
+			pcam.frustum_offset = Vector2.ZERO
 	if cam3d != null:
 		if cam3d.projection == Camera3D.PROJECTION_FRUSTUM:
 			cam3d.projection = Camera3D.PROJECTION_PERSPECTIVE
-		cam3d.frustum_offset = Vector2.ZERO
+		if cam3d.frustum_offset != Vector2.ZERO:
+			cam3d.frustum_offset = Vector2.ZERO
 
 
 func _ensure_perspective(cam: Node) -> void:

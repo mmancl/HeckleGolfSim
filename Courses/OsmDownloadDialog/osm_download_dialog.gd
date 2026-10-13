@@ -9,6 +9,68 @@ const KEY_LAST_OSM_DOWNLOAD_TIME = "last_osm_download_time"
 const KEY_LAST_OSM_DOWNLOAD_COURSE = "last_osm_download_course"
 const INSTRUCTION_HEADER_TEXT = "Select from the cached courses, or if not seen in list search to download from OSM"
 
+# Well-known PGA Tour, DP World Tour, Major Championship, and prestigious golf venues
+const PGA_TOUR_AND_MAJOR_COURSES: Array[String] = [
+	"adare manor", "ailsa", "aronomink", "augusta national", "ballybunion",
+	"ballyliffin", "baltray", "baltusrol", "bandon dunes", "bandon preserve",
+	"bandon trails", "banff springs", "bay hill", "bel air country club", "belfry",
+	"bellerive", "bernardus", "bethpage", "bro hof slott", "cabot cliffs",
+	"cabot links", "camiral", "carnoustie", "castle stuart", "chambers bay",
+	"charlotte country club", "cherry hills", "cog hill", "colonial country club", "conway farms",
+	"county louth", "county sligo", "crans sur sierre", "crooked stick", "cruden bay",
+	"cypress point", "cypress point club", "detroit golf club", "druids glen", "dunluce",
+	"east lake", "erin hills", "finca cortesin", "gleneagles", "golf club gut larchenhof",
+	"green eagle", "gullane", "hamilton golf", "harbour town", "hazeltine",
+	"hilversumsche", "hoylake", "innisbrook", "interlachen", "inverness club",
+	"k club", "kapalua", "kennemer", "kiawah island", "kingsbarns",
+	"lacc", "lahinch", "le golf national", "liberty national", "los angeles country club",
+	"marco simone", "medinah", "memorial park", "merion", "minikahda",
+	"monterey peninsula", "mount juliet", "muirfield", "muirfield village", "north berwick",
+	"oak hill", "oakmont", "ocean course", "old course", "old macdonald",
+	"olgiata", "olympia fields", "olympic club", "pacific dunes", "pebble beach",
+	"pebble beach golf links", "pete dye golf club", "pga catalunya", "pinehurst", "plainfield",
+	"portmarnock", "prestwick", "quail hollow", "rcg sotogrande", "real club valderrama",
+	"ridgewood country club", "riviera", "rosapenna", "royal birkdale", "royal county down",
+	"royal dornoch", "royal liverpool", "royal lytham", "royal portrush", "royal st george",
+	"royal troon", "sand hills", "scioto", "scripps ranch", "sea island",
+	"sedgefield", "sheep ranch", "shinnecock hills", "southern hills", "spyglass hill",
+	"st andrews", "st george's", "sunningdale", "swinley forest", "the belfry",
+	"the k club", "torrey pines", "tpc boston", "tpc craig ranch", "tpc deer run",
+	"tpc louisiana", "tpc potomac", "tpc river highlands", "tpc san antonio", "tpc sawgrass",
+	"tpc scottsdale", "tpc southwind", "tpc summerlin", "tpc twin cities", "tralee",
+	"trump international golf links", "turnberry", "valderrama", "valhalla", "waialae",
+	"walton heath", "waterville", "wentworth", "western gailes", "whistling straits",
+	"winge foot", "winged foot", "woodhall spa"
+]
+
+static var _regex_clean: RegEx = null
+static var _pga_name_cache: Dictionary = {}
+
+static func is_pga_tour_course_name(name_str: String) -> bool:
+	if _pga_name_cache.has(name_str):
+		return _pga_name_cache[name_str]
+	if _regex_clean == null:
+		_regex_clean = RegEx.new()
+		_regex_clean.compile("[^a-z0-9]+")
+	var lower: String = name_str.to_lower()
+	var replaced: String = _regex_clean.sub(lower, " ", true)
+	var clean: String = " " + replaced.strip_edges() + " "
+	var stripped: String = clean.strip_edges()
+	var matched: bool = false
+	for kw in PGA_TOUR_AND_MAJOR_COURSES:
+		if clean.contains(" " + kw + " ") or stripped == kw:
+			matched = true
+			break
+	_pga_name_cache[name_str] = matched
+	return matched
+
+static func is_pga_tour_course(course: Dictionary) -> bool:
+	if course.has("is_pga_tour"):
+		return bool(course["is_pga_tour"])
+	var res: bool = is_pga_tour_course_name(course.get("name", ""))
+	course["is_pga_tour"] = res
+	return res
+
 @onready var search_input: LineEdit = %SearchInput
 @onready var settings_button: Button = %SettingsButton
 @onready var results_list: ItemList = %ResultsList
@@ -260,10 +322,68 @@ func record_osm_download_success(course_name: String) -> void:
 	_update_rate_limit_ui()
 
 
+var _available_cache_slugs: Dictionary = {}
+
+
+static var _slug_regex: RegEx = null
+
+func _get_slug_candidates(course_name: String) -> Array:
+	if _slug_regex == null:
+		_slug_regex = RegEx.new()
+		_slug_regex.compile("[^a-zA-Z0-9]+")
+	var slugs = []
+	var lower = course_name.to_lower()
+	var py_slug = _slug_regex.sub(lower, "_", true).strip_edges().trim_prefix("_").trim_suffix("_")
+	if not py_slug.is_empty():
+		slugs.append(py_slug)
+	var sb = ""
+	for i in range(lower.length()):
+		var c = lower[i]
+		if (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9'):
+			sb += c
+		elif c == ' ' or c == '_' or c == '-' or c == '(' or c == ')' or c == '.':
+			if not sb.is_empty() and sb[sb.length() - 1] != '_':
+				sb += '_'
+	var legacy_slug = sb.strip_edges().trim_prefix("_").trim_suffix("_")
+	if not legacy_slug.is_empty() and not slugs.has(legacy_slug):
+		slugs.append(legacy_slug)
+	return slugs
+
+
+func _refresh_available_cache_slugs() -> void:
+	_available_cache_slugs.clear()
+	var cache_dirs = ["user://cached_geometry", "res://Courses/CachedGeometry"]
+	for c_dir in cache_dirs:
+		if not DirAccess.dir_exists_absolute(c_dir):
+			continue
+		var dir = DirAccess.open(c_dir)
+		if dir == null:
+			continue
+		dir.list_dir_begin()
+		var file_name = dir.get_next()
+		while file_name != "":
+			if not dir.current_is_dir() and (file_name.ends_with(".json.gz") or file_name.ends_with(".json")):
+				var f_slug = file_name.replace(".json.gz", "").replace(".json", "").to_lower()
+				_available_cache_slugs[f_slug] = true
+			file_name = dir.get_next()
+		dir.list_dir_end()
+
+
+func _is_slug_cached(course_name: String) -> bool:
+	for slug in _get_slug_candidates(course_name):
+		if _available_cache_slugs.has(slug):
+			return true
+	if _loader != null and _loader.has_method("IsCourseCached"):
+		return bool(_loader.call("IsCourseCached", course_name))
+	return false
+
+
 func _load_cached_courses() -> void:
 	_all_cached_courses.clear()
 	_cached_names_set.clear()
+	_refresh_available_cache_slugs()
 
+	var catalog_map: Dictionary = {}
 	var catalog_path = "res://Courses/Catalog/golf_courses.json"
 	if FileAccess.file_exists(catalog_path):
 		var file = FileAccess.open(catalog_path, FileAccess.ModeFlags.READ)
@@ -275,12 +395,22 @@ func _load_cached_courses() -> void:
 				for item in json.data:
 					if item is Dictionary:
 						var entry = item.duplicate()
-						entry["is_catalog"] = true
-						entry["is_cached"] = true
-						_all_cached_courses.append(entry)
 						var c_name = entry.get("name", "")
-						if not c_name.is_empty():
-							_cached_names_set[c_name.to_lower()] = true
+						var lower_name = c_name.to_lower()
+						var is_cached = _is_slug_cached(c_name)
+						entry["is_catalog"] = true
+						entry["is_cached"] = is_cached
+						if entry.has("is_pga_tour"):
+							entry["is_pga_tour"] = bool(entry["is_pga_tour"])
+						else:
+							entry["is_pga_tour"] = is_pga_tour_course_name(c_name)
+						_all_cached_courses.append(entry)
+						if not lower_name.is_empty():
+							catalog_map[lower_name] = entry
+							_cached_names_set[lower_name] = true
+							if is_cached:
+								for s in _get_slug_candidates(c_name):
+									_cached_names_set[s] = true
 
 	if _loader != null and _loader.has_method("GetCachedCourses"):
 		var loader_courses = _loader.call("GetCachedCourses")
@@ -289,15 +419,35 @@ func _load_cached_courses() -> void:
 				if lc is Dictionary:
 					var lc_name = lc.get("name", "")
 					var lower_name = lc_name.to_lower()
-					if not lower_name.is_empty() and not _cached_names_set.has(lower_name):
-						_cached_names_set[lower_name] = true
-						_all_cached_courses.append(lc)
+					var is_cached = bool(lc.get("is_cached", false))
+					if not lower_name.is_empty():
+						if is_cached:
+							_cached_names_set[lower_name] = true
+						var existing = catalog_map.get(lower_name)
+						if existing != null:
+							existing["is_cached"] = is_cached
+							if lc.get("is_pga_tour", false):
+								existing["is_pga_tour"] = true
+						else:
+							if lc.has("is_pga_tour"):
+								lc["is_pga_tour"] = bool(lc["is_pga_tour"])
+							else:
+								lc["is_pga_tour"] = is_pga_tour_course_name(lc_name)
+							_all_cached_courses.append(lc)
+							catalog_map[lower_name] = lc
 
 	# Also scan user://cached_geometry and res://Courses/CachedGeometry for loose geometry files
 	_scan_loose_cached_geometries()
 
-	# Sort all cached courses alphabetically by name
-	_all_cached_courses.sort_custom(func(a, b):
+	# Sort cached courses: PGA Tour & Major Championship courses first (alphabetically),
+	# followed by any other courses (alphabetically).
+	# is_pga_tour is already cached as a boolean on every entry, so this sort is pure O(N log N)
+	# boolean and string comparison without regex or linear searches.
+	_all_cached_courses.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var a_pga: bool = bool(a.get("is_pga_tour", false))
+		var b_pga: bool = bool(b.get("is_pga_tour", false))
+		if a_pga != b_pga:
+			return a_pga
 		return a.get("name", "").to_lower() < b.get("name", "").to_lower()
 	)
 
@@ -316,9 +466,12 @@ func _scan_loose_cached_geometries() -> void:
 			if not dir.current_is_dir() and (file_name.ends_with(".json.gz") or file_name.ends_with(".json")):
 				var f_slug = file_name.replace(".json.gz", "").replace(".json", "")
 				var lower_slug = f_slug.to_lower()
+				if _cached_names_set.has(lower_slug):
+					file_name = dir.get_next()
+					continue
 				var readable_title = f_slug.replace("_", " ").capitalize()
 				var lower_title = readable_title.to_lower()
-				if not _cached_names_set.has(lower_slug) and not _cached_names_set.has(lower_title):
+				if not _cached_names_set.has(lower_title):
 					_cached_names_set[lower_slug] = true
 					_cached_names_set[lower_title] = true
 					var entry = {
@@ -329,7 +482,8 @@ func _scan_loose_cached_geometries() -> void:
 						"hole_count": 18,
 						"last_updated": "",
 						"is_catalog": false,
-						"is_cached": true
+						"is_cached": true,
+						"is_pga_tour": is_pga_tour_course_name(readable_title)
 					}
 					_all_cached_courses.append(entry)
 			file_name = dir.get_next()
@@ -337,17 +491,16 @@ func _scan_loose_cached_geometries() -> void:
 
 
 func _is_course_cached(course: Dictionary) -> bool:
-	if course.get("is_catalog", false) or course.get("is_cached", false):
-		return true
+	if course.has("is_cached"):
+		return bool(course["is_cached"])
 	var c_name = course.get("name", "")
 	if not c_name.is_empty():
 		var lower_name = c_name.to_lower()
 		if _cached_names_set.has(lower_name):
 			return true
-		if _loader != null and _loader.has_method("IsCourseCached"):
-			if bool(_loader.call("IsCourseCached", c_name)):
-				_cached_names_set[lower_name] = true
-				return true
+		if _is_slug_cached(c_name):
+			_cached_names_set[lower_name] = true
+			return true
 	return false
 
 
@@ -401,6 +554,8 @@ func _display_courses_in_list(courses: Array, is_search_results: bool = false) -
 			meta_parts.append("Updated: " + date_only)
 		if is_cached:
 			meta_parts.append("Cached")
+		elif item.get("is_catalog", false):
+			meta_parts.append("Catalog")
 
 		var display_text = name_text
 		if not meta_parts.is_empty():
@@ -419,7 +574,7 @@ func _display_courses_in_list(courses: Array, is_search_results: bool = false) -
 		if is_search_results:
 			status_label.text = "Found " + str(courses.size()) + " course(s). Select one to download."
 		else:
-			status_label.text = "Showing " + str(courses.size()) + " cached courses alphabetically. Select from list, or search to download from OSM."
+			status_label.text = "Showing " + str(courses.size()) + " cached courses (PGA Tour & Majors first). Select from list, or search to download from OSM."
 
 
 func _show_all_cached_courses() -> void:

@@ -14,6 +14,11 @@ import os
 import re
 import sys
 
+try:
+    from monthly_osm_course_sync import PGA_TOUR_AND_MAJOR_COURSES
+except ImportError:
+    from .monthly_osm_course_sync import PGA_TOUR_AND_MAJOR_COURSES
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 CATALOG_PATH = os.path.join(PROJECT_ROOT, "Courses", "Catalog", "golf_courses.json")
@@ -324,7 +329,22 @@ def generate_catalog(scan_cache: bool = True):
 
             print(f"Extracted {added_count} new courses from cached geometry folder.")
 
-    final_courses = sorted(merged.values(), key=lambda c: c["name"].lower())
+    def is_pga_tour_course(name: str) -> bool:
+        clean = " " + re.sub(r'[^a-z0-9]+', ' ', name.lower()).strip() + " "
+        stripped = clean.strip()
+        for kw in PGA_TOUR_AND_MAJOR_COURSES:
+            if f" {kw} " in clean or stripped == kw:
+                return True
+        return False
+
+    for c in merged.values():
+        if is_pga_tour_course(c.get("name", "")) or c.get("is_pga_tour"):
+            c["is_pga_tour"] = True
+
+    final_courses = sorted(
+        merged.values(),
+        key=lambda c: (not bool(c.get("is_pga_tour", False)), c["name"].lower())
+    )
 
     with open(CATALOG_PATH, "w", encoding="utf-8") as f:
         json.dump(final_courses, f, indent=2, ensure_ascii=False)

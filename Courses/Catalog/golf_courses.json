@@ -5,7 +5,1259 @@
     "lon": -85.809599,
     "location": "Cached Course",
     "hole_count": 18,
-    "last_updated": "2026-10-12"
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Augusta National Golf Club",
+    "lat": 33.5022,
+    "lon": -82.0225,
+    "location": "Augusta, Georgia, United States",
+    "hole_count": 18,
+    "last_updated": "2024-04-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Ballybunion Golf Club (Old Course)",
+    "lat": 52.5186,
+    "lon": -9.6739,
+    "location": "Ballybunion, County Kerry, Ireland",
+    "hole_count": 18,
+    "last_updated": "2024-06-22",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Baltusrol Golf Club (Lower Course)",
+    "lat": 40.7061,
+    "lon": -74.3317,
+    "location": "Springfield, New Jersey, United States",
+    "hole_count": 18,
+    "last_updated": "2024-04-22",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Bandon Dunes Golf Resort (Bandon Dunes)",
+    "lat": 43.1906,
+    "lon": -124.3986,
+    "location": "Bandon, Oregon, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Bandon Dunes Golf Resort (Bandon Trails)",
+    "lat": 43.1869,
+    "lon": -124.3889,
+    "location": "Bandon, Oregon, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Bandon Dunes Golf Resort (Old Macdonald)",
+    "lat": 43.2117,
+    "lon": -124.3917,
+    "location": "Bandon, Oregon, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Bandon Dunes Golf Resort (Pacific Dunes)",
+    "lat": 43.2017,
+    "lon": -124.3958,
+    "location": "Bandon, Oregon, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Bandon Dunes Golf Resort (Sheep Ranch)",
+    "lat": 43.2267,
+    "lon": -124.4014,
+    "location": "Bandon, Oregon, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Bandon Preserve",
+    "lat": 43.1894,
+    "lon": -124.3944,
+    "location": "Bandon, Oregon, United States",
+    "hole_count": 13,
+    "last_updated": "2024-05-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Banff Springs Golf Course",
+    "lat": 51.1639,
+    "lon": -115.5583,
+    "location": "Banff, Alberta, Canada",
+    "hole_count": 18,
+    "last_updated": "2024-06-20",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Bay Hill Club and Lodge",
+    "lat": 28.4578,
+    "lon": -81.5108,
+    "location": "Orlando, Florida, United States",
+    "hole_count": 18,
+    "last_updated": "2024-03-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Bethpage State Park (Black Course)",
+    "lat": 40.7444,
+    "lon": -73.4561,
+    "location": "Farmingdale, New York, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Bethpage State Park (Blue Course)",
+    "lat": 40.75,
+    "lon": -73.4639,
+    "location": "Farmingdale, New York, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Bethpage State Park (Green Course)",
+    "lat": 40.7472,
+    "lon": -73.4528,
+    "location": "Farmingdale, New York, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Bethpage State Park (Red Course)",
+    "lat": 40.7417,
+    "lon": -73.4597,
+    "location": "Farmingdale, New York, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Bethpage State Park (Yellow Course)",
+    "lat": 40.7528,
+    "lon": -73.4583,
+    "location": "Farmingdale, New York, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Cabot Cliffs",
+    "lat": 46.2239,
+    "lon": -61.2986,
+    "location": "Inverness, Nova Scotia, Canada",
+    "hole_count": 18,
+    "last_updated": "2024-06-30",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Cabot Links",
+    "lat": 46.2361,
+    "lon": -61.3097,
+    "location": "Inverness, Nova Scotia, Canada",
+    "hole_count": 18,
+    "last_updated": "2024-06-30",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Carnoustie Golf Links (Championship Course)",
+    "lat": 56.4975,
+    "lon": -2.7161,
+    "location": "Carnoustie, Angus, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Castle Stuart Golf Links (Cabot Highlands)",
+    "lat": 57.5147,
+    "lon": -4.1039,
+    "location": "Inverness, Highland, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-06-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Chambers Bay",
+    "lat": 47.2039,
+    "lon": -122.5769,
+    "location": "University Place, Washington, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-25",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Charlotte Country Club",
+    "lat": 35.233895,
+    "lon": -80.790375,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Cherry Hills Country Club",
+    "lat": 39.637861,
+    "lon": -104.955158,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Cog Hill Golf & Country Club",
+    "lat": 41.666841,
+    "lon": -87.959129,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Cog Hill Golf & Country Club (Dubsdread)",
+    "lat": 41.6708,
+    "lon": -87.9422,
+    "location": "Lemont, Illinois, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-08",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Colonial Country Club",
+    "lat": 32.7161,
+    "lon": -97.3756,
+    "location": "Fort Worth, Texas, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-22",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Conway Farms Golf Club",
+    "lat": 42.231372,
+    "lon": -87.888185,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Crooked Stick Golf Club",
+    "lat": 39.95863,
+    "lon": -86.20015,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Cypress Point Club",
+    "lat": 36.5772,
+    "lon": -121.9753,
+    "location": "Pebble Beach, California, United States",
+    "hole_count": 18,
+    "last_updated": "2024-01-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Cypress Point Golf Club",
+    "lat": 28.847675,
+    "lon": -81.14125,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Cypress Point Golf Course",
+    "lat": 36.573985,
+    "lon": -121.951477,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "East Lake Community Church",
+    "lat": 28.846106,
+    "lon": -81.575766,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "East Lake Golf Club",
+    "lat": 33.7431,
+    "lon": -84.3039,
+    "location": "Atlanta, Georgia, United States",
+    "hole_count": 18,
+    "last_updated": "2024-03-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Erin Hills",
+    "lat": 43.230952,
+    "lon": -88.414731,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Erin Hills Golf Course",
+    "lat": 43.2508,
+    "lon": -88.4239,
+    "location": "Erin, Wisconsin, United States",
+    "hole_count": 18,
+    "last_updated": "2024-06-05",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Gleneagles (King's Course)",
+    "lat": 56.2847,
+    "lon": -3.7556,
+    "location": "Auchterarder, Perth and Kinross, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-06-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Gleneagles (PGA Centenary Course)",
+    "lat": 56.2883,
+    "lon": -3.7431,
+    "location": "Auchterarder, Perth and Kinross, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-06-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Gleneagles Golf Course",
+    "lat": 37.716238,
+    "lon": -122.424324,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Golf Club Gut Larchenhof",
+    "lat": 51.0472,
+    "lon": 6.8194,
+    "location": "Pulheim, North Rhine-Westphalia, Germany",
+    "hole_count": 18,
+    "last_updated": "2024-06-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Half Moon Bay Golf Links (Ocean Course)",
+    "lat": 37.4308,
+    "lon": -122.4389,
+    "location": "Half Moon Bay, California, United States",
+    "hole_count": 18,
+    "last_updated": "2024-01-22",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Half Moon Bay Golf Links (Old Course)",
+    "lat": 37.4339,
+    "lon": -122.4411,
+    "location": "Half Moon Bay, California, United States",
+    "hole_count": 18,
+    "last_updated": "2024-01-22",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Hamilton Golf and Country Club",
+    "lat": 43.2278,
+    "lon": -79.9722,
+    "location": "Ancaster, Ontario, Canada",
+    "hole_count": 18,
+    "last_updated": "2024-06-05",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Innisbrook Resort (Copperhead Course)",
+    "lat": 28.1136,
+    "lon": -82.7561,
+    "location": "Palm Harbor, Florida, United States",
+    "hole_count": 18,
+    "last_updated": "2024-03-05",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Interlachen Country Club",
+    "lat": 44.913481,
+    "lon": -93.389855,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Inverness Club",
+    "lat": 41.636189,
+    "lon": -83.63735,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Lahinch Golf Club (Old Course)",
+    "lat": 52.9347,
+    "lon": -9.3494,
+    "location": "Lahinch, County Clare, Ireland",
+    "hole_count": 18,
+    "last_updated": "2024-06-18",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Le Golf National (Albatros Course)",
+    "lat": 48.7533,
+    "lon": 2.0733,
+    "location": "Guyancourt, Île-de-France, France",
+    "hole_count": 18,
+    "last_updated": "2024-08-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Los Angeles Country Club",
+    "lat": 34.06093,
+    "lon": -118.419487,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Marco Simone Golf & Country Club",
+    "lat": 41.9619,
+    "lon": 12.6306,
+    "location": "Guidonia Montecelio, Rome, Lazio, Italy",
+    "hole_count": 18,
+    "last_updated": "2024-05-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Medinah Country Club",
+    "lat": 41.945585,
+    "lon": -88.033255,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Medinah Country Club (Course No. 3)",
+    "lat": 41.9708,
+    "lon": -88.0489,
+    "location": "Medinah, Illinois, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Memorial Park Golf Course",
+    "lat": 39.938069,
+    "lon": -85.383564,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Merion Golf Club (East Course)",
+    "lat": 40.0,
+    "lon": -75.3117,
+    "location": "Ardmore, Pennsylvania, United States",
+    "hole_count": 18,
+    "last_updated": "2024-04-18",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Monterey Peninsula Country Club - Dunes Course",
+    "lat": 36.609221,
+    "lon": -121.948549,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Monterey Peninsula Country Club - Shore Course",
+    "lat": 36.609221,
+    "lon": -121.948549,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Muirfield (The Honourable Company of Edinburgh Golfers)",
+    "lat": 56.0425,
+    "lon": -2.8217,
+    "location": "Gullane, East Lothian, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-06-25",
+    "is_pga_tour": true
+  },
+  {
+    "name": "North Berwick Golf Club (West Links)",
+    "lat": 56.0594,
+    "lon": -2.7297,
+    "location": "North Berwick, East Lothian, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-06-20",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Oak Hill Country Club (East Course)",
+    "lat": 43.1097,
+    "lon": -77.5333,
+    "location": "Rochester, New York, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-20",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Oakmont Country Club",
+    "lat": 40.5258,
+    "lon": -79.8267,
+    "location": "Oakmont, Pennsylvania, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-30",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Oakmont Driving Range",
+    "lat": 38.876358,
+    "lon": -77.317094,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Oakmont Golf Course",
+    "lat": 38.876358,
+    "lon": -77.317094,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Oakmont Green Golf Course",
+    "lat": 39.630622,
+    "lon": -76.858877,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Ocean Course",
+    "lat": 29.578209,
+    "lon": -81.188861,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Ohio Prestwick Country Club",
+    "lat": 40.964874,
+    "lon": -81.447146,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Old Course",
+    "lat": 37.998236,
+    "lon": -79.826295,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Olympia Fields Country Club",
+    "lat": 41.506165,
+    "lon": -87.69831,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Olympic Club Lake Course",
+    "lat": 37.715307,
+    "lon": -122.486192,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Pebble Beach Golf Links",
+    "lat": 36.5688,
+    "lon": -121.9507,
+    "location": "Pebble Beach, California, United States",
+    "hole_count": 18,
+    "last_updated": "2024-01-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "PGA Catalunya Golf and Wellness (Stadium Course)",
+    "lat": 41.8703,
+    "lon": 2.7583,
+    "location": "Caldes de Malavella, Girona, Catalonia, Spain",
+    "hole_count": 18,
+    "last_updated": "2024-06-25",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Pinehurst Course No. 8",
+    "lat": 35.208237,
+    "lon": -79.479389,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Pinehurst Course No.1",
+    "lat": 35.167562,
+    "lon": -79.448954,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Pinehurst Course No.7",
+    "lat": 35.196181,
+    "lon": -79.444183,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Pinehurst Golf Course",
+    "lat": 47.537697,
+    "lon": -116.227662,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Pinehurst No. 10",
+    "lat": 35.160227,
+    "lon": -79.453207,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Pinehurst No. 2",
+    "lat": 35.187624,
+    "lon": -79.44591,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Pinehurst No. 4",
+    "lat": 35.196181,
+    "lon": -79.444183,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Pinehurst Resort (No. 2)",
+    "lat": 35.1897,
+    "lon": -79.4678,
+    "location": "Pinehurst, North Carolina, United States",
+    "hole_count": 18,
+    "last_updated": "2024-06-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Pinehurst Resort (No. 4)",
+    "lat": 35.1869,
+    "lon": -79.4719,
+    "location": "Pinehurst, North Carolina, United States",
+    "hole_count": 18,
+    "last_updated": "2024-06-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Portmarnock Golf Club",
+    "lat": 53.4144,
+    "lon": -6.1133,
+    "location": "Portmarnock, County Dublin, Ireland",
+    "hole_count": 18,
+    "last_updated": "2024-06-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Prestwick Country Club",
+    "lat": 41.506433,
+    "lon": -87.790628,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Quail Hollow Club",
+    "lat": 35.1092,
+    "lon": -80.8406,
+    "location": "Charlotte, North Carolina, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Quail Hollow Golf Course",
+    "lat": 43.660652,
+    "lon": -116.226908,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Real Club Valderrama",
+    "lat": 36.2942,
+    "lon": -5.3253,
+    "location": "Sotogrande, San Roque, Andalusia, Spain",
+    "hole_count": 18,
+    "last_updated": "2024-07-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Ridgewood Country Club",
+    "lat": 41.410768,
+    "lon": -73.475243,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Riviera Country Club",
+    "lat": 34.05,
+    "lon": -118.5028,
+    "location": "Pacific Palisades, Los Angeles, California, United States",
+    "hole_count": 18,
+    "last_updated": "2024-03-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Riviera Country Club (Ormond Beach)",
+    "lat": 29.259536,
+    "lon": -81.054407,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Royal Birkdale Golf Club",
+    "lat": 53.6219,
+    "lon": -3.0361,
+    "location": "Southport, Merseyside, England, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-08",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Royal County Down Golf Club (Championship Links)",
+    "lat": 54.2181,
+    "lon": -5.8789,
+    "location": "Newcastle, County Down, Northern Ireland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Royal Dornoch Golf Club (Championship Course)",
+    "lat": 57.8825,
+    "lon": -4.0267,
+    "location": "Dornoch, Sutherland, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-06-18",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Royal Liverpool Golf Club (Hoylake)",
+    "lat": 53.3933,
+    "lon": -3.1867,
+    "location": "Hoylake, Merseyside, England, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-02",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Royal Lytham & St Annes Golf Club",
+    "lat": 53.7444,
+    "lon": -3.0239,
+    "location": "Lytham St Annes, Lancashire, England, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-06",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Royal Portrush Golf Club (Dunluce Links)",
+    "lat": 55.1983,
+    "lon": -6.6389,
+    "location": "Portrush, County Antrim, Northern Ireland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-14",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Royal St George's Golf Club",
+    "lat": 51.2758,
+    "lon": 1.3653,
+    "location": "Sandwich, Kent, England, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Royal Troon Golf Club (Old Course)",
+    "lat": 55.5306,
+    "lon": -4.6467,
+    "location": "Troon, South Ayrshire, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-20",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Scioto Country Club",
+    "lat": 39.99071,
+    "lon": -83.080695,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Sea Island Golf Club (Seaside Course)",
+    "lat": 31.1394,
+    "lon": -81.4089,
+    "location": "St. Simons Island, Georgia, United States",
+    "hole_count": 18,
+    "last_updated": "2024-01-30",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Shinnecock Hills Golf Club",
+    "lat": 40.8925,
+    "lon": -72.4397,
+    "location": "Southampton, New York, United States",
+    "hole_count": 18,
+    "last_updated": "2024-04-10",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Southern Hills Country Club",
+    "lat": 36.0717,
+    "lon": -95.9406,
+    "location": "Tulsa, Oklahoma, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-18",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Southern Hills Golf Course",
+    "lat": 36.113972,
+    "lon": -85.592657,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Spyglass Hill Golf Course",
+    "lat": 36.5856,
+    "lon": -121.961,
+    "location": "Pebble Beach, California, United States",
+    "hole_count": 18,
+    "last_updated": "2024-01-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "St Andrews Golf Club",
+    "lat": 38.884905,
+    "lon": -94.713319,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "St Andrews Links (Balgove Course)",
+    "lat": 56.3456,
+    "lon": -2.8206,
+    "location": "St Andrews, Fife, Scotland, United Kingdom",
+    "hole_count": 9,
+    "last_updated": "2024-07-10",
+    "is_pga_tour": true
+  },
+  {
+    "name": "St Andrews Links (Castle Course)",
+    "lat": 56.3314,
+    "lon": -2.7533,
+    "location": "St Andrews, Fife, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-10",
+    "is_pga_tour": true
+  },
+  {
+    "name": "St Andrews Links (Eden Course)",
+    "lat": 56.3481,
+    "lon": -2.8228,
+    "location": "St Andrews, Fife, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-10",
+    "is_pga_tour": true
+  },
+  {
+    "name": "St Andrews Links (Jubilee Course)",
+    "lat": 56.3536,
+    "lon": -2.8089,
+    "location": "St Andrews, Fife, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-10",
+    "is_pga_tour": true
+  },
+  {
+    "name": "St Andrews Links (New Course)",
+    "lat": 56.3486,
+    "lon": -2.8067,
+    "location": "St Andrews, Fife, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-10",
+    "is_pga_tour": true
+  },
+  {
+    "name": "St Andrews Links (Old Course)",
+    "lat": 56.3431,
+    "lon": -2.8027,
+    "location": "St Andrews, Fife, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-10",
+    "is_pga_tour": true
+  },
+  {
+    "name": "St Andrews Links (Strathtyrum Course)",
+    "lat": 56.3444,
+    "lon": -2.8272,
+    "location": "St Andrews, Fife, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-10",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Sunmessage Dale Golf Club (Old Course)",
+    "lat": 51.3789,
+    "lon": -0.6389,
+    "location": "Sunningdale, Berkshire, England, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-06-10",
+    "is_pga_tour": true
+  },
+  {
+    "name": "The Belfry (Brabazon Course)",
+    "lat": 52.5539,
+    "lon": -1.7583,
+    "location": "Wishaw, Warwickshire, England, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-08-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "The Bull at Pinehurst Farms",
+    "lat": 43.697218,
+    "lon": -87.8212,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "The K Club (Palmer Ryder Cup Course)",
+    "lat": 53.3089,
+    "lon": -6.6319,
+    "location": "Straffan, County Kildare, Ireland",
+    "hole_count": 18,
+    "last_updated": "2024-06-08",
+    "is_pga_tour": true
+  },
+  {
+    "name": "The Old Course at Odessa Country Club",
+    "lat": 31.890792,
+    "lon": -102.285368,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "The Olympic Club (Lake Course)",
+    "lat": 37.7083,
+    "lon": -122.4939,
+    "location": "San Francisco, California, United States",
+    "hole_count": 18,
+    "last_updated": "2024-01-20",
+    "is_pga_tour": true
+  },
+  {
+    "name": "The Villages of East Lake",
+    "lat": 33.740964,
+    "lon": -84.303268,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Torrey Pines Golf Course (North)",
+    "lat": 32.9056,
+    "lon": -117.2486,
+    "location": "La Jolla, San Diego, California, United States",
+    "hole_count": 18,
+    "last_updated": "2024-02-10",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Torrey Pines Golf Course (South)",
+    "lat": 32.8986,
+    "lon": -117.2514,
+    "location": "La Jolla, San Diego, California, United States",
+    "hole_count": 18,
+    "last_updated": "2024-02-10",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Torrey Pines North Course",
+    "lat": 32.904024,
+    "lon": -117.245615,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Torrey Pines South Course",
+    "lat": 32.885559,
+    "lon": -117.241843,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "TPC Craig Ranch",
+    "lat": 33.1539,
+    "lon": -96.7028,
+    "location": "McKinney, Texas, United States",
+    "hole_count": 18,
+    "last_updated": "2024-05-02",
+    "is_pga_tour": true
+  },
+  {
+    "name": "TPC San Antonio AT&T Canyons Course",
+    "lat": 29.656654,
+    "lon": -98.392622,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "TPC San Antonio Oaks Course",
+    "lat": 29.656654,
+    "lon": -98.392622,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "TPC Sawgrass (Dye's Valley Course)",
+    "lat": 30.195,
+    "lon": -81.3889,
+    "location": "Ponte Vedra Beach, Florida, United States",
+    "hole_count": 18,
+    "last_updated": "2024-03-10",
+    "is_pga_tour": true
+  },
+  {
+    "name": "TPC Sawgrass (The Players Stadium)",
+    "lat": 30.1983,
+    "lon": -81.3939,
+    "location": "Ponte Vedra Beach, Florida, United States",
+    "hole_count": 18,
+    "last_updated": "2024-03-10",
+    "is_pga_tour": true
+  },
+  {
+    "name": "TPC Scottsdale (Champions Course)",
+    "lat": 33.6469,
+    "lon": -111.9056,
+    "location": "Scottsdale, Arizona, United States",
+    "hole_count": 18,
+    "last_updated": "2024-02-05",
+    "is_pga_tour": true
+  },
+  {
+    "name": "TPC Scottsdale (Stadium Course)",
+    "lat": 33.6406,
+    "lon": -111.9103,
+    "location": "Scottsdale, Arizona, United States",
+    "hole_count": 18,
+    "last_updated": "2024-02-05",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Turnberry (Ailsa Course)",
+    "lat": 55.3161,
+    "lon": -4.8394,
+    "location": "Turnberry, South Ayrshire, Scotland, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-07-05",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Turnberry Golf Club",
+    "lat": 42.225838,
+    "lon": -88.370515,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Valhalla Golf Club",
+    "lat": 38.238998,
+    "lon": -85.475894,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Waterville Golf Course",
+    "lat": 39.685992,
+    "lon": -96.731085,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Waterville Golf Links",
+    "lat": 51.8286,
+    "lon": -10.1839,
+    "location": "Waterville, County Kerry, Ireland",
+    "hole_count": 18,
+    "last_updated": "2024-06-20",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Wentworth Club (West Course)",
+    "lat": 51.3986,
+    "lon": -0.5969,
+    "location": "Virginia Water, Surrey, England, United Kingdom",
+    "hole_count": 18,
+    "last_updated": "2024-09-01",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Wentworth Golf Club",
+    "lat": 28.144473,
+    "lon": -82.696096,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Whistling Straits",
+    "lat": 43.849161,
+    "lon": -87.74592,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Whistling Straits (Irish Course)",
+    "lat": 43.8458,
+    "lon": -87.7389,
+    "location": "Sheboygan, Wisconsin, United States",
+    "hole_count": 18,
+    "last_updated": "2024-06-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Whistling Straits (Straits Course)",
+    "lat": 43.8508,
+    "lon": -87.7347,
+    "location": "Sheboygan, Wisconsin, United States",
+    "hole_count": 18,
+    "last_updated": "2024-06-15",
+    "is_pga_tour": true
+  },
+  {
+    "name": "White Bluff Old Course",
+    "lat": 32.016423,
+    "lon": -97.413954,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Wicker Memorial Park Golf Course",
+    "lat": 41.57034,
+    "lon": -87.446242,
+    "location": "Cached Course",
+    "hole_count": 18,
+    "last_updated": "2026-10-12",
+    "is_pga_tour": true
+  },
+  {
+    "name": "Winged Foot Golf Club (West Course)",
+    "lat": 40.9575,
+    "lon": -73.7547,
+    "location": "Mamaroneck, New York, United States",
+    "hole_count": 18,
+    "last_updated": "2024-03-25",
+    "is_pga_tour": true
   },
   {
     "name": "#2 Green",
@@ -1496,14 +2748,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Augusta National Golf Club",
-    "lat": 33.5022,
-    "lon": -82.0225,
-    "location": "Augusta, Georgia, United States",
-    "hole_count": 18,
-    "last_updated": "2024-04-01"
-  },
-  {
     "name": "Augusta Pines Golf Course",
     "lat": 30.13005,
     "lon": -95.546926,
@@ -1752,14 +2996,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Ballybunion Golf Club (Old Course)",
-    "lat": 52.5186,
-    "lon": -9.6739,
-    "location": "Ballybunion, County Kerry, Ireland",
-    "hole_count": 18,
-    "last_updated": "2024-06-22"
-  },
-  {
     "name": "Ballyhack Golf Club",
     "lat": 37.241418,
     "lon": -79.902991,
@@ -1790,70 +3026,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Baltusrol Golf Club (Lower Course)",
-    "lat": 40.7061,
-    "lon": -74.3317,
-    "location": "Springfield, New Jersey, United States",
-    "hole_count": 18,
-    "last_updated": "2024-04-22"
-  },
-  {
-    "name": "Bandon Dunes Golf Resort (Bandon Dunes)",
-    "lat": 43.1906,
-    "lon": -124.3986,
-    "location": "Bandon, Oregon, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-01"
-  },
-  {
-    "name": "Bandon Dunes Golf Resort (Bandon Trails)",
-    "lat": 43.1869,
-    "lon": -124.3889,
-    "location": "Bandon, Oregon, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-01"
-  },
-  {
-    "name": "Bandon Dunes Golf Resort (Old Macdonald)",
-    "lat": 43.2117,
-    "lon": -124.3917,
-    "location": "Bandon, Oregon, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-01"
-  },
-  {
-    "name": "Bandon Dunes Golf Resort (Pacific Dunes)",
-    "lat": 43.2017,
-    "lon": -124.3958,
-    "location": "Bandon, Oregon, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-01"
-  },
-  {
-    "name": "Bandon Dunes Golf Resort (Sheep Ranch)",
-    "lat": 43.2267,
-    "lon": -124.4014,
-    "location": "Bandon, Oregon, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-01"
-  },
-  {
-    "name": "Bandon Preserve",
-    "lat": 43.1894,
-    "lon": -124.3944,
-    "location": "Bandon, Oregon, United States",
-    "hole_count": 13,
-    "last_updated": "2024-05-01"
-  },
-  {
-    "name": "Banff Springs Golf Course",
-    "lat": 51.1639,
-    "lon": -115.5583,
-    "location": "Banff, Alberta, Canada",
-    "hole_count": 18,
-    "last_updated": "2024-06-20"
   },
   {
     "name": "Banner Country Club",
@@ -2118,14 +3290,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Bay Hill Club and Lodge",
-    "lat": 28.4578,
-    "lon": -81.5108,
-    "location": "Orlando, Florida, United States",
-    "hole_count": 18,
-    "last_updated": "2024-03-01"
   },
   {
     "name": "Bay Hills Golf Club",
@@ -3006,46 +4170,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Bethpage State Park (Black Course)",
-    "lat": 40.7444,
-    "lon": -73.4561,
-    "location": "Farmingdale, New York, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-15"
-  },
-  {
-    "name": "Bethpage State Park (Blue Course)",
-    "lat": 40.75,
-    "lon": -73.4639,
-    "location": "Farmingdale, New York, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-15"
-  },
-  {
-    "name": "Bethpage State Park (Green Course)",
-    "lat": 40.7472,
-    "lon": -73.4528,
-    "location": "Farmingdale, New York, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-15"
-  },
-  {
-    "name": "Bethpage State Park (Red Course)",
-    "lat": 40.7417,
-    "lon": -73.4597,
-    "location": "Farmingdale, New York, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-15"
-  },
-  {
-    "name": "Bethpage State Park (Yellow Course)",
-    "lat": 40.7528,
-    "lon": -73.4583,
-    "location": "Farmingdale, New York, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-15"
   },
   {
     "name": "Betsie Valley",
@@ -5352,22 +6476,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Cabot Cliffs",
-    "lat": 46.2239,
-    "lon": -61.2986,
-    "location": "Inverness, Nova Scotia, Canada",
-    "hole_count": 18,
-    "last_updated": "2024-06-30"
-  },
-  {
-    "name": "Cabot Links",
-    "lat": 46.2361,
-    "lon": -61.3097,
-    "location": "Inverness, Nova Scotia, Canada",
-    "hole_count": 18,
-    "last_updated": "2024-06-30"
-  },
-  {
     "name": "Cacapon Golf Course",
     "lat": 39.511586,
     "lon": -78.299115,
@@ -5992,14 +7100,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Carnoustie Golf Links (Championship Course)",
-    "lat": 56.4975,
-    "lon": -2.7161,
-    "location": "Carnoustie, Angus, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-15"
-  },
-  {
     "name": "Caro Golf Club",
     "lat": 43.494182,
     "lon": -83.387348,
@@ -6246,14 +7346,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Castle Stuart Golf Links (Cabot Highlands)",
-    "lat": 57.5147,
-    "lon": -4.1039,
-    "location": "Inverness, Highland, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-06-15"
   },
   {
     "name": "Castlewood Country Club - Valley Course",
@@ -6648,14 +7740,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Chambers Bay",
-    "lat": 47.2039,
-    "lon": -122.5769,
-    "location": "University Place, Washington, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-25"
-  },
-  {
     "name": "Chambers County Golf Course",
     "lat": 29.830888,
     "lon": -94.639069,
@@ -6851,14 +7935,6 @@
     "name": "Charlie Vettner Golf Course",
     "lat": 38.1714,
     "lon": -85.56956,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Charlotte Country Club",
-    "lat": 35.233895,
-    "lon": -80.790375,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -7139,14 +8215,6 @@
     "name": "Cherry Hill Golf Resort",
     "lat": 44.889474,
     "lon": -87.359973,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Cherry Hills Country Club",
-    "lat": 39.637861,
-    "lon": -104.955158,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -8080,22 +9148,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Cog Hill Golf & Country Club",
-    "lat": 41.666841,
-    "lon": -87.959129,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Cog Hill Golf & Country Club (Dubsdread)",
-    "lat": 41.6708,
-    "lon": -87.9422,
-    "location": "Lemont, Illinois, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-08"
-  },
-  {
     "name": "Cokesbury Hills Golf Course",
     "lat": 34.284138,
     "lon": -82.199132,
@@ -8222,14 +9274,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Colonial Country Club",
-    "lat": 32.7161,
-    "lon": -97.3756,
-    "location": "Fort Worth, Texas, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-22"
   },
   {
     "name": "Colonial Golf Course",
@@ -8539,14 +9583,6 @@
     "name": "Conway Country Club",
     "lat": 35.085422,
     "lon": -92.489215,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Conway Farms Golf Club",
-    "lat": 42.231372,
-    "lon": -87.888185,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -9576,14 +10612,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Crooked Stick Golf Club",
-    "lat": 39.95863,
-    "lon": -86.20015,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
     "name": "Crooked Tree Golf Club",
     "lat": 45.360464,
     "lon": -85.02329,
@@ -9907,30 +10935,6 @@
     "name": "Cypress Links Course",
     "lat": 27.423143,
     "lon": -82.415893,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Cypress Point Club",
-    "lat": 36.5772,
-    "lon": -121.9753,
-    "location": "Pebble Beach, California, United States",
-    "hole_count": 18,
-    "last_updated": "2024-01-15"
-  },
-  {
-    "name": "Cypress Point Golf Club",
-    "lat": 28.847675,
-    "lon": -81.14125,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Cypress Point Golf Course",
-    "lat": 36.573985,
-    "lon": -121.951477,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -11896,22 +12900,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "East Lake Community Church",
-    "lat": 28.846106,
-    "lon": -81.575766,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "East Lake Golf Club",
-    "lat": 33.7431,
-    "lon": -84.3039,
-    "location": "Atlanta, Georgia, United States",
-    "hole_count": 18,
-    "last_updated": "2024-03-15"
-  },
-  {
     "name": "East Mountain Golf Course",
     "lat": 41.520949,
     "lon": -73.014995,
@@ -12902,22 +13890,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Erin Hills",
-    "lat": 43.230952,
-    "lon": -88.414731,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Erin Hills Golf Course",
-    "lat": 43.2508,
-    "lon": -88.4239,
-    "location": "Erin, Wisconsin, United States",
-    "hole_count": 18,
-    "last_updated": "2024-06-05"
   },
   {
     "name": "Erskine Golf Course",
@@ -15384,30 +16356,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Gleneagles (King's Course)",
-    "lat": 56.2847,
-    "lon": -3.7556,
-    "location": "Auchterarder, Perth and Kinross, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-06-12"
-  },
-  {
-    "name": "Gleneagles (PGA Centenary Course)",
-    "lat": 56.2883,
-    "lon": -3.7431,
-    "location": "Auchterarder, Perth and Kinross, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-06-12"
-  },
-  {
-    "name": "Gleneagles Golf Course",
-    "lat": 37.716238,
-    "lon": -122.424324,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
     "name": "Glenhurst Golf Course",
     "lat": 42.407175,
     "lon": -83.281571,
@@ -15718,14 +16666,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Golf Club Gut Larchenhof",
-    "lat": 51.0472,
-    "lon": 6.8194,
-    "location": "Pulheim, North Rhine-Westphalia, Germany",
-    "hole_count": 18,
-    "last_updated": "2024-06-15"
   },
   {
     "name": "Golf Club of Avon",
@@ -17096,22 +18036,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Half Moon Bay Golf Links (Ocean Course)",
-    "lat": 37.4308,
-    "lon": -122.4389,
-    "location": "Half Moon Bay, California, United States",
-    "hole_count": 18,
-    "last_updated": "2024-01-22"
-  },
-  {
-    "name": "Half Moon Bay Golf Links (Old Course)",
-    "lat": 37.4339,
-    "lon": -122.4411,
-    "location": "Half Moon Bay, California, United States",
-    "hole_count": 18,
-    "last_updated": "2024-01-22"
-  },
-  {
     "name": "Halifax Country Club",
     "lat": 36.750917,
     "lon": -78.927519,
@@ -17142,14 +18066,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Hamilton Golf and Country Club",
-    "lat": 43.2278,
-    "lon": -79.9722,
-    "location": "Ancaster, Ontario, Canada",
-    "hole_count": 18,
-    "last_updated": "2024-06-05"
   },
   {
     "name": "Hammock Dunes Links Course",
@@ -19896,14 +20812,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Innisbrook Resort (Copperhead Course)",
-    "lat": 28.1136,
-    "lon": -82.7561,
-    "location": "Palm Harbor, Florida, United States",
-    "hole_count": 18,
-    "last_updated": "2024-03-05"
-  },
-  {
     "name": "Innsbrook Country Club",
     "lat": 41.492958,
     "lon": -87.355383,
@@ -19928,14 +20836,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Interlachen Country Club",
-    "lat": 44.913481,
-    "lon": -93.389855,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
     "name": "International Country Club",
     "lat": 38.904082,
     "lon": -77.405673,
@@ -19947,14 +20847,6 @@
     "name": "Intimidator Golf Course",
     "lat": 43.801018,
     "lon": -85.642185,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Inverness Club",
-    "lat": 41.636189,
-    "lon": -83.63735,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -21696,14 +22588,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Lahinch Golf Club (Old Course)",
-    "lat": 52.9347,
-    "lon": -9.3494,
-    "location": "Lahinch, County Clare, Ireland",
-    "hole_count": 18,
-    "last_updated": "2024-06-18"
-  },
-  {
     "name": "Lake Almanor Country Club",
     "lat": 40.264076,
     "lon": -121.126993,
@@ -22736,14 +23620,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Le Golf National (Albatros Course)",
-    "lat": 48.7533,
-    "lon": 2.0733,
-    "location": "Guyancourt, Île-de-France, France",
-    "hole_count": 18,
-    "last_updated": "2024-08-01"
-  },
-  {
     "name": "Le Triomphe Golf & Country Club",
     "lat": 30.089669,
     "lon": -91.945518,
@@ -23744,14 +24620,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Los Angeles Country Club",
-    "lat": 34.06093,
-    "lon": -118.419487,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
     "name": "Los Coyotes Country Club",
     "lat": 33.893881,
     "lon": -117.979032,
@@ -24656,14 +25524,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Marco Simone Golf & Country Club",
-    "lat": 41.9619,
-    "lon": 12.6306,
-    "location": "Guidonia Montecelio, Rome, Lazio, Italy",
-    "hole_count": 18,
-    "last_updated": "2024-05-15"
-  },
-  {
     "name": "Marcus Community Golf Club",
     "lat": 42.819044,
     "lon": -95.810823,
@@ -25512,22 +26372,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Medinah Country Club",
-    "lat": 41.945585,
-    "lon": -88.033255,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Medinah Country Club (Course No. 3)",
-    "lat": 41.9708,
-    "lon": -88.0489,
-    "location": "Medinah, Illinois, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-12"
-  },
-  {
     "name": "Mee-Kwon Park Golf Course",
     "lat": 43.265182,
     "lon": -87.971146,
@@ -25563,14 +26407,6 @@
     "name": "Member Course",
     "lat": 29.923856,
     "lon": -95.261594,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Memorial Park Golf Course",
-    "lat": 39.938069,
-    "lon": -85.383564,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -25670,14 +26506,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Merion Golf Club (East Course)",
-    "lat": 40.0,
-    "lon": -75.3117,
-    "location": "Ardmore, Pennsylvania, United States",
-    "hole_count": 18,
-    "last_updated": "2024-04-18"
   },
   {
     "name": "Merit Club",
@@ -26488,22 +27316,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Monterey Peninsula Country Club - Dunes Course",
-    "lat": 36.609221,
-    "lon": -121.948549,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Monterey Peninsula Country Club - Shore Course",
-    "lat": 36.609221,
-    "lon": -121.948549,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
     "name": "Monterey Pines Golf Course",
     "lat": 36.593209,
     "lon": -121.866325,
@@ -27038,14 +27850,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Muirfield (The Honourable Company of Edinburgh Golfers)",
-    "lat": 56.0425,
-    "lon": -2.8217,
-    "location": "Gullane, East Lothian, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-06-25"
   },
   {
     "name": "Mulberry Hills Golf Course",
@@ -27744,14 +28548,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "North Berwick Golf Club (West Links)",
-    "lat": 56.0594,
-    "lon": -2.7297,
-    "location": "North Berwick, East Lothian, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-06-20"
-  },
-  {
     "name": "North Branch Golf Course",
     "lat": 39.330367,
     "lon": -85.334393,
@@ -28208,14 +29004,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Oak Hill Country Club (East Course)",
-    "lat": 43.1097,
-    "lon": -77.5333,
-    "location": "Rochester, New York, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-20"
-  },
-  {
     "name": "Oak Hills",
     "lat": 36.402384,
     "lon": -86.80658,
@@ -28504,38 +29292,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Oakmont Country Club",
-    "lat": 40.5258,
-    "lon": -79.8267,
-    "location": "Oakmont, Pennsylvania, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-30"
-  },
-  {
-    "name": "Oakmont Driving Range",
-    "lat": 38.876358,
-    "lon": -77.317094,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Oakmont Golf Course",
-    "lat": 38.876358,
-    "lon": -77.317094,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Oakmont Green Golf Course",
-    "lat": 39.630622,
-    "lon": -76.858877,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
     "name": "Oakmoore Golf Course",
     "lat": 37.99482,
     "lon": -121.267583,
@@ -28680,14 +29436,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Ocean Course",
-    "lat": 29.578209,
-    "lon": -81.188861,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
     "name": "Ocean Hills Country Club",
     "lat": 33.161384,
     "lon": -117.26397,
@@ -28787,14 +29535,6 @@
     "name": "Ohio County Community Golf Course",
     "lat": 37.453929,
     "lon": -86.86239,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Ohio Prestwick Country Club",
-    "lat": 40.964874,
-    "lon": -81.447146,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -28923,14 +29663,6 @@
     "name": "Old Corkscrew Golf Club",
     "lat": 26.449846,
     "lon": -81.676033,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Old Course",
-    "lat": 37.998236,
-    "lon": -79.826295,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -29227,22 +29959,6 @@
     "name": "Olton Country Club",
     "lat": 34.136636,
     "lon": -102.145386,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Olympia Fields Country Club",
-    "lat": 41.506165,
-    "lon": -87.69831,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Olympic Club Lake Course",
-    "lat": 37.715307,
-    "lon": -122.486192,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -30400,14 +31116,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Pebble Beach Golf Links",
-    "lat": 36.5688,
-    "lon": -121.9507,
-    "location": "Pebble Beach, California, United States",
-    "hole_count": 18,
-    "last_updated": "2024-01-15"
-  },
-  {
     "name": "Pebble Creek Golf Club",
     "lat": 40.650059,
     "lon": -82.621561,
@@ -30742,14 +31450,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "PGA Catalunya Golf and Wellness (Stadium Course)",
-    "lat": 41.8703,
-    "lon": 2.7583,
-    "location": "Caldes de Malavella, Girona, Catalonia, Spain",
-    "hole_count": 18,
-    "last_updated": "2024-06-25"
   },
   {
     "name": "PGA Golf Club",
@@ -31374,78 +32074,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Pinehurst Course No. 8",
-    "lat": 35.208237,
-    "lon": -79.479389,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Pinehurst Course No.1",
-    "lat": 35.167562,
-    "lon": -79.448954,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Pinehurst Course No.7",
-    "lat": 35.196181,
-    "lon": -79.444183,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Pinehurst Golf Course",
-    "lat": 47.537697,
-    "lon": -116.227662,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Pinehurst No. 10",
-    "lat": 35.160227,
-    "lon": -79.453207,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Pinehurst No. 2",
-    "lat": 35.187624,
-    "lon": -79.44591,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Pinehurst No. 4",
-    "lat": 35.196181,
-    "lon": -79.444183,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Pinehurst Resort (No. 2)",
-    "lat": 35.1897,
-    "lon": -79.4678,
-    "location": "Pinehurst, North Carolina, United States",
-    "hole_count": 18,
-    "last_updated": "2024-06-01"
-  },
-  {
-    "name": "Pinehurst Resort (No. 4)",
-    "lat": 35.1869,
-    "lon": -79.4719,
-    "location": "Pinehurst, North Carolina, United States",
-    "hole_count": 18,
-    "last_updated": "2024-06-01"
   },
   {
     "name": "Pines Crossing Golf Course",
@@ -32088,14 +32716,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Portmarnock Golf Club",
-    "lat": 53.4144,
-    "lon": -6.1133,
-    "location": "Portmarnock, County Dublin, Ireland",
-    "hole_count": 18,
-    "last_updated": "2024-06-15"
-  },
-  {
     "name": "Pottawatomie Golf Course",
     "lat": 41.934118,
     "lon": -88.309713,
@@ -32368,14 +32988,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Prestwick Country Club",
-    "lat": 41.506433,
-    "lon": -87.790628,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
     "name": "Primghar Golf and Country Club",
     "lat": 43.086922,
     "lon": -95.627232,
@@ -32627,22 +33239,6 @@
     "name": "Quail Dunes Golf Course",
     "lat": 40.279595,
     "lon": -103.829556,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Quail Hollow Club",
-    "lat": 35.1092,
-    "lon": -80.8406,
-    "location": "Charlotte, North Carolina, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-01"
-  },
-  {
-    "name": "Quail Hollow Golf Course",
-    "lat": 43.660652,
-    "lon": -116.226908,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -33272,14 +33868,6 @@
     "last_updated": "2024-06-20"
   },
   {
-    "name": "Real Club Valderrama",
-    "lat": 36.2942,
-    "lon": -5.3253,
-    "location": "Sotogrande, San Roque, Andalusia, Spain",
-    "hole_count": 18,
-    "last_updated": "2024-07-15"
-  },
-  {
     "name": "Rebsamen Golf Course",
     "lat": 34.775652,
     "lon": -92.311791,
@@ -33843,14 +34431,6 @@
     "name": "Ridgeway Country Club",
     "lat": 35.068032,
     "lon": -89.732254,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Ridgewood Country Club",
-    "lat": 41.410768,
-    "lon": -73.475243,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -34504,22 +35084,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Riviera Country Club",
-    "lat": 34.05,
-    "lon": -118.5028,
-    "location": "Pacific Palisades, Los Angeles, California, United States",
-    "hole_count": 18,
-    "last_updated": "2024-03-01"
-  },
-  {
-    "name": "Riviera Country Club (Ormond Beach)",
-    "lat": 29.259536,
-    "lon": -81.054407,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
     "name": "Roane County Country Club",
     "lat": 38.84286,
     "lon": -81.420219,
@@ -35032,30 +35596,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Royal Birkdale Golf Club",
-    "lat": 53.6219,
-    "lon": -3.0361,
-    "location": "Southport, Merseyside, England, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-08"
-  },
-  {
-    "name": "Royal County Down Golf Club (Championship Links)",
-    "lat": 54.2181,
-    "lon": -5.8789,
-    "location": "Newcastle, County Down, Northern Ireland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-12"
-  },
-  {
-    "name": "Royal Dornoch Golf Club (Championship Course)",
-    "lat": 57.8825,
-    "lon": -4.0267,
-    "location": "Dornoch, Sutherland, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-06-18"
-  },
-  {
     "name": "Royal Fox Country Club",
     "lat": 41.943137,
     "lon": -88.27119,
@@ -35094,22 +35634,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Royal Liverpool Golf Club (Hoylake)",
-    "lat": 53.3933,
-    "lon": -3.1867,
-    "location": "Hoylake, Merseyside, England, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-02"
-  },
-  {
-    "name": "Royal Lytham & St Annes Golf Club",
-    "lat": 53.7444,
-    "lon": -3.0239,
-    "location": "Lytham St Annes, Lancashire, England, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-06"
   },
   {
     "name": "Royal Meadows Golf Club",
@@ -35160,36 +35684,12 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Royal Portrush Golf Club (Dunluce Links)",
-    "lat": 55.1983,
-    "lon": -6.6389,
-    "location": "Portrush, County Antrim, Northern Ireland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-14"
-  },
-  {
     "name": "Royal Scot Golf Course",
     "lat": 44.567757,
     "lon": -87.83852,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Royal St George's Golf Club",
-    "lat": 51.2758,
-    "lon": 1.3653,
-    "location": "Sandwich, Kent, England, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-01"
-  },
-  {
-    "name": "Royal Troon Golf Club (Old Course)",
-    "lat": 55.5306,
-    "lon": -4.6467,
-    "location": "Troon, South Ayrshire, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-20"
   },
   {
     "name": "RTJ Grand National Golf",
@@ -36248,14 +36748,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Scioto Country Club",
-    "lat": 39.99071,
-    "lon": -83.080695,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
     "name": "Scotch Meadows Country Club",
     "lat": 34.704319,
     "lon": -79.511055,
@@ -36318,14 +36810,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Sea Island Golf Club (Seaside Course)",
-    "lat": 31.1394,
-    "lon": -81.4089,
-    "location": "St. Simons Island, Georgia, United States",
-    "hole_count": 18,
-    "last_updated": "2024-01-30"
   },
   {
     "name": "Sea Mountain Golf Club",
@@ -37078,14 +37562,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Shinnecock Hills Golf Club",
-    "lat": 40.8925,
-    "lon": -72.4397,
-    "location": "Southampton, New York, United States",
-    "hole_count": 18,
-    "last_updated": "2024-04-10"
   },
   {
     "name": "Shirkey Golf Course",
@@ -38048,22 +38524,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Southern Hills Country Club",
-    "lat": 36.0717,
-    "lon": -95.9406,
-    "location": "Tulsa, Oklahoma, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-18"
-  },
-  {
-    "name": "Southern Hills Golf Course",
-    "lat": 36.113972,
-    "lon": -85.592657,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
     "name": "Southern Landings",
     "lat": 32.560961,
     "lon": -83.597657,
@@ -38464,14 +38924,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Spyglass Hill Golf Course",
-    "lat": 36.5856,
-    "lon": -121.961,
-    "location": "Pebble Beach, California, United States",
-    "hole_count": 18,
-    "last_updated": "2024-01-15"
-  },
-  {
     "name": "Squaw Creek Golf Course",
     "lat": 41.231048,
     "lon": -80.67146,
@@ -38486,70 +38938,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "St Andrews Golf Club",
-    "lat": 38.884905,
-    "lon": -94.713319,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "St Andrews Links (Balgove Course)",
-    "lat": 56.3456,
-    "lon": -2.8206,
-    "location": "St Andrews, Fife, Scotland, United Kingdom",
-    "hole_count": 9,
-    "last_updated": "2024-07-10"
-  },
-  {
-    "name": "St Andrews Links (Castle Course)",
-    "lat": 56.3314,
-    "lon": -2.7533,
-    "location": "St Andrews, Fife, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-10"
-  },
-  {
-    "name": "St Andrews Links (Eden Course)",
-    "lat": 56.3481,
-    "lon": -2.8228,
-    "location": "St Andrews, Fife, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-10"
-  },
-  {
-    "name": "St Andrews Links (Jubilee Course)",
-    "lat": 56.3536,
-    "lon": -2.8089,
-    "location": "St Andrews, Fife, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-10"
-  },
-  {
-    "name": "St Andrews Links (New Course)",
-    "lat": 56.3486,
-    "lon": -2.8067,
-    "location": "St Andrews, Fife, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-10"
-  },
-  {
-    "name": "St Andrews Links (Old Course)",
-    "lat": 56.3431,
-    "lon": -2.8027,
-    "location": "St Andrews, Fife, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-10"
-  },
-  {
-    "name": "St Andrews Links (Strathtyrum Course)",
-    "lat": 56.3444,
-    "lon": -2.8272,
-    "location": "St Andrews, Fife, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-10"
   },
   {
     "name": "St Joseph Country Club",
@@ -39478,14 +39866,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Sunmessage Dale Golf Club (Old Course)",
-    "lat": 51.3789,
-    "lon": -0.6389,
-    "location": "Sunningdale, Berkshire, England, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-06-10"
   },
   {
     "name": "Sunny Brae Golf & Country Club",
@@ -40496,14 +40876,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "The Belfry (Brabazon Course)",
-    "lat": 52.5539,
-    "lon": -1.7583,
-    "location": "Wishaw, Warwickshire, England, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-08-15"
-  },
-  {
     "name": "The Bog",
     "lat": 43.382217,
     "lon": -87.980311,
@@ -40563,14 +40935,6 @@
     "name": "The Buckhorn Golf Course",
     "lat": 29.975545,
     "lon": -98.894925,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "The Bull at Pinehurst Farms",
-    "lat": 43.697218,
-    "lon": -87.8212,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -41712,14 +42076,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "The K Club (Palmer Ryder Cup Course)",
-    "lat": 53.3089,
-    "lon": -6.6319,
-    "location": "Straffan, County Kildare, Ireland",
-    "hole_count": 18,
-    "last_updated": "2024-06-08"
-  },
-  {
     "name": "The Kansas City Country Club",
     "lat": 39.017902,
     "lon": -94.608658,
@@ -42328,14 +42684,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "The Old Course at Odessa Country Club",
-    "lat": 31.890792,
-    "lon": -102.285368,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
     "name": "The Olde Course",
     "lat": 40.42178,
     "lon": -105.119028,
@@ -42358,14 +42706,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "The Olympic Club (Lake Course)",
-    "lat": 37.7083,
-    "lon": -122.4939,
-    "location": "San Francisco, California, United States",
-    "hole_count": 18,
-    "last_updated": "2024-01-20"
   },
   {
     "name": "The Palms",
@@ -42883,14 +43223,6 @@
     "name": "The Villages Golf and Country Club",
     "lat": 37.291978,
     "lon": -121.75353,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "The Villages of East Lake",
-    "lat": 33.740964,
-    "lon": -84.303268,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -43536,38 +43868,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Torrey Pines Golf Course (North)",
-    "lat": 32.9056,
-    "lon": -117.2486,
-    "location": "La Jolla, San Diego, California, United States",
-    "hole_count": 18,
-    "last_updated": "2024-02-10"
-  },
-  {
-    "name": "Torrey Pines Golf Course (South)",
-    "lat": 32.8986,
-    "lon": -117.2514,
-    "location": "La Jolla, San Diego, California, United States",
-    "hole_count": 18,
-    "last_updated": "2024-02-10"
-  },
-  {
-    "name": "Torrey Pines North Course",
-    "lat": 32.904024,
-    "lon": -117.245615,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Torrey Pines South Course",
-    "lat": 32.885559,
-    "lon": -117.241843,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
     "name": "Torrington Country Club",
     "lat": 41.835299,
     "lon": -73.20475,
@@ -43664,14 +43964,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "TPC Craig Ranch",
-    "lat": 33.1539,
-    "lon": -96.7028,
-    "location": "McKinney, Texas, United States",
-    "hole_count": 18,
-    "last_updated": "2024-05-02"
-  },
-  {
     "name": "TPC Harding Park",
     "lat": 37.715307,
     "lon": -122.486192,
@@ -43686,54 +43978,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "TPC San Antonio AT&T Canyons Course",
-    "lat": 29.656654,
-    "lon": -98.392622,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "TPC San Antonio Oaks Course",
-    "lat": 29.656654,
-    "lon": -98.392622,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "TPC Sawgrass (Dye's Valley Course)",
-    "lat": 30.195,
-    "lon": -81.3889,
-    "location": "Ponte Vedra Beach, Florida, United States",
-    "hole_count": 18,
-    "last_updated": "2024-03-10"
-  },
-  {
-    "name": "TPC Sawgrass (The Players Stadium)",
-    "lat": 30.1983,
-    "lon": -81.3939,
-    "location": "Ponte Vedra Beach, Florida, United States",
-    "hole_count": 18,
-    "last_updated": "2024-03-10"
-  },
-  {
-    "name": "TPC Scottsdale (Champions Course)",
-    "lat": 33.6469,
-    "lon": -111.9056,
-    "location": "Scottsdale, Arizona, United States",
-    "hole_count": 18,
-    "last_updated": "2024-02-05"
-  },
-  {
-    "name": "TPC Scottsdale (Stadium Course)",
-    "lat": 33.6406,
-    "lon": -111.9103,
-    "location": "Scottsdale, Arizona, United States",
-    "hole_count": 18,
-    "last_updated": "2024-02-05"
   },
   {
     "name": "TPC Stonebrae",
@@ -44131,22 +44375,6 @@
     "name": "Turlock Golf & Country Club",
     "lat": 37.435547,
     "lon": -120.828091,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Turnberry (Ailsa Course)",
-    "lat": 55.3161,
-    "lon": -4.8394,
-    "location": "Turnberry, South Ayrshire, Scotland, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-07-05"
-  },
-  {
-    "name": "Turnberry Golf Club",
-    "lat": 42.225838,
-    "lon": -88.370515,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -44771,14 +44999,6 @@
     "name": "Valdosta Country Club",
     "lat": 30.887376,
     "lon": -83.292905,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Valhalla Golf Club",
-    "lat": 38.238998,
-    "lon": -85.475894,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -45816,22 +46036,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Waterville Golf Course",
-    "lat": 39.685992,
-    "lon": -96.731085,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Waterville Golf Links",
-    "lat": 51.8286,
-    "lon": -10.1839,
-    "location": "Waterville, County Kerry, Ireland",
-    "hole_count": 18,
-    "last_updated": "2024-06-20"
-  },
-  {
     "name": "Watford City Golf Course",
     "lat": 47.810825,
     "lon": -103.254965,
@@ -46131,22 +46335,6 @@
     "name": "Wendell Country Club",
     "lat": 35.76967,
     "lon": -78.397083,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Wentworth Club (West Course)",
-    "lat": 51.3986,
-    "lon": -0.5969,
-    "location": "Virginia Water, Surrey, England, United Kingdom",
-    "hole_count": 18,
-    "last_updated": "2024-09-01"
-  },
-  {
-    "name": "Wentworth Golf Club",
-    "lat": 28.144473,
-    "lon": -82.696096,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -46712,30 +46900,6 @@
     "last_updated": "2026-10-12"
   },
   {
-    "name": "Whistling Straits",
-    "lat": 43.849161,
-    "lon": -87.74592,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Whistling Straits (Irish Course)",
-    "lat": 43.8458,
-    "lon": -87.7389,
-    "location": "Sheboygan, Wisconsin, United States",
-    "hole_count": 18,
-    "last_updated": "2024-06-15"
-  },
-  {
-    "name": "Whistling Straits (Straits Course)",
-    "lat": 43.8508,
-    "lon": -87.7347,
-    "location": "Sheboygan, Wisconsin, United States",
-    "hole_count": 18,
-    "last_updated": "2024-06-15"
-  },
-  {
     "name": "White Barn Par 3 Golf",
     "lat": 36.14564,
     "lon": -97.036286,
@@ -46747,14 +46911,6 @@
     "name": "White Birch Hills Golf Course",
     "lat": 43.639218,
     "lon": -84.040654,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "White Bluff Old Course",
-    "lat": 32.016423,
-    "lon": -97.413954,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -46995,14 +47151,6 @@
     "name": "Wicker Hills Golf Club",
     "lat": 44.451923,
     "lon": -83.817862,
-    "location": "Cached Course",
-    "hole_count": 18,
-    "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Wicker Memorial Park Golf Course",
-    "lat": 41.57034,
-    "lon": -87.446242,
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
@@ -47710,14 +47858,6 @@
     "location": "Cached Course",
     "hole_count": 18,
     "last_updated": "2026-10-12"
-  },
-  {
-    "name": "Winged Foot Golf Club (West Course)",
-    "lat": 40.9575,
-    "lon": -73.7547,
-    "location": "Mamaroneck, New York, United States",
-    "hole_count": 18,
-    "last_updated": "2024-03-25"
   },
   {
     "name": "WingHaven Country Club",

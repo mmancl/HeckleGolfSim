@@ -1171,7 +1171,13 @@ def update_global_catalog(new_entries: list, catalog_path: str):
             if entry.get("rating", 0.0) > 0.0:
                 merged[key]["rating"] = max(merged[key].get("rating", 0.0), entry["rating"])
 
-    final_list = sorted(merged.values(), key=lambda x: x["name"].lower())
+    for c in merged.values():
+        if not c.get("is_pga_tour"):
+            clean_name = " " + re.sub(r'[^a-z0-9]+', ' ', c["name"].lower()).strip() + " "
+            if any(f" {kw} " in clean_name or clean_name.strip() == kw for kw in PGA_TOUR_AND_MAJOR_COURSES):
+                c["is_pga_tour"] = True
+
+    final_list = sorted(merged.values(), key=lambda x: (not bool(x.get("is_pga_tour", False)), x["name"].lower()))
     with open(catalog_path, "w", encoding="utf-8") as f:
         json.dump(final_list, f, indent=2, ensure_ascii=False)
 

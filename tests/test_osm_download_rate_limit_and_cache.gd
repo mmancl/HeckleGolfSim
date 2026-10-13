@@ -53,16 +53,24 @@ func _process(_delta: float) -> bool:
 		"Search bar placeholder must guide user on cached vs OSM download: " + placeholder)
 	print("  PASS: Search input placeholder text is correct: " + placeholder)
 
-	# 3. Verify all cached courses are listed and alphabetically sorted
+	# 3. Verify all cached courses are listed with PGA Tour & Major courses first, then other courses (both alphabetically sorted)
 	var all_cached = instance.get("_all_cached_courses")
 	assert(all_cached is Array and not all_cached.is_empty(), "Cached courses catalog must not be empty")
 	print("  PASS: Loaded %d cached courses into catalog." % all_cached.size())
 
+	var saw_non_pga = false
 	for i in range(all_cached.size() - 1):
-		var name_a = all_cached[i].get("name", "").to_lower()
-		var name_b = all_cached[i + 1].get("name", "").to_lower()
-		assert(name_a <= name_b, "Cached courses must be sorted alphabetically: '%s' vs '%s'" % [name_a, name_b])
-	print("  PASS: Cached courses are strictly sorted in alphabetical order.")
+		var is_pga_a: bool = instance.call("is_pga_tour_course", all_cached[i])
+		var is_pga_b: bool = instance.call("is_pga_tour_course", all_cached[i + 1])
+		if not is_pga_a:
+			saw_non_pga = true
+		if saw_non_pga:
+			assert(not is_pga_b, "PGA course '%s' found after non-PGA course" % all_cached[i + 1].get("name", ""))
+		if is_pga_a == is_pga_b:
+			var name_a = all_cached[i].get("name", "").to_lower()
+			var name_b = all_cached[i + 1].get("name", "").to_lower()
+			assert(name_a <= name_b, "Cached courses within tier must be sorted alphabetically: '%s' vs '%s'" % [name_a, name_b])
+	print("  PASS: Cached courses are strictly ordered with PGA Tour & Major venues first, followed by other courses (each tier sorted alphabetically).")
 
 	# 4. Verify results_list first item is the instruction header
 	assert(results_list.item_count > 1, "results_list must contain header plus course items")
