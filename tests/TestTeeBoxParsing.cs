@@ -14,6 +14,8 @@ public partial class TestTeeBoxParsing : Node
 
         TestParseHoleRefs();
         TestParseTeeColors();
+        TestTeeDistancesAndPlacement();
+        TestLegacyTeeFallbacksWithoutDistances();
 
         GD.Print("==================================================");
         GD.Print("ALL TEE BOX & COLOR PARSING TESTS PASSED!");
@@ -89,5 +91,68 @@ public partial class TestTeeBoxParsing : Node
             throw new Exception($"Expected fallback Blue, got [{string.Join(", ", c7)}]");
 
         GD.Print("  PASS: ParseTeeColors correctly extracted single and multi-color tees.");
+    }
+
+    private static void TestTeeDistancesAndPlacement()
+    {
+        GD.Print("\n--- Test 3: Tee distances and placement ---");
+
+        var distances = OsmMapLoader.ParseTeeDistances(new Dictionary<string, string>
+        {
+            { "dist:blue", "440" },
+            { "dist:white", "128 m" }
+        });
+        if (Math.Abs(distances["Blue"] - 402.336f) > 0.01f)
+            throw new Exception($"Unitless dist:blue should parse as 440 yards, got {distances["Blue"]} meters");
+        if (Math.Abs(distances["White"] - 128f) > 0.01f)
+            throw new Exception($"Explicit meter dist:white should remain 128 meters, got {distances["White"]}");
+
+        var holePath = new List<float[]>
+        {
+            new[] { 0f, 0f },
+            new[] { 0f, 100f },
+            new[] { 100f, 100f }
+        };
+        var target = OsmMapLoader.GetPointAtDistanceFromHoleEnd(holePath, 50f);
+        if (target.DistanceTo(new Vector2(50f, 100f)) > 0.01f)
+            throw new Exception($"Distance should be measured backward from the hole end, got {target}");
+
+        var teePolygon = new[]
+        {
+            new Vector2(40f, 90f),
+            new Vector2(60f, 90f),
+            new Vector2(60f, 110f),
+            new Vector2(40f, 110f)
+        };
+        var closestTeePoint = OsmMapLoader.GetClosestPointInPolygon(new Vector2(20f, 100f), teePolygon);
+        if (closestTeePoint.DistanceTo(new Vector2(40f, 100f)) > 0.01f)
+            throw new Exception($"Tee placement should project to the closest point inside its color polygon, got {closestTeePoint}");
+        if (OsmMapLoader.GetDistanceToTeeCandidate(new Vector2(50f, 100f), new Vector2(0f, 0f), teePolygon) > 0.01f)
+            throw new Exception("An unreferenced tee inside an existing tee polygon should match that tee area by proximity.");
+
+        GD.Print("  PASS: dist:* units, backward path measurement, and tee-area projection.");
+    }
+
+    private static void TestLegacyTeeFallbacksWithoutDistances()
+    {
+        GD.Print("\n--- Test 4: Legacy tee fallbacks without distance tags ---");
+
+        var hole = new OsmMapLoader.HoleConfig
+        {
+            HoleLocation = new[] { 100f, 0f },
+            TeeBoxes = new Dictionary<string, float[]>
+            {
+                { "Gold", new[] { 0f, 0f } },
+                { "Orange", new[] { 80f, 0f } }
+            }
+        };
+        OsmMapLoader.ApplyLegacyTeeFallbacks(hole);
+
+        if (hole.TeeBoxes["Blue"][0] != 0f || hole.TeeBoxes["White"][0] != 0f)
+            throw new Exception("Without dist:* tags, Blue and White should retain the legacy fallback tee.");
+        if (hole.TeeBoxes["Red"][0] != 80f)
+            throw new Exception("Without dist:* tags, Red should retain the legacy tee closest to the pin.");
+
+        GD.Print("  PASS: Legacy standard-color tee fallbacks remain active without dist:* tags.");
     }
 }

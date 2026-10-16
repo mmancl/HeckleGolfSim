@@ -24,11 +24,15 @@ var hud_top_left_widget: VBoxContainer = null
 var _last_hud_strokes: int = -1
 var _last_hud_player_name: String = ""
 var _last_hud_hole_index: int = -1
+var _last_course_hole_id: String = ""
 
 const ScorecardBadge = preload("res://UI/scorecard_badge.gd")
+const HoleShotPathDiagram = preload("res://UI/hole_shot_path_diagram.gd")
 
 @onready var hud_scorecard = Panel.new()
 @onready var scorecard_grid = GridContainer.new()
+var _scorecard_content: VBoxContainer = null
+var _hole_shot_summary: VBoxContainer = null
 var _scorecard_action_btn: Button = null
 var _scorecard_countdown_container: HBoxContainer = null
 var _scorecard_countdown_lbl: Label = null
@@ -1671,7 +1675,7 @@ func _setup_hud() -> void:
 	hud_scorecard.grow_vertical = Control.GROW_DIRECTION_BOTH
 	
 	var card_style = StyleBoxFlat.new()
-	card_style.bg_color = Color(0.06, 0.09, 0.14, 0.96)
+	card_style.bg_color = Color(0.06, 0.09, 0.14, 1.0)
 	card_style.border_width_left = 2
 	card_style.border_width_top = 2
 	card_style.border_width_right = 2
@@ -1717,7 +1721,19 @@ func _setup_hud() -> void:
 	scorecard_grid.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	scorecard_grid.add_theme_constant_override("h_separation", 2)
 	scorecard_grid.add_theme_constant_override("v_separation", 2)
-	scroll.add_child(scorecard_grid)
+	_scorecard_content = VBoxContainer.new()
+	_scorecard_content.name = "ScorecardContent"
+	_scorecard_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scorecard_content.add_theme_constant_override("separation", 16)
+	scroll.add_child(_scorecard_content)
+	_scorecard_content.add_child(scorecard_grid)
+
+	_hole_shot_summary = VBoxContainer.new()
+	_hole_shot_summary.name = "HoleShotSummary"
+	_hole_shot_summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_hole_shot_summary.add_theme_constant_override("separation", 8)
+	_hole_shot_summary.visible = false
+	_scorecard_content.add_child(_hole_shot_summary)
 	
 	var actions_row = HBoxContainer.new()
 	actions_row.name = "ScorecardActionsRow"
@@ -3137,14 +3153,15 @@ func _on_active_player_changed(player: Dictionary) -> void:
 		if "_aim_is_manual" in course_instance:
 			course_instance.set("_aim_is_manual", false)
 		var hole_name = active_hole.get("Name", hole_id)
-		var cur_hole_name = course_instance.get("current_hole_name")
-		var is_new_hole = (cur_hole_name != hole_name) or (course_instance.get("current_hole_location") != null and course_instance.current_hole_location.is_zero_approx())
+		var current_hole_location = course_instance.get("current_hole_location")
+		var is_new_hole = _last_course_hole_id != hole_id or current_hole_location == null or current_hole_location.is_zero_approx()
 		
 		course_instance.current_hole_name = hole_name
 		course_instance.current_hole_par = active_hole.get("Par", 4)
 		var hole_loc = active_hole.get("Hole Location")
 		if hole_loc != null and is_new_hole:
 			course_instance.current_hole_location = Vector3(hole_loc[0], course_instance.get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
+			_last_course_hole_id = hole_id
 			
 			if course_instance.has_node("PinMarker"):
 				course_instance.get_node("PinMarker").global_position = course_instance.current_hole_location
@@ -3193,7 +3210,11 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			if player_node_ref != null:
 				player_node_ref.current_lie_type = initial_lie
 				if player_node_ref.get("_last_starting_pos") != null:
-					player_node_ref._last_starting_pos = player.get("last_starting_pos", player["position"])
+					var player_start_pos = player.get("last_starting_pos", player.get("position", Vector3.ZERO))
+					if typeof(player_start_pos) != TYPE_VECTOR3:
+						player_start_pos = player.get("position", Vector3.ZERO)
+					if typeof(player_start_pos) == TYPE_VECTOR3:
+						player_node_ref._last_starting_pos = player_start_pos
 			active_ball.reset()
 			
 			# Recalculate lie immediately after teleporting/resetting
@@ -5104,8 +5125,185 @@ func _get_hole_distance(hole_id: String, tee_color: String) -> int:
 	return 0
 
 
+func _get_hole_shot_positions(player: Dictionary, hole_id: String, tee_boxes: Dictionary, world_to_course: Transform3D) -> Array[Vector3]:
+	var shot_stats: Array = []
+	var player_stats = player.get("shot_stats", {})
+	if typeof(player_stats) == TYPE_DICTIONARY and typeof(player_stats.get(hole_id, [])) == TYPE_ARRAY:
+		shot_stats = player_stats[hole_id]
+
+	var fallback_positions: Array[Vector3] = []
+	var tee_position: Array = MultiplayerManager.get_tee_position_from_boxes(tee_boxes, player.get("tee", "Blue"))
+	if tee_position.size() >= 2:
+		fallback_positions.append(Vector3(float(tee_position[0]), 0.0, float(tee_position[1])))
+	var shot_history = player.get("shot_history", [])
+	if typeof(shot_history) == TYPE_ARRAY:
+		for end_position in shot_history:
+			if typeof(end_position) == TYPE_VECTOR3:
+				fallback_positions.append(world_to_course * end_position)
+	return HoleShotPathDiagram.get_positions_from_shot_stats(shot_stats, fallback_positions, world_to_course)
+
+
+func _populate_hole_shot_summary(action_type: String) -> void:
+	if _hole_shot_summary == null:
+		return
+	for child in _hole_shot_summary.get_children():
+		child.queue_free()
+	_hole_shot_summary.visible = action_type == "hole_completed"
+	if not _hole_shot_summary.visible or MultiplayerManager.hole_ids.is_empty():
+		return
+
+	var hole_index = MultiplayerManager.current_hole_index
+	if hole_index < 0 or hole_index >= MultiplayerManager.hole_ids.size():
+		return
+	var hole_id: String = MultiplayerManager.hole_ids[hole_index]
+
+	var player_order: Array[Dictionary] = []
+	for player_index in range(MultiplayerManager.players.size()):
+		var player: Dictionary = MultiplayerManager.players[player_index]
+		var hole_scores: Dictionary = player.get("hole_scores", {})
+		var score = hole_scores.get(hole_id)
+		if score == null and player.get("active", true):
+			score = player.get("strokes", 0)
+		var previous_hole_id = MultiplayerManager.hole_ids[hole_index - 1] if hole_index > 0 else ""
+		var previous_score = hole_scores.get(previous_hole_id) if not previous_hole_id.is_empty() else null
+		player_order.append({
+			"player": player,
+			"score": int(round(float(score))) if score != null else 2147483647,
+			"previous_score": int(round(float(previous_score))) if previous_score != null else 2147483647,
+			"player_index": player_index
+		})
+	player_order.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if a["score"] != b["score"]:
+			return a["score"] < b["score"]
+		if a["previous_score"] != b["previous_score"]:
+			return a["previous_score"] < b["previous_score"]
+		return a["player_index"] < b["player_index"]
+	)
+
+	var current_hole: Dictionary = MultiplayerManager.hole_info.get(hole_id, {})
+	var tee_boxes: Dictionary = current_hole.get("Tee Boxes", {})
+	var hole_location: Array = current_hole.get("Hole Location", [0.0, 0.0])
+	var green_position := Vector3.ZERO
+	if hole_location.size() >= 2:
+		green_position = Vector3(float(hole_location[0]), 0.0, float(hole_location[1]))
+	var course_manager = get_node_or_null("/root/CourseManager")
+	var config_path: String = course_manager.call("get_current_config_path") if course_manager != null and course_manager.has_method("get_current_config_path") else ""
+	var satellite_path = config_path.get_base_dir().path_join("satellite.png") if not config_path.is_empty() else ""
+	var satellite_image: Image = null
+	var satellite_texture: Texture2D = null
+	if not satellite_path.is_empty() and FileAccess.file_exists(satellite_path):
+		satellite_image = Image.load_from_file(satellite_path)
+		if satellite_image.is_empty():
+			push_warning("[CoursePlay] Could not load satellite image for shot summary: %s" % satellite_path)
+		else:
+			satellite_texture = ImageTexture.create_from_image(satellite_image)
+	var course_info_value = course_manager.get("course_info") if course_manager != null else {}
+	var course_info: Dictionary = course_info_value if typeof(course_info_value) == TYPE_DICTIONARY else {}
+	var satellite_bounds: Array = []
+	var bounds_version := int(course_info.get("Satellite Image Bounds Version", 0))
+	if bounds_version == 5:
+		var saved_satellite_bounds = course_info.get("Satellite Image Bounds", [])
+		if typeof(saved_satellite_bounds) == TYPE_ARRAY:
+			satellite_bounds = saved_satellite_bounds
+	var cart_paths: Array[PackedVector2Array] = []
+	var saved_cart_paths = course_info.get("Cart Paths", [])
+	if typeof(saved_cart_paths) == TYPE_ARRAY:
+		for saved_path in saved_cart_paths:
+			if typeof(saved_path) != TYPE_ARRAY:
+				continue
+			var cart_path := PackedVector2Array()
+			for saved_point in saved_path:
+				if typeof(saved_point) == TYPE_ARRAY and saved_point.size() >= 2:
+					cart_path.append(Vector2(float(saved_point[0]), float(saved_point[1])))
+			if cart_path.size() >= 2:
+				cart_paths.append(cart_path)
+	var player_cards = GridContainer.new()
+	player_cards.name = "HoleShotPlayerCards"
+	player_cards.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	player_cards.add_theme_constant_override("h_separation", 10)
+	player_cards.add_theme_constant_override("v_separation", 10)
+	var cards_available_width = get_viewport().get_visible_rect().size.x * 0.92 - 64.0
+	player_cards.columns = mini(player_order.size(), maxi(1, int(floor((cards_available_width + 10.0) / 270.0))))
+	_hole_shot_summary.add_child(player_cards)
+	var card_width = clampf((cards_available_width - (player_cards.columns - 1) * 10.0) / player_cards.columns, 190.0, 300.0)
+	var hole_tee_positions: Array[Vector3] = []
+	for tee_value in tee_boxes.values():
+		if typeof(tee_value) == TYPE_ARRAY and tee_value.size() >= 2:
+			hole_tee_positions.append(Vector3(float(tee_value[0]), 0.0, float(tee_value[1])))
+	var world_to_course := Transform3D.IDENTITY
+	if course_instance is Node3D:
+		world_to_course = (course_instance as Node3D).global_transform.affine_inverse()
+	var shared_shot_positions: Array[Vector3] = []
+	for player_entry in player_order:
+		shared_shot_positions.append_array(_get_hole_shot_positions(player_entry["player"], hole_id, tee_boxes, world_to_course))
+	for rank in range(player_order.size()):
+		var player: Dictionary = player_order[rank]["player"]
+		var positions := _get_hole_shot_positions(player, hole_id, tee_boxes, world_to_course)
+
+		var shot_distances: Array[int] = []
+		for shot_index in range(maxi(0, positions.size() - 1)):
+			var start_position = positions[shot_index]
+			var end_position = positions[shot_index + 1]
+			var distance_yards = Vector2(start_position.x, start_position.z).distance_to(Vector2(end_position.x, end_position.z)) * 1.09361
+			shot_distances.append(int(round(distance_yards)))
+
+		var player_card = PanelContainer.new()
+		player_card.custom_minimum_size = Vector2(card_width, 0)
+		player_card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		var card_style = StyleBoxFlat.new()
+		card_style.bg_color = Color(0.10, 0.14, 0.21, 0.92)
+		card_style.border_width_left = 3
+		card_style.border_width_top = 1
+		card_style.border_width_right = 1
+		card_style.border_width_bottom = 1
+		var player_color := Color(0.35, 0.65, 0.9)
+		var color_value = player.get("color")
+		if typeof(color_value) == TYPE_COLOR:
+			player_color = color_value
+		var is_hole_winner = player_order[rank]["score"] == player_order[0]["score"] and player_order[rank]["score"] < 2147483647
+		card_style.border_color = Color(1.0, 0.85, 0.38) if is_hole_winner else player_color
+		card_style.content_margin_left = 10
+		card_style.content_margin_right = 10
+		card_style.content_margin_top = 7
+		card_style.content_margin_bottom = 7
+		player_card.add_theme_stylebox_override("panel", card_style)
+		var player_row = VBoxContainer.new()
+		player_row.add_theme_constant_override("separation", 3)
+		player_card.add_child(player_row)
+
+		var score_label = Label.new()
+		var score_text = "No score" if player_order[rank]["score"] == 2147483647 else "%d strokes" % player_order[rank]["score"]
+		score_label.text = "%d. %s — %s · %d shots" % [rank + 1, player.get("name", "Player"), score_text, shot_distances.size()]
+		score_label.add_theme_font_size_override("font_size", 17)
+		score_label.add_theme_color_override("font_color", Color.WHITE)
+		player_row.add_child(score_label)
+
+		if shot_distances.is_empty():
+			var no_shots_label = Label.new()
+			no_shots_label.text = "No shot path recorded"
+			no_shots_label.add_theme_color_override("font_color", Color(0.82, 0.87, 0.94))
+			player_row.add_child(no_shots_label)
+		else:
+			var shot_path = HoleShotPathDiagram.new()
+			var image_width = card_width - 20.0
+			shot_path.custom_minimum_size = Vector2(image_width, image_width)
+			shot_path.set_shot_path(
+				positions,
+				shot_distances,
+				green_position,
+				satellite_texture,
+				satellite_bounds,
+				hole_tee_positions,
+				shared_shot_positions,
+				cart_paths
+			)
+			player_row.add_child(shot_path)
+		player_cards.add_child(player_card)
+
+
 func _populate_scorecard(action_type: String) -> void:
 	_last_scorecard_action_type = action_type
+	_populate_hole_shot_summary(action_type)
 	
 	# Clear previous cells
 	for child in scorecard_grid.get_children():
@@ -5308,7 +5506,7 @@ func _populate_scorecard(action_type: String) -> void:
 	for i in range(front_holes.size()):
 		var hole_id = front_holes[i]
 		var hole = MultiplayerManager.hole_info.get(hole_id, {})
-		var par = hole.get("Par", 4)
+		var par = int(round(float(hole.get("Par", 4))))
 		front_par_sum += par
 		if render_front:
 			var is_act = (MultiplayerManager.get_hole_number_from_id(hole_id, i) == active_hole_num)
@@ -5322,7 +5520,7 @@ func _populate_scorecard(action_type: String) -> void:
 		for i in range(back_holes.size()):
 			var hole_id = back_holes[i]
 			var hole = MultiplayerManager.hole_info.get(hole_id, {})
-			var par = hole.get("Par", 4)
+			var par = int(round(float(hole.get("Par", 4))))
 			back_par_sum += par
 			if render_back:
 				var is_act = (MultiplayerManager.get_hole_number_from_id(hole_id, 9 + i) == active_hole_num)
@@ -5489,7 +5687,7 @@ func _populate_scorecard(action_type: String) -> void:
 					front_score_sum += s
 			
 			var hole = MultiplayerManager.hole_info.get(hole_id, {})
-			var par = hole.get("Par", 4)
+			var par = int(round(float(hole.get("Par", 4))))
 			if display_score != "-" and display_score != "*":
 				if is_skins_mode:
 					var h_res = MultiplayerManager.hole_skins_results.get(hole_id, {})
@@ -5533,7 +5731,7 @@ func _populate_scorecard(action_type: String) -> void:
 						back_score_sum += s
 						
 				var hole = MultiplayerManager.hole_info.get(hole_id, {})
-				var par = hole.get("Par", 4)
+				var par = int(round(float(hole.get("Par", 4))))
 				if display_score != "-" and display_score != "*":
 					if is_skins_mode:
 						var h_res = MultiplayerManager.hole_skins_results.get(hole_id, {})

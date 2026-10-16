@@ -2357,6 +2357,7 @@ func _update_surface_from_collider(collider: Object) -> void:
 	var on_green_geo = (not on_wrong_green) and _is_position_on_green(global_position)
 	var is_sand = (collider.has_meta("is_sand") and bool(collider.get_meta("is_sand"))) or name_lower.contains("bunker") or name_lower.contains("sand") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.BUNKER)
 	var is_green = (not on_wrong_green) and (on_green_geo or name_lower.contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.GREEN))
+	var is_cart_path = (collider.has_meta("is_cart_path") and bool(collider.get_meta("is_cart_path"))) or name_lower.contains("cartpath")
 	var is_tee = name_lower.contains("tee")
 	var is_fairway = on_wrong_green or name_lower.contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.FAIRWAY)
 	var is_rough = (not on_wrong_green) and (not on_green_geo) and (name_lower.contains("rough") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.ROUGH))
@@ -2372,6 +2373,11 @@ func _update_surface_from_collider(collider: Object) -> void:
 	elif is_green:
 		lie_type = "green"
 		set_surface(PhysicsEnums.SurfaceType.GREEN)
+		if changed_sand:
+			_apply_surface_params()
+	elif is_cart_path:
+		lie_type = "fairway"
+		set_surface(PhysicsEnums.SurfaceType.CART_PATH)
 		if changed_sand:
 			_apply_surface_params()
 	elif is_tee:
@@ -2557,12 +2563,14 @@ func _update_surface_from_underneath() -> void:
 		
 		# 1. Check for water
 		if collider.has_meta("is_water") and bool(collider.get_meta("is_water")):
-			priority = 6
+			priority = 7
 		# 2. Check for sand
 		elif (collider.has_meta("is_sand") and bool(collider.get_meta("is_sand"))) or collider.name.to_lower().contains("bunker") or collider.name.to_lower().contains("sand") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.BUNKER):
-			priority = 5
+			priority = 6
 		# 3. Check for green
 		elif (not _is_position_on_wrong_green(global_position)) and (on_green_geo or collider.name.to_lower().contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.GREEN)):
+			priority = 5
+		elif (collider.has_meta("is_cart_path") and bool(collider.get_meta("is_cart_path"))) or collider.name.to_lower().contains("cartpath"):
 			priority = 4
 		# 4. Check for tee
 		elif collider.name.to_lower().contains("tee"):

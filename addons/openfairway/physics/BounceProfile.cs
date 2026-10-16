@@ -110,6 +110,28 @@ public sealed class BounceProfile
         RolloutHighSpinRetention = 0.78f
     };
 
+    public static BounceProfile CartPath { get; } = new()
+    {
+        Name = "CartPath",
+        Version = "1.0",
+        CorBaseA = 0.75f,
+        CorBaseB = -0.008f,
+        CorBaseC = 0.00015f,
+        CorHighSpeedCap = 0.62f,
+        CorHighSpeedThreshold = 20.0f,
+        CorKillThreshold = 1.0f,
+        FlightTangentialRetentionBase = 0.88f,
+        ShallowImpactRetentionMin = 0.84f,
+        ShallowImpactRetentionMax = 0.94f,
+        RolloutLowSpinRetention = 0.94f,
+        RolloutHighSpinRetention = 0.84f,
+        SpinCorLowSpinMaxReduction = 0.15f,
+        SpinCorHighSpinAdditionalReduction = 0.15f,
+        RolloutBounceCorKillThreshold = 1.5f,
+        RolloutBounceCorScale = 0.75f,
+        PennerLowEnergyThreshold = 18.0f
+    };
+
     public static BounceProfile Bunker { get; } = new()
     {
         Name = "Bunker",
@@ -144,6 +166,7 @@ public sealed class BounceProfile
             PhysicsEnums.SurfaceType.Rough => Rough,
             PhysicsEnums.SurfaceType.FairwaySoft => FairwaySoft,
             PhysicsEnums.SurfaceType.Firm => Firm,
+            PhysicsEnums.SurfaceType.CartPath => CartPath,
             _ => Default
         };
     }

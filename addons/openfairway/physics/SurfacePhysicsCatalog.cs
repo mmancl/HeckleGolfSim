@@ -59,6 +59,20 @@ public static class SurfacePhysicsCatalog
         spinbackSpeedEndMps: 0.0f
     );
 
+    private static readonly SurfacePhysicsSettings CartPath = new(
+        PhysicsEnums.SurfaceType.CartPath,
+        kineticFriction: 0.20f,
+        rollingFriction: 0.035f,
+        grassViscosity: 0.0003f,
+        criticalAngle: 0.20f,
+        spinbackResponseScale: 0.0f,
+        spinbackThetaBoostMax: 0.0f,
+        spinbackSpinStartRpm: 0.0f,
+        spinbackSpinEndRpm: 0.0f,
+        spinbackSpeedStartMps: 0.0f,
+        spinbackSpeedEndMps: 0.0f
+    );
+
     private static readonly SurfacePhysicsSettings Green = new(
         PhysicsEnums.SurfaceType.Green,
         kineticFriction: 0.58f,
@@ -94,6 +108,7 @@ public static class SurfacePhysicsCatalog
             PhysicsEnums.SurfaceType.Rough => Rough,
             PhysicsEnums.SurfaceType.FairwaySoft => FairwaySoft,
             PhysicsEnums.SurfaceType.Firm => Firm,
+            PhysicsEnums.SurfaceType.CartPath => CartPath,
             PhysicsEnums.SurfaceType.Green => Green,
             PhysicsEnums.SurfaceType.Bunker => Bunker,
             _ => Fairway
