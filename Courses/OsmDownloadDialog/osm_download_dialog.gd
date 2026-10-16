@@ -535,7 +535,7 @@ func _display_courses_in_list(courses: Array, is_search_results: bool = false) -
 	for item in courses:
 		var name_text = item.get("name", "Unnamed Course")
 		var loc_text = item.get("location", "")
-		var holes = item.get("hole_count", 0)
+		var holes = int(item.get("hole_count", 0))
 		var updated_ts = item.get("last_updated", "")
 		var is_cached = _is_course_cached(item)
 
@@ -941,7 +941,7 @@ func _on_download_pressed() -> void:
 		return
 
 	status_label.add_theme_color_override("font_color", Color(0.78, 0.82, 0.88, 1.0))
-	status_label.text = "Downloading and generating 3D map for '" + course_name + "'..."
+	status_label.text = "Downloading course map and generating playable layouts for '" + course_name + "'..."
 	_set_ui_disabled(true)
 	download_button.disabled = true
 	cancel_button.disabled = true
