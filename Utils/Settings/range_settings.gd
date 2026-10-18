@@ -11,10 +11,11 @@ var altitude := Setting.new(0.0, -1000.0, 10000.0)
 var surface_type := Setting.new(PhysicsEnums.SurfaceType.FAIRWAY)
 var shot_tracer_count := Setting.new(10, 0, 10)
 var ball_type := Setting.new(0)
-var camera_height := Setting.new(1.65, 0.5, 10.0)
-var camera_distance := Setting.new(5.2, 1.0, 30.0)
+var camera_height := Setting.new(1.35, 0.5, 10.0)
+var camera_distance := Setting.new(3.6, 1.0, 30.0)
 var camera_fov := Setting.new(55.0, 1.0, 90.0)
 var camera_far := Setting.new(1000.0, 100.0, 1000.0)
+var ball_visual_scale := Setting.new(1.35, 1.0, 2.5)
 var dof_enabled := Setting.new(false)
 var dof_blur_amount := Setting.new(0.03, 0.0, 0.3)
 var vignette_enabled := Setting.new(false)
@@ -73,6 +74,7 @@ var screen_offset_value := Setting.new(0.0, -1.0, 1.0)
 var screen_offset_putter_value := Setting.new(0.0, -1.0, 1.0)
 var debug_logging_enabled := Setting.new(false)
 var debug_log_path := Setting.new("user://debug.log")
+var track_club_averages := Setting.new(true)
 
 func _init():
 	init({
@@ -90,6 +92,7 @@ func _init():
 		"camera_distance": camera_distance,
 		"camera_fov": camera_fov,
 		"camera_far": camera_far,
+		"ball_visual_scale": ball_visual_scale,
 		"dof_enabled": dof_enabled,
 		"dof_blur_amount": dof_blur_amount,
 		"vignette_enabled": vignette_enabled,
@@ -148,6 +151,7 @@ func _init():
 		"screen_offset_putter_value": screen_offset_putter_value,
 		"debug_logging_enabled": debug_logging_enabled,
 		"debug_log_path": debug_log_path,
+		"track_club_averages": track_club_averages,
 	})
 
 

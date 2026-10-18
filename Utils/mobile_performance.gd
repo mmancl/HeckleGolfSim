@@ -41,16 +41,16 @@ static func optimize_sky3d(sky3d: Node) -> void:
 	if "environment" in sky3d and sky3d.environment != null:
 		sky3d.environment.ssao_enabled = false
 		if sky3d.environment.sky != null:
-			sky3d.environment.sky.process_mode = Sky.PROCESS_MODE_REALTIME
+			sky3d.environment.sky.process_mode = Sky.PROCESS_MODE_QUALITY
 			sky3d.environment.sky.radiance_size = Sky.RADIANCE_SIZE_128
-	
+
 	# Reduce shadow quality on SunLight
 	var sun: DirectionalLight3D = null
 	if "sun" in sky3d and sky3d.sun != null:
 		sun = sky3d.sun
 	elif sky3d.has_node("SunLight"):
 		sun = sky3d.get_node("SunLight") as DirectionalLight3D
-	
+
 	if sun != null:
 		optimize_sun_light(sun)
 
@@ -86,8 +86,9 @@ static func optimize_environment(env: Environment) -> void:
 		return
 	env.ssao_enabled = false
 	if env.sky != null:
-		env.sky.process_mode = Sky.PROCESS_MODE_REALTIME
+		env.sky.process_mode = Sky.PROCESS_MODE_QUALITY
 		env.sky.radiance_size = Sky.RADIANCE_SIZE_128
+
 
 ## Call this once at game startup (e.g., in SceneManager)
 static func apply_global_render_settings(tree: SceneTree = null) -> void:
@@ -145,22 +146,29 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 	var is_low = quality == "Low"
 	var is_med = quality == "Medium"
 	var is_high = quality == "High"
+
+	# Convert any unbatched course Tree_*, Bush_*, and Rock_* nodes into MultiMesh chunks
+	if ResourceLoader.exists("res://HighFidelity/Foliage/procedural_tree_generator.gd"):
+		var ptg = load("res://HighFidelity/Foliage/procedural_tree_generator.gd")
+		if ptg != null:
+			ptg.convert_scene_foliage_to_multimesh(scene_root, false)
+
 	var stack: Array[Node] = [scene_root]
-	
+
 	var stipple_shader: Shader = null
 	var water_low_shader: Shader = null
-	
+
 	if is_low:
 		if ResourceLoader.exists("res://Courses/Environments/shaders/terrain_stipple.gdshader"):
 			stipple_shader = load("res://Courses/Environments/shaders/terrain_stipple.gdshader") as Shader
 		if ResourceLoader.exists("res://Courses/Environments/shaders/water_low.gdshader"):
 			water_low_shader = load("res://Courses/Environments/shaders/water_low.gdshader") as Shader
-	
+
 	while not stack.is_empty():
 		var n = stack.pop_back()
 		if n is MeshInstance3D:
 			var n_lower = n.name.to_lower()
-			
+
 			# 1. Terrain Mesh (e.g. UnifiedTerrain on golf courses)
 			var is_terrain = n.name == "UnifiedTerrain" or n_lower.contains("terrain")
 			if not is_terrain:
@@ -209,12 +217,12 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 					var splat_map = n.get_meta("orig_splat_map") if n.has_meta("orig_splat_map") else null
 					var ao_map = n.get_meta("orig_ao_map") if n.has_meta("orig_ao_map") else null
 					var sun_dir = n.get_meta("orig_sun_direction") if n.has_meta("orig_sun_direction") else null
-					
+
 					if splat_map == null and base_m is ShaderMaterial:
 						splat_map = (base_m as ShaderMaterial).get_shader_parameter("splat_map")
 						ao_map = (base_m as ShaderMaterial).get_shader_parameter("terrain_ao_map")
 						sun_dir = (base_m as ShaderMaterial).get_shader_parameter("sun_direction")
-					
+
 					if splat_map != null:
 						var stipple_mat = ShaderMaterial.new()
 						stipple_mat.shader = stipple_shader
@@ -225,10 +233,8 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 							stipple_mat.set_shader_parameter("sun_direction", sun_dir)
 						n.material_override = stipple_mat
 				elif is_med:
-					# Medium quality (former High): clear override to restore base PBR terrain_splat material
 					n.material_override = null
 				else:
-					# High quality: apply enhanced photorealistic terrain_splat_realistic material
 					var realistic_terrain = _create_realistic_terrain_material(base_m as ShaderMaterial, n)
 					if realistic_terrain != null:
 						n.material_override = realistic_terrain
@@ -261,10 +267,11 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 				else:
 					n.material_override = null
 
-			# 4. Foliage / Tree Meshes
+			# 4. Individual Foliage / Tree Meshes (e.g. Driving Range trees)
 			var is_foliage = false
 			var parent_name = n.get_parent().name.to_lower() if n.get_parent() != null else ""
-			if n_lower.contains("tree") or parent_name.contains("tree") or n_lower.contains("bush") or parent_name.contains("bush") or n_lower.contains("plant") or n_lower.contains("hedge") or n_lower.contains("shrub"):
+			var is_bush = n_lower.contains("bush") or parent_name.contains("bush") or n_lower.contains("shrub") or n_lower.contains("hedge")
+			if n_lower.contains("tree") or parent_name.contains("tree") or is_bush or n_lower.contains("plant"):
 				is_foliage = true
 			elif n.mesh != null and n.mesh.get_surface_count() > 0:
 				for s in range(n.mesh.get_surface_count()):
@@ -272,10 +279,15 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 					if sm != null and sm.resource_path.contains("shapespark-low-poly-exterior-plants"):
 						is_foliage = true
 						break
-			
+
 			if is_foliage and n.mesh != null:
 				if n.material_override != null:
 					n.material_override = null
+				n.visibility_range_end = (140.0 if is_bush else 200.0) if is_low else ((200.0 if is_bush else 340.0) if is_med else (280.0 if is_bush else 550.0))
+				n.visibility_range_end_margin = 20.0
+				n.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+				if is_bush:
+					n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 				for s in range(n.mesh.get_surface_count()):
 					var orig_m = n.mesh.surface_get_material(s)
 					var s_name = ""
@@ -286,71 +298,119 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 						if low_m != null:
 							n.set_surface_override_material(s, low_m)
 					elif is_med:
-						# Medium: restore standard original materials (former High)
 						n.set_surface_override_material(s, null)
 					else:
-						# High: enhanced realistic foliage shader with backlight & 3D canopy depth
 						var high_m = _get_realistic_tree_material(orig_m, s_name, s)
 						if high_m != null:
 							n.set_surface_override_material(s, high_m)
 						else:
 							n.set_surface_override_material(s, null)
 
+		# 5. Spatial MultiMesh Foliage Chunks (TreeChunk_*, BushChunk_*, RockChunk_*)
+		elif n is MultiMeshInstance3D:
+			var mmi := n as MultiMeshInstance3D
+			var m_name := mmi.name.to_lower()
+			var is_tree_chunk := m_name.begins_with("treechunk")
+			var is_bush_chunk := m_name.begins_with("bushchunk")
+			var is_rock_chunk := m_name.begins_with("rockchunk")
+			if (is_tree_chunk or is_bush_chunk or is_rock_chunk) and mmi.multimesh != null and mmi.multimesh.mesh != null:
+				if is_tree_chunk:
+					mmi.visibility_range_end = 190.0 if is_low else (330.0 if is_med else 560.0)
+					mmi.visibility_range_end_margin = 30.0
+					mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+				elif is_bush_chunk:
+					mmi.visibility_range_end = 120.0 if is_low else (190.0 if is_med else 270.0)
+					mmi.visibility_range_end_margin = 20.0
+					mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				else:
+					mmi.visibility_range_end = 130.0 if is_low else (200.0 if is_med else 290.0)
+					mmi.visibility_range_end_margin = 20.0
+					mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+				if is_tree_chunk or is_bush_chunk:
+					var mesh := mmi.multimesh.mesh
+					if not mmi.has_meta("orig_surface_mats"):
+						var orig_mats: Array = []
+						for s in range(mesh.get_surface_count()):
+							orig_mats.append(mesh.surface_get_material(s))
+						mmi.set_meta("orig_surface_mats", orig_mats)
+					var cached_mats: Array = mmi.get_meta("orig_surface_mats")
+					for s in range(mesh.get_surface_count()):
+						var orig_m: Material = cached_mats[s] if s < cached_mats.size() else mesh.surface_get_material(s)
+						var s_name := ""
+						if mesh is ArrayMesh:
+							s_name = (mesh as ArrayMesh).surface_get_name(s)
+						if is_low:
+							var low_m = _get_low_tree_material(orig_m, s_name, s)
+							if low_m != null:
+								mesh.surface_set_material(s, low_m)
+						elif is_med:
+							mesh.surface_set_material(s, orig_m)
+						else:
+							var high_m = _get_realistic_tree_material(orig_m, s_name, s)
+							if high_m != null:
+								mesh.surface_set_material(s, high_m)
+							else:
+								mesh.surface_set_material(s, orig_m)
+
 		elif n is DirectionalLight3D:
 			if is_low:
 				n.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
-				n.directional_shadow_max_distance = 200.0
+				n.directional_shadow_max_distance = 180.0
 				n.directional_shadow_blend_splits = false
+				RenderingServer.directional_soft_shadow_filter_set_quality(RenderingServer.SHADOW_QUALITY_SOFT_LOW)
 			elif is_med:
 				n.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if is_mobile() else DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-				n.directional_shadow_max_distance = 250.0 if is_mobile() else 500.0
+				n.directional_shadow_max_distance = 240.0 if is_mobile() else 420.0
 				n.directional_shadow_blend_splits = true
-				n.directional_shadow_split_1 = 0.05
-				n.directional_shadow_split_2 = 0.15
-				n.directional_shadow_split_3 = 0.40
+				n.directional_shadow_split_1 = 0.045
+				n.directional_shadow_split_2 = 0.14
+				n.directional_shadow_split_3 = 0.38
 				n.shadow_bias = 0.03
 				n.shadow_normal_bias = 2.0
 				RenderingServer.directional_soft_shadow_filter_set_quality(RenderingServer.SHADOW_QUALITY_SOFT_MEDIUM)
 			else:
 				n.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-				n.directional_shadow_max_distance = 650.0
+				n.directional_shadow_max_distance = 550.0
 				n.directional_shadow_blend_splits = true
-				n.directional_shadow_split_1 = 0.035
-				n.directional_shadow_split_2 = 0.12
-				n.directional_shadow_split_3 = 0.35
-				n.shadow_bias = 0.03
-				n.shadow_normal_bias = 2.0
-				RenderingServer.directional_soft_shadow_filter_set_quality(RenderingServer.SHADOW_QUALITY_SOFT_ULTRA)
+				n.directional_shadow_split_1 = 0.025
+				n.directional_shadow_split_2 = 0.10
+				n.directional_shadow_split_3 = 0.32
+				n.shadow_bias = 0.018
+				n.shadow_normal_bias = 1.6
+				RenderingServer.directional_soft_shadow_filter_set_quality(RenderingServer.SHADOW_QUALITY_SOFT_HIGH)
 
 		elif n is WorldEnvironment and n.environment != null:
+			if n.environment.sky != null:
+				n.environment.sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL if is_high else Sky.PROCESS_MODE_QUALITY
+				n.environment.sky.radiance_size = Sky.RADIANCE_SIZE_128 if is_low else Sky.RADIANCE_SIZE_256
 			if is_low:
 				n.environment.ssao_enabled = false
+				n.environment.ssr_enabled = false
 				n.environment.glow_enabled = false
 				n.environment.fog_enabled = false
 			elif is_med:
 				n.environment.ssao_enabled = not is_mobile()
-				n.environment.ssao_radius = 2.0
-				n.environment.ssao_intensity = 1.2
+				n.environment.ssao_radius = 1.8
+				n.environment.ssao_intensity = 1.0
+				n.environment.ssr_enabled = false
 				n.environment.glow_enabled = true
 				n.environment.fog_enabled = false
 			else:
-				# High quality: soft contact occlusion, crisp lighting, gentle ambient daylight fill
 				n.environment.ssao_enabled = true
-				n.environment.ssao_radius = 1.5
-				n.environment.ssao_intensity = 0.85
-				n.environment.ssao_power = 1.2
-				n.environment.ssao_detail = 0.5
-				n.environment.ssao_horizon = 0.05
+				n.environment.ssao_radius = 1.35
+				n.environment.ssao_intensity = 1.15
+				n.environment.ssao_power = 1.45
+				n.environment.ssao_detail = 0.55
+				n.environment.ssao_horizon = 0.06
 				n.environment.glow_enabled = true
-				# Fill shadows with natural sky fill so shadows are NEVER pitch-black holes
 				n.environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-				n.environment.ambient_light_sky_contribution = 0.70
-				n.environment.ambient_light_energy = 0.75
-				n.environment.ambient_light_color = Color(0.72, 0.82, 0.94)
-				n.environment.fog_enabled = false
+				n.environment.ambient_light_sky_contribution = 0.52
+				n.environment.ambient_light_energy = 0.46
+				n.environment.ambient_light_color = Color(0.68, 0.80, 0.94)
 				n.environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-				n.environment.tonemap_white = 1.0
-				n.environment.tonemap_exposure = 1.0
+				n.environment.tonemap_white = 6.0
+				n.environment.tonemap_exposure = 1.02
 
 		for child in n.get_children():
 			stack.append(child)
@@ -365,6 +425,7 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 			var builder_script = load("res://HighFidelity/Core/high_fidelity_builder.gd")
 			if builder_script != null:
 				builder_script.remove_high_fidelity(scene_root)
+
 
 
 static var _low_tree_materials: Dictionary = {}

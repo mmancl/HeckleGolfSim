@@ -10,7 +10,7 @@ const GROUND_CENTER_HEIGHT := BALL_RADIUS # 0.021335m
 const START_HEIGHT := TEED_CENTER_HEIGHT
 const COLLISION_SAFE_MARGIN := 0.0005
 const BELOW_GROUND_RECOVERY_Y := -0.5
-const FALLTHROUGH_FAILSAFE_Y := -5.0
+const FALLTHROUGH_FAILSAFE_Y := -500.0
 const GROUND_SNAP_OFFSET := 0.001
 const GROUND_RAYCAST_UP := 2.0
 const GROUND_RAYCAST_DOWN := 8.0
@@ -23,11 +23,16 @@ const FOLIAGE_DAMPING_MAX: float = 0.14
 const FOLIAGE_RAMP_DURATION: float = 0.40
 const TREE_CHECK_INTERVAL: float = 0.05 # 20 Hz responsive canopy detection
 
-# Rock clearance parameters (relief from rocks when ending within 2 feet)
-const TWO_FEET_METERS: float = 0.6096 # 2 feet in meters
+# Obstacle clearance parameters
+const TWO_FEET_METERS: float = 0.6096 # 2 feet in meters (rock clearance)
+const TREE_CLEARANCE_RADIUS: float = 1.0 # Minimum clearance away from tree trunks
+var _airborne_low_speed_timer: float = 0.0
+var _shot_duration: float = 0.0
 
 var ball_model : PackedScene = preload("res://assets/models/balls/golf_ball.glb")
 var _ball_mesh: Node3D = null
+var _current_ball_graphic_id: String = "single_line"
+static var _ball_material_cache: Dictionary = {}
 var _tee_mesh: Node3D = null
 var current_selected_club: String = "Dr"
 var spawn_position := Vector3(0.0, START_HEIGHT, 0.0)
@@ -110,6 +115,12 @@ var _kinetic_mult := 1.0
 var _rolling_mult := 1.0
 var _grass_mult := 1.0
 var _critical_mult := 1.0
+var _spinback_response_scale: float = 0.69
+var _spinback_theta_boost_max: float = 0.0
+var _spinback_spin_start_rpm: float = 0.0
+var _spinback_spin_end_rpm: float = 0.0
+var _spinback_speed_start_mps: float = 0.0
+var _spinback_speed_end_mps: float = 0.0
 @export var slope_force_scale: float = 0.5
 
 # Environment
@@ -127,7 +138,12 @@ var shot_was_from_teebox := false
 var shot_hit_other_ground := false
 var shot_dir := Vector3(1.0, 0.0, 0.0)  # Normalized horizontal direction
 var target_dir := Vector3(1.0, 0.0, 0.0)  # Normalized target aim direction (horizontal)
-var aim_yaw_offset_deg := 0.0  # Camera/world rotation offset applied at launch
+var aim_yaw_offset_deg := 0.0:  # Camera/world rotation offset applied at launch
+	set(value):
+		aim_yaw_offset_deg = value
+		if state == PhysicsEnums.BallState.REST:
+			target_dir = Vector3.RIGHT.rotated(Vector3.UP, deg_to_rad(aim_yaw_offset_deg)).normalized()
+			_orient_ball_to_aim()
 var launch_spin_rpm := 0.0  # Stored for bounce calculations
 var rollout_impact_spin_rpm := 0.0  # Spin on first impact; used for rollout friction
 var is_putt := false
@@ -338,6 +354,31 @@ func initialize_ball() -> void:
 	_create_collision_and_model()
 
 
+func get_visual_scale() -> float:
+	var tree = Engine.get_main_loop() as SceneTree
+	if tree != null and tree.root != null and tree.root.has_node("GlobalSettings"):
+		var gs = tree.root.get_node("GlobalSettings")
+		if gs != null and gs.range_settings != null and gs.range_settings.settings.has("ball_visual_scale"):
+			return float(gs.range_settings.ball_visual_scale.value)
+	return 1.35
+
+
+func get_visual_y_offset() -> float:
+	return _ball_radius * (get_visual_scale() - 1.0)
+
+
+func get_mesh_scale() -> float:
+	return (_ball_radius / 1.007168) * get_visual_scale()
+
+
+func _on_ball_visual_scale_changed(_val = null) -> void:
+	if _ball_mesh != null and is_instance_valid(_ball_mesh):
+		var mesh_scale := get_mesh_scale()
+		_ball_mesh.scale = Vector3(mesh_scale, mesh_scale, mesh_scale)
+		_ball_mesh.position.y = get_visual_y_offset()
+		_orient_ball_to_aim()
+
+
 func _create_collision_and_model():
 	# Create collision shape
 	var collision = CollisionShape3D.new()
@@ -347,10 +388,24 @@ func _create_collision_and_model():
 	add_child(collision)
 	# Create model
 	_ball_mesh = ball_model.instantiate()
-	# golf_ball.glb Icosphere has radius ~1.007168m; scale so visual mesh matches physical ball radius
-	var mesh_scale := _ball_radius / 1.007168
+	# golf_ball.glb Icosphere has radius ~1.007168m; scale so visual mesh matches physical ball radius with visual scaling
+	var mesh_scale := get_mesh_scale()
 	_ball_mesh.scale = Vector3(mesh_scale, mesh_scale, mesh_scale)
+	_ball_mesh.position.y = get_visual_y_offset()
+
+	# Canonical alignment of Icosphere planar UV projection
+	# Maps texture +U (horizontal equator/aim) along local +X, texture normal (pole) along local +Y (crown),
+	# and texture +V (right) along local +Z, forming an exact right-handed orthonormal basis.
+	var icosphere = _ball_mesh.find_child("Icosphere", true, false) as MeshInstance3D
+	if icosphere != null:
+		var c0 := Vector3(0.88574782, -0.42354276, -0.18990081)
+		var c1 := Vector3(-0.00734311, -0.42185689, 0.90663270)
+		var c2 := Vector3(-0.46410868, -0.80165348, -0.37676894)
+		icosphere.transform.basis = Basis(c0, c1, c2)
+
 	add_child(_ball_mesh)
+	apply_ball_graphic(_current_ball_graphic_id)
+	_orient_ball_to_aim()
 
 	# Create 3D golf tee peg model
 	_tee_mesh = Node3D.new()
@@ -383,7 +438,7 @@ func _check_scene_has_trees() -> bool:
 			_has_canopy_trees = false
 			return false
 		# Look for TreesFolder or CanopyArea in course
-		if current_scene.has_node("TreesFolder") or current_scene.find_child("CanopyArea", true, false) != null:
+		if current_scene.has_node("TreesFolder") or current_scene.find_child("CanopyArea", true, false) != null or current_scene.find_child("ConsolidatedCanopyArea", true, false) != null:
 			_has_canopy_trees = true
 			return true
 	_has_canopy_trees = false
@@ -404,7 +459,7 @@ func _check_tree_canopy() -> void:
 	var found_canopy := false
 	for hit in results:
 		var col = hit.get("collider")
-		if col is Area3D and (col.name == "CanopyArea" or col.has_meta("is_canopy")):
+		if col is Area3D and (col.name == "CanopyArea" or col.name == "ConsolidatedCanopyArea" or col.has_meta("is_canopy")):
 			found_canopy = true
 			break
 	_is_in_tree_canopy = found_canopy
@@ -415,13 +470,19 @@ func _is_collider_tree(collider: Object) -> bool:
 		return false
 	if collider.has_meta("is_tree"):
 		return bool(collider.get_meta("is_tree"))
-	var c_name := String(collider.name)
-	if c_name.containsn("tree") or c_name.containsn("trunk") or c_name.containsn("branch") or c_name.containsn("foliage") or c_name.containsn("canopy"):
+	if collider is Node and (collider.is_in_group("trees") or collider.is_in_group("tree")):
+		return true
+	var c_name := String(collider.name).to_lower()
+	if c_name.contains("tree") or c_name.contains("trunk") or c_name.contains("branch") or c_name.contains("foliage") or c_name.contains("canopy"):
 		return true
 	var parent := (collider as Node).get_parent() if collider is Node else null
 	if parent != null:
-		var p_name := String(parent.name)
-		if p_name.containsn("tree") or p_name.containsn("trunk") or p_name.containsn("branch") or p_name.containsn("foliage") or p_name.containsn("canopy"):
+		if parent.has_meta("is_tree") and bool(parent.get_meta("is_tree")):
+			return true
+		if parent.is_in_group("trees") or parent.is_in_group("tree"):
+			return true
+		var p_name := String(parent.name).to_lower()
+		if p_name.contains("tree") or p_name.contains("trunk") or p_name.contains("branch") or p_name.contains("foliage") or p_name.contains("canopy"):
 			return true
 	return false
 
@@ -479,8 +540,16 @@ func _get_nearby_rocks(pos: Vector3, max_dist: float) -> Array:
 		var hits := world.direct_space_state.intersect_shape(query, 64)
 		for hit in hits:
 			var col = hit.get("collider")
-			if col != null and _is_collider_rock(col) and not rocks.has(col):
-				rocks.append(col)
+			if col != null and _is_collider_rock(col):
+				var target_node = col
+				if col is CollisionObject3D and col.get_child_count() > 1 and hit.has("shape"):
+					var owner_id: int = col.shape_find_owner(int(hit["shape"]))
+					if owner_id != -1:
+						var shape_node = col.shape_owner_get_owner(owner_id)
+						if shape_node is Node3D:
+							target_node = shape_node
+				if not rocks.has(target_node):
+					rocks.append(target_node)
 
 	if get_tree() != null:
 		var group_rocks := get_tree().get_nodes_in_group("rocks")
@@ -492,6 +561,48 @@ func _get_nearby_rocks(pos: Vector3, max_dist: float) -> Array:
 				if pos.distance_to(r.global_position) <= (r_scale * 0.9 + max_dist):
 					rocks.append(r)
 	return rocks
+
+
+func _get_nearby_trees(pos: Vector3, max_dist: float) -> Array:
+	var trees: Array = []
+	var world := get_world_3d()
+	if world != null and world.direct_space_state != null:
+		var query := PhysicsShapeQueryParameters3D.new()
+		var sphere := SphereShape3D.new()
+		sphere.radius = max_dist
+		query.shape = sphere
+		query.transform = Transform3D(Basis(), pos)
+		query.collision_mask = 1
+		query.collide_with_bodies = true
+		query.collide_with_areas = false
+		query.exclude = [get_rid()]
+		var hits := world.direct_space_state.intersect_shape(query, 64)
+		for hit in hits:
+			var col = hit.get("collider")
+			if col != null and _is_collider_tree(col):
+				var target_node = col
+				if col is CollisionObject3D and col.get_child_count() > 1 and hit.has("shape"):
+					var owner_id: int = col.shape_find_owner(int(hit["shape"]))
+					if owner_id != -1:
+						var shape_node = col.shape_owner_get_owner(owner_id)
+						if shape_node is Node3D:
+							target_node = shape_node
+				if not trees.has(target_node):
+					trees.append(target_node)
+
+	if get_tree() != null:
+		var group_trees := get_tree().get_nodes_in_group("trees")
+		for t in group_trees:
+			if t is Node3D and not trees.has(t):
+				var t_scale: float = 1.0
+				if "scale" in t:
+					t_scale = maxf(t.scale.x, maxf(t.scale.y, t.scale.z))
+				var trunk_rad := 0.45 * t_scale
+				var t_pos: Vector3 = t.global_position
+				var dist_2d := Vector2(pos.x - t_pos.x, pos.z - t_pos.z).length()
+				if dist_2d <= (trunk_rad + max_dist):
+					trees.append(t)
+	return trees
 
 
 func _get_ground_y_at(x: float, z: float) -> float:
@@ -525,7 +636,9 @@ func _get_ground_y_at(x: float, z: float) -> float:
 			else:
 				return float(hit["position"].y)
 
-	return global_position.y
+	if not spawn_position.is_zero_approx():
+		return spawn_position.y
+	return 0.0
 
 
 func _is_position_in_water(x: float, z: float, y_ref: float) -> bool:
@@ -637,13 +750,96 @@ func ensure_rock_clearance() -> bool:
 	return true
 
 
+## Checks if the ball ends within tree trunk collision radius (1.0m) and moves the ball clear of the tree onto playable ground.
+func ensure_tree_clearance() -> bool:
+	var trees := _get_nearby_trees(global_position, TREE_CLEARANCE_RADIUS)
+	if trees.is_empty():
+		return false
+
+	var ball_pos_2d := Vector2(global_position.x, global_position.z)
+	var away_dir_2d := Vector2.ZERO
+	for t in trees:
+		var t_pos_3d: Vector3 = t.global_position if t is Node3D else global_position
+		var diff := ball_pos_2d - Vector2(t_pos_3d.x, t_pos_3d.z)
+		if diff.length_squared() > 0.0001:
+			away_dir_2d += diff.normalized()
+		else:
+			away_dir_2d += Vector2(1.0, 0.0)
+
+	if away_dir_2d.length_squared() > 0.0001:
+		away_dir_2d = away_dir_2d.normalized()
+	else:
+		if not shot_start_pos_global.is_zero_approx():
+			var s_diff := Vector2(shot_start_pos_global.x - global_position.x, shot_start_pos_global.z - global_position.z)
+			if s_diff.length_squared() > 0.0001:
+				away_dir_2d = s_diff.normalized()
+		if away_dir_2d.length_squared() <= 0.0001:
+			away_dir_2d = Vector2(0.0, 1.0)
+
+	var test_angles = [
+		0.0,
+		deg_to_rad(30.0), deg_to_rad(-30.0),
+		deg_to_rad(60.0), deg_to_rad(-60.0),
+		deg_to_rad(90.0), deg_to_rad(-90.0),
+		deg_to_rad(120.0), deg_to_rad(-120.0),
+		deg_to_rad(150.0), deg_to_rad(-150.0),
+		deg_to_rad(180.0)
+	]
+
+	var best_pos: Vector3 = Vector3.ZERO
+	var found_spot := false
+
+	for dist_mult in [1.2, 1.6, 2.0, 2.5, 3.0]:
+		var test_dist: float = TREE_CLEARANCE_RADIUS * dist_mult
+		for angle in test_angles:
+			var cand_dir: Vector2 = away_dir_2d.rotated(angle)
+			var cand_2d: Vector2 = ball_pos_2d + cand_dir * test_dist
+			var cand_y: float = _get_ground_y_at(cand_2d.x, cand_2d.y)
+			var cand_pos := Vector3(cand_2d.x, cand_y + GROUND_CENTER_HEIGHT + GROUND_SNAP_OFFSET, cand_2d.y)
+
+			if _is_position_in_water(cand_2d.x, cand_2d.y, cand_y):
+				continue
+
+			var trees_at_cand := _get_nearby_trees(cand_pos, TREE_CLEARANCE_RADIUS)
+			var rocks_at_cand := _get_nearby_rocks(cand_pos, TWO_FEET_METERS)
+			if trees_at_cand.is_empty() and rocks_at_cand.is_empty():
+				best_pos = cand_pos
+				found_spot = true
+				break
+
+		if found_spot:
+			break
+
+	if not found_spot:
+		var cand_2d: Vector2 = ball_pos_2d + away_dir_2d * (TREE_CLEARANCE_RADIUS * 1.5)
+		var cand_y: float = _get_ground_y_at(cand_2d.x, cand_2d.y)
+		best_pos = Vector3(cand_2d.x, cand_y + GROUND_CENTER_HEIGHT + GROUND_SNAP_OFFSET, cand_2d.y)
+
+	var prev_pos := global_position
+	global_position = best_pos
+	curr_physics_pos = best_pos
+	prev_physics_pos = best_pos
+	_current_ground_y = best_pos.y - (GROUND_CENTER_HEIGHT + GROUND_SNAP_OFFSET)
+	_update_surface_from_underneath()
+
+	print("[ball.gd] Tree clearance applied: Ball ended within tree at %s. Moved to %s." % [str(prev_pos), str(best_pos)])
+	return true
+
+
 
 func _connect_settings() -> void:
-	GlobalSettings.range_settings.temperature.setting_changed.connect(_on_environment_changed)
-	GlobalSettings.range_settings.altitude.setting_changed.connect(_on_environment_changed)
-	GlobalSettings.range_settings.range_units.setting_changed.connect(_on_environment_changed)
-	GlobalSettings.range_settings.surface_type.setting_changed.connect(_on_surface_type_changed)
-	GlobalSettings.range_settings.green_speed.setting_changed.connect(_on_green_speed_changed)
+	if not GlobalSettings.range_settings.temperature.setting_changed.is_connected(_on_environment_changed):
+		GlobalSettings.range_settings.temperature.setting_changed.connect(_on_environment_changed)
+	if not GlobalSettings.range_settings.altitude.setting_changed.is_connected(_on_environment_changed):
+		GlobalSettings.range_settings.altitude.setting_changed.connect(_on_environment_changed)
+	if not GlobalSettings.range_settings.range_units.setting_changed.is_connected(_on_environment_changed):
+		GlobalSettings.range_settings.range_units.setting_changed.connect(_on_environment_changed)
+	if not GlobalSettings.range_settings.surface_type.setting_changed.is_connected(_on_surface_type_changed):
+		GlobalSettings.range_settings.surface_type.setting_changed.connect(_on_surface_type_changed)
+	if not GlobalSettings.range_settings.green_speed.setting_changed.is_connected(_on_green_speed_changed):
+		GlobalSettings.range_settings.green_speed.setting_changed.connect(_on_green_speed_changed)
+	if GlobalSettings.range_settings.settings.has("ball_visual_scale") and not GlobalSettings.range_settings.ball_visual_scale.setting_changed.is_connected(_on_ball_visual_scale_changed):
+		GlobalSettings.range_settings.ball_visual_scale.setting_changed.connect(_on_ball_visual_scale_changed)
 	
 	if is_inside_tree() and has_node("/root/EventBus"):
 		var eb = get_node("/root/EventBus")
@@ -686,6 +882,7 @@ func _update_tee_elevation() -> void:
 			on_ground = true
 			if probe.has("collider") and probe["collider"] != null:
 				_update_surface_from_collider(probe["collider"])
+	_orient_ball_to_aim()
 
 
 func _create_physics_params():
@@ -858,6 +1055,21 @@ func _apply_surface_params() -> void:
 	
 	_grass_viscosity = float(surface_params.get("nu_g", 0.0010)) * _grass_mult
 	_critical_angle = float(surface_params.get("theta_c", 0.25)) * _critical_mult
+	_spinback_response_scale = float(surface_params.get("spinback_response_scale", 0.69))
+	_spinback_theta_boost_max = float(surface_params.get("spinback_theta_boost_max", 0.0))
+	_spinback_spin_start_rpm = float(surface_params.get("spinback_spin_start_rpm", 0.0))
+	_spinback_spin_end_rpm = float(surface_params.get("spinback_spin_end_rpm", 0.0))
+	_spinback_speed_start_mps = float(surface_params.get("spinback_speed_start_mps", 0.0))
+	_spinback_speed_end_mps = float(surface_params.get("spinback_speed_end_mps", 0.0))
+
+	if params != null:
+		_set_openfairway_property(params, &"spinback_response_scale", &"SpinbackResponseScale", _spinback_response_scale)
+		_set_openfairway_property(params, &"spinback_theta_boost_max", &"SpinbackThetaBoostMax", _spinback_theta_boost_max)
+		_set_openfairway_property(params, &"spinback_spin_start_rpm", &"SpinbackSpinStartRpm", _spinback_spin_start_rpm)
+		_set_openfairway_property(params, &"spinback_spin_end_rpm", &"SpinbackSpinEndRpm", _spinback_spin_end_rpm)
+		_set_openfairway_property(params, &"spinback_speed_start_mps", &"SpinbackSpeedStartMps", _spinback_speed_start_mps)
+		_set_openfairway_property(params, &"spinback_speed_end_mps", &"SpinbackSpeedEndMps", _spinback_speed_end_mps)
+
 	if OS.is_debug_build():
 		print("Surface set to %s (sand=%s) -> u_k=%.3f, u_kr=%.3f, nu_g=%.4f, theta_c=%.3f, speed_mult=%.3f" % [
 			str(surface_type), str(is_in_sand), _kinetic_friction, _rolling_friction, _grass_viscosity, _critical_angle, speed_mult
@@ -939,7 +1151,8 @@ func _update_ground_elevation() -> void:
 
 func _process(delta: float) -> void:
 	if _ball_mesh != null:
-		var target_y := 0.0
+		var base_y := get_visual_y_offset()
+		var target_y := base_y
 		var on_green_surface := (lie_type == "green" or surface_type == PhysicsEnums.SurfaceType.GREEN or is_putt or (is_inside_tree() and _is_position_on_green(global_position)))
 		var on_fairway_or_tee := (lie_type in ["fairway", "teebox", "fringe"] or surface_type in [PhysicsEnums.SurfaceType.FAIRWAY, PhysicsEnums.SurfaceType.FAIRWAY_SOFT])
 
@@ -947,15 +1160,15 @@ func _process(delta: float) -> void:
 		# While rolling or in flight, roll cleanly on top of the surface without visual clipping.
 		if state == PhysicsEnums.BallState.REST:
 			if on_green_surface or on_fairway_or_tee:
-				target_y = 0.0
+				target_y = base_y
 			elif is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER or lie_type == "sand":
-				target_y = -0.017 # Sink 1.7 cm in sand traps
+				target_y = base_y - 0.017 # Sink 1.7 cm in sand traps
 			elif lie_type == "rough" or surface_type == PhysicsEnums.SurfaceType.ROUGH:
-				target_y = -0.014 # Sink 1.4 cm in tall rough
+				target_y = base_y - 0.014 # Sink 1.4 cm in tall rough
 			else:
-				target_y = 0.0
+				target_y = base_y
 		else:
-			target_y = 0.0
+			target_y = base_y
 
 		if not is_equal_approx(_ball_mesh.position.y, target_y):
 			# If cup rim dip is active (near hole lip), let the hole physics control the Y offset
@@ -1045,21 +1258,21 @@ func _physics_process(delta: float) -> void:
 							# Visual dip into the rim depression
 							if _ball_mesh != null:
 								var dip_depth = clampf(penetration * 0.02, 0.0, 0.02)
-								_ball_mesh.position.y = -dip_depth
+								_ball_mesh.position.y = get_visual_y_offset() - dip_depth
 				else:
 					# Restore mesh Y offset when rolling away from the lip
-					if _ball_mesh != null and _ball_mesh.position.y < -0.001:
-						_ball_mesh.position.y = lerpf(_ball_mesh.position.y, 0.0, delta * 15.0)
+					if _ball_mesh != null and _ball_mesh.position.y < (get_visual_y_offset() - 0.001):
+						_ball_mesh.position.y = lerpf(_ball_mesh.position.y, get_visual_y_offset(), delta * 15.0)
 			else:
-				if _ball_mesh != null and _ball_mesh.position.y < -0.001:
-					_ball_mesh.position.y = lerpf(_ball_mesh.position.y, 0.0, delta * 15.0)
+				if _ball_mesh != null and _ball_mesh.position.y < (get_visual_y_offset() - 0.001):
+					_ball_mesh.position.y = lerpf(_ball_mesh.position.y, get_visual_y_offset(), delta * 15.0)
 
 	if is_falling_in_hole:
 		falling_time += delta
 		var target_pos = Vector3(falling_target_hole.x, falling_target_hole.y - 0.08, falling_target_hole.z)
 		global_position = global_position.lerp(target_pos, delta * 12.0)
 		if _ball_mesh != null:
-			_ball_mesh.position.y = 0.0
+			_ball_mesh.position.y = get_visual_y_offset()
 
 		if global_position.distance_to(target_pos) < 0.01 or falling_time > 0.5:
 			global_position = target_pos
@@ -1092,6 +1305,12 @@ func _physics_process(delta: float) -> void:
 		_set_openfairway_property(params, &"slope_force_scale", &"SlopeForceScale", slope_force_scale)
 		_set_openfairway_property(params, &"is_in_sand", &"IsInSand", is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER)
 		_set_openfairway_property(params, &"is_putt", &"IsPutt", is_putt)
+		_set_openfairway_property(params, &"spinback_response_scale", &"SpinbackResponseScale", _spinback_response_scale)
+		_set_openfairway_property(params, &"spinback_theta_boost_max", &"SpinbackThetaBoostMax", _spinback_theta_boost_max)
+		_set_openfairway_property(params, &"spinback_spin_start_rpm", &"SpinbackSpinStartRpm", _spinback_spin_start_rpm)
+		_set_openfairway_property(params, &"spinback_spin_end_rpm", &"SpinbackSpinEndRpm", _spinback_spin_end_rpm)
+		_set_openfairway_property(params, &"spinback_speed_start_mps", &"SpinbackSpeedStartMps", _spinback_speed_start_mps)
+		_set_openfairway_property(params, &"spinback_speed_end_mps", &"SpinbackSpeedEndMps", _spinback_speed_end_mps)
 
 	# Calculate forces and torques using BallPhysics
 	var total_force = _call_openfairway_method(_physics, &"calculate_forces", &"CalculateForces", [velocity, omega, was_on_ground, params])
@@ -1175,8 +1394,8 @@ func _physics_process(delta: float) -> void:
 		return
 
 	# Safety bounds check
-	#if _check_out_of_bounds():
-		#return
+	if _check_out_of_bounds():
+		return
 
 	# Move and handle collisions
 	prev_physics_pos = global_position
@@ -1209,24 +1428,58 @@ func _physics_process(delta: float) -> void:
 
 	# Check for rest
 	if velocity.length() < 0.12 and state != PhysicsEnums.BallState.REST:
+		var has_active_spin_slip := false
+		if on_ground and not is_putt and not is_in_water and not is_falling_in_hole:
+			var contact_vel := velocity + omega.cross(-floor_normal * _ball_radius)
+			var tangent_slip := contact_vel - floor_normal * contact_vel.dot(floor_normal)
+			has_active_spin_slip = tangent_slip.length() > 0.25 and (omega.length() * _ball_radius) > 0.20
+
+		if not has_active_spin_slip and (on_ground or is_putt or is_in_water or is_falling_in_hole):
+			_enter_rest_state()
+		elif not on_ground:
+			# Ball is airborne / in tree: don't rest in mid-air! Let gravity drop it.
+			_airborne_low_speed_timer += delta
+			if _airborne_low_speed_timer > 1.5:
+				var g_y := _get_ground_y_at(global_position.x, global_position.z)
+				global_position.y = g_y + GROUND_CENTER_HEIGHT + GROUND_SNAP_OFFSET
+				velocity = Vector3.ZERO
+				on_ground = true
+				_enter_rest_state()
+	elif not on_ground and velocity.length() < 0.5:
+		# If trapped in tree foliage or collision seams at low speed, don't reset timer
+		_airborne_low_speed_timer += delta
+		if _airborne_low_speed_timer > 1.5:
+			var g_y := _get_ground_y_at(global_position.x, global_position.z)
+			global_position.y = g_y + GROUND_CENTER_HEIGHT + GROUND_SNAP_OFFSET
+			velocity = Vector3.ZERO
+			on_ground = true
+			_enter_rest_state()
+	else:
+		_airborne_low_speed_timer = 0.0
+
+	# Failsafe: prevent shots from rolling or hanging indefinitely
+	_shot_duration += delta
+	if _shot_duration > 25.0 or (_shot_duration > 15.0 and velocity.length() < 0.4 and on_ground):
 		_enter_rest_state()
 
 
-# TODO: this check needs to be updated for larger distances and below zero surfaces
 func _check_out_of_bounds() -> bool:
-	if absf(position.x) > 1000.0 or absf(position.z) > 1000.0:
+	if absf(position.x) > 3000.0 or absf(position.z) > 3000.0:
 		print("WARNING: Ball out of bounds at: ", position)
 		_enter_rest_state()
 		return true
 
-	if global_position.y < BELOW_GROUND_RECOVERY_Y:
+	var ground_y := _get_ground_y_at(global_position.x, global_position.z)
+	if global_position.y < (ground_y - 2.0) or global_position.y < FALLTHROUGH_FAILSAFE_Y:
 		if _try_recover_to_ground():
 			return false
-		if global_position.y > FALLTHROUGH_FAILSAFE_Y:
-			return false
-		print("WARNING: Ball fell through ground at: ", global_position)
-		_enter_rest_state()
-		return true
+		if global_position.y < (ground_y - 2.0):
+			print("WARNING: Ball fell through ground at: ", global_position, " (ground at: %.2f)" % ground_y)
+			global_position.y = ground_y + GROUND_CENTER_HEIGHT + GROUND_SNAP_OFFSET
+			velocity = Vector3.ZERO
+			on_ground = true
+			_enter_rest_state()
+			return true
 
 	return false
 
@@ -1258,24 +1511,23 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 			return
 
 		var normal := collision.get_normal()
-
-		var is_ground_norm := _is_ground_normal(normal)
+		var is_tree := _is_collider_tree(collider)
+		var is_rock := _is_collider_rock(collider)
+		var is_ground_norm := _is_ground_normal(normal) and not is_tree
 
 		# Check for step-up / lip / mesh seam if rolling along ground (e.g. fringe-to-green collar or terrain seam)
 		var is_rolling := was_on_ground or is_putt or state == PhysicsEnums.BallState.ROLLOUT
 		if not is_ground_norm and is_rolling:
-			var is_tree := _is_collider_tree(collider)
-			var is_rock := _is_collider_rock(collider)
 			if not is_tree and not is_flagstick and not is_rock:
 				# Probe ahead across the edge to check if there is rollable ground on top of the step/lip
-				var forward_dir := -Vector3(normal.x, 0.0, normal.z).normalized()
+				var forward_dir := Vector3(prev_velocity.x, 0.0, prev_velocity.z).normalized()
 				if forward_dir.is_zero_approx():
-					forward_dir = Vector3(prev_velocity.x, 0.0, prev_velocity.z).normalized()
+					forward_dir = -Vector3(normal.x, 0.0, normal.z).normalized()
 				if not forward_dir.is_zero_approx():
-					var probe_pos := collision.get_position() + forward_dir * 0.03
+					var probe_pos := collision.get_position() + forward_dir * 0.04
 					var world := get_world_3d()
 					if world != null:
-						var step_query := PhysicsRayQueryParameters3D.create(probe_pos + Vector3.UP * 0.15, probe_pos + Vector3.DOWN * 0.25)
+						var step_query := PhysicsRayQueryParameters3D.create(probe_pos + Vector3.UP * 0.25, probe_pos + Vector3.DOWN * 0.35)
 						step_query.collide_with_areas = false
 						step_query.collide_with_bodies = true
 						step_query.exclude = [get_rid()]
@@ -1286,8 +1538,8 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 								var step_y: float = step_hit["position"].y
 								var ball_bottom_y := global_position.y - _ball_radius
 								var step_height := step_y - ball_bottom_y
-								# Small step/lip up to 4cm (less than ball diameter) can be rolled over smoothly
-								if step_height >= -0.02 and step_height <= 0.040:
+								# Small step/lip up to 5cm or downward slope can be rolled over smoothly
+								if step_height <= 0.050 and step_height >= -0.25:
 									on_ground = true
 									floor_normal = step_normal
 									global_position.y = step_y + (_ball_radius + GROUND_SNAP_OFFSET) / maxf(step_normal.y, MIN_GROUND_NORMAL)
@@ -1303,6 +1555,13 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 									if remainder.length_squared() > 0.000001:
 										move_and_collide(remainder, false, COLLISION_SAFE_MARGIN)
 									return
+
+		# If the collider is turf/terrain and not an obstacle, but normal is slightly steep (e.g. contour embankment or seam)
+		if not is_ground_norm and not is_tree and not is_rock and not is_flagstick:
+			var cname: String = String(collider.name).to_lower() if collider != null else ""
+			var is_turf: bool = cname.contains("fairway") or cname.contains("green") or cname.contains("tee") or cname.contains("rough") or cname.contains("terrain") or (collider != null and collider.has_meta("surface_type"))
+			if is_turf and normal.y > 0.25:
+				is_ground_norm = true
 
 		if is_ground_norm:
 			floor_normal = normal
@@ -1357,6 +1616,12 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 					_set_openfairway_property(params, &"critical_angle", &"CriticalAngle", _critical_angle)
 					_set_openfairway_property(params, &"surface_type", &"SurfaceType", surface_type)
 					_set_openfairway_property(params, &"is_in_sand", &"IsInSand", is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER)
+					_set_openfairway_property(params, &"spinback_response_scale", &"SpinbackResponseScale", _spinback_response_scale)
+					_set_openfairway_property(params, &"spinback_theta_boost_max", &"SpinbackThetaBoostMax", _spinback_theta_boost_max)
+					_set_openfairway_property(params, &"spinback_spin_start_rpm", &"SpinbackSpinStartRpm", _spinback_spin_start_rpm)
+					_set_openfairway_property(params, &"spinback_spin_end_rpm", &"SpinbackSpinEndRpm", _spinback_spin_end_rpm)
+					_set_openfairway_property(params, &"spinback_speed_start_mps", &"SpinbackSpeedStartMps", _spinback_speed_start_mps)
+					_set_openfairway_property(params, &"spinback_speed_end_mps", &"SpinbackSpeedEndMps", _spinback_speed_end_mps)
 
 				if state == PhysicsEnums.BallState.FLIGHT:
 					_print_impact_debug()
@@ -1442,11 +1707,11 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 					_update_surface_from_collider(collider)
 				var prev_speed := velocity.length()
 				velocity = _remove_velocity_along_normal(velocity, normal)
-				# Only protect against acute internal mesh seam micro-catches (e.g. nearly stopping on flat ground)
+				# Only protect against acute internal mesh seam micro-catches (e.g. nearly stopping on flat ground or slope seams)
 				# without artificially boosting momentum when rolling uphill into normal slope contours.
-				if was_on_ground and prev_speed > 0.5 and velocity.length() < 0.05 and normal.y > 0.95:
+				if was_on_ground and prev_speed > 0.3 and velocity.length() < 0.08 and normal.y > 0.70:
 					if velocity.length_squared() > 0.0001:
-						velocity = velocity.normalized() * (prev_speed * 0.90)
+						velocity = velocity.normalized() * (prev_speed * 0.92)
 				# Snap ball Y to correct sphere-on-slope height at the collision point
 				# instead of pushing along normal (which accumulates lift over frames)
 				var contact_pos := collision.get_position()
@@ -1465,9 +1730,9 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 								_update_surface_from_collider(col2.get_collider())
 							var p_spd2 := velocity.length()
 							velocity = _remove_velocity_along_normal(velocity, norm2)
-							if was_on_ground and p_spd2 > 0.5 and velocity.length() < 0.05 and norm2.y > 0.95:
+							if was_on_ground and p_spd2 > 0.3 and velocity.length() < 0.08 and norm2.y > 0.70:
 								if velocity.length_squared() > 0.0001:
-									velocity = velocity.normalized() * (p_spd2 * 0.90)
+									velocity = velocity.normalized() * (p_spd2 * 0.92)
 							global_position.y = col2.get_position().y + (_ball_radius + GROUND_SNAP_OFFSET) / maxf(norm2.y, MIN_GROUND_NORMAL)
 				# Ensure ball Y matches the ground height at the ball's final position after remainder
 				if on_ground:
@@ -1482,7 +1747,6 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 			# Wall collision - damped reflection
 			on_ground = false
 			floor_normal = Vector3.UP
-			var is_tree := _is_collider_tree(collider)
 			if is_tree:
 				if _sfx_player != null and not _skipping_flight:
 					_sfx_player.pitch_scale = randf_range(0.95, 1.05)
@@ -1494,15 +1758,27 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 						get_node("/root/AnnouncerEngine").call("SpeakTreeHeckle")
 				if has_node("/root/TensionManager"):
 					get_node("/root/TensionManager").on_tree_hit()
+				# Damped reflection off tree
+				velocity = velocity.bounce(normal) * 0.40
+				# If hit near top of trunk collider, deflect outward and down so ball doesn't hover on top
+				if normal.y > 0.5:
+					var outward := Vector3(velocity.x, -2.0, velocity.z)
+					if outward.is_zero_approx():
+						outward = Vector3(randf_range(-1.0, 1.0), -2.0, randf_range(-1.0, 1.0)).normalized()
+					velocity = outward.normalized() * maxf(velocity.length(), 2.0)
+				omega = omega * 0.5
+				state = PhysicsEnums.BallState.FLIGHT
 			elif is_flagstick:
 				if _cup_player != null and not _skipping_flight:
 					_cup_player.pitch_scale = randf_range(1.18, 1.30)
 					_cup_player.play()
 				print("[ball.gd] Ball struck the flagstick pin! Damped bounce.")
-
-			# Damped reflection off vertical surfaces (walls, barriers, trees, flagstick, etc.)
-			velocity = velocity.bounce(normal) * 0.35
-			omega = omega * 0.5
+				velocity = velocity.bounce(normal) * 0.35
+				omega = omega * 0.5
+			else:
+				# Damped reflection off vertical surfaces (walls, barriers, rocks, etc.)
+				velocity = velocity.bounce(normal) * 0.35
+				omega = omega * 0.5
 	else:
 		# No collision - only stay grounded if terrain is still directly beneath the ball.
 		if state != PhysicsEnums.BallState.FLIGHT and was_on_ground:
@@ -1535,36 +1811,50 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 
 func _try_recover_to_ground() -> bool:
 	var world := get_world_3d()
+	if world == null:
+		return false
 
 	var ray_start := global_position + Vector3.UP * GROUND_RAYCAST_UP
 	var ray_end := global_position + Vector3.DOWN * GROUND_RAYCAST_DOWN
 	var query := PhysicsRayQueryParameters3D.create(ray_start, ray_end)
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
-	query.exclude = [get_rid()]
+	var excludes: Array[RID] = [get_rid()]
+	query.exclude = excludes
 
-	var ray_hit := world.direct_space_state.intersect_ray(query)
-	if ray_hit.is_empty():
-		return false
+	for attempt in range(5):
+		var ray_hit := world.direct_space_state.intersect_ray(query)
+		if ray_hit.is_empty():
+			return false
 
-	var hit_position: Vector3 = ray_hit["position"]
-	var hit_normal: Vector3 = ray_hit["normal"]
-	if hit_normal.length_squared() < 0.000001:
-		hit_normal = Vector3.UP
-	else:
-		hit_normal = hit_normal.normalized()
+		var col = ray_hit.get("collider")
+		if col != null and (_is_collider_tree(col) or _is_collider_rock(col)):
+			excludes.append(col.get_rid())
+			query.exclude = excludes
+			continue
 
-	var nys := maxf(hit_normal.y, MIN_GROUND_NORMAL)
-	global_position = Vector3(hit_position.x, hit_position.y + (_ball_radius + GROUND_SNAP_OFFSET) / nys, hit_position.z)
-	floor_normal = hit_normal
-	velocity = _remove_velocity_along_normal(velocity, hit_normal)
-	on_ground = true
+		var hit_position: Vector3 = ray_hit["position"]
+		if hit_position.y <= global_position.y - _ball_radius:
+			return false
+		var hit_normal: Vector3 = ray_hit["normal"]
+		if hit_normal.length_squared() < 0.000001:
+			hit_normal = Vector3.UP
+		else:
+			hit_normal = hit_normal.normalized()
 
-	if state == PhysicsEnums.BallState.FLIGHT:
-		state = PhysicsEnums.BallState.ROLLOUT
+		var nys := maxf(hit_normal.y, MIN_GROUND_NORMAL)
+		global_position = Vector3(hit_position.x, hit_position.y + (_ball_radius + GROUND_SNAP_OFFSET) / nys, hit_position.z)
+		floor_normal = hit_normal
+		velocity = _remove_velocity_along_normal(velocity, hit_normal)
+		on_ground = true
 
-	print("Recovered ball-to-ground at %s (normal: %s)" % [str(global_position), str(hit_normal)])
-	return true
+		if state == PhysicsEnums.BallState.FLIGHT:
+			state = PhysicsEnums.BallState.ROLLOUT
+
+		print("Recovered ball-to-ground at %s (normal: %s)" % [str(global_position), str(hit_normal)])
+		return true
+
+	return false
 
 
 func _try_probe_ground() -> Dictionary:
@@ -1577,23 +1867,33 @@ func _try_probe_ground() -> Dictionary:
 	var query := PhysicsRayQueryParameters3D.create(ray_start, ray_end)
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
-	query.exclude = [get_rid()]
+	var excludes: Array[RID] = [get_rid()]
+	query.exclude = excludes
 
-	var ray_hit := world.direct_space_state.intersect_ray(query)
-	if ray_hit.is_empty():
-		return {"hit": false, "normal": Vector3.UP}
+	for attempt in range(5):
+		var ray_hit := world.direct_space_state.intersect_ray(query)
+		if ray_hit.is_empty():
+			return {"hit": false, "normal": Vector3.UP}
 
-	var ground_normal: Vector3 = ray_hit["normal"]
-	if ground_normal.length_squared() < 0.000001:
-		ground_normal = Vector3.UP
-	else:
-		ground_normal = ground_normal.normalized()
-	return {
-		"hit": true,
-		"normal": ground_normal,
-		"position": ray_hit["position"],
-		"collider": ray_hit.get("collider", null)
-	}
+		var col = ray_hit.get("collider")
+		if col != null and (_is_collider_tree(col) or _is_collider_rock(col)):
+			excludes.append(col.get_rid())
+			query.exclude = excludes
+			continue
+
+		var ground_normal: Vector3 = ray_hit["normal"]
+		if ground_normal.length_squared() < 0.000001:
+			ground_normal = Vector3.UP
+		else:
+			ground_normal = ground_normal.normalized()
+		return {
+			"hit": true,
+			"normal": ground_normal,
+			"position": ray_hit["position"],
+			"collider": col
+		}
+
+	return {"hit": false, "normal": Vector3.UP}
 
 
 static func is_ground_normal(normal: Vector3) -> bool:
@@ -1678,7 +1978,7 @@ func _get_cup_radius() -> float:
 			var r: float = float(parent_scene.cup_radius)
 			if r > 0.01:
 				return r
-	return 0.108
+	return 0.054
 
 
 func get_target_hole_position() -> Vector3:
@@ -1740,9 +2040,18 @@ func _enter_rest_state() -> void:
 	omega = Vector3.ZERO
 	_is_in_tree_canopy = false
 	_canopy_time = 0.0
+	_airborne_low_speed_timer = 0.0
+	_shot_duration = 0.0
 	if _leaves_player and _leaves_player.playing:
 		_leaves_player.stop()
 	if not is_in_water and not is_falling_in_hole:
+		# If the ball ended up elevated in a tree or off the ground, drop to ground level
+		var true_ground_y := _get_ground_y_at(global_position.x, global_position.z)
+		if global_position.y > (true_ground_y + 0.35) or not on_ground:
+			global_position.y = true_ground_y + GROUND_CENTER_HEIGHT + GROUND_SNAP_OFFSET
+			on_ground = true
+			floor_normal = Vector3.UP
+		ensure_tree_clearance()
 		ensure_rock_clearance()
 		var rest_probe := _try_probe_ground()
 		if bool(rest_probe.get("hit", false)):
@@ -1752,9 +2061,9 @@ func _enter_rest_state() -> void:
 				floor_normal = r_norm.normalized()
 			var r_nys := maxf(floor_normal.y, MIN_GROUND_NORMAL)
 			var r_target_y := r_hit.y + (_ball_radius + GROUND_SNAP_OFFSET) / r_nys
-			if absf(global_position.y - r_target_y) < 0.20 or global_position.y < r_target_y:
-				global_position.y = r_target_y
-				on_ground = true
+			global_position.y = r_target_y
+			on_ground = true
+	_orient_ball_to_aim()
 	emit_signal("rest")
 
 
@@ -1780,6 +2089,8 @@ func reset() -> void:
 	_tree_check_timer = 0.0
 	_canopy_time = 0.0
 	_surface_check_timer = 0.0
+	_airborne_low_speed_timer = 0.0
+	_shot_duration = 0.0
 	if _leaves_player and _leaves_player.playing:
 		_leaves_player.stop()
 	_cached_target_hole = get_target_hole_position()
@@ -1806,7 +2117,7 @@ func reset() -> void:
 	falling_time = 0.0
 	holed_out_this_shot = false
 	if _ball_mesh != null:
-		_ball_mesh.position.y = 0.0
+		_ball_mesh.position.y = get_visual_y_offset()
 	prev_physics_pos = global_position
 	curr_physics_pos = global_position
 	_physics_pos_initialized = true
@@ -1997,6 +2308,8 @@ func hit_from_data(data: Dictionary) -> void:
 	_tree_check_timer = 0.0
 	_canopy_time = 0.0
 	_surface_check_timer = 0.0
+	_airborne_low_speed_timer = 0.0
+	_shot_duration = 0.0
 	_check_scene_has_trees()
 	_cached_target_hole = get_target_hole_position()
 	is_falling_in_hole = false
@@ -2004,7 +2317,7 @@ func hit_from_data(data: Dictionary) -> void:
 	falling_time = 0.0
 	holed_out_this_shot = false
 	if _ball_mesh != null:
-		_ball_mesh.position.y = 0.0
+		_ball_mesh.position.y = get_visual_y_offset()
 	flight_time = 0.0
 	shot_hit_other_ground = false
 	shot_was_from_teebox = _check_is_on_teebox()
@@ -2028,18 +2341,35 @@ func hit_from_data(data: Dictionary) -> void:
 		speed_mph = speed_mph * (1.0 - reduction)
 		data["Speed"] = speed_mph
 		data["BallSpeed"] = speed_mph
+		data["shot_reduction"] = reduction
 		print("[ball.gd] Shot reduction applied! Speed reduced from %.2f to %.2f (%.1f%% reduction)" % [prev_speed, speed_mph, reduction * 100.0])
 		
-		# Reset the reduction now that it has been applied to this shot
+		# Reset the reduction now that it has been applied to this shot, saving last_shot_reduction for tracking
 		if player_node != null:
+			player_node.set("last_shot_reduction", reduction)
+			if "shot_data" in player_node and player_node.shot_data is Dictionary:
+				player_node.shot_data["shot_reduction"] = reduction
+				player_node.shot_data["Speed"] = speed_mph
+				player_node.shot_data["BallSpeed"] = speed_mph
 			var mp_mgr = get_node_or_null("/root/MultiplayerManager")
 			if mp_mgr != null and not mp_mgr.players.is_empty():
 				var active_player = mp_mgr.get_active_player()
+				active_player["last_shot_reduction"] = reduction
 				active_player["shot_reduction"] = 0.0
 				active_player["lie_type"] = "fairway"
 			else:
 				player_node.current_shot_reduction = 0.0
 				player_node.current_lie_type = "fairway"
+	else:
+		data["shot_reduction"] = 0.0
+		if player_node != null:
+			player_node.set("last_shot_reduction", 0.0)
+			if "shot_data" in player_node and player_node.shot_data is Dictionary:
+				player_node.shot_data["shot_reduction"] = 0.0
+			var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+			if mp_mgr != null and not mp_mgr.players.is_empty():
+				var active_player = mp_mgr.get_active_player()
+				active_player["last_shot_reduction"] = 0.0
 
 	var speed_mps: float = speed_mph * 0.44704  # mph to m/s
 	var vla_deg: float = float(data.get("VLA", 0.0))
@@ -2104,7 +2434,8 @@ func hit_from_data(data: Dictionary) -> void:
 		var flat_velocity := Vector3(launch_velocity.x, 0.0, launch_velocity.z)
 		launch_direction = flat_velocity.normalized() if flat_velocity.length() > 0.001 else Vector3.RIGHT
 		launch_omega = Vector3(0.0, 0.0, total_spin * 0.10472) \
-			.rotated(Vector3.RIGHT, deg_to_rad(spin_axis))
+			.rotated(Vector3.RIGHT, deg_to_rad(spin_axis)) \
+			.rotated(Vector3.UP, deg_to_rad(-hla_deg))
 	else:
 		launch_velocity = launch_data.get("velocity", Vector3.ZERO)
 		launch_omega = launch_data.get("omega", Vector3.ZERO)
@@ -2583,3 +2914,122 @@ func _update_surface_from_underneath() -> void:
 
 	if best_collider != null:
 		_update_surface_from_collider(best_collider)
+
+
+func _orient_ball_to_aim() -> void:
+	if _ball_mesh == null or not is_instance_valid(_ball_mesh):
+		return
+	var mesh_scale := get_mesh_scale()
+	var forward_dir := get_target_dir()
+	var up_dir := Vector3.UP
+	if on_ground and floor_normal.length_squared() > 0.5 and is_ground_normal(floor_normal):
+		up_dir = floor_normal.normalized()
+		var proj_fwd = forward_dir - up_dir * forward_dir.dot(up_dir)
+		if proj_fwd.length_squared() > 0.0001:
+			forward_dir = proj_fwd.normalized()
+	var right_dir := forward_dir.cross(up_dir).normalized()
+	if right_dir.length_squared() < 0.0001:
+		right_dir = Vector3.RIGHT
+	var target_basis := Basis(forward_dir, up_dir, right_dir).scaled(Vector3(mesh_scale, mesh_scale, mesh_scale))
+	_ball_mesh.basis = target_basis
+	if _ball_mesh.is_inside_tree():
+		var t := _ball_mesh.global_transform
+		t.basis = target_basis
+		_ball_mesh.global_transform = t
+
+
+
+func apply_ball_graphic(graphic_id: String, avatar_path: String = "", player_name: String = "", player_color: Color = Color(0.24, 0.46, 0.72)) -> void:
+	_current_ball_graphic_id = graphic_id if not graphic_id.is_empty() else "single_line"
+	if _current_ball_graphic_id == "osg_pro" or _current_ball_graphic_id == "classic_white" or _current_ball_graphic_id == "tour_yellow" or _current_ball_graphic_id == "neon_orange":
+		_current_ball_graphic_id = "single_line"
+
+	if _ball_mesh != null and is_instance_valid(_ball_mesh):
+		var icosphere = _ball_mesh.find_child("Icosphere", true, false) as MeshInstance3D
+		if icosphere != null:
+			var cache_key = "%s|%s|%s|%s" % [_current_ball_graphic_id, avatar_path, player_name, str(player_color)]
+			var mat: StandardMaterial3D = _ball_material_cache.get(cache_key, null)
+			if mat == null:
+				mat = StandardMaterial3D.new()
+				mat.roughness = 0.22
+				mat.metallic = 0.0
+				mat.albedo_color = Color.WHITE
+				match _current_ball_graphic_id:
+					"single_line":
+						if ResourceLoader.exists("res://assets/models/balls/ball_single_line.png"):
+							mat.albedo_texture = load("res://assets/models/balls/ball_single_line.png")
+					"triple_track":
+						if ResourceLoader.exists("res://assets/models/balls/ball_triple_track.png"):
+							mat.albedo_texture = load("res://assets/models/balls/ball_triple_track.png")
+					"arrow_track":
+						if ResourceLoader.exists("res://assets/models/balls/ball_arrow_track.png"):
+							mat.albedo_texture = load("res://assets/models/balls/ball_arrow_track.png")
+					"player_icon":
+						var img: Image = null
+						if ResourceLoader.exists("res://assets/models/balls/ball_single_line.png"):
+							var base_tex = load("res://assets/models/balls/ball_single_line.png")
+							if base_tex is Texture2D:
+								var base_img = base_tex.get_image()
+								if base_img != null:
+									img = base_img.duplicate()
+									img.convert(Image.FORMAT_RGBA8)
+						if img == null:
+							img = Image.create(1024, 1024, false, Image.FORMAT_RGBA8)
+							img.fill(Color(0.98, 0.98, 0.99))
+
+						var loaded_icon := false
+						var avatar_img: Image = null
+						if not avatar_path.is_empty():
+							if ResourceLoader.exists(avatar_path):
+								var av_res = load(avatar_path)
+								if av_res is Texture2D:
+									var res_img = av_res.get_image()
+									if res_img != null:
+										avatar_img = res_img.duplicate()
+							if avatar_img == null:
+								var raw_img := Image.new()
+								var p = ProjectSettings.globalize_path(avatar_path) if avatar_path.begins_with("res://") or avatar_path.begins_with("user://") else avatar_path
+								if raw_img.load_svg_from_file(p, 2.0) == OK or raw_img.load(p) == OK:
+									avatar_img = raw_img
+
+						var decal_size := 180
+						if avatar_img != null and not avatar_img.is_empty():
+							avatar_img = avatar_img.duplicate()
+							avatar_img.convert(Image.FORMAT_RGBA8)
+							avatar_img.resize(decal_size, decal_size, Image.INTERPOLATE_LANCZOS)
+							loaded_icon = true
+
+							# Stamp on +Z side (address/golfer side, y=132): flipped vertically for upright 3D orientation
+							var av_flipped = avatar_img.duplicate()
+							av_flipped.flip_y()
+							img.blend_rect(av_flipped, Rect2i(0, 0, decal_size, decal_size), Vector2i(512 - decal_size / 2, 132 - decal_size / 2))
+
+							# Stamp on -Z side (opposite side, y=892): standard orientation
+							img.blend_rect(avatar_img, Rect2i(0, 0, decal_size, decal_size), Vector2i(512 - decal_size / 2, 892 - decal_size / 2))
+
+						if not loaded_icon:
+							var badge_rad: int = 70
+							var side_centers: Array[Vector2i] = [Vector2i(512, 132), Vector2i(512, 892)]
+							for sc in side_centers:
+								var cx: int = sc.x
+								var cy: int = sc.y
+								for y in range(cy - badge_rad - 4, cy + badge_rad + 4):
+									for x in range(cx - badge_rad - 4, cx + badge_rad + 4):
+										if x < 0 or x >= 1024 or y < 0 or y >= 1024:
+											continue
+										var dist = Vector2(x - cx, y - cy).length()
+										if dist <= badge_rad:
+											if dist <= badge_rad - 14 and dist >= badge_rad - 20:
+												img.set_pixel(x, y, Color.WHITE)
+											else:
+												img.set_pixel(x, y, player_color)
+										elif dist <= badge_rad + 3:
+											img.set_pixel(x, y, Color(1, 1, 1, 0.8))
+						mat.albedo_texture = ImageTexture.create_from_image(img)
+					_:
+						if ResourceLoader.exists("res://assets/models/balls/ball_single_line.png"):
+							mat.albedo_texture = load("res://assets/models/balls/ball_single_line.png")
+				_ball_material_cache[cache_key] = mat
+			icosphere.material_override = mat
+
+	_orient_ball_to_aim()

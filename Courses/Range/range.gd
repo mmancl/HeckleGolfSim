@@ -1,5 +1,7 @@
 extends Node3D
 
+const TeeboxMarkerBuilder = preload("res://Courses/Range/teebox_marker_builder.gd")
+
 var track_points : bool = false
 var trail_timer : float = 0.0
 var trail_resolution : float = 0.1
@@ -79,7 +81,8 @@ var current_hole_location: Vector3 = Vector3.ZERO:
 		if current_hole_location != val:
 			current_hole_location = val
 			call_deferred("_generate_green_grid_and_heatmap")
-var cup_radius: float = 0.108
+var cup_radius: float = 0.054
+var current_hole_id: String = ""
 var current_hole_name: String = "Hole 1"
 var current_hole_par: int = 4
 var current_hole_tee_dist_yards: int = 0
@@ -97,6 +100,8 @@ var _last_pinch_distance: float = -1.0
 var is_screen_aiming: bool = false
 var screen_aim_direction: float = 0.0
 var screen_aim_speed_deg: float = 17.5
+var _was_keyboard_aiming: bool = false
+var _last_aim_dist_yards: int = -1
 var course_data_dict: Dictionary = {}
 var _shot_active: bool = false
 var is_sky_view_active: bool = false
@@ -429,6 +434,8 @@ func _ready() -> void:
 			$RangeUI.player_profile_changed.connect(_on_player_profile_changed)
 		if $RangeUI.has_signal("shot_traces_toggled") and not $RangeUI.shot_traces_toggled.is_connected(_on_shot_traces_toggled):
 			$RangeUI.shot_traces_toggled.connect(_on_shot_traces_toggled)
+		if $RangeUI.has_signal("stuck_ball_requested") and not $RangeUI.stuck_ball_requested.is_connected(_on_stuck_ball_requested):
+			$RangeUI.stuck_ball_requested.connect(_on_stuck_ball_requested)
 		var init_player = $RangeUI.get_selected_player_name() if $RangeUI.has_method("get_selected_player_name") else "Player 1"
 		if has_node("SessionRecorder"):
 			$SessionRecorder.username = init_player
@@ -804,6 +811,7 @@ func _ready() -> void:
 							var hole_loc = first_hole.get("Hole Location")
 							var par = first_hole.get("Par", 4)
 							var hole_name = first_hole.get("Name", start_hole_id)
+							current_hole_id = start_hole_id
 							current_hole_name = hole_name
 							current_hole_par = par
 							if hole_loc != null:
@@ -816,6 +824,7 @@ func _ready() -> void:
 								# We only need to ensure the flag pin is spawned.
 								if hole_loc != null:
 									_spawn_flag_pin()
+									update_teebox_markers(player_tee)
 							else:
 								if has_node("Player") and $Player.ball != null:
 									$Player.ball.spawn_position = spawn_pos
@@ -829,6 +838,7 @@ func _ready() -> void:
 									update_auto_club()
 									apply_default_aim()
 									_spawn_flag_pin()
+									update_teebox_markers(player_tee)
 								
 							print("[CoursePlay] Player positioned at %s Tee: " % start_hole_id, spawn_pos, " | Aiming at green: ", aim_target_pos)
 
@@ -1232,44 +1242,14 @@ func _unhandled_input(event: InputEvent) -> void:
 				$RangeUI.toggle_rollout()
 			get_viewport().set_input_as_handled()
 			return
-		elif event.is_action_pressed("aim_left"):
+		elif event.is_action_pressed("aim_left") or event.is_action_pressed("aim_right") or \
+			 event.is_action_pressed("aim_forward") or event.is_action_pressed("aim_backward"):
 			var vp := get_viewport()
 			if vp != null and vp.gui_get_focus_owner() != null:
 				var foc = vp.gui_get_focus_owner()
 				if _is_control_in_dialog(foc) or foc is LineEdit or foc is TextEdit:
 					return
 				vp.gui_release_focus()
-			_apply_aim_step(-1.5, 0.0)
-			get_viewport().set_input_as_handled()
-			return
-		elif event.is_action_pressed("aim_right"):
-			var vp := get_viewport()
-			if vp != null and vp.gui_get_focus_owner() != null:
-				var foc = vp.gui_get_focus_owner()
-				if _is_control_in_dialog(foc) or foc is LineEdit or foc is TextEdit:
-					return
-				vp.gui_release_focus()
-			_apply_aim_step(1.5, 0.0)
-			get_viewport().set_input_as_handled()
-			return
-		elif event.is_action_pressed("aim_forward"):
-			var vp := get_viewport()
-			if vp != null and vp.gui_get_focus_owner() != null:
-				var foc = vp.gui_get_focus_owner()
-				if _is_control_in_dialog(foc) or foc is LineEdit or foc is TextEdit:
-					return
-				vp.gui_release_focus()
-			_apply_aim_step(0.0, 2.0)
-			get_viewport().set_input_as_handled()
-			return
-		elif event.is_action_pressed("aim_backward"):
-			var vp := get_viewport()
-			if vp != null and vp.gui_get_focus_owner() != null:
-				var foc = vp.gui_get_focus_owner()
-				if _is_control_in_dialog(foc) or foc is LineEdit or foc is TextEdit:
-					return
-				vp.gui_release_focus()
-			_apply_aim_step(0.0, -2.0)
 			get_viewport().set_input_as_handled()
 			return
 		else:
@@ -1570,7 +1550,7 @@ func _process_screen_aiming(delta: float) -> void:
 	update_auto_club(false)
 	update_dof_focus()
 
-	var cam_pos = get_address_camera_position(ball_pos, -new_angle)
+	var cam_pos = get_address_camera_position(ball_pos, -new_angle, null, true)
 	var target_look = get_camera_target_look(aim_target_pos, ball_pos)
 	if has_node("PhantomCamera3D"):
 		$PhantomCamera3D.global_position = cam_pos
@@ -1581,7 +1561,7 @@ func _process_screen_aiming(delta: float) -> void:
 
 
 func _process_keyboard_aiming(delta: float) -> void:
-	if not ($Player and $Player.ball) or _shot_active:
+	if not has_node("Player") or $Player.ball == null or _shot_active:
 		return
 	if is_any_dialog_open():
 		return
@@ -1599,7 +1579,25 @@ func _process_keyboard_aiming(delta: float) -> void:
 		dist_input -= 1.0
 
 	if turn_input == 0.0 and dist_input == 0.0:
+		if _was_keyboard_aiming:
+			_was_keyboard_aiming = false
+			update_auto_club(false)
+			update_dof_focus()
+			if not is_aerial_view and has_node("Player") and $Player.ball != null:
+				var ball_pos = $Player.ball.global_position
+				var diff = aim_target_pos - ball_pos
+				var current_angle = atan2(diff.z, diff.x)
+				var cam_pos = get_address_camera_position(ball_pos, -current_angle, null, false)
+				var target_look = get_camera_target_look(aim_target_pos, ball_pos)
+				if has_node("PhantomCamera3D"):
+					$PhantomCamera3D.global_position = cam_pos
+					$PhantomCamera3D.look_at(target_look)
+				if has_node("Camera3D"):
+					$Camera3D.global_position = cam_pos
+					$Camera3D.look_at(target_look)
 		return
+
+	_was_keyboard_aiming = true
 
 	var vp := get_viewport()
 	if vp != null and vp.gui_get_focus_owner() != null:
@@ -1643,11 +1641,13 @@ func _process_keyboard_aiming(delta: float) -> void:
 	if has_node("MapCanvas/AimDistanceLabel"):
 		set_aim_distance(dist_yards)
 
-	update_auto_club(false)
-	update_dof_focus()
+	if dist_input != 0.0 and dist_yards != _last_aim_dist_yards:
+		_last_aim_dist_yards = dist_yards
+		update_auto_club(false)
+		update_dof_focus()
 
 	if not is_aerial_view:
-		var cam_pos = get_address_camera_position(ball_pos, -current_angle)
+		var cam_pos = get_address_camera_position(ball_pos, -current_angle, null, true)
 		var target_look = get_camera_target_look(aim_target_pos, ball_pos)
 		if has_node("PhantomCamera3D"):
 			$PhantomCamera3D.global_position = cam_pos
@@ -1692,7 +1692,7 @@ func _apply_aim_step(turn_deg: float, dist_m: float) -> void:
 	update_dof_focus()
 
 	if not is_aerial_view:
-		var cam_pos = get_address_camera_position(ball_pos, -current_angle)
+		var cam_pos = get_address_camera_position(ball_pos, -current_angle, null, true)
 		var target_look = get_camera_target_look(aim_target_pos, ball_pos)
 		if has_node("PhantomCamera3D"):
 			$PhantomCamera3D.global_position = cam_pos
@@ -1700,8 +1700,6 @@ func _apply_aim_step(turn_deg: float, dist_m: float) -> void:
 		if has_node("Camera3D"):
 			$Camera3D.global_position = cam_pos
 			$Camera3D.look_at(target_look)
-		if has_node("/root/ScreenOffsetManager"):
-			ScreenOffsetManager.on_ready_for_shot()
 
 
 var _last_club_cycle_time: float = 0.0
@@ -2030,6 +2028,15 @@ func _on_golf_ball_rest(_ball_data) -> void:
 				if p_node.has_method("get_side_distance"):
 					raw_ball_data["SideDistance"] = p_node.get_side_distance()
 
+			if not raw_ball_data.has("shot_reduction") or float(raw_ball_data.get("shot_reduction", 0.0)) == 0.0:
+				var red = p_node.get("last_shot_reduction")
+				if red != null and float(red) > 0.0:
+					raw_ball_data["shot_reduction"] = float(red)
+			if current_aim_distance_yards > 0.0:
+				raw_ball_data["AimDistanceYards"] = current_aim_distance_yards
+				if not raw_ball_data.has("TargetDistance") or float(raw_ball_data.get("TargetDistance", 0.0)) == 0.0:
+					raw_ball_data["TargetDistance"] = current_aim_distance_yards / 1.09361
+
 			# Capture flight tracer points from the Player's current_tracer
 			var tracer = p_node.get("current_tracer")
 			if tracer != null and is_instance_valid(tracer) and "points" in tracer and not tracer.points.is_empty():
@@ -2045,6 +2052,14 @@ func _on_golf_ball_rest(_ball_data) -> void:
 					else:
 						raw_ball_data["SideDistance"] = p_delta.z
 
+		var mp_mgr_lie = get_node_or_null("/root/MultiplayerManager")
+		if mp_mgr_lie != null and not mp_mgr_lie.players.is_empty():
+			var active_p = mp_mgr_lie.get_active_player()
+			if not raw_ball_data.has("shot_reduction") or float(raw_ball_data.get("shot_reduction", 0.0)) == 0.0:
+				var red = active_p.get("last_shot_reduction", active_p.get("shot_reduction", 0.0))
+				if float(red) > 0.0:
+					raw_ball_data["shot_reduction"] = float(red)
+
 		shot_history.append(raw_ball_data.duplicate())
 
 		# Notify shot trace overlay and dispersion map if active
@@ -2057,8 +2072,9 @@ func _on_golf_ball_rest(_ball_data) -> void:
 			var prev_longest_drive = -1.0
 			if mp_mgr != null and not p_name.is_empty():
 				prev_longest_drive = mp_mgr.get_player_longest_drive(p_name)
-			_record_global_shot(p_name, club_name, raw_ball_data)
-			if has_node("/root/AchievementManager") and not practice_mode_active:
+			var recorded = _record_global_shot(p_name, club_name, raw_ball_data)
+			raw_ball_data["recorded_in_averages"] = recorded
+			if has_node("/root/AchievementManager") and not practice_mode_active and recorded:
 				var total_yds = (raw_ball_data.get("TotalDistance", 0.0) as float) * 1.09361
 				get_node("/root/AchievementManager").check_shot_achievements(p_name, club_name, total_yds, prev_longest_drive)
 		_update_averages()
@@ -2159,6 +2175,9 @@ func _on_golf_ball_rest(_ball_data) -> void:
 		
 		# 2. Update ball position and spawn position
 		ball.global_position = recovery_pos
+		if ball.has_method("ensure_tree_clearance"):
+			ball.ensure_tree_clearance()
+			recovery_pos = ball.global_position
 		if ball.has_method("ensure_rock_clearance"):
 			ball.ensure_rock_clearance()
 			recovery_pos = ball.global_position
@@ -2410,11 +2429,22 @@ func _on_golf_ball_rest(_ball_data) -> void:
 func _update_averages(target_club: String = "") -> void:
 	var p_name = _get_current_player_name()
 	var club_name = target_club if not target_club.is_empty() else _get_current_club()
+	var mp = get_node_or_null("/root/MultiplayerManager")
+	var canonical_name = mp.get_canonical_player_name(p_name) if mp != null and mp.has_method("get_canonical_player_name") else p_name
+	var club_code = mp.normalize_club_code(club_name) if mp != null and mp.has_method("normalize_club_code") else club_name
 	
 	var global_stats = _load_global_stats()
 	var shots = []
-	if global_stats.has(p_name) and global_stats[p_name].has(club_name):
-		shots = global_stats[p_name][club_name]
+	var target_p_key = p_name
+	if mp != null and mp.has_method("_find_matching_player_key_in_dict"):
+		var match_key = mp._find_matching_player_key_in_dict(global_stats, canonical_name)
+		if not match_key.is_empty():
+			target_p_key = match_key
+	if global_stats.has(target_p_key):
+		if global_stats[target_p_key].has(club_code):
+			shots = global_stats[target_p_key][club_code]
+		elif global_stats[target_p_key].has(club_name):
+			shots = global_stats[target_p_key][club_name]
 		
 	if shots.is_empty():
 		if has_node("RangeUI"):
@@ -2701,6 +2731,7 @@ func load_practice_hole(idx: int) -> void:
 		var par = hole_data.get("Par", 4)
 		var hole_name = hole_data.get("Name", hole_key)
 		
+		current_hole_id = hole_key
 		current_hole_name = hole_name
 		current_hole_par = par
 		shot_count = 0
@@ -2728,6 +2759,7 @@ func load_practice_hole(idx: int) -> void:
 			apply_default_aim()
 			_spawn_flag_pin()
 			update_hole_outline()
+			update_teebox_markers(player_tee)
 			
 		print("[PracticeMode] Loaded hole ", idx, " (", hole_name, ")")
 
@@ -2958,8 +2990,8 @@ func _spawn_flag_pin() -> void:
 	var pole = MeshInstance3D.new()
 	pole.name = "Pole"
 	var pole_mesh = CylinderMesh.new()
-	pole_mesh.top_radius = 0.03
-	pole_mesh.bottom_radius = 0.03
+	pole_mesh.top_radius = 0.012
+	pole_mesh.bottom_radius = 0.012
 	pole_mesh.height = 3.0
 	pole.mesh = pole_mesh
 	var pole_mat = StandardMaterial3D.new()
@@ -2978,7 +3010,7 @@ func _spawn_flag_pin() -> void:
 	var col_shape = CollisionShape3D.new()
 	col_shape.name = "CollisionShape"
 	var cyl = CylinderShape3D.new()
-	cyl.radius = 0.025
+	cyl.radius = 0.012
 	cyl.height = 3.0
 	col_shape.shape = cyl
 	col_shape.position = Vector3(0, 1.5, 0)
@@ -3018,8 +3050,8 @@ func _spawn_flag_pin() -> void:
 	var cup = MeshInstance3D.new()
 	cup.name = "Cup"
 	var cup_mesh = CylinderMesh.new()
-	cup_mesh.top_radius = 0.095
-	cup_mesh.bottom_radius = 0.095
+	cup_mesh.top_radius = 0.048
+	cup_mesh.bottom_radius = 0.048
 	cup_mesh.height = 0.0035
 	cup.mesh = cup_mesh
 	var cup_mat = StandardMaterial3D.new()
@@ -3039,6 +3071,39 @@ func update_flagstick_collision(is_putt: bool) -> void:
 		var col = get_node("FlagPin/FlagstickCollider/CollisionShape") as CollisionShape3D
 		if col != null:
 			col.disabled = is_putt
+
+
+func update_teebox_markers(active_tee_color: String = "") -> void:
+	if is_driving_range:
+		return
+		
+	var hole_data: Dictionary = {}
+	if not current_hole_id.is_empty():
+		if course_data_dict.has("Hole Info") and course_data_dict["Hole Info"].has(current_hole_id):
+			hole_data = course_data_dict["Hole Info"][current_hole_id]
+		elif has_node("/root/MultiplayerManager"):
+			var mp = get_node("/root/MultiplayerManager")
+			if mp.hole_info.has(current_hole_id):
+				hole_data = mp.hole_info[current_hole_id]
+
+	if hole_data.is_empty() and course_data_dict.has("Hole Info") and not course_data_dict["Hole Info"].is_empty():
+		var h_keys = course_data_dict["Hole Info"].keys()
+		h_keys.sort()
+		var h_idx = clamp(current_practice_hole_index, 0, h_keys.size() - 1)
+		hole_data = course_data_dict["Hole Info"][h_keys[h_idx]]
+
+	if active_tee_color.is_empty():
+		var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+		if mp_mgr != null and not mp_mgr.players.is_empty():
+			var ap = mp_mgr.get_active_player()
+			if not ap.is_empty():
+				active_tee_color = ap.get("tee", "Blue")
+		else:
+			active_tee_color = "Blue"
+
+	var target = aim_target_pos if not aim_target_pos.is_zero_approx() else current_hole_location
+	var height_cb = Callable(self, "get_height")
+	TeeboxMarkerBuilder.update_course_teebox_markers(self, hole_data, active_tee_color, target, height_cb)
 
 
 func _on_shot_initiated() -> void:
@@ -3303,7 +3368,19 @@ func get_active_hole_config() -> Dictionary:
 	if all_holes.is_empty():
 		return {}
 
-	# 1. Match by current_hole_location proximity (most reliable across all game modes)
+	# 1. Authoritative: Match by explicit current_hole_id if valid
+	if current_hole_id != "" and all_holes.has(current_hole_id):
+		return all_holes[current_hole_id]
+
+	# 2. Authoritative for Match Play: Match by MultiplayerManager current hole ID
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and not mp_mgr.players.is_empty() and not mp_mgr.hole_ids.is_empty():
+		var hole_idx = clamp(mp_mgr.current_hole_index, 0, mp_mgr.hole_ids.size() - 1)
+		var hole_id = mp_mgr.hole_ids[hole_idx]
+		if all_holes.has(hole_id):
+			return all_holes[hole_id]
+
+	# 3. Match by current_hole_location proximity (most reliable across practice/driving range)
 	if not current_hole_location.is_zero_approx():
 		var cur_2d = Vector2(current_hole_location.x, current_hole_location.z)
 		var best_key = ""
@@ -3320,7 +3397,7 @@ func get_active_hole_config() -> Dictionary:
 		if best_key != "":
 			return all_holes[best_key]
 
-	# 2. Match by current_hole_name
+	# 4. Match by current_hole_name
 	if current_hole_name != "":
 		if all_holes.has(current_hole_name):
 			return all_holes[current_hole_name]
@@ -3328,15 +3405,7 @@ func get_active_hole_config() -> Dictionary:
 			if all_holes[k].get("Name", "") == current_hole_name:
 				return all_holes[k]
 
-	# 3. Match by MultiplayerManager.current_hole_index
-	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
-	if mp_mgr != null and not mp_mgr.hole_ids.is_empty():
-		var hole_idx = clamp(mp_mgr.current_hole_index, 0, mp_mgr.hole_ids.size() - 1)
-		var hole_id = mp_mgr.hole_ids[hole_idx]
-		if all_holes.has(hole_id):
-			return all_holes[hole_id]
-
-	# 4. Match by current_practice_hole_index
+	# 5. Match by current_practice_hole_index
 	var hole_keys = all_holes.keys()
 	hole_keys.sort()
 	if current_practice_hole_index >= 0 and current_practice_hole_index < hole_keys.size():
@@ -3446,10 +3515,10 @@ func get_camera_local_offset(override_is_on_green: Variant = null) -> Vector3:
 		
 	var cam_dist = 50.0 if is_sky_view_active else GlobalSettings.range_settings.camera_distance.value
 	var cam_height = 15.0 if is_sky_view_active else GlobalSettings.range_settings.camera_height.value
-	if is_driving_range and not is_sky_view_active and (is_equal_approx(cam_dist, 15.0) or cam_dist > 10.0):
-		cam_dist = 5.2
-	if is_driving_range and not is_sky_view_active and (is_equal_approx(cam_height, 2.4) or cam_height > 2.0):
-		cam_height = 1.65
+	if not is_sky_view_active and (is_equal_approx(cam_dist, 15.0) or cam_dist > 8.0):
+		cam_dist = 3.6
+	if not is_sky_view_active and (is_equal_approx(cam_height, 2.4) or cam_height > 2.0):
+		cam_height = 1.35
 	return Vector3(-cam_dist, cam_height, 0)
 
 
@@ -3479,7 +3548,7 @@ func is_ball_in_sand(pos: Variant = null) -> bool:
 	return false
 
 
-func get_address_camera_position(ball_pos: Vector3, rot_y: float, override_is_on_green: Variant = null) -> Vector3:
+func get_address_camera_position(ball_pos: Vector3, rot_y: float, override_is_on_green: Variant = null, is_aiming: bool = false) -> Vector3:
 	var is_on_green = is_putting_view(override_is_on_green)
 	
 	if is_on_green:
@@ -3492,17 +3561,17 @@ func get_address_camera_position(ball_pos: Vector3, rot_y: float, override_is_on
 	
 	var default_dist = GlobalSettings.range_settings.camera_distance.value
 	var default_height = GlobalSettings.range_settings.camera_height.value
-	if is_driving_range and (is_equal_approx(default_dist, 15.0) or default_dist > 10.0):
-		default_dist = 5.2
-	if is_driving_range and (is_equal_approx(default_height, 2.4) or default_height > 2.0):
-		default_height = 1.65
+	if is_equal_approx(default_dist, 15.0) or default_dist > 8.0:
+		default_dist = 3.6
+	if is_equal_approx(default_height, 2.4) or default_height > 2.0:
+		default_height = 1.35
 	var back_dir = Vector3(-1.0, 0.0, 0.0).rotated(Vector3.UP, rot_y)
 	
 	var default_cam_pos = ball_pos + back_dir * default_dist + Vector3.UP * default_height
 	var clamped_default = clamp_camera_position(default_cam_pos)
 	
-	# If on flat driving range, terrain height is always 0.0 and no bunker/hill exists
-	if is_driving_range:
+	# If on flat driving range or actively aiming, use smooth clamped default (prevents raycast spikes and distance popping)
+	if is_driving_range or is_aiming:
 		return clamped_default
 
 	var is_sand = is_ball_in_sand(ball_pos)
@@ -4316,6 +4385,10 @@ func _spawn_driving_range_elements() -> void:
 	_spawn_ground_distance_indicators()
 	_spawn_range_trees()
 	_spawn_mountain_backdrop()
+	if has_node("DrivingRangeTrees"):
+		var q = GlobalSettings.get_graphics_quality() if GlobalSettings != null else "High"
+		MobilePerformance.apply_graphics_quality($DrivingRangeTrees, q)
+
 
 
 func _spawn_hitting_bays() -> void:
@@ -4947,8 +5020,11 @@ func _save_global_stats(stats: Dictionary) -> void:
 	get_node("/root/MultiplayerManager").save_global_club_stats(stats)
 
 
-func _record_global_shot(player_name: String, club_name: String, raw_shot: Dictionary) -> void:
-	get_node("/root/MultiplayerManager").record_global_shot(player_name, club_name, raw_shot)
+func _record_global_shot(player_name: String, club_name: String, raw_shot: Dictionary) -> bool:
+	var mp = get_node_or_null("/root/MultiplayerManager")
+	if mp != null and mp.has_method("record_global_shot"):
+		return mp.record_global_shot(player_name, club_name, raw_shot)
+	return false
 
 
 func _remove_last_global_shot(player_name: String, club_name: String) -> void:
@@ -4961,7 +5037,8 @@ func remove_last_shot() -> void:
 		var p_name = last_shot.get("player", "")
 		var club_name = last_shot.get("club", "")
 		if not p_name.is_empty() and not club_name.is_empty():
-			_remove_last_global_shot(p_name, club_name)
+			if last_shot.get("recorded_in_averages", true):
+				_remove_last_global_shot(p_name, club_name)
 		_update_averages()
 		if is_driving_range and _shot_trace_overlay != null and _shot_trace_overlay.is_active():
 			var cur_p = _get_current_player_name()
@@ -5022,8 +5099,8 @@ func _find_green_nodes(node: Node) -> Array:
 	return result
 
 
-func _init_cached_surface_bodies() -> void:
-	if _cached_surface_nodes_initialized:
+func _init_cached_surface_bodies(force: bool = false) -> void:
+	if _cached_surface_nodes_initialized and not force:
 		return
 	_cached_surface_nodes_initialized = true
 	_cached_green_bodies.clear()
@@ -5141,6 +5218,206 @@ func is_point_in_fairway(pos_2d: Vector2) -> bool:
 					if _distance_to_triangle_2d(pos_2d, a, b, c) <= 0.5:
 						return true
 	return false
+
+
+func _project_point_on_segment_2d(p: Vector2, a: Vector2, b: Vector2) -> Vector2:
+	var ab := b - a
+	var ap := p - a
+	var ab_len_sq := ab.length_squared()
+	if ab_len_sq == 0.0:
+		return a
+	var t := clampf(ap.dot(ab) / ab_len_sq, 0.0, 1.0)
+	return a + t * ab
+
+
+func get_closest_point_on_nearest_fairway(pos: Vector3) -> Vector3:
+	_init_cached_surface_bodies()
+	var pos_2d := Vector2(pos.x, pos.z)
+	var min_dist := INF
+	var best_pt_2d := pos_2d
+	var found_fairway := false
+
+	if not _cached_fairway_bodies.is_empty():
+		for entry in _cached_fairway_bodies:
+			var dist_to_center = pos_2d.distance_to(entry.center_2d)
+			if dist_to_center - entry.radius >= min_dist:
+				continue # Bounding circle early-out
+
+			var trans: Transform3D = entry.transform
+			for faces in entry.shapes:
+				for i in range(0, faces.size(), 3):
+					if i + 2 < faces.size():
+						var a_3d = trans * faces[i]
+						var b_3d = trans * faces[i + 1]
+						var c_3d = trans * faces[i + 2]
+						var a = Vector2(a_3d.x, a_3d.z)
+						var b = Vector2(b_3d.x, b_3d.z)
+						var c = Vector2(c_3d.x, c_3d.z)
+
+						if _is_point_in_triangle_2d(pos_2d, a, b, c):
+							min_dist = 0.0
+							best_pt_2d = pos_2d
+							found_fairway = true
+							break
+
+						var proj_ab = _project_point_on_segment_2d(pos_2d, a, b)
+						var d_ab = pos_2d.distance_to(proj_ab)
+						if d_ab < min_dist:
+							min_dist = d_ab
+							best_pt_2d = proj_ab
+							found_fairway = true
+
+						var proj_bc = _project_point_on_segment_2d(pos_2d, b, c)
+						var d_bc = pos_2d.distance_to(proj_bc)
+						if d_bc < min_dist:
+							min_dist = d_bc
+							best_pt_2d = proj_bc
+							found_fairway = true
+
+						var proj_ca = _project_point_on_segment_2d(pos_2d, c, a)
+						var d_ca = pos_2d.distance_to(proj_ca)
+						if d_ca < min_dist:
+							min_dist = d_ca
+							best_pt_2d = proj_ca
+							found_fairway = true
+				if min_dist <= 0.001:
+					break
+
+	if not found_fairway:
+		if is_driving_range:
+			# Driving range fairway corridor centered at Z = 0, half_width = 26.0m, X >= -12.0
+			var fx = maxf(pos.x, -12.0)
+			var fz = clampf(pos.z, -26.0, 26.0)
+			best_pt_2d = Vector2(fx, fz)
+			found_fairway = true
+		else:
+			# Check hole path / centerline corridor
+			var active_hole = get_active_hole_config() if has_method("get_active_hole_config") else {}
+			var path_arr = active_hole.get("Hole Path", active_hole.get("HolePath", []))
+			if typeof(path_arr) == TYPE_ARRAY and path_arr.size() >= 2:
+				var poly: Array[Vector2] = []
+				for pt in path_arr:
+					poly.append(Vector2(float(pt[0]), float(pt[1])))
+				var proj_res = _project_point_on_polyline(pos_2d, poly)
+				best_pt_2d = proj_res.get("closest_point", pos_2d)
+				found_fairway = true
+			elif not current_hole_location.is_zero_approx():
+				var pin_2d = Vector2(current_hole_location.x, current_hole_location.z)
+				var tee_2d = Vector2.ZERO
+				var tee_boxes = active_hole.get("Tee Boxes", {})
+				if typeof(tee_boxes) == TYPE_DICTIONARY and not tee_boxes.is_empty():
+					var def_key = "Blue" if "Blue" in tee_boxes else tee_boxes.keys()[0]
+					var t_arr = tee_boxes[def_key]
+					tee_2d = Vector2(float(t_arr[0]), float(t_arr[1]))
+				elif has_node("Player") and $Player.get("ball") != null and not ($Player.ball.spawn_position as Vector3).is_zero_approx():
+					tee_2d = Vector2($Player.ball.spawn_position.x, $Player.ball.spawn_position.z)
+
+				if not tee_2d.is_zero_approx():
+					best_pt_2d = _project_point_on_segment_2d(pos_2d, tee_2d, pin_2d)
+				else:
+					best_pt_2d = pin_2d
+				found_fairway = true
+
+	var ground_y = get_height(best_pt_2d.x, best_pt_2d.y)
+	return Vector3(best_pt_2d.x, ground_y, best_pt_2d.y)
+
+
+func _on_stuck_ball_requested() -> void:
+	move_stuck_ball()
+
+
+func move_stuck_ball(distance_yards: float = 2.0) -> bool:
+	var player_node = get_node_or_null("Player")
+	if player_node == null:
+		return false
+	var ball = player_node.get("ball")
+	if ball == null:
+		return false
+	if "state" in ball and (ball.state == PhysicsEnums.BallState.FLIGHT or ball.state == PhysicsEnums.BallState.ROLLOUT):
+		print("[range.gd] Cannot move stuck ball while ball is in motion.")
+		return false
+
+	var ball_pos: Vector3 = ball.global_position
+	var ball_2d := Vector2(ball_pos.x, ball_pos.z)
+	var fairway_pos: Vector3 = get_closest_point_on_nearest_fairway(ball_pos)
+	var fairway_2d := Vector2(fairway_pos.x, fairway_pos.z)
+
+	var move_dist_m: float = distance_yards * 0.9144 # 2 yards = 1.8288m
+	var to_fairway := fairway_2d - ball_2d
+	var dist_to_fairway := to_fairway.length()
+	var new_pos_2d := ball_2d
+
+	if dist_to_fairway > 0.001:
+		var dir := to_fairway.normalized()
+		new_pos_2d = ball_2d + dir * move_dist_m
+	else:
+		# Ball is already on fairway; move 2 yards towards aim target or hole
+		var target_2d := Vector2.ZERO
+		if not current_hole_location.is_zero_approx():
+			target_2d = Vector2(current_hole_location.x, current_hole_location.z)
+		elif aim_target_pos != null and not aim_target_pos.is_zero_approx():
+			target_2d = Vector2(aim_target_pos.x, aim_target_pos.z)
+
+		var dir := (target_2d - ball_2d).normalized() if not target_2d.is_zero_approx() and target_2d != ball_2d else Vector2(1.0, 0.0)
+		new_pos_2d = ball_2d + dir * move_dist_m
+
+	var ground_y := get_height(new_pos_2d.x, new_pos_2d.y)
+	var new_pos := Vector3(new_pos_2d.x, ground_y + GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET, new_pos_2d.y)
+
+	ball.global_position = new_pos
+	ball.spawn_position = new_pos
+	if ball.has_method("ensure_tree_clearance"):
+		ball.ensure_tree_clearance()
+	if ball.has_method("ensure_rock_clearance"):
+		ball.ensure_rock_clearance()
+	new_pos = ball.global_position
+	ball.spawn_position = new_pos
+	ball.reset()
+	if ball.has_method("_update_surface_from_underneath"):
+		ball._update_surface_from_underneath()
+
+	if practice_mode_active:
+		practice_start_pos = new_pos
+
+	# Update active player without incrementing strokes
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and not mp_mgr.players.is_empty():
+		var active_player = mp_mgr.get_active_player()
+		if not active_player.is_empty():
+			active_player["position"] = new_pos
+			active_player["last_starting_pos"] = new_pos
+			active_player["lie_type"] = ball.lie_type
+
+	if player_node != null:
+		player_node.current_lie_type = ball.lie_type
+		if player_node.get("_last_starting_pos") != null:
+			player_node._last_starting_pos = new_pos
+		if player_node.camera_target != null:
+			player_node.camera_target.global_position = new_pos
+
+	if has_node("PlayerMarker"):
+		$PlayerMarker.global_position = new_pos
+
+	update_current_lie_and_reduction()
+	update_auto_club(true)
+
+	if not current_hole_location.is_zero_approx():
+		_update_hole_info_label(true)
+		apply_default_aim()
+
+	if has_node("MultiplayerController"):
+		var mp_ctrl = get_node("MultiplayerController")
+		if mp_ctrl != null and mp_ctrl.has_method("_update_distance_queue"):
+			mp_ctrl.call("_update_distance_queue")
+
+	if mp_mgr != null and mp_mgr.has_method("save_current_match"):
+		mp_mgr.save_current_match()
+
+	print("[range.gd] Stuck ball moved 2 yards closer to nearest fairway: %s -> %s (Strokes: %s)" % [
+		ball_pos, new_pos,
+		str(mp_mgr.get_active_player().get("strokes", 0)) if mp_mgr != null and not mp_mgr.players.is_empty() else "N/A"
+	])
+	return true
 
 
 func _project_point_on_polyline(pt: Vector2, polyline: Array[Vector2]) -> Dictionary:

@@ -12,6 +12,7 @@ signal golfer_cam_enabled_changed(is_enabled: bool)
 signal putting_cam_enabled_changed(is_enabled: bool)
 signal player_profile_changed(player_name: String)
 signal shot_traces_toggled(enabled: bool)
+signal stuck_ball_requested
 
 
 var _avg_carry: Label
@@ -46,6 +47,9 @@ var _shot_analysis_btn: Button = null
 var _shot_traces_btn: Button = null
 var _shot_traces_active: bool = true
 var _rollout_btn: Button = null
+var _track_averages_btn: Button = null
+var _stuck_ball_btn: Button = null
+var _avg_paused_indicator: Label = null
 var _dispersion_overlay: Control = null
 var _golfer_cam_panel: PanelContainer = null
 var _camera_feed_rect: TextureRect = null
@@ -420,6 +424,8 @@ func _ready() -> void:
 					var vp = get_viewport()
 					if vp != null:
 						vp.gui_release_focus()
+				_update_hit_distance_button_state()
+				_update_helpers_scroll_layout.call_deferred()
 		)
 		toggles_container.add_child(dist_btn)
 		_dist_btn = dist_btn
@@ -429,6 +435,10 @@ func _ready() -> void:
 		dist_menu.name = "DistanceMenu"
 		dist_menu.visible = false
 		dist_menu.inject_shot.connect(_on_shot_injector_inject)
+		dist_menu.visibility_changed.connect(func():
+			_update_hit_distance_button_state()
+			_update_helpers_scroll_layout.call_deferred()
+		)
 		toggles_container.add_child(dist_menu)
 		_update_hit_distance_button_visibility()
 
@@ -530,6 +540,47 @@ func _ready() -> void:
 		)
 		toggles_container.add_child(rollout_btn)
 		_rollout_btn = rollout_btn
+
+		# Track Club Distances & Averages Toggle Button
+		var track_averages_btn = Button.new()
+		track_averages_btn.name = "TrackAveragesButton"
+		var is_tracking_on = true
+		var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+		if mp_mgr != null and mp_mgr.has_method("is_club_averages_tracking_enabled"):
+			is_tracking_on = mp_mgr.is_club_averages_tracking_enabled()
+		track_averages_btn.text = "📊 Track Averages: ON" if is_tracking_on else "📊 Track Averages: OFF"
+		track_averages_btn.tooltip_text = "Toggle Club Distances & Shot Averages Tracking"
+		track_averages_btn.custom_minimum_size = Vector2(180, 56)
+		var initial_tracking_color = Color(0.18, 0.55, 0.65, 0.85) if is_tracking_on else Color(0.5, 0.5, 0.5, 0.85)
+		apply_material_button_style(track_averages_btn, initial_tracking_color)
+		track_averages_btn.pressed.connect(func():
+			var cur_state = true
+			var mp = get_node_or_null("/root/MultiplayerManager")
+			if mp != null and mp.has_method("is_club_averages_tracking_enabled"):
+				cur_state = mp.is_club_averages_tracking_enabled()
+			var new_state = not cur_state
+			if mp != null and mp.has_method("set_club_averages_tracking_enabled"):
+				mp.set_club_averages_tracking_enabled(new_state)
+			elif has_node("/root/GlobalSettings") and GlobalSettings.range_settings != null and "track_club_averages" in GlobalSettings.range_settings:
+				GlobalSettings.range_settings.track_club_averages.value = new_state
+				GlobalSettings.save_settings()
+			_update_track_averages_btn_state()
+		)
+		if mp_mgr != null and mp_mgr.has_signal("club_averages_tracking_toggled"):
+			mp_mgr.club_averages_tracking_toggled.connect(func(_enabled): _update_track_averages_btn_state())
+		toggles_container.add_child(track_averages_btn)
+		_track_averages_btn = track_averages_btn
+
+		# Stuck Ball Button (Free drop 2 yards closer to nearest fairway)
+		var stuck_ball_btn = Button.new()
+		stuck_ball_btn.name = "StuckBallButton"
+		stuck_ball_btn.text = "⛳ Stuck Ball Relief"
+		stuck_ball_btn.tooltip_text = "Move ball 2 yards closer to nearest fairway without counting a stroke"
+		stuck_ball_btn.custom_minimum_size = Vector2(180, 56)
+		apply_material_button_style(stuck_ball_btn, Color(0.75, 0.45, 0.15, 0.85))
+		stuck_ball_btn.pressed.connect(_on_stuck_ball_button_pressed)
+		toggles_container.add_child(stuck_ball_btn)
+		_stuck_ball_btn = stuck_ball_btn
 
 
 		# Position ClubSelector directly underneath SettingsButton and HideHelpersButton
@@ -780,6 +831,8 @@ func set_data(data: Dictionary, is_final_rest: bool = false) -> void:
 
 			if stat_id == "VLA" or stat_id == "HLA":
 				val = _format_angle(val)
+			elif stat_id == "ClubPath":
+				val = _format_club_path(val)
 			if child.has_method("set_data"):
 				child.call("set_data", str(val))
 
@@ -1221,6 +1274,28 @@ func _format_angle(value) -> String:
 	return str(value)
 
 
+func _format_club_path(value) -> String:
+	if typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT:
+		var f_val := float(value)
+		if absf(f_val) < 0.1:
+			return "0.0 Str"
+		elif f_val > 0.0:
+			return "%.1f I-O" % f_val
+		else:
+			return "%.1f O-I" % absf(f_val)
+	var s: String = str(value).strip_edges()
+	if s == "---" or s == "N/A" or s.is_empty():
+		return s
+	var s_lower := s.to_lower()
+	if s_lower.ends_with("in-out") or s_lower.ends_with("in-to-out"):
+		var num := s.split(" ")[0]
+		return "%s I-O" % num
+	elif s_lower.ends_with("out-in") or s_lower.ends_with("out-to-in"):
+		var num := s.split(" ")[0]
+		return "%s O-I" % num
+	return s
+
+
 func _on_rec_button_pressed() -> void:
 	emit_signal("rec_button_pressed")
 
@@ -1482,6 +1557,19 @@ func _setup_averages_ui() -> void:
 	_avg_target_diff.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_avg_target_diff.add_theme_font_size_override("font_size", 15)
 	averages_hbox.add_child(_avg_target_diff)
+
+	_avg_paused_indicator = Label.new()
+	_avg_paused_indicator.name = "AvgPausedIndicator"
+	_avg_paused_indicator.text = "⏸ (Tracking Off)"
+	_avg_paused_indicator.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_avg_paused_indicator.add_theme_font_size_override("font_size", 15)
+	_avg_paused_indicator.modulate = Color(1.0, 0.75, 0.25, 0.95)
+	var is_tr_on := true
+	var mp_mgr_init = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr_init != null and mp_mgr_init.has_method("is_club_averages_tracking_enabled"):
+		is_tr_on = mp_mgr_init.is_club_averages_tracking_enabled()
+	_avg_paused_indicator.visible = not is_tr_on
+	averages_hbox.add_child(_avg_paused_indicator)
 	
 	_averages_panel.add_child(averages_hbox)
 
@@ -4286,6 +4374,8 @@ func _update_tooltips() -> void:
 		_shot_traces_btn.tooltip_text = "Toggle Flight Arc Traces & Dispersion View for current club [%s]" % km.get_action_summary_str("shot_traces_toggle")
 	if _rollout_btn != null and is_instance_valid(_rollout_btn):
 		_rollout_btn.tooltip_text = "Toggle Ball Rollout & Bounce [%s]" % km.get_action_summary_str("rollout_toggle")
+	if _stuck_ball_btn != null and is_instance_valid(_stuck_ball_btn):
+		_stuck_ball_btn.tooltip_text = "Move ball 2 yards closer to nearest fairway without counting a stroke"
 
 
 func update_announcer_button_state() -> void:
@@ -4347,6 +4437,37 @@ func update_rollout_button_state() -> void:
 		apply_material_button_style(_rollout_btn, Color(0.5, 0.5, 0.5, 0.85))
 
 
+func _update_track_averages_btn_state() -> void:
+	var is_on := true
+	var mp = get_node_or_null("/root/MultiplayerManager")
+	if mp != null and mp.has_method("is_club_averages_tracking_enabled"):
+		is_on = mp.is_club_averages_tracking_enabled()
+	elif has_node("/root/GlobalSettings") and GlobalSettings.range_settings != null and "track_club_averages" in GlobalSettings.range_settings:
+		is_on = bool(GlobalSettings.range_settings.track_club_averages.value)
+	if _track_averages_btn != null and is_instance_valid(_track_averages_btn):
+		_track_averages_btn.text = "📊 Track Averages: ON" if is_on else "📊 Track Averages: OFF"
+		var c = Color(0.18, 0.55, 0.65, 0.85) if is_on else Color(0.5, 0.5, 0.5, 0.85)
+		apply_material_button_style(_track_averages_btn, c)
+	if _avg_paused_indicator != null and is_instance_valid(_avg_paused_indicator):
+		_avg_paused_indicator.visible = not is_on
+
+
+func _on_stuck_ball_button_pressed() -> void:
+	stuck_ball_requested.emit()
+	if get_signal_connection_list("stuck_ball_requested").is_empty():
+		var course = get_parent()
+		if course != null and course.has_method("move_stuck_ball"):
+			course.call("move_stuck_ball")
+		elif course != null and course.has_node("MultiplayerController"):
+			var mc = course.get_node("MultiplayerController")
+			if mc != null and mc.has_method("move_stuck_ball"):
+				mc.call("move_stuck_ball")
+
+
+func get_stuck_ball_button() -> Button:
+	return _stuck_ball_btn
+
+
 func is_driving_range() -> bool:
 	var parent = get_parent()
 	if parent != null:
@@ -4363,6 +4484,25 @@ func is_driving_range() -> bool:
 
 func _on_debug_hit_distance_setting_changed(_val) -> void:
 	_update_hit_distance_button_visibility()
+
+
+func _update_hit_distance_button_state() -> void:
+	if _dist_btn == null or not is_instance_valid(_dist_btn):
+		return
+	var menu = null
+	if _right_panel != null:
+		menu = _right_panel.get_node_or_null("TogglesScroll/TogglesContainer/DistanceMenu")
+		if not menu:
+			menu = _right_panel.get_node_or_null("TogglesContainer/DistanceMenu")
+	if not menu:
+		menu = get_node_or_null("DistanceMenu")
+	var is_open = menu != null and is_instance_valid(menu) and menu.visible
+	if is_open:
+		_dist_btn.text = "🎯 Hit Distance: OPEN"
+		apply_material_button_style(_dist_btn, Color(0.75, 0.25, 0.75, 0.9))
+	else:
+		_dist_btn.text = "🎯 Hit Distance"
+		apply_material_button_style(_dist_btn, Color(0.6, 0.2, 0.6, 0.85))
 
 
 func _update_hit_distance_button_visibility() -> void:
@@ -4383,6 +4523,7 @@ func _update_hit_distance_button_visibility() -> void:
 		menu = get_node_or_null("DistanceMenu")
 	if not enabled and menu != null and menu.visible:
 		menu.visible = false
+	_update_hit_distance_button_state()
 	_update_helpers_scroll_layout.call_deferred()
 	call_deferred("_update_hud_focus_neighbors")
 
@@ -4602,4 +4743,12 @@ func _update_helpers_scroll_layout() -> void:
 	if scroll_w <= 0 and is_bar_visible and v_bar != null:
 		scroll_w = int(v_bar.custom_minimum_size.x)
 	var shift = (scroll_w + 6) if scroll_w > 0 else 0
-	_right_panel.offset_left = -280 - shift
+
+	var dist_menu = _toggles_scroll.find_child("DistanceMenu", true, false)
+	var is_dist_menu_visible = dist_menu != null and is_instance_valid(dist_menu) and dist_menu.visible and _toggles_scroll.visible
+	var dist_shift = 0
+	if is_dist_menu_visible:
+		var is_mob = MobilePerformance.is_mobile()
+		dist_shift = 220 if is_mob else 160
+
+	_right_panel.offset_left = -280 - shift - dist_shift

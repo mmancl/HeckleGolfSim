@@ -196,14 +196,14 @@ func load_settings() -> void:
 	elif range_settings.shot_tracer_count.value > 10:
 		range_settings.shot_tracer_count.set_value(10)
 		migrated = true
-	if range_settings.camera_distance.value < 14.0:
-		range_settings.camera_distance.set_value(15.0)
+	if range_settings.camera_distance.value >= 14.0 or is_equal_approx(range_settings.camera_distance.value, 5.2):
+		range_settings.camera_distance.set_value(3.6)
 		migrated = true
 	if range_settings.camera_fov.value < 50.0:
 		range_settings.camera_fov.set_value(55.0)
 		migrated = true
-	if range_settings.camera_height.value < 2.0:
-		range_settings.camera_height.set_value(2.4)
+	if range_settings.camera_height.value >= 2.0 or is_equal_approx(range_settings.camera_height.value, 1.65):
+		range_settings.camera_height.set_value(1.35)
 		migrated = true
 	if is_equal_approx(range_settings.ball_reset_timer.value, 3.0):
 		range_settings.ball_reset_timer.set_value(1.5)

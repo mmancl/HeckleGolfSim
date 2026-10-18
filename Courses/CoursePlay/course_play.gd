@@ -87,6 +87,8 @@ var announcer_btn: Button = null
 var tension_btn: Button = null
 var dist_btn: Button = null
 var rollout_btn: Button = null
+var track_averages_btn: Button = null
+var stuck_ball_btn: Button = null
 var _screen_offset_ctrl: Control = null
 var club_selector_node: Control = null
 
@@ -118,12 +120,18 @@ var gimme_title_lbl: Label = null
 var gimme_sub_lbl: Label = null
 var _gimme_tween: Tween = null
 var is_player_turn_ready: bool = true
+var _last_loaded_hole_id: String = ""
+var _last_loaded_hole_index: int = -1
 
 func is_gimme_banner_active() -> bool:
 	return gimme_banner != null and is_instance_valid(gimme_banner) and gimme_banner.visible and gimme_banner.modulate.a > 0.05
 
 func _ready() -> void:
+	_last_loaded_hole_id = ""
+	_last_loaded_hole_index = -1
 	MultiplayerManager.active_player_changed.connect(_on_active_player_changed)
+	if not MultiplayerManager.player_ball_graphic_changed.is_connected(_on_course_ball_graphic_changed):
+		MultiplayerManager.player_ball_graphic_changed.connect(_on_course_ball_graphic_changed)
 	MultiplayerManager.hole_completed.connect(_on_hole_completed)
 	MultiplayerManager.game_over.connect(_on_game_over)
 	MultiplayerManager.gimme_awarded.connect(_on_gimme_awarded)
@@ -135,19 +143,23 @@ func _ready() -> void:
 	if has_node("/root/KeybindingManager"):
 		KeybindingManager.keybindings_changed.connect(_update_hud_tooltips)
 	
-	if get_parent() != null and get_parent() != get_tree().get_root() and get_parent().name != "CourseManager":
-		course_instance = get_parent()
-	else:
-		var current_scene = get_tree().current_scene
-		if current_scene != null and current_scene.name == "CourseManager":
-			var course_nodes = current_scene.get_children()
-			if not course_nodes.is_empty():
-				course_instance = course_nodes[0]
+	if course_instance == null:
+		if get_parent() != null and get_parent() != get_tree().get_root() and get_parent().name != "CourseManager":
+			course_instance = get_parent()
+		else:
+			var current_scene = get_tree().current_scene
+			if current_scene != null and current_scene.name == "CourseManager":
+				var course_nodes = current_scene.get_children()
+				if not course_nodes.is_empty():
+					course_instance = course_nodes[0]
 			
 	if course_instance != null:
 		var player_node = course_instance.get_node_or_null("Player")
 		if player_node != null:
 			active_ball = player_node.get("ball")
+			var init_p = MultiplayerManager.get_active_player()
+			if player_node.has_method("set_profile") and not init_p.is_empty():
+				player_node.set_profile(str(init_p.get("name", "")))
 
 	if has_node("/root/GlobalSettings"):
 		var gs = get_node("/root/GlobalSettings")
@@ -1033,10 +1045,8 @@ func _setup_hud() -> void:
 	dist_menu.name = "DistanceMenu"
 	dist_menu.visible = false
 	dist_menu.inject_shot.connect(func(data):
-		var player_node = course_instance.get_node_or_null("Player") if course_instance != null else null
-		if player_node != null:
+		if course_instance != null and course_instance.has_method("_on_range_ui_hit_shot"):
 			course_instance.call("_on_range_ui_hit_shot", data)
-			player_node.call("_on_range_ui_hit_shot", data)
 	)
 	
 	# Distance Menu Button
@@ -1052,6 +1062,16 @@ func _setup_hud() -> void:
 				dist_menu.current_ball_node = active_ball
 				if course_instance != null and "aim_target_pos" in course_instance:
 					dist_menu.aim_target_node = course_instance.get("aim_target_pos")
+			else:
+				var vp = get_viewport()
+				if vp != null:
+					vp.gui_release_focus()
+			_update_hit_distance_button_state()
+			_update_helpers_scroll_layout.call_deferred()
+	)
+	dist_menu.visibility_changed.connect(func():
+		_update_hit_distance_button_state()
+		_update_helpers_scroll_layout.call_deferred()
 	)
 	toggles_container.add_child(dist_btn)
 	toggles_container.add_child(dist_menu)
@@ -1168,6 +1188,48 @@ func _setup_hud() -> void:
 				apply_material_button_style(rollout_btn, Color(0.5, 0.5, 0.5, 0.85))
 	)
 	toggles_container.add_child(rollout_btn)
+
+	# Track Club Distances & Averages Toggle Button
+	track_averages_btn = Button.new()
+	track_averages_btn.name = "TrackAveragesButton"
+	var is_tracking_on = true
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and mp_mgr.has_method("is_club_averages_tracking_enabled"):
+		is_tracking_on = mp_mgr.is_club_averages_tracking_enabled()
+	track_averages_btn.text = "📊 Track Averages: ON" if is_tracking_on else "📊 Track Averages: OFF"
+	track_averages_btn.tooltip_text = "Toggle Club Distances & Shot Averages Tracking"
+	track_averages_btn.custom_minimum_size = Vector2(180, 56)
+	var initial_tracking_color = Color(0.18, 0.55, 0.65, 0.85) if is_tracking_on else Color(0.5, 0.5, 0.5, 0.85)
+	apply_material_button_style(track_averages_btn, initial_tracking_color)
+	track_averages_btn.pressed.connect(func():
+		var cur_state = true
+		var mp = get_node_or_null("/root/MultiplayerManager")
+		if mp != null and mp.has_method("is_club_averages_tracking_enabled"):
+			cur_state = mp.is_club_averages_tracking_enabled()
+		var new_state = not cur_state
+		if mp != null and mp.has_method("set_club_averages_tracking_enabled"):
+			mp.set_club_averages_tracking_enabled(new_state)
+		elif has_node("/root/GlobalSettings") and GlobalSettings.range_settings != null and "track_club_averages" in GlobalSettings.range_settings:
+			GlobalSettings.range_settings.track_club_averages.value = new_state
+			GlobalSettings.save_settings()
+		_update_track_averages_btn_state()
+	)
+	if mp_mgr != null and mp_mgr.has_signal("club_averages_tracking_toggled"):
+		mp_mgr.club_averages_tracking_toggled.connect(func(_enabled): _update_track_averages_btn_state())
+	toggles_container.add_child(track_averages_btn)
+
+	# Stuck Ball Relief Button
+	var s_btn = Button.new()
+	s_btn.name = "StuckBallButton"
+	s_btn.text = "⛳ Stuck Ball Relief"
+	s_btn.tooltip_text = "Move ball 2 yards closer to nearest fairway without counting a stroke"
+	s_btn.custom_minimum_size = Vector2(180, 56)
+	apply_material_button_style(s_btn, Color(0.75, 0.45, 0.15, 0.85))
+	s_btn.pressed.connect(func():
+		move_stuck_ball(2.0)
+	)
+	toggles_container.add_child(s_btn)
+	stuck_ball_btn = s_btn
 
 
 	var is_match_play = not MultiplayerManager.players.is_empty() and not MultiplayerManager.practice_mode_active
@@ -2434,24 +2496,25 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().gui_release_focus()
 				get_viewport().set_input_as_handled()
 				return
-			if range_ui != null:
-				var dist_m = range_ui.find_child("DistanceMenu", true, false)
-				if dist_m != null and is_instance_valid(dist_m) and dist_m.visible:
-					dist_m.visible = false
-					get_viewport().gui_release_focus()
-					get_viewport().set_input_as_handled()
-					return
-				var replay_modal = range_ui.call("get_active_swing_replay_modal") if range_ui.has_method("get_active_swing_replay_modal") else range_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
-				if replay_modal != null and is_instance_valid(replay_modal) and replay_modal.visible:
-					range_ui.call("toggle_prev_shot_analysis")
-					get_viewport().gui_release_focus()
-					get_viewport().set_input_as_handled()
-					return
-				if range_ui.has_node("SettingsLayer") and range_ui.get_node("SettingsLayer").visible:
-					range_ui.get_node("SettingsLayer").visible = false
-					get_viewport().gui_release_focus()
-					get_viewport().set_input_as_handled()
-					return
+			var dist_m = toggles_container.get_node_or_null("DistanceMenu") if toggles_container != null else null
+			if dist_m == null and range_ui != null:
+				dist_m = range_ui.find_child("DistanceMenu", true, false)
+			if dist_m != null and is_instance_valid(dist_m) and dist_m.visible:
+				dist_m.visible = false
+				get_viewport().gui_release_focus()
+				get_viewport().set_input_as_handled()
+				return
+			var replay_modal = range_ui.call("get_active_swing_replay_modal") if range_ui.has_method("get_active_swing_replay_modal") else range_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
+			if replay_modal != null and is_instance_valid(replay_modal) and replay_modal.visible:
+				range_ui.call("toggle_prev_shot_analysis")
+				get_viewport().gui_release_focus()
+				get_viewport().set_input_as_handled()
+				return
+			if range_ui.has_node("SettingsLayer") and range_ui.get_node("SettingsLayer").visible:
+				range_ui.get_node("SettingsLayer").visible = false
+				get_viewport().gui_release_focus()
+				get_viewport().set_input_as_handled()
+				return
 
 		if event.is_action_pressed("mulligan"):
 			if mulligan_btn != null and is_instance_valid(mulligan_btn) and mulligan_btn.visible and not mulligan_btn.disabled:
@@ -2690,6 +2753,8 @@ func _update_hud_tooltips() -> void:
 		dist_btn.tooltip_text = "Hit Distance Menu [%s]" % km.get_action_summary_str("distance_menu_toggle")
 	if rollout_btn != null and is_instance_valid(rollout_btn):
 		rollout_btn.tooltip_text = "Toggle Ball Rollout & Bounce [%s]" % km.get_action_summary_str("rollout_toggle")
+	if stuck_ball_btn != null and is_instance_valid(stuck_ball_btn):
+		stuck_ball_btn.tooltip_text = "Move ball 2 yards closer to nearest fairway without counting a stroke"
 	if club_selector_node != null and is_instance_valid(club_selector_node):
 		var club_btn = club_selector_node.get("club_button") as Button
 		if club_btn != null and is_instance_valid(club_btn):
@@ -2765,8 +2830,34 @@ func _update_course_putting_cam_btn_state() -> void:
 			apply_material_button_style(putting_cam_btn, Color(0.15, 0.6, 0.3, 0.85))
 
 
+func _update_track_averages_btn_state() -> void:
+	var is_on := true
+	var mp = get_node_or_null("/root/MultiplayerManager")
+	if mp != null and mp.has_method("is_club_averages_tracking_enabled"):
+		is_on = mp.is_club_averages_tracking_enabled()
+	elif has_node("/root/GlobalSettings") and GlobalSettings.range_settings != null and "track_club_averages" in GlobalSettings.range_settings:
+		is_on = bool(GlobalSettings.range_settings.track_club_averages.value)
+	if track_averages_btn != null and is_instance_valid(track_averages_btn):
+		track_averages_btn.text = "📊 Track Averages: ON" if is_on else "📊 Track Averages: OFF"
+		var c = Color(0.18, 0.55, 0.65, 0.85) if is_on else Color(0.5, 0.5, 0.5, 0.85)
+		apply_material_button_style(track_averages_btn, c)
+
+
 func _on_debug_hit_distance_setting_changed(_val) -> void:
 	_update_hit_distance_button_visibility()
+
+
+func _update_hit_distance_button_state() -> void:
+	if dist_btn == null or not is_instance_valid(dist_btn):
+		return
+	var menu = toggles_container.get_node_or_null("DistanceMenu") if toggles_container != null else null
+	var is_open = menu != null and is_instance_valid(menu) and menu.visible
+	if is_open:
+		dist_btn.text = "🎯 Hit Distance: OPEN"
+		apply_material_button_style(dist_btn, Color(0.75, 0.25, 0.75, 0.9))
+	else:
+		dist_btn.text = "🎯 Hit Distance"
+		apply_material_button_style(dist_btn, Color(0.6, 0.2, 0.6, 0.85))
 
 
 func _update_hit_distance_button_visibility() -> void:
@@ -2781,8 +2872,21 @@ func _update_hit_distance_button_visibility() -> void:
 	var menu = toggles_container.get_node_or_null("DistanceMenu") if toggles_container != null else null
 	if not enabled and menu != null and menu.visible:
 		menu.visible = false
+	_update_hit_distance_button_state()
 	_update_helpers_scroll_layout.call_deferred()
 	call_deferred("_update_hud_focus_neighbors")
+
+
+func toggle_distance_menu() -> void:
+	var enabled := false
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.range_settings != null and gs.range_settings.settings.has("debug_show_hit_distance"):
+			enabled = bool(gs.range_settings.debug_show_hit_distance.value)
+	if not enabled:
+		return
+	if dist_btn != null and is_instance_valid(dist_btn):
+		dist_btn.emit_signal("pressed")
 
 
 func _get_current_green_vertices() -> PackedVector3Array:
@@ -3116,8 +3220,33 @@ func _update_minimap_position() -> void:
 
 
 
+func _on_course_ball_graphic_changed(player_name: String, _ball_graphic: String) -> void:
+	var cur_p = MultiplayerManager.get_active_player()
+	if not cur_p.is_empty() and cur_p.get("name", "").to_lower() == player_name.to_lower():
+		var player_node = course_instance.get_node_or_null("Player") if course_instance != null else null
+		if player_node != null and player_node.has_method("set_profile"):
+			player_node.set_profile(player_name)
+		elif active_ball != null and active_ball.has_method("apply_ball_graphic"):
+			var bg = MultiplayerManager.get_player_ball_graphic(player_name)
+			var av = MultiplayerManager.get_player_avatar(player_name)
+			var col = MultiplayerManager.get_player_color(cur_p)
+			active_ball.apply_ball_graphic(bg, av, player_name, col)
+
 func _on_active_player_changed(player: Dictionary) -> void:
-	if player.is_empty() or MultiplayerManager.hole_ids.is_empty():
+	if player.is_empty():
+		return
+
+	var player_node_ref = course_instance.get_node_or_null("Player") if course_instance != null else null
+	var p_name = str(player.get("name", ""))
+	if player_node_ref != null and player_node_ref.has_method("set_profile") and not p_name.is_empty():
+		player_node_ref.set_profile(p_name)
+	elif active_ball != null and active_ball.has_method("apply_ball_graphic") and not p_name.is_empty():
+		var bg = MultiplayerManager.get_player_ball_graphic(p_name) if MultiplayerManager != null and MultiplayerManager.has_method("get_player_ball_graphic") else player.get("ball_graphic", "single_line")
+		var av = MultiplayerManager.get_player_avatar(p_name) if MultiplayerManager != null and MultiplayerManager.has_method("get_player_avatar") else player.get("avatar", "")
+		var col = MultiplayerManager.get_player_color(player) if MultiplayerManager != null and MultiplayerManager.has_method("get_player_color") else player.get("color", Color(0.24, 0.46, 0.72))
+		active_ball.apply_ball_graphic(bg, av, p_name, col)
+
+	if MultiplayerManager.hole_ids.is_empty():
 		return
 		
 	_clear_map_markers()
@@ -3133,28 +3262,41 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			club_sel.update_bag_for_player(player.get("name", ""))
 
 	
+	var is_new_hole: bool = false
 	if course_instance != null:
 		if "_aim_is_manual" in course_instance:
 			course_instance.set("_aim_is_manual", false)
 		var hole_name = active_hole.get("Name", hole_id)
-		var cur_hole_name = course_instance.get("current_hole_name")
-		var is_new_hole = (cur_hole_name != hole_name) or (course_instance.get("current_hole_location") != null and course_instance.current_hole_location.is_zero_approx())
+		is_new_hole = (_last_loaded_hole_id != hole_id) or (_last_loaded_hole_index != hole_idx) or (course_instance.get("current_hole_location") != null and course_instance.current_hole_location.is_zero_approx())
 		
-		course_instance.current_hole_name = hole_name
-		course_instance.current_hole_par = active_hole.get("Par", 4)
-		var hole_loc = active_hole.get("Hole Location")
-		if hole_loc != null and is_new_hole:
-			course_instance.current_hole_location = Vector3(hole_loc[0], course_instance.get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
-			
-			if course_instance.has_node("PinMarker"):
-				course_instance.get_node("PinMarker").global_position = course_instance.current_hole_location
-				course_instance.get_node("PinMarker").visible = true
-			
-			var flag_pin = course_instance.get_node_or_null("FlagPin")
-			if flag_pin != null:
-				flag_pin.global_position = course_instance.current_hole_location
-				if course_instance.has_method("update_gimme_circles"):
-					course_instance.update_gimme_circles()
+		if is_new_hole:
+			_last_loaded_hole_id = hole_id
+			_last_loaded_hole_index = hole_idx
+			if "current_hole_id" in course_instance:
+				course_instance.current_hole_id = hole_id
+			course_instance.current_hole_name = hole_name
+			course_instance.current_hole_par = active_hole.get("Par", 4)
+			var hole_loc = active_hole.get("Hole Location")
+			if hole_loc != null:
+				course_instance.current_hole_location = Vector3(hole_loc[0], course_instance.get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
+				course_instance.aim_target_pos = Vector3.ZERO
+				
+				if course_instance.has_node("PinMarker"):
+					course_instance.get_node("PinMarker").global_position = course_instance.current_hole_location
+					course_instance.get_node("PinMarker").visible = true
+				
+				var flag_pin = course_instance.get_node_or_null("FlagPin")
+				if flag_pin != null:
+					flag_pin.global_position = course_instance.current_hole_location
+					if course_instance.has_method("update_gimme_circles"):
+						course_instance.update_gimme_circles()
+				elif course_instance.has_method("_spawn_flag_pin"):
+					course_instance.call("_spawn_flag_pin")
+		else:
+			if "current_hole_id" in course_instance and str(course_instance.current_hole_id).is_empty():
+				course_instance.current_hole_id = hole_id
+			course_instance.current_hole_name = hole_name
+			course_instance.current_hole_par = active_hole.get("Par", 4)
 				
 		# Update tee-off distance
 		if player.get("strokes", 0) == 0 and course_instance != null and course_instance.has_method("get_height"):
@@ -3170,14 +3312,9 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			reset_zoom_to_default()
 		else:
 			_last_zoom_zone = -1
-			
-		# Update labels
-		course_instance.call("_update_hole_info_label", player["strokes"] > 0)
-		
-		# Update outline
-		if is_new_hole:
-			course_instance.call("update_hole_outline")
 
+	if player_node_ref == null and course_instance != null:
+		player_node_ref = course_instance.get_node_or_null("Player")
 	if active_ball != null:
 		var is_practice = course_instance != null and course_instance.get("practice_mode_active")
 		var is_multiplayer = MultiplayerManager.players.size() > 1
@@ -3186,7 +3323,6 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			should_initialize = false
 			
 		if should_initialize:
-			var player_node_ref = course_instance.get_node_or_null("Player") if course_instance != null else null
 			var initial_lie = player.get("lie_type", "teebox" if player.get("strokes", 0) == 0 else "fairway")
 			active_ball.spawn_position = player["position"]
 			active_ball.lie_type = initial_lie
@@ -3201,12 +3337,28 @@ func _on_active_player_changed(player: Dictionary) -> void:
 				course_instance.call("update_current_lie_and_reduction")
 			if player_node_ref != null:
 				player_node_ref.current_lie_type = active_ball.lie_type
-			
+
+	if course_instance != null:
+		# Update labels and outline with the ball now properly positioned at the hole/tee
+		course_instance.call("_update_hole_info_label", player["strokes"] > 0)
+		if is_new_hole:
+			course_instance.call("update_hole_outline")
+		if course_instance.has_method("update_teebox_markers"):
+			course_instance.call("update_teebox_markers", player.get("tee", "Blue"))
+
+	if active_ball != null:
+		var is_practice = course_instance != null and course_instance.get("practice_mode_active")
+		var is_multiplayer = MultiplayerManager.players.size() > 1
+		var should_initialize = true
+		if is_practice and not is_multiplayer and player.get("strokes", 0) > 0:
+			should_initialize = false
+
+		if should_initialize:
 			if course_instance != null and course_instance.has_method("update_auto_club"):
 				course_instance.call("update_auto_club", true)
 			
 			# Move camera target to focus on the active ball
-			var camera = course_instance.get_node_or_null("PhantomCamera3D")
+			var camera = course_instance.get_node_or_null("PhantomCamera3D") if course_instance != null else null
 			if camera != null:
 				var cam_target = player_node_ref.get_camera_target() if player_node_ref != null and player_node_ref.has_method("get_camera_target") else active_ball
 				camera.follow_target = cam_target
@@ -3223,7 +3375,7 @@ func _on_active_player_changed(player: Dictionary) -> void:
 				var target_aim = course_instance.get("aim_target_pos")
 				if is_putting and course_instance.get("current_hole_location") != null:
 					target_aim = course_instance.get("current_hole_location")
-				elif target_aim == null or target_aim.is_zero_approx():
+				elif target_aim == null or target_aim.is_zero_approx() or is_new_hole:
 					if course_instance.has_method("apply_default_aim"):
 						var sel_club = MultiplayerManager.current_club if "current_club" in MultiplayerManager else ""
 						target_aim = course_instance.call("apply_default_aim", sel_club)
@@ -4137,6 +4289,14 @@ func is_player_in_teebox() -> bool:
 	return false
 
 
+func move_stuck_ball(distance_yards: float = 2.0) -> bool:
+	if course_instance != null and course_instance.has_method("move_stuck_ball"):
+		var res = course_instance.call("move_stuck_ball", distance_yards)
+		_update_distance_queue()
+		return bool(res)
+	return false
+
+
 func is_player_on_wrong_green() -> bool:
 	if course_instance != null and course_instance.has_method("is_ball_on_wrong_green"):
 		var ball = active_ball
@@ -5025,7 +5185,15 @@ func _update_helpers_scroll_layout() -> void:
 	if scroll_w <= 0 and is_bar_visible and v_bar != null:
 		scroll_w = int(v_bar.custom_minimum_size.x)
 	var shift = (scroll_w + 6) if scroll_w > 0 else 0
-	right_panel.offset_left = -280 - shift
+
+	var dist_menu = toggles_scroll.find_child("DistanceMenu", true, false)
+	var is_dist_menu_visible = dist_menu != null and is_instance_valid(dist_menu) and dist_menu.visible and toggles_scroll.visible
+	var dist_shift = 0
+	if is_dist_menu_visible:
+		var is_mob = MobilePerformance.is_mobile()
+		dist_shift = 220 if is_mob else 160
+
+	right_panel.offset_left = -280 - shift - dist_shift
 
 
 func _set_helpers_visible(is_vis: bool) -> void:

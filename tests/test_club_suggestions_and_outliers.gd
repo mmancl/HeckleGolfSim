@@ -9,10 +9,10 @@ func _initialize():
 func _on_frame():
 	if _tested:
 		return
-	_tested = true
-	
 	var mp = root.get_node_or_null("MultiplayerManager")
-	assert(mp != null, "MultiplayerManager autoload must exist")
+	if mp == null:
+		return
+	_tested = true
 	
 	# TEST 1: Default distances constants
 	print("\n--- Test 1: Default Club Distances Constants ---")

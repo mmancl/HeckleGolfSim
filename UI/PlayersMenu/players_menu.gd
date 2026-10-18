@@ -82,16 +82,148 @@ var avatar_picker_selected_path: String = ""
 var avatar_picker_content: VBoxContainer = VBoxContainer.new()
 var avatar_picker_buttons: Array = []
 
+var new_player_ball_opt: OptionButton = OptionButton.new()
+var new_player_ball_preview_container: Control = null
 var edit_profile_player_name: String = ""
 var edit_profile_email_input: LineEdit = LineEdit.new()
 var edit_profile_avatar_path: String = ""
+var edit_profile_ball_graphic: String = "single_line"
 var edit_profile_tee_opt: OptionButton = OptionButton.new()
 var edit_profile_skill_opt: OptionButton = OptionButton.new()
 var edit_profile_handedness_opt: OptionButton = OptionButton.new()
+var edit_profile_ball_opt: OptionButton = OptionButton.new()
 var edit_profile_content: VBoxContainer = VBoxContainer.new()
 var edit_profile_avatar_preview_container: Control = null
+var edit_profile_ball_preview_container: Control = null
 var back_btn: Button = null
 var register_btn: Button = null
+
+func _ball_graphic_id_to_name(graphic_id: String) -> String:
+	for bg in MultiplayerManager.AVAILABLE_BALL_GRAPHICS:
+		if bg["id"] == graphic_id:
+			return bg["name"]
+	return "Single Alignment Line (Default)"
+
+func _ball_graphic_id_to_index(graphic_id: String) -> int:
+	for i in range(MultiplayerManager.AVAILABLE_BALL_GRAPHICS.size()):
+		if MultiplayerManager.AVAILABLE_BALL_GRAPHICS[i]["id"] == graphic_id:
+			return i
+	return 0
+
+func _ball_graphic_index_to_id(idx: int) -> String:
+	if idx >= 0 and idx < MultiplayerManager.AVAILABLE_BALL_GRAPHICS.size():
+		return MultiplayerManager.AVAILABLE_BALL_GRAPHICS[idx]["id"]
+	return "single_line"
+
+func _create_ball_preview_icon(graphic_id: String, avatar_path: String = "", player_name: String = "", size: Vector2 = Vector2(56, 56)) -> Control:
+	var root_ctrl := Control.new()
+	root_ctrl.custom_minimum_size = size
+	root_ctrl.clip_contents = true
+
+	var bg_panel := Panel.new()
+	bg_panel.custom_minimum_size = size
+	var style := StyleBoxFlat.new()
+	style.corner_radius_top_left = int(size.x / 2.0)
+	style.corner_radius_top_right = int(size.x / 2.0)
+	style.corner_radius_bottom_left = int(size.x / 2.0)
+	style.corner_radius_bottom_right = int(size.x / 2.0)
+	style.border_width_left = 2
+	style.border_width_right = 2
+	style.border_width_top = 2
+	style.border_width_bottom = 2
+	style.border_color = Color(0.40, 0.48, 0.58, 0.8)
+	style.bg_color = Color(0.97, 0.97, 0.99)
+	bg_panel.add_theme_stylebox_override("panel", style)
+	root_ctrl.add_child(bg_panel)
+
+	match graphic_id:
+		"single_line":
+			# Wilson Staff Model style: Bold center black alignment line with parallel accents
+			var line_c := ColorRect.new()
+			line_c.color = Color(0.08, 0.08, 0.10)
+			line_c.size = Vector2(size.x * 0.94, 5.0)
+			line_c.position = Vector2(size.x * 0.03, size.y / 2.0 - 2.5)
+			root_ctrl.add_child(line_c)
+
+			var line_top := ColorRect.new()
+			line_top.color = Color(0.28, 0.30, 0.36)
+			line_top.size = Vector2(size.x * 0.82, 2.5)
+			line_top.position = Vector2(size.x * 0.09, size.y / 2.0 - 7.5)
+			root_ctrl.add_child(line_top)
+
+			var line_bot := ColorRect.new()
+			line_bot.color = Color(0.28, 0.30, 0.36)
+			line_bot.size = Vector2(size.x * 0.82, 2.5)
+			line_bot.position = Vector2(size.x * 0.09, size.y / 2.0 + 5.0)
+			root_ctrl.add_child(line_bot)
+
+			# Central aim indicator
+			var arr := Label.new()
+			arr.text = "►"
+			arr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			arr.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			arr.size = size
+			arr.add_theme_font_size_override("font_size", int(size.y * 0.32))
+			arr.add_theme_color_override("font_color", Color(0.08, 0.08, 0.10))
+			root_ctrl.add_child(arr)
+
+		"triple_track":
+			# Bold red center line, two bold blue outer lines
+			var red_line := ColorRect.new()
+			red_line.color = Color(0.88, 0.10, 0.12)
+			red_line.size = Vector2(size.x * 0.96, 6.0)
+			red_line.position = Vector2(size.x * 0.02, size.y / 2.0 - 3.0)
+			root_ctrl.add_child(red_line)
+
+			var blue_top := ColorRect.new()
+			blue_top.color = Color(0.08, 0.38, 0.88)
+			blue_top.size = Vector2(size.x * 0.84, 3.5)
+			blue_top.position = Vector2(size.x * 0.08, size.y / 2.0 - 9.5)
+			root_ctrl.add_child(blue_top)
+
+			var blue_bot := ColorRect.new()
+			blue_bot.color = Color(0.08, 0.38, 0.88)
+			blue_bot.size = Vector2(size.x * 0.84, 3.5)
+			blue_bot.position = Vector2(size.x * 0.08, size.y / 2.0 + 6.0)
+			root_ctrl.add_child(blue_bot)
+
+		"arrow_track":
+			# High-contrast directional chevrons pointing along aim
+			var chevrons_box := HBoxContainer.new()
+			chevrons_box.alignment = BoxContainer.ALIGNMENT_CENTER
+			chevrons_box.add_theme_constant_override("separation", 3)
+			chevrons_box.size = size
+			chevrons_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			for i in range(3):
+				var ch := Label.new()
+				ch.text = "»"
+				ch.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+				ch.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+				ch.add_theme_font_size_override("font_size", int(size.y * 0.44))
+				ch.add_theme_color_override("font_color", Color(1.0, 0.48, 0.04) if i == 1 else Color(0.10, 0.10, 0.12))
+				chevrons_box.add_child(ch)
+			root_ctrl.add_child(chevrons_box)
+
+		"player_icon":
+			if not avatar_path.is_empty() and ResourceLoader.exists(avatar_path):
+				var trect := TextureRect.new()
+				trect.texture = load(avatar_path)
+				trect.custom_minimum_size = Vector2(size.x * 0.55, size.y * 0.55)
+				trect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+				trect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+				trect.position = Vector2(size.x * 0.225, size.y * 0.225)
+				root_ctrl.add_child(trect)
+			else:
+				var init_lbl := Label.new()
+				init_lbl.text = player_name.substr(0, 1).to_upper() if not player_name.is_empty() else "P"
+				init_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+				init_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+				init_lbl.size = size
+				init_lbl.add_theme_font_size_override("font_size", int(size.y * 0.44))
+				init_lbl.add_theme_color_override("font_color", Color(0.2, 0.45, 0.85))
+				root_ctrl.add_child(init_lbl)
+
+	return root_ctrl
 
 func _skill_key_to_index(skill_key: String) -> int:
 	match skill_key.to_lower():
@@ -288,6 +420,25 @@ func _ready() -> void:
 	new_player_handedness_opt.custom_minimum_size = Vector2(0, 50)
 	ThemeManager.apply_option_button_style(new_player_handedness_opt, 17, Vector2(0, 50))
 	reg_section.add_child(new_player_handedness_opt)
+
+	var ball_reg_hbox = HBoxContainer.new()
+	ball_reg_hbox.add_theme_constant_override("separation", 10)
+	reg_section.add_child(ball_reg_hbox)
+
+	new_player_ball_preview_container = HBoxContainer.new()
+	ball_reg_hbox.add_child(new_player_ball_preview_container)
+
+	new_player_ball_opt.name = "NewPlayerBallOpt"
+	new_player_ball_opt.clear()
+	for bg in MultiplayerManager.AVAILABLE_BALL_GRAPHICS:
+		new_player_ball_opt.add_item("Ball: " + bg["name"], new_player_ball_opt.item_count)
+	new_player_ball_opt.selected = 0
+	new_player_ball_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	new_player_ball_opt.custom_minimum_size = Vector2(0, 50)
+	ThemeManager.apply_option_button_style(new_player_ball_opt, 17, Vector2(0, 50))
+	new_player_ball_opt.item_selected.connect(func(_idx: int): _update_new_player_ball_preview())
+	ball_reg_hbox.add_child(new_player_ball_opt)
+	_update_new_player_ball_preview()
 
 	var reg_btn_hbox = HBoxContainer.new()
 	reg_btn_hbox.add_theme_constant_override("separation", 10)
@@ -540,11 +691,15 @@ func _update_controller_focus_navigation() -> void:
 	new_player_tee_opt.focus_neighbor_top = new_player_email_input.get_path()
 	new_player_tee_opt.focus_neighbor_bottom = new_player_skill_opt.get_path()
 	new_player_skill_opt.focus_neighbor_top = new_player_tee_opt.get_path()
-	new_player_skill_opt.focus_neighbor_bottom = avatar_preview_btn.get_path()
-	avatar_preview_btn.focus_neighbor_top = new_player_skill_opt.get_path()
+	new_player_skill_opt.focus_neighbor_bottom = new_player_handedness_opt.get_path()
+	new_player_handedness_opt.focus_neighbor_top = new_player_skill_opt.get_path()
+	new_player_handedness_opt.focus_neighbor_bottom = new_player_ball_opt.get_path()
+	new_player_ball_opt.focus_neighbor_top = new_player_handedness_opt.get_path()
+	new_player_ball_opt.focus_neighbor_bottom = avatar_preview_btn.get_path()
+	avatar_preview_btn.focus_neighbor_top = new_player_ball_opt.get_path()
 	avatar_preview_btn.focus_neighbor_right = register_btn.get_path()
 	register_btn.focus_neighbor_left = avatar_preview_btn.get_path()
-	register_btn.focus_neighbor_top = new_player_skill_opt.get_path()
+	register_btn.focus_neighbor_top = new_player_ball_opt.get_path()
 	register_btn.focus_neighbor_bottom = back_btn.get_path()
 
 	# Wire cross-navigation between player list and profile view
@@ -617,7 +772,8 @@ func _on_register_pressed() -> void:
 		pref_tee = raw_t.replace("Preferred Tee: ", "").strip_edges()
 	var skill_level = _skill_index_to_key(new_player_skill_opt.selected)
 	var handedness = new_player_handedness_opt.selected if new_player_handedness_opt != null else 0
-	MultiplayerManager.register_player(name_text, email_text, new_player_avatar_path, [], pref_tee, skill_level, handedness)
+	var ball_graphic = _ball_graphic_index_to_id(new_player_ball_opt.selected) if new_player_ball_opt != null else "single_line"
+	MultiplayerManager.register_player(name_text, email_text, new_player_avatar_path, [], pref_tee, skill_level, handedness, ball_graphic)
 	new_player_input.clear()
 	new_player_email_input.clear()
 	new_player_avatar_path = ""
@@ -625,7 +781,10 @@ func _on_register_pressed() -> void:
 	new_player_skill_opt.selected = 0
 	if new_player_handedness_opt != null:
 		new_player_handedness_opt.selected = 0
+	if new_player_ball_opt != null:
+		new_player_ball_opt.selected = 0
 	_update_new_player_avatar_preview()
+	_update_new_player_ball_preview()
 	_select_player(name_text)
 
 func _update_new_player_avatar_preview() -> void:
@@ -642,6 +801,16 @@ func _update_new_player_avatar_preview() -> void:
 		if ResourceLoader.exists(new_player_avatar_path):
 			avatar_preview_btn.icon = load(new_player_avatar_path)
 			avatar_preview_btn.expand_icon = true
+	_update_new_player_ball_preview()
+
+func _update_new_player_ball_preview() -> void:
+	if new_player_ball_preview_container == null:
+		return
+	for child in new_player_ball_preview_container.get_children():
+		child.queue_free()
+	var bg_id = _ball_graphic_index_to_id(new_player_ball_opt.selected) if new_player_ball_opt != null else "single_line"
+	var preview = _create_ball_preview_icon(bg_id, new_player_avatar_path, new_player_input.text.strip_edges(), Vector2(48, 48))
+	new_player_ball_preview_container.add_child(preview)
 
 func _open_avatar_picker(current_path: String, callback: Callable) -> void:
 	avatar_picker_callback = callback
@@ -968,6 +1137,60 @@ func _open_edit_profile_dialog(player_name: String) -> void:
 	edit_profile_handedness_opt.selected = cur_hand
 	hand_sec.add_child(edit_profile_handedness_opt)
 
+	# Golf Ball Graphic Section
+	var ball_sec = VBoxContainer.new()
+	ball_sec.add_theme_constant_override("separation", 6)
+	edit_profile_content.add_child(ball_sec)
+
+	var ball_title = Label.new()
+	ball_title.text = "Golf Ball Graphics & Alignment Marker:"
+	ball_title.add_theme_font_size_override("font_size", 15)
+	ball_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	ball_sec.add_child(ball_title)
+
+	var ball_hint = Label.new()
+	ball_hint.text = "ℹ️ Ball is always positioned in a canonical orientation with an alignment arrow directed at the hole."
+	ball_hint.add_theme_font_size_override("font_size", 13)
+	ball_hint.add_theme_color_override("font_color", Color(0.65, 0.85, 1.0))
+	ball_sec.add_child(ball_hint)
+
+	var ball_hbox = HBoxContainer.new()
+	ball_hbox.add_theme_constant_override("separation", 14)
+	ball_sec.add_child(ball_hbox)
+
+	edit_profile_ball_preview_container = HBoxContainer.new()
+	edit_profile_ball_preview_container.add_theme_constant_override("separation", 10)
+	ball_hbox.add_child(edit_profile_ball_preview_container)
+
+	edit_profile_ball_opt = OptionButton.new()
+	edit_profile_ball_opt.clear()
+	for bg in MultiplayerManager.AVAILABLE_BALL_GRAPHICS:
+		edit_profile_ball_opt.add_item(bg["name"], edit_profile_ball_opt.item_count)
+	edit_profile_ball_opt.custom_minimum_size = Vector2(240, 50)
+	edit_profile_ball_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ThemeManager.apply_option_button_style(edit_profile_ball_opt, 18, Vector2(0, 50))
+	edit_profile_ball_graphic = reg.get("ball_graphic", "single_line")
+	edit_profile_ball_opt.selected = _ball_graphic_id_to_index(edit_profile_ball_graphic)
+	edit_profile_ball_opt.item_selected.connect(func(idx: int):
+		edit_profile_ball_graphic = _ball_graphic_index_to_id(idx)
+		_update_edit_profile_ball_ui()
+	)
+	ball_hbox.add_child(edit_profile_ball_opt)
+
+	var match_icon_btn = Button.new()
+	match_icon_btn.text = "Match Player Icon"
+	match_icon_btn.custom_minimum_size = Vector2(170, 50)
+	match_icon_btn.add_theme_font_size_override("font_size", 15)
+	ThemeManager.apply_secondary_button_style(match_icon_btn, 6)
+	match_icon_btn.pressed.connect(func():
+		edit_profile_ball_graphic = "player_icon"
+		edit_profile_ball_opt.selected = _ball_graphic_id_to_index("player_icon")
+		_update_edit_profile_ball_ui()
+	)
+	ball_hbox.add_child(match_icon_btn)
+
+	_update_edit_profile_ball_ui()
+
 	# Bag Section
 	var bag_sec = VBoxContainer.new()
 	bag_sec.add_theme_constant_override("separation", 6)
@@ -1075,6 +1298,18 @@ func _update_edit_profile_avatar_ui() -> void:
 		name_l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		edit_profile_avatar_preview_container.add_child(name_l)
 
+	if edit_profile_ball_graphic == "player_icon":
+		_update_edit_profile_ball_ui()
+
+func _update_edit_profile_ball_ui() -> void:
+	if edit_profile_ball_preview_container == null:
+		return
+	for child in edit_profile_ball_preview_container.get_children():
+		child.queue_free()
+
+	var preview = _create_ball_preview_icon(edit_profile_ball_graphic, edit_profile_avatar_path, edit_profile_player_name, Vector2(48, 48))
+	edit_profile_ball_preview_container.add_child(preview)
+
 func _on_edit_profile_confirmed() -> void:
 	if edit_profile_player_name.is_empty():
 		return
@@ -1084,7 +1319,8 @@ func _on_edit_profile_confirmed() -> void:
 		new_tee = edit_profile_tee_opt.get_item_text(edit_profile_tee_opt.selected)
 	var new_skill = _skill_index_to_key(edit_profile_skill_opt.selected)
 	var new_handedness = edit_profile_handedness_opt.selected if edit_profile_handedness_opt != null else 0
-	MultiplayerManager.update_player_profile(edit_profile_player_name, new_email, edit_profile_avatar_path, new_tee, new_skill, new_handedness)
+	var new_ball_graphic = edit_profile_ball_graphic
+	MultiplayerManager.update_player_profile(edit_profile_player_name, new_email, edit_profile_avatar_path, new_tee, new_skill, new_handedness, new_ball_graphic)
 	_refresh_players_list()
 	_render_player_profile(edit_profile_player_name)
 
@@ -1233,6 +1469,13 @@ func _render_player_profile(player_name: String) -> void:
 	hand_lbl.add_theme_font_size_override("font_size", 14)
 	hand_lbl.add_theme_color_override("font_color", Color(0.95, 0.82, 0.45))
 	info_vbox.add_child(hand_lbl)
+
+	var p_ball = reg_p.get("ball_graphic", "single_line")
+	var ball_display_lbl = Label.new()
+	ball_display_lbl.text = "⚪ Ball: " + _ball_graphic_id_to_name(p_ball)
+	ball_display_lbl.add_theme_font_size_override("font_size", 14)
+	ball_display_lbl.add_theme_color_override("font_color", Color(0.85, 0.88, 1.0))
+	info_vbox.add_child(ball_display_lbl)
 
 	var edit_profile_btn = Button.new()
 	edit_profile_btn.name = "EditProfileBtn"

@@ -70,6 +70,13 @@ public partial class BounceCalculator : RefCounted
         float speedNormal = velNormal.Length();
         Vector3 velTangent = vel - velNormal;
         float speedTangent = velTangent.Length();
+        Vector3 incomingTangentDir = speedTangent > 0.0001f ? (velTangent / speedTangent) : Vector3.Right;
+        Vector3 incomingRollingAxis = normal.Cross(incomingTangentDir);
+        if (incomingRollingAxis.LengthSquared() > 0.0001f)
+            incomingRollingAxis = incomingRollingAxis.Normalized();
+        else
+            incomingRollingAxis = Vector3.Forward;
+        Vector3 incomingBackspinAxis = -incomingRollingAxis;
 
         Vector3 omegaNormal = omega.Project(normal);
         Vector3 omegaTangent = omega - omegaNormal;
@@ -162,7 +169,8 @@ public partial class BounceCalculator : RefCounted
                     steepDamping = Mathf.Clamp(1.0f - (impactAngleDeg - 45.0f) * 0.015f, 0.65f, 1.0f);
                 }
                 float spinbackTerm = 2.0f * BallPhysics.RADIUS * omegaTangentMagnitude * Mathf.Max(parameters.SpinbackResponseScale, 0.0f) / 7.0f;
-                newTangentSpeed = (speedTangent * bp.FlightTangentialRetentionBase * steepDamping) - spinbackTerm;
+                float rawNewTangentSpeed = (speedTangent * bp.FlightTangentialRetentionBase * steepDamping) - spinbackTerm;
+                newTangentSpeed = rawNewTangentSpeed;
 
                 if (!hasSpinbackSurface)
                 {
@@ -171,8 +179,12 @@ public partial class BounceCalculator : RefCounted
                 }
                 else if (speedTangent > 2.0f)
                 {
-                    // Forward momentum carries the ball forward or checks on first bounce; rollout handles spinback
-                    newTangentSpeed = Mathf.Max(0.0f, newTangentSpeed);
+                    // Forward momentum carries the ball forward on first bounce; rollout and 2nd bounce handle spinback
+                    // Allow a controlled, realistic check-hop forward (0.20m/s to 0.65m/s) if raw is negative/checking hard
+                    if (newTangentSpeed < 0.20f)
+                    {
+                        newTangentSpeed = Mathf.Clamp(speedTangent * 0.04f, 0.20f, 0.65f);
+                    }
                 }
                 else
                 {
@@ -181,12 +193,29 @@ public partial class BounceCalculator : RefCounted
                 }
 
                 PhysicsLogger.Verbose($"  Bounce: Penner model ({parameters.SurfaceType}) speed={impactSpeed:F2} m/s angle={impactAngleDeg:F2}° crit={criticalAngleDeg:F2}°");
-                PhysicsLogger.Verbose($"    speedTangent={speedTangent:F2} m/s, spinbackScale={parameters.SpinbackResponseScale:F2}, newTangentSpeed={newTangentSpeed:F2} m/s");
+                PhysicsLogger.Verbose($"    speedTangent={speedTangent:F2} m/s, spinbackScale={parameters.SpinbackResponseScale:F2}, newTangentSpeed={newTangentSpeed:F2} m/s (raw={rawNewTangentSpeed:F2})");
             }
         }
         else
         {
-            newTangentSpeed = speedTangent * tangentialRetention;
+            // BallState.Rollout (second or subsequent bounce)
+            float activeBackspinRad = omegaTangent.Dot(incomingBackspinAxis);
+            float activeBackspinRpm = activeBackspinRad / ShotSetup.RAD_PER_RPM;
+
+            bool isSpinbackSurface = parameters != null && (parameters.SpinbackThetaBoostMax > 0.0f || parameters.SpinbackResponseScale > 1.0f);
+
+            if (isSpinbackSurface && activeBackspinRpm > 1800.0f)
+            {
+                // Active backspin bite on second bounce / ground rollout bounce!
+                float rolloutSpinbackTerm = (2.0f / 7.0f) * BallPhysics.RADIUS * activeBackspinRad * Mathf.Max(parameters.SpinbackResponseScale, 0.5f);
+                newTangentSpeed = (speedTangent * tangentialRetention) - rolloutSpinbackTerm;
+                newTangentSpeed = Mathf.Max(-2.6f, newTangentSpeed);
+                PhysicsLogger.Verbose($"  Rollout Bounce Bite: backspin={activeBackspinRpm:F0} rpm, spinbackTerm={rolloutSpinbackTerm:F2}, newTangentSpeed={newTangentSpeed:F2} m/s");
+            }
+            else
+            {
+                newTangentSpeed = speedTangent * tangentialRetention;
+            }
         }
 
         if (speedTangent < 0.01f && Mathf.Abs(newTangentSpeed) < 0.01f)
@@ -215,38 +244,70 @@ public partial class BounceCalculator : RefCounted
                 : Vector3.Zero;
         }
 
+        // Add subtle lateral kick from vertical-axis sidespin on impact
+        if (currentState == PhysicsEnums.BallState.Flight && velTangent.LengthSquared() > 0.0001f && omegaNormal.LengthSquared() > 0.01f)
+        {
+            Vector3 tDir = velTangent.Normalized();
+            Vector3 lateralDir = normal.Cross(tDir);
+            float sideSpinY = omegaNormal.Dot(normal);
+            // Sliced ball (sidespin > 0, omega.Y < 0 in standard frame) kicks right
+            float kickMag = -sideSpinY * BallPhysics.RADIUS * 0.06f;
+            velTangent += lateralDir * Mathf.Clamp(kickMag, -0.6f, 0.6f);
+        }
+
         if (currentState == PhysicsEnums.BallState.Flight)
         {
-            float newOmegaTangent = Mathf.Abs(newTangentSpeed) / BallPhysics.RADIUS;
-            if (omegaTangent.Length() < 0.1f || newOmegaTangent < 0.01f)
+            float incomingBackspin = omegaTangent.Dot(incomingBackspinAxis);
+            bool hasSpinbackSurface = parameters != null && (parameters.SpinbackThetaBoostMax > 0.0f || parameters.SpinbackResponseScale > 1.0f);
+            bool inHighSpinCheckRegime = hasSpinbackSurface && (incomingBackspin / ShotSetup.RAD_PER_RPM) >= 3800.0f && impactAngle >= 0.35f;
+
+            if (inHighSpinCheckRegime)
             {
-                omegaTangent = Vector3.Zero;
-            }
-            else if (newTangentSpeed < 0.0f)
-            {
-                omegaTangent = omegaTangent.LengthSquared() > 0.0001f
-                    ? -omegaTangent.Normalized() * newOmegaTangent
-                    : Vector3.Zero;
+                // High-spin steep check impact: ball checks forward but retains high backspin for second bounce & rollout
+                float spinRetentionRatio = Mathf.Clamp(0.55f + (parameters.SpinbackResponseScale - 1.0f) * 0.35f, 0.45f, 0.72f);
+                float retainedBackspin = incomingBackspin * spinRetentionRatio;
+                omegaTangent = incomingBackspinAxis * retainedBackspin;
             }
             else
             {
-                omegaTangent = omegaTangent.LengthSquared() > 0.0001f
-                    ? omegaTangent.LimitLength(newOmegaTangent)
-                    : Vector3.Zero;
+                float newOmegaTangent = Mathf.Abs(newTangentSpeed) / BallPhysics.RADIUS;
+                if (omegaTangent.Length() < 0.1f || newOmegaTangent < 0.01f)
+                {
+                    omegaTangent = Vector3.Zero;
+                }
+                else if (newTangentSpeed < 0.0f)
+                {
+                    omegaTangent = incomingBackspinAxis * newOmegaTangent;
+                }
+                else
+                {
+                    omegaTangent = omegaTangent.LengthSquared() > 0.0001f
+                        ? omegaTangent.LimitLength(newOmegaTangent)
+                        : Vector3.Zero;
+                }
             }
         }
         else
         {
-            if (newTangentSpeed > 0.05f)
+            // Rollout bounces: preserve any active backspin or transition to rolling
+            float incomingBackspin = omegaTangent.Dot(incomingBackspinAxis);
+            if (incomingBackspin > 40.0f)
+            {
+                // Still spinning backwards: retain backspin to continue spinback/check on rollout
+                float retainedBackspin = incomingBackspin * 0.55f;
+                float minBackspinForNegativeVel = Mathf.Abs(newTangentSpeed) / BallPhysics.RADIUS;
+                if (newTangentSpeed < 0.0f && retainedBackspin < minBackspinForNegativeVel)
+                {
+                    retainedBackspin = minBackspinForNegativeVel;
+                }
+                omegaTangent = incomingBackspinAxis * retainedBackspin;
+            }
+            else if (newTangentSpeed > 0.05f)
             {
                 float existingSpinMag = omegaTangent.Length();
-                Vector3 tangentDir = velTangent.LengthSquared() > 0.0001f ? velTangent.Normalized() : Vector3.Right;
-                Vector3 crossDir = normal.Cross(tangentDir);
-                Vector3 rollingAxis = crossDir.LengthSquared() > 0.0001f ? crossDir.Normalized() : Vector3.Forward;
-
                 if (existingSpinMag > 0.05f)
                 {
-                    omegaTangent = rollingAxis * existingSpinMag;
+                    omegaTangent = incomingRollingAxis * existingSpinMag;
                 }
                 else
                 {
@@ -263,6 +324,11 @@ public partial class BounceCalculator : RefCounted
         {
             omegaTangent *= 0.15f;
             omegaNormal *= 0.10f;
+        }
+        else
+        {
+            // Turf impacts damp vertical-axis drill spin
+            omegaNormal *= 0.30f;
         }
 
         float cor;

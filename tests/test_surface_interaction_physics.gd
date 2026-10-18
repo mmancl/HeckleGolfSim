@@ -112,7 +112,7 @@ const SURFACE_TEST_CASES = [
 		"shot": {"BallData": {"Speed": 87.0, "VLA": 29.5, "TotalSpin": 9950.0, "BackSpin": 9950.0, "HLA": 0.0, "SideSpin": 0.0}},
 		"expected_landing_angle_min": 49.0, "expected_landing_angle_max": 56.0,
 		"fw_roll_min": 1.0, "fw_roll_max": 6.0,     # Expected ~3.1 yd
-		"grn_roll_min": -0.5, "grn_roll_max": 2.0,  # Expected ~0.1 yd (spin bite / check)
+		"grn_roll_min": -2.5, "grn_roll_max": 2.0,  # Expected ~ -1.1 yd to 0.5 yd (spin bite / check & spinback)
 		"rf_roll_min": 0.0, "rf_roll_max": 1.5,     # Expected ~0.4 yd
 		"bnk_roll_max": 0.3                          # Expected ~0.1 yd
 	},
@@ -122,7 +122,7 @@ const SURFACE_TEST_CASES = [
 		"shot": {"BallData": {"Speed": 76.0, "VLA": 33.0, "TotalSpin": 9500.0, "BackSpin": 9500.0, "HLA": 0.0, "SideSpin": 0.0}},
 		"expected_landing_angle_min": 49.0, "expected_landing_angle_max": 56.0,
 		"fw_roll_min": 0.5, "fw_roll_max": 3.5,     # Expected ~1.4 yd
-		"grn_roll_min": -0.5, "grn_roll_max": 1.5,  # Expected ~0.0 yd (immediate bite)
+		"grn_roll_min": -2.0, "grn_roll_max": 1.5,  # Expected ~ -0.3 yd to 0.5 yd (immediate bite / spinback)
 		"rf_roll_min": 0.0, "rf_roll_max": 1.5,     # Expected ~0.5 yd
 		"bnk_roll_max": 0.3                          # Expected ~0.0 yd
 	},

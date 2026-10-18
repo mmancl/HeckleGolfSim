@@ -8,6 +8,8 @@ signal catch_up_mode_changed(is_active: bool, player_name: String, current_hole_
 signal player_bag_changed(player_name: String, bag: Array)
 signal distance_queue_updated()
 signal shot_recorded(player: Dictionary, shot_data: Dictionary)
+signal club_averages_tracking_toggled(enabled: bool)
+signal player_ball_graphic_changed(player_name: String, ball_graphic: String)
 
 var last_gimme_strokes: int = 0
 
@@ -145,6 +147,7 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 		var p_bag = config.get("bag", reg.get("bag", []))
 		var p_skill = config.get("skill_level", reg.get("skill_level", "mid_handicap"))
 		var p_handedness = int(config.get("handedness", reg.get("handedness", 0)))
+		var p_ball_graphic = config.get("ball_graphic", reg.get("ball_graphic", "single_line"))
 
 		var p := {
 			"name": p_name,
@@ -152,6 +155,7 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 			"team": p_team,
 			"email": p_email,
 			"avatar": p_avatar,
+			"ball_graphic": p_ball_graphic,
 			"bag": p_bag,
 			"skill_level": p_skill,
 			"handedness": p_handedness,
@@ -180,7 +184,7 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 			"last_starting_pos": Vector3.ZERO
 		}
 		players.append(p)
-		register_player(p_name, p_email, p_avatar, p_bag, config.get("tee", "Blue"), p_skill, p_handedness)
+		register_player(p_name, p_email, p_avatar, p_bag, config.get("tee", "Blue"), p_skill, p_handedness, p_ball_graphic)
 		skins_won[p_name] = 0
 		
 	course_title = config_data.get("Title", "")
@@ -364,7 +368,7 @@ func start_hole() -> void:
 		return
 		
 	var hole_id: String = hole_ids[current_hole_index]
-	var current_hole = hole_info[hole_id]
+	var current_hole = hole_info.get(hole_id, {})
 	var tee_boxes = current_hole.get("Tee Boxes", {})
 	
 	current_club = "Dr"
@@ -658,8 +662,8 @@ func can_mulligan() -> bool:
 func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> void:
 	last_gimme_strokes = 0
 	var active_player = get_active_player()
-	var prev_lie = active_player.get("lie_type", "")
-	var prev_reduction = active_player.get("shot_reduction", 0.0)
+	var prev_lie = active_player.get("last_shot_starting_lie", active_player.get("lie_type", ""))
+	var prev_reduction = float(raw_shot_data.get("shot_reduction", active_player.get("last_shot_reduction", active_player.get("shot_reduction", 0.0))))
 	var holed_out_before = active_player.get("holed_out", false)
 
 	var player_node = get_tree().root.find_child("Player", true, false)
@@ -704,8 +708,16 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 	active_player["last_aim_target_pos"] = last_aim_target
 	active_player["last_aim_yaw_offset_deg"] = last_aim_yaw
 
+	raw_shot_data["shot_reduction"] = prev_reduction
+	if not raw_shot_data.has("TargetDistance") or float(raw_shot_data.get("TargetDistance", 0.0)) == 0.0:
+		if last_aim_target != Vector3.ZERO and start_pos != Vector3.ZERO and not last_aim_target.is_equal_approx(start_pos):
+			var aim_dist_m = start_pos.distance_to(last_aim_target)
+			raw_shot_data["TargetDistance"] = aim_dist_m
+			raw_shot_data["AimDistanceYards"] = aim_dist_m * 1.09361
+
 	var stat_entry = {}
 	var prev_longest_drive := -1.0
+	var recorded := false
 
 	if not hole_ids.is_empty():
 		var hole_id: String = hole_ids[current_hole_index]
@@ -763,8 +775,9 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 		prev_longest_drive = -1.0
 		if not p_name.is_empty():
 			prev_longest_drive = get_player_longest_drive(p_name)
+		recorded = false
 		if not p_name.is_empty() and not current_club.is_empty():
-			record_global_shot(p_name, current_club, raw_shot_data)
+			recorded = record_global_shot(p_name, current_club, raw_shot_data)
 
 	# Track lies and shot achievements
 	if not active_player.has("lies_in_hole"):
@@ -778,7 +791,7 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 	else:
 		active_player["last_putt_dist_yards"] = 0.0
 
-	if has_node("/root/AchievementManager") and not practice_mode_active:
+	if has_node("/root/AchievementManager") and not practice_mode_active and is_club_averages_tracking_enabled() and recorded:
 		var total_yds = (raw_shot_data.get("TotalDistance", 0.0) as float) * 1.09361
 		get_node("/root/AchievementManager").check_shot_achievements(active_player.get("name", ""), current_club, total_yds, prev_longest_drive)
 
@@ -2007,6 +2020,9 @@ func resume_match(match_data: Dictionary) -> void:
 	hole_skins_results = match_data.get("hole_skins_results", {})
 	hole_ctp_results = match_data.get("hole_ctp_results", {})
 	
+	if match_data.has("hole_ids") and match_data["hole_ids"] is Array and not match_data["hole_ids"].is_empty():
+		hole_ids = match_data["hole_ids"].duplicate()
+
 	# Load config so we have hole info, par scores, etc.
 	var config_file = FileAccess.open(config_path, FileAccess.READ)
 	if config_file != null:
@@ -2016,15 +2032,14 @@ func resume_match(match_data: Dictionary) -> void:
 			var parsed = json_parser.data
 			if typeof(parsed) == TYPE_DICTIONARY:
 				hole_info = parsed.get("Hole Info", {})
-				var all_hole_ids = hole_info.keys()
-				all_hole_ids.sort_custom(func(a, b):
-					var num_a = get_hole_number_from_id(str(a))
-					var num_b = get_hole_number_from_id(str(b))
-					return num_a < num_b
-				)
-				
-				# Filter hole_ids
-				hole_ids = filter_hole_ids_by_length(all_hole_ids, selected_course_length)
+				if hole_ids.is_empty():
+					var all_hole_ids = hole_info.keys()
+					all_hole_ids.sort_custom(func(a, b):
+						var num_a = get_hole_number_from_id(str(a))
+						var num_b = get_hole_number_from_id(str(b))
+						return num_a < num_b
+					)
+					hole_ids = filter_hole_ids_by_length(all_hole_ids, selected_course_length)
 			
 	# Fallback if hole_info is empty but match_data has saved hole_pars
 	if hole_info.is_empty() and match_data.has("hole_pars"):
@@ -2325,6 +2340,13 @@ const AVAILABLE_AVATARS: Array[Dictionary] = [
 	{"id": "avatar_10", "name": "The Heckler", "path": "res://assets/images/avatars/avatar_10.svg"},
 ]
 
+const AVAILABLE_BALL_GRAPHICS: Array[Dictionary] = [
+	{"id": "single_line", "name": "Single Alignment Line", "desc": "Clean tour white ball with sharp alignment line and dual accents"},
+	{"id": "triple_track", "name": "Triple Track", "desc": "Tour white with red & blue triple alignment track lines"},
+	{"id": "arrow_track", "name": "Arrow Alignment Track", "desc": "High-contrast micro-dot directional chevrons pointing to the pin"},
+	{"id": "player_icon", "name": "Match Player Icon", "desc": "Stamps your selected player avatar/icon on the ball"}
+]
+
 const PREFERRED_TEE_OPTIONS: Array[String] = ["Blue", "Red", "White", "Black", "Gold"]
 
 static func get_tee_position_from_boxes(tee_boxes: Dictionary, tee_color: String) -> Array:
@@ -2436,7 +2458,7 @@ func get_registered_player(player_name: String) -> Dictionary:
 			return p
 	return {}
 
-func update_player_profile(player_name: String, email: String, avatar: String, preferred_tee: String = "", skill_level: String = "mid_handicap", handedness: int = 0) -> bool:
+func update_player_profile(player_name: String, email: String, avatar: String, preferred_tee: String = "", skill_level: String = "mid_handicap", handedness: int = 0, ball_graphic: String = "single_line") -> bool:
 	var registered = get_registered_players()
 	for p in registered:
 		if p.get("name", "").to_lower() == player_name.to_lower():
@@ -2445,6 +2467,7 @@ func update_player_profile(player_name: String, email: String, avatar: String, p
 			p["preferred_tee"] = preferred_tee.strip_edges()
 			p["skill_level"] = skill_level.strip_edges() if not skill_level.is_empty() else "mid_handicap"
 			p["handedness"] = handedness
+			p["ball_graphic"] = ball_graphic.strip_edges() if not ball_graphic.is_empty() else "single_line"
 			save_registered_players(registered)
 			# Update actively playing participants if this player is in match
 			for pl in players:
@@ -2453,11 +2476,22 @@ func update_player_profile(player_name: String, email: String, avatar: String, p
 					pl["avatar"] = p["avatar"]
 					pl["skill_level"] = p["skill_level"]
 					pl["handedness"] = handedness
+					pl["ball_graphic"] = p["ball_graphic"]
 			var cur_p = get_active_player()
 			if not cur_p.is_empty() and cur_p.get("name", "").to_lower() == player_name.to_lower():
 				_sync_launch_monitor_for_player(cur_p)
+			emit_signal("player_ball_graphic_changed", player_name, p["ball_graphic"])
 			return true
 	return false
+
+func get_player_ball_graphic(player_name: String) -> String:
+	var p = get_registered_player(player_name)
+	if p.is_empty():
+		p = get_player_by_name(player_name)
+	var bg = p.get("ball_graphic", "single_line")
+	if bg.is_empty() or bg == "osg_pro" or bg == "classic_white" or bg == "tour_yellow" or bg == "neon_orange":
+		bg = "single_line"
+	return bg
 
 func get_player_skill_level(player_name: String) -> String:
 	var p = get_registered_player(player_name)
@@ -2469,6 +2503,8 @@ func get_player_email(player_name: String) -> String:
 
 func get_player_avatar(player_name: String) -> String:
 	var p = get_registered_player(player_name)
+	if p.is_empty():
+		p = get_player_by_name(player_name)
 	return p.get("avatar", "")
 
 func get_player_preferred_tee(player_name: String) -> String:
@@ -2539,7 +2575,7 @@ func set_player_bag(player_name: String, bag: Array) -> bool:
 	emit_signal("player_bag_changed", player_name, clean_bag)
 	return found
 
-func register_player(player_name: String, email: String = "", avatar: String = "", bag: Array = [], preferred_tee: String = "", skill_level: String = "mid_handicap", handedness: int = 0) -> void:
+func register_player(player_name: String, email: String = "", avatar: String = "", bag: Array = [], preferred_tee: String = "", skill_level: String = "mid_handicap", handedness: int = 0, ball_graphic: String = "single_line") -> void:
 	if player_name.is_empty():
 		return
 	var registered = get_registered_players()
@@ -2564,6 +2600,9 @@ func register_player(player_name: String, email: String = "", avatar: String = "
 			if p.get("handedness", 0) != handedness:
 				p["handedness"] = handedness
 				changed = true
+			if not ball_graphic.is_empty() and p.get("ball_graphic", "single_line") != ball_graphic:
+				p["ball_graphic"] = ball_graphic.strip_edges()
+				changed = true
 			if changed:
 				save_registered_players(registered)
 			return # Already exists
@@ -2576,6 +2615,7 @@ func register_player(player_name: String, email: String = "", avatar: String = "
 		"preferred_tee": preferred_tee.strip_edges(),
 		"skill_level": skill_level.strip_edges() if not skill_level.is_empty() else "mid_handicap",
 		"handedness": handedness,
+		"ball_graphic": ball_graphic.strip_edges() if not ball_graphic.is_empty() else "single_line",
 		"created_at": Time.get_unix_time_from_system()
 	}
 	registered.append(new_player)
@@ -2694,7 +2734,23 @@ func _find_matching_player_key_in_dict(dict: Dictionary, player_name: String) ->
 			return k_str
 	return ""
 
+func is_club_averages_tracking_enabled() -> bool:
+	if has_node("/root/GlobalSettings") and GlobalSettings.range_settings != null:
+		if "track_club_averages" in GlobalSettings.range_settings:
+			return bool(GlobalSettings.range_settings.track_club_averages.value)
+	return true
+
+func set_club_averages_tracking_enabled(enabled: bool) -> void:
+	if has_node("/root/GlobalSettings") and GlobalSettings.range_settings != null:
+		if "track_club_averages" in GlobalSettings.range_settings:
+			GlobalSettings.range_settings.track_club_averages.value = enabled
+			GlobalSettings.save_settings()
+	emit_signal("club_averages_tracking_toggled", enabled)
+
 func record_global_shot(player_name: String, club_name: String, raw_shot: Dictionary) -> bool:
+	if not is_club_averages_tracking_enabled():
+		print("[MultiplayerManager] Club distances and averages tracking is disabled. Skipping record_global_shot for %s (%s)." % [player_name, club_name])
+		return false
 	if player_name.is_empty() or club_name.is_empty():
 		return false
 	var canonical_name = get_canonical_player_name(player_name)
@@ -2708,18 +2764,80 @@ func record_global_shot(player_name: String, club_name: String, raw_shot: Dictio
 		stats[target_key][club_code] = []
 	if not stats[target_key].has("_records"):
 		stats[target_key]["_records"] = {}
-		
+
+	# 1. Check aim distance to determine if this was a partial swing
+	var aim_dist_yds := 0.0
+	if raw_shot.has("AimDistanceYards") and float(raw_shot["AimDistanceYards"]) > 0.0:
+		aim_dist_yds = float(raw_shot["AimDistanceYards"])
+	elif raw_shot.has("aim_distance_yards") and float(raw_shot["aim_distance_yards"]) > 0.0:
+		aim_dist_yds = float(raw_shot["aim_distance_yards"])
+	elif raw_shot.has("TargetDistance") and float(raw_shot["TargetDistance"]) > 0.0:
+		aim_dist_yds = float(raw_shot["TargetDistance"]) * 1.09361
+	elif raw_shot.has("target_distance") and float(raw_shot["target_distance"]) > 0.0:
+		aim_dist_yds = float(raw_shot["target_distance"]) * 1.09361
+
+	if aim_dist_yds <= 0.0 and not players.is_empty():
+		var ap = get_active_player()
+		if get_canonical_player_name(ap.get("name", "")) == canonical_name:
+			var aim_pos = ap.get("last_aim_target_pos", Vector3.ZERO)
+			var start_pos = ap.get("last_starting_pos", ap.get("position", Vector3.ZERO))
+			if aim_pos != Vector3.ZERO and start_pos != Vector3.ZERO and not aim_pos.is_equal_approx(start_pos):
+				aim_dist_yds = start_pos.distance_to(aim_pos) * 1.09361
+
+	if club_code != "Pt" and aim_dist_yds > 0.0:
+		var avg_dist_yds = get_player_club_average_distance_yards(target_key, club_code)
+		if aim_dist_yds < (avg_dist_yds - 10.0):
+			print("[MultiplayerManager] Aiming distance (%.1f yds) is more than 10 yards less than %s average (%.1f yds). Assuming partial swing: skipping club distance/average tracking." % [
+				aim_dist_yds, club_code, avg_dist_yds
+			])
+			return false
+
+	# 2. Check lie resistance / distance reduction penalty
+	var reduction: float = float(raw_shot.get("shot_reduction", raw_shot.get("lie_reduction", raw_shot.get("reduction", 0.0))))
+	if reduction <= 0.0 and not players.is_empty():
+		var ap = get_active_player()
+		if get_canonical_player_name(ap.get("name", "")) == canonical_name:
+			reduction = float(ap.get("last_shot_reduction", ap.get("shot_reduction", 0.0)))
+
+	var lie_factor := 1.0
+	if reduction > 0.0:
+		lie_factor = 1.0 - clampf(reduction, 0.0, 0.95)
+
+	var raw_total = float(raw_shot.get("TotalDistance", 0.0))
+	var raw_carry = float(raw_shot.get("CarryDistance", 0.0))
+	var raw_speed = float(raw_shot.get("BallSpeed", raw_shot.get("Speed", 0.0)))
+
+	var stored_total = raw_total / lie_factor if lie_factor > 0.0 else raw_total
+	var stored_carry = raw_carry / lie_factor if lie_factor > 0.0 else raw_carry
+	var stored_speed = raw_speed / lie_factor if lie_factor > 0.0 else raw_speed
+
+	if reduction > 0.0:
+		print("[MultiplayerManager] Lie resistance adjusted for %s (%s): raw total %.1fyds (reduction %.0f%%) stored as unreduced distance %.1fyds." % [
+			target_key, club_code, raw_total * 1.09361, reduction * 100.0, stored_total * 1.09361
+		])
+		raw_shot["unreduced_total_distance"] = stored_total
+		raw_shot["unreduced_carry_distance"] = stored_carry
+
+	var target_dist_m = float(raw_shot.get("TargetDistance", 0.0))
+	if target_dist_m <= 0.0 and aim_dist_yds > 0.0:
+		target_dist_m = aim_dist_yds / 1.09361
+
 	var entry = {
-		"CarryDistance": raw_shot.get("CarryDistance", 0.0),
-		"Speed": raw_shot.get("BallSpeed", raw_shot.get("Speed", 0.0)),
-		"BallSpeed": raw_shot.get("BallSpeed", raw_shot.get("Speed", 0.0)),
+		"CarryDistance": stored_carry,
+		"Speed": stored_speed,
+		"BallSpeed": stored_speed,
 		"ClubSpeed": raw_shot.get("ClubSpeed", 0.0),
-		"SmashFactor": raw_shot.get("SmashFactor", 0.0),
+		"SmashFactor": stored_speed / float(raw_shot.get("ClubSpeed", 1.0)) if float(raw_shot.get("ClubSpeed", 0.0)) > 0.0 else raw_shot.get("SmashFactor", 0.0),
 		"TotalSpin": raw_shot.get("TotalSpin", 0.0),
 		"SideDistance": raw_shot.get("SideDistance", 0.0),
-		"TargetDistance": raw_shot.get("TargetDistance", 0.0),
-		"TotalDistance": raw_shot.get("TotalDistance", 0.0)
+		"TargetDistance": target_dist_m,
+		"TotalDistance": stored_total,
+		"shot_reduction": reduction,
+		"raw_total_distance": raw_total,
+		"raw_carry_distance": raw_carry
 	}
+	if aim_dist_yds > 0.0:
+		entry["AimDistanceYards"] = aim_dist_yds
 
 	# Record club delivery telemetry if provided by launch monitor
 	if raw_shot.has("FaceAngle"):
@@ -2873,13 +2991,45 @@ static func is_shot_outlier(existing_shots: Array, new_shot: Dictionary, _club_n
 	var diff = absf(new_d - stats["mean"])
 	return diff > (OUTLIER_STD_DEV_THRESHOLD * stats["effective_std_dev"])
 
+func get_player_club_average_distance_yards(player_name: String, club_name: String) -> float:
+	var canonical_name = get_canonical_player_name(player_name)
+	var club_code = normalize_club_code(club_name)
+	var default_dist = float(DEFAULT_CLUB_DISTANCES.get(club_code, 100.0))
+	if player_name.is_empty() or club_name.is_empty():
+		return default_dist
+
+	var stats = load_global_club_stats()
+	var matching_key = _find_matching_player_key_in_dict(stats, canonical_name)
+	var target_key = matching_key if not matching_key.is_empty() else canonical_name
+	if not stats.has(target_key):
+		return default_dist
+
+	var shots: Array = []
+	if stats[target_key].has(club_code):
+		shots = stats[target_key][club_code]
+	elif stats[target_key].has(club_name):
+		shots = stats[target_key][club_name]
+
+	var sum_dist := 0.0
+	var count := 0
+	for s in shots:
+		if typeof(s) == TYPE_DICTIONARY:
+			var d = get_shot_distance_m(s)
+			if d > 0.0:
+				sum_dist += d
+				count += 1
+	if count > 0:
+		return (sum_dist / float(count)) * 1.09361
+	return default_dist
+
 func get_club_effective_distance(player_name: String, club_name: String) -> float:
-	var default_dist = float(DEFAULT_CLUB_DISTANCES.get(club_name, 100.0))
+	var club_code = normalize_club_code(club_name)
+	var default_dist = float(DEFAULT_CLUB_DISTANCES.get(club_code, DEFAULT_CLUB_DISTANCES.get(club_name, 100.0)))
 	if player_name.is_empty() or club_name.is_empty():
 		return default_dist
 		
 	var player_stats = get_player_club_stats(player_name)
-	var shots: Array = player_stats.get(club_name, [])
+	var shots: Array = player_stats.get(club_code, player_stats.get(club_name, []))
 	if shots.size() < MIN_SHOTS_FOR_AVERAGES:
 		return default_dist
 		

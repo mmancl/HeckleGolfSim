@@ -6,8 +6,18 @@ var current_scene = null
 var _loading_screen: CanvasLayer = null
 
 
+const CourseGraphicsUpgraderScript = preload("res://Utils/CourseGraphicsUpgrader.gd")
+
+
 func _ready() -> void:
 	MobilePerformance.apply_global_render_settings(get_tree())
+	if DisplayServer.get_name() != "headless":
+		call_deferred("_run_startup_course_upgrader")
+
+
+func _run_startup_course_upgrader() -> void:
+	await get_tree().process_frame
+	await CourseGraphicsUpgraderScript.check_and_upgrade_courses_on_startup(get_tree())
 
 
 func change_scene(path):

@@ -178,6 +178,81 @@ public partial class OsmMapLoader : Node
         if (!string.IsNullOrEmpty(legacySlug) && !slugs.Contains(legacySlug))
             slugs.Add(legacySlug);
 
+        // Common suffix variations (e.g. "Erin Hills Golf Course" -> "erin_hills")
+        string baseSlug = pySlug;
+        string[] suffixes = { "_golf_course", "_golf_club", "_country_club", "_golf_links", "_golf_and_country_club", "_resort", "_club", "_links", "_golf" };
+        foreach (var suf in suffixes)
+        {
+            if (baseSlug.EndsWith(suf, StringComparison.OrdinalIgnoreCase))
+            {
+                string trimmed = baseSlug.Substring(0, baseSlug.Length - suf.Length).Trim('_');
+                if (!string.IsNullOrEmpty(trimmed))
+                {
+                    string[] alts = { trimmed, $"{trimmed}_golf_course", $"{trimmed}_golf_club", $"{trimmed}_country_club" };
+                    foreach (var alt in alts)
+                    {
+                        if (!slugs.Contains(alt))
+                            slugs.Add(alt);
+                    }
+                }
+                break;
+            }
+        }
+
+        // Parentheses variations (e.g. "Torrey Pines Golf Course (North)" -> "torrey_pines_north_course")
+        string lower = courseName.ToLowerInvariant();
+        int openParen = lower.IndexOf('(');
+        int closeParen = lower.IndexOf(')');
+        if (openParen >= 0 && closeParen > openParen)
+        {
+            string parenSub = lower.Substring(openParen + 1, closeParen - openParen - 1).Trim();
+            string noParen = (lower.Substring(0, openParen) + lower.Substring(closeParen + 1)).Trim();
+
+            var sbNoParen = new StringBuilder();
+            foreach (char c in noParen)
+            {
+                if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+                    sbNoParen.Append(c);
+                else if (sbNoParen.Length > 0 && sbNoParen[sbNoParen.Length - 1] != '_')
+                    sbNoParen.Append('_');
+            }
+            string noParenSlug = sbNoParen.ToString().Trim('_');
+
+            var sbParen = new StringBuilder();
+            foreach (char c in parenSub)
+            {
+                if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+                    sbParen.Append(c);
+                else if (sbParen.Length > 0 && sbParen[sbParen.Length - 1] != '_')
+                    sbParen.Append('_');
+            }
+            string parenSlug = sbParen.ToString().Trim('_');
+
+            if (!string.IsNullOrEmpty(noParenSlug))
+            {
+                if (!slugs.Contains(noParenSlug)) slugs.Add(noParenSlug);
+                if (!string.IsNullOrEmpty(parenSlug))
+                {
+                    string combined = $"{noParenSlug}_{parenSlug}";
+                    if (!slugs.Contains(combined)) slugs.Add(combined);
+
+                    string mainBase = noParenSlug;
+                    foreach (var suf in suffixes)
+                    {
+                        if (mainBase.EndsWith(suf, StringComparison.OrdinalIgnoreCase))
+                        {
+                            mainBase = mainBase.Substring(0, mainBase.Length - suf.Length).Trim('_');
+                            break;
+                        }
+                    }
+                    string altCourse = $"{mainBase}_{parenSlug}_course";
+                    if (!slugs.Contains(altCourse)) slugs.Add(altCourse);
+                    string altGolf = $"{mainBase}_{parenSlug}_golf_course";
+                    if (!slugs.Contains(altGolf)) slugs.Add(altGolf);
+                }
+            }
+        }
+
         return slugs;
     }
 
@@ -2782,7 +2857,7 @@ public partial class OsmMapLoader : Node
             var sky = new Sky 
             { 
                 SkyMaterial = skyMaterial,
-                ProcessMode = Sky.ProcessModeEnum.Realtime,
+                ProcessMode = Sky.ProcessModeEnum.Quality,
                 RadianceSize = isMobilePlatform ? Sky.RadianceSizeEnum.Size128 : Sky.RadianceSizeEnum.Size256
             };
             var env = new Godot.Environment
@@ -2889,6 +2964,38 @@ public partial class OsmMapLoader : Node
                 rootNode.AddChild(rangeUiInst);
                 rangeUiInst.Owner = rootNode;
             }
+
+            // Extract OSM cart path polylines if available
+            var cartPathPolylines = new Godot.Collections.Array();
+            foreach (var w in ways)
+            {
+                bool isCartPath = (w.Tags.TryGetValue("golf", out var gTag) && gTag == "cartpath") ||
+                                  (w.Tags.TryGetValue("highway", out var hTag) && (hTag == "path" || hTag == "footway"));
+                if (!isCartPath || w.NodeIds.Count < 2)
+                    continue;
+                var pts = w.NodeIds
+                    .Where(nodes.ContainsKey)
+                    .Select(id => nodes[id])
+                    .Select(coord => new Vector2(
+                        (float)((coord.Lon - refLon) * metersPerLon),
+                        -(float)((coord.Lat - refLat) * metersPerLat)
+                    ))
+                    .ToArray();
+                if (pts.Length >= 2)
+                {
+                    cartPathPolylines.Add(pts);
+                }
+            }
+            if (cartPathPolylines.Count > 0)
+            {
+                rootNode.SetMeta("cart_path_polylines", cartPathPolylines);
+            }
+
+            // Convert individual foliage nodes into spatial MultiMesh chunks & build 3D recessed bunkers/reeds/horizon/cart paths
+            var treeGenScript = GD.Load<Script>("res://HighFidelity/Foliage/procedural_tree_generator.gd");
+            treeGenScript?.Call("convert_scene_foliage_to_multimesh", rootNode, true);
+            var detailEnhancerScript = GD.Load<Script>("res://HighFidelity/Terrain/course_detail_enhancer.gd");
+            detailEnhancerScript?.Call("enhance_course_scene", rootNode, true);
 
             // Set main scene script
             rootNode.SetScript(GD.Load<Script>("res://Courses/Range/range.gd"));
@@ -3156,6 +3263,8 @@ public partial class OsmMapLoader : Node
                     dict["hole_count"] = item.HoleCount;
                     dict["last_updated"] = item.LastUpdated;
                     dict["is_catalog"] = item.IsCatalog;
+                    dict["is_cached"] = IsCourseCached(item.Name);
+                    dict["is_pga_tour"] = item.IsPgaTour;
                     godotResults.Add(dict);
                 }
                 EmitSignal(SignalName.SearchCompleted, godotResults);
@@ -3205,6 +3314,8 @@ public partial class OsmMapLoader : Node
                 if (!include18 && (item.HoleCount == 18 || item.HoleCount >= 18)) continue;
             }
 
+            if (!IsCourseCached(item.Name)) continue;
+
             var dict = new Godot.Collections.Dictionary();
             dict["name"] = item.Name;
             dict["lat"] = item.Lat;
@@ -3213,7 +3324,7 @@ public partial class OsmMapLoader : Node
             dict["hole_count"] = item.HoleCount;
             dict["last_updated"] = item.LastUpdated;
             dict["is_catalog"] = true;
-            dict["is_cached"] = IsCourseCached(item.Name);
+            dict["is_cached"] = true;
             dict["is_pga_tour"] = item.IsPgaTour;
             results.Add(dict);
         }
@@ -3230,7 +3341,7 @@ public partial class OsmMapLoader : Node
             }
         }
 
-        string[] cacheDirs = new[] { "user://cached_geometry", "res://Courses/CachedGeometry" };
+        string[] cacheDirs = new[] { "res://Courses/CachedGeometry" };
         foreach (var cDir in cacheDirs)
         {
             if (!Godot.DirAccess.DirExistsAbsolute(cDir)) continue;
@@ -3258,6 +3369,7 @@ public partial class OsmMapLoader : Node
                         dict["last_updated"] = "";
                         dict["is_catalog"] = false;
                         dict["is_cached"] = true;
+                        dict["is_pga_tour"] = false;
                         results.Add(dict);
                     }
                 }
@@ -3276,9 +3388,7 @@ public partial class OsmMapLoader : Node
         foreach (var slug in slugs)
         {
             if (Godot.FileAccess.FileExists($"res://Courses/CachedGeometry/{slug}.json.gz") ||
-                Godot.FileAccess.FileExists($"res://Courses/CachedGeometry/{slug}.json") ||
-                Godot.FileAccess.FileExists($"user://cached_geometry/{slug}.json.gz") ||
-                Godot.FileAccess.FileExists($"user://cached_geometry/{slug}.json"))
+                Godot.FileAccess.FileExists($"res://Courses/CachedGeometry/{slug}.json"))
             {
                 return true;
             }
@@ -3345,6 +3455,8 @@ public partial class OsmMapLoader : Node
         var results = new Godot.Collections.Array();
         foreach (var item in sorted)
         {
+            if (!IsCourseCached(item.Name)) continue;
+
             var dict = new Godot.Collections.Dictionary();
             dict["name"] = item.Name;
             dict["lat"] = item.Lat;
@@ -3353,7 +3465,8 @@ public partial class OsmMapLoader : Node
             dict["hole_count"] = item.HoleCount;
             dict["last_updated"] = item.LastUpdated;
             dict["is_catalog"] = true;
-            dict["is_cached"] = IsCourseCached(item.Name);
+            dict["is_cached"] = true;
+            dict["is_pga_tour"] = item.IsPgaTour;
             results.Add(dict);
         }
         return results;
@@ -4310,49 +4423,21 @@ public partial class OsmMapLoader : Node
                 Shader = GD.Load<Shader>("res://Courses/Environments/shaders/water_shader.gdshader")
             };
             
-            shaderMat.SetShaderParameter("shallow_color", new Color(0.22f, 0.66f, 1.0f));
-            shaderMat.SetShaderParameter("deep_color", new Color(0.01f, 0.15f, 0.3f));
-            shaderMat.SetShaderParameter("absorbance", 2.0f);
-            shaderMat.SetShaderParameter("depth_fade_distance", 1.0f);
-            shaderMat.SetShaderParameter("roughness", 0.08f);
+            shaderMat.SetShaderParameter("shallow_color", new Color(0.12f, 0.23f, 0.18f));
+            shaderMat.SetShaderParameter("deep_color", new Color(0.03f, 0.09f, 0.11f));
+            shaderMat.SetShaderParameter("absorbance", 2.6f);
+            shaderMat.SetShaderParameter("depth_fade_distance", 1.2f);
+            shaderMat.SetShaderParameter("roughness", 0.04f);
+            shaderMat.SetShaderParameter("foam_amount", 0.12f);
+            shaderMat.SetShaderParameter("foam_color", new Color(0.68f, 0.74f, 0.70f));
             
-            var waveNoise = new FastNoiseLite
-            {
-                NoiseType = FastNoiseLite.NoiseTypeEnum.Simplex,
-                Frequency = 0.03f
-            };
-            var waveNoiseTex = new NoiseTexture2D
-            {
-                Noise = waveNoise,
-                Seamless = true
-            };
-            
-            var normalNoise = new FastNoiseLite
-            {
-                NoiseType = FastNoiseLite.NoiseTypeEnum.Simplex,
-                Frequency = 0.05f
-            };
-            var normalNoiseTex1 = new NoiseTexture2D
-            {
-                Noise = normalNoise,
-                Seamless = true,
-                AsNormalMap = true,
-                BumpStrength = 2.0f
-            };
-            var normalNoiseTex2 = new NoiseTexture2D
-            {
-                Noise = normalNoise,
-                Seamless = true,
-                AsNormalMap = true,
-                BumpStrength = 1.5f
-            };
-            
-            shaderMat.SetShaderParameter("wave_texture", waveNoiseTex);
-            shaderMat.SetShaderParameter("normal1", normalNoiseTex1);
-            shaderMat.SetShaderParameter("normal2", normalNoiseTex2);
+            EnsureWaterNoiseTextures();
+            shaderMat.SetShaderParameter("wave_texture", _cachedWaterWaveNoiseTex!);
+            shaderMat.SetShaderParameter("normal1", _cachedWaterNormalTex1!);
+            shaderMat.SetShaderParameter("normal2", _cachedWaterNormalTex2!);
             shaderMat.SetShaderParameter("wave_speed", 0.015f);
-            shaderMat.SetShaderParameter("wave_scale", 10.0f);
-            shaderMat.SetShaderParameter("height_scale", 0.1f);
+            shaderMat.SetShaderParameter("wave_scale", 12.0f);
+            shaderMat.SetShaderParameter("height_scale", 0.025f);
             
             arrayMesh.SurfaceSetMaterial(0, shaderMat);
             return arrayMesh;
@@ -5225,6 +5310,7 @@ public partial class OsmMapLoader : Node
     private List<PackedScene>? _cachedWillowTreeScenes;
     private List<PackedScene>? _cachedBirchTreeScenes;
     private List<PackedScene>? _cachedPineTreeScenes;
+    private const bool BushesEnabled = false;
     private List<PackedScene>? _cachedBushScenes;
 
     private static List<PackedScene> LoadSceneList(string[] paths)
@@ -5334,6 +5420,12 @@ public partial class OsmMapLoader : Node
 
             root.AddChild(treeInstance);
             treeInstance.Owner = root;
+            treeInstance.SetMeta("is_tree", true);
+            treeInstance.AddToGroup("trees");
+            if (treeInstance is CollisionObject3D colObj)
+            {
+                colObj.SetMeta("is_tree", true);
+            }
 
             // Shrink and reposition the trunk collision shape so it doesn't extend into foliage
             foreach (Node child in treeInstance.GetChildren())
@@ -5390,7 +5482,8 @@ public partial class OsmMapLoader : Node
     private void AddBushAt(Node3D root, Vector3 position)
     {
         EnsurePlantScenesLoaded();
-        if (_cachedBushScenes == null || _cachedBushScenes.Count == 0) return;
+        // Low-poly spiky bush meshes looked like floating grass blades; skipped entirely.
+        if (!BushesEnabled || _cachedBushScenes == null || _cachedBushScenes.Count == 0) return;
 
         int posHash = (int)(position.X * 1000f) ^ (int)(position.Z * 1000f);
         var random = new Random(posHash);
@@ -5546,11 +5639,55 @@ public partial class OsmMapLoader : Node
             .ToList();
     }
 
+    private static NoiseTexture2D? _cachedWaterWaveNoiseTex;
+    private static NoiseTexture2D? _cachedWaterNormalTex1;
+    private static NoiseTexture2D? _cachedWaterNormalTex2;
+
+    private static void EnsureWaterNoiseTextures()
+    {
+        if (_cachedWaterWaveNoiseTex != null && _cachedWaterNormalTex1 != null && _cachedWaterNormalTex2 != null)
+            return;
+
+        var waveNoise = new FastNoiseLite
+        {
+            NoiseType = FastNoiseLite.NoiseTypeEnum.Simplex,
+            Frequency = 0.03f
+        };
+        _cachedWaterWaveNoiseTex = new NoiseTexture2D
+        {
+            Noise = waveNoise,
+            Seamless = true
+        };
+
+        var normalNoise = new FastNoiseLite
+        {
+            NoiseType = FastNoiseLite.NoiseTypeEnum.Simplex,
+            Frequency = 0.05f
+        };
+        _cachedWaterNormalTex1 = new NoiseTexture2D
+        {
+            Noise = normalNoise,
+            Seamless = true,
+            AsNormalMap = true,
+            BumpStrength = 2.0f
+        };
+        _cachedWaterNormalTex2 = new NoiseTexture2D
+        {
+            Noise = normalNoise,
+            Seamless = true,
+            AsNormalMap = true,
+            BumpStrength = 1.5f
+        };
+    }
+
     private record OsmWay(long Id, List<long> NodeIds, Dictionary<string, string> Tags);
     private record OsmRelation(long Id, List<(string Type, long Ref, string Role)> Members, Dictionary<string, string> Tags);
     
     private class CourseJsonConfig
     {
+        [JsonPropertyName("graphics_version")]
+        public int GraphicsVersion { get; set; } = 5;
+
         [JsonPropertyName("scene_path")]
         public string ScenePath { get; set; } = "course.tscn";
 

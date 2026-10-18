@@ -73,7 +73,7 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 			if not rollout_enabled or not is_final_rest:
 				ball_data["Rollout"] = "---"
 			else:
-				var rollout_yd = maxf(0.0, (dist_m - carry_val) * m2yd)
+				var rollout_yd = (dist_m - carry_val) * m2yd
 				ball_data["Rollout"] = "%.1f" % rollout_yd
 		else:
 			ball_data["Distance"] = "---"
@@ -119,7 +119,7 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 			if not rollout_enabled or not is_final_rest:
 				ball_data["Rollout"] = "---"
 			else:
-				var rollout_m = maxf(0.0, dist_m - carry_val)
+				var rollout_m = dist_m - carry_val
 				ball_data["Rollout"] = "%.1f" % rollout_m
 		else:
 			ball_data["Distance"] = "---"
@@ -187,18 +187,18 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 		if abs(club_path) < 0.1:
 			ball_data["ClubPath"] = "0.0 Str"
 		elif club_path > 0.0:
-			ball_data["ClubPath"] = "%.1f In-Out" % club_path
+			ball_data["ClubPath"] = "%.1f I-O" % club_path
 		else:
-			ball_data["ClubPath"] = "%.1f Out-In" % abs(club_path)
+			ball_data["ClubPath"] = "%.1f O-I" % abs(club_path)
 		ball_data["RawClubPath"] = club_path
 	elif raw_speed_mph > 20.0 and ball_data.has("RawFaceAngle"):
 		var est_path = (raw_hla - float(ball_data["RawFaceAngle"]) * 0.75) / 0.25
 		if abs(est_path) < 0.1:
 			ball_data["ClubPath"] = "0.0 Str"
 		elif est_path > 0.0:
-			ball_data["ClubPath"] = "%.1f In-Out" % est_path
+			ball_data["ClubPath"] = "%.1f I-O" % est_path
 		else:
-			ball_data["ClubPath"] = "%.1f Out-In" % abs(est_path)
+			ball_data["ClubPath"] = "%.1f O-I" % abs(est_path)
 		ball_data["RawClubPath"] = est_path
 	else:
 		ball_data["ClubPath"] = "N/A"

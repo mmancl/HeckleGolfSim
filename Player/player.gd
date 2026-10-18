@@ -12,6 +12,7 @@ var _last_starting_pos : Vector3 = Vector3.ZERO
 var _last_aim_target_pos : Vector3 = Vector3.ZERO
 var _last_aim_yaw_offset_deg : float = 0.0
 var current_shot_reduction : float = 0.0
+var last_shot_reduction : float = 0.0
 var current_lie_type : String = "fairway"
 
 var max_tracers : int = 10
@@ -19,10 +20,11 @@ var min_tracers : int = 0
 var tracers : Array = []
 var current_tracer : MeshInstance3D = null
 var BallTrailScript = preload("res://Player/ball_trail.gd")
+const GolfBallClass = preload("res://Player/ball.gd")
 var current_profile_name : String = "Player 1"
 var profile_tracers : Dictionary = {}
 
-var ball : GolfBall = null
+var ball : CharacterBody3D = null
 var camera_target : Node3D = null
 
 # Tree occlusion variables
@@ -42,7 +44,7 @@ signal manual_hit
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	# Create new golf ball
-	ball = GolfBall.new()
+	ball = GolfBallClass.new()
 	add_child(ball)
 	ball.rest.connect(_on_ball_rest)
 	
@@ -59,10 +61,20 @@ func _ready() -> void:
 
 	if has_node("/root/MultiplayerManager"):
 		var mp_mgr = get_node("/root/MultiplayerManager")
-		if mp_mgr.has_method("get_default_range_profile_name"):
+		if not mp_mgr.players.is_empty():
+			var cur_p = mp_mgr.get_active_player()
+			if not cur_p.is_empty() and not str(cur_p.get("name", "")).is_empty():
+				current_profile_name = str(cur_p.get("name", ""))
+		elif mp_mgr.has_method("get_default_range_profile_name"):
 			var def_name = mp_mgr.get_default_range_profile_name()
 			if not def_name.is_empty():
 				current_profile_name = def_name
+		if not mp_mgr.active_player_changed.is_connected(_on_active_player_changed):
+			mp_mgr.active_player_changed.connect(_on_active_player_changed)
+		if not mp_mgr.player_ball_graphic_changed.is_connected(_on_player_ball_graphic_changed):
+			mp_mgr.player_ball_graphic_changed.connect(_on_player_ball_graphic_changed)
+
+	_apply_profile_to_ball(current_profile_name)
 
 	if has_node("/root/EventBus"):
 		var eb = get_node("/root/EventBus")
@@ -72,27 +84,55 @@ func _ready() -> void:
 func set_profile(player_name: String) -> void:
 	if player_name.is_empty():
 		return
-	if player_name == current_profile_name:
+	if player_name != current_profile_name:
+		# Hide tracers for previous profile
+		var old_list: Array = profile_tracers.get(current_profile_name, [])
+		for tracer in old_list:
+			if is_instance_valid(tracer):
+				tracer.visible = false
+
+		current_profile_name = player_name
+
+		# Show tracers for new profile
+		if not profile_tracers.has(current_profile_name):
+			profile_tracers[current_profile_name] = []
+		var new_list: Array = profile_tracers[current_profile_name]
+		for tracer in new_list:
+			if is_instance_valid(tracer):
+				tracer.visible = true
+
+		tracers = new_list
+		current_tracer = tracers.back() if not tracers.is_empty() else null
+
+	_apply_profile_to_ball(current_profile_name)
+
+func _on_active_player_changed(player_dict: Dictionary) -> void:
+	var p_name = str(player_dict.get("name", ""))
+	if not p_name.is_empty():
+		set_profile(p_name)
+
+func _on_player_ball_graphic_changed(player_name: String, _ball_graphic: String) -> void:
+	if player_name.to_lower() == current_profile_name.to_lower():
+		_apply_profile_to_ball(current_profile_name)
+
+func _apply_profile_to_ball(player_name: String) -> void:
+	if ball == null or not is_instance_valid(ball) or not ball.has_method("apply_ball_graphic"):
 		return
-
-	# Hide tracers for previous profile
-	var old_list: Array = profile_tracers.get(current_profile_name, [])
-	for tracer in old_list:
-		if is_instance_valid(tracer):
-			tracer.visible = false
-
-	current_profile_name = player_name
-
-	# Show tracers for new profile
-	if not profile_tracers.has(current_profile_name):
-		profile_tracers[current_profile_name] = []
-	var new_list: Array = profile_tracers[current_profile_name]
-	for tracer in new_list:
-		if is_instance_valid(tracer):
-			tracer.visible = true
-
-	tracers = new_list
-	current_tracer = tracers.back() if not tracers.is_empty() else null
+	var graphic_id = "single_line"
+	var avatar_path = ""
+	var p_color = Color(0.24, 0.46, 0.72)
+	if has_node("/root/MultiplayerManager"):
+		var mp_mgr = get_node("/root/MultiplayerManager")
+		var reg = mp_mgr.get_registered_player(player_name)
+		if reg.is_empty() and mp_mgr.has_method("get_player_by_name"):
+			reg = mp_mgr.get_player_by_name(player_name)
+		if mp_mgr.has_method("get_player_ball_graphic"):
+			graphic_id = mp_mgr.get_player_ball_graphic(player_name)
+		else:
+			graphic_id = reg.get("ball_graphic", "single_line")
+		avatar_path = mp_mgr.get_player_avatar(player_name) if mp_mgr.has_method("get_player_avatar") else reg.get("avatar", "")
+		p_color = mp_mgr.get_player_color(reg) if mp_mgr.has_method("get_player_color") else p_color
+	ball.apply_ball_graphic(graphic_id, avatar_path, player_name, p_color)
 
 func _on_club_selected(club_name: String) -> void:
 	_cached_selected_club = club_name
@@ -354,6 +394,7 @@ func _on_tcp_client_hit_ball(data: Dictionary) -> void:
 	_last_starting_pos = ball.global_position
 	shot_data = data.duplicate()
 	shot_data["TargetDistance"] = target_dist
+	shot_data["shot_reduction"] = current_shot_reduction
 
 	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
 	if mp_mgr != null and not mp_mgr.players.is_empty():
@@ -393,6 +434,7 @@ func _on_range_ui_hit_shot(data: Variant) -> void:
 	_last_starting_pos = ball.global_position
 	shot_data = data.duplicate()
 	shot_data["TargetDistance"] = target_dist
+	shot_data["shot_reduction"] = current_shot_reduction
 	print("Local shot injection payload: ", JSON.stringify(shot_data))
 	if has_node("/root/DebugLogger") and shot_data is Dictionary:
 		get_node("/root/DebugLogger").log_shot(shot_data)

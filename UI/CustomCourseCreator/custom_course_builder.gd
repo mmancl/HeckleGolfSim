@@ -108,6 +108,7 @@ static func build_custom_course(
 
 	# 2. Serialize course.json
 	var course_json_dict = {
+		"graphics_version": 5,
 		"scene_path": "course.tscn",
 		"Title": title.strip_edges(),
 		"is_custom": true,
@@ -497,6 +498,14 @@ static func _build_and_save_course_scene(
 		flag_node.add_child(flag)
 		flag.owner = root
 
+	# Convert foliage into spatial MultiMesh chunks and add recessed 3D bunkers/reeds/horizon/cart paths
+	var tree_gen_script = load("res://HighFidelity/Foliage/procedural_tree_generator.gd")
+	if tree_gen_script != null:
+		tree_gen_script.convert_scene_foliage_to_multimesh(root, true)
+	var detail_enhancer_script = load("res://HighFidelity/Terrain/course_detail_enhancer.gd")
+	if detail_enhancer_script != null:
+		detail_enhancer_script.enhance_course_scene(root, true)
+
 	# Save PackedScene to disk
 	if progress_cb.is_valid():
 		progress_cb.call(total_holes, total_holes, "Finalizing and saving 3D course scene...")
@@ -557,11 +566,48 @@ static func _extract_hole_geometry(
 					height_grid[cell_key] = []
 				height_grid[cell_key].append(custom_v)
 
+	# Also extract trees from MultiMeshFoliageContainer metadata if the source course was upgraded
+	var mm_container := src_inst.get_node_or_null("MultiMeshFoliageContainer")
+	if mm_container != null and mm_container.has_meta("tree_records"):
+		var records: Array = mm_container.get_meta("tree_records", [])
+		var mesh_paths: Array = mm_container.get_meta("tree_mesh_paths", [])
+		var loaded_scenes: Dictionary = {}
+		for rec_idx in range(records.size()):
+			var rec = records[rec_idx]
+			if not (rec is Array) or rec.size() < 8:
+				continue
+			var pos := Vector3(float(rec[0]), float(rec[1]), float(rec[2]))
+			var dist := _get_distance_to_hole_info(pos, source_hole_data)
+			if dist <= 70.0 and _is_closest_to_hole(pos, source_hole_key, all_source_holes, dist):
+				var rel_vec := pos - src_tee_3d
+				var rot_vec := rel_vec.rotated(Vector3.UP, angle)
+				var target_pos := target_tee_pos + rot_vec
+				tree_positions.append(Vector2(target_pos.x, target_pos.z))
+
+				var mesh_idx := int(rec[7])
+				var mesh_path := "res://Courses/Environments/Tree1.tscn"
+				if mesh_idx >= 0 and mesh_idx < mesh_paths.size() and str(mesh_paths[mesh_idx]) != "":
+					mesh_path = str(mesh_paths[mesh_idx])
+				if not loaded_scenes.has(mesh_path):
+					loaded_scenes[mesh_path] = load(mesh_path) if ResourceLoader.exists(mesh_path) else load("res://Courses/Environments/Tree1.tscn")
+				var tree_scene := loaded_scenes[mesh_path] as PackedScene
+				if tree_scene != null:
+					var tree_inst := tree_scene.instantiate() as Node3D
+					if tree_inst != null:
+						tree_inst.name = "Tree_Extracted_%d" % rec_idx
+						tree_inst.position = target_pos
+						tree_inst.scale = Vector3(float(rec[3]), float(rec[4]), float(rec[5]))
+						tree_inst.rotation.y = float(rec[6]) - angle
+						tree_nodes.append(tree_inst)
+
 	var ignored_names: Array[String] = [
 		"Player", "RangeUI", "Sky3D", "SunLight", "MoonLight", "Skydome", "TimeOfDay",
 		"Camera3D", "PhantomCamera3D", "PhantomCameraHost", "AerialCamera", "SessionRecorder",
 		"TCPServer", "YardMarkers", "CenterLine", "RoughMesh_Base", "RoughStatic_Base",
-		"PreviewAerialCam", "TerrainStatic", "UnifiedTerrain", "GroundMesh"
+		"PreviewAerialCam", "TerrainStatic", "UnifiedTerrain", "GroundMesh",
+		"MultiMeshFoliageContainer", "ConsolidatedFoliageCollision", "ConsolidatedCanopyArea",
+		"HighFidelityBunkers", "BunkerLipGrassMultiMesh", "ShorelineReedsMultiMesh",
+		"HorizonSkirt", "CartPaths"
 	]
 
 	var all_nodes: Array[Node] = []
@@ -571,7 +617,7 @@ static func _extract_hole_geometry(
 		var name_lower = node.name.to_lower()
 
 		# Check for Tree & Bush instances
-		if node is Node3D and (name_lower.contains("tree") or name_lower.contains("bush")):
+		if node is Node3D and not (node is MultiMeshInstance3D) and (name_lower.contains("tree") or name_lower.contains("bush")):
 			var node_3d = node as Node3D
 			var rel_t = _get_relative_transform(node_3d, src_inst)
 			var pos = rel_t.origin

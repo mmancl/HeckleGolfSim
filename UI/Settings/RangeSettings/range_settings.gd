@@ -27,6 +27,9 @@ var temperature_unit_label : Label = null
 var altitude_unit_label : Label = null
 var _stats_count_label : Label = null
 var _stat_limit_modal : Control = null
+var _stat_check_buttons : Dictionary = {}
+var _stat_check_button_list : Array[CheckButton] = []
+var _is_internal_stats_sync : bool = false
 var _key_buttons_by_action : Dictionary = {}
 var _joy_buttons_by_action : Dictionary = {}
 var _rebind_modal : Control = null
@@ -285,7 +288,12 @@ func _ready() -> void:
 	_setup_displayed_stats_section()
 	if GlobalSettings and GlobalSettings.range_settings and "displayed_stats" in GlobalSettings.range_settings:
 		GlobalSettings.range_settings.displayed_stats.setting_changed.connect(func(_v):
-			_setup_displayed_stats_section()
+			if _is_internal_stats_sync:
+				return
+			if _stat_check_buttons.is_empty():
+				_setup_displayed_stats_section()
+			else:
+				_sync_displayed_stats_checkboxes()
 		)
 	_setup_square_monitor_section()
 	_setup_tcp_monitor_section()
@@ -633,6 +641,7 @@ func _ready() -> void:
 	var suspense_toggle = _create_toggle_setting_row("Course Play Suspense", "tension_effects_enabled")
 	var shot_analysis_toggle = _create_toggle_setting_row("Shot Analysis Suggestions", "shot_analysis_enabled")
 	var ball_rollout_toggle = _create_toggle_setting_row("Ball Rollout", "ball_rollout_enabled")
+	var track_averages_toggle = _create_toggle_setting_row("Track Club Distances & Averages", "track_club_averages")
 
 	var audio_toggles_grid = _create_toggle_grid([
 		custom_next_player_toggle,
@@ -642,7 +651,8 @@ func _ready() -> void:
 		minigame_music_toggle,
 		suspense_toggle,
 		shot_analysis_toggle,
-		ball_rollout_toggle
+		ball_rollout_toggle,
+		track_averages_toggle
 	], 3)
 	gameplay_vbox.add_child(audio_toggles_grid)
 
@@ -661,8 +671,9 @@ func _ready() -> void:
 	var dist_row = _create_spinbox_setting_row("Camera Distance", "camera_distance", 1.0, 30.0, 0.1, "m")
 	var fov_row = _create_spinbox_setting_row("Camera FOV", "camera_fov", 1.0, 90.0, 0.1, "deg")
 	var far_row = _create_spinbox_setting_row("Camera Far", "camera_far", 100.0, 1000.0, 1.0, "m")
+	var ball_scale_row = _create_spinbox_setting_row("Ball Visual Size", "ball_visual_scale", 1.0, 2.5, 0.05, "x")
 	
-	var camera_range_grid = _create_range_grid([dist_row, height_row, fov_row, far_row], 2)
+	var camera_range_grid = _create_range_grid([dist_row, height_row, fov_row, far_row, ball_scale_row], 2)
 	camera_vbox.add_child(camera_range_grid)
 	
 	# Visual effects separator
@@ -2238,11 +2249,16 @@ func _setup_displayed_stats_section() -> void:
 	var root := get_node_or_null("MarginContainer/VBoxContainer/TabContainer/Stats/MarginContainer/StatsVBox")
 	if root == null:
 		return
+
+	_stat_check_buttons.clear()
+	_stat_check_button_list.clear()
+
 	for child in root.get_children():
 		child.queue_free()
 
 	# --- Header & Instruction Card ---
 	var header_card := PanelContainer.new()
+	header_card.name = "StatsHeaderCard"
 	ThemeManager.apply_card_panel_style(header_card, true, 10, 16, 14, 16, 14)
 	
 	var header_vbox := VBoxContainer.new()
@@ -2275,6 +2291,9 @@ func _setup_displayed_stats_section() -> void:
 
 	# --- Categorized Stat Cards ---
 	var categories = ["Ball Flight", "Club Delivery", "Trajectory"]
+	var grid_rows: Array[Array] = []
+	var cur_row: Array[CheckButton] = []
+
 	for cat in categories:
 		var cat_label := Label.new()
 		cat_label.text = cat.to_upper() + " METRICS"
@@ -2294,6 +2313,102 @@ func _setup_displayed_stats_section() -> void:
 
 		var cat_sep := HSeparator.new()
 		root.add_child(cat_sep)
+
+	# Group all check buttons into rows of 3 for full 2D grid navigation
+	for i in range(_stat_check_button_list.size()):
+		cur_row.append(_stat_check_button_list[i])
+		if cur_row.size() == 3:
+			grid_rows.append(cur_row)
+			cur_row = []
+	if not cur_row.is_empty():
+		grid_rows.append(cur_row)
+
+	_wire_stats_grid_focus(grid_rows)
+
+
+func _wire_stats_grid_focus(grid_rows: Array[Array]) -> void:
+	if grid_rows.is_empty():
+		return
+
+	var header_close = get_node_or_null("MarginContainer/VBoxContainer/HeaderHBox/HeaderCloseButton")
+	var tab_container = get_node_or_null("MarginContainer/VBoxContainer/TabContainer")
+	var reset_layout_btn = get_node_or_null("MarginContainer/VBoxContainer/ButtonsHBox/ResetLayoutButton")
+	var exit_btn = get_node_or_null("MarginContainer/VBoxContainer/ButtonsHBox/ExitButton")
+	var close_btn = get_node_or_null("MarginContainer/VBoxContainer/ButtonsHBox/CloseButton")
+
+	for r in range(grid_rows.size()):
+		var row: Array = grid_rows[r]
+		for c in range(row.size()):
+			var btn: CheckButton = row[c] as CheckButton
+			if btn == null or not is_instance_valid(btn):
+				continue
+
+			# Left / Right navigation within row (prevent horizontal focus bleeding)
+			if c > 0:
+				btn.focus_neighbor_left = btn.get_path_to(row[c - 1])
+			else:
+				btn.focus_neighbor_left = btn.get_path_to(btn)
+
+			if c < row.size() - 1:
+				btn.focus_neighbor_right = btn.get_path_to(row[c + 1])
+			else:
+				btn.focus_neighbor_right = btn.get_path_to(btn)
+
+			# Down navigation
+			if r < grid_rows.size() - 1:
+				var next_row: Array = grid_rows[r + 1]
+				var target_c = clampi(c, 0, next_row.size() - 1)
+				btn.focus_neighbor_bottom = btn.get_path_to(next_row[target_c])
+			else:
+				if reset_layout_btn != null and is_instance_valid(reset_layout_btn):
+					btn.focus_neighbor_bottom = btn.get_path_to(reset_layout_btn)
+
+			# Up navigation
+			if r > 0:
+				var prev_row: Array = grid_rows[r - 1]
+				var target_c = clampi(c, 0, prev_row.size() - 1)
+				btn.focus_neighbor_top = btn.get_path_to(prev_row[target_c])
+			else:
+				# Top row of stats selection window (r == 0)
+				# Connect gui_input so if scrolled down (scroll_vertical > 0),
+				# pressing UP pulls up the slider to the top first instead of jumping to top menu items!
+				if not btn.gui_input.is_connected(_on_top_stat_button_gui_input):
+					btn.gui_input.connect(_on_top_stat_button_gui_input)
+				if header_close != null and is_instance_valid(header_close):
+					btn.focus_neighbor_top = btn.get_path_to(header_close)
+				elif tab_container != null and is_instance_valid(tab_container):
+					btn.focus_neighbor_top = btn.get_path_to(tab_container)
+
+	# Wire bottom buttons back up to last row of stats
+	var last_row: Array = grid_rows.back()
+	if not last_row.is_empty():
+		if reset_layout_btn != null and is_instance_valid(reset_layout_btn):
+			reset_layout_btn.focus_neighbor_top = reset_layout_btn.get_path_to(last_row[0])
+		if exit_btn != null and is_instance_valid(exit_btn):
+			var mid_c = clampi(1, 0, last_row.size() - 1)
+			exit_btn.focus_neighbor_top = exit_btn.get_path_to(last_row[mid_c])
+		if close_btn != null and is_instance_valid(close_btn):
+			var right_c = last_row.size() - 1
+			close_btn.focus_neighbor_top = close_btn.get_path_to(last_row[right_c])
+
+
+func _on_top_stat_button_gui_input(ev: InputEvent) -> void:
+	if ev.is_action_pressed("ui_up") or (ev is InputEventJoypadButton and ev.button_index == JOY_BUTTON_DPAD_UP and ev.pressed) or (ev is InputEventJoypadMotion and ev.axis == JOY_AXIS_LEFT_Y and ev.axis_value <= -0.5):
+		var stats_scroll = get_node_or_null("MarginContainer/VBoxContainer/TabContainer/Stats") as ScrollContainer
+		if stats_scroll != null and stats_scroll.scroll_vertical > 0:
+			stats_scroll.scroll_vertical = 0
+			get_viewport().set_input_as_handled()
+
+
+func _sync_displayed_stats_checkboxes() -> void:
+	if not (GlobalSettings and GlobalSettings.range_settings and "displayed_stats" in GlobalSettings.range_settings):
+		return
+	var active_stats: Array = GlobalSettings.range_settings.displayed_stats.value
+	for s_id in _stat_check_buttons:
+		var cb: CheckButton = _stat_check_buttons[s_id]
+		if is_instance_valid(cb):
+			cb.set_pressed_no_signal(active_stats.has(s_id))
+	_update_stats_count_label()
 
 
 func _update_stats_count_label() -> void:
@@ -2359,6 +2474,9 @@ func _create_stat_card_row(stat: Dictionary) -> PanelContainer:
 		_on_stat_toggled(stat_id, toggled_on, check_btn)
 	)
 	
+	_stat_check_buttons[stat_id] = check_btn
+	_stat_check_button_list.append(check_btn)
+
 	hbox.add_child(check_btn)
 	card.add_child(hbox)
 	return card
@@ -2377,8 +2495,10 @@ func _on_stat_toggled(stat_id: String, toggled_on: bool, btn: CheckButton) -> vo
 	else:
 		active_stats.erase(stat_id)
 		
+	_is_internal_stats_sync = true
 	GlobalSettings.range_settings.displayed_stats.set_value(active_stats)
 	GlobalSettings.save_settings()
+	_is_internal_stats_sync = false
 	_update_stats_count_label()
 
 
@@ -2503,13 +2623,51 @@ func _unhandled_input(event: InputEvent) -> void:
 			if btn_idx == JOY_BUTTON_LEFT_SHOULDER:
 				var prev_tab = (tab_container.current_tab - 1 + tab_container.get_tab_count()) % tab_container.get_tab_count()
 				tab_container.current_tab = prev_tab
+				call_deferred("_focus_first_in_current_tab")
 				get_viewport().set_input_as_handled()
 				return
 			elif btn_idx == JOY_BUTTON_RIGHT_SHOULDER:
 				var next_tab = (tab_container.current_tab + 1) % tab_container.get_tab_count()
 				tab_container.current_tab = next_tab
+				call_deferred("_focus_first_in_current_tab")
 				get_viewport().set_input_as_handled()
 				return
+
+		# 5. Controller Right Stick vertical scrolling for scrollable tabs
+		if event is InputEventJoypadMotion and event.axis == JOY_AXIS_RIGHT_Y:
+			if abs(event.axis_value) >= 0.2:
+				var cur_scroll = tab_container.get_current_tab_control() as ScrollContainer
+				if cur_scroll != null:
+					cur_scroll.scroll_vertical += int(event.axis_value * 18.0)
+					get_viewport().set_input_as_handled()
+					return
+
+		# 6. Analog Triggers (LT / RT) for list page scrolling
+		if event is InputEventJoypadMotion:
+			var motion_ev = event as InputEventJoypadMotion
+			if motion_ev.axis == JOY_AXIS_TRIGGER_LEFT and motion_ev.axis_value > 0.6:
+				var cur_scroll = tab_container.get_current_tab_control() as ScrollContainer
+				if cur_scroll != null:
+					var page_h := int(max(cur_scroll.size.y * 0.7, 120.0))
+					cur_scroll.scroll_vertical = max(0, cur_scroll.scroll_vertical - page_h)
+					get_viewport().set_input_as_handled()
+					return
+			elif motion_ev.axis == JOY_AXIS_TRIGGER_RIGHT and motion_ev.axis_value > 0.6:
+				var cur_scroll = tab_container.get_current_tab_control() as ScrollContainer
+				if cur_scroll != null:
+					var page_h := int(max(cur_scroll.size.y * 0.7, 120.0))
+					cur_scroll.scroll_vertical += page_h
+					get_viewport().set_input_as_handled()
+					return
+
+
+func _focus_first_in_current_tab() -> void:
+	var tab_container = get_node_or_null("MarginContainer/VBoxContainer/TabContainer") as TabContainer
+	if tab_container == null:
+		return
+	var cur_tab = tab_container.get_current_tab_control()
+	if cur_tab != null:
+		KeybindingManager.focus_first_control(cur_tab)
 
 
 func _setup_keybindings_section() -> void:
