@@ -137,7 +137,7 @@ var game_time: String = ""
 
 
 ## Move time forward in the editor.
-@export var enable_editor_time: bool = true : set = set_editor_time_enabled
+@export var enable_editor_time: bool = false : set = set_editor_time_enabled
 
 func set_editor_time_enabled(value: bool) -> void:
 	enable_editor_time = value
@@ -146,7 +146,7 @@ func set_editor_time_enabled(value: bool) -> void:
 
 
 ## Move time forward in game.
-@export var enable_game_time: bool = true : set = set_game_time_enabled
+@export var enable_game_time: bool = false : set = set_game_time_enabled
 
 func set_game_time_enabled(value: bool) -> void:
 	enable_game_time = value
@@ -178,7 +178,7 @@ func set_minutes_per_day(value):
 ## Frequency of sky updates, per second. The smaller the number, the more frequent the updates and
 ## the smoother the animation. Set to [param 0.016] for 60fps, for example.[br][br]
 ## [b]Note:[/b] Setting this value too small may cause unwanted behavior. See [member Timer.wait_time].
-@export_range(0.016, 10.0) var update_interval: float = 0.1 : set = set_update_interval
+@export_range(0.016, 10.0) var update_interval: float = 1.0 : set = set_update_interval
 
 func set_update_interval(value: float) -> void:
 	update_interval = value

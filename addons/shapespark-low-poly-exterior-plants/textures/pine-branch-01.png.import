@@ -3,8 +3,8 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://dpjfavm6ke1b4"
-path.s3tc="res://.godot/imported/pine-branch-01.png-340f57d7b00c6045a3e085b5d98862f6.s3tc.ctex"
-path.etc2="res://.godot/imported/pine-branch-01.png-340f57d7b00c6045a3e085b5d98862f6.etc2.ctex"
+path.bptc="res://.godot/imported/pine-branch-01.png-340f57d7b00c6045a3e085b5d98862f6.bptc.ctex"
+path.astc="res://.godot/imported/pine-branch-01.png-340f57d7b00c6045a3e085b5d98862f6.astc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -13,13 +13,13 @@ metadata={
 [deps]
 
 source_file="res://addons/shapespark-low-poly-exterior-plants/textures/pine-branch-01.png"
-dest_files=["res://.godot/imported/pine-branch-01.png-340f57d7b00c6045a3e085b5d98862f6.s3tc.ctex", "res://.godot/imported/pine-branch-01.png-340f57d7b00c6045a3e085b5d98862f6.etc2.ctex"]
+dest_files=["res://.godot/imported/pine-branch-01.png-340f57d7b00c6045a3e085b5d98862f6.bptc.ctex", "res://.godot/imported/pine-branch-01.png-340f57d7b00c6045a3e085b5d98862f6.astc.ctex"]
 
 [params]
 
 compress/mode=2
-compress/high_quality=false
-compress/lossy_quality=0.7
+compress/high_quality=true
+compress/lossy_quality=0.9
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

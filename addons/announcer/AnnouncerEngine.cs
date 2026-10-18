@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 using Godot.Collections;
 
@@ -75,8 +76,20 @@ public partial class AnnouncerEngine : Node
     private const double BadShotHeckleProbability = 0.65;
     private ulong _lastMulliganMsec = 0;
 
-    // Audio file cache: Category -> List of resource paths
+    public class HecklePromptDefinition
+    {
+        public string Name { get; set; } = "";
+        public string Audio { get; set; } = "";
+        public string Prompt { get; set; } = "";
+        public string Filepath { get; set; } = "";
+        public bool Enabled { get; set; } = true;
+        public System.Collections.Generic.Dictionary<string, object> Qualifiers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    // Audio file cache: Category -> List of resource paths (fallback for non-json categories)
     private readonly System.Collections.Generic.Dictionary<string, List<string>> _audioCache = new(StringComparer.OrdinalIgnoreCase);
+    // JSON prompt cache: Category -> List of HecklePromptDefinitions with enabled flag and qualifiers
+    private readonly System.Collections.Generic.Dictionary<string, List<HecklePromptDefinition>> _promptDefinitions = new(StringComparer.OrdinalIgnoreCase);
     private string _lastPlayedPath = "";
 
     public Array<Dictionary> GetTtsVoices()
@@ -94,6 +107,8 @@ public partial class AnnouncerEngine : Node
 
     private void PreloadCategoryClips()
     {
+        LoadPromptDefinitions();
+
         string hecklerDir = "res://assets/audio/heckler";
         if (!DirAccess.DirExistsAbsolute(hecklerDir)) return;
 
@@ -102,17 +117,184 @@ public partial class AnnouncerEngine : Node
 
         foreach (var dir in subdirs)
         {
-            GetAvailableClipsForCategory(dir);
+            if (!_promptDefinitions.ContainsKey(dir))
+            {
+                ScanFolderClips(dir);
+            }
         }
     }
 
-    public List<string> GetAvailableClipsForCategory(string categoryName)
+    private void LoadPromptDefinitions()
     {
-        if (_audioCache.TryGetValue(categoryName, out var cached) && cached.Count > 0)
+        string[] candidatePaths = {
+            "res://assets/audio/heckler/heckle_prompts.json",
+            "res://scripts/tools/heckle_generator/heckle_prompts.json"
+        };
+
+        string jsonContent = "";
+        string loadedPath = "";
+        foreach (var path in candidatePaths)
         {
-            return cached;
+            if (FileAccess.FileExists(path))
+            {
+                jsonContent = FileAccess.GetFileAsString(path);
+                if (!string.IsNullOrWhiteSpace(jsonContent))
+                {
+                    loadedPath = path;
+                    break;
+                }
+            }
         }
 
+        if (string.IsNullOrWhiteSpace(jsonContent))
+        {
+            GD.Print($"{LogPrefix} No heckle_prompts.json found. Falling back to directory scan.");
+            return;
+        }
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(jsonContent);
+            if (doc.RootElement.TryGetProperty("categories", out var categoriesElem))
+            {
+                _promptDefinitions.Clear();
+                foreach (var catProp in categoriesElem.EnumerateObject())
+                {
+                    string catName = catProp.Name;
+                    var promptList = new List<HecklePromptDefinition>();
+
+                    foreach (var itemElem in catProp.Value.EnumerateArray())
+                    {
+                        var def = new HecklePromptDefinition();
+                        if (itemElem.TryGetProperty("name", out var n)) def.Name = n.GetString() ?? "";
+                        if (itemElem.TryGetProperty("audio", out var a)) def.Audio = a.GetString() ?? "";
+                        if (itemElem.TryGetProperty("prompt", out var p)) def.Prompt = p.GetString() ?? "";
+                        if (itemElem.TryGetProperty("filepath", out var fp)) def.Filepath = fp.GetString() ?? "";
+                        if (itemElem.TryGetProperty("enabled", out var en)) def.Enabled = en.GetBoolean();
+
+                        if (itemElem.TryGetProperty("qualifiers", out var qElem) && qElem.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        {
+                            foreach (var qProp in qElem.EnumerateObject())
+                            {
+                                switch (qProp.Value.ValueKind)
+                                {
+                                    case System.Text.Json.JsonValueKind.True:
+                                    case System.Text.Json.JsonValueKind.False:
+                                        def.Qualifiers[qProp.Name] = qProp.Value.GetBoolean();
+                                        break;
+                                    case System.Text.Json.JsonValueKind.Number:
+                                        if (qProp.Value.TryGetInt32(out int intVal))
+                                            def.Qualifiers[qProp.Name] = intVal;
+                                        else if (qProp.Value.TryGetDouble(out double dblVal))
+                                            def.Qualifiers[qProp.Name] = dblVal;
+                                        break;
+                                    case System.Text.Json.JsonValueKind.String:
+                                        def.Qualifiers[qProp.Name] = qProp.Value.GetString() ?? "";
+                                        break;
+                                }
+                            }
+                        }
+
+                        promptList.Add(def);
+                    }
+
+                    _promptDefinitions[catName] = promptList;
+                }
+
+                GD.Print($"{LogPrefix} Loaded {_promptDefinitions.Count} categories from {loadedPath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Failed to parse heckle_prompts.json: {ex.Message}");
+        }
+    }
+
+    public Array<string> GetAvailableClipsForCategory(string categoryName)
+    {
+        return GetAvailableClipsForCategory(categoryName, null);
+    }
+
+    public Array<string> GetAvailableClipsForCategory(string categoryName, Dictionary? context)
+    {
+        var result = new Array<string>();
+        if (_promptDefinitions.TryGetValue(categoryName, out var defs) && defs.Count > 0)
+        {
+            // 1. Filter out prompts disabled via audio JSON flag
+            var enabledDefs = defs.Where(d => d.Enabled).ToList();
+            if (enabledDefs.Count == 0)
+            {
+                GD.Print($"{LogPrefix} All clips for category '{categoryName}' are disabled in JSON.");
+                return result;
+            }
+
+            // 2. If no context provided, return general clips (or all enabled if none are purely general)
+            if (context == null || context.Count == 0)
+            {
+                var generalClips = enabledDefs
+                    .Where(d => d.Qualifiers.Count == 0)
+                    .Select(d => d.Filepath)
+                    .Where(fp => !string.IsNullOrEmpty(fp))
+                    .ToList();
+
+                if (generalClips.Count > 0)
+                {
+                    foreach (var c in generalClips) result.Add(c);
+                    return result;
+                }
+
+                foreach (var d in enabledDefs)
+                {
+                    if (!string.IsNullOrEmpty(d.Filepath)) result.Add(d.Filepath);
+                }
+                return result;
+            }
+
+            // 3. Match against context qualifiers
+            var qualifiedMatches = new List<string>();
+            var generalMatches = new List<string>();
+
+            foreach (var def in enabledDefs)
+            {
+                if (string.IsNullOrEmpty(def.Filepath)) continue;
+
+                if (def.Qualifiers.Count == 0)
+                {
+                    generalMatches.Add(def.Filepath);
+                    continue;
+                }
+
+                if (MatchesQualifiers(def.Qualifiers, context))
+                {
+                    qualifiedMatches.Add(def.Filepath);
+                }
+            }
+
+            // Prioritize specific contextual matches when available; fall back to general
+            if (qualifiedMatches.Count > 0)
+            {
+                foreach (var c in qualifiedMatches) result.Add(c);
+                return result;
+            }
+
+            foreach (var c in generalMatches) result.Add(c);
+            return result;
+        }
+
+        // Fallback to legacy filesystem audio cache if category not defined in JSON
+        if (_audioCache.TryGetValue(categoryName, out var cached) && cached.Count > 0)
+        {
+            foreach (var c in cached) result.Add(c);
+            return result;
+        }
+
+        var scanned = ScanFolderClips(categoryName);
+        foreach (var c in scanned) result.Add(c);
+        return result;
+    }
+
+    private List<string> ScanFolderClips(string categoryName)
+    {
         var clips = new List<string>();
         string folderPath = $"res://assets/audio/heckler/{categoryName}";
 
@@ -253,10 +435,15 @@ public partial class AnnouncerEngine : Node
 
     public bool PlayCategory(string categoryName)
     {
-        var clips = GetAvailableClipsForCategory(categoryName);
+        return PlayCategory(categoryName, null);
+    }
+
+    public bool PlayCategory(string categoryName, Dictionary? context)
+    {
+        var clips = GetAvailableClipsForCategory(categoryName, context);
         if (clips == null || clips.Count == 0)
         {
-            GD.Print($"{LogPrefix} No audio files found in res://assets/audio/heckler/{categoryName}");
+            GD.Print($"{LogPrefix} No eligible audio clips found for category '{categoryName}' (with context).");
             return false;
         }
 
@@ -299,7 +486,7 @@ public partial class AnnouncerEngine : Node
         }
     }
 
-    private bool PlayCategoryGuarded(string categoryName, bool isHeckle = false, bool guaranteed = false)
+    private bool PlayCategoryGuarded(string categoryName, bool isHeckle = false, bool guaranteed = false, Dictionary? context = null)
     {
         if (!IsAnnouncerActiveForCurrentScene())
             return false;
@@ -329,7 +516,126 @@ public partial class AnnouncerEngine : Node
         }
 
         _shotHadCommentary = true;
-        return PlayCategory(categoryName);
+        return PlayCategory(categoryName, context);
+    }
+
+    private static bool MatchesQualifiers(System.Collections.Generic.Dictionary<string, object> qualifiers, Dictionary context)
+    {
+        foreach (var kvp in qualifiers)
+        {
+            string key = kvp.Key;
+            object qualVal = kvp.Value;
+
+            switch (key.ToLowerInvariant())
+            {
+                case "score_type":
+                {
+                    string targetType = qualVal.ToString()?.ToLowerInvariant() ?? "";
+                    string actualType = GetStringSafe(context, "score_type").ToLowerInvariant();
+                    int relToPar = (int)GetFloatSafe(context, "score_relative_to_par", 999.0f);
+
+                    if (targetType == "birdie")
+                    {
+                        if (actualType != "birdie" && relToPar != -1) return false;
+                    }
+                    else if (targetType == "eagle")
+                    {
+                        if (actualType != "eagle" && relToPar != -2) return false;
+                    }
+                    else if (targetType == "double_bogey")
+                    {
+                        if (actualType != "double_bogey" && relToPar != 2) return false;
+                    }
+                    else if (targetType == "triple_bogey")
+                    {
+                        if (actualType != "triple_bogey" && relToPar < 3) return false;
+                    }
+                    else if (targetType == "under_par")
+                    {
+                        if (relToPar >= 0 && actualType != "birdie" && actualType != "eagle" && actualType != "albatross") return false;
+                    }
+                    else if (targetType == "over_bogey")
+                    {
+                        if (relToPar < 2) return false;
+                    }
+                    else if (actualType != targetType)
+                    {
+                        return false;
+                    }
+                    break;
+                }
+                case "strokes":
+                {
+                    int requiredStrokes = Convert.ToInt32(qualVal);
+                    int actualStrokes = (int)GetFloatSafe(context, "strokes", -1.0f);
+                    if (actualStrokes != requiredStrokes) return false;
+                    break;
+                }
+                case "gir":
+                {
+                    bool requiredGir = Convert.ToBoolean(qualVal);
+                    bool actualGir = GetBoolSafe(context, "gir", false);
+                    if (actualGir != requiredGir) return false;
+                    break;
+                }
+                case "birdie_chance":
+                {
+                    bool requiredChance = Convert.ToBoolean(qualVal);
+                    bool actualChance = GetBoolSafe(context, "birdie_chance", false);
+                    if (actualChance != requiredChance) return false;
+                    break;
+                }
+                case "tee_shot":
+                {
+                    bool requiredTee = Convert.ToBoolean(qualVal);
+                    bool actualTee = GetBoolSafe(context, "tee_shot", false);
+                    int actualStrokes = (int)GetFloatSafe(context, "strokes", -1.0f);
+                    if (actualStrokes == 1) actualTee = true;
+                    if (actualTee != requiredTee) return false;
+                    break;
+                }
+                case "tree_hit_type":
+                {
+                    string requiredHit = qualVal.ToString()?.ToLowerInvariant() ?? "";
+                    string actualHit = GetStringSafe(context, "tree_hit_type").ToLowerInvariant();
+
+                    if (requiredHit == "trunk")
+                    {
+                        if (actualHit != "trunk") return false;
+                    }
+                    else if (requiredHit == "leaves" || requiredHit == "branches")
+                    {
+                        if (actualHit != "leaves" && actualHit != "branches") return false;
+                    }
+                    else if (actualHit != requiredHit)
+                    {
+                        return false;
+                    }
+                    break;
+                }
+                case "close_to_pin":
+                {
+                    bool requiredClose = Convert.ToBoolean(qualVal);
+                    bool actualClose = GetBoolSafe(context, "close_to_pin", false);
+                    float distYds = GetFloatSafe(context, "distance_to_pin_yards", 999.0f);
+                    if (distYds <= 4.0f) actualClose = true;
+                    if (actualClose != requiredClose) return false;
+                    break;
+                }
+                default:
+                {
+                    if (context.TryGetValue(key, out var ctxVal))
+                    {
+                        string ctxStr = ctxVal.AsString()?.ToLowerInvariant() ?? "";
+                        string qStr = qualVal.ToString()?.ToLowerInvariant() ?? "";
+                        if (ctxStr != qStr) return false;
+                    }
+                    break;
+                }
+            }
+        }
+
+        return true;
     }
 
     public override void _Process(double delta)
@@ -437,24 +743,34 @@ public partial class AnnouncerEngine : Node
             return;
         }
 
+        var launchContext = new Dictionary
+        {
+            ["tee_shot"] = true
+        };
+
         // Check for severe launch catastrophes ONLY (pop-up skyball, wormburner skittering along the turf)
         bool isWormburner = vla < 3.0f && speedMph > 40.0f;
         bool isSkyball = vla > 35.0f && speedMph > 80.0f;
 
         if (isWormburner)
         {
-            PlayCategoryGuarded("really_short_shots", isHeckle: true, guaranteed: false);
+            PlayCategoryGuarded("really_short_shots", isHeckle: true, guaranteed: false, launchContext);
             return;
         }
 
         if (isSkyball)
         {
-            PlayCategoryGuarded("crazy_high_apex", isHeckle: true, guaranteed: false);
+            PlayCategoryGuarded("crazy_high_apex", isHeckle: true, guaranteed: false, launchContext);
             return;
         }
     }
 
     public void EvaluateShot(Dictionary shotData, int surfaceType, float distanceToPinYards, bool isInSand = false, bool isInWater = false, bool hitTree = false)
+    {
+        EvaluateShot(shotData, surfaceType, distanceToPinYards, isInSand, isInWater, hitTree, null);
+    }
+
+    public void EvaluateShot(Dictionary shotData, int surfaceType, float distanceToPinYards, bool isInSand, bool isInWater, bool hitTree, Dictionary? gameContext)
     {
         if (!IsAnnouncerActiveForCurrentScene()) return;
         _idleTimer = 0.0f; // Reset idle timer!
@@ -472,6 +788,78 @@ public partial class AnnouncerEngine : Node
             return;
         }
 
+        // Resolve game context (strokes, par, GIR, birdie chance, etc.)
+        int strokes = 1;
+        int par = 0;
+        bool isGir = false;
+        bool birdieChance = false;
+        bool teeShot = false;
+
+        if (gameContext != null)
+        {
+            strokes = (int)GetFloatSafe(gameContext, "strokes", 1.0f);
+            par = (int)GetFloatSafe(gameContext, "par", 0.0f);
+            isGir = GetBoolSafe(gameContext, "gir", false);
+            birdieChance = GetBoolSafe(gameContext, "birdie_chance", false);
+            teeShot = GetBoolSafe(gameContext, "tee_shot", strokes == 1);
+        }
+        else
+        {
+            var mpMgr = GetNodeOrNull("/root/MultiplayerManager");
+            if (mpMgr != null)
+            {
+                var players = mpMgr.Get("players");
+                if (players.VariantType == Variant.Type.Array && ((Godot.Collections.Array)players).Count > 0)
+                {
+                    var activeP = mpMgr.Call("get_active_player");
+                    if (activeP.VariantType == Variant.Type.Dictionary)
+                    {
+                        var pDict = (Dictionary)activeP;
+                        // Prior to record_shot, the stroke currently finishing is strokes + 1
+                        strokes = (int)GetFloatSafe(pDict, "strokes", 0.0f) + 1;
+                    }
+
+                    var holeIds = mpMgr.Get("hole_ids");
+                    var holeInfo = mpMgr.Get("hole_info");
+                    var curHoleIdx = (int)mpMgr.Get("current_hole_index");
+                    if (holeIds.VariantType == Variant.Type.Array && holeInfo.VariantType == Variant.Type.Dictionary)
+                    {
+                        var hArray = (Godot.Collections.Array)holeIds;
+                        if (curHoleIdx >= 0 && curHoleIdx < hArray.Count)
+                        {
+                            string hId = hArray[curHoleIdx].AsString();
+                            var hDict = (Dictionary)holeInfo;
+                            if (hDict.TryGetValue(hId, out var curHoleVar) && curHoleVar.VariantType == Variant.Type.Dictionary)
+                            {
+                                par = (int)GetFloatSafe((Dictionary)curHoleVar, "Par", 4.0f);
+                            }
+                        }
+                    }
+                }
+            }
+
+            teeShot = (strokes == 1);
+            if (par >= 3)
+            {
+                isGir = (strokes <= par - 2);
+                birdieChance = isGir;
+            }
+        }
+
+        bool closeToPin = (distanceToPinYards <= 4.0f);
+
+        var context = new Dictionary
+        {
+            ["strokes"] = strokes,
+            ["par"] = par,
+            ["score_relative_to_par"] = strokes - par,
+            ["gir"] = isGir,
+            ["birdie_chance"] = birdieChance,
+            ["tee_shot"] = teeShot,
+            ["close_to_pin"] = closeToPin,
+            ["distance_to_pin_yards"] = distanceToPinYards
+        };
+
         float speedMph = GetFloatSafe(shotData, "Speed");
         float totalDistYards = GetFloatSafe(shotData, "TotalDistance") * 1.09361f;
         float offlineYards = GetFloatSafe(shotData, "SideDistance") * 1.09361f;
@@ -486,11 +874,11 @@ public partial class AnnouncerEngine : Node
         {
             if (totalDistYards < 2.0f && distanceToPinYards > 8.0f) // Left way short
             {
-                PlayCategoryGuarded("terrible_putts_off_green", isHeckle: true, guaranteed: false);
+                PlayCategoryGuarded("terrible_putts_off_green", isHeckle: true, guaranteed: false, context);
             }
             else if (distanceToPinYards > 10.0f) // Very far lag putt (>30 ft away)
             {
-                PlayCategoryGuarded("terrible_putts_off_green", isHeckle: true, guaranteed: false);
+                PlayCategoryGuarded("terrible_putts_off_green", isHeckle: true, guaranteed: false, context);
             }
             return;
         }
@@ -500,14 +888,14 @@ public partial class AnnouncerEngine : Node
         // 1. Water Hazard (100% Heckle guarantee)
         if (isInWater)
         {
-            PlayCategoryGuarded("ball_in_water", isHeckle: true, guaranteed: true);
+            PlayCategoryGuarded("ball_in_water", isHeckle: true, guaranteed: true, context);
             return;
         }
 
         // 2. Sand / Bunker (100% Heckle guarantee)
         if (isInSand || surfaceType == 5)
         {
-            PlayCategoryGuarded("ball_in_sand", isHeckle: true, guaranteed: true);
+            PlayCategoryGuarded("ball_in_sand", isHeckle: true, guaranteed: true, context);
             return;
         }
 
@@ -544,7 +932,7 @@ public partial class AnnouncerEngine : Node
 
         if (isChunked || isDuff)
         {
-            PlayCategoryGuarded("really_short_shots", isHeckle: true, guaranteed: false);
+            PlayCategoryGuarded("really_short_shots", isHeckle: true, guaranteed: false, context);
             return;
         }
 
@@ -552,11 +940,11 @@ public partial class AnnouncerEngine : Node
         {
             if (offlineYards > 0.0f)
             {
-                PlayCategoryGuarded("slice_into_rough", isHeckle: true, guaranteed: false);
+                PlayCategoryGuarded("slice_into_rough", isHeckle: true, guaranteed: false, context);
             }
             else
             {
-                PlayCategoryGuarded("hook_into_rough", isHeckle: true, guaranteed: false);
+                PlayCategoryGuarded("hook_into_rough", isHeckle: true, guaranteed: false, context);
             }
             return;
         }
@@ -575,14 +963,14 @@ public partial class AnnouncerEngine : Node
             // Close approach to pin on green
             if (distanceToPinYards < 4.0f && totalDistYards > 15.0f)
             {
-                PlayCategoryGuarded("good_shot_green", isHeckle: false, guaranteed: false);
+                PlayCategoryGuarded("good_shot_green", isHeckle: false, guaranteed: false, context);
                 return;
             }
 
             // Target-reaching approach shot onto green
             if (effectiveTargetYards > 15.0f && totalDistYards >= effectiveTargetYards * 0.70f)
             {
-                PlayCategoryGuarded("good_shot_green", isHeckle: false, guaranteed: false);
+                PlayCategoryGuarded("good_shot_green", isHeckle: false, guaranteed: false, context);
                 return;
             }
         }
@@ -593,7 +981,7 @@ public partial class AnnouncerEngine : Node
             // Long drive with good control (must be on fairway and well-centered!)
             if (totalDistYards > 240.0f && Math.Abs(offlineYards) < 25.0f)
             {
-                PlayCategoryGuarded("good_shot_fairway", isHeckle: false, guaranteed: false);
+                PlayCategoryGuarded("good_shot_fairway", isHeckle: false, guaranteed: false, context);
                 return;
             }
 
@@ -605,7 +993,7 @@ public partial class AnnouncerEngine : Node
 
                 if (reachedTarget && isReasonablyOnline)
                 {
-                    PlayCategoryGuarded("good_shot_fairway", isHeckle: false, guaranteed: false);
+                    PlayCategoryGuarded("good_shot_fairway", isHeckle: false, guaranteed: false, context);
                     return;
                 }
             }
@@ -627,6 +1015,11 @@ public partial class AnnouncerEngine : Node
 
     public void SpeakTreeHeckle()
     {
+        SpeakTreeHeckle("trunk");
+    }
+
+    public void SpeakTreeHeckle(string hitType)
+    {
         _ballHitTree = true;
         _idleTimer = 0.0f; // Reset idle timer!
 
@@ -636,7 +1029,12 @@ public partial class AnnouncerEngine : Node
             return;
         }
 
-        PlayCategoryGuarded("hitting_or_going_through_trees", isHeckle: true, guaranteed: true);
+        var context = new Dictionary
+        {
+            ["tree_hit_type"] = hitType
+        };
+
+        PlayCategoryGuarded("hitting_or_going_through_trees", isHeckle: true, guaranteed: true, context);
     }
 
     public void AnnounceHoleScore(string playerName, int strokes, int par)
@@ -645,18 +1043,58 @@ public partial class AnnouncerEngine : Node
         _idleTimer = 0.0f; // Reset idle timer!
 
         int scoreType = strokes - par;
+        string scoreTypeName = scoreType switch
+        {
+            <= -3 => "albatross",
+            -2 => "eagle",
+            -1 => "birdie",
+            0 => "par",
+            1 => "bogey",
+            2 => "double_bogey",
+            3 => "triple_bogey",
+            _ => "over_bogey"
+        };
+
+        var context = new Dictionary
+        {
+            ["strokes"] = strokes,
+            ["par"] = par,
+            ["score_relative_to_par"] = scoreType,
+            ["score_type"] = scoreTypeName
+        };
+
+        if (strokes == 8)
+        {
+            context["strokes"] = 8;
+        }
 
         if (scoreType >= 2)
         {
             // Heckle above par: only on double bogey or worse (scoreType >= 2)
             if (IsHeckleActiveForCurrentScene())
-                PlayCategoryGuarded("over_bogey_heckles", isHeckle: true, guaranteed: true);
+                PlayCategoryGuarded("over_bogey_heckles", isHeckle: true, guaranteed: true, context);
         }
         else if (scoreType < 0) // Under par (Birdie, Eagle, etc.)
         {
             if (PraiseEnabled)
-                PlayCategoryGuarded("under_par", isHeckle: false, guaranteed: true);
+                PlayCategoryGuarded("under_par", isHeckle: false, guaranteed: true, context);
         }
+    }
+
+    private static bool GetBoolSafe(Dictionary dict, string key, bool defaultValue = false)
+    {
+        if (dict.TryGetValue(key, out var val))
+        {
+            if (val.VariantType == Variant.Type.Bool)
+            {
+                return (bool)val;
+            }
+            if (val.VariantType == Variant.Type.Int)
+            {
+                return ((int)val) != 0;
+            }
+        }
+        return defaultValue;
     }
 
     private static float GetFloatSafe(Dictionary dict, string key, float defaultValue = 0.0f)

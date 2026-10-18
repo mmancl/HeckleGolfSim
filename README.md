@@ -22,6 +22,7 @@ An open-source, full-featured golf simulator and practice suite built with the G
   - [In-Game Custom Course Creator](#in-game-custom-course-creator)
   - [Course Loading & Discovery Architecture](#course-loading--discovery-architecture)
 - [Dynamic Commentary & Heckle Announcer Engine](#dynamic-commentary--heckle-announcer-engine)
+  - [Heckle Audio & Qualifier Editor (Standalone GUI Mini-App)](#heckle-audio--qualifier-editor-standalone-gui-mini-app)
 - [AI Golfer Camera & MediaPipe Pose Tracking](#ai-golfer-camera--mediapipe-pose-tracking)
 - [Ball Physics & Aerodynamics](#ball-physics--aerodynamics)
   - [Reynolds Number Aerodynamic Modeling](#reynolds-number-aerodynamic-modeling)
@@ -157,6 +158,39 @@ The announcer engine (`addons/announcer/AnnouncerEngine.cs`) brings personality 
 - **Text-to-Speech (TTS) Integration**: Utilizes native platform TTS engines (Godot `DisplayServer.TtsSpeak` and `AndroidTTS.cs`).
 - **Customizable**: Adjust pitch, rate, speech voice, and independently toggle praise or heckles in the Settings menu.
 
+### Heckle Audio & Qualifier Editor (Standalone GUI Mini-App)
+A dedicated, zero-dependency browser-based mini-app running outside the Godot game client is included to audition audio clips, enable/mute specific commentary lines, edit context qualifiers with dropdown selectors, and synchronize updates back to disk.
+
+#### Capabilities:
+- **Audio Auditioning**: 1-click in-browser playback for all 770+ `.wav` commentary clips with pause, seek, and volume controls.
+- **Enable / Mute Toggles**: Enable or mute individual commentary lines (`enabled: true/false`). Muted lines are immediately excluded by the game engine.
+- **Qualifier Dropdown Selectors**: Configure contextual qualifiers with allowed-value dropdowns:
+  - `score_type`: `birdie`, `eagle`, `albatross`, `hole_in_one`, `double_bogey`, `triple_bogey`, `over_bogey`, `under_par`
+  - `tree_hit_type`: `trunk` (solid collision) vs `leaves` (canopy pass)
+  - `gir`: `true` / `false` (Green in Regulation)
+  - `birdie_chance`: `true` / `false`
+  - `tee_shot`: `true` / `false`
+  - `close_to_pin`: `true` / `false` (within 4 yards / 12 ft of the pin)
+  - `strokes`: integer stroke count (e.g. `8` for snowman heckles)
+  - Custom qualifiers: arbitrary key-value pairs
+- **Dual JSON Synchronization**: Automatically creates `.bak` backups and synchronizes updates to both runtime (`assets/audio/heckler/heckle_prompts.json`) and generator master (`scripts/tools/heckle_generator/heckle_prompts.json`).
+- **Keyboard Shortcuts**: `Ctrl+S` / `Cmd+S` to save instantly, with live tracking of unsaved changes.
+
+#### How to Run:
+- **Option 1 (One-Click Launcher)**: Double-click `launch_heckle_editor.bat` in the repository root.
+- **Option 2 (Python CLI)**:
+  ```bash
+  python scripts/tools/heckle_generator/heckle_editor.py
+  ```
+  *(Automatically opens your default web browser to `http://localhost:8088`)*
+- **Option 3 (PowerShell)**:
+  ```powershell
+  .\scripts\tools\heckle_generator\run_heckle_editor.ps1
+  ```
+- **CLI Options**:
+  - `--port <PORT>`: Preferred HTTP server port (default: `8088`).
+  - `--no-browser`: Start the server without opening the browser automatically.
+
 ---
 
 ## AI Golfer Camera & MediaPipe Pose Tracking
@@ -253,6 +287,7 @@ Example GSPro Open Connect v1 message used for socket testing (`assets/data/driv
 - **In-Game Shot Injector**: Access the built-in injector UI (`UI/shot_injector.gd`) to test shots without physical hardware.
 - **Python Shot Injector**: Run `python scripts/tools/inject_shot.py` to send customizable test shot payloads to port 49152.
 - **PowerShell Script**: Run `.\scripts\tools\inject_shot.ps1` for rapid Windows socket testing.
+- **Heckle Audio & Qualifier Editor**: Run `launch_heckle_editor.bat` (or `python scripts/tools/heckle_generator/heckle_editor.py`) to audition audio lines, toggle prompt muting, and modify context qualifiers in a browser GUI.
 
 ---
 

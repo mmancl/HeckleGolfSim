@@ -67,8 +67,8 @@ public static class SurfacePhysicsCatalog
         criticalAngle: 0.36f,
         spinbackResponseScale: 1.12f,
         spinbackThetaBoostMax: 0.12f,
-        spinbackSpinStartRpm: 3500.0f,
-        spinbackSpinEndRpm: 5500.0f,
+        spinbackSpinStartRpm: 7500.0f,
+        spinbackSpinEndRpm: 9500.0f,
         spinbackSpeedStartMps: 8.0f,
         spinbackSpeedEndMps: 20.0f
     );

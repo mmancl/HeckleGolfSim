@@ -764,16 +764,7 @@ func get_relative_wind_arrow_and_angle(ball_pos: Vector3, aim_target_pos: Vector
 	elif deg >= -67.5 and deg < -22.5:
 		arrow = "↖"
 
-	var thick_arrow: String = "⬆"
-	match arrow:
-		"↑": thick_arrow = "⬆"
-		"↗": thick_arrow = "⬈"
-		"→": thick_arrow = "➡"
-		"↘": thick_arrow = "⬊"
-		"↓": thick_arrow = "⬇"
-		"↙": thick_arrow = "⬋"
-		"←": thick_arrow = "⬅"
-		"↖": thick_arrow = "⬉"
+	var thick_arrow: String = arrow
 
 	return {
 		"arrow": arrow,

@@ -13,11 +13,13 @@ static func apply(scene_root: Node) -> void:
 	if scene_root == null or not scene_root.is_inside_tree():
 		return
 
-	# Enable Viewport TAA for sub-pixel anti-aliasing on foliage and 3D grass blades
+	# Configure clean MSAA anti-aliasing without TAA temporal motion blur
 	var viewport = scene_root.get_viewport()
 	if viewport != null:
 		if "use_taa" in viewport:
-			viewport.use_taa = true
+			viewport.use_taa = false
+		if "msaa_3d" in viewport:
+			viewport.msaa_3d = Viewport.MSAA_4X
 		if "scaling_3d_mode" in viewport:
 			viewport.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 		if "scaling_3d_scale" in viewport:
@@ -36,10 +38,16 @@ static func apply(scene_root: Node) -> void:
 		# 2. Tune WorldEnvironment / Sky3D
 		if node is WorldEnvironment and node.environment != null:
 			_apply_environment_settings(node.environment)
+			if node.camera_attributes != null and node.camera_attributes is CameraAttributesPractical:
+				(node.camera_attributes as CameraAttributesPractical).dof_blur_far_enabled = false
 			# Prevent double-fogging if Sky3D Skydome has its own fullscreen fog quad
 			var skydome = node.get_node_or_null("Skydome")
 			if skydome != null and "fog_visible" in skydome:
 				skydome.fog_visible = false
+
+		elif node is Camera3D:
+			if node.attributes != null and node.attributes is CameraAttributesPractical:
+				(node.attributes as CameraAttributesPractical).dof_blur_far_enabled = false
 
 		# 3. Tune Sun / DirectionalLight3D
 		elif node is DirectionalLight3D:
@@ -54,8 +62,11 @@ static func remove(scene_root: Node) -> void:
 		return
 
 	var viewport = scene_root.get_viewport()
-	if viewport != null and "use_taa" in viewport:
-		viewport.use_taa = false
+	if viewport != null:
+		if "use_taa" in viewport:
+			viewport.use_taa = false
+		if "msaa_3d" in viewport:
+			viewport.msaa_3d = Viewport.MSAA_DISABLED
 
 	var stack: Array[Node] = [scene_root]
 	while not stack.is_empty():

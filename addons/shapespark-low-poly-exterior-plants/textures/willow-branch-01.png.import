@@ -3,8 +3,8 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://b1sgvhriuy8o8"
-path.s3tc="res://.godot/imported/willow-branch-01.png-bdd0484f342fc23ff7db0f49450f70ef.s3tc.ctex"
-path.etc2="res://.godot/imported/willow-branch-01.png-bdd0484f342fc23ff7db0f49450f70ef.etc2.ctex"
+path.bptc="res://.godot/imported/willow-branch-01.png-bdd0484f342fc23ff7db0f49450f70ef.bptc.ctex"
+path.astc="res://.godot/imported/willow-branch-01.png-bdd0484f342fc23ff7db0f49450f70ef.astc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -13,13 +13,13 @@ metadata={
 [deps]
 
 source_file="res://addons/shapespark-low-poly-exterior-plants/textures/willow-branch-01.png"
-dest_files=["res://.godot/imported/willow-branch-01.png-bdd0484f342fc23ff7db0f49450f70ef.s3tc.ctex", "res://.godot/imported/willow-branch-01.png-bdd0484f342fc23ff7db0f49450f70ef.etc2.ctex"]
+dest_files=["res://.godot/imported/willow-branch-01.png-bdd0484f342fc23ff7db0f49450f70ef.bptc.ctex", "res://.godot/imported/willow-branch-01.png-bdd0484f342fc23ff7db0f49450f70ef.astc.ctex"]
 
 [params]
 
 compress/mode=2
-compress/high_quality=false
-compress/lossy_quality=0.7
+compress/high_quality=true
+compress/lossy_quality=0.9
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

@@ -41,7 +41,7 @@ static func optimize_sky3d(sky3d: Node) -> void:
 	if "environment" in sky3d and sky3d.environment != null:
 		sky3d.environment.ssao_enabled = false
 		if sky3d.environment.sky != null:
-			sky3d.environment.sky.process_mode = Sky.PROCESS_MODE_QUALITY
+			sky3d.environment.sky.process_mode = Sky.PROCESS_MODE_REALTIME
 			sky3d.environment.sky.radiance_size = Sky.RADIANCE_SIZE_128
 
 	# Reduce shadow quality on SunLight
@@ -86,7 +86,7 @@ static func optimize_environment(env: Environment) -> void:
 		return
 	env.ssao_enabled = false
 	if env.sky != null:
-		env.sky.process_mode = Sky.PROCESS_MODE_QUALITY
+		env.sky.process_mode = Sky.PROCESS_MODE_REALTIME
 		env.sky.radiance_size = Sky.RADIANCE_SIZE_128
 
 
@@ -382,7 +382,7 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 
 		elif n is WorldEnvironment and n.environment != null:
 			if n.environment.sky != null:
-				n.environment.sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL if is_high else Sky.PROCESS_MODE_QUALITY
+				n.environment.sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL if is_high else Sky.PROCESS_MODE_REALTIME
 				n.environment.sky.radiance_size = Sky.RADIANCE_SIZE_128 if is_low else Sky.RADIANCE_SIZE_256
 			if is_low:
 				n.environment.ssao_enabled = false
@@ -425,6 +425,12 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 			var builder_script = load("res://HighFidelity/Core/high_fidelity_builder.gd")
 			if builder_script != null:
 				builder_script.remove_high_fidelity(scene_root)
+
+	# Update teebox markers vibrancy if present in scene
+	if ResourceLoader.exists("res://Courses/Range/teebox_marker_builder.gd"):
+		var tmb = load("res://Courses/Range/teebox_marker_builder.gd")
+		if tmb != null and tmb.has_method("apply_graphics_quality_to_markers"):
+			tmb.apply_graphics_quality_to_markers(scene_root, is_low)
 
 
 
@@ -656,6 +662,19 @@ static func _create_realistic_terrain_material(base_m: ShaderMaterial, n: MeshIn
 	if mat.get_shader_parameter("height_bunker") == null and ResourceLoader.exists("res://Courses/Environments/sand-bunker/height.png"):
 		mat.set_shader_parameter("height_bunker", load("res://Courses/Environments/sand-bunker/height.png"))
 
+	# High-graphics 2048px procedural grass textures override the original low-res images
+	var high_dir := "res://Courses/Environments/high/"
+	for kind in ["rough", "green", "fairway"]:
+		var a_path: String = high_dir + "grass_%s_albedo.png" % kind
+		var n_path: String = high_dir + "grass_%s_normal.png" % kind
+		var r_path: String = high_dir + "grass_%s_roughness.png" % kind
+		if ResourceLoader.exists(a_path):
+			mat.set_shader_parameter("tex_" + kind, load(a_path))
+		if ResourceLoader.exists(n_path):
+			mat.set_shader_parameter("normal_" + kind, load(n_path))
+		if ResourceLoader.exists(r_path):
+			mat.set_shader_parameter("roughness_tex_" + kind, load(r_path))
+
 	return mat
 
 
@@ -708,6 +727,18 @@ static func _get_realistic_bark_material(orig_mat: Material) -> Material:
 		mat.roughness_texture = load("res://Courses/Environments/tree-bark/roughness.png") as Texture2D
 	
 	mat.uv1_scale = Vector3(1.0, 2.5, 1.0)
+
+	# High-graphics 2048px seamless bark replaces the original low-res bark images
+	var bark_dir := "res://Courses/Environments/high/"
+	if ResourceLoader.exists(bark_dir + "bark_albedo.png"):
+		mat.albedo_texture = load(bark_dir + "bark_albedo.png") as Texture2D
+		mat.uv1_scale = Vector3(1.0, 1.0, 1.0)
+		if ResourceLoader.exists(bark_dir + "bark_normal.png"):
+			mat.normal_enabled = true
+			mat.normal_texture = load(bark_dir + "bark_normal.png") as Texture2D
+			mat.normal_scale = 1.0
+		if ResourceLoader.exists(bark_dir + "bark_roughness.png"):
+			mat.roughness_texture = load(bark_dir + "bark_roughness.png") as Texture2D
 	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	_realistic_bark_materials[cache_key] = mat
 	return mat
@@ -803,10 +834,18 @@ static func _get_realistic_foliage_material(orig_mat: Material, surface_name: St
 	if ResourceLoader.exists("res://Courses/Environments/tree-foliage/roughness.png"):
 		mat.set_shader_parameter("texture_roughness", load("res://Courses/Environments/tree-foliage/roughness.png"))
 
+	# Keep native branch textures crisp without blurry 85% detail overlay
+	if ResourceLoader.exists("res://Courses/Environments/high/leaf_albedo.png"):
+		mat.set_shader_parameter("leaf_detail_albedo", load("res://Courses/Environments/high/leaf_albedo.png"))
+		mat.set_shader_parameter("use_leaf_detail", false)
+		if ResourceLoader.exists("res://Courses/Environments/high/leaf_normal.png"):
+			mat.set_shader_parameter("leaf_detail_normal", load("res://Courses/Environments/high/leaf_normal.png"))
+			mat.set_shader_parameter("use_leaf_detail_normal", false)
+
 	mat.set_shader_parameter("backlight_color", Color(0.42, 0.58, 0.18))
 	mat.set_shader_parameter("backlight_strength", 0.90)
 	mat.set_shader_parameter("canopy_depth_ao", 0.45)
-	mat.set_shader_parameter("alpha_scissor_threshold", 0.42)
+	mat.set_shader_parameter("alpha_scissor_threshold", 0.45)
 
 	_ensure_wind_listener()
 
@@ -829,7 +868,7 @@ static func _get_realistic_foliage_material(orig_mat: Material, surface_name: St
 	mat.set_shader_parameter("wind_speed", wind_params["speed"])
 	mat.set_shader_parameter("wind_strength", wind_params["strength"])
 	mat.set_shader_parameter("leaf_flutter_speed", wind_params["flutter_spd"])
-	mat.set_shader_parameter("leaf_flutter_strength", wind_params["flutter"])
+	mat.set_shader_parameter("leaf_flutter_strength", 0.0)
 	mat.set_shader_parameter("wind_direction", dir_2d)
 
 	_realistic_tree_materials[cache_key] = mat

@@ -9,10 +9,10 @@ class_name CourseGraphicsUpgrader
 ##   `MultiMeshInstance3D` chunks (`MultiMeshFoliageContainer`) + consolidated Jolt physics
 ## - Builds recessed 3D bunker lip & floor meshes (`HighFidelityBunkers`) and overhanging fescue
 ## - Builds pond shoreline reeds (`ShorelineReedsMultiMesh`), cart paths (`CartPaths`), and `HorizonSkirt`
-## - Fixes `Sky3D` `Sky.PROCESS_MODE_REALTIME` -> `Sky.PROCESS_MODE_QUALITY`
+## - Optimizes `Sky3D` `Sky.PROCESS_MODE_REALTIME` & gradual clouds (0.005 / 0.003) to eliminate choppiness
 ## - Stamps `"graphics_version": 2` into `course.json` so subsequent launches have zero overhead.
 
-const CURRENT_COURSE_GRAPHICS_VERSION: int = 5
+const CURRENT_COURSE_GRAPHICS_VERSION: int = 7
 const ProceduralTreeGeneratorScript = preload("res://HighFidelity/Foliage/procedural_tree_generator.gd")
 const CourseDetailEnhancerScript = preload("res://HighFidelity/Terrain/course_detail_enhancer.gd")
 
@@ -74,14 +74,32 @@ static func upgrade_single_course(course_entry: Dictionary) -> bool:
 	# 2. Build recessed 3D bunkers, overhanging lip grass, shoreline reeds, cart paths, and horizon skirt
 	CourseDetailEnhancerScript.enhance_course_scene(root, true)
 
-	# 3. Fix Sky3D process_mode and Skydome fog overlay
+	# 3. Optimize Sky3D process_mode, radiance_size, clouds speed, and Skydome fog overlay
 	var sky3d := root.get_node_or_null("Sky3D") as WorldEnvironment
 	if sky3d != null and sky3d.environment != null and sky3d.environment.sky != null:
-		sky3d.environment.sky.process_mode = Sky.PROCESS_MODE_QUALITY
+		sky3d.environment.sky.process_mode = Sky.PROCESS_MODE_REALTIME
+		sky3d.environment.sky.radiance_size = Sky.RADIANCE_SIZE_128 if MobilePerformance.is_mobile() else Sky.RADIANCE_SIZE_256
 	if sky3d != null:
+		if "enable_game_time" in sky3d:
+			sky3d.set("enable_game_time", false)
+		if "enable_editor_time" in sky3d:
+			sky3d.set("enable_editor_time", false)
 		var skydome := sky3d.get_node_or_null("Skydome")
-		if skydome != null and "fog_visible" in skydome:
-			skydome.set("fog_visible", false)
+		if skydome != null:
+			if "fog_visible" in skydome:
+				skydome.set("fog_visible", false)
+			if "clouds_speed" in skydome:
+				skydome.set("clouds_speed", 0.005)
+			if "clouds_cumulus_speed" in skydome:
+				skydome.set("clouds_cumulus_speed", 0.003)
+		var tod := sky3d.get_node_or_null("TimeOfDay")
+		if tod != null:
+			if "update_in_game" in tod:
+				tod.set("update_in_game", false)
+			if "update_in_editor" in tod:
+				tod.set("update_in_editor", false)
+			if "update_interval" in tod:
+				tod.set("update_interval", 1.0)
 
 	# 4. Pack and save upgraded course.tscn in-place
 	var out_packed := PackedScene.new()

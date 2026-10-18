@@ -5686,7 +5686,7 @@ public partial class OsmMapLoader : Node
     private class CourseJsonConfig
     {
         [JsonPropertyName("graphics_version")]
-        public int GraphicsVersion { get; set; } = 5;
+        public int GraphicsVersion { get; set; } = 6;
 
         [JsonPropertyName("scene_path")]
         public string ScenePath { get; set; } = "course.tscn";

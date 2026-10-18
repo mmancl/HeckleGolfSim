@@ -311,7 +311,7 @@ public partial class BallPhysics : RefCounted
         if (onGround && parameters != null && parameters.GrassViscosity > 0.0f)
         {
             float decayRate = (6.0f * Mathf.Pi * parameters.GrassViscosity * RADIUS) / MOMENT_OF_INERTIA;
-            if (parameters.SpinbackResponseScale > 1.0f && omega.Length() > 5500.0f * ShotSetup.RAD_PER_RPM)
+            if (parameters.SpinbackResponseScale > 1.0f && omega.Length() > 7000.0f * ShotSetup.RAD_PER_RPM)
             {
                 decayRate *= 0.12f;
             }

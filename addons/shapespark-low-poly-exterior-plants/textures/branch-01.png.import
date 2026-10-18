@@ -3,8 +3,8 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://brisa0dyrk46p"
-path.s3tc="res://.godot/imported/branch-01.png-3550da70673f653c4d6aa7e1ffa0fa8d.s3tc.ctex"
-path.etc2="res://.godot/imported/branch-01.png-3550da70673f653c4d6aa7e1ffa0fa8d.etc2.ctex"
+path.bptc="res://.godot/imported/branch-01.png-3550da70673f653c4d6aa7e1ffa0fa8d.bptc.ctex"
+path.astc="res://.godot/imported/branch-01.png-3550da70673f653c4d6aa7e1ffa0fa8d.astc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -13,13 +13,13 @@ metadata={
 [deps]
 
 source_file="res://addons/shapespark-low-poly-exterior-plants/textures/branch-01.png"
-dest_files=["res://.godot/imported/branch-01.png-3550da70673f653c4d6aa7e1ffa0fa8d.s3tc.ctex", "res://.godot/imported/branch-01.png-3550da70673f653c4d6aa7e1ffa0fa8d.etc2.ctex"]
+dest_files=["res://.godot/imported/branch-01.png-3550da70673f653c4d6aa7e1ffa0fa8d.bptc.ctex", "res://.godot/imported/branch-01.png-3550da70673f653c4d6aa7e1ffa0fa8d.astc.ctex"]
 
 [params]
 
 compress/mode=2
-compress/high_quality=false
-compress/lossy_quality=0.7
+compress/high_quality=true
+compress/lossy_quality=0.9
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

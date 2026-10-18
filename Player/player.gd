@@ -583,6 +583,19 @@ func _handle_tree_occlusion() -> void:
 
 	_trees_restored_for_flight = false
 
+	# Skip heavy occlusion re-evaluations while player is actively aiming the camera
+	if Input.is_action_pressed("aim_left") or Input.is_action_pressed("aim_right") or \
+	   Input.is_action_pressed("aim_forward") or Input.is_action_pressed("aim_backward"):
+		return
+	var parent_scene = get_parent()
+	if parent_scene != null:
+		if parent_scene.has_method("is_actively_aiming") and parent_scene.call("is_actively_aiming"):
+			return
+		if "_was_keyboard_aiming" in parent_scene and parent_scene._was_keyboard_aiming:
+			return
+		if "is_screen_aiming" in parent_scene and parent_scene.is_screen_aiming:
+			return
+
 	# Scan tree cache ONCE upon first rest/ready, never rescan in a loop
 	if not _has_scanned_trees:
 		_has_scanned_trees = true
@@ -615,8 +628,11 @@ func _handle_tree_occlusion() -> void:
 	var AB = B - A
 	var AB_len_sq = AB.length_squared()
 
-	# Clean up invalid nodes in the cache
-	_cached_trees = _cached_trees.filter(func(t): return is_instance_valid(t) and t.is_inside_tree())
+	# Clean up invalid nodes in the cache without lambda allocation
+	for i in range(_cached_trees.size() - 1, -1, -1):
+		var tr = _cached_trees[i]
+		if not is_instance_valid(tr) or not tr.is_inside_tree():
+			_cached_trees.remove_at(i)
 
 	for tree in _cached_trees:
 		if not is_instance_valid(tree) or not tree.is_inside_tree():

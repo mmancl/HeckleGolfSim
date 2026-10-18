@@ -10,6 +10,7 @@ signal distance_queue_updated()
 signal shot_recorded(player: Dictionary, shot_data: Dictionary)
 signal club_averages_tracking_toggled(enabled: bool)
 signal player_ball_graphic_changed(player_name: String, ball_graphic: String)
+signal player_tee_changed(player_index: int, player_name: String, new_tee: String)
 
 var last_gimme_strokes: int = 0
 
@@ -803,7 +804,7 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 		var current_hole = hole_info[hole_ids[current_hole_index]]
 		var hole_loc = current_hole.get("Hole Location", [0.0, 0.0])
 		var target_pin = Vector3(hole_loc[0], final_position.y, hole_loc[1])
-		var par = current_hole.get("Par", 4)
+		var par = int(round(float(current_hole.get("Par", 4))))
 		
 		var dist_to_pin = final_position.distance_to(target_pin)
 		
@@ -1460,7 +1461,7 @@ func _apply_gimme(active_player, extra_strokes: int, hole_id: String) -> void:
 	
 	var par = 4
 	if hole_info.has(hole_id):
-		par = hole_info[hole_id].get("Par", 4)
+		par = int(round(float(hole_info[hole_id].get("Par", 4))))
 	if active_player["strokes"] <= par:
 		var gs_clap = _get_global_settings()
 		if gs_clap != null and gs_clap.has_method("play_golf_clap"):
@@ -1514,7 +1515,7 @@ func concede_hole() -> void:
 	
 	var par = 4
 	if not hole_id.is_empty() and hole_info.has(hole_id):
-		par = hole_info[hole_id].get("Par", 4)
+		par = int(round(float(hole_info[hole_id].get("Par", 4))))
 	if has_node("/root/AnnouncerEngine"):
 		var announcer = get_node("/root/AnnouncerEngine")
 		if announcer.has_method("SpeakForfeitHeckle"):
@@ -2320,7 +2321,7 @@ func _get_hole_pars() -> Dictionary:
 	var pars = {}
 	for h_id in hole_ids:
 		var hole = hole_info.get(h_id, {})
-		pars[h_id] = hole.get("Par", 4)
+		pars[h_id] = int(round(float(hole.get("Par", 4))))
 	return pars
 
 
@@ -2358,6 +2359,60 @@ static func get_tee_position_from_boxes(tee_boxes: Dictionary, tee_color: String
 	if not tee_boxes.is_empty():
 		return tee_boxes.values()[0]
 	return [0.0, 0.0]
+
+func get_course_tees() -> Array[String]:
+	var tees: Array[String] = []
+	for h in hole_info.values():
+		if h is Dictionary and h.has("Tee Boxes"):
+			for k in h["Tee Boxes"].keys():
+				var k_str = str(k).strip_edges()
+				if not k_str.is_empty() and not tees.has(k_str):
+					tees.append(k_str)
+	if tees.is_empty():
+		tees = ["Blue", "Red", "White", "Black", "Gold"]
+	return tees
+
+func set_player_tee(idx: int, new_tee: String) -> void:
+	if idx < 0 or idx >= players.size():
+		return
+	var player = players[idx]
+	var clean_new_tee = new_tee.strip_edges()
+	if clean_new_tee.is_empty():
+		return
+	player["tee"] = clean_new_tee
+	
+	# Update position if player is on the tee box (0 strokes taken on this hole)
+	if player.get("strokes", 0) == 0:
+		var target_hole_idx = current_hole_index
+		if target_hole_idx < hole_ids.size():
+			var hole_id: String = hole_ids[target_hole_idx]
+			var current_hole = hole_info.get(hole_id, {})
+			var tee_boxes = current_hole.get("Tee Boxes", {})
+			var tee_pos = get_tee_position_from_boxes(tee_boxes, clean_new_tee)
+			var is_driver = current_club.to_lower() in ["dr", "driver", "1w"]
+			var offset_y = 0.059435 if is_driver else 0.021335
+			player["position"] = Vector3(tee_pos[0], offset_y, tee_pos[1])
+			player["last_starting_pos"] = player["position"]
+			player["lie_type"] = "teebox"
+	
+	# Update registered player profile preference
+	var p_name = player.get("name", "")
+	if not p_name.is_empty():
+		var registered = get_registered_players()
+		for reg in registered:
+			if reg.get("name", "") == p_name:
+				reg["preferred_tee"] = clean_new_tee
+				save_registered_players(registered)
+				break
+			
+	save_current_match()
+	player_tee_changed.emit(idx, p_name, clean_new_tee)
+
+func set_player_tee_by_name(p_name: String, new_tee: String) -> void:
+	for i in range(players.size()):
+		if players[i].get("name", "") == p_name:
+			set_player_tee(i, new_tee)
+			return
 
 func get_registered_players() -> Array[Dictionary]:
 	if not FileAccess.file_exists(REGISTRY_PATH):
@@ -2940,6 +2995,7 @@ const MIN_SHOTS_FOR_AVERAGES: int = 10
 const OUTLIER_STD_DEV_THRESHOLD: float = 2.0
 const MIN_SHOTS_FOR_OUTLIER_CHECK: int = 5
 const MIN_EFFECTIVE_STD_DEV_METERS: float = 15.0
+const COLD_START_AUTO_REJECT_PERCENT: float = 0.65
 
 static func get_shot_distance_m(shot_dict: Dictionary) -> float:
 	var total_dist = float(shot_dict.get("TotalDistance", 0.0))
@@ -2949,6 +3005,22 @@ static func get_shot_distance_m(shot_dict: Dictionary) -> float:
 	elif carry_dist > 0.0:
 		return carry_dist
 	return 0.0
+
+static func calculate_shots_median_distance_m(shots: Array) -> float:
+	var distances: Array[float] = []
+	for s in shots:
+		if typeof(s) == TYPE_DICTIONARY:
+			var d = get_shot_distance_m(s)
+			if d > 0.0:
+				distances.append(d)
+	if distances.is_empty():
+		return 0.0
+	distances.sort()
+	var n = distances.size()
+	if n % 2 == 1:
+		return distances[n / 2]
+	else:
+		return (distances[(n / 2) - 1] + distances[n / 2]) * 0.5
 
 static func calculate_shots_mean_and_std_dev(shots: Array) -> Dictionary:
 	if shots.size() < MIN_SHOTS_FOR_OUTLIER_CHECK:
@@ -2981,14 +3053,121 @@ static func calculate_shots_mean_and_std_dev(shots: Array) -> Dictionary:
 		"count": count
 	}
 
-static func is_shot_outlier(existing_shots: Array, new_shot: Dictionary, _club_name: String = "") -> bool:
+static func calculate_shots_median_and_mad(shots: Array) -> Dictionary:
+	var distances: Array[float] = []
+	for s in shots:
+		if typeof(s) == TYPE_DICTIONARY:
+			var d = get_shot_distance_m(s)
+			if d > 0.0:
+				distances.append(d)
+	var count = distances.size()
+	if count < MIN_SHOTS_FOR_OUTLIER_CHECK:
+		return {"median": 0.0, "mad": 0.0, "effective_std_dev": 0.0, "count": count}
+	
+	distances.sort()
+	var median: float = distances[count / 2] if count % 2 == 1 else (distances[(count / 2) - 1] + distances[count / 2]) * 0.5
+	var dev_list: Array[float] = []
+	for d in distances:
+		dev_list.append(absf(d - median))
+	dev_list.sort()
+	var mad: float = dev_list[count / 2] if count % 2 == 1 else (dev_list[(count / 2) - 1] + dev_list[count / 2]) * 0.5
+	var effective_std = maxf(1.4826 * mad, MIN_EFFECTIVE_STD_DEV_METERS)
+	return {
+		"median": median,
+		"mad": mad,
+		"effective_std_dev": effective_std,
+		"count": count
+	}
+
+static func filter_valid_club_shots(shots: Array, club_name: String) -> Array:
+	if shots.is_empty():
+		return []
+	var club_code = normalize_club_code(club_name)
+	if club_code == "Pt":
+		return shots
+
+	var benchmark_yds = float(DEFAULT_CLUB_DISTANCES.get(club_code, 100.0))
+	var initial_valid: Array = []
+	var initial_distances: Array[float] = []
+	
+	for s in shots:
+		if typeof(s) != TYPE_DICTIONARY:
+			continue
+		if s.get("is_mishit", false) or s.get("excluded_from_averages", false):
+			continue
+		var d = get_shot_distance_m(s)
+		if d > 0.0:
+			initial_valid.append(s)
+			initial_distances.append(d)
+
+	if initial_valid.is_empty():
+		return shots
+
+	initial_distances.sort()
+	var n = initial_distances.size()
+	var med_m = initial_distances[n / 2] if n % 2 == 1 else (initial_distances[(n / 2) - 1] + initial_distances[n / 2]) * 0.5
+	var med_yds = med_m * 1.09361
+	if med_yds > 0.0:
+		benchmark_yds = maxf(benchmark_yds * 0.70, med_yds)
+
+	var min_allowed_yds = benchmark_yds * COLD_START_AUTO_REJECT_PERCENT
+	var min_allowed_m = min_allowed_yds / 1.09361
+	var max_allowed_yds = maxf(benchmark_yds * 1.75, 380.0)
+	var max_allowed_m = max_allowed_yds / 1.09361
+
+	var passed_shots: Array = []
+	for s in initial_valid:
+		var d = get_shot_distance_m(s)
+		if d >= min_allowed_m and d <= max_allowed_m:
+			passed_shots.append(s)
+
+	if passed_shots.is_empty():
+		return initial_valid
+
+	if passed_shots.size() >= MIN_SHOTS_FOR_OUTLIER_CHECK:
+		var mad_stats = calculate_shots_median_and_mad(passed_shots)
+		var refined_shots: Array = []
+		var med = mad_stats["median"]
+		var threshold = OUTLIER_STD_DEV_THRESHOLD * mad_stats["effective_std_dev"]
+		for s in passed_shots:
+			var d = get_shot_distance_m(s)
+			if absf(d - med) <= threshold:
+				refined_shots.append(s)
+		if not refined_shots.is_empty():
+			return refined_shots
+
+	return passed_shots
+
+static func is_shot_outlier(existing_shots: Array, new_shot: Dictionary, club_name: String = "") -> bool:
+	var new_d = get_shot_distance_m(new_shot)
+	var new_d_yds = new_d * 1.09361
+
+	# Rule 1: Benchmark Cold-Start / Miss-hit check (65% floor) when club is provided
+	if not club_name.is_empty():
+		var club_code = normalize_club_code(club_name)
+		if club_code != "Pt":
+			var benchmark_yds = float(DEFAULT_CLUB_DISTANCES.get(club_code, 100.0))
+			if not existing_shots.is_empty():
+				var ex_median_m = calculate_shots_median_distance_m(existing_shots)
+				if ex_median_m > 0.0:
+					var ex_median_yds = ex_median_m * 1.09361
+					benchmark_yds = maxf(benchmark_yds * 0.70, ex_median_yds)
+			
+			var min_allowed_yds = benchmark_yds * COLD_START_AUTO_REJECT_PERCENT
+			if new_d_yds < min_allowed_yds:
+				return true
+				
+			var max_allowed_yds = maxf(benchmark_yds * 1.70, 380.0)
+			if new_d_yds > max_allowed_yds:
+				return true
+
+	# Rule 2: Robust statistical check (Median + MAD) for sufficient samples
 	if existing_shots.size() < MIN_SHOTS_FOR_OUTLIER_CHECK:
 		return false
-	var stats = calculate_shots_mean_and_std_dev(existing_shots)
+	var stats = calculate_shots_median_and_mad(existing_shots)
 	if stats["count"] < MIN_SHOTS_FOR_OUTLIER_CHECK:
 		return false
-	var new_d = get_shot_distance_m(new_shot)
-	var diff = absf(new_d - stats["mean"])
+	var diff = absf(new_d - stats["median"])
 	return diff > (OUTLIER_STD_DEV_THRESHOLD * stats["effective_std_dev"])
 
 func get_player_club_average_distance_yards(player_name: String, club_name: String) -> float:
@@ -3004,12 +3183,13 @@ func get_player_club_average_distance_yards(player_name: String, club_name: Stri
 	if not stats.has(target_key):
 		return default_dist
 
-	var shots: Array = []
+	var raw_shots: Array = []
 	if stats[target_key].has(club_code):
-		shots = stats[target_key][club_code]
+		raw_shots = stats[target_key][club_code]
 	elif stats[target_key].has(club_name):
-		shots = stats[target_key][club_name]
+		raw_shots = stats[target_key][club_name]
 
+	var shots: Array = filter_valid_club_shots(raw_shots, club_code)
 	var sum_dist := 0.0
 	var count := 0
 	for s in shots:
@@ -3029,7 +3209,8 @@ func get_club_effective_distance(player_name: String, club_name: String) -> floa
 		return default_dist
 		
 	var player_stats = get_player_club_stats(player_name)
-	var shots: Array = player_stats.get(club_code, player_stats.get(club_name, []))
+	var raw_shots: Array = player_stats.get(club_code, player_stats.get(club_name, []))
+	var shots: Array = filter_valid_club_shots(raw_shots, club_code)
 	if shots.size() < MIN_SHOTS_FOR_AVERAGES:
 		return default_dist
 		
@@ -3171,8 +3352,11 @@ func calculate_player_club_averages(player_name: String) -> Dictionary:
 			clubs_to_eval.append(c)
 			
 	for club in clubs_to_eval:
-		var shots: Array = player_club_stats.get(club, [])
+		var raw_shots: Array = player_club_stats.get(club, [])
+		var shots: Array = filter_valid_club_shots(raw_shots, club)
 		var shot_count = shots.size()
+		var raw_shot_count = raw_shots.size()
+		var mishits_excluded = max(0, raw_shot_count - shot_count)
 		if shot_count == 0:
 			var p_hand_empty = get_player_handedness(player_name)
 			result[club] = {
@@ -3182,6 +3366,8 @@ func calculate_player_club_averages(player_name: String) -> Dictionary:
 				"is_lefty": p_hand_empty == 1,
 				"display_name": get_club_display_name(club),
 				"shot_count": 0,
+				"raw_shot_count": raw_shot_count,
+				"mishits_excluded": mishits_excluded,
 				"avg_carry_m": 0.0,
 				"avg_total_m": 0.0,
 				"avg_speed_mph": 0.0,
@@ -3266,6 +3452,8 @@ func calculate_player_club_averages(player_name: String) -> Dictionary:
 			"is_lefty": p_hand == 1,
 			"display_name": get_club_display_name(club),
 			"shot_count": shot_count,
+			"raw_shot_count": raw_shot_count,
+			"mishits_excluded": mishits_excluded,
 			"avg_carry_m": sum_carry / cnt,
 			"avg_total_m": sum_total / cnt,
 			"avg_speed_mph": sum_speed / cnt,
@@ -3428,7 +3616,7 @@ func calculate_player_stats(player_name: String) -> Dictionary:
 													if typeof(cfg_json) == TYPE_DICTIONARY:
 														var h_info = cfg_json.get("Hole Info", {})
 														for h_id in h_info:
-															hole_pars[h_id] = h_info[h_id].get("Par", 4)
+															hole_pars[h_id] = int(round(float(h_info[h_id].get("Par", 4))))
 															
 										var player_strokes = 0
 										var par_sum = 0

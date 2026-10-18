@@ -145,6 +145,12 @@ func _refresh_anchor(force: bool) -> void:
 
 	var anchor := Vector3.ZERO
 	var ball := _scene_root.get_node_or_null("Ball") as Node3D
+	if ball == null:
+		ball = _scene_root.get_node_or_null("Player/ball") as Node3D
+	if ball == null:
+		ball = _scene_root.find_child("ball", true, false) as Node3D
+	if ball == null:
+		ball = _scene_root.find_child("Ball", true, false) as Node3D
 	if ball != null:
 		anchor = ball.global_position
 	else:

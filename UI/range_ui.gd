@@ -50,6 +50,9 @@ var _rollout_btn: Button = null
 var _track_averages_btn: Button = null
 var _stuck_ball_btn: Button = null
 var _avg_paused_indicator: Label = null
+var _mishit_badge: Label = null
+var _mishit_badge_timer: Timer = null
+var _undo_shot_btn: Button = null
 var _dispersion_overlay: Control = null
 var _golfer_cam_panel: PanelContainer = null
 var _camera_feed_rect: TextureRect = null
@@ -1570,6 +1573,24 @@ func _setup_averages_ui() -> void:
 		is_tr_on = mp_mgr_init.is_club_averages_tracking_enabled()
 	_avg_paused_indicator.visible = not is_tr_on
 	averages_hbox.add_child(_avg_paused_indicator)
+
+	_mishit_badge = Label.new()
+	_mishit_badge.name = "MishitBadge"
+	_mishit_badge.text = "⚠️ Miss-hit Excluded"
+	_mishit_badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_mishit_badge.add_theme_font_size_override("font_size", 14)
+	_mishit_badge.modulate = Color(1.0, 0.45, 0.35, 0.95)
+	_mishit_badge.visible = false
+	averages_hbox.add_child(_mishit_badge)
+
+	_mishit_badge_timer = Timer.new()
+	_mishit_badge_timer.name = "MishitBadgeTimer"
+	_mishit_badge_timer.one_shot = true
+	_mishit_badge_timer.timeout.connect(func():
+		if _mishit_badge != null:
+			_mishit_badge.visible = false
+	)
+	add_child(_mishit_badge_timer)
 	
 	_averages_panel.add_child(averages_hbox)
 
@@ -1583,6 +1604,16 @@ func _setup_averages_ui() -> void:
 	_prev_shot_btn.pressed.connect(_on_prev_shot_analysis_pressed)
 	_prev_shot_btn.tooltip_text = "View analysis and recommendations for your previous shot"
 
+	_undo_shot_btn = Button.new()
+	_undo_shot_btn.name = "UndoShotButton"
+	_undo_shot_btn.text = "↺ Undo Shot"
+	_undo_shot_btn.custom_minimum_size = Vector2(130, 48)
+	_undo_shot_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_undo_shot_btn.add_theme_font_size_override("font_size", 14)
+	apply_material_button_style(_undo_shot_btn, Color(0.35, 0.25, 0.25, 0.85))
+	_undo_shot_btn.tooltip_text = "Remove the last shot from club statistics and session history"
+	_undo_shot_btn.pressed.connect(_on_undo_shot_pressed)
+
 	var bottom_bar = HBoxContainer.new()
 	bottom_bar.name = "BottomBarContainer"
 	bottom_bar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -1593,9 +1624,23 @@ func _setup_averages_ui() -> void:
 
 	bottom_bar.add_child(_averages_panel)
 	bottom_bar.add_child(_prev_shot_btn)
+	bottom_bar.add_child(_undo_shot_btn)
 	add_child(bottom_bar)
 
 	_update_prev_shot_analysis_visibility()
+
+func show_mishit_alert(msg: String = "⚠️ Miss-hit excluded from club averages") -> void:
+	if _mishit_badge != null:
+		_mishit_badge.text = msg
+		_mishit_badge.visible = true
+		if _mishit_badge_timer != null:
+			_mishit_badge_timer.start(4.5)
+
+func _on_undo_shot_pressed() -> void:
+	var parent_node = get_parent()
+	if parent_node != null and parent_node.has_method("remove_last_shot"):
+		parent_node.call("remove_last_shot")
+		show_mishit_alert("↺ Last shot removed from stats")
 
 
 func update_average_stats(avg_data: Dictionary) -> void:

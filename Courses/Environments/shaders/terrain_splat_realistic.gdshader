@@ -322,24 +322,36 @@ void fragment() {
 	}
 
 	// -----------------------------------------------------------------------
-	// 3C. GREEN: Velvety manicured bentgrass with subtle cross-cut & collar
+	// 3C. GREEN: Lighter, manicured bentgrass putting surface + distinct collar framing
 	// -----------------------------------------------------------------------
 	if (green_w > 0.005) {
 		vec3 g_fine = texture(tex_green, uv_green).rgb;
-		vec3 col_green = g_fine * vec3(0.95, 1.08, 0.88) * macro_turf_tint;
+		// Distinct vibrant bentgrass hue: lighter, high-vitality chartreuse-emerald matching reference
+		vec3 col_green = g_fine * vec3(1.05, 1.32, 0.78);
 
-		float green_grid = (sin(dot(v_world_pos.xz, mow_dir) * 2.4) * 0.5 + 0.5)
-		                 * (sin(dot(v_world_pos.xz, mow_perp) * 2.4) * 0.5 + 0.5);
-		col_green = mix(col_green * 0.97, col_green * 1.03, green_grid);
+		// Precision cross-cut tournament mowing pattern
+		float cut_a = sin(dot(v_world_pos.xz, mow_dir) * 4.2) * 0.5 + 0.5;
+		float cut_b = sin(dot(v_world_pos.xz, mow_perp) * 4.2) * 0.5 + 0.5;
+		float green_grid = cut_a * cut_b;
+		col_green *= mix(0.93, 1.07, green_grid);
 
-		float fringe_w = smoothstep(0.02, 0.25, green_w) * (1.0 - smoothstep(0.65, 0.98, green_w));
-		vec3 green_output = mix(col_green, col_green * vec3(0.86, 0.93, 0.84), fringe_w);
+		// Velvety sheen based on view angle and putting surface nap
+		float view_sheen = abs(dot(view_dir.xz, mow_dir));
+		col_green *= (1.0 + (view_sheen - 0.5) * 0.16);
 
-		vec3 nr_green = mix(vec3(0.0, 0.0, 1.0), texture(normal_green, uv_green).rgb * 2.0 - 1.0, 0.18);
+		// Crisp distinctive putting green collar / fringe band framing the green perimeter
+		// Forms a visible intermediate ring between fairway and green putting surface
+		float fringe_w = smoothstep(0.01, 0.28, green_w) * (1.0 - smoothstep(0.42, 0.88, green_w));
+		vec3 col_fringe = g_fine * vec3(0.68, 0.95, 0.58);
+		vec3 green_output = mix(col_green, col_fringe, fringe_w * 0.85);
+
+		// Very smooth, subtle normal map for manicured rolling green
+		vec3 nr_green = mix(vec3(0.0, 0.0, 1.0), texture(normal_green, uv_green).rgb * 2.0 - 1.0, 0.08);
 		blended_albedo += clamp(green_output, 0.0, 1.0) * green_w;
 		blended_normal += nr_green * green_w;
-		blended_roughness += roughness_green * green_w;
-		blended_ao += 0.97 * green_w;
+		// Smooth bentgrass surface gives a soft, manicured sheen
+		blended_roughness += clamp(roughness_green - 0.38, 0.38, 0.52) * green_w;
+		blended_ao += 0.98 * green_w;
 	}
 
 	// -----------------------------------------------------------------------
@@ -380,12 +392,12 @@ void fragment() {
 	}
 
 	// Mid-distance (to ~60m) turf micro-variation: keeps grass from reading as a smeared texture
-	float grass_w_total = rough_w + fairway_w + green_w;
+	float grass_w_total = rough_w + fairway_w;
 	if (grass_w_total > 0.01) {
 		float mid_fade = 1.0 - smoothstep(18.0, 65.0, cam_dist);
 		float mid_a = gnoise(v_world_pos.xz * 9.0);
 		float mid_b = gnoise(v_world_pos.xz * 3.1 + vec2(11.0, 5.0));
-		float amp = rough_w * 0.22 + fairway_w * 0.07 + green_w * 0.025;
+		float amp = rough_w * 0.22 + fairway_w * 0.07;
 		blended_albedo *= 1.0 + (mid_a * 0.6 + mid_b * 0.4) * amp * mid_fade;
 		// Sun-warmed highlights and cooler shade within the turf canopy
 		blended_albedo = mix(blended_albedo, blended_albedo * vec3(1.06, 1.05, 0.90), clamp(mid_b * 0.5 + 0.5, 0.0, 1.0) * 0.20 * mid_fade * grass_w_total);

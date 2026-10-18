@@ -71,6 +71,7 @@ var raw_ball_data: Dictionary = {}
 var display_data: Dictionary = {}
 var sfx_applause_player: AudioStreamPlayer = null
 var user_aim_yaw_offset_deg: float = 0.0
+var _was_aiming_putting: bool = false
 
 # PvP Mode State
 const MinigamePlayerModal = preload("res://Courses/Minigames/minigame_player_modal.gd")
@@ -1268,7 +1269,7 @@ func _teleport_ball(pos: Vector3) -> void:
 			if lm.has_method("_update_hud_display"):
 				lm.call("_update_hud_display")
 
-func _update_aim_and_camera() -> void:
+func _update_aim_and_camera(is_aiming: bool = false) -> void:
 	if selected_hole_index < 0 or selected_hole_index >= holes.size():
 		return
 		
@@ -1285,7 +1286,8 @@ func _update_aim_and_camera() -> void:
 	# Position camera behind the ball closer to ball and ground so slope is easy to read
 	var back_dir = Vector3(-cos(final_angle_rad), 0.0, -sin(final_angle_rad)).normalized()
 	var cam_pos = ball_pos + back_dir * 1.35 + Vector3.UP * 0.8
-	cam_pos = clamp_camera_position(cam_pos, 0.35)
+	if not is_aiming:
+		cam_pos = clamp_camera_position(cam_pos, 0.35)
 	
 	var dist = ball_pos.distance_to(target_hole)
 	var look_dist = clamp(dist * 0.4, 2.0, 6.0)
@@ -1312,8 +1314,12 @@ func _process(delta: float) -> void:
 		if Input.is_action_pressed("aim_right") or Input.is_key_pressed(KEY_RIGHT):
 			turn_input += 1.0
 		if turn_input != 0.0:
+			_was_aiming_putting = true
 			user_aim_yaw_offset_deg += turn_input * 15.0 * delta
-			_update_aim_and_camera()
+			_update_aim_and_camera(true)
+		elif _was_aiming_putting:
+			_was_aiming_putting = false
+			_update_aim_and_camera(false)
 
 
 func _unhandled_input(event: InputEvent) -> void:

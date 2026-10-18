@@ -201,16 +201,27 @@ public partial class BounceCalculator : RefCounted
             // BallState.Rollout (second or subsequent bounce)
             float activeBackspinRad = omegaTangent.Dot(incomingBackspinAxis);
             float activeBackspinRpm = activeBackspinRad / ShotSetup.RAD_PER_RPM;
+            float impactAngleDeg = Mathf.RadToDeg(impactAngle);
 
             bool isSpinbackSurface = parameters != null && (parameters.SpinbackThetaBoostMax > 0.0f || parameters.SpinbackResponseScale > 1.0f);
+            bool canReverseBackwards = isSpinbackSurface && activeBackspinRpm >= 3800.0f && impactAngleDeg >= 47.0f;
 
-            if (isSpinbackSurface && activeBackspinRpm > 1800.0f)
+            if (canReverseBackwards)
             {
-                // Active backspin bite on second bounce / ground rollout bounce!
+                // Active backspin bite into reverse spinback! Only for ultra-high-spin wedge shots landing steep.
                 float rolloutSpinbackTerm = (2.0f / 7.0f) * BallPhysics.RADIUS * activeBackspinRad * Mathf.Max(parameters.SpinbackResponseScale, 0.5f);
                 newTangentSpeed = (speedTangent * tangentialRetention) - rolloutSpinbackTerm;
                 newTangentSpeed = Mathf.Max(-2.6f, newTangentSpeed);
-                PhysicsLogger.Verbose($"  Rollout Bounce Bite: backspin={activeBackspinRpm:F0} rpm, spinbackTerm={rolloutSpinbackTerm:F2}, newTangentSpeed={newTangentSpeed:F2} m/s");
+                PhysicsLogger.Verbose($"  Rollout Bounce Spinback: backspin={activeBackspinRpm:F0} rpm, spinbackTerm={rolloutSpinbackTerm:F2}, newTangentSpeed={newTangentSpeed:F2} m/s");
+            }
+            else if (isSpinbackSurface && activeBackspinRpm > 1800.0f)
+            {
+                // Moderate backspin (~5,000 - 7,500 RPM launch, ~1,800 - 3,700 RPM residual):
+                // Checks forward speed down quickly without ever reversing backwards!
+                float rolloutCheckTerm = (2.0f / 7.0f) * BallPhysics.RADIUS * activeBackspinRad * 0.45f;
+                float rawSpeed = (speedTangent * tangentialRetention) - rolloutCheckTerm;
+                newTangentSpeed = Mathf.Max(0.25f, rawSpeed);
+                PhysicsLogger.Verbose($"  Rollout Bounce Forward Check: backspin={activeBackspinRpm:F0} rpm, checkTerm={rolloutCheckTerm:F2}, newTangentSpeed={newTangentSpeed:F2} m/s");
             }
             else
             {
@@ -258,8 +269,9 @@ public partial class BounceCalculator : RefCounted
         if (currentState == PhysicsEnums.BallState.Flight)
         {
             float incomingBackspin = omegaTangent.Dot(incomingBackspinAxis);
+            float impactAngleDeg = Mathf.RadToDeg(impactAngle);
             bool hasSpinbackSurface = parameters != null && (parameters.SpinbackThetaBoostMax > 0.0f || parameters.SpinbackResponseScale > 1.0f);
-            bool inHighSpinCheckRegime = hasSpinbackSurface && (incomingBackspin / ShotSetup.RAD_PER_RPM) >= 3800.0f && impactAngle >= 0.35f;
+            bool inHighSpinCheckRegime = hasSpinbackSurface && (incomingBackspin / ShotSetup.RAD_PER_RPM) >= 8000.0f && impactAngleDeg >= 47.0f;
 
             if (inHighSpinCheckRegime)
             {

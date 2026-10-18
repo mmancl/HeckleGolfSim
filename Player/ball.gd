@@ -860,28 +860,24 @@ func _update_tee_elevation() -> void:
 		return
 
 	var is_teebox := (lie_type == "teebox")
-	var is_driver := current_selected_club.to_lower() in ["dr", "driver", "1w"]
-
-	if is_teebox and is_driver:
-		_tee_mesh.visible = true
-		var probe := _try_probe_ground()
-		if probe.get("hit", false):
-			var ground_y: float = probe.get("position", Vector3.ZERO).y
-			global_position.y = ground_y + TEED_CENTER_HEIGHT
-	else:
+	if not is_teebox:
 		_tee_mesh.visible = false
-		# For all non-teed balls (green, fairway, rough, teebox with irons/putter),
-		# probe the ground and seat the ball cleanly on top of the surface normal.
-		var probe := _try_probe_ground()
-		if probe.get("hit", false):
-			var hit_pos: Vector3 = probe.get("position", Vector3.ZERO)
-			var hit_norm: Vector3 = probe.get("normal", Vector3.UP)
-			var nys := maxf(hit_norm.y, MIN_GROUND_NORMAL)
+		return
+
+	var is_driver := current_selected_club.to_lower() in ["dr", "driver", "1w"]
+	var probe := _try_probe_ground()
+	if probe.get("hit", false):
+		var hit_pos: Vector3 = probe.get("position", Vector3.ZERO)
+		var hit_norm: Vector3 = probe.get("normal", Vector3.UP)
+		var nys := maxf(hit_norm.y, MIN_GROUND_NORMAL)
+		if is_driver:
+			_tee_mesh.visible = true
+			global_position.y = hit_pos.y + TEED_CENTER_HEIGHT
+		else:
+			_tee_mesh.visible = false
 			global_position.y = hit_pos.y + (_ball_radius + GROUND_SNAP_OFFSET) / nys
 			floor_normal = hit_norm
 			on_ground = true
-			if probe.has("collider") and probe["collider"] != null:
-				_update_surface_from_collider(probe["collider"])
 	_orient_ball_to_aim()
 
 
@@ -1153,20 +1149,24 @@ func _process(delta: float) -> void:
 	if _ball_mesh != null:
 		var base_y := get_visual_y_offset()
 		var target_y := base_y
-		var on_green_surface := (lie_type == "green" or surface_type == PhysicsEnums.SurfaceType.GREEN or is_putt or (is_inside_tree() and _is_position_on_green(global_position)))
-		var on_fairway_or_tee := (lie_type in ["fairway", "teebox", "fringe"] or surface_type in [PhysicsEnums.SurfaceType.FAIRWAY, PhysicsEnums.SurfaceType.FAIRWAY_SOFT])
+		var on_fairway_or_tee := (lie_type in ["fairway", "teebox", "fringe"] or surface_type in [PhysicsEnums.SurfaceType.FAIRWAY, PhysicsEnums.SurfaceType.FAIRWAY_SOFT] or (is_inside_tree() and _is_position_on_fringe(global_position)))
+		var on_green_surface := false
 
 		# Only sink into tall rough or bunker sand when the ball is at rest.
 		# While rolling or in flight, roll cleanly on top of the surface without visual clipping.
 		if state == PhysicsEnums.BallState.REST:
-			if on_green_surface or on_fairway_or_tee:
+			if on_fairway_or_tee:
 				target_y = base_y
-			elif is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER or lie_type == "sand":
-				target_y = base_y - 0.017 # Sink 1.7 cm in sand traps
-			elif lie_type == "rough" or surface_type == PhysicsEnums.SurfaceType.ROUGH:
-				target_y = base_y - 0.014 # Sink 1.4 cm in tall rough
 			else:
-				target_y = base_y
+				on_green_surface = (lie_type == "green" or surface_type == PhysicsEnums.SurfaceType.GREEN or is_putt or (is_inside_tree() and _is_position_on_green(global_position)))
+				if on_green_surface:
+					target_y = base_y
+				elif is_in_sand or surface_type == PhysicsEnums.SurfaceType.BUNKER or lie_type == "sand":
+					target_y = base_y - 0.017 # Sink 1.7 cm in sand traps
+				elif lie_type == "rough" or surface_type == PhysicsEnums.SurfaceType.ROUGH:
+					target_y = base_y - 0.014 # Sink 1.4 cm in tall rough
+				else:
+					target_y = base_y
 		else:
 			target_y = base_y
 
@@ -1189,7 +1189,7 @@ func _physics_process(delta: float) -> void:
 	if has_node("/root/TensionManager") and not target_hole_live.is_zero_approx() and TensionManager.is_course_play_active():
 		var start_p = shot_start_pos_global if not shot_start_pos_global.is_zero_approx() else (position if not position.is_zero_approx() else spawn_position)
 		var is_airborne = (state == PhysicsEnums.BallState.FLIGHT)
-		TensionManager.check_ball_proximity(global_position, target_hole_live, is_putt, start_p, shot_was_in_sand, is_airborne, velocity, hit_tree_this_shot)
+		TensionManager.check_ball_proximity(global_position, target_hole_live, is_putt, start_p, shot_was_in_sand, is_airborne, velocity, hit_tree_this_shot, delta)
 
 	# Check hole and rim physics interaction
 	if not is_falling_in_hole:
@@ -1376,7 +1376,7 @@ func _physics_process(delta: float) -> void:
 				if has_node("/root/TensionManager"):
 					get_node("/root/TensionManager").on_tree_hit()
 				if has_node("/root/AnnouncerEngine") and not _skipping_flight:
-					get_node("/root/AnnouncerEngine").call("SpeakTreeHeckle")
+					get_node("/root/AnnouncerEngine").call("SpeakTreeHeckle", "leaves")
 		else:
 			_canopy_time = 0.0
 			if _leaves_player and _leaves_player.playing:
@@ -1755,7 +1755,7 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 				if not hit_tree_this_shot:
 					hit_tree_this_shot = true
 					if has_node("/root/AnnouncerEngine") and not _skipping_flight:
-						get_node("/root/AnnouncerEngine").call("SpeakTreeHeckle")
+						get_node("/root/AnnouncerEngine").call("SpeakTreeHeckle", "trunk")
 				if has_node("/root/TensionManager"):
 					get_node("/root/TensionManager").on_tree_hit()
 				# Damped reflection off tree
@@ -2117,7 +2117,12 @@ func reset() -> void:
 	falling_time = 0.0
 	holed_out_this_shot = false
 	if _ball_mesh != null:
-		_ball_mesh.position.y = get_visual_y_offset()
+		var init_y := get_visual_y_offset()
+		if lie_type == "sand" or is_in_sand:
+			init_y -= 0.017
+		elif lie_type == "rough":
+			init_y -= 0.014
+		_ball_mesh.position.y = init_y
 	prev_physics_pos = global_position
 	curr_physics_pos = global_position
 	_physics_pos_initialized = true
@@ -2131,13 +2136,23 @@ func get_interpolated_position() -> Vector3:
 	return prev_physics_pos.lerp(curr_physics_pos, fraction)
 
 
+var _cached_is_pos_on_wrong_green_pos: Vector3 = Vector3.INF
+var _cached_is_pos_on_wrong_green_res: bool = false
+
 func _is_position_on_wrong_green(pos: Vector3) -> bool:
+	if pos.is_equal_approx(_cached_is_pos_on_wrong_green_pos):
+		return _cached_is_pos_on_wrong_green_res
+	_cached_is_pos_on_wrong_green_pos = pos
+	_cached_is_pos_on_wrong_green_res = _calc_is_position_on_wrong_green(pos)
+	return _cached_is_pos_on_wrong_green_res
+
+func _calc_is_position_on_wrong_green(pos: Vector3) -> bool:
 	var course = null
 	var player_parent = get_parent()
 	if player_parent != null:
 		course = player_parent.get_parent()
 	if course == null or not course.has_method("is_ball_on_wrong_green"):
-		var root = get_tree().current_scene if get_tree() != null else null
+		var root = get_tree().current_scene if (is_inside_tree() and get_tree() != null) else null
 		if root != null:
 			course = root
 	if course != null and course.has_method("is_ball_on_wrong_green"):
@@ -2145,7 +2160,17 @@ func _is_position_on_wrong_green(pos: Vector3) -> bool:
 	return false
 
 
+var _cached_is_pos_on_green_pos: Vector3 = Vector3.INF
+var _cached_is_pos_on_green_res: bool = false
+
 func _is_position_on_green(pos: Vector3) -> bool:
+	if pos.is_equal_approx(_cached_is_pos_on_green_pos):
+		return _cached_is_pos_on_green_res
+	_cached_is_pos_on_green_pos = pos
+	_cached_is_pos_on_green_res = _calc_is_position_on_green(pos)
+	return _cached_is_pos_on_green_res
+
+func _calc_is_position_on_green(pos: Vector3) -> bool:
 	if _is_position_on_wrong_green(pos):
 		return false
 	var course = null
@@ -2153,7 +2178,7 @@ func _is_position_on_green(pos: Vector3) -> bool:
 	if player_parent != null:
 		course = player_parent.get_parent()
 	if course == null or not (course.has_method("get_distance_to_nearest_green") or course.has_method("is_inside_green") or course.has_method("get_distance_to_current_green")):
-		var root = get_tree().current_scene if get_tree() != null else null
+		var root = get_tree().current_scene if (is_inside_tree() and get_tree() != null) else null
 		if root != null:
 			course = root
 	if course != null:
@@ -2179,7 +2204,7 @@ func _has_course_green_geometry() -> bool:
 	if player_parent != null:
 		course = player_parent.get_parent()
 	if course == null or not (course.has_method("get_distance_to_nearest_green") or course.has_method("is_inside_green") or course.has_method("get_distance_to_current_green")):
-		var root = get_tree().current_scene if get_tree() != null else null
+		var root = get_tree().current_scene if (is_inside_tree() and get_tree() != null) else null
 		if root != null:
 			course = root
 	if course != null:
@@ -2187,7 +2212,17 @@ func _has_course_green_geometry() -> bool:
 	return false
 
 
+var _cached_is_pos_on_fringe_pos: Vector3 = Vector3.INF
+var _cached_is_pos_on_fringe_res: bool = false
+
 func _is_position_on_fringe(pos: Vector3) -> bool:
+	if pos.is_equal_approx(_cached_is_pos_on_fringe_pos):
+		return _cached_is_pos_on_fringe_res
+	_cached_is_pos_on_fringe_pos = pos
+	_cached_is_pos_on_fringe_res = _calc_is_position_on_fringe(pos)
+	return _cached_is_pos_on_fringe_res
+
+func _calc_is_position_on_fringe(pos: Vector3) -> bool:
 	if _is_position_on_wrong_green(pos):
 		return false
 	var course = null
@@ -2195,7 +2230,7 @@ func _is_position_on_fringe(pos: Vector3) -> bool:
 	if player_parent != null:
 		course = player_parent.get_parent()
 	if course == null or not (course.has_method("get_distance_to_nearest_green") or course.has_method("get_distance_to_current_green")):
-		var root = get_tree().current_scene if get_tree() != null else null
+		var root = get_tree().current_scene if (is_inside_tree() and get_tree() != null) else null
 		if root != null and (root.has_method("get_distance_to_nearest_green") or root.has_method("get_distance_to_current_green")):
 			course = root
 	if course != null:
@@ -2690,7 +2725,7 @@ func _update_surface_from_collider(collider: Object) -> void:
 	var is_green = (not on_wrong_green) and (on_green_geo or name_lower.contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.GREEN))
 	var is_tee = name_lower.contains("tee")
 	var is_fairway = on_wrong_green or name_lower.contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.FAIRWAY)
-	var is_rough = (not on_wrong_green) and (not on_green_geo) and (name_lower.contains("rough") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.ROUGH))
+	var is_rough = (not on_wrong_green) and (not on_green_geo) and (name_lower.contains("rough") or name_lower.contains("terrain") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.ROUGH))
 
 	var changed_sand = (is_in_sand != is_sand)
 	is_in_sand = is_sand
@@ -2782,8 +2817,8 @@ func _update_surface_from_collider(collider: Object) -> void:
 					set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
 					lie_type = "fringe"
 				else:
-					set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
-					lie_type = "fairway"
+					set_surface(PhysicsEnums.SurfaceType.ROUGH)
+					lie_type = "rough"
 		if changed_sand:
 			_apply_surface_params()
 

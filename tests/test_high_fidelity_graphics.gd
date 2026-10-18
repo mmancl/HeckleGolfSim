@@ -93,10 +93,13 @@ func _process(_delta: float) -> bool:
 	assert(int(detail_stats["bunkers_built"]) == 1, "1 recessed 3D bunker must be built")
 	assert(mock_scene.has_node("HighFidelityBunkers"), "HighFidelityBunkers container must exist")
 	assert(mock_scene.has_node("BunkerLipGrassMultiMesh") or (mock_scene.has_node("HighFidelityBunkers") and mock_scene.get_node("HighFidelityBunkers").has_node("BunkerLipGrassMultiMesh")), "BunkerLipGrassMultiMesh must exist")
+	var bunker_grass_mmi = mock_scene.get_node_or_null("BunkerLipGrassMultiMesh") as MultiMeshInstance3D
+	if bunker_grass_mmi != null and bunker_grass_mmi.multimesh != null:
+		assert(bunker_grass_mmi.multimesh.instance_count == 0, "BunkerLipGrassMultiMesh instance_count must be 0 to keep sand traps free of grass weeds")
 	assert(mock_scene.has_node("ShorelineReedsMultiMesh"), "ShorelineReedsMultiMesh must exist around water pond")
 	assert(mock_scene.has_node("HorizonSkirt"), "HorizonSkirt outer terrain ring must exist")
 	assert(mock_scene.has_node("CartPaths"), "CartPaths extruded ribbon mesh must exist")
-	print("  PASS: CourseDetailEnhancer built recessed 3D bunkers, lip grass, shoreline reeds, cart paths, and horizon skirt.")
+	print("  PASS: CourseDetailEnhancer built recessed 3D bunkers, clean hazard lip, shoreline reeds, cart paths, and horizon skirt.")
 
 	# 7. Test HighFidelityBuilder coordinator lifecycle (including HighFidelityGrass & HighFidelityOverlay)
 	var builder := HighFidelityBuilder.apply_high_fidelity(mock_scene)
@@ -270,7 +273,10 @@ func _test_course_graphics_upgrader() -> void:
 	assert(upgraded_inst.has_node("MultiMeshFoliageContainer"), "Upgraded course.tscn must contain MultiMeshFoliageContainer")
 	assert(upgraded_inst.has_node("HighFidelityBunkers"), "Upgraded course.tscn must contain HighFidelityBunkers")
 	var sky3d := upgraded_inst.get_node_or_null("Sky3D") as WorldEnvironment
-	assert(sky3d.environment.sky.process_mode == Sky.PROCESS_MODE_QUALITY, "Upgraded course.tscn Sky must use PROCESS_MODE_QUALITY")
+	assert(sky3d.environment.sky.process_mode == Sky.PROCESS_MODE_REALTIME, "Upgraded course.tscn Sky must use PROCESS_MODE_REALTIME")
+	var skydome := sky3d.get_node_or_null("Skydome")
+	if skydome != null and "clouds_speed" in skydome:
+		assert(is_equal_approx(skydome.get("clouds_speed"), 0.005), "Skydome clouds_speed must be 0.005 for gradual drift")
 	upgraded_inst.free()
 
 	# Clean up temporary test folder

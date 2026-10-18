@@ -181,8 +181,17 @@ func _initialize():
 
 	assert(label.text.contains("💨"), "Label must contain air moving icon 💨")
 	assert(label.text.contains("Wind 12 MPH"), "Label must contain 'Wind 12 MPH', got: " + label.text)
+	assert(label.text.contains("↑"), "Tailwind must show plain arrow ↑ in label, got: " + label.text)
+	assert(not label.text.contains("⬆"), "Label must NOT contain emoji box ⬆")
+	assert(not label.text.contains("font_size=28"), "Label must NOT have font_size=28 override distorting line spacing")
 	var wind_offset = badge.offset_right
 	assert(wind_offset > 300 and wind_offset < 420, "Badge must dynamically expand for wind, got: %f" % wind_offset)
+
+	# Crosswind check: ensure right crosswind produces plain arrow → and never emoji ➡
+	gs.current_wind_direction_rad = PI / 2.0
+	range_instance._update_aim_distance_label_text()
+	assert(label.text.contains("→"), "Right crosswind must show plain arrow → in label, got: " + label.text)
+	assert(not label.text.contains("➡"), "Label must NOT contain emoji box ➡")
 	print("  PASS: HUD Label text when enabled: '%s' (badge width: %0.1f)" % [label.text, wind_offset * 2])
 
 	# Disable wind

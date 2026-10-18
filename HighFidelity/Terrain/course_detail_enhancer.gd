@@ -40,6 +40,7 @@ static func _strip_legacy_grass_nodes(scene_root: Node) -> void:
 		for c in n.get_children():
 			var cn := String(c.name)
 			if cn == "BunkerLipGrassMultiMesh" or cn == "ShorelineReedsMultiMesh" \
+					or cn == "HighFidelityBunkers" \
 					or cn.begins_with("BushChunk_") or cn.begins_with("Bush_"):
 				to_remove.append(c)
 			else:
@@ -132,7 +133,7 @@ static func _build_recessed_3d_bunkers(scene_root: Node, height_info: Dictionary
 
 	for child in scene_root.find_children("*", "CollisionObject3D", true, false):
 		var cname := child.name.to_lower()
-		var is_bunker: bool = cname.begins_with("bunker") or cname.contains("bunker") or bool(child.get_meta("is_sand", false)) or int(child.get_meta("surface_type", -1)) in [2, 5]
+		var is_bunker: bool = (cname.begins_with("bunker") or cname.contains("bunker") or bool(child.get_meta("is_sand", false)) or int(child.get_meta("surface_type", -1)) == 5) and not bool(child.get_meta("is_water", false)) and not cname.contains("terrain") and not cname.contains("rough")
 		if is_bunker:
 			for sub in child.get_children():
 				if sub is CollisionPolygon3D and (sub as CollisionPolygon3D).polygon.size() >= 3:
@@ -174,11 +175,6 @@ static func _build_recessed_3d_bunkers(scene_root: Node, height_info: Dictionary
 		container.owner = scene_root
 
 	var bunker_mat := _create_bunker_high_material()
-	var lip_grass_transforms: Array[Transform3D] = []
-	var lip_grass_colors: Array[Color] = []
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 424242
-
 	var built := 0
 	for idx in range(polygons.size()):
 		var poly := _subdivide_and_orient_ccw(polygons[idx], 0.95)
@@ -202,43 +198,14 @@ static func _build_recessed_3d_bunkers(scene_root: Node, height_info: Dictionary
 			mi.owner = scene_root
 		built += 1
 
-		# Populate overhanging 3D rough/fescue grass clumps along the raised bunker sod rim
-		for v_i in range(poly.size()):
-			if rng.randf() > 0.68:
-				continue
-			var p2d := poly[v_i]
-			var wy := _sample_height(p2d.x, p2d.y, height_info, base_heights[idx]) + 0.04
-			var rot_y := rng.randf_range(0.0, TAU)
-			var s := rng.randf_range(0.85, 1.35)
-			var xf := Transform3D(Basis(Vector3.UP, rot_y).scaled(Vector3(s, s, s)), Vector3(p2d.x, wy, p2d.y))
-			lip_grass_transforms.append(xf)
-			lip_grass_colors.append(Color(rng.randf_range(0.88, 1.06), rng.randf_range(0.92, 1.05), rng.randf_range(0.84, 1.0), rng.randf_range(0.05, 0.99)))
-
 	var mmi := MultiMeshInstance3D.new()
 	mmi.name = "BunkerLipGrassMultiMesh"
-	if not lip_grass_transforms.is_empty():
-		var clump_mesh := HighFidelityGrassScript._create_grass_clump_mesh(14, 0.34, 0.14, 0.27, 0.022, 0.18)
-		var grass_shader := load("res://Courses/Environments/shaders/grass_blades_high.gdshader") as Shader
-		if grass_shader != null:
-			var g_mat := ShaderMaterial.new()
-			g_mat.shader = grass_shader
-			g_mat.set_shader_parameter("root_color", Color(0.11, 0.21, 0.08))
-			g_mat.set_shader_parameter("tip_color", Color(0.35, 0.51, 0.21))
-			g_mat.set_shader_parameter("dry_tip_color", Color(0.60, 0.54, 0.34))
-			g_mat.set_shader_parameter("dry_tip_ratio", 0.32)
-			g_mat.set_shader_parameter("max_render_distance", 95.0)
-			g_mat.set_shader_parameter("fade_start_distance", 65.0)
-			clump_mesh.surface_set_material(0, g_mat)
-
-		var mm := MultiMesh.new()
-		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.use_custom_data = true
-		mm.mesh = clump_mesh
-		mm.instance_count = lip_grass_transforms.size()
-		for i in range(lip_grass_transforms.size()):
-			mm.set_instance_transform(i, lip_grass_transforms[i])
-			mm.set_instance_custom_data(i, lip_grass_colors[i])
-		mmi.multimesh = mm
+	# Sand traps should be clean hazards without grass shoots or weeds
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_custom_data = true
+	mm.instance_count = 0
+	mmi.multimesh = mm
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	scene_root.add_child(mmi)
 	if persist_for_save:

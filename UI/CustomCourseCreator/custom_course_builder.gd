@@ -108,7 +108,7 @@ static func build_custom_course(
 
 	# 2. Serialize course.json
 	var course_json_dict = {
-		"graphics_version": 5,
+		"graphics_version": 6,
 		"scene_path": "course.tscn",
 		"Title": title.strip_edges(),
 		"is_custom": true,
@@ -193,6 +193,8 @@ static func _build_and_save_course_scene(
 	var sky_env = WorldEnvironment.new()
 	sky_env.name = "Sky3D"
 	sky_env.set_script(load("res://addons/sky_3d/src/Sky3D.gd"))
+	sky_env.set("enable_editor_time", false)
+	sky_env.set("enable_game_time", false)
 	root.add_child(sky_env)
 	sky_env.owner = root
 
@@ -230,6 +232,8 @@ static func _build_and_save_course_scene(
 	var skydome_script = load("res://addons/sky_3d/src/Skydome.gd")
 	if skydome_script != null:
 		skydome.set_script(skydome_script)
+		skydome.set("clouds_speed", 0.005)
+		skydome.set("clouds_cumulus_speed", 0.003)
 	sky_env.add_child(skydome)
 	skydome.owner = root
 
@@ -239,6 +243,9 @@ static func _build_and_save_course_scene(
 	if tod_script != null:
 		time_of_day.set_script(tod_script)
 		time_of_day.set("dome_path", NodePath("../Skydome"))
+		time_of_day.set("update_in_game", false)
+		time_of_day.set("update_in_editor", false)
+		time_of_day.set("update_interval", 1.0)
 	sky_env.add_child(time_of_day)
 	time_of_day.owner = root
 

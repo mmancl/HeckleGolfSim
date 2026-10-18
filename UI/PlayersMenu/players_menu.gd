@@ -2381,9 +2381,14 @@ func _build_club_distances_tab(player_name: String) -> VBoxContainer:
 		count_vbox.add_child(count_val)
 
 		var count_cap = Label.new()
-		count_cap.text = "Recorded"
+		var mishits_cnt: int = c_data.get("mishits_excluded", 0)
+		if mishits_cnt > 0:
+			count_cap.text = "Valid (%d miss-hit%s)" % [mishits_cnt, "" if mishits_cnt == 1 else "s"]
+			count_cap.add_theme_color_override("font_color", Color(1.0, 0.65, 0.35, 0.9))
+		else:
+			count_cap.text = "Recorded"
+			count_cap.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_DIM)
 		count_cap.add_theme_font_size_override("font_size", 11)
-		count_cap.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_DIM)
 		count_vbox.add_child(count_cap)
 
 		# Column 3: Stats (Total Distance, Carry Distance, Speed, Spin, Offline)
