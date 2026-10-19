@@ -202,6 +202,21 @@ func _initialize():
 	assert(no_wind_offset < wind_offset, "Badge must shrink when wind is disabled")
 	print("  PASS: HUD Label text when disabled: '%s' (badge width: %0.1f)" % [label.text, no_wind_offset * 2])
 
+	# RichTextLabel check: ensure bbcode thickness formatting is applied
+	canvas.remove_child(label)
+	label.free()
+	var rtl = RichTextLabel.new()
+	rtl.name = "AimDistanceLabel"
+	rtl.bbcode_enabled = true
+	canvas.add_child(rtl)
+	gs.range_settings.wind_enabled.set_value(true)
+	range_instance._update_aim_distance_label_text()
+	assert(rtl.text.contains("[outline_size=2]"), "RichTextLabel must contain outline_size=2 for thickened arrow, got: " + rtl.text)
+	assert(rtl.text.contains("[outline_color=#f5faff]"), "RichTextLabel must contain outline_color matching text")
+	assert(rtl.text.contains("[b]"), "RichTextLabel must contain bold tag for thickened arrow")
+	assert(not rtl.text.contains("font_size=28"), "RichTextLabel must not contain line-height distorting font_size=28")
+	print("  PASS: RichTextLabel thick arrow BBCode verified: %s" % rtl.text)
+
 	range_instance.free()
 
 	# -------------------------------------------------------------

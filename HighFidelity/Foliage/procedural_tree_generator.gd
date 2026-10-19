@@ -176,6 +176,7 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 	static_col_body.collision_layer = 1
 	static_col_body.collision_mask = 0
 	static_col_body.set_meta("is_tree", true)
+	static_col_body.add_to_group("trees", true)
 	scene_root.add_child(static_col_body)
 	if persist_for_save:
 		static_col_body.owner = scene_root
@@ -192,13 +193,24 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 	if persist_for_save:
 		canopy_area.owner = scene_root
 
-	# Shared collision shapes (eliminates thousands of duplicate shape allocations!)
-	var shared_trunk_shape := CapsuleShape3D.new()
-	shared_trunk_shape.radius = 0.15
-	shared_trunk_shape.height = 1.0
+	# Shared collision shapes matching authentic tree model dimensions
+	# Standard oak/foliage trees: 5.6m height, 0.38m trunk radius
+	var shared_trunk_shape := CylinderShape3D.new()
+	shared_trunk_shape.radius = 0.38
+	shared_trunk_shape.height = 5.6
+
+	# Weeping willows: 2.6m height, 0.45m trunk radius
+	var shared_willow_trunk_shape := CylinderShape3D.new()
+	shared_willow_trunk_shape.radius = 0.45
+	shared_willow_trunk_shape.height = 2.6
+
+	# Tall conifers/birches: 6.8m height, 0.34m trunk radius
+	var shared_tall_trunk_shape := CylinderShape3D.new()
+	shared_tall_trunk_shape.radius = 0.34
+	shared_tall_trunk_shape.height = 6.8
 
 	var shared_canopy_shape := SphereShape3D.new()
-	shared_canopy_shape.radius = 2.0
+	shared_canopy_shape.radius = 2.4
 
 	var shared_rock_shape := SphereShape3D.new()
 	shared_rock_shape.radius = 0.55
@@ -247,19 +259,63 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 		chunk_buckets[bucket_key]["transforms"].append(global_xf)
 		chunk_buckets[bucket_key]["colors"].append(get_lush_summer_instance_color(pos, near_water))
 
-		# Add trunk collider to consolidated StaticBody3D
+		# Look for original trunk CollisionShape3D on t_node before converting
+		var orig_col: CollisionShape3D = null
+		for child in t_node.get_children():
+			if child is CollisionShape3D and child.get_parent() == t_node:
+				orig_col = child
+				break
+
+		# Add trunk collider to consolidated StaticBody3D with full trunk height & radius
 		var trunk_col := CollisionShape3D.new()
-		trunk_col.shape = shared_trunk_shape
-		trunk_col.position = pos + Vector3(0.0, 0.5 * t_node.scale.y, 0.0)
+		if orig_col != null and orig_col.shape != null:
+			trunk_col.shape = orig_col.shape
+			trunk_col.position = pos + Vector3(
+				orig_col.position.x * t_node.scale.x,
+				orig_col.position.y * t_node.scale.y,
+				orig_col.position.z * t_node.scale.z
+			)
+		else:
+			var is_willow_tree: bool = t_node.has_meta("is_willow") or m_path.containsn("willow")
+			var is_tall_tree: bool = t_node.has_meta("is_pine") or t_node.has_meta("is_birch") or m_path.containsn("pine") or m_path.containsn("birch")
+			if is_willow_tree:
+				trunk_col.shape = shared_willow_trunk_shape
+				trunk_col.position = pos + Vector3(0.0, 1.3 * t_node.scale.y, 0.0)
+			elif is_tall_tree:
+				trunk_col.shape = shared_tall_trunk_shape
+				trunk_col.position = pos + Vector3(0.0, 2.4 * t_node.scale.y, 0.0)
+			else:
+				trunk_col.shape = shared_trunk_shape
+				trunk_col.position = pos + Vector3(0.0, 2.0 * t_node.scale.y, 0.0)
+
 		trunk_col.scale = t_node.scale
+		trunk_col.rotation.y = t_node.rotation.y
 		static_col_body.add_child(trunk_col)
 		if persist_for_save:
 			trunk_col.owner = scene_root
 
+		# Look for original CanopyArea on t_node
+		var orig_canopy: Area3D = t_node.get_node_or_null("CanopyArea") as Area3D
+		var orig_canopy_col: CollisionShape3D = null
+		if orig_canopy != null:
+			for child in orig_canopy.get_children():
+				if child is CollisionShape3D:
+					orig_canopy_col = child
+					break
+
 		# Add canopy collider to consolidated Area3D
 		var canopy_col := CollisionShape3D.new()
-		canopy_col.shape = shared_canopy_shape
-		canopy_col.position = pos + Vector3(0.0, 3.2 * t_node.scale.y, 0.0)
+		if orig_canopy != null and orig_canopy_col != null and orig_canopy_col.shape != null:
+			canopy_col.shape = orig_canopy_col.shape
+			canopy_col.position = pos + Vector3(
+				orig_canopy.position.x * t_node.scale.x,
+				orig_canopy.position.y * t_node.scale.y,
+				orig_canopy.position.z * t_node.scale.z
+			)
+		else:
+			canopy_col.shape = shared_canopy_shape
+			canopy_col.position = pos + Vector3(0.0, 3.8 * t_node.scale.y, 0.0)
+
 		canopy_col.scale = t_node.scale
 		canopy_area.add_child(canopy_col)
 		if persist_for_save:

@@ -1,6 +1,8 @@
 extends Node3D
 
 const TeeboxMarkerBuilder = preload("res://Courses/Range/teebox_marker_builder.gd")
+const FlagBuilder = preload("res://Courses/Range/flag_builder.gd")
+const AimDistanceIndicator = preload("res://UI/aim_distance_indicator.gd")
 
 var track_points : bool = false
 var trail_timer : float = 0.0
@@ -105,9 +107,10 @@ var _was_screen_aiming: bool = false
 var _continuous_aim_angle_rad: float = 0.0
 var _continuous_aim_angle_init: bool = false
 var _last_aim_dist_yards: int = -1
+var _aim_distance_indicator: AimDistanceIndicator = null
 
 func is_actively_aiming() -> bool:
-	return _was_keyboard_aiming or _was_screen_aiming or is_screen_aiming
+	return _was_keyboard_aiming or _was_screen_aiming or is_screen_aiming or (_aim_distance_indicator != null and _aim_distance_indicator.is_indicator_active())
 
 var course_data_dict: Dictionary = {}
 var _shot_active: bool = false
@@ -616,6 +619,11 @@ func _ready() -> void:
 	canvas.visible = true
 	add_child(canvas)
 
+	# Initialize AimDistanceIndicator (3D reticle + floating distance card with guideline)
+	_aim_distance_indicator = AimDistanceIndicator.new()
+	_aim_distance_indicator.initialize(self)
+	add_child(_aim_distance_indicator)
+
 	# HBoxContainer for zoom buttons in Aerial View (placed top middle below the distance label)
 	var zoom_vbox = HBoxContainer.new()
 	zoom_vbox.name = "AerialZoomVBox"
@@ -703,7 +711,11 @@ func _ready() -> void:
 	aim_lbl.autowrap_mode = TextServer.AUTOWRAP_OFF
 	aim_lbl.text = "[center]🎯 Aim: --- | ⛰️ Elevation: 0 Feet | 🟢 Fairway[/center]"
 	aim_lbl.add_theme_font_size_override("normal_font_size", 18)
-	aim_lbl.add_theme_font_size_override("bold_font_size", 18)
+	aim_lbl.add_theme_font_size_override("bold_font_size", 22)
+	var bold_var = FontVariation.new()
+	bold_var.base_font = aim_lbl.get_theme_font("font")
+	bold_var.variation_embolden = 1.8
+	aim_lbl.add_theme_font_override("bold_font", bold_var)
 	aim_lbl.add_theme_color_override("default_color", Color(0.96, 0.98, 1.0))
 	aim_lbl.add_theme_constant_override("outline_size", 4)
 	aim_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
@@ -1530,6 +1542,8 @@ func _process_screen_aiming(delta: float) -> void:
 	if screen_aim_direction == 0.0:
 		if _was_screen_aiming:
 			_was_screen_aiming = false
+			if _aim_distance_indicator != null:
+				_aim_distance_indicator.notify_aiming_stopped()
 			_continuous_aim_angle_init = false
 			aim_target_pos.y = get_height(aim_target_pos.x, aim_target_pos.z)
 			if has_node("AimMarker"):
@@ -1554,6 +1568,8 @@ func _process_screen_aiming(delta: float) -> void:
 		return
 
 	_was_screen_aiming = true
+	if _aim_distance_indicator != null:
+		_aim_distance_indicator.notify_aiming()
 
 	var ball_pos = $Player.ball.global_position
 	var diff = aim_target_pos - ball_pos
@@ -1606,20 +1622,32 @@ func _process_keyboard_aiming(delta: float) -> void:
 		return
 
 	var turn_input: float = 0.0
-	if Input.is_action_pressed("aim_left"):
+	if Input.is_action_pressed("aim_left") or Input.is_key_pressed(KEY_LEFT):
 		turn_input -= 1.0
-	if Input.is_action_pressed("aim_right"):
+	if Input.is_action_pressed("aim_right") or Input.is_key_pressed(KEY_RIGHT):
 		turn_input += 1.0
 
 	var dist_input: float = 0.0
-	if Input.is_action_pressed("aim_forward"):
+	if Input.is_action_pressed("aim_forward") or Input.is_key_pressed(KEY_UP):
 		dist_input += 1.0
-	if Input.is_action_pressed("aim_backward"):
+	if Input.is_action_pressed("aim_backward") or Input.is_key_pressed(KEY_DOWN):
 		dist_input -= 1.0
+
+	for joy_id in Input.get_connected_joypads():
+		if Input.is_joy_button_pressed(joy_id, JOY_BUTTON_DPAD_LEFT):
+			turn_input -= 1.0
+		if Input.is_joy_button_pressed(joy_id, JOY_BUTTON_DPAD_RIGHT):
+			turn_input += 1.0
+		if Input.is_joy_button_pressed(joy_id, JOY_BUTTON_DPAD_UP):
+			dist_input += 1.0
+		if Input.is_joy_button_pressed(joy_id, JOY_BUTTON_DPAD_DOWN):
+			dist_input -= 1.0
 
 	if turn_input == 0.0 and dist_input == 0.0:
 		if _was_keyboard_aiming:
 			_was_keyboard_aiming = false
+			if _aim_distance_indicator != null:
+				_aim_distance_indicator.notify_aiming_stopped()
 			_continuous_aim_angle_init = false
 			aim_target_pos.y = get_height(aim_target_pos.x, aim_target_pos.z)
 			if has_node("AimMarker"):
@@ -1647,6 +1675,8 @@ func _process_keyboard_aiming(delta: float) -> void:
 		return
 
 	_was_keyboard_aiming = true
+	if _aim_distance_indicator != null:
+		_aim_distance_indicator.notify_aiming()
 
 	var vp := get_viewport()
 	if vp != null and vp.gui_get_focus_owner() != null:
@@ -3050,80 +3080,11 @@ func _spawn_flag_pin() -> void:
 	add_child(pin)
 	pin.global_position = current_hole_location
 	
-	# Flagpole: thin cylinder
-	var pole = MeshInstance3D.new()
-	pole.name = "Pole"
-	var pole_mesh = CylinderMesh.new()
-	pole_mesh.top_radius = 0.012
-	pole_mesh.bottom_radius = 0.012
-	pole_mesh.height = 3.0
-	pole.mesh = pole_mesh
-	var pole_mat = StandardMaterial3D.new()
-	pole_mat.albedo_color = Color.WHITE
-	pole.material_override = pole_mat
-	pole.position = Vector3(0, 1.5, 0)
-	pin.add_child(pole)
-
-	# Flagpole 3D collider (typical collision, disabled when putting)
-	var flag_body = StaticBody3D.new()
-	flag_body.name = "FlagstickCollider"
-	flag_body.set_meta("is_flagstick", true)
-	flag_body.set_meta("is_obstacle", true)
-	flag_body.collision_layer = 1
-	flag_body.collision_mask = 0
-	var col_shape = CollisionShape3D.new()
-	col_shape.name = "CollisionShape"
-	var cyl = CylinderShape3D.new()
-	cyl.radius = 0.012
-	cyl.height = 3.0
-	col_shape.shape = cyl
-	col_shape.position = Vector3(0, 1.5, 0)
-	flag_body.add_child(col_shape)
-	pin.add_child(flag_body)
-	
-	# Flag: small red prism/box mesh
-	var flag = MeshInstance3D.new()
-	flag.name = "Flag"
-	var flag_mesh = PrismMesh.new()
-	flag_mesh.size = Vector3(0.5, 0.4, 0.02)
-	flag.mesh = flag_mesh
-	var flag_mat = StandardMaterial3D.new()
-	flag_mat.albedo_color = Color(1.0, 0.1, 0.1) # Bright red
-	flag_mat.emission_enabled = true
-	flag_mat.emission = Color(1.0, 0.1, 0.1)
-	flag.material_override = flag_mat
-	flag.position = Vector3(0.25, 2.8, 0)
-	flag.rotation = Vector3(0, 0, -PI/2)
-	pin.add_child(flag)
-	
-	# Cup / hole circle on ground: realistic golf cup (white cup liner/rim with dark interior)
-	var cup_white = MeshInstance3D.new()
-	cup_white.name = "CupWhite"
-	var white_mesh = CylinderMesh.new()
-	white_mesh.top_radius = cup_radius
-	white_mesh.bottom_radius = cup_radius
-	white_mesh.height = 0.003
-	cup_white.mesh = white_mesh
-	var white_mat = StandardMaterial3D.new()
-	white_mat.albedo_color = Color(0.95, 0.95, 0.95)
-	white_mat.roughness = 0.5
-	cup_white.material_override = white_mat
-	cup_white.position = Vector3(0, 0.0012, 0)
-	pin.add_child(cup_white)
-
-	var cup = MeshInstance3D.new()
-	cup.name = "Cup"
-	var cup_mesh = CylinderMesh.new()
-	cup_mesh.top_radius = 0.048
-	cup_mesh.bottom_radius = 0.048
-	cup_mesh.height = 0.0035
-	cup.mesh = cup_mesh
-	var cup_mat = StandardMaterial3D.new()
-	cup_mat.albedo_color = Color(0.12, 0.12, 0.12)
-	cup_mat.roughness = 1.0
-	cup.material_override = cup_mat
-	cup.position = Vector3(0, 0.0016, 0)
-	pin.add_child(cup)
+	var q_str = ""
+	var gs = GlobalSettings if GlobalSettings != null else (get_node_or_null("/root/GlobalSettings") if is_inside_tree() else null)
+	if gs != null and gs.has_method("get_graphics_quality"):
+		q_str = gs.get_graphics_quality()
+	FlagBuilder.build_flag_pin(pin, 3.0, Color(0.95, 0.12, 0.12), cup_radius, q_str)
 	
 	print("[CoursePlay] FlagPin and PinMarker spawned at: ", current_hole_location)
 	update_gimme_circles()
@@ -3175,6 +3136,8 @@ func _on_shot_initiated() -> void:
 	_shot_active = true
 	_shot_transition_active = false
 	_zoom_zone_dirty = true
+	if _aim_distance_indicator != null:
+		_aim_distance_indicator.dismiss_immediate()
 	if has_node("/root/ScreenOffsetManager"):
 		ScreenOffsetManager.on_shot_started()
 	if has_node("/root/LaunchMonitorManager"):
@@ -6428,7 +6391,10 @@ func _update_aim_distance_label_text() -> void:
 		var arrow_symbol: String = wind_info.get("arrow", "↑")
 		var spd_val: int = int(round(wind_info.get("speed_mph", 0.0)))
 		
-		wind_text = "💨 %s Wind %d MPH" % [arrow_symbol, spd_val]
+		if label is RichTextLabel or label.get("bbcode_enabled") == true:
+			wind_text = "💨 [b][outline_size=2][outline_color=#f5faff]%s[/outline_color][/outline_size][/b] Wind %d MPH" % [arrow_symbol, spd_val]
+		else:
+			wind_text = "💨 %s Wind %d MPH" % [arrow_symbol, spd_val]
 		plain_wind_text = "💨 %s Wind %d MPH" % [arrow_symbol, spd_val]
 
 	var plain_full_text := ""
@@ -6451,7 +6417,7 @@ func _update_aim_distance_label_text() -> void:
 	if text_w <= 0.0:
 		text_w = plain_full_text.length() * 9.5
 
-	var half_w: float = ceil((text_w / 2.0) + 16.0)
+	var half_w: float = ceil((text_w / 2.0) + 18.0)
 	label.offset_left = -half_w
 	label.offset_right = half_w
 	if has_node("MapCanvas/AimDistanceBadge"):
@@ -7205,30 +7171,11 @@ func _setup_chipping_minigame() -> void:
 		island.add_child(flag_node)
 		flag_node.position = Vector3(0.0, 0.1, 0.0)
 		
-		var pole = MeshInstance3D.new()
-		var pole_mesh = CylinderMesh.new()
-		pole_mesh.top_radius = 0.015
-		pole_mesh.bottom_radius = 0.015
-		pole_mesh.height = 1.8
-		pole.mesh = pole_mesh
-		var pole_mat = StandardMaterial3D.new()
-		pole_mat.albedo_color = Color.WHITE
-		pole.material_override = pole_mat
-		pole.position = Vector3(0.0, 0.9, 0.0)
-		flag_node.add_child(pole)
-		
-		var flag = MeshInstance3D.new()
-		var flag_mesh = PrismMesh.new()
-		flag_mesh.size = Vector3(0.35, 0.25, 0.01)
-		flag.mesh = flag_mesh
-		var flag_mat = StandardMaterial3D.new()
-		flag_mat.albedo_color = Color(0.85, 0.65, 0.0)
-		flag_mat.emission_enabled = true
-		flag_mat.emission = Color(0.85, 0.65, 0.0)
-		flag.material_override = flag_mat
-		flag.position = Vector3(0.175, 1.775, 0.0)
-		flag.rotation = Vector3(0.0, 0.0, -PI/2)
-		flag_node.add_child(flag)
+		var q_str = ""
+		var gs = GlobalSettings if GlobalSettings != null else (get_node_or_null("/root/GlobalSettings") if is_inside_tree() else null)
+		if gs != null and gs.has_method("get_graphics_quality"):
+			q_str = gs.get_graphics_quality()
+		FlagBuilder.setup_target_flag(flag_node, 1.8, Color(0.85, 0.65, 0.0), 0.38, 0.26, false, q_str)
 		
 		var label_node = Label3D.new()
 		label_node.text = "%d FT" % chipping_distances[i]

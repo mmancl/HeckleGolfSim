@@ -99,6 +99,25 @@ func _process(_delta: float) -> bool:
 	assert(mock_scene.has_node("ShorelineReedsMultiMesh"), "ShorelineReedsMultiMesh must exist around water pond")
 	assert(mock_scene.has_node("HorizonSkirt"), "HorizonSkirt outer terrain ring must exist")
 	assert(mock_scene.has_node("CartPaths"), "CartPaths extruded ribbon mesh must exist")
+
+	# Test concave bunker manifold extraction (ensures concave shapes are preserved and not flattened into convex hulls)
+	var l_faces := PackedVector3Array([
+		Vector3(0, 0, 0), Vector3(10, 0, 0), Vector3(10, 0, 10),
+		Vector3(0, 0, 0), Vector3(10, 0, 10), Vector3(0, 0, 10),
+		Vector3(10, 0, 0), Vector3(20, 0, 0), Vector3(20, 0, 10),
+		Vector3(10, 0, 0), Vector3(20, 0, 10), Vector3(10, 0, 10),
+		Vector3(0, 0, 10), Vector3(10, 0, 10), Vector3(10, 0, 20),
+		Vector3(0, 0, 10), Vector3(10, 0, 20), Vector3(0, 0, 20)
+	])
+	var concave_boundary: PackedVector2Array = CourseDetailEnhancer._extract_boundary_polygon_from_faces(l_faces, Transform3D.IDENTITY)
+	assert(concave_boundary.size() == 6, "Concave L-shaped bunker must preserve all 6 vertices, got %d" % concave_boundary.size())
+	var has_inner_corner := false
+	for pt in concave_boundary:
+		if pt.distance_squared_to(Vector2(10.0, 10.0)) < 0.01:
+			has_inner_corner = true
+			break
+	assert(has_inner_corner, "Concave inner corner (10, 10) must be preserved and not bypassed by convex hull")
+
 	print("  PASS: CourseDetailEnhancer built recessed 3D bunkers, clean hazard lip, shoreline reeds, cart paths, and horizon skirt.")
 
 	# 7. Test HighFidelityBuilder coordinator lifecycle (including HighFidelityGrass & HighFidelityOverlay)

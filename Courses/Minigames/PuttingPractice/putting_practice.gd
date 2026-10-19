@@ -2,6 +2,7 @@ extends Node3D
 
 # Preloaded assets
 var PlayerScene = preload("res://Player/player.tscn")
+const FlagBuilder = preload("res://Courses/Range/flag_builder.gd")
 
 # Minigame state variables
 var player = null
@@ -292,9 +293,14 @@ func _update_flagpole_color() -> void:
 	var flag = pin.get_node_or_null("Flag")
 	var ring = pin.get_node_or_null("TargetRing")
 	var active_col = get_active_player_color() if pvp_mode else Color(1.0, 0.1, 0.1)
-	if flag and flag.material_override is StandardMaterial3D:
-		flag.material_override.albedo_color = active_col
-		flag.material_override.emission = active_col
+	if flag != null:
+		if flag.has_method("set_flag_color"):
+			flag.set_flag_color(active_col)
+		elif "flag_color" in flag:
+			flag.set("flag_color", active_col)
+		elif flag.material_override is StandardMaterial3D:
+			flag.material_override.albedo_color = active_col
+			flag.material_override.emission = active_col
 	if ring and ring.material_override is StandardMaterial3D:
 		var ring_col = get_active_player_color() if pvp_mode else Color(0.0, 0.8, 1.0)
 		ring.material_override.albedo_color = Color(ring_col.r, ring_col.g, ring_col.b, 0.5)
@@ -1182,36 +1188,12 @@ func _spawn_flagpole(pos: Vector3) -> void:
 	add_child(pin)
 	pin.global_position = pos
 	
-	# Pole
-	var pole = MeshInstance3D.new()
-	var pole_mesh = CylinderMesh.new()
-	pole_mesh.top_radius = 0.012
-	pole_mesh.bottom_radius = 0.012
-	pole_mesh.height = 2.0
-	pole.mesh = pole_mesh
-	
-	var pole_mat = StandardMaterial3D.new()
-	pole_mat.albedo_color = Color.WHITE
-	pole.material_override = pole_mat
-	pole.position = Vector3(0.0, 1.0, 0.0)
-	pin.add_child(pole)
-	
-	# Flag
-	var flag = MeshInstance3D.new()
-	var flag_mesh = PrismMesh.new()
-	flag_mesh.size = Vector3(0.4, 0.3, 0.02)
-	flag.mesh = flag_mesh
-	flag.name = "Flag"
-	
 	var flag_col = get_active_player_color() if pvp_mode else Color(1.0, 0.1, 0.1)
-	var flag_mat = StandardMaterial3D.new()
-	flag_mat.albedo_color = flag_col
-	flag_mat.emission_enabled = true
-	flag_mat.emission = flag_col
-	flag.material_override = flag_mat
-	flag.position = Vector3(0.2, 1.85, 0.0)
-	flag.rotation = Vector3(0.0, 0.0, -PI/2)
-	pin.add_child(flag)
+	var q_str = ""
+	var gs = GlobalSettings if GlobalSettings != null else (get_node_or_null("/root/GlobalSettings") if is_inside_tree() else null)
+	if gs != null and gs.has_method("get_graphics_quality"):
+		q_str = gs.get_graphics_quality()
+	FlagBuilder.setup_target_flag(pin, 2.0, flag_col, 0.42, 0.30, false, q_str)
 	
 	# Glow/Selection Ring
 	var ring = MeshInstance3D.new()

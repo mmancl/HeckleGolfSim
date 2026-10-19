@@ -208,11 +208,39 @@ public partial class BounceCalculator : RefCounted
 
             if (canReverseBackwards)
             {
-                // Active backspin bite into reverse spinback! Only for ultra-high-spin wedge shots landing steep.
-                float rolloutSpinbackTerm = (2.0f / 7.0f) * BallPhysics.RADIUS * activeBackspinRad * Mathf.Max(parameters.SpinbackResponseScale, 0.5f);
+                // Active backspin bite into reverse spinback!
+                // Target reverse distances on green:
+                //   ~9,000 RPM:  2-3 feet (0.6 - 0.9 m, speed ~ -0.45 to -0.55 m/s)
+                //  ~10,000 RPM:  4-8 feet (1.2 - 2.4 m, speed ~ -0.65 to -0.90 m/s)
+                //  ~11,000 RPM:  9-16 feet (2.7 - 4.9 m, speed ~ -1.00 to -1.35 m/s)
+                //  ~12,000 RPM: 16-25 feet (4.9 - 7.6 m, speed ~ -1.35 to -1.70 m/s)
+                //  >12,000 RPM: 25+ feet (speed up to -2.1 m/s)
+                float spinScaleFactor;
+                if (activeBackspinRpm <= 3900.0f)
+                {
+                    spinScaleFactor = Mathf.Lerp(0.50f, 0.65f, (activeBackspinRpm - 3800.0f) / 100.0f);
+                }
+                else if (activeBackspinRpm <= 4500.0f)
+                {
+                    // ~9,500 - 10,500 RPM launch
+                    spinScaleFactor = Mathf.Lerp(0.65f, 0.95f, (activeBackspinRpm - 3900.0f) / 600.0f);
+                }
+                else if (activeBackspinRpm <= 5200.0f)
+                {
+                    // ~10,500 - 11,500 RPM launch
+                    spinScaleFactor = Mathf.Lerp(0.95f, 1.35f, (activeBackspinRpm - 4500.0f) / 700.0f);
+                }
+                else
+                {
+                    // >= 12,000 RPM launch
+                    spinScaleFactor = Mathf.Lerp(1.35f, 2.00f, Mathf.Clamp((activeBackspinRpm - 5200.0f) / 1000.0f, 0.0f, 1.0f));
+                }
+
+                float maxReverseSpeed = -spinScaleFactor;
+                float rolloutSpinbackTerm = (2.0f / 7.0f) * BallPhysics.RADIUS * activeBackspinRad * 0.40f * Mathf.Max(parameters.SpinbackResponseScale, 0.5f);
                 newTangentSpeed = (speedTangent * tangentialRetention) - rolloutSpinbackTerm;
-                newTangentSpeed = Mathf.Max(-2.6f, newTangentSpeed);
-                PhysicsLogger.Verbose($"  Rollout Bounce Spinback: backspin={activeBackspinRpm:F0} rpm, spinbackTerm={rolloutSpinbackTerm:F2}, newTangentSpeed={newTangentSpeed:F2} m/s");
+                newTangentSpeed = Mathf.Max(maxReverseSpeed, newTangentSpeed);
+                PhysicsLogger.Verbose($"  Rollout Bounce Spinback: backspin={activeBackspinRpm:F0} rpm, maxRev={maxReverseSpeed:F2}, newTangentSpeed={newTangentSpeed:F2} m/s");
             }
             else if (isSpinbackSurface && activeBackspinRpm > 1800.0f)
             {

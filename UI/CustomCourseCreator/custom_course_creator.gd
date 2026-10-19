@@ -40,6 +40,10 @@ func _exit_tree() -> void:
 
 
 func _ready() -> void:
+	add_to_group("modals")
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").push_lock(self)
+
 	var main_panel = get_node_or_null("MainPanel")
 	if main_panel != null:
 		ThemeManager.apply_modal_style(main_panel, 12)
@@ -550,3 +554,8 @@ func _load_texture(path: String) -> Texture2D:
 	if img != null:
 		return ImageTexture.create_from_image(img)
 	return null
+
+
+func _exit_tree() -> void:
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").pop_lock(self)

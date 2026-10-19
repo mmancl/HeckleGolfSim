@@ -110,6 +110,10 @@ var _is_showing_cached: bool = true
 
 
 func _ready() -> void:
+	add_to_group("modals")
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").push_lock(self)
+
 	var panel = get_node_or_null("CenterContainer/PanelContainer")
 	if panel != null:
 		ThemeManager.apply_modal_style(panel, 12)
@@ -173,6 +177,7 @@ func _ready() -> void:
 	cancel_button.pressed.connect(_on_cancel_pressed)
 	download_button.pressed.connect(_on_download_pressed)
 	results_list.item_selected.connect(_on_item_selected)
+	results_list.item_activated.connect(_on_item_activated)
 	search_input.text_submitted.connect(func(_text): _perform_search(false))
 
 	download_button.disabled = true
@@ -617,6 +622,9 @@ func _display_courses_in_list(courses: Array, is_search_results: bool = false) -
 	else:
 		if is_search_results:
 			status_label.text = "Found " + str(courses.size()) + " course(s). Select one to download."
+			if not courses.is_empty():
+				results_list.select(0)
+				_on_item_selected(0)
 		else:
 			status_label.text = "Showing " + str(courses.size()) + " cached courses (PGA Tour & Majors first). Select from list, or search to download from OSM."
 
@@ -954,6 +962,12 @@ func _on_item_selected(index: int) -> void:
 			_show_rate_limit_panel(false)
 
 
+func _on_item_activated(index: int) -> void:
+	_on_item_selected(index)
+	if download_button != null and not download_button.disabled:
+		_on_download_pressed()
+
+
 func _on_download_pressed() -> void:
 	var selected_items = results_list.get_selected_items()
 	if selected_items.is_empty():
@@ -985,7 +999,10 @@ func _on_download_pressed() -> void:
 		return
 
 	status_label.add_theme_color_override("font_color", Color(0.78, 0.82, 0.88, 1.0))
-	status_label.text = "Downloading and generating 3D map for '" + course_name + "'..."
+	if is_cached:
+		status_label.text = "Loading cached 3D map for '" + course_name + "'..."
+	else:
+		status_label.text = "Downloading and generating 3D map for '" + course_name + "'..."
 	_set_ui_disabled(true)
 	download_button.disabled = true
 	cancel_button.disabled = true
@@ -999,7 +1016,7 @@ func _on_download_pressed() -> void:
 	_start_download_notice_timer(current_token)
 
 	# Call C# download and generate and await signal
-	_loader.DownloadAndGenerateCourse(lat, lon, course_name)
+	_loader.DownloadAndGenerateCourse(lat, lon, course_name, is_cached)
 	var success = await _loader.CourseGenerated
 
 	_download_in_progress = false
@@ -1014,7 +1031,10 @@ func _on_download_pressed() -> void:
 		if msg != "":
 			status_label.text = msg
 		else:
-			status_label.text = "Successfully generated course: " + course_name + "!"
+			if is_cached:
+				status_label.text = "Successfully loaded cached course: " + course_name + "!"
+			else:
+				status_label.text = "Successfully generated course: " + course_name + "!"
 		course_downloaded.emit(course_name)
 		# Wait 1.5 seconds before auto-closing
 		await get_tree().create_timer(1.5).timeout
@@ -1030,7 +1050,10 @@ func _on_download_pressed() -> void:
 		if msg != "":
 			status_label.text = msg
 		else:
-			status_label.text = "Error: Course generation timed out or failed. Please retry the download, and if it continues to fail, please log a bug."
+			if is_cached:
+				status_label.text = "Error: Failed to load cached course '" + course_name + "'. Please check that cached geometry files are present."
+			else:
+				status_label.text = "Error: Course generation timed out or failed. Please retry the download, and if it continues to fail, please log a bug."
 		_set_ui_disabled(false)
 		download_button.disabled = false
 		cancel_button.disabled = false
@@ -1078,3 +1101,9 @@ func _set_ui_disabled(disabled: bool) -> void:
 func _update_progress_status(msg: String) -> void:
 	if _download_in_progress and is_instance_valid(self):
 		status_label.text = msg
+
+
+func _exit_tree() -> void:
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").pop_lock(self)
+

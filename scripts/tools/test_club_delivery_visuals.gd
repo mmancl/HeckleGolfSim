@@ -294,17 +294,28 @@ func test_distance_menu_presets() -> void:
 	assert(slice_shot.has("VerticalFaceImpact"), "Slice must include VerticalFaceImpact")
 	assert(slice_shot["SpinAxis"] >= 17.5 and slice_shot["SpinAxis"] <= 32.5, "Slice SpinAxis in range")
 
+	# Test 100Y Backspin preset (wedge backspin test shot: ~10,000 RPM backspin)
+	menu._on_hit_100y_backspin()
+	assert(emitted_shots.size() == 3, "Must have emitted 3 shots for backspin")
+	var backspin_shot = emitted_shots[2]
+	assert(backspin_shot["TotalSpin"] >= 9750.0 and backspin_shot["TotalSpin"] <= 10250.0, "Backspin TotalSpin in range")
+	assert(backspin_shot["BackSpin"] >= 9750.0 and backspin_shot["BackSpin"] <= 10250.0, "Backspin BackSpin in range")
+	assert(abs(backspin_shot["SpinAxis"]) <= 0.6, "Backspin SpinAxis near zero")
+	assert(backspin_shot["VLA"] >= 28.0 and backspin_shot["VLA"] <= 31.0, "Backspin high wedge VLA")
+	assert(backspin_shot.has("HorizontalFaceImpact"), "Backspin must include HorizontalFaceImpact")
+	assert(backspin_shot.has("VerticalFaceImpact"), "Backspin must include VerticalFaceImpact")
+
 	# Test standard distance shot injection
 	menu._inject_shot_for_distance(150.0)
-	assert(emitted_shots.size() == 3, "Must have emitted 3 shots")
-	var std_shot = emitted_shots[2]
+	assert(emitted_shots.size() == 4, "Must have emitted 4 shots")
+	var std_shot = emitted_shots[3]
 	assert(std_shot.has("HorizontalFaceImpact"), "Standard distance shot must have HorizontalFaceImpact")
 	assert(std_shot.has("VerticalFaceImpact"), "Standard distance shot must have VerticalFaceImpact")
 	assert(std_shot.has("FaceAngle"), "Standard distance shot must have FaceAngle")
 	assert(std_shot.has("ClubPath"), "Standard distance shot must have ClubPath")
 
 	menu.queue_free()
-	print("  PASS: DistanceMenu 100Y Fade, 100Y Slice, and standard shots emit full delivery and impact data.")
+	print("  PASS: DistanceMenu 100Y Fade, 100Y Slice, 100Y Backspin, and standard shots emit full delivery and impact data.")
 
 
 func test_shot_formatter_preserves_delivery_and_impact() -> void:

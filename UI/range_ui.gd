@@ -52,7 +52,6 @@ var _stuck_ball_btn: Button = null
 var _avg_paused_indicator: Label = null
 var _mishit_badge: Label = null
 var _mishit_badge_timer: Timer = null
-var _undo_shot_btn: Button = null
 var _dispersion_overlay: Control = null
 var _golfer_cam_panel: PanelContainer = null
 var _camera_feed_rect: TextureRect = null
@@ -406,6 +405,7 @@ func _ready() -> void:
 		dist_btn.name = "HitDistanceButton"
 		dist_btn.text = "🎯 Hit Distance"
 		dist_btn.custom_minimum_size = Vector2(180, 56)
+		dist_btn.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 		apply_material_button_style(dist_btn, Color(0.6, 0.2, 0.6, 0.85))
 		dist_btn.pressed.connect(func():
 			var menu = null
@@ -416,17 +416,21 @@ func _ready() -> void:
 			if not menu:
 				menu = get_node_or_null("DistanceMenu")
 			if menu:
-				menu.visible = not menu.visible
 				if menu.visible:
+					if menu.has_method("close"):
+						menu.close()
+					else:
+						menu.visible = false
+					var vp = get_viewport()
+					if vp != null:
+						vp.gui_release_focus()
+				else:
+					menu.visible = true
 					var p = get_parent()
 					if p and p.has_node("Player"):
 						menu.current_ball_node = p.get_node("Player").get("ball")
 					if p and "aim_target_pos" in p:
 						menu.aim_target_node = p.get("aim_target_pos")
-				else:
-					var vp = get_viewport()
-					if vp != null:
-						vp.gui_release_focus()
 				_update_hit_distance_button_state()
 				_update_helpers_scroll_layout.call_deferred()
 		)
@@ -437,6 +441,7 @@ func _ready() -> void:
 		var dist_menu = distance_menu_script.new()
 		dist_menu.name = "DistanceMenu"
 		dist_menu.visible = false
+		dist_btn.set_meta("toggle_target", dist_menu)
 		dist_menu.inject_shot.connect(_on_shot_injector_inject)
 		dist_menu.visibility_changed.connect(func():
 			_update_hit_distance_button_state()
@@ -1604,16 +1609,6 @@ func _setup_averages_ui() -> void:
 	_prev_shot_btn.pressed.connect(_on_prev_shot_analysis_pressed)
 	_prev_shot_btn.tooltip_text = "View analysis and recommendations for your previous shot"
 
-	_undo_shot_btn = Button.new()
-	_undo_shot_btn.name = "UndoShotButton"
-	_undo_shot_btn.text = "↺ Undo Shot"
-	_undo_shot_btn.custom_minimum_size = Vector2(130, 48)
-	_undo_shot_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_undo_shot_btn.add_theme_font_size_override("font_size", 14)
-	apply_material_button_style(_undo_shot_btn, Color(0.35, 0.25, 0.25, 0.85))
-	_undo_shot_btn.tooltip_text = "Remove the last shot from club statistics and session history"
-	_undo_shot_btn.pressed.connect(_on_undo_shot_pressed)
-
 	var bottom_bar = HBoxContainer.new()
 	bottom_bar.name = "BottomBarContainer"
 	bottom_bar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -1624,7 +1619,6 @@ func _setup_averages_ui() -> void:
 
 	bottom_bar.add_child(_averages_panel)
 	bottom_bar.add_child(_prev_shot_btn)
-	bottom_bar.add_child(_undo_shot_btn)
 	add_child(bottom_bar)
 
 	_update_prev_shot_analysis_visibility()
@@ -1635,12 +1629,6 @@ func show_mishit_alert(msg: String = "⚠️ Miss-hit excluded from club average
 		_mishit_badge.visible = true
 		if _mishit_badge_timer != null:
 			_mishit_badge_timer.start(4.5)
-
-func _on_undo_shot_pressed() -> void:
-	var parent_node = get_parent()
-	if parent_node != null and parent_node.has_method("remove_last_shot"):
-		parent_node.call("remove_last_shot")
-		show_mishit_alert("↺ Last shot removed from stats")
 
 
 func update_average_stats(avg_data: Dictionary) -> void:
@@ -1937,7 +1925,7 @@ func _on_home_button_pressed() -> void:
 
 func _show_exit_confirm_dialog() -> void:
 	if has_node("/root/AnnouncerEngine"):
-		get_node("/root/AnnouncerEngine").call("SpeakHomeButtonHeckle")
+		get_node("/root/AnnouncerEngine").call("SpeakHomeButtonHeckle", {"game_mode": "range"})
 
 	if _exit_confirm_dialog != null:
 		_exit_confirm_dialog.visible = true

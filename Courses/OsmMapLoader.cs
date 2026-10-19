@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Security;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -26,7 +27,57 @@ public partial class OsmMapLoader : Node
 
     private static System.Net.Http.HttpClient CreateHttpClient()
     {
-        var client = new System.Net.Http.HttpClient();
+        var handler = new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            ConnectTimeout = TimeSpan.FromSeconds(30),
+            SslOptions = new SslClientAuthenticationOptions
+            {
+                AllowRenegotiation = true,
+                RemoteCertificateValidationCallback = (sender, cert, chain, errors) =>
+                {
+                    if (errors == SslPolicyErrors.None)
+                        return true;
+
+                    // Allow trusted domain patterns for public GIS and map services when system root stores fail
+                    if (sender is HttpRequestMessage request && request.RequestUri != null)
+                    {
+                        string host = request.RequestUri.Host.ToLowerInvariant();
+                        if (host.EndsWith("overpass-api.de") ||
+                            host.EndsWith("openstreetmap.de") ||
+                            host.EndsWith("openstreetmap.org") ||
+                            host.EndsWith("komoot.io") ||
+                            host.EndsWith("nationalmap.gov") ||
+                            host.EndsWith("open-meteo.com") ||
+                            host.EndsWith("amazonaws.com") ||
+                            host.EndsWith("arcgisonline.com"))
+                        {
+                            return true;
+                        }
+                    }
+
+                    if (cert != null)
+                    {
+                        string subject = cert.Subject?.ToLowerInvariant() ?? "";
+                        string issuer = cert.Issuer?.ToLowerInvariant() ?? "";
+                        if (subject.Contains("openstreetmap") ||
+                            subject.Contains("overpass") ||
+                            subject.Contains("komoot") ||
+                            subject.Contains("arcgis") ||
+                            subject.Contains("nationalmap") ||
+                            issuer.Contains("let's encrypt") ||
+                            issuer.Contains("isrg root"))
+                        {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                }
+            }
+        };
+
+        var client = new System.Net.Http.HttpClient(handler);
         client.Timeout = TimeSpan.FromSeconds(120);
         client.DefaultRequestHeaders.Add("User-Agent", "HeckleLinks/1.0 (contact: github.com/mmancl/HeckleGolfSim)");
         return client;
@@ -77,7 +128,12 @@ public partial class OsmMapLoader : Node
         return _generationMessage;
     }
 
-    public async void DownloadAndGenerateCourse(double lat, double lon, string courseName)
+    public void DownloadAndGenerateCourse(double lat, double lon, string courseName)
+    {
+        DownloadAndGenerateCourse(lat, lon, courseName, false);
+    }
+
+    public async void DownloadAndGenerateCourse(double lat, double lon, string courseName, bool isCached)
     {
         _generationMessage = "";
         string safeName = string.Concat(courseName.Split(Path.GetInvalidFileNameChars())).Replace(" ", "_");
@@ -94,8 +150,8 @@ public partial class OsmMapLoader : Node
         string globalTscnPath = ProjectSettings.GlobalizePath(tscnPath);
         string globalJsonPath = ProjectSettings.GlobalizePath(jsonPath);
 
-        ReportProgress($"Preparing map for '{courseName}'...");
-        string osmJson = await DownloadOsmDataAsync(lat, lon, courseName);
+        ReportProgress(isCached ? $"Loading cached map for '{courseName}'..." : $"Preparing map for '{courseName}'...");
+        string osmJson = await DownloadOsmDataAsync(lat, lon, courseName, isCached);
         if (string.IsNullOrEmpty(osmJson))
         {
             try
@@ -111,7 +167,9 @@ public partial class OsmMapLoader : Node
             }
             if (string.IsNullOrEmpty(_generationMessage))
             {
-                _generationMessage = "Error: Course download timed out or failed. Please retry the download, and if it continues to fail, please log a bug.";
+                _generationMessage = isCached
+                    ? $"Error: Cached course geometry for '{courseName}' could not be loaded. Please check that cached geometry assets are installed."
+                    : "Error: Course download timed out or failed. Please retry the download, and if it continues to fail, please log a bug.";
             }
             EmitCourseGenerated(false);
             return;
@@ -360,7 +418,7 @@ public partial class OsmMapLoader : Node
         }
     }
 
-    private async Task<string> DownloadOsmDataAsync(double lat, double lon, string courseName)
+    private async Task<string> DownloadOsmDataAsync(double lat, double lon, string courseName, bool isCached = false)
     {
         // 1. Check if pre-packaged or locally cached geometry exists (instant & 0 API calls)
         string prepackaged = await TryLoadPrepackagedGeometryAsync(courseName);
@@ -368,6 +426,14 @@ public partial class OsmMapLoader : Node
         {
             ReportProgress($"Loaded pre-packaged map data for '{courseName}' (0 API calls)...");
             return prepackaged;
+        }
+
+        // If this course is marked cached (or has cached geometry registered), never query OpenStreetMap Overpass
+        if (isCached || IsCourseCached(courseName))
+        {
+            GD.PrintErr($"{LogPrefix} Cached geometry for '{courseName}' was requested but could not be loaded from local files. OpenStreetMap Overpass will NOT be queried for cached courses.");
+            _generationMessage = $"Error: Cached map geometry for '{courseName}' could not be loaded from local files. OpenStreetMap was not queried.";
+            return "";
         }
 
         ReportProgress($"Connecting to OpenStreetMap for '{courseName}'...");
@@ -420,7 +486,7 @@ public partial class OsmMapLoader : Node
             }
             catch (Exception ex)
             {
-                GD.PrintErr($"{LogPrefix} Attempt {attempt} exception querying {endpoint}: {ex.Message}");
+                GD.PrintErr($"{LogPrefix} Attempt {attempt} exception querying {endpoint}: {ex.Message}{(ex.InnerException != null ? $" (Inner: {ex.InnerException.Message})" : "")}");
             }
 
             if (attempt < maxAttempts)
@@ -1189,6 +1255,7 @@ public partial class OsmMapLoader : Node
                     if (golfType == "bunker")
                     {
                         staticBody.SetMeta("is_sand", true);
+                        staticBody.SetMeta("boundary_polygon", uniquePoints);
                     }
                     CreateCollisionForPolygon(staticBody, uniquePoints, rootNode, exclusionPolygons);
                 }
@@ -3947,7 +4014,7 @@ public partial class OsmMapLoader : Node
             }
             catch (Exception ex)
             {
-                GD.PrintErr($"{LogPrefix} Overpass verification attempt {attempt} failed on {endpoint}: {ex.Message}");
+                GD.PrintErr($"{LogPrefix} Overpass verification attempt {attempt} failed on {endpoint}: {ex.Message}{(ex.InnerException != null ? $" (Inner: {ex.InnerException.Message})" : "")}");
             }
         }
 
@@ -5427,23 +5494,6 @@ public partial class OsmMapLoader : Node
                 colObj.SetMeta("is_tree", true);
             }
 
-            // Shrink and reposition the trunk collision shape so it doesn't extend into foliage
-            foreach (Node child in treeInstance.GetChildren())
-            {
-                if (child is CollisionShape3D colShapeNode)
-                {
-                    if (colShapeNode.Shape is CapsuleShape3D capsule)
-                    {
-                        var newCapsule = (CapsuleShape3D)capsule.Duplicate();
-                        newCapsule.Radius = 0.15f;
-                        newCapsule.Height = 1.0f;
-                        colShapeNode.Shape = newCapsule;
-
-                        colShapeNode.Transform = new Transform3D(Basis.Identity, new Vector3(0f, 0.5f, 0f));
-                    }
-                }
-            }
-
             // Ensure leaves/canopy Area3D is present to detect ball passing through
             var existingCanopy = treeInstance.GetNodeOrNull<Area3D>("CanopyArea");
             if (existingCanopy != null)
@@ -6477,6 +6527,7 @@ public partial class OsmMapLoader : Node
         if (golfType == "bunker")
         {
             staticBody.SetMeta("is_sand", true);
+            staticBody.SetMeta("boundary_polygon", uniquePoints);
         }
         CreateCollisionForPolygon(staticBody, uniquePoints, rootNode, exclusionPolygons);
     }

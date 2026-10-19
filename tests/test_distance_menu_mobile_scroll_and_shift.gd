@@ -37,7 +37,26 @@ func _run_tests() -> void:
 	var touch_helper = scroll.get_node_or_null("TouchScrollHelper")
 	assert(touch_helper != null, "TouchScrollHelper must be attached to DistanceMenu's ScrollContainer")
 
-	print("  PASS: DistanceMenu scrollbar width (%d) and TouchScrollHelper verified." % int(v_bar.custom_minimum_size.x))
+	var scroll_margin = scroll.get_node_or_null("ScrollMargin") as MarginContainer
+	assert(scroll_margin != null, "DistanceMenu ScrollContainer must contain ScrollMargin to prevent slider overlapping buttons")
+	var margin_r = scroll_margin.get_theme_constant("margin_right")
+	assert(margin_r >= int(v_bar.custom_minimum_size.x), "ScrollMargin margin_right (%d) must be >= scrollbar width (%d)" % [margin_r, int(v_bar.custom_minimum_size.x)])
+
+	var backspin_btn = dist_menu.find_child("100YBackspinButton", true, false) as Button
+	assert(backspin_btn != null, "100-Yard Backspin button must exist in DistanceMenu")
+	assert(backspin_btn.text == "🔄 100-Yard Backspin", "Backspin button text must match")
+
+	var emitted_shots = []
+	dist_menu.inject_shot.connect(func(data): emitted_shots.append(data))
+	dist_menu._on_hit_100y_backspin()
+	assert(emitted_shots.size() == 1, "Must emit shot on _on_hit_100y_backspin")
+	var shot = emitted_shots[0]
+	assert(shot["TotalSpin"] >= 9750.0 and shot["TotalSpin"] <= 10250.0, "TotalSpin must be ~10,000 RPM")
+	assert(shot["BackSpin"] >= 9750.0 and shot["BackSpin"] <= 10250.0, "BackSpin must be ~10,000 RPM")
+	assert(shot["VLA"] >= 28.0 and shot["VLA"] <= 31.0, "VLA must be high wedge angle")
+	assert(abs(shot["SpinAxis"]) <= 0.6, "SpinAxis must be near 0")
+
+	print("  PASS: DistanceMenu scrollbar width (%d), TouchScrollHelper, ScrollMargin padding (%d), and 100Y Backspin button verified." % [int(v_bar.custom_minimum_size.x), margin_r])
 	dist_menu.queue_free()
 
 	# =========================================================================
@@ -92,16 +111,29 @@ func _run_tests() -> void:
 	var r_expected_shifted_offset = -280.0 - r_shift - expected_dist_shift
 	assert(is_equal_approx(shifted_offset, r_expected_shifted_offset), "RangeUI _right_panel shifted offset (%f) should match expected (%f)" % [shifted_offset, r_expected_shifted_offset])
 
-	# Close DistanceMenu
-	r_dist_menu.visible = false
-	rui.call("_update_helpers_scroll_layout")
+	# Close DistanceMenu by pressing HitDistanceButton while open
+	var r_dist_btn = rui.find_child("HitDistanceButton", true, false) as Button
+	assert(r_dist_btn != null, "RangeUI must have HitDistanceButton")
+	assert(r_dist_btn.action_mode == BaseButton.ACTION_MODE_BUTTON_PRESS, "HitDistanceButton must trigger on press")
+	assert(r_dist_btn.get_meta("toggle_target") == r_dist_menu, "HitDistanceButton meta toggle_target must be r_dist_menu")
+
+	# Focus HitDistanceButton while focus lock is active - focus should NOT be snatched away
+	r_dist_btn.grab_focus()
 	for f in range(2):
 		await process_frame
+	var cur_f = root.get_viewport().gui_get_focus_owner()
+	assert(cur_f == r_dist_btn, "HitDistanceButton must retain focus even when UIFocusGuard has DistanceMenu locked")
+
+	# Press HitDistanceButton to close
+	r_dist_btn.emit_signal("pressed")
+	for f in range(2):
+		await process_frame
+	assert(not r_dist_menu.visible, "Pressing HitDistanceButton while open must close DistanceMenu")
 
 	var restored_offset = r_right_panel.offset_left
 	print("  Restored RangeUI offset_left with DistanceMenu hidden: %f" % restored_offset)
 	assert(is_equal_approx(restored_offset, initial_offset), "RangeUI _right_panel offset_left must restore when DistanceMenu is hidden (%f == %f)" % [restored_offset, initial_offset])
-	print("  PASS: RangeUI helper layout shift verified.")
+	print("  PASS: RangeUI helper layout shift and HitDistanceButton close verified.")
 	range_instance.queue_free()
 
 	# =========================================================================

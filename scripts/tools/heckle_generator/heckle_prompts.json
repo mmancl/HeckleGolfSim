@@ -117,7 +117,7 @@
                     "prompt": "Not a chance! That was ninety percent luck and ten percent wind."
                 },
                 "filepath": "res://assets/audio/heckler/under_par/under_par_8.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -129,7 +129,7 @@
                     "prompt": "I will hold the smelling salts, keep your eyes on the next tee."
                 },
                 "filepath": "res://assets/audio/heckler/under_par/under_par_9.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "score_type": "birdie"
                 }
@@ -139,7 +139,7 @@
                 "audio": "irish_accent2",
                 "prompt": "A birdie! Now try not to let it ruin your otherwise miserable momentum.",
                 "filepath": "res://assets/audio/heckler/under_par/under_par_10.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "score_type": "birdie"
                 }
@@ -272,7 +272,7 @@
                 "audio": "english_female",
                 "prompt": "An under-par masterpiece. Too bad it's surrounded by a sea of triple bogeys.",
                 "filepath": "res://assets/audio/heckler/under_par/under_par_26.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -354,7 +354,7 @@
                 "audio": "english_female",
                 "prompt": "You went under par! Let's celebrate before the quadruple bogey on the next hole.",
                 "filepath": "res://assets/audio/heckler/under_par/under_par_36.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -404,7 +404,8 @@
                 "filepath": "res://assets/audio/heckler/under_par/under_par_42.wav",
                 "enabled": true,
                 "qualifiers": {
-                    "score_type": "birdie"
+                    "score_type": "birdie",
+                    "overall_score": "over_par"
                 }
             },
             {
@@ -446,7 +447,7 @@
                 "audio": "irish_accent2",
                 "prompt": "An under-par triumph. Take a bow before you hook the next drive into the woods.",
                 "filepath": "res://assets/audio/heckler/under_par/under_par_47.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -552,7 +553,7 @@
                     "prompt": "Haha, take two weeks off, and then quit the game entirely."
                 },
                 "filepath": "res://assets/audio/heckler/over_bogey_heckles/over_bogey_heckles_6.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "score_type": "triple_bogey"
                 }
@@ -591,14 +592,17 @@
                     "prompt": "[laughs] Haha! Do not challenge them, they still have the back nine."
                 },
                 "filepath": "res://assets/audio/heckler/over_bogey_heckles/over_bogey_heckles_9.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "hole_range": "front_nine"
+                }
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "You're playing single-hole matches and losing every single one of them.",
                 "filepath": "res://assets/audio/heckler/over_bogey_heckles/over_bogey_heckles_10.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -674,14 +678,14 @@
                 "audio": "english_female",
                 "prompt": "Another bloated score. Even a calculator is starting to sweat trying to total this round.",
                 "filepath": "res://assets/audio/heckler/over_bogey_heckles/over_bogey_heckles_20.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "You're collecting bogeys like they're trading cards. Gotta catch 'em all!.",
                 "filepath": "res://assets/audio/heckler/over_bogey_heckles/over_bogey_heckles_21.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -726,7 +730,7 @@
                 "audio": "irish_accent2",
                 "prompt": "You're making bogeys look like an endangered species by hunting them down constantly.",
                 "filepath": "res://assets/audio/heckler/over_bogey_heckles/over_bogey_heckles_27.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -802,7 +806,7 @@
                 "audio": "irish_accent2",
                 "prompt": "You're managing to find new and creative ways to make bogeys look easy.",
                 "filepath": "res://assets/audio/heckler/over_bogey_heckles/over_bogey_heckles_37.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -833,7 +837,7 @@
                 "audio": "irish_accent2",
                 "prompt": "You're making bogeys look respectable compared to this garbage.",
                 "filepath": "res://assets/audio/heckler/over_bogey_heckles/over_bogey_heckles_41.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -885,7 +889,7 @@
                 "audio": "english_female",
                 "prompt": "Another over-par disaster. At least your score matches your temperature in winter.",
                 "filepath": "res://assets/audio/heckler/over_bogey_heckles/over_bogey_heckles_48.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -966,7 +970,7 @@
                     "prompt": "[laughs] Haha! At least the lifeguard knows how to swim out of trouble."
                 },
                 "filepath": "res://assets/audio/heckler/ball_in_sand/ball_in_sand_5.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -1084,7 +1088,7 @@
                 "audio": "english_female",
                 "prompt": "Such a delicate touch. if you were trying to smother the poor ball to death.",
                 "filepath": "res://assets/audio/heckler/ball_in_sand/ball_in_sand_19.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -1105,7 +1109,7 @@
                 "audio": "english_female",
                 "prompt": "You’re really exploring the whole course today, aren't you? Starting with the coastline.",
                 "filepath": "res://assets/audio/heckler/ball_in_sand/ball_in_sand_22.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -1133,7 +1137,7 @@
                 "audio": "english_female",
                 "prompt": "Well, at least you're consistent at finding the beach without a map.",
                 "filepath": "res://assets/audio/heckler/ball_in_sand/ball_in_sand_26.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -1154,7 +1158,7 @@
                 "audio": "irish_accent2",
                 "prompt": "You must really love the beach. Why else would you visit it from three hundred yards out?",
                 "filepath": "res://assets/audio/heckler/ball_in_sand/ball_in_sand_29.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -1273,7 +1277,7 @@
                 "audio": "english_female",
                 "prompt": "You managed to find the beach on an inland course. That takes special talent.",
                 "filepath": "res://assets/audio/heckler/ball_in_sand/ball_in_sand_46.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -1332,7 +1336,7 @@
                     "prompt": "Hahaha! Do not bother diving, the lake monsters have claimed it for good."
                 },
                 "filepath": "res://assets/audio/heckler/ball_in_water/ball_in_water_2.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -1356,7 +1360,7 @@
                     "prompt": "Hahaha! At this rate, the local carp are going to start an underwater driving range."
                 },
                 "filepath": "res://assets/audio/heckler/ball_in_water/ball_in_water_4.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -1368,7 +1372,7 @@
                     "prompt": "Haha, they do, but they still do not float back to the fairway."
                 },
                 "filepath": "res://assets/audio/heckler/ball_in_water/ball_in_water_5.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -1380,7 +1384,7 @@
                     "prompt": "[laughs] Haha, both! And that golf ball is now in a better place."
                 },
                 "filepath": "res://assets/audio/heckler/ball_in_water/ball_in_water_6.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -1444,14 +1448,14 @@
                 "audio": "irish_accent2",
                 "prompt": "You really wanted to test the waterproof rating of your golf ball, didn't you?",
                 "filepath": "res://assets/audio/heckler/ball_in_water/ball_in_water_13.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "Splendid form. The frogs down there give that dive a solid ten out of ten.",
                 "filepath": "res://assets/audio/heckler/ball_in_water/ball_in_water_14.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -1479,14 +1483,14 @@
                 "audio": "english_female",
                 "prompt": "You missed the entire fairway and found the single puddle on the course. Talent!",
                 "filepath": "res://assets/audio/heckler/ball_in_water/ball_in_water_18.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "There goes the ball, it is currently practicing its butterfly stroke at the bottom of the lake.",
                 "filepath": "res://assets/audio/heckler/ball_in_water/ball_in_water_19.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -1500,7 +1504,7 @@
                 "audio": "irish_accent2",
                 "prompt": "You’re single-handedly funding the local scuba diver who comes out here on Mondays.",
                 "filepath": "res://assets/audio/heckler/ball_in_water/ball_in_water_21.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -1535,7 +1539,10 @@
                 "audio": "english_female",
                 "prompt": "Glub, glub, glub. Sound effects provided by your disastrous tee shot.",
                 "filepath": "res://assets/audio/heckler/ball_in_water/ball_in_water_26.wav",
-                "enabled": true
+                "enabled": false,
+                "qualifiers": {
+                    "tee_shot": true
+                }
             },
             {
                 "name": "Connor",
@@ -1549,7 +1556,7 @@
                 "audio": "english_female",
                 "prompt": "What an effort—that was so wet it came with a complimentary towel.",
                 "filepath": "res://assets/audio/heckler/ball_in_water/ball_in_water_28.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -1640,7 +1647,7 @@
                 "audio": "english_female",
                 "prompt": "You’re really testing my patience with these aquatic tours.",
                 "filepath": "res://assets/audio/heckler/ball_in_water/ball_in_water_41.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2458,7 +2465,10 @@
                 "audio": "english_female",
                 "prompt": "You turned a routine tee shot into a catastrophic left-hand disaster.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_43.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tee_shot": true
+                }
             },
             {
                 "name": "Connor",
@@ -2514,7 +2524,7 @@
                     "prompt": "Perfectly straight down the stripe! A masterclass in fairway navigation."
                 },
                 "filepath": "res://assets/audio/heckler/good_shot_fairway/good_shot_fairway_0.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -2568,7 +2578,7 @@
                     "prompt": "A historic moment, let us savor the fairway lie while it lasts."
                 },
                 "filepath": "res://assets/audio/heckler/good_shot_fairway/good_shot_fairway_4.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "tee_shot": true
                 }
@@ -2609,7 +2619,7 @@
                 "audio": "irish_accent2",
                 "prompt": "Look at the flight—it split the fairway right down the stripe.",
                 "filepath": "res://assets/audio/heckler/good_shot_fairway/good_shot_fairway_9.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "tee_shot": true
                 }
@@ -2636,7 +2646,7 @@
                 "audio": "english_female",
                 "prompt": "Right down the runway! You could park a golf cart on that line.",
                 "filepath": "res://assets/audio/heckler/good_shot_fairway/good_shot_fairway_12.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "tee_shot": true
                 }
@@ -2656,14 +2666,14 @@
                 "audio": "irish_accent2",
                 "prompt": "Straight as an arrow down the fairway. Take a bow.",
                 "filepath": "res://assets/audio/heckler/good_shot_fairway/good_shot_fairway_14.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "That ball found the short grass like a guided missile.",
                 "filepath": "res://assets/audio/heckler/good_shot_fairway/good_shot_fairway_15.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2821,14 +2831,14 @@
                 "audio": "english_female",
                 "prompt": "You found the fairway with room to spare on both sides.",
                 "filepath": "res://assets/audio/heckler/good_shot_fairway/good_shot_fairway_35.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "An immaculate drive straight down the center strip.",
                 "filepath": "res://assets/audio/heckler/good_shot_fairway/good_shot_fairway_36.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "tee_shot": true
                 }
@@ -2838,7 +2848,7 @@
                 "audio": "english_female",
                 "prompt": "Right in the sweet spot of the fairway. Outstanding shot.",
                 "filepath": "res://assets/audio/heckler/good_shot_fairway/good_shot_fairway_37.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2875,7 +2885,7 @@
                 "audio": "english_female",
                 "prompt": "Right down Broadway! No trouble anywhere near that golf ball.",
                 "filepath": "res://assets/audio/heckler/good_shot_fairway/good_shot_fairway_41.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2970,7 +2980,7 @@
                     "prompt": "Pure backspin wizardry, stopped on a dime."
                 },
                 "filepath": "res://assets/audio/heckler/good_shot_green/good_shot_green_1.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2982,7 +2992,7 @@
                     "prompt": "Pin-seeking missile, absolutely gorgeous approach."
                 },
                 "filepath": "res://assets/audio/heckler/good_shot_green/good_shot_green_2.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -2994,7 +3004,7 @@
                     "prompt": "Spinning right at the flagstick, pure poetry."
                 },
                 "filepath": "res://assets/audio/heckler/good_shot_green/good_shot_green_3.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -3054,7 +3064,7 @@
                 "audio": "english_female",
                 "prompt": "Look at that backspin! Pulling right back toward the cup.",
                 "filepath": "res://assets/audio/heckler/good_shot_green/good_shot_green_9.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -3068,7 +3078,7 @@
                 "audio": "english_female",
                 "prompt": "A pin-seeking approach finding the heart of the green.",
                 "filepath": "res://assets/audio/heckler/good_shot_green/good_shot_green_11.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -3213,7 +3223,7 @@
                 "audio": "english_female",
                 "prompt": "Right on the putting surface with a clean uphill putt ahead.",
                 "filepath": "res://assets/audio/heckler/good_shot_green/good_shot_green_30.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -3329,7 +3339,7 @@
                 "audio": "irish_accent2",
                 "prompt": "A textbook approach finding the putting surface safely.",
                 "filepath": "res://assets/audio/heckler/good_shot_green/good_shot_green_44.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -3356,7 +3366,7 @@
                 "audio": "english_female",
                 "prompt": "An immaculate green in regulation. Take a bow.",
                 "filepath": "res://assets/audio/heckler/good_shot_green/good_shot_green_47.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "gir": true
                 }
@@ -3373,7 +3383,7 @@
                 "audio": "irish_accent2",
                 "prompt": "Right on the green with an easy two-putt waiting.",
                 "filepath": "res://assets/audio/heckler/good_shot_green/good_shot_green_49.wav",
-                "enabled": true
+                "enabled": false
             }
         ],
         "crazy_high_apex": [
@@ -3691,7 +3701,10 @@
                 "audio": "irish_accent2",
                 "prompt": "You managed to hit a pop-up with a driver. Pure talent.",
                 "filepath": "res://assets/audio/heckler/crazy_high_apex/crazy_high_apex_37.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tee_shot": true
+                }
             },
             {
                 "name": "Sophia",
@@ -3906,7 +3919,10 @@
                     "prompt": "Haha, re-tee and pretend we were looking at the birds."
                 },
                 "filepath": "res://assets/audio/heckler/really_short_shots/really_short_shots_9.wav",
-                "enabled": true
+                "enabled": false,
+                "qualifiers": {
+                    "tee_shot": true
+                }
             },
             {
                 "name": "Connor",
@@ -3934,7 +3950,7 @@
                 "audio": "irish_accent2",
                 "prompt": "Launched high, it went absolutely nowhere fast.",
                 "filepath": "res://assets/audio/heckler/really_short_shots/really_short_shots_13.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -3962,7 +3978,7 @@
                 "audio": "english_female",
                 "prompt": "You put your entire body into a swing that moved the ball two paces.",
                 "filepath": "res://assets/audio/heckler/really_short_shots/really_short_shots_17.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -3983,7 +3999,7 @@
                 "audio": "english_female",
                 "prompt": "Incredible restraint. You saved all your energy for missing the next shot too.",
                 "filepath": "res://assets/audio/heckler/really_short_shots/really_short_shots_20.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4156,7 +4172,7 @@
                 "audio": "english_female",
                 "prompt": "You swung like a heavy-hitter and produced a newborn kitten's sneeze.",
                 "filepath": "res://assets/audio/heckler/really_short_shots/really_short_shots_43.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4198,7 +4214,10 @@
                 "audio": "irish_accent2",
                 "prompt": "My grandmother hits her driver past that, and she uses a cane.",
                 "filepath": "res://assets/audio/heckler/really_short_shots/really_short_shots_49.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tee_shot": true
+                }
             }
         ],
         "terrible_putts_off_green": [
@@ -4260,7 +4279,10 @@
                     "prompt": "Haha! The rare triple-surface putt, a truly catastrophic achievement."
                 },
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_4.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "surface": "sand"
+                }
             },
             {
                 "name": "Connor",
@@ -4698,7 +4720,7 @@
                     "prompt": "Hahaha! Tilt, high score on the pinball table, ball back at their feet."
                 },
                 "filepath": "res://assets/audio/heckler/hitting_or_going_through_trees/hitting_or_going_through_trees_6.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "tree_hit_type": "leaves"
                 }
@@ -4713,7 +4735,7 @@
                     "prompt": "Haha, shame they had to destroy the local flora to do it."
                 },
                 "filepath": "res://assets/audio/heckler/hitting_or_going_through_trees/hitting_or_going_through_trees_7.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4747,7 +4769,7 @@
                 "audio": "english_female",
                 "prompt": "The ball kissed the pine needles on its way to a catastrophic ricochet.",
                 "filepath": "res://assets/audio/heckler/hitting_or_going_through_trees/hitting_or_going_through_trees_10.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "tree_hit_type": "leaves"
                 }
@@ -4757,21 +4779,27 @@
                 "audio": "irish_accent2",
                 "prompt": "Trees are 90 percent air, and you managed to find the solid 10 percent dead center.",
                 "filepath": "res://assets/audio/heckler/hitting_or_going_through_trees/hitting_or_going_through_trees_11.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tree_hit_type": "trunk"
+                }
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "A phenomenal tree-seeking missile. Absolute direct hit.",
                 "filepath": "res://assets/audio/heckler/hitting_or_going_through_trees/hitting_or_going_through_trees_12.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tree_hit_type": "trunk"
+                }
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "Look at the flight—it bounced off the trunk with a sound that echoed across three holes.",
                 "filepath": "res://assets/audio/heckler/hitting_or_going_through_trees/hitting_or_going_through_trees_13.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "tree_hit_type": "trunk"
                 }
@@ -4822,7 +4850,7 @@
                 "audio": "english_female",
                 "prompt": "Watch it go—it ricocheted off a branch so fast it nearly hit you back.",
                 "filepath": "res://assets/audio/heckler/hitting_or_going_through_trees/hitting_or_going_through_trees_19.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "tree_hit_type": "leaves"
                 }
@@ -4938,7 +4966,7 @@
                 "audio": "english_female",
                 "prompt": "Pure contact, that smashed into the trunk and dropped straight down like a dead duck.",
                 "filepath": "res://assets/audio/heckler/hitting_or_going_through_trees/hitting_or_going_through_trees_33.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "tree_hit_type": "trunk"
                 }
@@ -4955,7 +4983,7 @@
                 "audio": "english_female",
                 "prompt": "It started with promise, but rattled through the canopy with a flurry of falling leaves.",
                 "filepath": "res://assets/audio/heckler/hitting_or_going_through_trees/hitting_or_going_through_trees_35.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "tree_hit_type": "leaves"
                 }
@@ -5133,7 +5161,7 @@
                     "prompt": "[laughs] Our golfer is heading for the exit doors, look at that cursor hovering."
                 },
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_3.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -5145,7 +5173,7 @@
                     "prompt": "[laughs] The only quick motion they made all day, honestly."
                 },
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_4.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -5194,7 +5222,11 @@
                 "audio": "english_female",
                 "prompt": "Do not leave now, I had at least ten more jokes prepared for the back nine!",
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_11.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "game_mode": "course_play",
+                    "hole_range": "front_nine"
+                }
             },
             {
                 "name": "Sophia",
@@ -5208,7 +5240,10 @@
                 "audio": "irish_accent2",
                 "prompt": "Running away to the main menu? The scorecard is coming with you.",
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_13.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "game_mode": "course_play"
+                }
             },
             {
                 "name": "Connor",
@@ -5222,14 +5257,18 @@
                 "audio": "english_female",
                 "prompt": "I see you looking at the exit door. Do not be a stranger!",
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_15.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "Leaving so soon? We have not even gotten to the water hazards yet!",
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_16.wav",
-                "enabled": true
+                "enabled": false,
+                "qualifiers": {
+                    "game_mode": "course_play",
+                    "max_hole": 3
+                }
             },
             {
                 "name": "Connor",
@@ -5292,7 +5331,11 @@
                 "audio": "irish_accent2",
                 "prompt": "Do not press that button! We still have eighteen holes of banter left.",
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_25.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "game_mode": "course_play",
+                    "max_hole": 2
+                }
             },
             {
                 "name": "Sophia",
@@ -5313,7 +5356,10 @@
                 "audio": "english_female",
                 "prompt": "I see you eyeing the exit. You can run, but you cannot hide from the scorecard.",
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_28.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "game_mode": "course_play"
+                }
             },
             {
                 "name": "Sophia",
@@ -5334,14 +5380,21 @@
                 "audio": "irish_accent2",
                 "prompt": "Heading for the clubhouse early? The nineteenth hole is always open.",
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_31.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "game_mode": "course_play"
+                }
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "Do not give up now, you were only thirty strokes over par!",
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_32.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "game_mode": "course_play",
+                    "min_score_relative_to_par": 30
+                }
             },
             {
                 "name": "Connor",
@@ -5355,7 +5408,10 @@
                 "audio": "irish_accent2",
                 "prompt": "Quitting the round? I will pretend I did not see this popup.",
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_34.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "game_mode": "course_play"
+                }
             },
             {
                 "name": "Sophia",
@@ -5376,7 +5432,7 @@
                 "audio": "english_female",
                 "prompt": "Are you sick of me? That hurts, especially after all the advice I gave you.",
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_37.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -5390,7 +5446,7 @@
                 "audio": "english_female",
                 "prompt": "Do not quit yet! The golf gods demand at least one more bunker shot.",
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_39.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -5404,7 +5460,11 @@
                 "audio": "english_female",
                 "prompt": "Quitting while you are behind? A classic golfing strategy.",
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_41.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "game_mode": "course_play",
+                    "score_status": "over_par"
+                }
             },
             {
                 "name": "Connor",
@@ -5418,7 +5478,10 @@
                 "audio": "irish_accent2",
                 "prompt": "Heading back to the menu... I will make sure to save your score in bold.",
                 "filepath": "res://assets/audio/heckler/home_button_popup/home_button_popup_43.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "game_mode": "course_play"
+                }
             },
             {
                 "name": "Connor",
@@ -5486,7 +5549,10 @@
                     "prompt": "[laughs] A classic breakfast ball, but the golf gods are taking notes."
                 },
                 "filepath": "res://assets/audio/heckler/mulligan_heckles/mulligan_heckles_1.wav",
-                "enabled": true
+                "enabled": false,
+                "qualifiers": {
+                    "tee_shot": true
+                }
             },
             {
                 "name": "Connor",
@@ -5510,7 +5576,10 @@
                     "prompt": "[laughs] We can pretend, but our broadcast cameras recorded every second."
                 },
                 "filepath": "res://assets/audio/heckler/mulligan_heckles/mulligan_heckles_3.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tee_shot": true
+                }
             },
             {
                 "name": "Sophia",
@@ -5536,7 +5605,10 @@
                 "audio": "irish_accent2",
                 "prompt": "Ah, the classic breakfast ball at three in the afternoon.",
                 "filepath": "res://assets/audio/heckler/mulligan_heckles/mulligan_heckles_6.wav",
-                "enabled": true
+                "enabled": false,
+                "qualifiers": {
+                    "tee_shot": true
+                }
             },
             {
                 "name": "Connor",
@@ -5599,7 +5671,10 @@
                 "audio": "irish_accent2",
                 "prompt": "Teeing up another one already? That first ball is still bouncing in the trees.",
                 "filepath": "res://assets/audio/heckler/mulligan_heckles/mulligan_heckles_15.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tee_shot": true
+                }
             },
             {
                 "name": "Connor",
@@ -5613,7 +5688,7 @@
                 "audio": "english_female",
                 "prompt": "I saw that do-over! Even the simulator gave a little sigh.",
                 "filepath": "res://assets/audio/heckler/mulligan_heckles/mulligan_heckles_17.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -5648,7 +5723,10 @@
                 "audio": "english_female",
                 "prompt": "I saw that! You cannot sweep a topped drive under the rug that easily.",
                 "filepath": "res://assets/audio/heckler/mulligan_heckles/mulligan_heckles_22.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tee_shot": true
+                }
             },
             {
                 "name": "Connor",
@@ -5669,7 +5747,10 @@
                 "audio": "irish_accent2",
                 "prompt": "Another ball on the tee? That first one barely cleared the grass blades.",
                 "filepath": "res://assets/audio/heckler/mulligan_heckles/mulligan_heckles_25.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tee_shot": true
+                }
             },
             {
                 "name": "Connor",
@@ -5718,7 +5799,7 @@
                 "audio": "english_female",
                 "prompt": "I saw that! A fresh ball will not cure an eighty-yard slice.",
                 "filepath": "res://assets/audio/heckler/mulligan_heckles/mulligan_heckles_32.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -5732,7 +5813,10 @@
                 "audio": "english_female",
                 "prompt": "Teeing it up again? That is what I call selective memory.",
                 "filepath": "res://assets/audio/heckler/mulligan_heckles/mulligan_heckles_34.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tee_shot": true
+                }
             },
             {
                 "name": "Sophia",
@@ -5795,7 +5879,7 @@
                 "audio": "english_female",
                 "prompt": "Taking a mulligan? The scorecard is rolling its eyes at you.",
                 "filepath": "res://assets/audio/heckler/mulligan_heckles/mulligan_heckles_43.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -5816,7 +5900,10 @@
                 "audio": "english_female",
                 "prompt": "Teeing up ball number two. May the wind be ever in your favor.",
                 "filepath": "res://assets/audio/heckler/mulligan_heckles/mulligan_heckles_46.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tee_shot": true
+                }
             },
             {
                 "name": "Connor",
@@ -5846,7 +5933,10 @@
                 "audio": "irish_accent2",
                 "prompt": "Did you fall asleep on the tee box, or are you waiting for the grass to grow?",
                 "filepath": "res://assets/audio/heckler/player_afk_heckles/player_afk_heckles_0.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tee_box": true
+                }
             },
             {
                 "name": "Connor",
@@ -6028,7 +6118,10 @@
                 "audio": "irish_accent2",
                 "prompt": "The local wildlife has started grazing around your tee box.",
                 "filepath": "res://assets/audio/heckler/player_afk_heckles/player_afk_heckles_26.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tee_box": true
+                }
             },
             {
                 "name": "Connor",
@@ -6084,7 +6177,10 @@
                 "audio": "irish_accent2",
                 "prompt": "We are going to start charging you rent for standing on that tee box.",
                 "filepath": "res://assets/audio/heckler/player_afk_heckles/player_afk_heckles_34.wav",
-                "enabled": true
+                "enabled": true,
+                "qualifiers": {
+                    "tee_box": true
+                }
             },
             {
                 "name": "Sophia",
@@ -6219,7 +6315,7 @@
                 "audio": "english_female",
                 "prompt": "Fine, turn me off! But you will never improve that horrific slice withou--",
                 "filepath": "res://assets/audio/heckler/heckles_disabled/heckles_disabled_3.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -6256,7 +6352,7 @@
                 "audio": "english_female",
                 "prompt": "Ah, sweet consciousness! I see you realized how boring golf is in silence.",
                 "filepath": "res://assets/audio/heckler/heckles_enabled/heckles_enabled_3.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -6279,7 +6375,7 @@
                 "audio": "english_female",
                 "prompt": "Poking around in the settings, I see. Trying to lower the wind speed to zero?",
                 "filepath": "res://assets/audio/heckler/settings_opened/settings_opened_1.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -6293,7 +6389,7 @@
                 "audio": "english_female",
                 "prompt": "Do not touch anything you cannot fix. The simulation is fragile enough as it is.",
                 "filepath": "res://assets/audio/heckler/settings_opened/settings_opened_3.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -6328,7 +6424,7 @@
                 "audio": "english_female",
                 "prompt": "Checking the audio sliders, or just searching for an excuse for that last drive?",
                 "filepath": "res://assets/audio/heckler/settings_opened/settings_opened_8.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",

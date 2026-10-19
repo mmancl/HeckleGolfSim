@@ -108,11 +108,22 @@ func _ready() -> void:
 	scroll.follow_focus = true
 	add_child(scroll)
 	ThemeManager.apply_scroll_container_style(scroll, 56 if is_mob else 28)
+
+	var scroll_margin = MarginContainer.new()
+	scroll_margin.name = "ScrollMargin"
+	scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll_margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var scroll_pad_right: int = 64 if is_mob else 36
+	scroll_margin.add_theme_constant_override("margin_right", scroll_pad_right)
+	scroll_margin.add_theme_constant_override("margin_left", 4)
+	scroll_margin.add_theme_constant_override("margin_top", 4)
+	scroll_margin.add_theme_constant_override("margin_bottom", 4)
+	scroll.add_child(scroll_margin)
 	
 	_vbox = VBoxContainer.new()
 	_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_vbox.add_theme_constant_override("separation", 10)
-	scroll.add_child(_vbox)
+	scroll_margin.add_child(_vbox)
 	
 	var header = HBoxContainer.new()
 	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -163,6 +174,14 @@ func _ready() -> void:
 	_apply_material_button_style(slice_btn, Color(0.75, 0.25, 0.2, 0.85))
 	slice_btn.pressed.connect(_on_hit_100y_slice)
 	_vbox.add_child(slice_btn)
+
+	var backspin_btn = Button.new()
+	backspin_btn.name = "100YBackspinButton"
+	backspin_btn.text = "🔄 100-Yard Backspin"
+	backspin_btn.custom_minimum_size = Vector2(260, 48 if is_mob else 44)
+	_apply_material_button_style(backspin_btn, Color(0.18, 0.65, 0.42, 0.85))
+	backspin_btn.pressed.connect(_on_hit_100y_backspin)
+	_vbox.add_child(backspin_btn)
 
 	# --- Club Delivery Stats Controls ---
 	var telem_sep = HSeparator.new()
@@ -381,6 +400,44 @@ func _on_hit_100y_slice() -> void:
 		"ClubPath": rand_path,
 		"HorizontalFaceImpact": rand_h,
 		"VerticalFaceImpact": rand_v
+	}
+	emit_signal("inject_shot", data)
+	close()
+
+func _on_hit_100y_backspin() -> void:
+	# Wedge backspin test shot: high launch angle (~29.5° - 31.0°), square face & path,
+	# and tour-level backspin (9,800 - 10,200 RPM) with near-zero spin axis tilt.
+	# Perfect for landing on the green and generating immediate spin check / bite and spinback.
+	var rand_face = snappedf(randf_range(-0.3, 0.3), 0.1)
+	var rand_path = snappedf(randf_range(-0.4, 0.4), 0.1)
+	var rand_h = snappedf(randf_range(-0.5, 0.5), 0.5)
+	var rand_v = snappedf(randf_range(-0.5, 0.5), 0.5)
+	var rand_axis = snappedf(randf_range(-0.5, 0.5), 0.1)
+	var rand_spin = snappedf(randf_range(9800.0, 10200.0), 50.0)
+
+	if _face_angle_spin != null:
+		_face_angle_spin.value = rand_face
+	if _club_path_spin != null:
+		_club_path_spin.value = rand_path
+	if _impact_h_spin != null:
+		_impact_h_spin.value = rand_h
+	if _impact_v_spin != null:
+		_impact_v_spin.value = rand_v
+
+	var payload = _interpolate_payload(100.0)
+	var data = {
+		"Speed": payload["speed"], # 82.0 mph
+		"VLA": 29.5,
+		"HLA": 0.0,
+		"TotalSpin": rand_spin,
+		"BackSpin": rand_spin,
+		"SideSpin": 0.0,
+		"SpinAxis": rand_axis,
+		"FaceAngle": rand_face,
+		"ClubPath": rand_path,
+		"HorizontalFaceImpact": rand_h,
+		"VerticalFaceImpact": rand_v,
+		"Club": "Sw"
 	}
 	emit_signal("inject_shot", data)
 	close()

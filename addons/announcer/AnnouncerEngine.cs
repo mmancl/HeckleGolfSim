@@ -91,6 +91,8 @@ public partial class AnnouncerEngine : Node
     // JSON prompt cache: Category -> List of HecklePromptDefinitions with enabled flag and qualifiers
     private readonly System.Collections.Generic.Dictionary<string, List<HecklePromptDefinition>> _promptDefinitions = new(StringComparer.OrdinalIgnoreCase);
     private string _lastPlayedPath = "";
+    // Tracks played audio line filepaths to prevent repeated voice lines until all matching lines have played
+    private readonly HashSet<string> _playedAudioLines = new(StringComparer.OrdinalIgnoreCase);
 
     public Array<Dictionary> GetTtsVoices()
     {
@@ -433,6 +435,87 @@ public partial class AnnouncerEngine : Node
         };
     }
 
+    public string SelectNextClipForCategory(string categoryName)
+    {
+        return SelectNextClipForCategory(categoryName, null, false);
+    }
+
+    public string SelectNextClipForCategory(string categoryName, Dictionary? context)
+    {
+        return SelectNextClipForCategory(categoryName, context, false);
+    }
+
+    public string SelectNextClipForCategory(string categoryName, Dictionary? context, bool markAsPlayed)
+    {
+        var clips = GetAvailableClipsForCategory(categoryName, context);
+        if (clips == null || clips.Count == 0)
+        {
+            return "";
+        }
+
+        var distinctClips = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var clip in clips)
+        {
+            if (!string.IsNullOrEmpty(clip) && seen.Add(clip))
+            {
+                distinctClips.Add(clip);
+            }
+        }
+
+        if (distinctClips.Count == 0)
+        {
+            return "";
+        }
+
+        var unplayedClips = new List<string>();
+        foreach (var clip in distinctClips)
+        {
+            if (!_playedAudioLines.Contains(clip))
+            {
+                unplayedClips.Add(clip);
+            }
+        }
+
+        // If all clips meeting the criteria for this hit have been played,
+        // reset played status for this criteria set before repeating.
+        if (unplayedClips.Count == 0)
+        {
+            GD.Print($"{LogPrefix} All {distinctClips.Count} clips for '{categoryName}' criteria set have been played. Resetting played tracking for these clips.");
+            if (markAsPlayed)
+            {
+                foreach (var clip in distinctClips)
+                {
+                    _playedAudioLines.Remove(clip);
+                }
+            }
+            unplayedClips.AddRange(distinctClips);
+        }
+
+        string chosenPath;
+        if (unplayedClips.Count == 1)
+        {
+            chosenPath = unplayedClips[0];
+        }
+        else
+        {
+            int idx = _random.Next(unplayedClips.Count);
+            if (unplayedClips[idx] == _lastPlayedPath)
+            {
+                idx = (idx + 1) % unplayedClips.Count;
+            }
+            chosenPath = unplayedClips[idx];
+        }
+
+        if (markAsPlayed && !string.IsNullOrEmpty(chosenPath))
+        {
+            _playedAudioLines.Add(chosenPath);
+            _lastPlayedPath = chosenPath;
+        }
+
+        return chosenPath;
+    }
+
     public bool PlayCategory(string categoryName)
     {
         return PlayCategory(categoryName, null);
@@ -440,26 +523,11 @@ public partial class AnnouncerEngine : Node
 
     public bool PlayCategory(string categoryName, Dictionary? context)
     {
-        var clips = GetAvailableClipsForCategory(categoryName, context);
-        if (clips == null || clips.Count == 0)
+        string chosenPath = SelectNextClipForCategory(categoryName, context, markAsPlayed: true);
+        if (string.IsNullOrEmpty(chosenPath))
         {
             GD.Print($"{LogPrefix} No eligible audio clips found for category '{categoryName}' (with context).");
             return false;
-        }
-
-        string chosenPath;
-        if (clips.Count == 1)
-        {
-            chosenPath = clips[0];
-        }
-        else
-        {
-            int idx = _random.Next(clips.Count);
-            if (clips[idx] == _lastPlayedPath)
-            {
-                idx = (idx + 1) % clips.Count;
-            }
-            chosenPath = clips[idx];
         }
 
         try
@@ -467,23 +535,59 @@ public partial class AnnouncerEngine : Node
             var stream = GD.Load<AudioStream>(chosenPath);
             if (stream != null)
             {
-                _lastPlayedPath = chosenPath;
                 _audioPlayer.Stream = stream;
                 _audioPlayer.Play();
-                GD.Print($"{LogPrefix} Playing category '{categoryName}': {chosenPath}");
+                GD.Print($"{LogPrefix} Playing category '{categoryName}': {chosenPath} (Played total: {_playedAudioLines.Count})");
                 return true;
             }
             else
             {
+                _playedAudioLines.Remove(chosenPath);
                 GD.PrintErr($"{LogPrefix} Failed to load stream at {chosenPath}");
                 return false;
             }
         }
         catch (Exception ex)
         {
+            _playedAudioLines.Remove(chosenPath);
             GD.PrintErr($"{LogPrefix} Error playing audio stream at {chosenPath}: {ex.Message}");
             return false;
         }
+    }
+
+    public void ResetPlayedAudioLines()
+    {
+        _playedAudioLines.Clear();
+        _lastPlayedPath = "";
+        GD.Print($"{LogPrefix} Reset all played audio lines tracking.");
+    }
+
+    public void MarkAudioLinePlayed(string filePath)
+    {
+        if (!string.IsNullOrEmpty(filePath))
+        {
+            _playedAudioLines.Add(filePath);
+        }
+    }
+
+    public bool HasAudioLinePlayed(string filePath)
+    {
+        return !string.IsNullOrEmpty(filePath) && _playedAudioLines.Contains(filePath);
+    }
+
+    public int GetPlayedAudioLinesCount()
+    {
+        return _playedAudioLines.Count;
+    }
+
+    public Array<string> GetPlayedAudioLines()
+    {
+        var arr = new Array<string>();
+        foreach (var path in _playedAudioLines)
+        {
+            arr.Add(path);
+        }
+        return arr;
     }
 
     private bool PlayCategoryGuarded(string categoryName, bool isHeckle = false, bool guaranteed = false, Dictionary? context = null)
@@ -517,6 +621,116 @@ public partial class AnnouncerEngine : Node
 
         _shotHadCommentary = true;
         return PlayCategory(categoryName, context);
+    }
+
+    public Dictionary GetAmbientContext(Dictionary? explicitContext = null)
+    {
+        var ctx = new Dictionary();
+
+        var mode = GetCurrentGameMode();
+        string modeStr = mode switch
+        {
+            SimGameMode.CoursePlay => "course_play",
+            SimGameMode.Range => "range",
+            SimGameMode.MiniGames => "minigames",
+            _ => "menu"
+        };
+        ctx["game_mode"] = modeStr;
+
+        if (mode == SimGameMode.CoursePlay)
+        {
+            try
+            {
+                var mpNode = GetTree()?.Root?.GetNodeOrNull("MultiplayerManager");
+                if (mpNode != null)
+                {
+                    int holeIdx = 0;
+                    var curHoleVar = mpNode.Get("current_hole_index");
+                    if (curHoleVar.VariantType == Variant.Type.Int)
+                    {
+                        holeIdx = (int)curHoleVar;
+                    }
+
+                    int holeNum = holeIdx + 1;
+                    ctx["hole_number"] = holeNum;
+                    ctx["hole_range"] = holeIdx < 9 ? "front_nine" : "back_nine";
+
+                    var holeIdsVar = mpNode.Get("hole_ids");
+                    if (holeIdsVar.VariantType == Variant.Type.Array)
+                    {
+                        var holeIds = holeIdsVar.AsGodotArray();
+                        ctx["holes_remaining"] = Math.Max(0, holeIds.Count - holeIdx);
+                    }
+
+                    if (mpNode.HasMethod("get_active_player"))
+                    {
+                        var activePVar = mpNode.Call("get_active_player");
+                        if (activePVar.VariantType == Variant.Type.Dictionary)
+                        {
+                            var activeP = activePVar.AsGodotDictionary();
+                            int holeStrokes = activeP.TryGetValue("strokes", out var sVal) ? Convert.ToInt32(sVal) : 0;
+                            ctx["strokes"] = holeStrokes;
+                            ctx["tee_box"] = (holeStrokes <= 1);
+
+                            int totalDiff = 0;
+                            if (activeP.TryGetValue("hole_scores", out var scoresVar) && scoresVar.VariantType == Variant.Type.Dictionary)
+                            {
+                                var scoresDict = scoresVar.AsGodotDictionary();
+                                var holeInfoVar = mpNode.Get("hole_info");
+                                if (holeInfoVar.VariantType == Variant.Type.Dictionary)
+                                {
+                                    var holeInfoDict = holeInfoVar.AsGodotDictionary();
+                                    foreach (var kvp in scoresDict)
+                                    {
+                                        int sc = Convert.ToInt32(kvp.Value);
+                                        if (sc > 0)
+                                        {
+                                            int par = 4;
+                                            if (holeInfoDict.TryGetValue(kvp.Key, out var hInfo) && hInfo.VariantType == Variant.Type.Dictionary)
+                                            {
+                                                var hDict = hInfo.AsGodotDictionary();
+                                                if (hDict.TryGetValue("Par", out var parVal))
+                                                    par = Convert.ToInt32(parVal);
+                                            }
+                                            totalDiff += (sc - par);
+                                        }
+                                    }
+                                }
+                            }
+
+                            ctx["score_relative_to_par"] = totalDiff;
+                            ctx["total_score_relative_to_par"] = totalDiff;
+
+                            string status = totalDiff > 0 ? "over_par" : (totalDiff < 0 ? "under_par" : "even_par");
+                            ctx["score_status"] = status;
+                            ctx["overall_score"] = status;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.Print($"{LogPrefix} Ambient context gathering exception: {ex.Message}");
+            }
+        }
+        else if (mode == SimGameMode.Range)
+        {
+            ctx["score_relative_to_par"] = 0;
+            ctx["total_score_relative_to_par"] = 0;
+            ctx["score_status"] = "even_par";
+            ctx["overall_score"] = "even_par";
+            ctx["tee_box"] = false;
+        }
+
+        if (explicitContext != null)
+        {
+            foreach (var kvp in explicitContext)
+            {
+                ctx[kvp.Key] = kvp.Value;
+            }
+        }
+
+        return ctx;
     }
 
     private static bool MatchesQualifiers(System.Collections.Generic.Dictionary<string, object> qualifiers, Dictionary context)
@@ -562,6 +776,138 @@ public partial class AnnouncerEngine : Node
                     {
                         return false;
                     }
+                    break;
+                }
+                case "min_score_relative_to_par":
+                {
+                    int requiredMin = Convert.ToInt32(qualVal);
+                    int actualRel = (int)GetFloatSafe(context, "score_relative_to_par", -999.0f);
+                    if (actualRel == -999)
+                        actualRel = (int)GetFloatSafe(context, "total_score_relative_to_par", -999.0f);
+                    if (actualRel < requiredMin) return false;
+                    break;
+                }
+                case "max_score_relative_to_par":
+                {
+                    int requiredMax = Convert.ToInt32(qualVal);
+                    int actualRel = (int)GetFloatSafe(context, "score_relative_to_par", 999.0f);
+                    if (actualRel == 999)
+                        actualRel = (int)GetFloatSafe(context, "total_score_relative_to_par", 999.0f);
+                    if (actualRel > requiredMax) return false;
+                    break;
+                }
+                case "score_status":
+                {
+                    string reqStatus = qualVal.ToString()?.ToLowerInvariant() ?? "";
+                    string actStatus = GetStringSafe(context, "score_status").ToLowerInvariant();
+                    int actualRel = (int)GetFloatSafe(context, "score_relative_to_par", -999.0f);
+                    if (actualRel == -999)
+                        actualRel = (int)GetFloatSafe(context, "total_score_relative_to_par", -999.0f);
+
+                    if (reqStatus == "over_par")
+                    {
+                        if (actStatus != "over_par" && actualRel <= 0) return false;
+                    }
+                    else if (reqStatus == "under_par")
+                    {
+                        if (actStatus != "under_par" && actualRel >= 0) return false;
+                    }
+                    else if (reqStatus == "even_par")
+                    {
+                        if (actStatus != "even_par" && actualRel != 0) return false;
+                    }
+                    else if (actStatus != reqStatus)
+                    {
+                        return false;
+                    }
+                    break;
+                }
+                case "overall_score":
+                {
+                    string reqScore = qualVal.ToString()?.ToLowerInvariant() ?? "";
+                    string actScore = GetStringSafe(context, "overall_score").ToLowerInvariant();
+                    int actualRel = (int)GetFloatSafe(context, "total_score_relative_to_par", -999.0f);
+                    if (actualRel == -999)
+                        actualRel = (int)GetFloatSafe(context, "score_relative_to_par", -999.0f);
+
+                    if (reqScore == "over_par")
+                    {
+                        if (actScore != "over_par" && actualRel <= 0) return false;
+                    }
+                    else if (reqScore == "under_par")
+                    {
+                        if (actScore != "under_par" && actualRel >= 0) return false;
+                    }
+                    else if (reqScore == "even_par")
+                    {
+                        if (actScore != "even_par" && actualRel != 0) return false;
+                    }
+                    else if (actScore != reqScore)
+                    {
+                        return false;
+                    }
+                    break;
+                }
+                case "game_mode":
+                {
+                    string reqMode = qualVal.ToString()?.ToLowerInvariant() ?? "";
+                    string actMode = GetStringSafe(context, "game_mode").ToLowerInvariant();
+                    if (actMode != reqMode) return false;
+                    break;
+                }
+                case "hole_range":
+                {
+                    string reqRange = qualVal.ToString()?.ToLowerInvariant() ?? "";
+                    string actRange = GetStringSafe(context, "hole_range").ToLowerInvariant();
+                    int holeNum = (int)GetFloatSafe(context, "hole_number", -1.0f);
+
+                    if (reqRange == "front_nine")
+                    {
+                        if (actRange == "back_nine" || (holeNum > 9 && holeNum != -1)) return false;
+                    }
+                    else if (reqRange == "back_nine")
+                    {
+                        if (actRange == "front_nine" || (holeNum <= 9 && holeNum != -1)) return false;
+                    }
+                    else if (actRange != reqRange)
+                    {
+                        return false;
+                    }
+                    break;
+                }
+                case "min_hole":
+                {
+                    int minHole = Convert.ToInt32(qualVal);
+                    int holeNum = (int)GetFloatSafe(context, "hole_number", -1.0f);
+                    if (holeNum != -1 && holeNum < minHole) return false;
+                    break;
+                }
+                case "max_hole":
+                {
+                    int maxHole = Convert.ToInt32(qualVal);
+                    int holeNum = (int)GetFloatSafe(context, "hole_number", -1.0f);
+                    if (holeNum != -1 && holeNum > maxHole) return false;
+                    break;
+                }
+                case "surface":
+                {
+                    string reqSurf = qualVal.ToString()?.ToLowerInvariant() ?? "";
+                    string actSurf = GetStringSafe(context, "surface").ToLowerInvariant();
+                    bool isInSand = GetBoolSafe(context, "is_in_sand", false);
+                    bool isInWater = GetBoolSafe(context, "is_in_water", false);
+                    if (reqSurf == "sand" && !isInSand && actSurf != "sand") return false;
+                    if (reqSurf == "water" && !isInWater && actSurf != "water") return false;
+                    if (reqSurf != "sand" && reqSurf != "water" && actSurf != reqSurf) return false;
+                    break;
+                }
+                case "tee_box":
+                {
+                    bool reqTeeBox = Convert.ToBoolean(qualVal);
+                    bool actTeeBox = GetBoolSafe(context, "tee_box", false);
+                    bool teeShot = GetBoolSafe(context, "tee_shot", false);
+                    int strokes = (int)GetFloatSafe(context, "strokes", -1.0f);
+                    if (strokes == 1 || teeShot) actTeeBox = true;
+                    if (actTeeBox != reqTeeBox) return false;
                     break;
                 }
                 case "strokes":
@@ -630,6 +976,10 @@ public partial class AnnouncerEngine : Node
                         string qStr = qualVal.ToString()?.ToLowerInvariant() ?? "";
                         if (ctxStr != qStr) return false;
                     }
+                    else
+                    {
+                        return false;
+                    }
                     break;
                 }
             }
@@ -693,15 +1043,27 @@ public partial class AnnouncerEngine : Node
 
     public void SpeakIdleComment()
     {
+        SpeakIdleComment(null);
+    }
+
+    public void SpeakIdleComment(Dictionary? context)
+    {
         if (!IsHeckleActiveForCurrentScene()) return;
-        PlayCategory("player_afk_heckles");
+        var ambient = GetAmbientContext(context);
+        PlayCategory("player_afk_heckles", ambient);
     }
 
     public void SpeakHomeButtonHeckle()
     {
+        SpeakHomeButtonHeckle(null);
+    }
+
+    public void SpeakHomeButtonHeckle(Dictionary? context)
+    {
         if (!IsHeckleActiveForCurrentScene()) return;
         _idleTimer = 0.0f;
-        PlayCategoryGuarded("home_button_popup", isHeckle: true, guaranteed: true);
+        var ambient = GetAmbientContext(context);
+        PlayCategoryGuarded("home_button_popup", isHeckle: true, guaranteed: true, context: ambient);
     }
 
     public void SpeakHecklesEnabled()
@@ -718,10 +1080,16 @@ public partial class AnnouncerEngine : Node
 
     public void SpeakSettingsOpened()
     {
+        SpeakSettingsOpened(null);
+    }
+
+    public void SpeakSettingsOpened(Dictionary? context)
+    {
         if (!IsHeckleActiveForCurrentScene()) return;
 
         _idleTimer = 0.0f;
-        PlayCategory("settings_opened");
+        var ambient = GetAmbientContext(context);
+        PlayCategory("settings_opened", ambient);
     }
 
     public void AnnounceLaunch(Dictionary shotData)
@@ -1002,6 +1370,11 @@ public partial class AnnouncerEngine : Node
 
     public void SpeakMulliganHeckle()
     {
+        SpeakMulliganHeckle(null);
+    }
+
+    public void SpeakMulliganHeckle(Dictionary? context)
+    {
         if (!IsHeckleActiveForCurrentScene()) return;
 
         ulong now = Time.GetTicksMsec();
@@ -1010,7 +1383,8 @@ public partial class AnnouncerEngine : Node
 
         _idleTimer = 0.0f; // Reset idle timer!
         _shotHadCommentary = false; // Reset so shot commentary tracking is cleared
-        PlayCategory("mulligan_heckles");
+        var ambient = GetAmbientContext(context);
+        PlayCategory("mulligan_heckles", ambient);
     }
 
     public void SpeakTreeHeckle()
@@ -1068,16 +1442,18 @@ public partial class AnnouncerEngine : Node
             context["strokes"] = 8;
         }
 
+        var ambient = GetAmbientContext(context);
+
         if (scoreType >= 2)
         {
             // Heckle above par: only on double bogey or worse (scoreType >= 2)
             if (IsHeckleActiveForCurrentScene())
-                PlayCategoryGuarded("over_bogey_heckles", isHeckle: true, guaranteed: true, context);
+                PlayCategoryGuarded("over_bogey_heckles", isHeckle: true, guaranteed: true, ambient);
         }
         else if (scoreType < 0) // Under par (Birdie, Eagle, etc.)
         {
             if (PraiseEnabled)
-                PlayCategoryGuarded("under_par", isHeckle: false, guaranteed: true, context);
+                PlayCategoryGuarded("under_par", isHeckle: false, guaranteed: true, ambient);
         }
     }
 

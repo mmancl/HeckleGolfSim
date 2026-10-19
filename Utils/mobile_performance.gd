@@ -432,6 +432,12 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 		if tmb != null and tmb.has_method("apply_graphics_quality_to_markers"):
 			tmb.apply_graphics_quality_to_markers(scene_root, is_low)
 
+	# Update 3D golf flags realism and wind waving if present in scene
+	if ResourceLoader.exists("res://Courses/Range/flag_builder.gd"):
+		var fb = load("res://Courses/Range/flag_builder.gd")
+		if fb != null and fb.has_method("apply_graphics_quality_to_flags"):
+			fb.apply_graphics_quality_to_flags(scene_root, quality)
+
 
 
 static var _low_tree_materials: Dictionary = {}

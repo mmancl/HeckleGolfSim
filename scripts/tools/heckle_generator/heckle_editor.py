@@ -44,6 +44,56 @@ ALLOWED_QUALIFIERS = {
             "under_par"
         ]
     },
+    "game_mode": {
+        "type": "enum",
+        "description": "Target game mode (course_play, range, minigames)",
+        "values": ["course_play", "range", "minigames"]
+    },
+    "min_score_relative_to_par": {
+        "type": "int",
+        "description": "Minimum strokes over par required (e.g. 15 or 20 for blowout heckles)",
+        "placeholder": "e.g. 20"
+    },
+    "max_score_relative_to_par": {
+        "type": "int",
+        "description": "Maximum strokes over par allowed (e.g. 5)",
+        "placeholder": "e.g. 5"
+    },
+    "score_status": {
+        "type": "enum",
+        "description": "Current player score status",
+        "values": ["over_par", "under_par", "even_par"]
+    },
+    "overall_score": {
+        "type": "enum",
+        "description": "Overall round score relative to par",
+        "values": ["over_par", "under_par", "even_par"]
+    },
+    "hole_range": {
+        "type": "enum",
+        "description": "Front nine (holes 1-9) vs back nine (holes 10-18)",
+        "values": ["front_nine", "back_nine"]
+    },
+    "max_hole": {
+        "type": "int",
+        "description": "Maximum hole number (e.g. 2 for opening banter)",
+        "placeholder": "e.g. 2"
+    },
+    "min_hole": {
+        "type": "int",
+        "description": "Minimum hole number (e.g. 10 for back nine)",
+        "placeholder": "e.g. 10"
+    },
+    "surface": {
+        "type": "enum",
+        "description": "Required surface type",
+        "values": ["sand", "water", "green", "fairway", "rough"]
+    },
+    "tee_box": {
+        "type": "bool",
+        "description": "Ball or player on tee box",
+        "values": [True, False]
+    },
     "tree_hit_type": {
         "type": "enum",
         "description": "Tree collision type (trunk impact vs canopy leaves/branches)",
@@ -1525,6 +1575,16 @@ function createPromptCard(category, index, promptObj) {
         <select class="qual-select" id="qual-type-${cardId}" onchange="onQualifierTypeChange('${cardId}')">
           <option value="">+ Add Qualifier...</option>
           <option value="score_type">score_type (birdie, eagle, etc.)</option>
+          <option value="game_mode">game_mode (course_play, range, minigames)</option>
+          <option value="min_score_relative_to_par">min_score_relative_to_par (e.g. 20)</option>
+          <option value="max_score_relative_to_par">max_score_relative_to_par (e.g. 5)</option>
+          <option value="score_status">score_status (over_par, under_par, even_par)</option>
+          <option value="overall_score">overall_score (over_par, under_par, even_par)</option>
+          <option value="hole_range">hole_range (front_nine, back_nine)</option>
+          <option value="max_hole">max_hole (e.g. 2)</option>
+          <option value="min_hole">min_hole (e.g. 10)</option>
+          <option value="surface">surface (sand, water, green, fairway, rough)</option>
+          <option value="tee_box">tee_box (true/false)</option>
           <option value="tree_hit_type">tree_hit_type (trunk, leaves)</option>
           <option value="strokes">strokes (exact count, e.g. 8)</option>
           <option value="gir">gir (true/false)</option>
@@ -1572,6 +1632,39 @@ function onQualifierTypeChange(cardId) {
         <option value="under_par">under_par</option>
       </select>
     `;
+  } else if (type === "game_mode") {
+    container.innerHTML = `
+      <select class="qual-select" id="qual-val-${cardId}">
+        <option value="course_play">course_play</option>
+        <option value="range">range</option>
+        <option value="minigames">minigames</option>
+      </select>
+    `;
+  } else if (["score_status", "overall_score"].includes(type)) {
+    container.innerHTML = `
+      <select class="qual-select" id="qual-val-${cardId}">
+        <option value="over_par">over_par</option>
+        <option value="under_par">under_par</option>
+        <option value="even_par">even_par</option>
+      </select>
+    `;
+  } else if (type === "hole_range") {
+    container.innerHTML = `
+      <select class="qual-select" id="qual-val-${cardId}">
+        <option value="front_nine">front_nine (holes 1-9)</option>
+        <option value="back_nine">back_nine (holes 10-18)</option>
+      </select>
+    `;
+  } else if (type === "surface") {
+    container.innerHTML = `
+      <select class="qual-select" id="qual-val-${cardId}">
+        <option value="sand">sand</option>
+        <option value="water">water</option>
+        <option value="green">green</option>
+        <option value="fairway">fairway</option>
+        <option value="rough">rough</option>
+      </select>
+    `;
   } else if (type === "tree_hit_type") {
     container.innerHTML = `
       <select class="qual-select" id="qual-val-${cardId}">
@@ -1579,16 +1672,21 @@ function onQualifierTypeChange(cardId) {
         <option value="leaves">leaves (canopy pass)</option>
       </select>
     `;
-  } else if (["gir", "birdie_chance", "tee_shot", "close_to_pin"].includes(type)) {
+  } else if (["gir", "birdie_chance", "tee_shot", "close_to_pin", "tee_box"].includes(type)) {
     container.innerHTML = `
       <select class="qual-select" id="qual-val-${cardId}">
         <option value="true">true</option>
         <option value="false">false</option>
       </select>
     `;
-  } else if (type === "strokes") {
+  } else if (["strokes", "min_score_relative_to_par", "max_score_relative_to_par", "max_hole", "min_hole"].includes(type)) {
+    let defVal = "8";
+    if (type === "min_score_relative_to_par") defVal = "20";
+    else if (type === "max_score_relative_to_par") defVal = "5";
+    else if (type === "max_hole") defVal = "2";
+    else if (type === "min_hole") defVal = "10";
     container.innerHTML = `
-      <input type="number" class="qual-input" id="qual-val-${cardId}" placeholder="e.g. 8" min="1" max="20" value="8">
+      <input type="number" class="qual-input" id="qual-val-${cardId}" placeholder="Value" value="${defVal}">
     `;
   } else if (type === "custom") {
     container.innerHTML = `

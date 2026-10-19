@@ -148,6 +148,7 @@ var launch_spin_rpm := 0.0  # Stored for bounce calculations
 var rollout_impact_spin_rpm := 0.0  # Spin on first impact; used for rollout friction
 var is_putt := false
 var _hit_leaves_this_shot := false
+var _hit_trunk_this_shot := false
 var hit_tree_this_shot := false
 var _skipping_flight := false
 
@@ -1752,22 +1753,31 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 					_sfx_player.pitch_scale = randf_range(0.95, 1.05)
 					_sfx_player.stream = _sfx_tree_hit
 					_sfx_player.play()
-				if not hit_tree_this_shot:
-					hit_tree_this_shot = true
+				hit_tree_this_shot = true
+				if not _hit_trunk_this_shot:
+					_hit_trunk_this_shot = true
 					if has_node("/root/AnnouncerEngine") and not _skipping_flight:
 						get_node("/root/AnnouncerEngine").call("SpeakTreeHeckle", "trunk")
 				if has_node("/root/TensionManager"):
 					get_node("/root/TensionManager").on_tree_hit()
-				# Damped reflection off tree
-				velocity = velocity.bounce(normal) * 0.40
-				# If hit near top of trunk collider, deflect outward and down so ball doesn't hover on top
-				if normal.y > 0.5:
-					var outward := Vector3(velocity.x, -2.0, velocity.z)
-					if outward.is_zero_approx():
-						outward = Vector3(randf_range(-1.0, 1.0), -2.0, randf_range(-1.0, 1.0)).normalized()
-					velocity = outward.normalized() * maxf(velocity.length(), 2.0)
+				# Damped reflection off tree trunk
+				velocity = velocity.bounce(normal) * 0.45
+				# If hit near top rim of trunk cylinder, deflect horizontally outward away from trunk axis
+				if normal.y > 0.4:
+					var horiz_out := Vector3(normal.x, 0.0, normal.z)
+					if horiz_out.is_zero_approx():
+						horiz_out = Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0)).normalized()
+					else:
+						horiz_out = horiz_out.normalized()
+					velocity = Vector3(horiz_out.x * maxf(absf(velocity.x), 2.5), maxf(velocity.y, 0.5), horiz_out.z * maxf(absf(velocity.z), 2.5))
 				omega = omega * 0.5
 				state = PhysicsEnums.BallState.FLIGHT
+				# Depenetrate ball slightly away from tree surface so it doesn't get stuck in collider
+				global_position += normal * (COLLISION_SAFE_MARGIN * 2.0 + 0.008)
+				var remainder := collision.get_remainder()
+				var bounced_remainder := remainder.bounce(normal) * 0.45
+				if bounced_remainder.length_squared() > 0.000001:
+					move_and_collide(bounced_remainder, false, COLLISION_SAFE_MARGIN)
 			elif is_flagstick:
 				if _cup_player != null and not _skipping_flight:
 					_cup_player.pitch_scale = randf_range(1.18, 1.30)
@@ -1775,10 +1785,20 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 				print("[ball.gd] Ball struck the flagstick pin! Damped bounce.")
 				velocity = velocity.bounce(normal) * 0.35
 				omega = omega * 0.5
+				global_position += normal * (COLLISION_SAFE_MARGIN * 2.0 + 0.008)
+				var remainder := collision.get_remainder()
+				var bounced_remainder := remainder.bounce(normal) * 0.35
+				if bounced_remainder.length_squared() > 0.000001:
+					move_and_collide(bounced_remainder, false, COLLISION_SAFE_MARGIN)
 			else:
 				# Damped reflection off vertical surfaces (walls, barriers, rocks, etc.)
 				velocity = velocity.bounce(normal) * 0.35
 				omega = omega * 0.5
+				global_position += normal * (COLLISION_SAFE_MARGIN * 2.0 + 0.008)
+				var remainder := collision.get_remainder()
+				var bounced_remainder := remainder.bounce(normal) * 0.35
+				if bounced_remainder.length_squared() > 0.000001:
+					move_and_collide(bounced_remainder, false, COLLISION_SAFE_MARGIN)
 	else:
 		# No collision - only stay grounded if terrain is still directly beneath the ball.
 		if state != PhysicsEnums.BallState.FLIGHT and was_on_ground:
@@ -2338,6 +2358,7 @@ func hit_from_data(data: Dictionary) -> void:
 	is_in_sand = false
 	water_collider = null
 	_hit_leaves_this_shot = false
+	_hit_trunk_this_shot = false
 	hit_tree_this_shot = false
 	_is_in_tree_canopy = false
 	_tree_check_timer = 0.0

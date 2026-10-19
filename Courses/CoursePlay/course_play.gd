@@ -1089,7 +1089,26 @@ func _setup_hud() -> void:
 			if no_b != null:
 				no_b.call_deferred("grab_focus")
 			if has_node("/root/AnnouncerEngine"):
-				get_node("/root/AnnouncerEngine").call("SpeakHomeButtonHeckle")
+				var cur_score_rel := 0
+				if MultiplayerManager != null:
+					var p = MultiplayerManager.get_active_player()
+					if p != null:
+						for h_id in MultiplayerManager.hole_ids:
+							var sc = p.get("hole_scores", {}).get(h_id)
+							if sc != null and sc > 0:
+								var par_val = int(MultiplayerManager.hole_info.get(h_id, {}).get("Par", 4))
+								cur_score_rel += (int(sc) - par_val)
+				var cur_h_idx = clamp(MultiplayerManager.current_hole_index, 0, max(0, MultiplayerManager.hole_ids.size() - 1)) if MultiplayerManager != null else 0
+				var ctx = {
+					"game_mode": "course_play",
+					"hole_number": cur_h_idx + 1,
+					"hole_range": "front_nine" if cur_h_idx < 9 else "back_nine",
+					"score_relative_to_par": cur_score_rel,
+					"total_score_relative_to_par": cur_score_rel,
+					"score_status": "over_par" if cur_score_rel > 0 else ("under_par" if cur_score_rel < 0 else "even_par"),
+					"overall_score": "over_par" if cur_score_rel > 0 else ("under_par" if cur_score_rel < 0 else "even_par")
+				}
+				get_node("/root/AnnouncerEngine").call("SpeakHomeButtonHeckle", ctx)
 	)
 	canvas.add_child(home_btn)
 
@@ -1242,21 +1261,27 @@ func _setup_hud() -> void:
 	dist_btn.name = "HitDistanceButton"
 	dist_btn.text = "🎯 Hit Distance"
 	dist_btn.custom_minimum_size = Vector2(180, 56)
+	dist_btn.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	apply_material_button_style(dist_btn, Color(0.6, 0.2, 0.6, 0.85))
 	dist_btn.pressed.connect(func():
 		if dist_menu:
-			dist_menu.visible = not dist_menu.visible
 			if dist_menu.visible:
-				dist_menu.current_ball_node = active_ball
-				if course_instance != null and "aim_target_pos" in course_instance:
-					dist_menu.aim_target_node = course_instance.get("aim_target_pos")
-			else:
+				if dist_menu.has_method("close"):
+					dist_menu.close()
+				else:
+					dist_menu.visible = false
 				var vp = get_viewport()
 				if vp != null:
 					vp.gui_release_focus()
+			else:
+				dist_menu.visible = true
+				dist_menu.current_ball_node = active_ball
+				if course_instance != null and "aim_target_pos" in course_instance:
+					dist_menu.aim_target_node = course_instance.get("aim_target_pos")
 			_update_hit_distance_button_state()
 			_update_helpers_scroll_layout.call_deferred()
 	)
+	dist_btn.set_meta("toggle_target", dist_menu)
 	dist_menu.visibility_changed.connect(func():
 		_update_hit_distance_button_state()
 		_update_helpers_scroll_layout.call_deferred()
@@ -3824,23 +3849,24 @@ func _show_hole_intro_card(hole_num: int, par: int, dist: int, course_title: Str
 	hole_intro_card.offset_right = entrance_right
 
 	_hole_card_tween = create_tween()
+	# Optional initial settle delay
 	_hole_card_tween.tween_interval(0.35)
-	_hole_card_tween.chain().set_parallel(true)
-	# Smooth broadcast slide in from the LEFT into the middle of the screen
-	_hole_card_tween.tween_property(hole_intro_card, "offset_left", onscreen_left, 0.95).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	_hole_card_tween.tween_property(hole_intro_card, "offset_right", onscreen_right, 0.95).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	_hole_card_tween.tween_property(hole_intro_card, "modulate:a", 1.0, 0.7).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
-	# Dwell in the middle of the screen for 6.5 seconds so the player can comfortably read it
-	_hole_card_tween.chain().tween_interval(6.5)
+	# Phase 1: Slide in from the LEFT into the middle of the screen (1.5 seconds)
+	_hole_card_tween.tween_property(hole_intro_card, "offset_left", onscreen_left, 1.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_hole_card_tween.parallel().tween_property(hole_intro_card, "offset_right", onscreen_right, 1.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_hole_card_tween.parallel().tween_property(hole_intro_card, "modulate:a", 1.0, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
-	# Smooth broadcast slide out to the RIGHT
-	_hole_card_tween.chain().set_parallel(true)
-	_hole_card_tween.tween_property(hole_intro_card, "offset_left", exit_left, 0.85).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
-	_hole_card_tween.tween_property(hole_intro_card, "offset_right", exit_right, 0.85).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
-	_hole_card_tween.tween_property(hole_intro_card, "modulate:a", 0.0, 0.6).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	# Phase 2: Dwell in the middle of the screen for 2.5 seconds so the player can comfortably read it
+	_hole_card_tween.tween_interval(2.5)
 
-	_hole_card_tween.chain().tween_callback(func():
+	# Phase 3: Slide out to the RIGHT (1.5 seconds)
+	_hole_card_tween.tween_property(hole_intro_card, "offset_left", exit_left, 1.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	_hole_card_tween.parallel().tween_property(hole_intro_card, "offset_right", exit_right, 1.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	_hole_card_tween.parallel().tween_property(hole_intro_card, "modulate:a", 0.0, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+
+	# Hide upon completion
+	_hole_card_tween.tween_callback(func():
 		if is_instance_valid(hole_intro_card):
 			hole_intro_card.visible = false
 	)

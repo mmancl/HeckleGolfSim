@@ -2,6 +2,7 @@ extends Node3D
 
 # Preloaded assets
 var PlayerScene = preload("res://Player/player.tscn")
+const FlagBuilder = preload("res://Courses/Range/flag_builder.gd")
 
 # Minigame state variables
 var player = null
@@ -1115,50 +1116,12 @@ func _build_target_flag() -> void:
 	target_flag_node.position = Vector3(0.0, 0.04, 0.0)
 	target_node.add_child(target_flag_node)
 
-	# Pole
-	var pole = MeshInstance3D.new()
-	var pole_mesh = CylinderMesh.new()
-	pole_mesh.top_radius = 0.022
-	pole_mesh.bottom_radius = 0.022
-	pole_mesh.height = 2.6
-	pole.mesh = pole_mesh
-	var pole_mat = StandardMaterial3D.new()
-	pole_mat.albedo_color = Color.WHITE
-	pole.material_override = pole_mat
-	target_flag_node.add_child(pole)
-
-	# Flagpole 3D collider for target pin
-	var flag_body = StaticBody3D.new()
-	flag_body.name = "FlagstickCollider"
-	flag_body.set_meta("is_flagstick", true)
-	flag_body.set_meta("is_obstacle", true)
-	flag_body.collision_layer = 1
-	flag_body.collision_mask = 0
-	var col_shape = CollisionShape3D.new()
-	col_shape.name = "CollisionShape"
-	var cyl = CylinderShape3D.new()
-	cyl.radius = 0.025
-	cyl.height = 2.6
-	col_shape.shape = cyl
-	col_shape.position = Vector3(0.0, 1.3, 0.0)
-	flag_body.add_child(col_shape)
-	target_flag_node.add_child(flag_body)
-
-	# Flag pennant
-	var flag = MeshInstance3D.new()
-	var flag_mesh = PrismMesh.new()
-	flag_mesh.size = Vector3(0.55, 0.38, 0.01)
-	flag.mesh = flag_mesh
-	var flag_mat = StandardMaterial3D.new()
 	var col = get_active_player_color() if pvp_mode else Color(1.0, 0.20, 0.20)
-	flag_mat.albedo_color = col
-	flag_mat.emission_enabled = true
-	flag_mat.emission = col
-	flag_mat.emission_energy_multiplier = 0.8
-	flag.material_override = flag_mat
-	flag.position = Vector3(0.28, 2.40, 0.0)
-	flag.rotation = Vector3(0.0, 0.0, -PI / 2)
-	target_flag_node.add_child(flag)
+	var q_str = ""
+	var gs = GlobalSettings if GlobalSettings != null else (get_node_or_null("/root/GlobalSettings") if is_inside_tree() else null)
+	if gs != null and gs.has_method("get_graphics_quality"):
+		q_str = gs.get_graphics_quality()
+	FlagBuilder.setup_target_flag(target_flag_node, 2.6, col, 0.55, 0.38, true, q_str)
 
 	# Distance label
 	var label = Label3D.new()

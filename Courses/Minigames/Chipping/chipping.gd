@@ -2,6 +2,7 @@ extends Node3D
 
 # Preloaded assets
 var PlayerScene = preload("res://Player/player.tscn")
+const FlagBuilder = preload("res://Courses/Range/flag_builder.gd")
 
 # Minigame state variables
 var player = null
@@ -911,31 +912,11 @@ func _build_floating_island_node(idx: int, pos: Vector3, dist_yds: int, data: Di
 	flag_node.position = pin_pos + Vector3(0.0, 0.04, 0.0)
 	island.add_child(flag_node)
 	
-	var pole = MeshInstance3D.new()
-	var pole_mesh = CylinderMesh.new()
-	pole_mesh.top_radius = 0.018
-	pole_mesh.bottom_radius = 0.018
-	pole_mesh.height = 2.2
-	pole.mesh = pole_mesh
-	var pole_mat = StandardMaterial3D.new()
-	pole_mat.albedo_color = Color.WHITE
-	pole.material_override = pole_mat
-	pole.position = Vector3(0.0, 1.1, 0.0)
-	flag_node.add_child(pole)
-	
-	var flag = MeshInstance3D.new()
-	var flag_mesh_p = PrismMesh.new()
-	flag_mesh_p.size = Vector3(0.42, 0.30, 0.01)
-	flag.mesh = flag_mesh_p
-	var flag_m = StandardMaterial3D.new()
-	flag_m.albedo_color = flag_colors[idx]
-	flag_m.emission_enabled = true
-	flag_m.emission = flag_colors[idx]
-	flag_m.emission_energy_multiplier = 0.6
-	flag.material_override = flag_m
-	flag.position = Vector3(0.21, 2.05, 0.0)
-	flag.rotation = Vector3(0.0, 0.0, -PI / 2)
-	flag_node.add_child(flag)
+	var q_str = ""
+	var gs = GlobalSettings if GlobalSettings != null else (get_node_or_null("/root/GlobalSettings") if is_inside_tree() else null)
+	if gs != null and gs.has_method("get_graphics_quality"):
+		q_str = gs.get_graphics_quality()
+	FlagBuilder.setup_target_flag(flag_node, 2.2, flag_colors[idx], 0.44, 0.30, false, q_str)
 	
 	var label_node = Label3D.new()
 	label_node.text = "%d YDS" % dist_yds

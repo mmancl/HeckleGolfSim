@@ -135,6 +135,27 @@ static func _build_recessed_3d_bunkers(scene_root: Node, height_info: Dictionary
 		var cname := child.name.to_lower()
 		var is_bunker: bool = (cname.begins_with("bunker") or cname.contains("bunker") or bool(child.get_meta("is_sand", false)) or int(child.get_meta("surface_type", -1)) == 5) and not bool(child.get_meta("is_water", false)) and not cname.contains("terrain") and not cname.contains("rough")
 		if is_bunker:
+			# 1. Prefer explicit boundary polygon preserved in metadata (from course generator)
+			if child.has_meta("boundary_polygon"):
+				var poly_meta = child.get_meta("boundary_polygon")
+				var boundary_pts := PackedVector2Array()
+				if poly_meta is PackedVector2Array:
+					boundary_pts = poly_meta
+				elif poly_meta is Array:
+					for p in poly_meta:
+						if p is Vector2:
+							boundary_pts.append(p)
+				if boundary_pts.size() >= 3:
+					var world_poly := PackedVector2Array()
+					var child_xform: Transform3D = (child as Node3D).transform
+					for pt in boundary_pts:
+						var wp := child_xform * Vector3(pt.x, 0.0, pt.y)
+						world_poly.append(Vector2(wp.x, wp.z))
+					polygons.append(world_poly)
+					base_heights.append((child as Node3D).position.y)
+					continue
+
+			# 2. Inspect collision shapes without convex hull distortion
 			for sub in child.get_children():
 				if sub is CollisionPolygon3D and (sub as CollisionPolygon3D).polygon.size() >= 3:
 					var cp := sub as CollisionPolygon3D
@@ -146,24 +167,38 @@ static func _build_recessed_3d_bunkers(scene_root: Node, height_info: Dictionary
 					base_heights.append((child as Node3D).position.y)
 				elif sub is CollisionShape3D and (sub as CollisionShape3D).shape != null:
 					var cs := sub as CollisionShape3D
-					var world_pts := PackedVector2Array()
 					if cs.shape is ConcavePolygonShape3D:
 						var faces := (cs.shape as ConcavePolygonShape3D).get_faces()
-						for f in faces:
-							var wp := (child as Node3D).transform * (cs.transform * f)
-							world_pts.append(Vector2(wp.x, wp.z))
+						var boundary := _extract_boundary_polygon_from_faces(faces, (child as Node3D).transform * cs.transform)
+						if boundary.size() >= 3:
+							polygons.append(boundary)
+							base_heights.append((child as Node3D).position.y)
+						else:
+							# Fallback if boundary extraction could not trace a valid loop
+							var world_pts := PackedVector2Array()
+							for f in faces:
+								var wp := (child as Node3D).transform * (cs.transform * f)
+								world_pts.append(Vector2(wp.x, wp.z))
+							if world_pts.size() >= 3:
+								var hull := Geometry2D.convex_hull(world_pts)
+								if hull.size() > 3 and hull[hull.size() - 1].is_equal_approx(hull[0]):
+									hull.remove_at(hull.size() - 1)
+								if hull.size() >= 3:
+									polygons.append(hull)
+									base_heights.append((child as Node3D).position.y)
 					elif cs.shape is ConvexPolygonShape3D:
 						var points := (cs.shape as ConvexPolygonShape3D).points
+						var world_pts := PackedVector2Array()
 						for p in points:
 							var wp := (child as Node3D).transform * (cs.transform * p)
 							world_pts.append(Vector2(wp.x, wp.z))
-					if world_pts.size() >= 3:
-						var hull := Geometry2D.convex_hull(world_pts)
-						if hull.size() > 3 and hull[hull.size() - 1].is_equal_approx(hull[0]):
-							hull.remove_at(hull.size() - 1)
-						if hull.size() >= 3:
-							polygons.append(hull)
-							base_heights.append((child as Node3D).position.y)
+						if world_pts.size() >= 3:
+							var hull := Geometry2D.convex_hull(world_pts)
+							if hull.size() > 3 and hull[hull.size() - 1].is_equal_approx(hull[0]):
+								hull.remove_at(hull.size() - 1)
+							if hull.size() >= 3:
+								polygons.append(hull)
+								base_heights.append((child as Node3D).position.y)
 
 	if polygons.is_empty():
 		return 0
@@ -214,6 +249,133 @@ static func _build_recessed_3d_bunkers(scene_root: Node, height_info: Dictionary
 	return built
 
 
+
+## Extracts the outer 2D boundary polygon from a ConcavePolygonShape3D face array in world space.
+## In a triangulated 2D manifold mesh, interior edges are shared by 2 triangles,
+## while boundary edges belong to exactly 1 triangle.
+## Chaining these single-occurrence boundary edges produces the exact (potentially concave) polygon.
+static func _extract_boundary_polygon_from_faces(faces: PackedVector3Array, xform: Transform3D) -> PackedVector2Array:
+	if faces.size() < 3 or (faces.size() % 3) != 0:
+		return PackedVector2Array()
+
+	var edge_counts := {}
+	var edge_directed := {}
+	var snapped_to_world := {}
+
+	var tri_count := faces.size() / 3
+	for t in range(tri_count):
+		var base := t * 3
+		var v0 := xform * faces[base]
+		var v1 := xform * faces[base + 1]
+		var v2 := xform * faces[base + 2]
+
+		var p0 := Vector2(v0.x, v0.z)
+		var p1 := Vector2(v1.x, v1.z)
+		var p2 := Vector2(v2.x, v2.z)
+
+		var s0 := Vector2i(roundi(p0.x * 1000.0), roundi(p0.y * 1000.0))
+		var s1 := Vector2i(roundi(p1.x * 1000.0), roundi(p1.y * 1000.0))
+		var s2 := Vector2i(roundi(p2.x * 1000.0), roundi(p2.y * 1000.0))
+
+		if s0 == s1 or s1 == s2 or s2 == s0:
+			continue
+
+		snapped_to_world[s0] = p0
+		snapped_to_world[s1] = p1
+		snapped_to_world[s2] = p2
+
+		var tri_edges := [
+			Vector4i(s0.x, s0.y, s1.x, s1.y),
+			Vector4i(s1.x, s1.y, s2.x, s2.y),
+			Vector4i(s2.x, s2.y, s0.x, s0.y)
+		]
+
+		for edge in tri_edges:
+			var u := Vector2i(edge.x, edge.y)
+			var v := Vector2i(edge.z, edge.w)
+			var undirected_key: Vector4i
+			if u.x < v.x or (u.x == v.x and u.y < v.y):
+				undirected_key = Vector4i(u.x, u.y, v.x, v.y)
+			else:
+				undirected_key = Vector4i(v.x, v.y, u.x, u.y)
+
+			edge_counts[undirected_key] = edge_counts.get(undirected_key, 0) + 1
+			edge_directed[undirected_key] = edge
+
+	var adj := {}
+	for key in edge_counts:
+		if edge_counts[key] == 1:
+			var dir_edge: Vector4i = edge_directed[key]
+			var from_pt := Vector2i(dir_edge.x, dir_edge.y)
+			var to_pt := Vector2i(dir_edge.z, dir_edge.w)
+			adj[from_pt] = to_pt
+
+	if adj.is_empty():
+		return PackedVector2Array()
+
+	# Trace closed loops of boundary edges and select the primary outer loop
+	var best_loop := PackedVector2Array()
+	var best_area := 0.0
+	var visited := {}
+
+	for start_node in adj.keys():
+		if visited.has(start_node):
+			continue
+		var loop := PackedVector2Array()
+		var curr: Vector2i = start_node
+		while not visited.has(curr) and adj.has(curr):
+			visited[curr] = true
+			if snapped_to_world.has(curr):
+				loop.append(snapped_to_world[curr])
+			var nxt: Vector2i = adj[curr]
+			if nxt == start_node:
+				break
+			curr = nxt
+
+		if loop.size() >= 3:
+			# Remove near-zero distance consecutive duplicate points
+			var cleaned := PackedVector2Array()
+			for pt in loop:
+				if cleaned.is_empty() or cleaned[cleaned.size() - 1].distance_squared_to(pt) > 0.0001:
+					cleaned.append(pt)
+			if cleaned.size() > 3 and cleaned[cleaned.size() - 1].distance_squared_to(cleaned[0]) < 0.0001:
+				cleaned.remove_at(cleaned.size() - 1)
+
+			# Remove redundant collinear vertices along straight edges
+			if cleaned.size() > 3:
+				var simplified := PackedVector2Array()
+				var c_cnt := cleaned.size()
+				for i in range(c_cnt):
+					var prev_p: Vector2 = cleaned[(i - 1 + c_cnt) % c_cnt]
+					var curr_p: Vector2 = cleaned[i]
+					var next_p: Vector2 = cleaned[(i + 1) % c_cnt]
+					var e1 := (curr_p - prev_p).normalized()
+					var e2 := (next_p - curr_p).normalized()
+					var cross := absf(e1.x * e2.y - e1.y * e2.x)
+					var dot := e1.dot(e2)
+					if cross < 0.001 and dot > 0.999:
+						continue
+					simplified.append(curr_p)
+				if simplified.size() >= 3:
+					cleaned = simplified
+
+			if cleaned.size() >= 3:
+				var loop_area := 0.0
+				var c_size := cleaned.size()
+				for i in range(c_size):
+					var a: Vector2 = cleaned[i]
+					var b: Vector2 = cleaned[(i + 1) % c_size]
+					loop_area += (a.x * b.y - b.x * a.y)
+				var abs_area := absf(loop_area)
+				if abs_area > best_area:
+					best_area = abs_area
+					if loop_area < 0.0:
+						cleaned.reverse()
+					best_loop = cleaned
+
+	return best_loop
+
+
 static func _subdivide_and_orient_ccw(poly: PackedVector2Array, max_seg_len: float) -> PackedVector2Array:
 	var n := poly.size()
 	if n < 3:
@@ -253,7 +415,8 @@ static func _create_single_bunker_lip_and_bowl_mesh(
 		centroid += p
 	centroid /= float(count)
 
-	# Compute inward unit normals at each vertex
+	# Compute inward unit normals at each vertex.
+	# For any strictly CCW polygon in (X, Z), inward normal to (dx, dz) is (-dz, dx).
 	var inward_dirs := PackedVector2Array()
 	inward_dirs.resize(count)
 	for i in range(count):
@@ -262,12 +425,10 @@ static func _create_single_bunker_lip_and_bowl_mesh(
 		var next := poly[(i + 1) % count]
 		var e1 := (curr - prev).normalized()
 		var e2 := (next - curr).normalized()
-		# For CCW polygon in (X, Z), inward normal is (-dz, dx)
 		var n1 := Vector2(-e1.y, e1.x)
 		var n2 := Vector2(-e2.y, e2.x)
-		var avg_n := (n1 + n2).normalized()
-		if avg_n.dot(centroid - curr) < 0.0:
-			avg_n = -avg_n
+		var sum_n := n1 + n2
+		var avg_n := sum_n.normalized() if sum_n.length_squared() > 0.0001 else n1
 		inward_dirs[i] = avg_n
 
 	var ring_outer := PackedVector3Array()

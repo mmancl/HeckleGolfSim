@@ -110,50 +110,102 @@ func is_dropdown_open() -> bool:
 
 
 ## Push a focus lock — all directional navigation will be confined to
-## descendants of `root_node` until pop_lock() is called or the user
-## presses ui_cancel.
+## descendants of `root_node` until pop_lock() is called or the modal closes.
 func push_lock(root_node: Node) -> bool:
 	if root_node == null or not is_instance_valid(root_node):
 		return false
+	_prune_invalid_locks()
+	# Avoid duplicate push of the exact same node
+	for entry in _lock_stack:
+		if entry.get("root") == root_node:
+			return true
+
 	var vp := get_viewport()
 	var prev_focus: Control = null
 	if vp != null:
 		prev_focus = vp.gui_get_focus_owner()
+
 	_lock_stack.push_back({
 		"root": root_node,
 		"prev_focus": prev_focus
 	})
+
+	if not root_node.tree_exiting.is_connected(_on_lock_root_tree_exiting):
+		root_node.tree_exiting.connect(_on_lock_root_tree_exiting.bind(root_node))
+
+	call_deferred("_focus_first_control", root_node)
 	return true
 
 
-## Pop the most recent focus lock and restore focus.
-func pop_lock(restore_focus: bool = true) -> void:
+func _on_lock_root_tree_exiting(root_node: Node) -> void:
+	pop_lock(root_node)
+
+
+## Pop a focus lock and restore focus. Supports pop_lock(), pop_lock(bool), and pop_lock(Node, bool).
+func pop_lock(target: Variant = null, restore_focus: bool = true) -> void:
+	var target_node: Node = null
+	if target is bool:
+		restore_focus = target as bool
+	elif target is Node:
+		target_node = target as Node
+
 	if _lock_stack.is_empty():
 		return
-	var entry: Dictionary = _lock_stack.pop_back()
+
+	var entry: Dictionary = {}
+	if target_node != null:
+		var found_idx := -1
+		for i in range(_lock_stack.size() - 1, -1, -1):
+			if _lock_stack[i].get("root") == target_node:
+				found_idx = i
+				break
+		if found_idx >= 0:
+			entry = _lock_stack[found_idx]
+			_lock_stack.remove_at(found_idx)
+		else:
+			return
+	else:
+		entry = _lock_stack.pop_back()
+
 	var root: Node = entry.get("root") as Node
 	if root != null and is_instance_valid(root):
+		if root.tree_exiting.is_connected(_on_lock_root_tree_exiting):
+			root.tree_exiting.disconnect(_on_lock_root_tree_exiting)
 		if root.has_method("_on_focus_lock_popped"):
 			root._on_focus_lock_popped()
 		elif root.has_meta("on_focus_lock_popped"):
 			var cb = root.get_meta("on_focus_lock_popped")
 			if cb is Callable and cb.is_valid():
 				cb.call()
+
 	if restore_focus:
 		var prev: Control = entry.get("prev_focus") as Control
-		if prev != null and is_instance_valid(prev) and prev.is_visible_in_tree():
-			prev.call_deferred("grab_focus")
+		if _lock_stack.is_empty():
+			if prev != null and is_instance_valid(prev) and prev.is_visible_in_tree():
+				prev.call_deferred("grab_focus")
+		else:
+			var next_root: Node = _lock_stack.back().get("root") as Node
+			if next_root != null and is_instance_valid(next_root):
+				call_deferred("_focus_first_control", next_root)
 
 
 ## Returns `true` when any focus lock is active.
 func is_locked() -> bool:
-	_prune_invalid_locks()
-	return not _lock_stack.is_empty()
+	return current_lock_root() != null
 
 
-## Returns the root of the current (topmost) lock, or null.
+## Returns `true` when any modal or focus lock is currently active.
+func is_modal_active() -> bool:
+	return current_lock_root() != null
+
+
+## Returns the root of the current (topmost) lock, or auto-detected visible modal, or null.
 func current_lock_root() -> Node:
 	_prune_invalid_locks()
+	if _lock_stack.is_empty():
+		var auto_modal := _find_visible_modal_in_tree()
+		if auto_modal != null:
+			push_lock(auto_modal)
 	if _lock_stack.is_empty():
 		return null
 	return _lock_stack.back()["root"]
@@ -419,27 +471,108 @@ func _input(event: InputEvent) -> void:
 						get_viewport().set_input_as_handled()
 						return
 
-	# ── 3.  Manual focus-lock guard ───────────────────────────────
-	_prune_invalid_locks()
-	if not _lock_stack.is_empty():
-		var lock_root: Node = _lock_stack.back()["root"]
-
+	# ── 3.  Manual focus-lock guard & modal containment ───────────
+	var lock_root: Node = current_lock_root()
+	if lock_root != null:
 		if is_cancel:
-			pop_lock(true)
+			_dismiss_modal_or_pop_lock(lock_root)
 			get_viewport().set_input_as_handled()
 			return
 
-		if is_directional or event.is_action_pressed("ui_accept"):
-			if vp != null:
-				var cur_focus := vp.gui_get_focus_owner()
-				if cur_focus == null or not lock_root.is_ancestor_of(cur_focus):
-					var focused_ok := _focus_first_control(lock_root)
-					if focused_ok:
-						get_viewport().set_input_as_handled()
-						return
-					else:
-						# Lock root has no interactive controls; pop stale lock
-						pop_lock(false)
+		var cur_focus := vp.gui_get_focus_owner() if vp != null else null
+
+		# Tab switching with Gamepad Bumpers (LB/RB), Q/E (when not in LineEdit), or PageUp/PageDown
+		var is_typing: bool = (cur_focus is LineEdit or cur_focus is TextEdit)
+		var is_tab_prev: bool = (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_LEFT_SHOULDER) or \
+			(event is InputEventKey and event.pressed and (event.keycode == KEY_PAGEUP or (not is_typing and (event.keycode == KEY_Q or event.physical_keycode == KEY_Q))))
+		var is_tab_next: bool = (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_RIGHT_SHOULDER) or \
+			(event is InputEventKey and event.pressed and (event.keycode == KEY_PAGEDOWN or (not is_typing and (event.keycode == KEY_E or event.physical_keycode == KEY_E))))
+		if is_tab_prev or is_tab_next:
+			if _handle_modal_tab_switch(lock_root, is_tab_next):
+				get_viewport().set_input_as_handled()
+				return
+
+		# ui_accept handling on ItemList and TabBar
+		if cur_focus is ItemList:
+			var item_list := cur_focus as ItemList
+			if item_list.item_count > 0 and (event.is_action_pressed("ui_accept") or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_A)):
+				var selected := item_list.get_selected_items()
+				var idx := selected[0] if not selected.is_empty() else 0
+				item_list.select(idx)
+				item_list.ensure_current_is_visible()
+				item_list.item_selected.emit(idx)
+				item_list.item_activated.emit(idx)
+				get_viewport().set_input_as_handled()
+				return
+		elif cur_focus is TabBar:
+			var tab_bar := cur_focus as TabBar
+			if event.is_action_pressed("ui_accept") or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_A):
+				var tc: TabContainer = tab_bar.get_parent() as TabContainer if (tab_bar.get_parent() is TabContainer) else null
+				var count: int = tc.get_tab_count() if tc != null else tab_bar.tab_count
+				var cur: int = tc.current_tab if tc != null else tab_bar.current_tab
+				var next_tab: int = (cur + 1) % count
+				if tc != null:
+					tc.current_tab = next_tab
+					tc.tab_changed.emit(next_tab)
+				else:
+					tab_bar.current_tab = next_tab
+					tab_bar.tab_changed.emit(next_tab)
+				get_viewport().set_input_as_handled()
+				return
+
+		# If focus is null, invisible, or outside lock_root, redirect and consume input
+		if cur_focus == null or not cur_focus.is_visible_in_tree() or (not lock_root.is_ancestor_of(cur_focus) and cur_focus != lock_root):
+			var focused_ok := _focus_first_control(lock_root)
+			if focused_ok:
+				get_viewport().set_input_as_handled()
+				return
+			else:
+				# Lock root has no interactive controls; pop stale lock
+				pop_lock(lock_root, false)
+				return
+
+		# Tab / Shift-Tab cycling inside lock_root
+		if event.is_action_pressed("ui_focus_next") or event.is_action_pressed("ui_focus_prev") or \
+		   (event is InputEventKey and event.pressed and (event.keycode == KEY_TAB or event.physical_keycode == KEY_TAB)):
+			var focusables := _get_all_focusable_controls(lock_root)
+			if not focusables.is_empty():
+				var cur_idx := focusables.find(cur_focus)
+				var shift := (event is InputEventKey and (event as InputEventKey).shift_pressed) or event.is_action_pressed("ui_focus_prev")
+				var next_idx: int = 0
+				if cur_idx >= 0:
+					next_idx = (cur_idx - 1 + focusables.size()) % focusables.size() if shift else (cur_idx + 1) % focusables.size()
+				focusables[next_idx].grab_focus()
+				get_viewport().set_input_as_handled()
+				return
+
+		# Directional modal navigation: 2D spatial movement across visible controls
+		if is_directional:
+			var side: int = -1
+			if event.is_action_pressed("ui_left") or \
+			   (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_DPAD_LEFT) or \
+			   (event is InputEventJoypadMotion and event.axis == JOY_AXIS_LEFT_X and event.axis_value <= -0.5):
+				side = SIDE_LEFT
+			elif event.is_action_pressed("ui_right") or \
+			   (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_DPAD_RIGHT) or \
+			   (event is InputEventJoypadMotion and event.axis == JOY_AXIS_LEFT_X and event.axis_value >= 0.5):
+				side = SIDE_RIGHT
+			elif event.is_action_pressed("ui_up") or \
+			   (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_DPAD_UP) or \
+			   (event is InputEventJoypadMotion and event.axis == JOY_AXIS_LEFT_Y and event.axis_value <= -0.5):
+				side = SIDE_TOP
+			elif event.is_action_pressed("ui_down") or \
+			   (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_DPAD_DOWN) or \
+			   (event is InputEventJoypadMotion and event.axis == JOY_AXIS_LEFT_Y and event.axis_value >= 0.5):
+				side = SIDE_BOTTOM
+
+			if side >= 0:
+				# Keyboard caret navigation for LineEdit / TextEdit: allow Left/Right arrows on keyboard
+				if (cur_focus is LineEdit or cur_focus is TextEdit) and (side == SIDE_LEFT or side == SIDE_RIGHT) and event is InputEventKey:
+					return
+
+				_navigate_directional(lock_root, cur_focus, side)
+				get_viewport().set_input_as_handled()
+				return
 
 
 # ── OPTION BUTTON SIGNAL HOOKING ───────────────────────────────────────
@@ -567,7 +700,13 @@ func _is_directional(event: InputEvent) -> bool:
 	if event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down") \
 		or event.is_action_pressed("ui_left") or event.is_action_pressed("ui_right"):
 		return true
+	if event is InputEventJoypadButton and event.pressed:
+		var btn: int = event.button_index
+		if btn == JOY_BUTTON_DPAD_UP or btn == JOY_BUTTON_DPAD_DOWN or btn == JOY_BUTTON_DPAD_LEFT or btn == JOY_BUTTON_DPAD_RIGHT:
+			return true
 	if event is InputEventJoypadMotion and abs(event.axis_value) >= 0.5:
+		if event.axis == JOY_AXIS_LEFT_X or event.axis == JOY_AXIS_LEFT_Y:
+			return true
 		return event.is_action("ui_up") or event.is_action("ui_down") \
 			or event.is_action("ui_left") or event.is_action("ui_right")
 	return false
@@ -594,6 +733,8 @@ func _is_control_in_modal(ctrl: Node) -> bool:
 	while cur != null and is_instance_valid(cur) and cur != root:
 		if cur is Popup or cur is AcceptDialog or cur is ConfirmationDialog or cur is Window:
 			return true
+		if cur.is_in_group("modals") or cur.is_in_group("modal_dialogs"):
+			return true
 		var c_name := str(cur.name).to_lower()
 		if c_name.contains("modal") or c_name.contains("dialog") or c_name.contains("popup") \
 			or c_name == "distancemenu" or c_name == "settingslayer" or c_name == "settingsmodallayer" \
@@ -606,15 +747,90 @@ func _is_control_in_modal(ctrl: Node) -> bool:
 	return false
 
 
+func _find_visible_modal_in_tree() -> Node:
+	var tree := get_tree()
+	if tree == null:
+		return null
+	var current_scene := tree.current_scene
+
+	# 1. Group "modals"
+	var modal_nodes := tree.get_nodes_in_group("modals")
+	for m in modal_nodes:
+		if is_instance_valid(m) and m is Node and m != current_scene and m != self:
+			if (m is Control and m.is_visible_in_tree()) or (m is Window and m.visible) or (m is CanvasLayer and m.visible):
+				return m
+
+	# 2. Search direct children of current_scene and root
+	var search_roots: Array[Node] = []
+	if current_scene != null:
+		search_roots.append(current_scene)
+	if tree.root != null:
+		search_roots.append(tree.root)
+
+	for s_root in search_roots:
+		for child in s_root.get_children():
+			if not is_instance_valid(child) or child == current_scene or child == self:
+				continue
+			if child is Window and child.visible:
+				return child
+			if child is Control and child.is_visible_in_tree():
+				var c_name := str(child.name).to_lower()
+				if c_name.contains("modal") or c_name.contains("dialog") or c_name.contains("customcoursecreator") or c_name.contains("creator"):
+					return child
+				if child.get_script() != null:
+					var path := str(child.get_script().resource_path).to_lower()
+					if path.contains("modal") or path.contains("dialog") or path.contains("custom_course_creator"):
+						return child
+			if child is CanvasLayer and child.visible:
+				var c_name := str(child.name).to_lower()
+				if c_name.contains("modal") or c_name.contains("dialog"):
+					return child
+
+	return null
+
+
+func _dismiss_modal_or_pop_lock(lock_root: Node) -> void:
+	if lock_root == null or not is_instance_valid(lock_root):
+		pop_lock(lock_root, true)
+		return
+
+	if lock_root.has_method("_on_skip_pressed"):
+		lock_root._on_skip_pressed()
+	elif lock_root.has_method("_on_cancel_pressed"):
+		lock_root._on_cancel_pressed()
+	elif lock_root.has_method("_on_close_pressed"):
+		lock_root._on_close_pressed()
+	elif lock_root.has_method("close"):
+		lock_root.close()
+	else:
+		var btn = lock_root.find_child("*Cancel*", true, false)
+		if btn == null:
+			btn = lock_root.find_child("*Close*", true, false)
+		if btn == null:
+			btn = lock_root.find_child("*Skip*", true, false)
+		if btn != null and btn is BaseButton and not btn.disabled:
+			btn.emit_signal("pressed")
+		else:
+			pop_lock(lock_root, true)
+			if lock_root is Window or lock_root is Popup:
+				lock_root.hide()
+			elif lock_root.is_inside_tree():
+				lock_root.queue_free()
+
+
 func _on_gui_focus_changed(new_focus: Control) -> void:
 	if new_focus == null or _option_popup_open:
 		return
 	_prune_invalid_locks()
-	if not _lock_stack.is_empty():
-		var lock_root: Node = _lock_stack.back()["root"]
-		if lock_root != null and is_instance_valid(lock_root):
-			if not lock_root.is_ancestor_of(new_focus) and new_focus != lock_root:
-				call_deferred("_restore_lock_focus", lock_root)
+	var lock_root: Node = current_lock_root()
+	if lock_root != null and is_instance_valid(lock_root):
+		if not lock_root.is_ancestor_of(new_focus) and new_focus != lock_root:
+			if new_focus.has_meta("toggle_target") and new_focus.get_meta("toggle_target") == lock_root:
+				return
+			if new_focus.name == "HitDistanceButton":
+				return
+			new_focus.release_focus()
+			call_deferred("_restore_lock_focus", lock_root)
 
 
 func _restore_lock_focus(lock_root: Node) -> void:
@@ -626,21 +842,214 @@ func _restore_lock_focus(lock_root: Node) -> void:
 				_focus_first_control(lock_root)
 
 
+static func _get_all_focusable_controls(root: Node) -> Array[Control]:
+	var list: Array[Control] = []
+	_gather_focusable_controls_recursive(root, list)
+	return list
+
+
+static func _gather_focusable_controls_recursive(node: Node, list: Array[Control]) -> void:
+	if node == null:
+		return
+	if node is TabContainer:
+		var tc := node as TabContainer
+		var tb := tc.get_tab_bar()
+		if tb != null and tb.is_visible_in_tree() and tb.focus_mode != Control.FOCUS_NONE:
+			if not list.has(tb):
+				list.push_back(tb)
+	if node is Control:
+		var c := node as Control
+		if not c.is_visible_in_tree():
+			return
+		if c.focus_mode != Control.FOCUS_NONE:
+			if not (c is BaseButton and c.disabled):
+				if not (c is Container and not (c is ItemList or c is Tree or c is TabBar)):
+					if not list.has(c):
+						list.push_back(c)
+	for child in node.get_children():
+		_gather_focusable_controls_recursive(child, list)
+
+
 static func _focus_first_control(root: Node) -> bool:
 	if root == null:
 		return false
-	if root is Control:
-		var c = root as Control
-		if c.is_visible_in_tree() and c.focus_mode != Control.FOCUS_NONE:
-			if c is Button or c is OptionButton or c is LineEdit or c is Range or c is ItemList or c is CheckBox or c is CheckButton:
-				c.grab_focus()
+	if root.has_method("_grab_initial_focus"):
+		root._grab_initial_focus()
+		var vp := root.get_viewport()
+		if vp != null and vp.gui_get_focus_owner() != null:
+			var cur := vp.gui_get_focus_owner()
+			if cur.is_visible_in_tree() and (root.is_ancestor_of(cur) or cur == root):
 				return true
-	for child in root.get_children():
-		if child is Control and not (child as Control).is_visible_in_tree():
-			continue
-		if _focus_first_control(child):
-			return true
+	var focusables := _get_all_focusable_controls(root)
+	if not focusables.is_empty():
+		focusables[0].grab_focus()
+		return true
 	return false
+
+
+func _navigate_directional(lock_root: Node, cur_focus: Control, side: int) -> bool:
+	if lock_root == null or not is_instance_valid(lock_root):
+		return false
+
+	var focusables := _get_all_focusable_controls(lock_root)
+	if focusables.is_empty():
+		return false
+
+	if cur_focus == null or not is_instance_valid(cur_focus) or not cur_focus.is_visible_in_tree() or (not lock_root.is_ancestor_of(cur_focus) and cur_focus != lock_root):
+		return _focus_first_control(lock_root)
+
+	# Special handling for ItemList internal navigation:
+	if cur_focus is ItemList:
+		var item_list := cur_focus as ItemList
+		if item_list.item_count > 0:
+			var selected := item_list.get_selected_items()
+			var cur_idx := selected[0] if not selected.is_empty() else -1
+			if cur_idx == -1:
+				if side == SIDE_BOTTOM:
+					item_list.select(0)
+					item_list.ensure_current_is_visible()
+					item_list.item_selected.emit(0)
+					return true
+				# If side == SIDE_TOP and nothing selected, fall through to navigate UP out of ItemList
+			else:
+				if side == SIDE_TOP and cur_idx > 0:
+					item_list.select(cur_idx - 1)
+					item_list.ensure_current_is_visible()
+					item_list.item_selected.emit(cur_idx - 1)
+					return true
+				elif side == SIDE_BOTTOM and cur_idx < item_list.item_count - 1:
+					item_list.select(cur_idx + 1)
+					item_list.ensure_current_is_visible()
+					item_list.item_selected.emit(cur_idx + 1)
+					return true
+
+	# Special handling for TabBar tab switching:
+	if cur_focus is TabBar:
+		var tab_bar := cur_focus as TabBar
+		if side == SIDE_LEFT or side == SIDE_RIGHT:
+			var tc: TabContainer = tab_bar.get_parent() as TabContainer if (tab_bar.get_parent() is TabContainer) else null
+			var count: int = tc.get_tab_count() if tc != null else tab_bar.tab_count
+			var cur: int = tc.current_tab if tc != null else tab_bar.current_tab
+			var next_tab: int = clampi(cur - 1 if side == SIDE_LEFT else cur + 1, 0, count - 1)
+			if next_tab != cur:
+				if tc != null:
+					tc.current_tab = next_tab
+					tc.tab_changed.emit(next_tab)
+				else:
+					tab_bar.current_tab = next_tab
+					tab_bar.tab_changed.emit(next_tab)
+			return true
+
+	# Explicit neighbor override check if scene author set one:
+	var explicit_prop: StringName = &""
+	match side:
+		SIDE_LEFT: explicit_prop = &"focus_neighbor_left"
+		SIDE_TOP: explicit_prop = &"focus_neighbor_top"
+		SIDE_RIGHT: explicit_prop = &"focus_neighbor_right"
+		SIDE_BOTTOM: explicit_prop = &"focus_neighbor_bottom"
+
+	if explicit_prop != &"":
+		var target_path: NodePath = cur_focus.get(explicit_prop)
+		if target_path != null and not target_path.is_empty():
+			var neighbor = cur_focus.get_node_or_null(target_path)
+			if neighbor is Control and neighbor.is_visible_in_tree() and (lock_root.is_ancestor_of(neighbor) or neighbor == lock_root):
+				if neighbor.focus_mode != Control.FOCUS_NONE and not (neighbor is BaseButton and neighbor.disabled):
+					neighbor.grab_focus()
+					return true
+
+	# 2D Spatial Best-Candidate Search
+	var cur_rect := cur_focus.get_global_rect()
+	var cur_c := cur_rect.get_center()
+
+	var best_candidate: Control = null
+	var best_score: float = INF
+
+	for cand in focusables:
+		if cand == cur_focus:
+			continue
+		var cand_rect := cand.get_global_rect()
+		if cand_rect.size.x <= 0 or cand_rect.size.y <= 0:
+			continue
+		var cand_c := cand_rect.get_center()
+
+		var primary_dist: float = 0.0
+		var ortho_dist: float = 0.0
+		var is_valid_dir: bool = false
+
+		match side:
+			SIDE_LEFT:
+				primary_dist = cur_c.x - cand_c.x
+				ortho_dist = abs(cand_c.y - cur_c.y)
+				var overlap = max(0.0, min(cur_rect.end.y, cand_rect.end.y) - max(cur_rect.position.y, cand_rect.position.y))
+				if primary_dist > 1.0 and (overlap > 0.0 or ortho_dist <= max(cur_rect.size.y, cand_rect.size.y) * 3.0):
+					is_valid_dir = true
+					ortho_dist = max(0.0, ortho_dist - overlap * 0.75)
+
+			SIDE_RIGHT:
+				primary_dist = cand_c.x - cur_c.x
+				ortho_dist = abs(cand_c.y - cur_c.y)
+				var overlap = max(0.0, min(cur_rect.end.y, cand_rect.end.y) - max(cur_rect.position.y, cand_rect.position.y))
+				if primary_dist > 1.0 and (overlap > 0.0 or ortho_dist <= max(cur_rect.size.y, cand_rect.size.y) * 3.0):
+					is_valid_dir = true
+					ortho_dist = max(0.0, ortho_dist - overlap * 0.75)
+
+			SIDE_TOP:
+				primary_dist = cur_c.y - cand_c.y
+				ortho_dist = abs(cand_c.x - cur_c.x)
+				var overlap = max(0.0, min(cur_rect.end.x, cand_rect.end.x) - max(cur_rect.position.x, cand_rect.position.x))
+				if primary_dist > 1.0 and (overlap > 0.0 or ortho_dist <= max(cur_rect.size.x, cand_rect.size.x) * 3.5):
+					is_valid_dir = true
+					ortho_dist = max(0.0, ortho_dist - overlap * 0.75)
+
+			SIDE_BOTTOM:
+				primary_dist = cand_c.y - cur_c.y
+				ortho_dist = abs(cand_c.x - cur_c.x)
+				var overlap = max(0.0, min(cur_rect.end.x, cand_rect.end.x) - max(cur_rect.position.x, cand_rect.position.x))
+				if primary_dist > 1.0 and (overlap > 0.0 or ortho_dist <= max(cur_rect.size.x, cand_rect.size.x) * 3.5):
+					is_valid_dir = true
+					ortho_dist = max(0.0, ortho_dist - overlap * 0.75)
+
+		if not is_valid_dir:
+			continue
+
+		var score: float = primary_dist + ortho_dist * 2.0
+		if score < best_score:
+			best_score = score
+			best_candidate = cand
+
+	if best_candidate != null:
+		best_candidate.grab_focus()
+		return true
+
+	# Boundary preserved: no candidate in this direction
+	return true
+
+
+func _handle_modal_tab_switch(lock_root: Node, forward: bool) -> bool:
+	var tab_container := _find_tab_container(lock_root)
+	if tab_container == null or tab_container.get_tab_count() <= 1:
+		return false
+	var count := tab_container.get_tab_count()
+	var cur := tab_container.current_tab
+	var next_tab := (cur + 1) % count if forward else (cur - 1 + count) % count
+	tab_container.current_tab = next_tab
+	tab_container.tab_changed.emit(next_tab)
+	var tab_ctrl := tab_container.get_current_tab_control()
+	if tab_ctrl != null:
+		call_deferred("_focus_first_control", tab_ctrl)
+	else:
+		call_deferred("_focus_first_control", lock_root)
+	return true
+
+
+func _find_tab_container(node: Node) -> TabContainer:
+	if node is TabContainer and (node as TabContainer).is_visible_in_tree():
+		return node as TabContainer
+	for child in node.get_children():
+		var res := _find_tab_container(child)
+		if res != null:
+			return res
+	return null
 
 
 func _is_in_3d_gameplay() -> bool:

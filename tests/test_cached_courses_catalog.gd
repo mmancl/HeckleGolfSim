@@ -79,6 +79,30 @@ func _init() -> void:
 	assert(gitignore_text.contains("Courses/CachedGeometry/"), ".gitignore must contain Courses/CachedGeometry/")
 	print("  PASS: .gitignore correctly ignores Courses/CachedGeometry/.")
 
+	# 5. Test export_presets.cfg include_filter contains .json.gz
+	print("\n--- Test 5: export_presets.cfg include_filter verification ---")
+	var export_cfg = ConfigFile.new()
+	var err_cfg = export_cfg.load("res://export_presets.cfg")
+	assert(err_cfg == OK, "export_presets.cfg must be loadable")
+	for section in export_cfg.get_sections():
+		if export_cfg.has_section_key(section, "include_filter"):
+			var filter_str = str(export_cfg.get_value(section, "include_filter"))
+			assert(filter_str.contains("*.json.gz") or filter_str.contains("*.gz"),
+				"Preset %s must include *.json.gz in include_filter: %s" % [section, filter_str])
+	print("  PASS: All presets in export_presets.cfg include *.json.gz and *.gz.")
+
+	# 6. Test that OsmMapLoader does not query OSM when a course is cached but geometry is missing
+	print("\n--- Test 6: OsmMapLoader aborts without OSM query if cached course geometry is missing ---")
+	var loader_script = load("res://Courses/OsmMapLoader.cs")
+	if loader_script != null:
+		var loader = loader_script.new()
+		# Non-existent course with is_cached = true
+		loader.call("DownloadAndGenerateCourse", 0.0, 0.0, "NonExistentDummyCachedCourse_12345", true)
+		var gen_msg = str(loader.call("GetGenerationMessage"))
+		assert(gen_msg.contains("OpenStreetMap was not queried") or gen_msg.contains("could not be loaded"),
+			"Generation message must indicate OSM was not queried for missing cached course: " + gen_msg)
+		print("  PASS: OsmMapLoader refused to query OSM when cached course geometry was missing.")
+
 	print("\n=======================================================")
 	print("ALL CACHED COURSES TESTS PASSED SUCCESSFULLY!")
 	print("=======================================================\n")

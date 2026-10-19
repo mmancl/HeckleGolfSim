@@ -170,11 +170,125 @@ func _init() -> void:
 	# -------------------------------------------------------------
 	# Test 6: Backend Audio JSON "enabled" Flag Verification
 	# -------------------------------------------------------------
-	print("\n--- Test 6: Backend Audio JSON 'enabled' Flag ---")
+	print("\n--- Test 6: Backend Audio JSON 'enabled' Flag & Qualifiers ---")
 	var afk_clips: Array = announcer.call("GetAvailableClipsForCategory", "player_afk_heckles")
-	print("  Enabled AFK clips count: %d" % afk_clips.size())
-	assert(afk_clips.size() == 50, "All 50 AFK prompts should be available by default when enabled=true")
-	print("  PASS: Enabled clips successfully loaded from backend JSON.")
+	var afk_teebox: Array = announcer.call("GetAvailableClipsForCategory", "player_afk_heckles", {"tee_box": true})
+	print("  General AFK clips count: %d, Tee-box AFK clips: %d (Total: %d)" % [afk_clips.size(), afk_teebox.size(), afk_clips.size() + afk_teebox.size()])
+	assert(afk_clips.size() == 47, "47 general AFK prompts should be available by default without context")
+	assert(afk_teebox.size() == 3, "3 tee-box specific AFK prompts should be available with tee_box context")
+	print("  PASS: Enabled clips and context qualifiers successfully loaded from backend JSON.")
+
+	# -------------------------------------------------------------
+	# Test 7: Audio Line Played Tracking & Repeat Prevention
+	# -------------------------------------------------------------
+	print("\n--- Test 7: Audio Line Played Tracking & Repeat Prevention ---")
+	announcer.call("ResetPlayedAudioLines")
+	assert(announcer.call("GetPlayedAudioLinesCount") == 0, "Played audio lines should be empty after reset")
+
+	# Test with a criteria set: tree heckles with leaves (16 clips)
+	var leaves_test_context = {
+		"tree_hit_type": "leaves"
+	}
+	var leaves_all: Array = announcer.call("GetAvailableClipsForCategory", "hitting_or_going_through_trees", leaves_test_context)
+	var leaves_count: int = leaves_all.size()
+	print("  Testing criteria set with %d clips..." % leaves_count)
+	assert(leaves_count > 1, "Should have multiple clips for testing")
+
+	var played_sequence: Array = []
+	var played_set: Dictionary = {}
+
+	# Play through all matching clips one by one
+	for i in range(leaves_count):
+		var selected_clip: String = announcer.call("SelectNextClipForCategory", "hitting_or_going_through_trees", leaves_test_context, true)
+		assert(selected_clip != "", "A valid clip should be selected")
+		assert(not played_set.has(selected_clip), "Clip '%s' repeated before all %d matching clips were played! (iteration %d)" % [selected_clip, leaves_count, i])
+		played_set[selected_clip] = true
+		played_sequence.append(selected_clip)
+
+	print("  Played all %d distinct clips without any repeat: PASS" % leaves_count)
+	assert(announcer.call("GetPlayedAudioLinesCount") == leaves_count, "All clips should be marked played in tracker")
+
+	# Next play must reset the criteria set and allow cycling again
+	var next_cycle_first: String = announcer.call("SelectNextClipForCategory", "hitting_or_going_through_trees", leaves_test_context, true)
+	assert(next_cycle_first != "", "Next cycle must select a clip")
+	assert(next_cycle_first != played_sequence[-1], "Next cycle should avoid playing the exact same clip consecutively")
+	print("  Criteria reset on exhaustion and resumed cycle: PASS")
+
+	# Test cross-criteria independence:
+	# Criteria set A: tree heckles trunk (11 clips), Criteria set B: tee-box AFK (3 clips)
+	announcer.call("ResetPlayedAudioLines")
+	var trunk_ctx = {"tree_hit_type": "trunk"}
+	var trunk_1: String = announcer.call("SelectNextClipForCategory", "hitting_or_going_through_trees", trunk_ctx, true)
+	var trunk_2: String = announcer.call("SelectNextClipForCategory", "hitting_or_going_through_trees", trunk_ctx, true)
+	assert(trunk_1 != trunk_2, "Trunk clips must not repeat")
+	assert(announcer.call("HasAudioLinePlayed", trunk_1), "trunk_1 should be marked played")
+	assert(announcer.call("HasAudioLinePlayed", trunk_2), "trunk_2 should be marked played")
+
+	# Cycle through Criteria set B (3 tee-box AFK clips) until exhausted and reset
+	var afk_tb_ctx = {"tee_box": true}
+	for i in range(4): # 3 to exhaust, 4th resets B
+		announcer.call("SelectNextClipForCategory", "player_afk_heckles", afk_tb_ctx, true)
+
+	# Verify Criteria set A's played lines are still marked as played and not reset by B's reset
+	assert(announcer.call("HasAudioLinePlayed", trunk_1), "trunk_1 must remain played after Criteria B reset")
+	assert(announcer.call("HasAudioLinePlayed", trunk_2), "trunk_2 must remain played after Criteria B reset")
+	var trunk_3: String = announcer.call("SelectNextClipForCategory", "hitting_or_going_through_trees", trunk_ctx, true)
+	assert(trunk_3 != trunk_1 and trunk_3 != trunk_2, "Trunk clip 3 must not repeat previously played trunk clips")
+	print("  Cross-criteria independent tracking & preservation: PASS")
+
+	# Verify reset method works
+	announcer.call("ResetPlayedAudioLines")
+	assert(announcer.call("GetPlayedAudioLinesCount") == 0, "ResetPlayedAudioLines should clear all tracking")
+	print("  PASS: Audio line played tracking & repeat prevention verified.")
+	# -------------------------------------------------------------
+	# Test 8: Home Button Heckle Score Context (e.g. 2 over vs 30 over par)
+	# -------------------------------------------------------------
+	print("\n--- Test 8: Home Button Heckle Score Context (2 Over Par vs Blowout) ---")
+	var normal_over_par_context = {
+		"game_mode": "course_play",
+		"score_relative_to_par": 2,
+		"hole_number": 5,
+		"hole_range": "front_nine"
+	}
+	var normal_clips: Array = announcer.call("GetAvailableClipsForCategory", "home_button_popup", normal_over_par_context)
+	print("  Clips for 2-over par player: %d" % normal_clips.size())
+	for clip in normal_clips:
+		var c_str: String = str(clip)
+		assert(not c_str.ends_with("home_button_popup_32.wav"), "2-over par player must NEVER hear 'thirty strokes over par' prompt (popup_32)!")
+
+	# For a player 25 strokes over par: popup_32 SHOULD qualify
+	var blowout_context = {
+		"game_mode": "course_play",
+		"score_relative_to_par": 25,
+		"hole_number": 14,
+		"hole_range": "back_nine"
+	}
+	var blowout_clips: Array = announcer.call("GetAvailableClipsForCategory", "home_button_popup", blowout_context)
+	print("  Clips for 25-over par player: %d" % blowout_clips.size())
+	var has_blowout_clip := false
+	for clip in blowout_clips:
+		if str(clip).ends_with("home_button_popup_32.wav"):
+			has_blowout_clip = true
+			break
+	assert(has_blowout_clip, "Blowout player (25 over par) must have 'thirty strokes over par' prompt eligible in pool")
+	print("  PASS: Home button popup strictly filters 30-strokes heckle based on player score.")
+
+	# -------------------------------------------------------------
+	# Test 9: Range vs Course Play Game Mode Filtering
+	# -------------------------------------------------------------
+	print("\n--- Test 9: Game Mode Filtering (Driving Range vs Course Play) ---")
+	var range_context = {
+		"game_mode": "range"
+	}
+	var range_clips: Array = announcer.call("GetAvailableClipsForCategory", "home_button_popup", range_context)
+	print("  Clips on driving range: %d" % range_clips.size())
+	for clip in range_clips:
+		var c_str: String = str(clip)
+		assert(not c_str.ends_with("home_button_popup_32.wav"), "Range must not play strokes over par prompt")
+		assert(not c_str.ends_with("home_button_popup_11.wav"), "Range must not play back nine prompt")
+		assert(not c_str.ends_with("home_button_popup_13.wav"), "Range must not play scorecard prompt")
+		assert(not c_str.ends_with("home_button_popup_25.wav"), "Range must not play 18 holes prompt")
+	print("  PASS: Driving range strictly excludes course-only and scorecard heckles.")
 
 	print("\n=======================================================")
 	print("  ALL ANNOUNCER QUALIFIER TESTS PASSED!                ")

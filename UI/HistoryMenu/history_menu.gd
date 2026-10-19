@@ -112,6 +112,10 @@ func _grab_initial_focus() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_visible_in_tree():
 		return
+	if has_node("/root/UIFocusGuard"):
+		var ufg = get_node("/root/UIFocusGuard")
+		if ufg.is_modal_active():
+			return
 	if event.is_action_pressed("ui_cancel"):
 		if delete_confirm_dialog != null and delete_confirm_dialog.visible:
 			delete_confirm_dialog.visible = false

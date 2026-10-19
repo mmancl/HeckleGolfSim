@@ -15,6 +15,9 @@ var battery_percentage: int = 25
 func _ready() -> void:
 	process_mode = PROCESS_MODE_ALWAYS
 	layer = 150
+	add_to_group("modals")
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").push_lock(self)
 	if modal_panel != null:
 		ThemeManager.apply_modal_style(modal_panel, 14)
 	_update_ui()
@@ -58,3 +61,9 @@ func _unhandled_input(event: InputEvent) -> void:
 func _on_confirm_pressed() -> void:
 	confirmed.emit()
 	queue_free()
+
+
+func _exit_tree() -> void:
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").pop_lock(self)
+
