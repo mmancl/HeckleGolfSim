@@ -110,6 +110,10 @@ var _is_showing_cached: bool = true
 
 
 func _ready() -> void:
+	add_to_group("modals")
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").push_lock(self)
+
 	var panel = get_node_or_null("CenterContainer/PanelContainer")
 	if panel != null:
 		ThemeManager.apply_modal_style(panel, 12)
@@ -173,6 +177,7 @@ func _ready() -> void:
 	cancel_button.pressed.connect(_on_cancel_pressed)
 	download_button.pressed.connect(_on_download_pressed)
 	results_list.item_selected.connect(_on_item_selected)
+	results_list.item_activated.connect(_on_item_activated)
 	search_input.text_submitted.connect(func(_text): _perform_search(false))
 
 	download_button.disabled = true
@@ -347,12 +352,54 @@ func _get_slug_candidates(course_name: String) -> Array:
 	var legacy_slug = sb.strip_edges().trim_prefix("_").trim_suffix("_")
 	if not legacy_slug.is_empty() and not slugs.has(legacy_slug):
 		slugs.append(legacy_slug)
+
+	# Common suffix variations (e.g. "Erin Hills Golf Course" -> "erin_hills")
+	var base_slug = py_slug
+	var suffixes = ["_golf_course", "_golf_club", "_country_club", "_golf_links", "_golf_and_country_club", "_resort", "_club", "_links", "_golf"]
+	for suf in suffixes:
+		if base_slug.ends_with(suf):
+			var trimmed = base_slug.trim_suffix(suf).strip_edges().trim_suffix("_")
+			if not trimmed.is_empty():
+				for alt in [trimmed, trimmed + "_golf_course", trimmed + "_golf_club", trimmed + "_country_club"]:
+					if not slugs.has(alt):
+						slugs.append(alt)
+			break
+
+	# Parentheses variations (e.g. "Torrey Pines Golf Course (North)" -> "torrey_pines_north_course")
+	if "(" in lower and ")" in lower:
+		var paren_regex = RegEx.new()
+		paren_regex.compile("\\((.*?)\\)")
+		var match_paren = paren_regex.search(lower)
+		if match_paren:
+			var paren_sub = match_paren.get_string(1).strip_edges()
+			var no_paren = paren_regex.sub(lower, "", true).strip_edges()
+			var no_paren_slug = _slug_regex.sub(no_paren, "_", true).strip_edges().trim_prefix("_").trim_suffix("_")
+			var paren_slug = _slug_regex.sub(paren_sub, "_", true).strip_edges().trim_prefix("_").trim_suffix("_")
+			if not no_paren_slug.is_empty():
+				if not slugs.has(no_paren_slug):
+					slugs.append(no_paren_slug)
+				if not paren_slug.is_empty():
+					var combined = no_paren_slug + "_" + paren_slug
+					if not slugs.has(combined):
+						slugs.append(combined)
+					var main_base = no_paren_slug
+					for suf in suffixes:
+						if main_base.ends_with(suf):
+							main_base = main_base.left(-suf.length()).strip_edges().trim_suffix("_")
+							break
+					var alt_course = main_base + "_" + paren_slug + "_course"
+					if not slugs.has(alt_course):
+						slugs.append(alt_course)
+					var alt_golf = main_base + "_" + paren_slug + "_golf_course"
+					if not slugs.has(alt_golf):
+						slugs.append(alt_golf)
+
 	return slugs
 
 
 func _refresh_available_cache_slugs() -> void:
 	_available_cache_slugs.clear()
-	var cache_dirs = ["user://cached_geometry", "res://Courses/CachedGeometry"]
+	var cache_dirs = ["res://Courses/CachedGeometry"]
 	for c_dir in cache_dirs:
 		if not DirAccess.dir_exists_absolute(c_dir):
 			continue
@@ -404,11 +451,11 @@ func _load_cached_courses() -> void:
 							entry["is_pga_tour"] = bool(entry["is_pga_tour"])
 						else:
 							entry["is_pga_tour"] = is_pga_tour_course_name(c_name)
-						_all_cached_courses.append(entry)
-						if not lower_name.is_empty():
-							catalog_map[lower_name] = entry
-							_cached_names_set[lower_name] = true
-							if is_cached:
+						if is_cached:
+							_all_cached_courses.append(entry)
+							if not lower_name.is_empty():
+								catalog_map[lower_name] = entry
+								_cached_names_set[lower_name] = true
 								for s in _get_slug_candidates(c_name):
 									_cached_names_set[s] = true
 
@@ -421,14 +468,15 @@ func _load_cached_courses() -> void:
 					var lower_name = lc_name.to_lower()
 					var is_cached = bool(lc.get("is_cached", false))
 					if not lower_name.is_empty():
-						if is_cached:
-							_cached_names_set[lower_name] = true
 						var existing = catalog_map.get(lower_name)
 						if existing != null:
 							existing["is_cached"] = is_cached
 							if lc.get("is_pga_tour", false):
 								existing["is_pga_tour"] = true
-						else:
+						elif is_cached:
+							_cached_names_set[lower_name] = true
+							for s in _get_slug_candidates(lc_name):
+								_cached_names_set[s] = true
 							if lc.has("is_pga_tour"):
 								lc["is_pga_tour"] = bool(lc["is_pga_tour"])
 							else:
@@ -436,7 +484,7 @@ func _load_cached_courses() -> void:
 							_all_cached_courses.append(lc)
 							catalog_map[lower_name] = lc
 
-	# Also scan user://cached_geometry and res://Courses/CachedGeometry for loose geometry files
+	# Also scan res://Courses/CachedGeometry for loose geometry files
 	_scan_loose_cached_geometries()
 
 	# Sort cached courses: PGA Tour & Major Championship courses first (alphabetically),
@@ -453,7 +501,7 @@ func _load_cached_courses() -> void:
 
 
 func _scan_loose_cached_geometries() -> void:
-	var cache_dirs = ["user://cached_geometry", "res://Courses/CachedGeometry"]
+	var cache_dirs = ["res://Courses/CachedGeometry"]
 	for c_dir in cache_dirs:
 		if not DirAccess.dir_exists_absolute(c_dir):
 			continue
@@ -523,6 +571,7 @@ func _filter_by_hole_settings(courses: Array) -> Array:
 
 
 func _display_courses_in_list(courses: Array, is_search_results: bool = false) -> void:
+	_is_showing_cached = not is_search_results
 	results_list.clear()
 	_displayed_courses = courses
 	download_button.disabled = true
@@ -573,6 +622,9 @@ func _display_courses_in_list(courses: Array, is_search_results: bool = false) -
 	else:
 		if is_search_results:
 			status_label.text = "Found " + str(courses.size()) + " course(s). Select one to download."
+			if not courses.is_empty():
+				results_list.select(0)
+				_on_item_selected(0)
 		else:
 			status_label.text = "Showing " + str(courses.size()) + " cached courses (PGA Tour & Majors first). Select from list, or search to download from OSM."
 
@@ -910,6 +962,12 @@ func _on_item_selected(index: int) -> void:
 			_show_rate_limit_panel(false)
 
 
+func _on_item_activated(index: int) -> void:
+	_on_item_selected(index)
+	if download_button != null and not download_button.disabled:
+		_on_download_pressed()
+
+
 func _on_download_pressed() -> void:
 	var selected_items = results_list.get_selected_items()
 	if selected_items.is_empty():
@@ -941,7 +999,10 @@ func _on_download_pressed() -> void:
 		return
 
 	status_label.add_theme_color_override("font_color", Color(0.78, 0.82, 0.88, 1.0))
-	status_label.text = "Downloading course map and generating playable layouts for '" + course_name + "'..."
+	if is_cached:
+		status_label.text = "Loading cached 3D map for '" + course_name + "'..."
+	else:
+		status_label.text = "Downloading course map and generating playable layouts for '" + course_name + "'..."
 	_set_ui_disabled(true)
 	download_button.disabled = true
 	cancel_button.disabled = true
@@ -955,7 +1016,7 @@ func _on_download_pressed() -> void:
 	_start_download_notice_timer(current_token)
 
 	# Call C# download and generate and await signal
-	_loader.DownloadAndGenerateCourse(lat, lon, course_name)
+	_loader.DownloadAndGenerateCourse(lat, lon, course_name, is_cached)
 	var success = await _loader.CourseGenerated
 
 	_download_in_progress = false
@@ -970,7 +1031,10 @@ func _on_download_pressed() -> void:
 		if msg != "":
 			status_label.text = msg
 		else:
-			status_label.text = "Successfully generated course: " + course_name + "!"
+			if is_cached:
+				status_label.text = "Successfully loaded cached course: " + course_name + "!"
+			else:
+				status_label.text = "Successfully generated course: " + course_name + "!"
 		course_downloaded.emit(course_name)
 		# Wait 1.5 seconds before auto-closing
 		await get_tree().create_timer(1.5).timeout
@@ -986,7 +1050,10 @@ func _on_download_pressed() -> void:
 		if msg != "":
 			status_label.text = msg
 		else:
-			status_label.text = "Error: Course generation timed out or failed. Please retry the download, and if it continues to fail, please log a bug."
+			if is_cached:
+				status_label.text = "Error: Failed to load cached course '" + course_name + "'. Please check that cached geometry files are present."
+			else:
+				status_label.text = "Error: Course generation timed out or failed. Please retry the download, and if it continues to fail, please log a bug."
 		_set_ui_disabled(false)
 		download_button.disabled = false
 		cancel_button.disabled = false
@@ -1034,3 +1101,8 @@ func _set_ui_disabled(disabled: bool) -> void:
 func _update_progress_status(msg: String) -> void:
 	if _download_in_progress and is_instance_valid(self):
 		status_label.text = msg
+
+
+func _exit_tree() -> void:
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").pop_lock(self)

@@ -120,3 +120,51 @@ python test_voices.py --speaker "shooter_mcgavin"
 python test_voices.py
 ```
 
+---
+
+## 5. Heckle Audio & Qualifier Editor GUI (`heckle_editor.py`)
+
+A standalone web-based mini-app runnable outside the Godot game client that provides an interactive UI for auditioning voice lines, enabling/muting audio prompts, editing contextual qualifiers, and syncing updates to disk.
+
+### Features:
+- **Audio Auditioning**: In-browser instant playback of `.wav` commentary clips with pause, volume, and progress controls.
+- **Enable / Mute Toggles**: Toggle individual voice lines on/off (`enabled: true/false`). Muted lines are excluded by the game engine.
+- **Qualifier Editor**: Dropdowns for allowed qualifier conditions:
+  - `score_type`: `birdie`, `eagle`, `albatross`, `hole_in_one`, `double_bogey`, `triple_bogey`, `over_bogey`, `under_par`
+  - `tree_hit_type`: `trunk` (solid collision) vs `leaves` (canopy pass)
+  - `gir`: `true` / `false` (Green in regulation)
+  - `birdie_chance`: `true` / `false`
+  - `tee_shot`: `true` / `false`
+  - `close_to_pin`: `true` / `false` (within 4 yards / 12 ft of the pin)
+  - `strokes`: integer count (e.g. `8` for snowman heckles)
+  - Custom qualifiers: arbitrary key-value pairs
+- **Dual JSON Synchronization**: Automatically backs up (`.bak`) and updates both:
+  - `assets/audio/heckler/heckle_prompts.json` (Godot runtime)
+  - `scripts/tools/heckle_generator/heckle_prompts.json` (Generator master)
+- **Batch Controls & Filtering**: Fast text search, category switching, speaker filters, and bulk Enable/Disable controls.
+
+### How to Run:
+
+#### Option A: One-click launcher from repository root
+Double-click `launch_heckle_editor.bat` or run:
+```cmd
+launch_heckle_editor.bat
+```
+
+#### Option B: Run via Python CLI
+```bash
+python scripts/tools/heckle_generator/heckle_editor.py
+```
+
+#### Option C: PowerShell Launcher
+```powershell
+.\scripts\tools\heckle_generator\run_heckle_editor.ps1
+```
+
+#### CLI Options:
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--port` | Preferred HTTP server port | `8088` |
+| `--no-browser` | Disable automatic browser launch on startup | `False` |
+
+

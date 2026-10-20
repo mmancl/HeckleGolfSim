@@ -23,6 +23,10 @@ var _feedback_tween: Tween = null
 
 
 func _ready() -> void:
+	add_to_group("modals")
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").push_lock(self)
+
 	# Apply Theme Design System
 	if modal_panel != null:
 		ThemeManager.apply_modal_style(modal_panel, 14)
@@ -153,3 +157,9 @@ func _style_donation_button(btn: Button) -> void:
 	if btn == null:
 		return
 	ThemeManager.apply_secondary_button_style(btn, 8)
+
+
+func _exit_tree() -> void:
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").pop_lock(self)
+

@@ -112,6 +112,10 @@ func _grab_initial_focus() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_visible_in_tree():
 		return
+	if has_node("/root/UIFocusGuard"):
+		var ufg = get_node("/root/UIFocusGuard")
+		if ufg.is_modal_active():
+			return
 	if event.is_action_pressed("ui_cancel"):
 		if delete_confirm_dialog != null and delete_confirm_dialog.visible:
 			delete_confirm_dialog.visible = false
@@ -554,22 +558,23 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 
 	# 3. PAR ROW
 	add_cell.call(grid, "Par", par_bg, false, Color(0.8, 0.8, 0.8), 15)
-	var front_par_sum = 0
+	var front_par_sum: int = 0
 	for h_id in front_holes:
-		var p_val = hole_pars.get(h_id, 4)
+		var p_val: int = int(round(float(hole_pars.get(h_id, 4))))
 		front_par_sum += p_val
 		add_cell.call(grid, str(p_val), par_bg, false, Color(0.8, 0.8, 0.8), 15)
 	if not front_holes.is_empty():
 		add_cell.call(grid, str(front_par_sum), par_bg, false, Color(0.9, 0.9, 0.9), 15)
-	var back_par_sum = 0
+	var back_par_sum: int = 0
 	for h_id in back_holes:
-		var p_val = hole_pars.get(h_id, 4)
+		var p_val: int = int(round(float(hole_pars.get(h_id, 4))))
 		back_par_sum += p_val
 		add_cell.call(grid, str(p_val), par_bg, false, Color(0.8, 0.8, 0.8), 15)
 	if not back_holes.is_empty():
 		add_cell.call(grid, str(back_par_sum), par_bg, false, Color(0.9, 0.9, 0.9), 15)
 	if has_both_nines:
-		add_cell.call(grid, str(front_par_sum + back_par_sum), par_bg, false, Color(1.0, 0.85, 0.38), 15)
+		var total_par: int = front_par_sum + back_par_sum
+		add_cell.call(grid, str(total_par), par_bg, false, Color(1.0, 0.85, 0.38), 15)
 
 	# 4. PLAYER ROWS
 	for p_idx in range(players_list.size()):
@@ -632,7 +637,8 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 			name_hbox.add_child(badge)
 		
 		var name_lbl = Label.new()
-		name_lbl.text = "%s (%s)" % [p_name, p.get("tee", "Blue")]
+		var p_tee = p.get("tee", "Blue")
+		name_lbl.text = "%s (%s)" % [p_name, p_tee]
 		var name_fg = Color.WHITE
 		if not p.get("active", true):
 			name_lbl.text += " (Out)"
@@ -641,6 +647,24 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		name_lbl.add_theme_font_size_override("font_size", 15)
 		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		name_hbox.add_child(name_lbl)
+		
+		# Tee color chip/indicator
+		var tee_dot = PanelContainer.new()
+		tee_dot.custom_minimum_size = Vector2(10, 10)
+		tee_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var dot_style = StyleBoxFlat.new()
+		dot_style.bg_color = TeeboxMarkerBuilder.get_tee_color(p_tee)
+		dot_style.corner_radius_top_left = 5
+		dot_style.corner_radius_top_right = 5
+		dot_style.corner_radius_bottom_left = 5
+		dot_style.corner_radius_bottom_right = 5
+		dot_style.border_width_left = 1
+		dot_style.border_width_top = 1
+		dot_style.border_width_right = 1
+		dot_style.border_width_bottom = 1
+		dot_style.border_color = Color(0.1, 0.1, 0.1, 0.8) if dot_style.bg_color.get_luminance() > 0.5 else Color(0.9, 0.9, 0.9, 0.8)
+		tee_dot.add_theme_stylebox_override("panel", dot_style)
+		name_hbox.add_child(tee_dot)
 		
 		# Email stats button next to player name
 		var email_btn = Button.new()
@@ -713,7 +737,7 @@ func _email_player_stats(player: Dictionary, match_data: Dictionary) -> void:
 				hole_ids_list = hole_info.keys()
 				hole_ids_list.sort()
 				for h_id in hole_ids_list:
-					pars[h_id] = hole_info[h_id].get("Par", 4)
+					pars[h_id] = int(round(float(hole_info[h_id].get("Par", 4))))
 					var tee_info = hole_info[h_id].get("Tee Info", {})
 					distances[h_id] = {}
 					for t_name in tee_info.keys():

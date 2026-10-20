@@ -68,10 +68,12 @@ uniform float roughness_mulch   : hint_range(0.0, 1.0) = 0.95;
 // -- Normal map strength per surface --
 uniform float normal_depth : hint_range(0.0, 2.0) = 0.85;
 
-// -- Slope & Lighting Readability --
+// -- Slope, Hole Mow Alignment & Tee Divot Readability --
 uniform vec3 sun_direction = vec3(-0.45, -0.75, -0.45);
 uniform float slope_shading_strength : hint_range(0.0, 1.0) = 0.22;
-uniform float height_blend_contrast : hint_range(0.0, 1.0) = 0.25;
+uniform float height_blend_contrast : hint_range(0.0, 1.0) = 0.0;
+uniform vec2 hole_mow_direction = vec2(0.707, 0.707);
+uniform vec3 active_tee_pos = vec3(0.0, -9999.0, 0.0);
 
 const float BASE_UV_SCALE = 0.1;
 
@@ -80,255 +82,365 @@ varying vec3 v_world_pos;
 varying vec3 v_cam_pos;
 
 void vertex() {
-    v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
-    v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-    v_cam_pos = INV_VIEW_MATRIX[3].xyz;
+	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	v_cam_pos = INV_VIEW_MATRIX[3].xyz;
 }
 
 vec2 hash2(vec2 p) {
-    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
-    return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+	p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+	return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
 }
 
 float gnoise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(dot(hash2(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0)),
-                   dot(hash2(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
-               mix(dot(hash2(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
-                   dot(hash2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x), u.y);
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	vec2 u = f * f * (3.0 - 2.0 * f);
+	return mix(mix(dot(hash2(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0)),
+	               dot(hash2(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
+	           mix(dot(hash2(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
+	               dot(hash2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x), u.y);
+}
+
+// Breaks visible texture tiling by blending a rotated, offset second sample using low-frequency noise
+vec3 sample_notile(sampler2D tex, vec2 uv, vec2 wp) {
+	vec3 a = texture(tex, uv).rgb;
+	vec2 ruv = vec2(uv.x * 0.8660 - uv.y * 0.5, uv.x * 0.5 + uv.y * 0.8660) * 0.73 + vec2(0.31, 0.57);
+	vec3 b = texture(tex, ruv).rgb;
+	float m = smoothstep(0.30, 0.70, gnoise(wp * 0.09) * 0.5 + 0.5);
+	return mix(a, b, m);
+}
+
+// Multi-octave fine grain used in place of geometric grass blades
+float turf_grain(vec2 wp) {
+	return gnoise(wp * 38.0) * 0.5 + gnoise(wp * 91.0) * 0.3 + gnoise(wp * 7.0) * 0.2;
 }
 
 void fragment() {
-    // -----------------------------------------------------------------------
-    // 1. Splat Sampling with subtle edge perturbation
-    // -----------------------------------------------------------------------
-    vec4 raw_splat = texture(splat_map, UV2);
-    
-    float border_activity = (raw_splat.r * (1.0 - raw_splat.r))
-                          + (raw_splat.g * (1.0 - raw_splat.g))
-                          + (raw_splat.b * (1.0 - raw_splat.b))
-                          + (raw_splat.a * (1.0 - raw_splat.a));
-    float border_intensity = clamp(border_activity * 6.0, 0.0, 1.0);
-    
-    vec2 tuft_jitter = vec2(
-        gnoise(v_world_pos.xz * 0.40),
-        gnoise(v_world_pos.xz * 0.40 + vec2(27.4, 43.1))
-    ) * 0.0035 * border_intensity;
-    
-    vec4 splat = texture(splat_map, UV2 + tuft_jitter);
+	float cam_dist = distance(v_world_pos, v_cam_pos);
+	float near_detail_fade = 1.0 - smoothstep(25.0, 55.0, cam_dist);
+	float close_blade_fade = 1.0 - smoothstep(8.0, 18.0, cam_dist);
 
-    float raw_green   = splat.r;
-    float raw_fairway = splat.g;
-    float raw_bunker  = splat.b;
-    float raw_mulch   = splat.a;
-    float raw_rough   = clamp(1.0 - raw_green - raw_fairway - raw_bunker - raw_mulch, 0.0, 1.0);
+	// -----------------------------------------------------------------------
+	// 1. Splat Sampling: smoothed boundaries (no noise jitter) so fairway/rough/green
+	//    edges are clean, consistent-width transitions rather than zigzag bleeding.
+	// -----------------------------------------------------------------------
+	vec2 splat_texel = 1.0 / vec2(textureSize(splat_map, 0));
+	vec4 raw_splat = vec4(0.0);
+	float tap_w_sum = 0.0;
+	for (int sx = -2; sx <= 2; sx++) {
+		for (int sy = -2; sy <= 2; sy++) {
+			vec2 o = vec2(float(sx), float(sy));
+			float tw = exp(-dot(o, o) * 0.28);
+			raw_splat += texture(splat_map, UV2 + o * splat_texel * 1.1) * tw;
+			tap_w_sum += tw;
+		}
+	}
+	raw_splat /= tap_w_sum;
+	// Re-sharpen the blurred weights into a narrow, even-width transition band
+	raw_splat = vec4(
+		smoothstep(0.30, 0.70, raw_splat.r),
+		smoothstep(0.30, 0.70, raw_splat.g),
+		smoothstep(0.30, 0.70, raw_splat.b),
+		smoothstep(0.30, 0.70, raw_splat.a));
+	vec4 splat = raw_splat;
 
-    // UV coordinates per surface
-    vec2 uv_rough   = UV * (uv_scale_rough   / BASE_UV_SCALE);
-    vec2 uv_green   = UV * (uv_scale_green   / BASE_UV_SCALE);
-    vec2 uv_fairway = UV * (uv_scale_fairway / BASE_UV_SCALE);
-    vec2 uv_bunker  = UV * (uv_scale_bunker  / BASE_UV_SCALE);
-    vec2 uv_mulch   = UV * (uv_scale_mulch   / BASE_UV_SCALE);
+	float raw_green   = splat.r;
+	float raw_fairway = splat.g;
+	float raw_bunker  = splat.b;
+	float raw_mulch   = splat.a;
+	float raw_rough   = clamp(1.0 - raw_green - raw_fairway - raw_bunker - raw_mulch, 0.0, 1.0);
 
-    // -----------------------------------------------------------------------
-    // 2. Height-Blended Splat Weights (Guaranteed safe smoothsteps, ZERO NaNs)
-    // -----------------------------------------------------------------------
-    float h_r = texture(height_rough,   uv_rough).r;
-    float h_g = texture(height_green,   uv_green).r;
-    float h_f = texture(height_fairway, uv_fairway).r;
-    float h_b = texture(height_bunker,  uv_bunker).r;
-    float h_m = texture(height_mulch,   uv_mulch).r;
+	vec2 uv_rough   = UV * (uv_scale_rough   / BASE_UV_SCALE);
+	vec2 uv_green   = UV * (uv_scale_green   / BASE_UV_SCALE);
+	vec2 uv_fairway = UV * (uv_scale_fairway / BASE_UV_SCALE);
+	vec2 uv_bunker  = UV * (uv_scale_bunker  / BASE_UV_SCALE);
+	vec2 uv_mulch   = UV * (uv_scale_mulch   / BASE_UV_SCALE);
 
-    float in_transition = smoothstep(0.02, 0.30, raw_rough)   * (1.0 - smoothstep(0.70, 0.98, raw_rough))
-                        + smoothstep(0.02, 0.30, raw_fairway) * (1.0 - smoothstep(0.70, 0.98, raw_fairway))
-                        + smoothstep(0.02, 0.30, raw_green)   * (1.0 - smoothstep(0.70, 0.98, raw_green))
-                        + smoothstep(0.02, 0.30, raw_bunker)  * (1.0 - smoothstep(0.70, 0.98, raw_bunker));
-    in_transition = clamp(in_transition, 0.0, 1.0) * height_blend_contrast;
+	// -----------------------------------------------------------------------
+	// 2. Height-Blended Splat Weights (Only sampled in active transition zones)
+	// -----------------------------------------------------------------------
+	float in_transition = smoothstep(0.02, 0.30, raw_rough)   * (1.0 - smoothstep(0.70, 0.98, raw_rough))
+	                    + smoothstep(0.02, 0.30, raw_fairway) * (1.0 - smoothstep(0.70, 0.98, raw_fairway))
+	                    + smoothstep(0.02, 0.30, raw_green)   * (1.0 - smoothstep(0.70, 0.98, raw_green))
+	                    + smoothstep(0.02, 0.30, raw_bunker)  * (1.0 - smoothstep(0.70, 0.98, raw_bunker));
+	in_transition = clamp(in_transition, 0.0, 1.0) * height_blend_contrast;
 
-    float adj_rough   = max(raw_rough   + (h_r - 0.5) * in_transition * raw_rough,   0.0);
-    float adj_green   = max(raw_green   + (h_g - 0.5) * in_transition * raw_green,   0.0);
-    float adj_fairway = max(raw_fairway + (h_f - 0.5) * in_transition * raw_fairway, 0.0);
-    float adj_bunker  = max(raw_bunker  + (h_b - 0.5) * in_transition * raw_bunker,  0.0);
-    float adj_mulch   = max(raw_mulch   + (h_m - 0.5) * in_transition * raw_mulch,   0.0);
+	float adj_rough   = raw_rough;
+	float adj_green   = raw_green;
+	float adj_fairway = raw_fairway;
+	float adj_bunker  = raw_bunker;
+	float adj_mulch   = raw_mulch;
 
-    // Priority: Bunker > Green > Fairway/Mulch > Rough
-    float base_w = adj_green + adj_bunker + adj_mulch;
-    if (base_w > 1.0) {
-        adj_green /= base_w;
-        adj_bunker /= base_w;
-        adj_mulch /= base_w;
-    }
-    float fairway_w = adj_fairway * clamp(1.0 - adj_green - adj_bunker - adj_mulch, 0.0, 1.0);
-    float green_w   = adj_green;
-    float bunker_w  = adj_bunker;
-    float mulch_w   = adj_mulch;
-    float rough_w   = clamp(1.0 - green_w - fairway_w - bunker_w - mulch_w, 0.0, 1.0);
+	if (in_transition > 0.005 && near_detail_fade > 0.05) {
+		float h_r = raw_rough   > 0.005 ? texture(height_rough,   uv_rough).r   : 0.5;
+		float h_g = raw_green   > 0.005 ? texture(height_green,   uv_green).r   : 0.5;
+		float h_f = raw_fairway > 0.005 ? texture(height_fairway, uv_fairway).r : 0.5;
+		float h_b = raw_bunker  > 0.005 ? texture(height_bunker,  uv_bunker).r  : 0.5;
+		float h_m = raw_mulch   > 0.005 ? texture(height_mulch,   uv_mulch).r   : 0.5;
 
-    float total_w = rough_w + green_w + fairway_w + bunker_w + mulch_w;
-    if (total_w > 0.0001) {
-        rough_w   /= total_w;
-        green_w   /= total_w;
-        fairway_w /= total_w;
-        bunker_w  /= total_w;
-        mulch_w   /= total_w;
-    }
+		adj_rough   = max(raw_rough   + (h_r - 0.5) * in_transition * raw_rough,   0.0);
+		adj_green   = max(raw_green   + (h_g - 0.5) * in_transition * raw_green,   0.0);
+		adj_fairway = max(raw_fairway + (h_f - 0.5) * in_transition * raw_fairway, 0.0);
+		adj_bunker  = max(raw_bunker  + (h_b - 0.5) * in_transition * raw_bunker,  0.0);
+		adj_mulch   = max(raw_mulch   + (h_m - 0.5) * in_transition * raw_mulch,   0.0);
+	}
 
-    // -----------------------------------------------------------------------
-    // 3. Multi-Scale Texture Sampling & Authentic Championship Color Grading
-    // -----------------------------------------------------------------------
-    
-    // 3A. ROUGH: Rich championship emerald rough (cleans out dead yellow thatch with dual-octave detail)
-    vec3 r_fine  = texture(tex_rough, uv_rough).rgb;
-    vec3 r_broad = texture(tex_rough, uv_rough * 0.43 + vec2(0.37, 0.71)).rgb;
-    vec3 r_base  = mix(r_fine, r_broad, 0.25);
-    vec3 col_rough = mix(r_base, r_base * vec3(0.82, 1.14, 0.78), 0.60);
+	float base_w = adj_green + adj_bunker + adj_mulch;
+	if (base_w > 1.0) {
+		adj_green  /= base_w;
+		adj_bunker /= base_w;
+		adj_mulch  /= base_w;
+	}
+	float fairway_w = adj_fairway * clamp(1.0 - adj_green - adj_bunker - adj_mulch, 0.0, 1.0);
+	float green_w   = adj_green;
+	float bunker_w  = adj_bunker;
+	float mulch_w   = adj_mulch;
+	float rough_w   = clamp(1.0 - green_w - fairway_w - bunker_w - mulch_w, 0.0, 1.0);
 
-    // 3B. FAIRWAY: Championship turf with alternating directional mower roller stripes
-    vec3 f_fine  = texture(tex_fairway, uv_fairway).rgb;
-    vec3 f_broad = texture(tex_fairway, uv_fairway * 0.41 + vec2(0.53, 0.29)).rgb;
-    vec3 col_f   = mix(f_fine, f_broad, 0.25);
+	float total_w = rough_w + green_w + fairway_w + bunker_w + mulch_w;
+	if (total_w > 0.0001) {
+		rough_w   /= total_w;
+		green_w   /= total_w;
+		fairway_w /= total_w;
+		bunker_w  /= total_w;
+		mulch_w   /= total_w;
+	}
 
-    // Moon Bay alternating mower stripes (~3.5m width along hole angle)
-    vec2 stripe_dir = vec2(0.707, 0.707);
-    float stripe_coord = dot(v_world_pos.xz, stripe_dir) * 0.90;
-    float stripe_val = smoothstep(0.20, 0.80, sin(stripe_coord) * 0.5 + 0.5);
+	// Macro organic moisture & soil fertility variation across the course
+	float macro_mottle = gnoise(v_world_pos.xz * 0.032) * 0.5 + 0.5;
+	vec3 macro_turf_tint = mix(vec3(0.95, 0.96, 0.91), vec3(1.04, 1.05, 1.01), macro_mottle);
 
-    // Light / dark roller nap compression
-    vec3 stripe_bright = col_f * 1.07;
-    vec3 stripe_dark   = col_f * 0.92;
-    vec3 col_fairway   = mix(stripe_dark, stripe_bright, stripe_val);
+	vec3 blended_albedo = vec3(0.0);
+	vec3 blended_normal = vec3(0.0);
+	float blended_roughness = 0.0;
+	float blended_ao = 0.0;
 
-    // Camera view sheen: looking along roller nap creates silky light sheen
-    vec3 view_dir = normalize(v_world_pos - v_cam_pos);
-    float view_grain = dot(view_dir.xz, stripe_dir);
-    col_fairway *= (1.0 + (stripe_val - 0.5) * 0.08 * (0.5 + 0.5 * view_grain));
+	vec2 mow_dir = length(hole_mow_direction) > 0.01 ? normalize(hole_mow_direction) : normalize(vec2(0.707, 0.707));
+	vec2 mow_perp = vec2(-mow_dir.y, mow_dir.x);
+	vec3 view_dir = normalize(v_world_pos - v_cam_pos);
 
-    // Bay Hill first-cut collar ribbon: distinct darker green border framing the fairway
-    float first_cut_w = smoothstep(0.01, 0.18, fairway_w) * (1.0 - smoothstep(0.25, 0.60, fairway_w));
-    vec3 col_first_cut = col_fairway * vec3(0.72, 0.84, 0.68);
-    col_fairway = mix(col_fairway, col_first_cut, first_cut_w * 0.65);
+	// -----------------------------------------------------------------------
+	// 3A. ROUGH: Deep lush parkland rough with clumped thatch & moisture pockets
+	// -----------------------------------------------------------------------
+	if (rough_w > 0.005) {
+		vec3 r_fine = sample_notile(tex_rough, uv_rough, v_world_pos.xz);
+		vec3 r_base = r_fine;
+		if (near_detail_fade > 0.05) {
+			vec3 r_broad = texture(tex_rough, uv_rough * 0.41 + vec2(0.37, 0.71)).rgb;
+			r_base = mix(r_fine, r_broad, 0.30 * near_detail_fade);
+		}
+		// Authentic Warwick Hills deep summer rough (deep forest-olive green, not neon)
+		float clump_patch = gnoise(v_world_pos.xz * 0.28);
+		vec3 rough_tint = mix(vec3(0.76, 0.94, 0.70), vec3(0.88, 1.02, 0.78), clump_patch * 0.5 + 0.5);
+		vec3 col_rough = r_base * rough_tint * macro_turf_tint;
 
-    // 3C. GREEN: Pristine short-mown bentgrass
-    vec3 g_fine  = texture(tex_green, uv_green).rgb;
-    vec3 g_broad = texture(tex_green, uv_green * 0.47 + vec2(0.19, 0.61)).rgb;
-    vec3 col_green = mix(g_fine, g_broad, 0.25) * vec3(1.02, 1.10, 0.98);
+		// Sun-cured golden patches and dense dark clumps for natural variety
+		float dry_patch = smoothstep(0.25, 0.70, gnoise(v_world_pos.xz * 0.11 + vec2(7.3, 2.9)));
+		col_rough = mix(col_rough, col_rough * vec3(1.22, 1.08, 0.62), dry_patch * 0.45);
+		float clump_dark = smoothstep(0.1, 0.6, gnoise(v_world_pos.xz * 1.6));
+		col_rough *= mix(1.0, 0.78, clump_dark * 0.5);
+		// Fine grain stands in for individual blades at close range
+		float grain_r = turf_grain(v_world_pos.xz) * close_blade_fade;
+		col_rough *= 1.0 + grain_r * 0.35;
 
-    // Delicate Augusta/Pinehurst cross-cut mower grid (~1.6m width)
-    float green_grid = (sin(v_world_pos.x * 2.8) * 0.5 + 0.5) * (sin(v_world_pos.z * 2.8) * 0.5 + 0.5);
-    col_green = mix(col_green * 0.97, col_green * 1.03, green_grid);
+		vec3 nr_rough = texture(normal_rough, uv_rough).rgb * 2.0 - 1.0;
+		nr_rough = mix(vec3(0.0, 0.0, 1.0), nr_rough, 0.55);
 
-    // Smooth fringe collar border
-    float fringe_w = smoothstep(0.02, 0.25, green_w) * (1.0 - smoothstep(0.65, 0.98, green_w));
-    vec3 col_fringe = mix(col_green, col_fairway, 0.55);
-    vec3 green_output = mix(col_green, col_fringe, fringe_w);
+		float luma_r = dot(r_base, vec3(0.299, 0.587, 0.114));
+		blended_albedo += col_rough * rough_w;
+		blended_normal += nr_rough * rough_w;
+		blended_roughness += clamp(roughness_rough - clump_patch * 0.05, 0.80, 0.98) * rough_w;
+		blended_ao += clamp(0.78 + luma_r * 0.42, 0.70, 1.0) * rough_w;
+	}
 
-    // 3D. BUNKER: Clean silica sand + dark sculpted organic soil lip
-    vec3 col_bunker = texture(tex_bunker, uv_bunker).rgb * 1.05;
-    float rake_wave = sin(dot(v_world_pos.xz, vec2(0.707, -0.707)) * 18.0) * 0.5 + 0.5;
-    col_bunker = clamp(col_bunker * mix(0.97, 1.03, rake_wave), 0.0, 1.0);
+	// -----------------------------------------------------------------------
+	// 3B. FAIRWAY & TEE: Hole-aligned mower stripes, first-cut collar, & tee divot scars
+	// -----------------------------------------------------------------------
+	if (fairway_w > 0.005) {
+		vec3 f_fine = sample_notile(tex_fairway, uv_fairway, v_world_pos.xz);
+		vec3 col_f = f_fine;
+		if (near_detail_fade > 0.05) {
+			vec3 f_broad = texture(tex_fairway, uv_fairway * 0.39 + vec2(0.53, 0.29)).rgb;
+			col_f = mix(f_fine, f_broad, 0.25 * near_detail_fade);
+		}
 
-    float bunker_lip = smoothstep(0.02, 0.22, bunker_w) * (1.0 - smoothstep(0.35, 0.85, bunker_w));
-    float lip_noise = gnoise(v_world_pos.xz * 0.65) * 0.5 + 0.5;
-    vec3 dark_soil = vec3(0.20, 0.15, 0.10) * (0.85 + 0.30 * lip_noise);
-    col_bunker = mix(col_bunker, dark_soil, bunker_lip * 0.70);
+		// Broad (~5m) alternating mower stripes, crisp edges, plus subtle cross-band
+		float stripe_along = dot(v_world_pos.xz, mow_perp) * 0.62;
+		float stripe_cross = dot(v_world_pos.xz, mow_dir) * 0.52;
+		float stripe_val = smoothstep(0.38, 0.62, sin(stripe_along) * 0.5 + 0.5);
+		float cross_val  = smoothstep(0.25, 0.75, sin(stripe_cross) * 0.5 + 0.5);
+		float combined_stripe = mix(stripe_val, stripe_val * 0.8 + cross_val * 0.2, 0.25);
 
-    // 3E. MULCH
-    vec3 col_mulch = texture(tex_mulch, uv_mulch).rgb;
+		// Light bands lean warm lime-green, dark bands lean deep emerald (grass bent toward/away from sun)
+		vec3 stripe_light = vec3(1.10, 1.14, 0.80);
+		vec3 stripe_dark  = vec3(0.78, 0.96, 0.78);
+		vec3 col_fairway = col_f * vec3(0.92, 1.06, 0.82) * mix(stripe_dark, stripe_light, combined_stripe) * macro_turf_tint;
 
-    // -----------------------------------------------------------------------
-    // 4. Blend Albedo
-    // -----------------------------------------------------------------------
-    vec3 blended_albedo = col_rough   * rough_w
-                        + green_output * green_w
-                        + col_fairway * fairway_w
-                        + col_bunker  * bunker_w
-                        + col_mulch   * mulch_w;
+		// Fine mown-turf grain (replaces geometric blades)
+		float grain_f = turf_grain(v_world_pos.xz) * close_blade_fade;
+		col_fairway *= 1.0 + grain_f * 0.16;
 
-    // 4A. Clean Elevation Slope Shading & 3D Hill Relief
-    vec3 wn = normalize(v_world_normal);
-    float slope_grade = length(wn.xz);
-    float slope_intensity = clamp(slope_grade * 6.0, 0.0, 1.0);
+		// Anisotropic mower nap sheen relative to camera gaze
+		float view_grain = dot(view_dir.xz, mow_dir);
+		col_fairway *= (1.0 + (combined_stripe - 0.5) * 0.14 * (0.5 + 0.5 * view_grain));
 
-    vec3 light_dir = normalize(-sun_direction);
-    float NdotL = dot(wn, light_dir);
-    float flat_dot = light_dir.y;
-    float relief_diff = (NdotL - flat_dot) * 2.0;
-    float relief_factor = 1.0 + (relief_diff * slope_shading_strength);
-    float bank_darkening = 1.0 - (slope_intensity * 0.25 * slope_shading_strength);
+		// First-cut intermediate rough collar border framing the fairway/tee
+		float first_cut_w = smoothstep(0.01, 0.20, fairway_w) * (1.0 - smoothstep(0.28, 0.65, fairway_w));
+		vec3 col_first_cut = col_fairway * vec3(0.76, 0.86, 0.72);
+		col_fairway = mix(col_fairway, col_first_cut, first_cut_w * 0.65);
 
-    blended_albedo *= clamp(relief_factor * bank_darkening, 0.45, 1.25);
+		vec3 nr_fairway = mix(vec3(0.0, 0.0, 1.0), texture(normal_fairway, uv_fairway).rgb * 2.0 - 1.0, 0.35);
+		float rt_f = roughness_fairway + (combined_stripe - 0.5) * 0.04;
+		float ao_f = 0.94;
 
-    // 4B. Subsurface Grass Translucency (Sunlit Backlight Glow)
-    vec3 v_dir = normalize(v_cam_pos - v_world_pos);
-    float backlight_dot = clamp(dot(-v_dir, light_dir), 0.0, 1.0);
-    float grass_translucency = pow(backlight_dot, 2.8) * 0.18 * (rough_w * 0.75 + fairway_w * 0.40);
-    blended_albedo += vec3(0.25, 0.42, 0.12) * grass_translucency;
+		// Procedural Tee-Box Divot Scars (seen in reference video at 6:55 around golfer address)
+		if (active_tee_pos.y > -1000.0) {
+			vec2 tee_delta = v_world_pos.xz - active_tee_pos.xz;
+			// Local tee coordinates aligned with hole direction
+			vec2 tee_local = vec2(dot(tee_delta, mow_dir), dot(tee_delta, mow_perp));
+			float tee_zone = (1.0 - smoothstep(1.2, 3.2, abs(tee_local.x)))
+			               * (1.0 - smoothstep(1.8, 4.2, abs(tee_local.y)))
+			               * (1.0 - smoothstep(0.18, 0.45, length(tee_delta))); // Keep ball spot clean
+			if (tee_zone > 0.01) {
+				// Elongated turf divot strips aligned with swing direction (mow_dir)
+				vec2 divot_cell = vec2(tee_local.x * 2.8, tee_local.y * 9.5);
+				float divot_n = gnoise(divot_cell) * 0.6 + gnoise(divot_cell * 2.3 + vec2(5.2, 9.1)) * 0.4;
+				float divot_mask = smoothstep(0.28, 0.52, divot_n) * tee_zone;
+				vec3 divot_soil = mix(vec3(0.34, 0.28, 0.20), vec3(0.56, 0.50, 0.38), gnoise(v_world_pos.xz * 18.0) * 0.5 + 0.5);
+				col_fairway = mix(col_fairway, divot_soil, divot_mask * 0.78);
+				nr_fairway = normalize(mix(nr_fairway, vec3(0.0, -0.35, 0.93), divot_mask));
+				rt_f = mix(rt_f, 0.96, divot_mask);
+				ao_f = mix(ao_f, 0.72, divot_mask);
+			}
+		}
 
-    ALBEDO = clamp(blended_albedo, 0.0, 1.0);
+		blended_albedo += clamp(col_fairway, 0.0, 1.0) * fairway_w;
+		blended_normal += nr_fairway * fairway_w;
+		blended_roughness += rt_f * fairway_w;
+		blended_ao += ao_f * fairway_w;
+	}
 
-    // -----------------------------------------------------------------------
-    // 5. Sample & Blend Roughness
-    // -----------------------------------------------------------------------
-    float rt_r = mix(roughness_rough, roughness_rough * texture(roughness_tex_rough, uv_rough).r, 0.10);
-    float rt_g = mix(roughness_green, roughness_green * texture(roughness_tex_green, uv_green).r, 0.08);
-    float rt_f = mix(roughness_fairway, roughness_fairway * texture(roughness_tex_fairway, uv_fairway).r, 0.10) + (stripe_val - 0.5) * 0.04;
-    float rt_b = mix(roughness_bunker, roughness_bunker * texture(roughness_tex_bunker, uv_bunker).r, 0.08);
-    float rt_m = mix(roughness_mulch, roughness_mulch * texture(roughness_tex_mulch, uv_mulch).r, 0.10);
+	// -----------------------------------------------------------------------
+	// 3C. GREEN: Lighter, manicured bentgrass putting surface + distinct collar framing
+	// -----------------------------------------------------------------------
+	if (green_w > 0.005) {
+		vec3 g_fine = texture(tex_green, uv_green).rgb;
+		// Distinct vibrant bentgrass hue: lighter, high-vitality chartreuse-emerald matching reference
+		vec3 col_green = g_fine * vec3(1.05, 1.32, 0.78);
 
-    ROUGHNESS = rt_r * rough_w
-              + rt_g * green_w
-              + rt_f * fairway_w
-              + rt_b * bunker_w
-              + rt_m * mulch_w;
+		// Precision cross-cut tournament mowing pattern
+		float cut_a = sin(dot(v_world_pos.xz, mow_dir) * 4.2) * 0.5 + 0.5;
+		float cut_b = sin(dot(v_world_pos.xz, mow_perp) * 4.2) * 0.5 + 0.5;
+		float green_grid = cut_a * cut_b;
+		col_green *= mix(0.93, 1.07, green_grid);
 
-    // -----------------------------------------------------------------------
-    // 6. Normal Mapping with Crisp Turf Relief
-    // -----------------------------------------------------------------------
-    vec3 nr_rough   = texture(normal_rough,   uv_rough).rgb * 2.0 - 1.0;
-    vec3 nr_fairway = texture(normal_fairway, uv_fairway).rgb * 2.0 - 1.0;
-    vec3 nr_green   = texture(normal_green,   uv_green).rgb * 2.0 - 1.0;
-    vec3 nr_mulch   = texture(normal_mulch,   uv_mulch).rgb * 2.0 - 1.0;
-    vec3 nr_bunker  = texture(normal_bunker,  uv_bunker).rgb * 2.0 - 1.0;
+		// Velvety sheen based on view angle and putting surface nap
+		float view_sheen = abs(dot(view_dir.xz, mow_dir));
+		col_green *= (1.0 + (view_sheen - 0.5) * 0.16);
 
-    nr_green = mix(vec3(0.0, 0.0, 1.0), nr_green, 0.20); // Velvet smooth green
+		// Crisp distinctive putting green collar / fringe band framing the green perimeter
+		// Forms a visible intermediate ring between fairway and green putting surface
+		float fringe_w = smoothstep(0.01, 0.28, green_w) * (1.0 - smoothstep(0.42, 0.88, green_w));
+		vec3 col_fringe = g_fine * vec3(0.68, 0.95, 0.58);
+		vec3 green_output = mix(col_green, col_fringe, fringe_w * 0.85);
 
-    // Bunker raked sand normal
-    float rake_angle = dot(v_world_pos.xz, vec2(0.707, -0.707)) * 15.0;
-    vec2 rake_tangent = vec2(cos(rake_angle), sin(rake_angle)) * 0.25;
-    nr_bunker = normalize(vec3(nr_bunker.xy + rake_tangent, max(nr_bunker.z, 0.75)));
+		// Very smooth, subtle normal map for manicured rolling green
+		vec3 nr_green = mix(vec3(0.0, 0.0, 1.0), texture(normal_green, uv_green).rgb * 2.0 - 1.0, 0.08);
+		blended_albedo += clamp(green_output, 0.0, 1.0) * green_w;
+		blended_normal += nr_green * green_w;
+		// Smooth bentgrass surface gives a soft, manicured sheen
+		blended_roughness += clamp(roughness_green - 0.38, 0.38, 0.52) * green_w;
+		blended_ao += 0.98 * green_w;
+	}
 
-    vec3 blended_normal = nr_rough   * rough_w
-                        + nr_green   * green_w
-                        + nr_fairway * fairway_w
-                        + nr_bunker  * bunker_w
-                        + nr_mulch   * mulch_w;
+	// -----------------------------------------------------------------------
+	// 3D. BUNKER: Crisp silica sand + deep sod/soil under-lip shadow
+	// -----------------------------------------------------------------------
+	if (bunker_w > 0.005) {
+		vec3 col_bunker = texture(tex_bunker, uv_bunker).rgb * vec3(1.12, 1.07, 0.98);
+		float rake_angle = dot(v_world_pos.xz, vec2(0.707, -0.707)) * 18.0;
+		float rake_wave = sin(rake_angle) * 0.5 + 0.5;
+		col_bunker = clamp(col_bunker * mix(0.95, 1.04, rake_wave), 0.0, 1.0);
 
-    NORMAL_MAP = normalize(blended_normal) * 0.5 + 0.5;
-    NORMAL_MAP_DEPTH = normal_depth;
+		// Sharp sod & dark earth bunker lip transition
+		float bunker_lip = smoothstep(0.03, 0.26, bunker_w) * (1.0 - smoothstep(0.32, 0.68, bunker_w));
+		float lip_noise = gnoise(v_world_pos.xz * 1.2) * 0.5 + 0.5;
+		vec3 dark_soil = vec3(0.16, 0.12, 0.08) * (0.80 + 0.35 * lip_noise);
+		col_bunker = mix(col_bunker, dark_soil, bunker_lip * 0.88);
 
-    // -----------------------------------------------------------------------
-    // 7. Ambient Occlusion
-    // -----------------------------------------------------------------------
-    float ao_r = mix(1.0, texture(ao_rough,   uv_rough).r, 0.25);
-    float ao_g = mix(1.0, texture(ao_green,   uv_green).r, 0.10);
-    float ao_f = mix(1.0, texture(ao_fairway, uv_fairway).r, 0.18);
-    float ao_b = mix(1.0, texture(ao_bunker,  uv_bunker).r, 0.20);
-    float ao_m = mix(1.0, texture(ao_mulch,   uv_mulch).r, 0.20);
+		vec3 nr_bunker = texture(normal_bunker, uv_bunker).rgb * 2.0 - 1.0;
+		vec2 rake_tangent = vec2(cos(rake_angle), sin(rake_angle)) * 0.28;
+		nr_bunker = normalize(vec3(nr_bunker.xy + rake_tangent, max(nr_bunker.z, 0.72)));
 
-    float blended_ao = ao_r * rough_w
-                     + ao_g * green_w
-                     + ao_f * fairway_w
-                     + ao_b * bunker_w
-                     + ao_m * mulch_w;
+		blended_albedo += col_bunker * bunker_w;
+		blended_normal += nr_bunker * bunker_w;
+		blended_roughness += roughness_bunker * bunker_w;
+		blended_ao += mix(0.95, 0.55, bunker_lip) * bunker_w;
+	}
 
-    AO = clamp(blended_ao, 0.0, 1.0);
-    AO_LIGHT_AFFECT = 0.20;
+	// -----------------------------------------------------------------------
+	// 3E. MULCH
+	// -----------------------------------------------------------------------
+	if (mulch_w > 0.005) {
+		vec3 col_mulch = texture(tex_mulch, uv_mulch).rgb * 0.86;
+		vec3 nr_mulch = texture(normal_mulch, uv_mulch).rgb * 2.0 - 1.0;
+		blended_albedo += col_mulch * mulch_w;
+		blended_normal += nr_mulch * mulch_w;
+		blended_roughness += roughness_mulch * mulch_w;
+		blended_ao += 0.85 * mulch_w;
+	}
 
-    // -----------------------------------------------------------------------
-    // 8. Backlight & Specular Response
-    // -----------------------------------------------------------------------
-    BACKLIGHT = vec3(0.12, 0.18, 0.06) * (rough_w * 0.60 + fairway_w * 0.35);
-    SPECULAR = 0.03;
+	// Mid-distance (to ~60m) turf micro-variation: keeps grass from reading as a smeared texture
+	float grass_w_total = rough_w + fairway_w;
+	if (grass_w_total > 0.01) {
+		float mid_fade = 1.0 - smoothstep(18.0, 65.0, cam_dist);
+		float mid_a = gnoise(v_world_pos.xz * 9.0);
+		float mid_b = gnoise(v_world_pos.xz * 3.1 + vec2(11.0, 5.0));
+		float amp = rough_w * 0.22 + fairway_w * 0.07;
+		blended_albedo *= 1.0 + (mid_a * 0.6 + mid_b * 0.4) * amp * mid_fade;
+		// Sun-warmed highlights and cooler shade within the turf canopy
+		blended_albedo = mix(blended_albedo, blended_albedo * vec3(1.06, 1.05, 0.90), clamp(mid_b * 0.5 + 0.5, 0.0, 1.0) * 0.20 * mid_fade * grass_w_total);
+	}
+
+	// Close-range (< 18m) procedural micro-blade normal perturbation at golfer address
+	if (close_blade_fade > 0.01 && (rough_w + fairway_w) > 0.1) {
+		float blade_nx = gnoise(v_world_pos.xz * 26.0);
+		float blade_nz = gnoise(v_world_pos.xz * 26.0 + vec2(19.3, 41.7));
+		vec3 micro_blade_n = vec3(blade_nx, blade_nz, 0.0) * 0.24 * close_blade_fade * (rough_w + fairway_w * 0.65);
+		blended_normal = normalize(blended_normal + micro_blade_n);
+	}
+
+	// -----------------------------------------------------------------------
+	// 4. Elevation Slope Relief & Subsurface Grass Translucency
+	// -----------------------------------------------------------------------
+	vec3 wn = normalize(v_world_normal);
+	float slope_grade = length(wn.xz);
+	float slope_intensity = clamp(slope_grade * 6.0, 0.0, 1.0);
+
+	vec3 light_dir = normalize(-sun_direction);
+	float NdotL = dot(wn, light_dir);
+	float relief_diff = (NdotL - light_dir.y) * 2.0;
+	float relief_factor = 1.0 + (relief_diff * slope_shading_strength);
+	float bank_darkening = 1.0 - (slope_intensity * 0.25 * slope_shading_strength);
+
+	blended_albedo *= clamp(relief_factor * bank_darkening, 0.45, 1.25);
+
+	vec3 v_dir = normalize(v_cam_pos - v_world_pos);
+	float backlight_dot = clamp(dot(-v_dir, light_dir), 0.0, 1.0);
+	float grass_translucency = pow(backlight_dot, 2.8) * 0.16 * (rough_w * 0.75 + fairway_w * 0.40);
+	blended_albedo += vec3(0.24, 0.40, 0.12) * grass_translucency;
+
+	ALBEDO = clamp(blended_albedo, 0.0, 1.0);
+	ROUGHNESS = clamp(blended_roughness, 0.5, 1.0);
+	NORMAL_MAP = normalize(max(length(blended_normal), 0.001) > 0.002 ? blended_normal : vec3(0.0, 0.0, 1.0)) * 0.5 + 0.5;
+	NORMAL_MAP_DEPTH = normal_depth;
+
+	float macro_terrain_ao = mix(1.0, texture(terrain_ao_map, UV2).r, 0.45);
+	AO = clamp(blended_ao * macro_terrain_ao, 0.0, 1.0);
+	AO_LIGHT_AFFECT = 0.22;
+
+	BACKLIGHT = vec3(0.11, 0.17, 0.05) * (rough_w * 0.60 + fairway_w * 0.35);
+	SPECULAR = 0.03;
 }
+

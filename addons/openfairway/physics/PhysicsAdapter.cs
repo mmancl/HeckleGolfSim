@@ -227,10 +227,15 @@ public partial class PhysicsAdapter : RefCounted
             carryM = totalM;
         }
 
+        Vector3 perpDir = shotDir.Cross(Vector3.Up);
+        float offlineM = perpDir.LengthSquared() > 0.0001f ? pos.Dot(perpDir.Normalized()) : pos.Z;
+
         return new Dictionary
         {
             { "carry_yd", carryM * YARDS_PER_METER },
             { "total_yd", totalM * YARDS_PER_METER },
+            { "rollout_yd", (totalM - carryM) * YARDS_PER_METER },
+            { "offline_yd", offlineM * YARDS_PER_METER },
             { "carry_yd_first_impact", carryM * YARDS_PER_METER },
             { "apex_ft", apexM * FEET_PER_METER },
             { "hang_time_s", hangTimeS },
@@ -365,6 +370,18 @@ public partial class PhysicsAdapter : RefCounted
                 {
                     Vector3 omegaCrossVel = omega.Cross(velocity);
                     magnus = 0.5f * airSample.LiftCoefficient * airDensity * BallPhysics.CROSS_SECTION * omegaCrossVel * airSample.Speed / omegaLen;
+
+                    Vector3 horizVel = new Vector3(velocity.X, 0.0f, velocity.Z);
+                    if (horizVel.LengthSquared() > 0.001f)
+                    {
+                        Vector3 vForward = horizVel.Normalized();
+                        Vector3 vLateral = vForward.Cross(Vector3.Up);
+                        Vector3 sideSpin = new Vector3(0.0f, omega.Y, 0.0f);
+                        Vector3 sideMagnus = 0.5f * airSample.LiftCoefficient * airDensity * BallPhysics.CROSS_SECTION * sideSpin.Cross(velocity) * airSample.Speed / omegaLen;
+                        float lateralMag = sideMagnus.Dot(vLateral);
+                        Vector3 lateralForce = vLateral * lateralMag;
+                        magnus += lateralForce * (BallPhysics.LATERAL_MAGNUS_SCALE - 1.0f);
+                    }
                 }
                 airForces = drag + magnus;
             }

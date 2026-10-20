@@ -87,6 +87,10 @@ func _ready():
 func _grab_initial_focus() -> void:
 	if not is_visible_in_tree():
 		return
+	if has_node("/root/UIFocusGuard"):
+		var ufg = get_node("/root/UIFocusGuard")
+		if ufg.is_modal_active():
+			return
 	if _courses_button != null and is_instance_valid(_courses_button):
 		_courses_button.grab_focus()
 
@@ -94,6 +98,10 @@ func _grab_initial_focus() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_visible_in_tree():
 		return
+	if has_node("/root/UIFocusGuard"):
+		var ufg = get_node("/root/UIFocusGuard")
+		if ufg.is_modal_active():
+			return
 	if event.is_action_pressed("ui_cancel"):
 		if _exit_button != null and is_instance_valid(_exit_button):
 			if get_viewport().gui_get_focus_owner() == _exit_button:

@@ -2,8 +2,9 @@ extends RefCounted
 class_name HighFidelityLighting
 
 ## HighFidelityLighting
-## Configures Forward+ desktop lighting, SDFGI global illumination, SSIL,
-## volumetric fog, soft PCSS shadows, and AgX tonemapping for High graphics mode.
+## Configures Forward+ desktop lighting, SSAO, SSR, crisp 4-split directional shadows,
+## single-pass atmospheric depth haze, and calibrated AgX tonemapping for High graphics mode
+## with smooth performance on mainstream PCs (no heavy SDFGI/SSIL voxel overhead).
 
 static var _cached_original_env_settings: Dictionary = {}
 static var _cached_original_light_settings: Dictionary = {}
@@ -11,31 +12,43 @@ static var _cached_original_light_settings: Dictionary = {}
 static func apply(scene_root: Node) -> void:
 	if scene_root == null or not scene_root.is_inside_tree():
 		return
-	
-	# Enable Viewport TAA for sub-pixel anti-aliasing on foliage and grass blades
+
+	# Configure clean MSAA anti-aliasing without TAA temporal motion blur
 	var viewport = scene_root.get_viewport()
 	if viewport != null:
 		if "use_taa" in viewport:
-			viewport.use_taa = true
+			viewport.use_taa = false
+		if "msaa_3d" in viewport:
+			viewport.msaa_3d = Viewport.MSAA_4X
 		if "scaling_3d_mode" in viewport:
 			viewport.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 		if "scaling_3d_scale" in viewport:
 			viewport.scaling_3d_scale = 1.0
 
-	# 1. Configure Directional Soft Shadows & Shadow Atlas
+	# 1. Configure Directional Soft Shadows & Shadow Atlas (SOFT_HIGH balances crisp edges + fast GPU filter)
 	RenderingServer.directional_soft_shadow_filter_set_quality(
-		RenderingServer.SHADOW_QUALITY_SOFT_ULTRA
+		RenderingServer.SHADOW_QUALITY_SOFT_HIGH
 	)
 	RenderingServer.directional_shadow_atlas_set_size(4096, true)
 
 	var stack: Array[Node] = [scene_root]
 	while not stack.is_empty():
 		var node = stack.pop_back()
-		
-		# 2. Tune WorldEnvironment
+
+		# 2. Tune WorldEnvironment / Sky3D
 		if node is WorldEnvironment and node.environment != null:
 			_apply_environment_settings(node.environment)
-		
+			if node.camera_attributes != null and node.camera_attributes is CameraAttributesPractical:
+				(node.camera_attributes as CameraAttributesPractical).dof_blur_far_enabled = false
+			# Prevent double-fogging if Sky3D Skydome has its own fullscreen fog quad
+			var skydome = node.get_node_or_null("Skydome")
+			if skydome != null and "fog_visible" in skydome:
+				skydome.fog_visible = false
+
+		elif node is Camera3D:
+			if node.attributes != null and node.attributes is CameraAttributesPractical:
+				(node.attributes as CameraAttributesPractical).dof_blur_far_enabled = false
+
 		# 3. Tune Sun / DirectionalLight3D
 		elif node is DirectionalLight3D:
 			_apply_directional_light_settings(node)
@@ -47,10 +60,13 @@ static func apply(scene_root: Node) -> void:
 static func remove(scene_root: Node) -> void:
 	if scene_root == null:
 		return
-	
+
 	var viewport = scene_root.get_viewport()
-	if viewport != null and "use_taa" in viewport:
-		viewport.use_taa = false
+	if viewport != null:
+		if "use_taa" in viewport:
+			viewport.use_taa = false
+		if "msaa_3d" in viewport:
+			viewport.msaa_3d = Viewport.MSAA_DISABLED
 
 	var stack: Array[Node] = [scene_root]
 	while not stack.is_empty():
@@ -67,8 +83,7 @@ static func remove(scene_root: Node) -> void:
 static func _apply_environment_settings(env: Environment) -> void:
 	if env == null:
 		return
-	
-	# Cache original settings if not already cached
+
 	var env_id = env.get_instance_id()
 	if not _cached_original_env_settings.has(env_id):
 		_cached_original_env_settings[env_id] = {
@@ -77,6 +92,7 @@ static func _apply_environment_settings(env: Environment) -> void:
 			"ssao_enabled": env.ssao_enabled,
 			"ssr_enabled": env.ssr_enabled,
 			"glow_enabled": env.glow_enabled,
+			"fog_enabled": env.fog_enabled,
 			"volumetric_fog_enabled": env.volumetric_fog_enabled,
 			"tonemap_mode": env.tonemap_mode,
 			"tonemap_exposure": env.tonemap_exposure,
@@ -87,66 +103,62 @@ static func _apply_environment_settings(env: Environment) -> void:
 			"ambient_light_color": env.ambient_light_color,
 		}
 
-	# Tonemapper: AgX (constant 3 in Godot 4.4+) or Filmic fallback
+	# Calibrated AgX / Filmic Tonemapping:
+	# tonemap_white = 6.0 prevents highlight clipping on white silica sand and cumulus clouds
 	if ClassDB.class_has_enum("Environment", "ToneMapper") and "TONE_MAPPER_AGX" in ClassDB.class_get_enum_constants("Environment", "ToneMapper"):
 		env.tonemap_mode = 3 as Environment.ToneMapper
 	else:
 		env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env.tonemap_white = 1.05
-	env.tonemap_exposure = 1.15
+	env.tonemap_exposure = 1.02
+	env.tonemap_white = 6.0
 
-	# SDFGI: Cascaded Signed Distance Field Global Illumination (eliminates black shadows)
-	env.sdfgi_enabled = true
-	env.sdfgi_cascades = 4
-	env.sdfgi_min_cell_size = 0.4
-	env.sdfgi_use_occlusion = true
-	env.sdfgi_bounce_feedback = 0.5
-	env.sdfgi_energy = 1.0
-	env.sdfgi_normal_bias = 1.1
-	env.sdfgi_probe_bias = 1.1
-	env.sdfgi_y_scale = Environment.SDFGI_Y_SCALE_100_PERCENT
+	# Disable heavy SDFGI & SSIL (saves 6-10 ms/frame on mainstream PCs & eliminates voxel blotching)
+	env.sdfgi_enabled = false
+	env.ssil_enabled = false
+	env.volumetric_fog_enabled = false
 
-	# SSIL: Screen-Space Indirect Lighting (lush turf color bleed into trunks/canopies)
-	env.ssil_enabled = true
-	env.ssil_radius = 5.0
-	env.ssil_intensity = 1.0
-	env.ssil_sharpness = 0.98
-	env.ssil_normal_rejection = 1.0
-
-	# SSAO: Screen-Space Ambient Occlusion
+	# SSAO: Crisp contact & canopy pocket ambient occlusion
 	env.ssao_enabled = true
-	env.ssao_radius = 1.5
-	env.ssao_intensity = 1.0
-	env.ssao_power = 1.5
-	env.ssao_detail = 0.5
-	env.ssao_horizon = 0.05
+	env.ssao_radius = 1.35
+	env.ssao_intensity = 1.15
+	env.ssao_power = 1.45
+	env.ssao_detail = 0.55
+	env.ssao_horizon = 0.06
 
-	# Screen-Space Reflections (water & wet sand reflections)
+	# Screen-Space Reflections (pond water reflections, capped at 32 steps for mainstream GPU speed)
 	env.ssr_enabled = true
-	env.ssr_max_steps = 64
+	env.ssr_max_steps = 32
 	env.ssr_fade_in = 0.15
 	env.ssr_fade_out = 2.0
-	env.ssr_depth_tolerance = 0.2
+	env.ssr_depth_tolerance = 0.25
 
-	# Subtle Volumetric Fog (cinematic distance haze & atmospheric god-rays)
-	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.0012
-	env.volumetric_fog_albedo = Color(0.86, 0.92, 0.98)
-	env.volumetric_fog_emission_energy = 0.0
-	env.volumetric_fog_gi_inject = 1.0
-	env.volumetric_fog_anisotropy = 0.25
-	env.volumetric_fog_length = 350.0
+	# Single-pass Atmospheric Depth Fog (soft horizon aerial perspective without double-fog washout)
+	env.fog_enabled = true
+	env.fog_light_color = Color(0.76, 0.85, 0.95)
+	env.fog_light_energy = 0.85
+	env.fog_sun_scatter = 0.18
+	env.fog_density = 0.00045
+	env.fog_aerial_perspective = 0.38
+	if "fog_depth_begin" in env:
+		env.set("fog_depth_begin", 180.0)
+	if "fog_depth_end" in env:
+		env.set("fog_depth_end", 900.0)
 
-	# Balanced Ambient Daylight Fill (Crisp broadcast contrast matching Trackman Pinehurst and Moon Bay)
+	# Incremental Sky Radiance (prevents per-frame full cubemap convolution spike)
+	if env.sky != null:
+		env.sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL
+		env.sky.radiance_size = Sky.RADIANCE_SIZE_256
+
+	# Balanced Daylight Sky IBL Fill (Crisp Warwick Hills shadow contrast)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_sky_contribution = 0.50
-	env.ambient_light_energy = 0.55
-	env.ambient_light_color = Color(0.70, 0.82, 0.95)
+	env.ambient_light_sky_contribution = 0.52
+	env.ambient_light_energy = 0.28
+	env.ambient_light_color = Color(0.68, 0.80, 0.94)
 
-	# Subtle Cinematic Glow
+	# Subtle Natural Bloom
 	env.glow_enabled = true
-	env.glow_intensity = 0.25
-	env.glow_bloom = 0.04
+	env.glow_intensity = 0.18
+	env.glow_bloom = 0.03
 
 
 static func _restore_environment_settings(env: Environment) -> void:
@@ -155,13 +167,14 @@ static func _restore_environment_settings(env: Environment) -> void:
 	var env_id = env.get_instance_id()
 	if not _cached_original_env_settings.has(env_id):
 		return
-	
+
 	var orig = _cached_original_env_settings[env_id]
 	env.sdfgi_enabled = orig.get("sdfgi_enabled", false)
 	env.ssil_enabled = orig.get("ssil_enabled", false)
 	env.ssao_enabled = orig.get("ssao_enabled", false)
 	env.ssr_enabled = orig.get("ssr_enabled", false)
 	env.glow_enabled = orig.get("glow_enabled", false)
+	env.fog_enabled = orig.get("fog_enabled", false)
 	env.volumetric_fog_enabled = orig.get("volumetric_fog_enabled", false)
 	env.tonemap_mode = orig.get("tonemap_mode", Environment.TONE_MAPPER_LINEAR)
 	env.tonemap_exposure = orig.get("tonemap_exposure", 1.0)
@@ -190,14 +203,18 @@ static func _apply_directional_light_settings(light: DirectionalLight3D) -> void
 		}
 
 	light.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-	light.directional_shadow_max_distance = 650.0
+	light.directional_shadow_max_distance = 550.0
 	light.directional_shadow_blend_splits = true
-	light.directional_shadow_split_1 = 0.035
-	light.directional_shadow_split_2 = 0.12
-	light.directional_shadow_split_3 = 0.35
-	light.light_angular_distance = 0.5  # Soft canopy shadow penumbra
-	light.shadow_bias = 0.02
-	light.shadow_normal_bias = 2.0
+	light.directional_shadow_split_1 = 0.025  # Razor-sharp leaf & bunker lip shadows at tee address (0-15m)
+	light.directional_shadow_split_2 = 0.10
+	light.directional_shadow_split_3 = 0.32
+	light.shadow_enabled = true
+	light.shadow_opacity = 0.92
+	light.light_color = Color(1.0, 0.96, 0.88)
+	light.light_energy = maxf(light.light_energy, 1.45)
+	light.light_angular_distance = 0.35
+	light.shadow_bias = 0.018
+	light.shadow_normal_bias = 1.6
 
 
 static func _restore_directional_light_settings(light: DirectionalLight3D) -> void:
@@ -216,3 +233,4 @@ static func _restore_directional_light_settings(light: DirectionalLight3D) -> vo
 	light.light_angular_distance = orig.get("light_angular_distance", 0.0)
 	light.shadow_bias = orig.get("shadow_bias", 0.03)
 	light.shadow_normal_bias = orig.get("shadow_normal_bias", 2.0)
+

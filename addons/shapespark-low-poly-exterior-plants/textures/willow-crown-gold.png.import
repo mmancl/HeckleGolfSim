@@ -3,8 +3,8 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://d2me6qgilrt1"
-path.s3tc="res://.godot/imported/willow-crown-gold.png-6377d96ae9e893f84173390991b2e9a2.s3tc.ctex"
-path.etc2="res://.godot/imported/willow-crown-gold.png-6377d96ae9e893f84173390991b2e9a2.etc2.ctex"
+path.bptc="res://.godot/imported/willow-crown-gold.png-6377d96ae9e893f84173390991b2e9a2.bptc.ctex"
+path.astc="res://.godot/imported/willow-crown-gold.png-6377d96ae9e893f84173390991b2e9a2.astc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -13,13 +13,13 @@ metadata={
 [deps]
 
 source_file="res://addons/shapespark-low-poly-exterior-plants/textures/willow-crown-gold.png"
-dest_files=["res://.godot/imported/willow-crown-gold.png-6377d96ae9e893f84173390991b2e9a2.s3tc.ctex", "res://.godot/imported/willow-crown-gold.png-6377d96ae9e893f84173390991b2e9a2.etc2.ctex"]
+dest_files=["res://.godot/imported/willow-crown-gold.png-6377d96ae9e893f84173390991b2e9a2.bptc.ctex", "res://.godot/imported/willow-crown-gold.png-6377d96ae9e893f84173390991b2e9a2.astc.ctex"]
 
 [params]
 
 compress/mode=2
-compress/high_quality=false
-compress/lossy_quality=0.7
+compress/high_quality=true
+compress/lossy_quality=0.9
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

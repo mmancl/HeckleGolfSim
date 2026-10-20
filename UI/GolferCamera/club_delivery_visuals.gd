@@ -631,10 +631,10 @@ class ClubDeliveryVisualsPanel extends PanelContainer:
 			var cp_str = str(raw_path).strip_edges()
 			if cp_str == "---" or cp_str.is_empty():
 				has_path_data = false
-			elif cp_str.ends_with("Out-In"):
+			elif cp_str.ends_with("Out-In") or cp_str.ends_with("O-I") or cp_str.to_lower().ends_with("out-in") or cp_str.to_lower().ends_with("o-i"):
 				path_val = -absf(float(cp_str))
 				has_path_data = true
-			elif cp_str.ends_with("In-Out"):
+			elif cp_str.ends_with("In-Out") or cp_str.ends_with("I-O") or cp_str.to_lower().ends_with("in-out") or cp_str.to_lower().ends_with("i-o"):
 				path_val = absf(float(cp_str))
 				has_path_data = true
 			elif cp_str.ends_with("Str"):

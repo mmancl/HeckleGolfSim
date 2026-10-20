@@ -104,6 +104,48 @@ func _run_tests() -> void:
 	await process_frame
 	rui.toggle_distance_menu()
 	assert(dist_menu.visible == true, "DistanceMenu must open via toggle_distance_menu() when debug toggle is ON")
+	assert(rui_dist_btn.text == "🎯 Hit Distance: OPEN", "HitDistanceButton must show OPEN state text")
+
+	# Clicking toggle again when open should minimize the submenu
+	print("\n--- TEST 5: Clicking HitDistanceButton when submenu is already open minimizes it ---")
+	rui_dist_btn.emit_signal("pressed")
+	await process_frame
+	assert(dist_menu.visible == false, "DistanceMenu must minimize when HitDistanceButton is clicked while already open")
+	assert(rui_dist_btn.text == "🎯 Hit Distance", "HitDistanceButton must restore default text when minimized")
+	print("  PASS: HitDistanceButton minimize toggle verified.")
+
+	# Calling toggle_distance_menu again when open minimizes it
+	rui.toggle_distance_menu()
+	await process_frame
+	assert(dist_menu.visible == true, "DistanceMenu must open again")
+	rui.toggle_distance_menu()
+	await process_frame
+	assert(dist_menu.visible == false, "DistanceMenu must minimize on second toggle_distance_menu() call")
+	print("  PASS: toggle_distance_menu minimize toggle verified.")
+
+	# Clicking "Hit Distance: OPEN" button minimizes it
+	rui.toggle_distance_menu()
+	await process_frame
+	assert(dist_menu.visible == true, "DistanceMenu must be open")
+	assert(rui_dist_btn.text == "🎯 Hit Distance: OPEN", "HitDistanceButton must show '🎯 Hit Distance: OPEN'")
+	rui_dist_btn.emit_signal("pressed")
+	await process_frame
+	assert(dist_menu.visible == false, "DistanceMenu must minimize when 'Hit Distance: OPEN' button is clicked")
+	assert(rui_dist_btn.text == "🎯 Hit Distance", "HitDistanceButton text must restore to default after minimizing")
+	print("  PASS: Hit Distance: OPEN button minimize verified.")
+
+	# In CoursePlay: clicking cp_dist_btn while open minimizes submenu
+	var cp_dist_menu = cp.find_child("DistanceMenu", true, false)
+	assert(cp_dist_menu != null, "CoursePlay must have DistanceMenu")
+	cp.toggle_distance_menu()
+	await process_frame
+	assert(cp_dist_menu.visible == true, "CoursePlay DistanceMenu must open via toggle_distance_menu()")
+	assert(cp_dist_btn.text == "🎯 Hit Distance: OPEN", "CoursePlay HitDistanceButton must show OPEN state text")
+	cp_dist_btn.emit_signal("pressed")
+	await process_frame
+	assert(cp_dist_menu.visible == false, "CoursePlay DistanceMenu must minimize when HitDistanceButton pressed while open")
+	assert(cp_dist_btn.text == "🎯 Hit Distance", "CoursePlay HitDistanceButton text must restore to default")
+	print("  PASS: CoursePlay HitDistanceButton minimize toggle verified.")
 
 	# Toggle off should close it
 	gs.range_settings.debug_show_hit_distance.set_value(false)

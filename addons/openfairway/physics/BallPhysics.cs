@@ -181,10 +181,14 @@ public partial class BallPhysics : RefCounted
             {
                 Vector3 vForward = horizVel.Normalized();
                 Vector3 vLateral = vForward.Cross(Vector3.Up);
-                float lateralMag = magnus.Dot(vLateral);
+                // Isolate the Magnus force component purely arising from vertical-axis sidespin (omega.Y)
+                // to avoid cross-coupling with vertical-plane backspin lift on descent
+                Vector3 sideSpin = new Vector3(0.0f, omega.Y, 0.0f);
+                Vector3 sideMagnus = 0.5f * airSample.LiftCoefficient * parameters.AirDensity * CROSS_SECTION * sideSpin.Cross(velocity) * airSample.Speed / omegaLen;
+                float lateralMag = sideMagnus.Dot(vLateral);
                 Vector3 lateralForce = vLateral * lateralMag;
                 float scale = (parameters != null ? parameters.LateralCurveScale : 1.0f) * LATERAL_MAGNUS_SCALE;
-                magnus = (magnus - lateralForce) + (lateralForce * scale);
+                magnus += lateralForce * (scale - 1.0f);
             }
         }
 
@@ -307,6 +311,10 @@ public partial class BallPhysics : RefCounted
         if (onGround && parameters != null && parameters.GrassViscosity > 0.0f)
         {
             float decayRate = (6.0f * Mathf.Pi * parameters.GrassViscosity * RADIUS) / MOMENT_OF_INERTIA;
+            if (parameters.SpinbackResponseScale > 1.0f && omega.Length() > 7000.0f * ShotSetup.RAD_PER_RPM)
+            {
+                decayRate *= 0.12f;
+            }
             float dampingFactor = Mathf.Clamp(Mathf.Exp(-decayRate * dt), 0.0f, 1.0f);
             omega *= dampingFactor;
         }
@@ -327,6 +335,16 @@ public partial class BallPhysics : RefCounted
         PhysicsParams parameters)
     {
         Vector3 grassTorque = Vector3.Zero;
+        if (parameters != null && parameters.GrassViscosity > 0.0f)
+        {
+            // Physically scaled rotational grass viscosity drag (tau = -6*pi*nu_g*R^3 * omega)
+            grassTorque = -6.0f * Mathf.Pi * parameters.GrassViscosity * RADIUS * RADIUS * RADIUS * omega;
+        }
+
+        Vector3 normal = parameters.FloorNormal.LengthSquared() > 0.000001f ? parameters.FloorNormal.Normalized() : Vector3.Up;
+        Vector3 omegaNormal = omega.Project(normal);
+        // Torsional damping on vertical drill spin on turf
+        Vector3 drillTorque = -omegaNormal * (MOMENT_OF_INERTIA * 2.5f);
 
         Vector3 contactVelocity = velocity + omega.Cross(-parameters.FloorNormal * RADIUS);
         Vector3 tangentVelocity = contactVelocity - parameters.FloorNormal * contactVelocity.Dot(parameters.FloorNormal);
@@ -338,7 +356,6 @@ public partial class BallPhysics : RefCounted
             Vector3 frictionForce = CalculateFrictionForce(velocity, omega, parameters);
             if (frictionForce.Length() > 0.001f)
             {
-                Vector3 normal = parameters.FloorNormal.LengthSquared() > 0.000001f ? parameters.FloorNormal.Normalized() : Vector3.Up;
                 frictionTorque = 0.4f * RADIUS * normal.Cross(frictionForce);
             }
         }
@@ -351,7 +368,7 @@ public partial class BallPhysics : RefCounted
             }
         }
 
-        return frictionTorque + grassTorque;
+        return frictionTorque + grassTorque + drillTorque;
     }
 
     public BounceResult CalculateBounce(
@@ -440,9 +457,11 @@ public partial class BallPhysics : RefCounted
         Vector3 contactVelocity = velocity + omega.Cross(-parameters.FloorNormal * RADIUS);
         Vector3 tangentVelocity = contactVelocity - parameters.FloorNormal * contactVelocity.Dot(parameters.FloorNormal);
 
-        float spinMultiplier = GetSpinFrictionMultiplier(omega, parameters.RolloutImpactSpin, velocity.Length(), rp);
         float tangentVelMag = tangentVelocity.Length();
         float velocityMag = velocity.Length();
+        // When ball has high slip (e.g. checking/spinning backwards), ensure friction scaling considers slip velocity
+        float effectiveSpeedForFriction = Mathf.Max(velocityMag, tangentVelMag * 0.5f);
+        float spinMultiplier = GetSpinFrictionMultiplier(omega, parameters.RolloutImpactSpin, effectiveSpeedForFriction, rp);
 
         if (parameters.IsPutt)
         {
@@ -461,7 +480,7 @@ public partial class BallPhysics : RefCounted
         {
             float blendRange = rp.FrictionBlendSpeed - rp.RollFrictionBlendMinSpeed;
             float blendFactor = blendRange > 0.001f
-                ? Mathf.Clamp((velocityMag - rp.RollFrictionBlendMinSpeed) / blendRange, 0.0f, 1.0f)
+                ? Mathf.Clamp((effectiveSpeedForFriction - rp.RollFrictionBlendMinSpeed) / blendRange, 0.0f, 1.0f)
                 : 1.0f;
             float baseFriction = Mathf.Lerp(parameters.KineticFriction * 0.35f, parameters.KineticFriction, blendFactor);
             float effectiveFriction = baseFriction * spinMultiplier;

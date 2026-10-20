@@ -94,6 +94,8 @@ static func apply_card_panel_style(panel: Control, is_highlighted: bool = false,
 		panel.add_theme_stylebox_override("panel", style)
 
 static func apply_data_panel_style(panel: Control, is_highlighted: bool = false) -> void:
+	if panel != null:
+		panel.clip_contents = true
 	var bg = COLOR_GLASS_PANEL if not is_highlighted else Color(0.10, 0.16, 0.24, 0.90)
 	var border = COLOR_GLASS_BORDER if not is_highlighted else Color(0.35, 0.65, 0.95, 0.6)
 	var style = _create_stylebox(bg, border, 8, 1, 8, 4, 8, 4)

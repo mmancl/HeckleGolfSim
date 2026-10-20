@@ -22,6 +22,8 @@ const CONTENDER_RADIUS_METERS := 3.0   # Contender window for airborne trajector
 const CONTENDER_RADIUS_PUTT_METERS := 0.50 # 0.5 meters (~1.6 feet) contender window for putts (tightened from 2.5m)
 const MAX_HOLEABLE_SPEED_MPS := 3.2    # Max entry speed into cup
 const SHORT_ROLL_MARGIN_METERS := 0.75 # ~2.5 feet close-call margin for near misses
+const MIN_CONE_DURATION_BEFORE_ACTIVATION := 0.50 # seconds (500ms debounce in cone vision before playing suspense)
+const MIN_SUSPENSE_PLAY_DURATION := 1.50          # seconds (minimum play duration before suspense can turn off)
 
 enum SuspenseState {
 	IDLE,    # Before shot launched
@@ -32,6 +34,10 @@ enum SuspenseState {
 
 var suspense_state: SuspenseState = SuspenseState.IDLE
 var shot_validated: bool = false
+var _cone_time_tracked: float = 0.0
+var _suspense_play_timer: float = 0.0
+var _deactivation_pending: bool = false
+var _pending_lockout: bool = true
 
 # Predicted trajectory data
 var predicted_apex: Vector3 = Vector3.ZERO
@@ -627,6 +633,8 @@ func on_tree_hit() -> void:
 	shot_validated = false
 	suspense_state = SuspenseState.SPENT
 	_shot_suspense_locked_out = true
+	_cone_time_tracked = 0.0
+	_deactivation_pending = false
 	cancel_scheduled_tension()
 	stop_tension(true)
 
@@ -648,6 +656,10 @@ func reset_for_new_shot() -> void:
 	current_closeness = 0.0
 	_was_airborne_this_shot = false
 	_touchdown_timer = 0.0
+	_cone_time_tracked = 0.0
+	_suspense_play_timer = 0.0
+	_deactivation_pending = false
+	_pending_lockout = true
 	if tension_active:
 		tension_active = false
 		emit_signal("tension_stopped")
@@ -662,17 +674,25 @@ func check_ball_proximity(
 	_is_sand: bool = false,
 	is_airborne: bool = false,
 	ball_vel: Vector3 = Vector3.ZERO,
-	hit_tree: bool = false
+	hit_tree: bool = false,
+	delta: float = -1.0
 ) -> bool:
+	var dt: float = delta
+	if dt <= 0.0:
+		dt = get_physics_process_delta_time()
+		if dt <= 0.0:
+			dt = 1.0 / 60.0
+
 	# Never trigger or continue after hitting a tree
 	if _tree_hit_this_shot or hit_tree:
 		_tree_hit_this_shot = true
 		suspense_state = SuspenseState.SPENT
 		_shot_suspense_locked_out = true
 		_last_cone_valid = false
+		_cone_time_tracked = 0.0
 		cancel_scheduled_tension()
 		if tension_active:
-			stop_tension(true)
+			stop_tension(true, true)
 		return false
 
 	# Cache last observed parameters for 3D visualizer
@@ -688,10 +708,12 @@ func check_ball_proximity(
 	# Strict SPENT Latch: Suspense must never turn on more than once per shot
 	if suspense_state == SuspenseState.SPENT or _shot_suspense_locked_out:
 		_last_cone_valid = false
+		_cone_time_tracked = 0.0
 		return false
 
 	if not is_course_play_active() or target_pos.is_zero_approx():
 		_last_cone_valid = false
+		_cone_time_tracked = 0.0
 		return false
 
 	var ball_pos_2d = Vector2(ball_pos.x, ball_pos.z)
@@ -709,6 +731,7 @@ func check_ball_proximity(
 			suspense_state = SuspenseState.SPENT
 			_shot_suspense_locked_out = true
 			_last_cone_valid = false
+			_cone_time_tracked = 0.0
 			return false
 
 		# In READY state, trajectory validation must have passed
@@ -716,6 +739,7 @@ func check_ball_proximity(
 			suspense_state = SuspenseState.SPENT
 			_shot_suspense_locked_out = true
 			_last_cone_valid = false
+			_cone_time_tracked = 0.0
 			return false
 
 		# Airborne power check: ensure predicted landing was within reasonable distance of the hole
@@ -725,15 +749,18 @@ func check_ball_proximity(
 				suspense_state = SuspenseState.SPENT
 				_shot_suspense_locked_out = true
 				_last_cone_valid = false
+				_cone_time_tracked = 0.0
 				return false
 
 		# 2. Altitude Trigger: Ball must have passed predicted apex (Ball_Current_Altitude < P_apex.y and v_ball.y < 0)
 		if is_airborne:
 			if ball_vel.y >= 0.0:
 				_last_cone_valid = false
+				_cone_time_tracked = 0.0
 				return false # Ascending
 			if predicted_apex != Vector3.ZERO and ball_pos.y >= predicted_apex.y:
 				_last_cone_valid = false
+				_cone_time_tracked = 0.0
 				return false # Still at or above apex height
 
 		# 3. Angle Check (Critical): Cone projected forward along path of travel must encompass hole
@@ -775,33 +802,42 @@ func check_ball_proximity(
 		_last_cone_valid = cone_valid
 
 		if cone_valid:
-			suspense_state = SuspenseState.ACTIVE
-			_closest_dist_reached = dist_2d
-			var closeness = clampf(1.0 - (dist_2d / maxf(threshold, 0.001)), 0.35, 1.0)
-			start_tension("putt" if is_putt else "chip", closeness)
-			print("[TensionManager] READY -> ACTIVE! Vision cone encompass validated. Mode: %s, Closeness: %.2f" % [
-				"putt" if is_putt else "chip", closeness
-			])
-			return true
+			_cone_time_tracked += dt
+			if _cone_time_tracked >= MIN_CONE_DURATION_BEFORE_ACTIVATION:
+				suspense_state = SuspenseState.ACTIVE
+				_closest_dist_reached = dist_2d
+				_suspense_play_timer = 0.0
+				_deactivation_pending = false
+				var closeness = clampf(1.0 - (dist_2d / maxf(threshold, 0.001)), 0.35, 1.0)
+				start_tension("putt" if is_putt else "chip", closeness)
+				print("[TensionManager] READY -> ACTIVE! Vision cone encompass validated for >= 500ms (accum: %.3fs). Mode: %s, Closeness: %.2f" % [
+					_cone_time_tracked, "putt" if is_putt else "chip", closeness
+				])
+				return true
+			else:
+				return false
 		else:
+			_cone_time_tracked = 0.0
 			return false
 
 	# ========================================================
 	# STATE: ACTIVE (Ongoing Angle Loss & Deactivation Checks)
 	# ========================================================
 	if suspense_state == SuspenseState.ACTIVE:
+		if _deactivation_pending:
+			_last_cone_valid = false
+			return false
+
 		# 1. Rest / Sunk Check:
 		var speed = ball_vel.length()
 		if not is_airborne and speed < 0.05:
 			print("[TensionManager] ACTIVE -> SPENT: Ball stopped at rest.")
-			suspense_state = SuspenseState.SPENT
 			_last_cone_valid = false
 			stop_tension(true)
 			return false
 
 		if dist_2d <= CUP_RADIUS_METERS:
 			print("[TensionManager] ACTIVE -> SPENT: Ball reached/sunk in cup!")
-			suspense_state = SuspenseState.SPENT
 			_last_cone_valid = false
 			stop_tension(true)
 			return false
@@ -816,7 +852,6 @@ func check_ball_proximity(
 		var projected_reach = get_projected_reach_distance(ball_pos, ball_vel, is_airborne, target_pos)
 		if not is_airborne and dist_2d > projected_reach:
 			print("[TensionManager] ACTIVE -> SPENT: Ball clearly coming up short! Reach: %.2fm < Dist: %.2fm" % [projected_reach, dist_2d])
-			suspense_state = SuspenseState.SPENT
 			_last_cone_valid = false
 			stop_tension(true)
 			return false
@@ -824,7 +859,6 @@ func check_ball_proximity(
 		# 3. Overshoot Check: Ball rolls past the hole
 		if not is_airborne and dist_2d > (_closest_dist_reached + 0.05) and vel_dot_hole <= 0.0:
 			print("[TensionManager] ACTIVE -> SPENT: Overshoot detected (moving away from hole). Dist: %.2fm" % dist_2d)
-			suspense_state = SuspenseState.SPENT
 			_last_cone_valid = false
 			stop_tension(true)
 			return false
@@ -838,12 +872,11 @@ func check_ball_proximity(
 				var along_shot = hole_to_ball.dot(shot_dir)
 				if along_shot > PAST_HOLE_THRESHOLD_METERS:
 					print("[TensionManager] ACTIVE -> SPENT: Ball physically > 1ft past hole.")
-					suspense_state = SuspenseState.SPENT
 					_last_cone_valid = false
 					stop_tension(true)
 					return false
 
-		# 3. Hole Exits Cone (Angle Loss Check):
+		# 4. Hole Exits Cone (Angle Loss Check):
 		var half_angle = get_vision_cone_half_angle(dist_2d, is_putt, is_airborne)
 		var min_cos = cos(half_angle)
 
@@ -851,14 +884,12 @@ func check_ball_proximity(
 			var cos_theta_cur = vel_dot_hole
 			if cos_theta_cur < min_cos:
 				print("[TensionManager] ACTIVE -> SPENT: Airborne hole exited cone! cos_theta: %.3f < min_cos: %.3f" % [cos_theta_cur, min_cos])
-				suspense_state = SuspenseState.SPENT
 				_last_cone_valid = false
 				stop_tension(true)
 				return false
 		else:
 			if vel_dot_hole < min_cos:
 				print("[TensionManager] ACTIVE -> SPENT: Hole exited cone! cos_theta: %.3f < min_cos: %.3f (Broke offline)." % [vel_dot_hole, min_cos])
-				suspense_state = SuspenseState.SPENT
 				_last_cone_valid = false
 				stop_tension(true)
 				return false
@@ -891,6 +922,8 @@ func start_tension(mode: String = "putt", initial_closeness: float = 0.40) -> vo
 	current_closeness = initial_closeness
 	if not tension_active:
 		tension_active = true
+		_suspense_play_timer = 0.0
+		_deactivation_pending = false
 		pulse_timer = 0.0
 		current_intensity = 1.0
 		if sfx_player != null and _heartbeat_stream != null:
@@ -899,7 +932,16 @@ func start_tension(mode: String = "putt", initial_closeness: float = 0.40) -> vo
 			sfx_player.play()
 		emit_signal("tension_started", mode)
 
-func stop_tension(lockout: bool = true) -> void:
+func stop_tension(lockout: bool = true, force: bool = false) -> void:
+	if not force and tension_active and _suspense_play_timer < MIN_SUSPENSE_PLAY_DURATION:
+		_deactivation_pending = true
+		_pending_lockout = lockout
+		print("[TensionManager] Deactivation requested, holding active for minimum %.2fs play duration (played: %.2fs)" % [
+			MIN_SUSPENSE_PLAY_DURATION, _suspense_play_timer
+		])
+		return
+
+	_deactivation_pending = false
 	cancel_scheduled_tension()
 	if lockout:
 		_shot_suspense_locked_out = true
@@ -911,6 +953,15 @@ func stop_tension(lockout: bool = true) -> void:
 		tension_active = false
 		emit_signal("tension_stopped")
 
+func advance_simulation(dt: float) -> void:
+	if tension_active:
+		_suspense_play_timer += dt
+		if _deactivation_pending and _suspense_play_timer >= MIN_SUSPENSE_PLAY_DURATION:
+			print("[TensionManager] Minimum play duration (%.2fs >= %.2fs) reached; executing pending deactivation." % [
+				_suspense_play_timer, MIN_SUSPENSE_PLAY_DURATION
+			])
+			stop_tension(_pending_lockout, true)
+
 func register_camera(cam: Camera3D, base_fov: float = 55.0) -> void:
 	target_camera = cam
 	base_camera_fov = base_fov
@@ -920,6 +971,8 @@ func register_camera(cam: Camera3D, base_fov: float = 55.0) -> void:
 func _process(delta: float) -> void:
 	if _touchdown_timer > 0.0 and not _last_is_airborne:
 		_touchdown_timer = maxf(0.0, _touchdown_timer - delta)
+
+	advance_simulation(delta)
 
 	if tension_active:
 		pulse_timer += delta

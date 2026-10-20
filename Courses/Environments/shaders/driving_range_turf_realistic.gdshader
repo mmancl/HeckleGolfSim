@@ -68,73 +68,83 @@ float gnoise(vec2 p) {
 }
 
 void fragment() {
-    // 1. Calculate corridor weights with organic noise jitter at borders
-    float edge_noise = gnoise(v_world_pos.xz * 0.35) * 0.6;
-    float z_dist = abs(v_world_pos.z) + edge_noise;
-    float z_fairway = 1.0 - smoothstep(corridor_half_width - blend_margin, corridor_half_width + blend_margin, z_dist);
-    float x_fairway = smoothstep(tee_start_x - tee_blend_x, tee_start_x + tee_blend_x, v_world_pos.x);
-    float x_far_cutoff = 1.0 - smoothstep(max_range_dist - 2.0, max_range_dist + 8.0, v_world_pos.x);
-    
-    float fairway_w = clamp(z_fairway * x_fairway * x_far_cutoff, 0.0, 1.0);
-    float rough_w = 1.0 - fairway_w;
+	float cam_dist = distance(v_world_pos, v_cam_pos);
+	float near_detail_fade = 1.0 - smoothstep(25.0, 55.0, cam_dist);
 
-    // 2. UV coordinates
-    vec2 uv_f = v_world_pos.xz * uv_scale_fairway;
-    vec2 uv_r = v_world_pos.xz * uv_scale_rough;
+	// 1. Calculate corridor weights with organic noise jitter at borders
+	float edge_noise = gnoise(v_world_pos.xz * 0.35) * 0.6;
+	float z_dist = abs(v_world_pos.z) + edge_noise;
+	float z_fairway = 1.0 - smoothstep(corridor_half_width - blend_margin, corridor_half_width + blend_margin, z_dist);
+	float x_fairway = smoothstep(tee_start_x - tee_blend_x, tee_start_x + tee_blend_x, v_world_pos.x);
+	float x_far_cutoff = 1.0 - smoothstep(max_range_dist - 2.0, max_range_dist + 8.0, v_world_pos.x);
 
-    // 3. Multi-Scale Albedo Sampling & Natural Turf
-    // Rough: Rich championship emerald rough (cleans out dead yellow thatch with dual-octave detail)
-    vec3 r_fine  = texture(tex_rough, uv_r).rgb;
-    vec3 r_broad = texture(tex_rough, uv_r * 0.43 + vec2(0.37, 0.71)).rgb;
-    vec3 r_base  = mix(r_fine, r_broad, 0.25);
-    vec3 col_rough = mix(r_base, r_base * vec3(0.82, 1.14, 0.78), 0.60);
+	float fairway_w = clamp(z_fairway * x_fairway * x_far_cutoff, 0.0, 1.0);
+	float rough_w = 1.0 - fairway_w;
 
-    // Fairway: Championship turf with alternating directional mower roller stripes
-    vec3 f_fine  = texture(tex_fairway, uv_f).rgb;
-    vec3 f_broad = texture(tex_fairway, uv_f * 0.41 + vec2(0.53, 0.29)).rgb;
-    vec3 col_f   = mix(f_fine, f_broad, 0.25);
+	vec2 uv_f = v_world_pos.xz * uv_scale_fairway;
+	vec2 uv_r = v_world_pos.xz * uv_scale_rough;
 
-    // Moon Bay alternating mower stripes (~3.5m width along corridor)
-    vec2 stripe_dir = vec2(0.707, 0.707);
-    float stripe_coord = dot(v_world_pos.xz, stripe_dir) * 0.90;
-    float stripe_val = smoothstep(0.20, 0.80, sin(stripe_coord) * 0.5 + 0.5);
+	float macro_mottle = gnoise(v_world_pos.xz * 0.032) * 0.5 + 0.5;
+	vec3 macro_tint = mix(vec3(0.95, 0.96, 0.91), vec3(1.04, 1.05, 1.01), macro_mottle);
 
-    // Light / dark roller nap compression
-    vec3 stripe_bright = col_f * 1.07;
-    vec3 stripe_dark   = col_f * 0.92;
-    vec3 col_fairway   = mix(stripe_dark, stripe_bright, stripe_val);
+	vec3 blended_albedo = vec3(0.0);
+	vec3 blended_n = vec3(0.0);
+	float blended_r = 0.0;
+	float blended_ao = 0.0;
 
-    // Camera view sheen: looking along roller nap creates silky light sheen
-    vec3 view_dir = normalize(v_world_pos - v_cam_pos);
-    float view_grain = dot(view_dir.xz, stripe_dir);
-    col_fairway *= (1.0 + (stripe_val - 0.5) * 0.08 * (0.5 + 0.5 * view_grain));
+	if (rough_w > 0.005) {
+		vec3 r_fine = texture(tex_rough, uv_r).rgb;
+		vec3 r_base = near_detail_fade > 0.05
+			? mix(r_fine, texture(tex_rough, uv_r * 0.43 + vec2(0.37, 0.71)).rgb, 0.28 * near_detail_fade)
+			: r_fine;
+		float clump_patch = gnoise(v_world_pos.xz * 0.28);
+		vec3 rough_tint = mix(vec3(0.76, 0.94, 0.70), vec3(0.88, 1.02, 0.78), clump_patch * 0.5 + 0.5);
+		vec3 col_rough = r_base * rough_tint * macro_tint;
+		vec3 nr_r = mix(vec3(0.0, 0.0, 1.0), texture(normal_rough, uv_r).rgb * 2.0 - 1.0, 0.55);
 
-    // Bay Hill first-cut collar ribbon: distinct darker green border framing the fairway
-    float fringe_val = smoothstep(0.02, 0.22, fairway_w) * (1.0 - smoothstep(0.30, 0.65, fairway_w));
-    vec3 col_first_cut = col_fairway * vec3(0.72, 0.84, 0.68);
-    col_fairway = mix(col_fairway, col_first_cut, fringe_val * 0.65);
+		blended_albedo += col_rough * rough_w;
+		blended_n += nr_r * rough_w;
+		blended_r += clamp(0.93 - clump_patch * 0.05, 0.80, 0.98) * rough_w;
+		blended_ao += 0.86 * rough_w;
+	}
 
-    ALBEDO = clamp(col_fairway * fairway_w + col_rough * rough_w, 0.0, 1.0);
+	if (fairway_w > 0.005) {
+		vec3 f_fine = texture(tex_fairway, uv_f).rgb;
+		vec3 col_f = near_detail_fade > 0.05
+			? mix(f_fine, texture(tex_fairway, uv_f * 0.41 + vec2(0.53, 0.29)).rgb, 0.25 * near_detail_fade)
+			: f_fine;
 
-    // 5. Normal Mapping
-    vec3 nr_f = texture(normal_fairway, uv_f).rgb * 2.0 - 1.0;
-    vec3 nr_r = texture(normal_rough,   uv_r).rgb * 2.0 - 1.0;
-    vec3 blended_n = normalize(nr_f * fairway_w + nr_r * rough_w);
-    NORMAL_MAP = blended_n * 0.5 + 0.5;
-    NORMAL_MAP_DEPTH = normal_depth;
+		float stripe_along = v_world_pos.z * 0.88;
+		float stripe_cross = v_world_pos.x * 0.52;
+		float stripe_val = smoothstep(0.22, 0.78, sin(stripe_along) * 0.5 + 0.5);
+		float cross_val  = smoothstep(0.25, 0.75, sin(stripe_cross) * 0.5 + 0.5);
+		float combined_stripe = mix(stripe_val, stripe_val * 0.65 + cross_val * 0.35, 0.35);
 
-    // 6. Roughness
-    float r_f = mix(0.88, 0.88 * texture(roughness_fairway, uv_f).r, 0.10) + (stripe_val - 0.5) * 0.04;
-    float r_r = mix(0.94, 0.94 * texture(roughness_rough,   uv_r).r, 0.10);
-    ROUGHNESS = r_f * fairway_w + r_r * rough_w;
+		vec3 col_fairway = col_f * vec3(0.92, 1.06, 0.82) * mix(0.93, 1.06, combined_stripe) * macro_tint;
 
-    // 7. Ambient Occlusion
-    float ao_f = mix(1.0, texture(ao_fairway, uv_f).r, 0.20);
-    float ao_r = mix(1.0, texture(ao_rough,   uv_r).r, 0.25);
-    AO = ao_f * fairway_w + ao_r * rough_w;
-    AO_LIGHT_AFFECT = 0.20;
+		vec3 view_dir = normalize(v_world_pos - v_cam_pos);
+		float view_grain = view_dir.x;
+		col_fairway *= (1.0 + (combined_stripe - 0.5) * 0.08 * (0.5 + 0.5 * view_grain));
 
-    // 8. Subsurface Backlight Transmission & Specular
-    BACKLIGHT = vec3(0.12, 0.18, 0.06) * (rough_w * 0.60 + fairway_w * 0.35);
-    SPECULAR = 0.03;
+		float fringe_val = smoothstep(0.02, 0.22, fairway_w) * (1.0 - smoothstep(0.30, 0.65, fairway_w));
+		vec3 col_first_cut = col_fairway * vec3(0.76, 0.86, 0.72);
+		col_fairway = mix(col_fairway, col_first_cut, fringe_val * 0.65);
+
+		vec3 nr_f = mix(vec3(0.0, 0.0, 1.0), texture(normal_fairway, uv_f).rgb * 2.0 - 1.0, 0.35);
+
+		blended_albedo += col_fairway * fairway_w;
+		blended_n += nr_f * fairway_w;
+		blended_r += (0.87 + (combined_stripe - 0.5) * 0.04) * fairway_w;
+		blended_ao += 0.95 * fairway_w;
+	}
+
+	ALBEDO = clamp(blended_albedo, 0.0, 1.0);
+	NORMAL_MAP = normalize(max(length(blended_n), 0.001) > 0.002 ? blended_n : vec3(0.0, 0.0, 1.0)) * 0.5 + 0.5;
+	NORMAL_MAP_DEPTH = normal_depth;
+	ROUGHNESS = clamp(blended_r, 0.5, 1.0);
+	AO = clamp(blended_ao, 0.0, 1.0);
+	AO_LIGHT_AFFECT = 0.20;
+	BACKLIGHT = vec3(0.11, 0.17, 0.05) * (rough_w * 0.60 + fairway_w * 0.35);
+	SPECULAR = 0.03;
 }
+

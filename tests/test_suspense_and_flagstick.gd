@@ -14,6 +14,7 @@ func _initialize() -> void:
 	test_downtown_drain_achievement()
 	test_suspense_state_machine_and_cone()
 	test_flagstick_collision()
+	test_suspense_timing_debouncing_and_minimum_duration()
 	
 	print("\n=======================================================")
 	print("  ALL TESTS PASSED SUCCESSFULLY! 🎉")
@@ -109,23 +110,30 @@ func test_suspense_state_machine_and_cone() -> void:
 	assert(tm.suspense_state == tm.SuspenseState.READY, "Validated putt must be in READY state")
 	print("  PASS: On-line trajectory validated and transitioned to READY state.")
 	
-	# Check READY -> ACTIVE when rolling inside cone towards hole
+	# Check READY -> ACTIVE when rolling inside cone towards hole (requires >= 500ms in cone)
 	var ball_roll_pos = Vector3(2.0, 0.0, 0.0)
 	var ball_roll_vel = Vector3(3.2, 0.0, 0.0) # Directly towards hole with speed to reach 8m
-	var trig = tm.check_ball_proximity(ball_roll_pos, hole_pos, true, start_pos, false, false, ball_roll_vel)
-	assert(trig, "Ball rolling on target must activate suspense")
+	var trig_debounce = tm.check_ball_proximity(ball_roll_pos, hole_pos, true, start_pos, false, false, ball_roll_vel, false, 0.25)
+	assert(not trig_debounce, "Ball rolling in cone for 250ms (<500ms) must NOT activate suspense yet")
+	assert(tm.suspense_state == tm.SuspenseState.READY, "State must remain READY during debounce")
+
+	var trig = tm.check_ball_proximity(ball_roll_pos, hole_pos, true, start_pos, false, false, ball_roll_vel, false, 0.25)
+	assert(trig, "Ball rolling on target for >= 500ms must activate suspense")
 	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "State must transition to ACTIVE")
 	assert(tm.is_active(), "Tension must be active")
-	print("  PASS: READY -> ACTIVE triggered inside vision cone.")
+	print("  PASS: READY -> ACTIVE triggered inside vision cone after >= 500ms debounce.")
 	
 	# Test Angle Loss (Slope breaks ball off-line -> exits cone)
 	# Ball at (6, 0, 0), hole at (10, 0, 0), but velocity deflects 35 degrees offline (+Z)
 	var break_vel = Vector3(1.2, 0.0, 1.2).normalized() * 1.5 # cos theta ~= 0.707 < cos(15 deg)
-	var prox_break = tm.check_ball_proximity(Vector3(6.0, 0.0, 0.0), hole_pos, true, start_pos, false, false, break_vel)
-	assert(not prox_break, "Ball breaking offline must deactivate suspense")
-	assert(tm.suspense_state == tm.SuspenseState.SPENT, "Angle loss must transition to SPENT")
-	assert(not tm.is_active(), "Tension must stop when hole exits cone")
-	print("  PASS: Hole exiting vision cone deactivates suspense and latches to SPENT.")
+	var prox_break = tm.check_ball_proximity(Vector3(6.0, 0.0, 0.0), hole_pos, true, start_pos, false, false, break_vel, false, 0.1)
+	assert(not prox_break, "Ball breaking offline must return false")
+	assert(tm.is_active(), "Tension must stay active for minimum 1.5s play duration")
+	assert(tm._deactivation_pending, "Deactivation must be marked pending during 1.5s minimum window")
+	tm.advance_simulation(1.5)
+	assert(not tm.is_active(), "Tension must stop after minimum 1.5s play duration")
+	assert(tm.suspense_state == tm.SuspenseState.SPENT, "Angle loss must transition to SPENT after 1.5s")
+	print("  PASS: Hole exiting vision cone holds active for 1.5s then deactivates to SPENT.")
 	
 	# Verify SPENT latch again: even if ball somehow returns towards hole, it cannot re-activate
 	var prox_after = tm.check_ball_proximity(Vector3(8.0, 0.0, 0.0), hole_pos, true, start_pos, false, false, Vector3(1.0, 0.0, 0.0))
@@ -147,16 +155,17 @@ func test_suspense_state_machine_and_cone() -> void:
 	assert(tm.suspense_state == tm.SuspenseState.READY, "Ascending ball remains in READY")
 	print("  PASS: Ascending ball correctly waits in READY before apex.")
 	
-	# 2. Descending past apex (vy < 0, y < apex.y): must activate
-	var prox_desc = tm.check_ball_proximity(Vector3(35.0, 8.0, 0.0), chip_hole, false, start_pos, false, true, Vector3(12.0, -3.0, 0.0))
-	assert(prox_desc, "Descending ball past apex aligned with cone must trigger suspense")
+	# 2. Descending past apex (vy < 0, y < apex.y): must activate after 500ms
+	var prox_desc = tm.check_ball_proximity(Vector3(35.0, 8.0, 0.0), chip_hole, false, start_pos, false, true, Vector3(12.0, -3.0, 0.0), false, 0.50)
+	assert(prox_desc, "Descending ball past apex aligned with cone for 500ms must trigger suspense")
 	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "State must transition to ACTIVE")
 	print("  PASS: Descending ball past apex successfully triggered ACTIVE state.")
 	
-	# 3. Overshoot past hole: must deactivate to SPENT
+	# 3. Overshoot past hole: must deactivate to SPENT after 1.5s
 	# Hole is at (50, 0, 0), ball at (51.0, 0.0, 0.0) moving away (+X)
-	var prox_over = tm.check_ball_proximity(Vector3(51.0, 0.0, 0.0), chip_hole, false, start_pos, false, false, Vector3(1.0, 0.0, 0.0))
-	assert(not prox_over, "Overshoot past hole must deactivate suspense")
+	var prox_over = tm.check_ball_proximity(Vector3(51.0, 0.0, 0.0), chip_hole, false, start_pos, false, false, Vector3(1.0, 0.0, 0.0), false, 0.1)
+	assert(not prox_over, "Overshoot past hole must return false")
+	tm.advance_simulation(1.5)
 	assert(tm.suspense_state == tm.SuspenseState.SPENT, "Overshoot must transition to SPENT")
 	print("  PASS: Overshooting past the hole deactivates to SPENT.")
 
@@ -220,9 +229,9 @@ func test_suspense_state_machine_and_cone() -> void:
 	assert(pred_long.get("shot_validated") == true, "24-foot on-target putt MUST be validated")
 	assert(tm.suspense_state == tm.SuspenseState.READY, "24-foot putt must transition to READY")
 
-	# Ball rolling at 6.0m (20ft) from start, 1.3m from cup, directly on target
-	var long_trig = tm.check_ball_proximity(Vector3(6.0, 0.0, 0.0), long_putt_hole, true, long_putt_start, false, false, Vector3(1.2, 0.0, 0.0))
-	assert(long_trig == true, "20+ foot putt tracking to hole MUST activate suspense")
+	# Ball rolling at 6.0m (20ft) from start, 1.3m from cup, directly on target for 500ms
+	var long_trig = tm.check_ball_proximity(Vector3(6.0, 0.0, 0.0), long_putt_hole, true, long_putt_start, false, false, Vector3(1.2, 0.0, 0.0), false, 0.50)
+	assert(long_trig == true, "20+ foot putt tracking to hole for 500ms MUST activate suspense")
 	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "State must transition to ACTIVE")
 	assert(tm.is_active() == true, "Heartbeat tension must be active")
 	print("  PASS: 20+ foot putt successfully activates suspense as it tracks toward cup.")
@@ -238,7 +247,7 @@ func test_suspense_state_machine_and_cone() -> void:
 	# Hole is at (50, 0, 0). Ball velocity is (10, -3, 12).
 	# This ball is heading left-to-right across the green and will land far to the right (+Z) of the hole!
 	var chip_lr_vel = Vector3(10.0, -3.0, 12.0)
-	var prox_lr = tm.check_ball_proximity(Vector3(35.0, 8.0, -5.0), chip_f_hole, false, start_pos, false, true, chip_lr_vel)
+	var prox_lr = tm.check_ball_proximity(Vector3(35.0, 8.0, -5.0), chip_f_hole, false, start_pos, false, true, chip_lr_vel, false, 0.50)
 	assert(not prox_lr, "Left-to-right chip crossing front of hole MUST NOT activate suspense!")
 	assert(tm.suspense_state == tm.SuspenseState.READY, "State must remain READY (not triggered)")
 	print("  PASS: Left-to-right chip does not trigger false positive.")
@@ -254,8 +263,8 @@ func test_suspense_state_machine_and_cone() -> void:
 	# Landing spot = (48.0, 1.0) (just to the right of hole at Z=+1.0).
 	# Roll direction = (10.0, -5.0), aimed directly right-to-left at hole (50.0, 0.0)!
 	var chip_rl_vel = Vector3(10.0, -3.0, -5.0)
-	var prox_rl = tm.check_ball_proximity(Vector3(43.0, 2.73, 3.5), chip_f_hole, false, start_pos, false, true, chip_rl_vel)
-	assert(prox_rl == true, "Right-to-left chip landing and tracking toward hole MUST activate suspense!")
+	var prox_rl = tm.check_ball_proximity(Vector3(43.0, 2.73, 3.5), chip_f_hole, false, start_pos, false, true, chip_rl_vel, false, 0.50)
+	assert(prox_rl == true, "Right-to-left chip landing and tracking toward hole for 500ms MUST activate suspense!")
 	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "State must transition to ACTIVE")
 	print("  PASS: Right-to-left chip tracking toward hole successfully activates suspense.")
 
@@ -265,7 +274,7 @@ func test_suspense_state_machine_and_cone() -> void:
 	var putt_25ft_hole = Vector3(7.62, 0.0, 0.0) # 25 feet away
 	# Putt rolled at start (dist=7.62m), but angled 9.5 degrees offline (+Z)
 	var offline_putt_vel = Vector3(2.5, 0.0, 0.42)
-	var trig_offline = tm.check_ball_proximity(Vector3.ZERO, putt_25ft_hole, true, Vector3.ZERO, false, false, offline_putt_vel)
+	var trig_offline = tm.check_ball_proximity(Vector3.ZERO, putt_25ft_hole, true, Vector3.ZERO, false, false, offline_putt_vel, false, 0.50)
 	assert(not trig_offline, "Putt angled 9.5 degrees offline at start MUST NOT trigger suspense!")
 	assert(tm.suspense_state != tm.SuspenseState.ACTIVE, "State must not be ACTIVE for offline putt")
 	print("  PASS: Tightened putting cone rejects offline putts at the start.")
@@ -273,8 +282,8 @@ func test_suspense_state_machine_and_cone() -> void:
 	# On-target putt from 25ft
 	tm.reset_for_new_shot()
 	var online_putt_vel = Vector3(3.2, 0.0, 0.02)
-	var trig_online = tm.check_ball_proximity(Vector3.ZERO, putt_25ft_hole, true, Vector3.ZERO, false, false, online_putt_vel)
-	assert(trig_online == true, "On-target putt at 25ft MUST trigger suspense!")
+	var trig_online = tm.check_ball_proximity(Vector3.ZERO, putt_25ft_hole, true, Vector3.ZERO, false, false, online_putt_vel, false, 0.50)
+	assert(trig_online == true, "On-target putt at 25ft for 500ms MUST trigger suspense!")
 	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "State must transition to ACTIVE for online putt")
 	print("  PASS: On-target 25ft putt cleanly activates suspense.")
 
@@ -293,22 +302,24 @@ func test_suspense_state_machine_and_cone() -> void:
 
 	# Ball descends past apex towards green: ball at (34.0, 3.0, 0.0), landing at ~41m
 	var desc_141_vel = Vector3(14.0, -3.5, 0.0)
-	var trig_141_air = tm.check_ball_proximity(Vector3(34.0, 3.0, 0.0), chip_141_hole, false, Vector3.ZERO, false, true, desc_141_vel)
-	assert(trig_141_air == true, "141ft chip descending on green MUST activate suspense!")
+	var trig_141_air = tm.check_ball_proximity(Vector3(34.0, 3.0, 0.0), chip_141_hole, false, Vector3.ZERO, false, true, desc_141_vel, false, 0.50)
+	assert(trig_141_air == true, "141ft chip descending on green for 500ms MUST activate suspense!")
 	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "State must transition to ACTIVE in flight")
 	print("  PASS: 141ft chip descending towards green successfully activates suspense.")
 
 	# Ball lands on green at 40m and rolls towards cup at 42.97m:
-	var trig_141_roll = tm.check_ball_proximity(Vector3(41.5, 0.0, 0.0), chip_141_hole, false, Vector3.ZERO, false, false, Vector3(1.5, 0.0, 0.0))
+	var trig_141_roll = tm.check_ball_proximity(Vector3(41.5, 0.0, 0.0), chip_141_hole, false, Vector3.ZERO, false, false, Vector3(1.5, 0.0, 0.0), false, 0.1)
 	assert(trig_141_roll == true, "Chip rolling on green towards cup MUST keep suspense active!")
 	print("  PASS: Chip rollout towards cup keeps suspense ACTIVE.")
 
 	# Ball sinks into cup (dist <= CUP_RADIUS_METERS)
-	var sunk_141 = tm.check_ball_proximity(Vector3(42.97, 0.0, 0.0), chip_141_hole, false, Vector3.ZERO, false, false, Vector3(0.2, 0.0, 0.0))
-	assert(not sunk_141, "Sinking ball must stop suspense")
-	assert(tm.suspense_state == tm.SuspenseState.SPENT, "Sunk ball transitions to SPENT")
-	assert(not tm.is_active(), "Tension must stop when ball sinks in cup")
-	print("  PASS: 141ft chip successfully sinks and cleanly deactivates.")
+	var sunk_141 = tm.check_ball_proximity(Vector3(42.97, 0.0, 0.0), chip_141_hole, false, Vector3.ZERO, false, false, Vector3(0.2, 0.0, 0.0), false, 0.1)
+	assert(not sunk_141, "Sinking ball must return false from proximity check")
+	assert(tm.is_active(), "Tension must hold active for minimum 1.5s play duration")
+	tm.advance_simulation(1.5)
+	assert(tm.suspense_state == tm.SuspenseState.SPENT, "Sunk ball transitions to SPENT after 1.5s")
+	assert(not tm.is_active(), "Tension must stop when 1.5s minimum has elapsed")
+	print("  PASS: 141ft chip successfully sinks and cleanly deactivates after 1.5s minimum.")
 
 	# --- Case J: Developer Debugging 3D Vision Cone Toggle ---
 	print("\n  Testing Developer Debugging 3D Vision Cone Toggle...")
@@ -426,18 +437,22 @@ func test_suspense_state_machine_and_cone() -> void:
 	print("  PASS: 8.5-degree offline shot correctly rejected (no false positive).")
 
 	# B. Shot 2.0 degrees offline (pin-seeker tracking right at flag):
-	# cos(2.0 deg) ~ 0.99939 > cos(5.0 deg) ~ 0.99619. Must trigger!
+	# cos(2.0 deg) ~ 0.99939 > cos(5.0 deg) ~ 0.99619. Must trigger after 500ms in cone!
 	var online_vel = Vector3(cos(deg_to_rad(2.0)) * 12.0, -3.0, sin(deg_to_rad(2.0)) * 12.0)
-	var trig_online_air = tm.check_ball_proximity(ball_approach_pos, target_flag, false, Vector3.ZERO, false, true, online_vel)
-	assert(trig_online_air, "Shot 2.0 degrees offline within 5.0-deg cone must trigger suspense")
+	var trig_online_air = tm.check_ball_proximity(ball_approach_pos, target_flag, false, Vector3.ZERO, false, true, online_vel, false, 0.50)
+	assert(trig_online_air, "Shot 2.0 degrees offline within 5.0-deg cone for 500ms must trigger suspense")
 	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "Suspense state must transition to ACTIVE")
 	print("  PASS: 2.0-degree online shot within 5.0-deg cone successfully activates suspense.")
 
-	# C. In flight, ball drifts/curves 6.0 degrees offline: must deactivate ACTIVE -> SPENT!
+	# C. In flight, ball drifts/curves 6.0 degrees offline: must deactivate ACTIVE -> SPENT after 1.5s minimum!
 	var curved_vel = Vector3(cos(deg_to_rad(6.5)) * 10.0, -3.0, sin(deg_to_rad(6.5)) * 10.0)
-	var trig_curved = tm.check_ball_proximity(ball_approach_pos + Vector3(5.0, -1.5, 0.0), target_flag, false, Vector3.ZERO, false, true, curved_vel)
-	assert(not trig_curved, "Ball curving >5.0 deg offline in flight must deactivate suspense")
-	assert(tm.suspense_state == tm.SuspenseState.SPENT, "Exiting 5.0-deg cone must transition to SPENT")
+	var trig_curved = tm.check_ball_proximity(ball_approach_pos + Vector3(5.0, -1.5, 0.0), target_flag, false, Vector3.ZERO, false, true, curved_vel, false, 0.1)
+	assert(not trig_curved, "Ball curving >5.0 deg offline in flight must return false")
+	assert(tm.is_active(), "Tension must hold active for minimum 1.5s play duration")
+	tm.advance_simulation(1.5)
+	assert(tm.suspense_state == tm.SuspenseState.SPENT, "Exiting 5.0-deg cone must transition to SPENT after 1.5s")
+	print("  PASS: Ball curving offline holds 1.5s minimum suspense and deactivates to SPENT.")
+
 	# --- Case M: Dynamic Vision Reach & Coming Up Short Deactivation ---
 	print("\n  Testing Dynamic Vision Reach & Coming Up Short Rejection...")
 	tm.reset_for_new_shot()
@@ -451,7 +466,7 @@ func test_suspense_state_machine_and_cone() -> void:
 	assert(reach_slow < 7.62, "Ball must be recognized as clearly short of 25ft hole")
 
 	# Proximity check must reject activation because vision does not reach the hole
-	var trig_slow = tm.check_ball_proximity(Vector3.ZERO, test_hole, true, Vector3.ZERO, false, false, slow_putt_vel)
+	var trig_slow = tm.check_ball_proximity(Vector3.ZERO, test_hole, true, Vector3.ZERO, false, false, slow_putt_vel, false, 0.50)
 	assert(not trig_slow, "Putt that will clearly end short must NOT trigger suspense")
 	assert(tm.suspense_state != tm.SuspenseState.ACTIVE, "State must not be ACTIVE when ball is clearly short")
 	print("  PASS: Weak/slow putt clearly ending short is rejected (suspense does not run).")
@@ -460,19 +475,21 @@ func test_suspense_state_machine_and_cone() -> void:
 	var proper_putt_vel = Vector3(3.2, 0.0, 0.0)
 	var reach_proper = tm.get_projected_reach_distance(Vector3.ZERO, proper_putt_vel, false, test_hole)
 	assert(reach_proper >= 7.62, "Projected reach at 3.2 m/s must comfortably reach the 25ft hole")
-	var trig_proper = tm.check_ball_proximity(Vector3.ZERO, test_hole, true, Vector3.ZERO, false, false, proper_putt_vel)
-	assert(trig_proper, "Putt with sufficient speed tracking toward hole must activate suspense")
+	var trig_proper = tm.check_ball_proximity(Vector3.ZERO, test_hole, true, Vector3.ZERO, false, false, proper_putt_vel, false, 0.50)
+	assert(trig_proper, "Putt with sufficient speed tracking toward hole for 500ms must activate suspense")
 	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "State must transition to ACTIVE")
 	print("  PASS: On-target putt with adequate speed successfully activates suspense.")
 
 	# 3. As the ball rolls, speed drops significantly (slows to 0.5 m/s when still 3.6m from hole)
 	# Projected reach is now only ~0.98m (< 3.6m), so ball will clearly die short
 	var crawling_vel = Vector3(0.5, 0.0, 0.0)
-	var trig_crawl = tm.check_ball_proximity(Vector3(4.0, 0.0, 0.0), test_hole, true, Vector3.ZERO, false, false, crawling_vel)
-	assert(not trig_crawl, "Ball slowing down and coming up clearly short must deactivate suspense")
-	assert(tm.suspense_state == tm.SuspenseState.SPENT, "State must transition to SPENT when ball will end short")
-	assert(not tm.is_active(), "Tension must stop when ball will clearly end short")
-	print("  PASS: Ball decelerating short of hole cleanly deactivates ACTIVE -> SPENT.")
+	var trig_crawl = tm.check_ball_proximity(Vector3(4.0, 0.0, 0.0), test_hole, true, Vector3.ZERO, false, false, crawling_vel, false, 0.1)
+	assert(not trig_crawl, "Ball slowing down and coming up clearly short must return false")
+	assert(tm.is_active(), "Tension must hold active for minimum 1.5s play duration")
+	tm.advance_simulation(1.5)
+	assert(tm.suspense_state == tm.SuspenseState.SPENT, "State must transition to SPENT when ball will end short after 1.5s")
+	assert(not tm.is_active(), "Tension must stop when ball will clearly end short after 1.5s")
+	print("  PASS: Ball decelerating short of hole cleanly deactivates ACTIVE -> SPENT after 1.5s.")
 
 	# 4. Shot starting under 20ft (e.g. 2.0m away) must never activate suspense
 	tm.reset_for_new_shot()
@@ -529,3 +546,98 @@ func test_flagstick_collision() -> void:
 	
 	ball.queue_free()
 	range_instance.queue_free()
+
+
+func test_suspense_timing_debouncing_and_minimum_duration() -> void:
+	print("\n--- Test 4: Suspense Cone 500ms Debounce & 1.5s Minimum Play Duration ---")
+	var tm = root.get_node_or_null("TensionManager")
+	var created_tm := false
+	if tm == null:
+		tm = load("res://Utils/TensionManager.gd").new()
+		root.add_child(tm)
+		created_tm = true
+
+	var mock_cp = Node.new()
+	mock_cp.name = "CoursePlay"
+	root.add_child(mock_cp)
+	current_scene = mock_cp
+	tm._cached_is_course_play = true
+	tm._cached_scene_ref = weakref(mock_cp)
+	tm._cached_practice_mode = false
+	tm._cached_players_empty = false
+	tm.force_course_play_active_for_testing = true
+
+	var hole_pos = Vector3(10.0, 0.0, 0.0)
+	var start_pos = Vector3(0.0, 0.0, 0.0)
+	var putt_vel = Vector3(4.0, 0.0, 0.0)
+
+	# 1. Debounce Test: Ball must stay in cone vision continuously for >= 500ms
+	tm.reset_for_new_shot()
+	tm.predict_shot_outcome(start_pos, putt_vel, true, hole_pos)
+	assert(tm.suspense_state == tm.SuspenseState.READY, "Putt should start in READY")
+
+	# Frame 1: 100ms in cone -> must NOT activate
+	var t1 = tm.check_ball_proximity(Vector3(1.0, 0.0, 0.0), hole_pos, true, start_pos, false, false, putt_vel, false, 0.10)
+	assert(not t1, "100ms in cone must NOT trigger suspense")
+	assert(tm.suspense_state == tm.SuspenseState.READY, "Must remain READY after 100ms")
+
+	# Frame 2: 250ms more (total 350ms) -> must NOT activate
+	var t2 = tm.check_ball_proximity(Vector3(1.5, 0.0, 0.0), hole_pos, true, start_pos, false, false, putt_vel, false, 0.25)
+	assert(not t2, "350ms in cone must NOT trigger suspense")
+	assert(tm.suspense_state == tm.SuspenseState.READY, "Must remain READY after 350ms")
+
+	# Ball breaks offline before reaching 500ms -> timer must reset to 0!
+	var offline_vel = Vector3(1.0, 0.0, 3.0)
+	var t_break = tm.check_ball_proximity(Vector3(2.0, 0.0, 0.0), hole_pos, true, start_pos, false, false, offline_vel, false, 0.10)
+	assert(not t_break, "Offline ball must return false")
+	assert(tm._cone_time_tracked == 0.0, "Cone time tracked must reset to 0.0 when exiting cone")
+	assert(tm.suspense_state == tm.SuspenseState.READY, "State must remain READY (not yet active)")
+
+	# Ball re-enters cone: 200ms in cone -> must NOT activate
+	var t3 = tm.check_ball_proximity(Vector3(2.5, 0.0, 0.0), hole_pos, true, start_pos, false, false, putt_vel, false, 0.20)
+	assert(not t3, "200ms after re-entry must NOT trigger suspense")
+	assert(tm.suspense_state == tm.SuspenseState.READY, "Must remain READY after 200ms re-entry")
+
+	# Additional 300ms in cone (reaches 500ms total continuously) -> must ACTIVATE!
+	var t4 = tm.check_ball_proximity(Vector3(3.0, 0.0, 0.0), hole_pos, true, start_pos, false, false, putt_vel, false, 0.30)
+	assert(t4, "Reaching 500ms continuously in cone MUST activate suspense")
+	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "State must transition to ACTIVE at 500ms")
+	assert(tm.is_active(), "Tension must be active")
+	print("  PASS: Cone vision 500ms debounce verified (rejected short glances, resets on exit, triggers at 500ms).")
+
+	# 2. Minimum 1.5s Play Duration Test
+	# After 0.2s of play, ball drops into cup or comes to rest:
+	tm.advance_simulation(0.20)
+	# Rest check:
+	var rest_check = tm.check_ball_proximity(Vector3(9.99, 0.0, 0.0), hole_pos, true, start_pos, false, false, Vector3.ZERO, false, 0.05)
+	assert(not rest_check, "Stopped ball check returns false")
+	assert(tm.is_active(), "Tension MUST play for at least 1.5s before turning off (currently at 0.25s)")
+	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "State remains ACTIVE while holding for 1.5s minimum")
+	assert(tm._deactivation_pending, "Deactivation must be marked pending")
+
+	# Advance to 1.0s (still under 1.5s):
+	tm.advance_simulation(0.75)
+	assert(tm.is_active(), "Tension must still be active at 1.0s")
+
+	# Advance to 1.5s:
+	tm.advance_simulation(0.55)
+	assert(not tm.is_active(), "Tension must turn off once minimum 1.5s play duration is reached")
+	assert(tm.suspense_state == tm.SuspenseState.SPENT, "State must transition to SPENT after 1.5s duration completed")
+	print("  PASS: Minimum 1.5s play duration verified (holds through early rest, shuts off after 1.5s).")
+
+	# 3. Already past 1.5s duration: immediate deactivation
+	tm.reset_for_new_shot()
+	tm.predict_shot_outcome(start_pos, putt_vel, true, hole_pos)
+	tm.check_ball_proximity(Vector3(1.0, 0.0, 0.0), hole_pos, true, start_pos, false, false, putt_vel, false, 0.50)
+	assert(tm.suspense_state == tm.SuspenseState.ACTIVE, "Activated")
+	# Simulate 2.0s of continuous rolling tracking towards hole (> 1.5s minimum)
+	tm.advance_simulation(2.0)
+	# Overshoot past hole:
+	tm.check_ball_proximity(Vector3(10.5, 0.0, 0.0), hole_pos, true, start_pos, false, false, Vector3(1.0, 0.0, 0.0), false, 0.05)
+	assert(not tm.is_active(), "Shots already active > 1.5s must deactivate immediately upon miss/overshoot")
+	assert(tm.suspense_state == tm.SuspenseState.SPENT, "State transitions immediately to SPENT")
+	print("  PASS: Shots active > 1.5s deactivate immediately on exit without delay.")
+
+	mock_cp.queue_free()
+	if created_tm:
+		tm.queue_free()

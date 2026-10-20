@@ -87,6 +87,10 @@ const OTHER_DEVICE_GUIDES = {
 
 
 func _ready() -> void:
+	add_to_group("modals")
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").push_lock(self)
+
 	# Apply Design System
 	if modal_panel != null:
 		ThemeManager.apply_modal_style(modal_panel, 14)
@@ -114,8 +118,8 @@ func _ready() -> void:
 		tab_container.add_theme_stylebox_override("tab_selected", _create_tab_style(ThemeManager.COLOR_PRIMARY_NORMAL, ThemeManager.COLOR_PRIMARY_NORMAL.lightened(0.2)))
 		tab_container.add_theme_stylebox_override("tab_unselected", _create_tab_style(ThemeManager.COLOR_NAV_NORMAL, Color(1, 1, 1, 0.15)))
 		tab_container.add_theme_stylebox_override("tab_hovered", _create_tab_style(ThemeManager.COLOR_NAV_HOVER, Color(1, 1, 1, 0.3)))
-		tab_container.set_tab_title(0, "📶 Bluetooth")
-		tab_container.set_tab_title(1, "🌐 Other (GSPro / Network)")
+		tab_container.set_tab_title(0, "📶 Bluetooth [Q / LB]")
+		tab_container.set_tab_title(1, "🌐 Other (GSPro / Network) [E / RB]")
 		tab_container.current_tab = _get_saved_tab()
 		tab_container.tab_changed.connect(_on_tab_changed)
 
@@ -268,6 +272,14 @@ func _on_tab_changed(tab_index: int) -> void:
 		if gs.get("range_settings") != null and "launch_monitor_tab" in gs.range_settings:
 			gs.range_settings.launch_monitor_tab.set_value(tab_index)
 			gs.save_settings()
+	var vp = get_viewport()
+	var cur = vp.gui_get_focus_owner() if vp != null else null
+	if cur is TabBar:
+		return
+	var current_ctrl = tab_container.get_current_tab_control() if tab_container != null else null
+	if current_ctrl != null and has_node("/root/UIFocusGuard"):
+		var ufg = get_node("/root/UIFocusGuard")
+		ufg.call_deferred("_focus_first_control", current_ctrl)
 
 
 func _setup_other_devices_dropdown() -> void:
@@ -778,6 +790,8 @@ func _on_ready_changed(_is_ready: bool) -> void:
 
 
 func _exit_tree() -> void:
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").pop_lock(self)
 	_save_network_preferences()
 	if _launch_monitor != null:
 		if _launch_monitor.device_discovered.is_connected(_on_device_discovered):

@@ -94,26 +94,48 @@ func _ready() -> void:
 	style.content_margin_bottom = 20
 	add_theme_stylebox_override("panel", style)
 	
-	custom_minimum_size = Vector2(340, 560)
-	size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var is_mob: bool = MobilePerformance.is_mobile()
+	var min_w: float = 380.0 if is_mob else 340.0
+	custom_minimum_size = Vector2(min_w, 560)
+	size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	size_flags_vertical = Control.SIZE_SHRINK_CENTER
 
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.follow_focus = true
 	add_child(scroll)
+	ThemeManager.apply_scroll_container_style(scroll, 56 if is_mob else 28)
+
+	var scroll_margin = MarginContainer.new()
+	scroll_margin.name = "ScrollMargin"
+	scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll_margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var scroll_pad_right: int = 64 if is_mob else 36
+	scroll_margin.add_theme_constant_override("margin_right", scroll_pad_right)
+	scroll_margin.add_theme_constant_override("margin_left", 4)
+	scroll_margin.add_theme_constant_override("margin_top", 4)
+	scroll_margin.add_theme_constant_override("margin_bottom", 4)
+	scroll.add_child(scroll_margin)
 	
 	_vbox = VBoxContainer.new()
 	_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_vbox.add_theme_constant_override("separation", 10)
-	scroll.add_child(_vbox)
+	scroll_margin.add_child(_vbox)
 	
+	var header = HBoxContainer.new()
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
 	var title = Label.new()
 	title.text = "Hit Specific Distance"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.add_theme_font_size_override("font_size", 20)
-	_vbox.add_child(title)
+	header.add_child(title)
+
+	_vbox.add_child(header)
 	
 	_add_distance_button("50 Yards", 50.0)
 	_add_distance_button("100 Yards", 100.0)
@@ -123,7 +145,7 @@ func _ready() -> void:
 	
 	var aim_btn = Button.new()
 	aim_btn.text = "🎯 Hit Aim Distance"
-	aim_btn.custom_minimum_size = Vector2(260, 44)
+	aim_btn.custom_minimum_size = Vector2(260, 48 if is_mob else 44)
 	_apply_material_button_style(aim_btn, Color(0.6, 0.2, 0.6, 0.85))
 	aim_btn.pressed.connect(_on_hit_aim_distance)
 	_vbox.add_child(aim_btn)
@@ -141,17 +163,25 @@ func _ready() -> void:
 
 	var fade_btn = Button.new()
 	fade_btn.text = "↪️ 100-Yard Fade"
-	fade_btn.custom_minimum_size = Vector2(260, 44)
+	fade_btn.custom_minimum_size = Vector2(260, 48 if is_mob else 44)
 	_apply_material_button_style(fade_btn, Color(0.2, 0.5, 0.65, 0.85))
 	fade_btn.pressed.connect(_on_hit_100y_fade)
 	_vbox.add_child(fade_btn)
 
 	var slice_btn = Button.new()
 	slice_btn.text = "↩️ 100-Yard Slice (Heckle)"
-	slice_btn.custom_minimum_size = Vector2(260, 44)
+	slice_btn.custom_minimum_size = Vector2(260, 48 if is_mob else 44)
 	_apply_material_button_style(slice_btn, Color(0.75, 0.25, 0.2, 0.85))
 	slice_btn.pressed.connect(_on_hit_100y_slice)
 	_vbox.add_child(slice_btn)
+
+	var backspin_btn = Button.new()
+	backspin_btn.name = "100YBackspinButton"
+	backspin_btn.text = "🔄 100-Yard Backspin"
+	backspin_btn.custom_minimum_size = Vector2(260, 48 if is_mob else 44)
+	_apply_material_button_style(backspin_btn, Color(0.18, 0.65, 0.42, 0.85))
+	backspin_btn.pressed.connect(_on_hit_100y_backspin)
+	_vbox.add_child(backspin_btn)
 
 	# --- Club Delivery Stats Controls ---
 	var telem_sep = HSeparator.new()
@@ -185,7 +215,7 @@ func _ready() -> void:
 	
 	_close_btn = Button.new()
 	_close_btn.text = "Close"
-	_close_btn.custom_minimum_size = Vector2(260, 44)
+	_close_btn.custom_minimum_size = Vector2(260, 48 if is_mob else 44)
 	_apply_material_button_style(_close_btn, Color(0.35, 0.35, 0.35, 0.85))
 	_close_btn.pressed.connect(close)
 	_vbox.add_child(_close_btn)
@@ -195,6 +225,9 @@ func close() -> void:
 	var vp = get_viewport()
 	if vp != null:
 		vp.gui_release_focus()
+
+func minimize() -> void:
+	close()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not visible:
@@ -371,6 +404,44 @@ func _on_hit_100y_slice() -> void:
 	emit_signal("inject_shot", data)
 	close()
 
+func _on_hit_100y_backspin() -> void:
+	# Wedge backspin test shot: high launch angle (~29.5° - 31.0°), square face & path,
+	# and tour-level backspin (9,800 - 10,200 RPM) with near-zero spin axis tilt.
+	# Perfect for landing on the green and generating immediate spin check / bite and spinback.
+	var rand_face = snappedf(randf_range(-0.3, 0.3), 0.1)
+	var rand_path = snappedf(randf_range(-0.4, 0.4), 0.1)
+	var rand_h = snappedf(randf_range(-0.5, 0.5), 0.5)
+	var rand_v = snappedf(randf_range(-0.5, 0.5), 0.5)
+	var rand_axis = snappedf(randf_range(-0.5, 0.5), 0.1)
+	var rand_spin = snappedf(randf_range(9800.0, 10200.0), 50.0)
+
+	if _face_angle_spin != null:
+		_face_angle_spin.value = rand_face
+	if _club_path_spin != null:
+		_club_path_spin.value = rand_path
+	if _impact_h_spin != null:
+		_impact_h_spin.value = rand_h
+	if _impact_v_spin != null:
+		_impact_v_spin.value = rand_v
+
+	var payload = _interpolate_payload(100.0)
+	var data = {
+		"Speed": payload["speed"], # 82.0 mph
+		"VLA": 29.5,
+		"HLA": 0.0,
+		"TotalSpin": rand_spin,
+		"BackSpin": rand_spin,
+		"SideSpin": 0.0,
+		"SpinAxis": rand_axis,
+		"FaceAngle": rand_face,
+		"ClubPath": rand_path,
+		"HorizontalFaceImpact": rand_h,
+		"VerticalFaceImpact": rand_v,
+		"Club": "Sw"
+	}
+	emit_signal("inject_shot", data)
+	close()
+
 
 func _create_spinbox_row(parent: Node, label_text: String, min_v: float, max_v: float, step_v: float, def_v: float, sfx: String) -> SpinBox:
 	var lbl = Label.new()
@@ -385,7 +456,7 @@ func _create_spinbox_row(parent: Node, label_text: String, min_v: float, max_v: 
 	sb.step = step_v
 	sb.value = def_v
 	sb.suffix = sfx
-	sb.custom_minimum_size = Vector2(90, 32)
+	sb.custom_minimum_size = Vector2(90, 38 if MobilePerformance.is_mobile() else 32)
 	parent.add_child(sb)
 	return sb
 

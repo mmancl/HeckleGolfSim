@@ -91,7 +91,7 @@ uniform float clouds_sky_tint_fade = 0.5;
 uniform float clouds_intensity = 10.0;
 uniform float clouds_size = 2.0;
 uniform vec2 clouds_uv = vec2(0.16, 0.11);
-uniform float clouds_speed = 0.07;
+uniform float clouds_speed = 0.005;
 uniform vec2 clouds_direction = vec2(0.25);
 uniform vec4 clouds_day_color: source_color = vec4(0.824, 0.875, 1.0, 1.0);
 uniform vec4 clouds_horizon_light_color: source_color = vec4(0.98, 0.43, 0.15, 1.0);
@@ -107,7 +107,7 @@ uniform float cumulus_clouds_noise_freq = 2.7;
 uniform float cumulus_clouds_sky_tint_fade = 0.0;
 uniform float cumulus_clouds_intensity = 1.0;
 uniform float cumulus_clouds_size = 0.5;
-uniform float cumulus_clouds_speed = 0.05;
+uniform float cumulus_clouds_speed = 0.003;
 uniform vec3 cumulus_clouds_direction = vec3(0.25, 0.1, 0.25);
 uniform sampler2D cumulus_clouds_texture;
 uniform vec4 cumulus_clouds_day_color: source_color = vec4(0.824, 0.875, 1.0, 1.0);
@@ -455,8 +455,11 @@ vec3 render_sky(vec3 worldPos, vec3 cloudsPos, vec3 sunPosition, vec3 moonPositi
 	deepSpace.rgb += deepSpaceBackground.rgb * moonMask + moon_output;
 
 	// Stars Field
-	float starsScintillation = textureLod(noise_tex, deepSpaceUV + (p_time * stars_scintillation_speed), 0.0).r;
-	starsScintillation = mix(1.0, starsScintillation * 1.5, stars_scintillation);
+	float starsScintillation = 1.0;
+	if (!AT_CUBEMAP_PASS) {
+		starsScintillation = textureLod(noise_tex, deepSpaceUV + (p_time * stars_scintillation_speed), 0.0).r;
+		starsScintillation = mix(1.0, starsScintillation * 1.5, stars_scintillation);
+	}
 
 	vec3 starsField = textureLod(stars_field_texture, deepSpaceUV, 0.0).rgb * stars_field_color.rgb;
 	starsField = saturateRGB(mix(starsField.rgb, starsField.rgb * starsScintillation, stars_scintillation));
@@ -466,8 +469,8 @@ vec3 render_sky(vec3 worldPos, vec3 cloudsPos, vec3 sunPosition, vec3 moonPositi
 	deepSpace.rgb *= angle_mult.z;
 	col.rgb += sunDisk.rgb + deepSpace.rgb * horizonBlend;
 
-	// Clouds
-	if (clouds_visible) {
+	// Clouds (Only rendered for camera screen passes; skipped in radiance cubemap to eliminate massive per-frame GPU stalls and choppiness)
+	if (clouds_visible && !AT_CUBEMAP_PASS) {
 		vec4 clouds = renderClouds(cloudsPos, p_time);
 		clouds.a = saturate(clouds.a);
 		clouds.rgb *= mix(mix(clouds_day_color.rgb, clouds_horizon_light_color.rgb, angle_mult.x), clouds_night_color.rgb, angle_mult.w);
@@ -476,7 +479,7 @@ vec3 render_sky(vec3 worldPos, vec3 cloudsPos, vec3 sunPosition, vec3 moonPositi
 		col.rgb = mix(col.rgb, clouds.rgb + mix(vec3(0.0), scatter, clouds_sky_tint_fade), clouds.a);
 	}
 
-	if (cumulus_clouds_visible) {
+	if (cumulus_clouds_visible && !AT_CUBEMAP_PASS) {
 		vec4 cumulusClouds = renderCloudsCumulus(vec3(0.0), cloudsPos, angle_mult.z, sunPosition, moonPosition, p_time);
 		cumulusClouds.a = saturate(cumulusClouds.a);
 		cumulusClouds.rgb *= mix(mix(cumulus_clouds_day_color.rgb, cumulus_clouds_horizon_light_color.rgb, angle_mult.x),
@@ -561,7 +564,7 @@ void draw_grid(vec3 dir, vec3 pole_dir, float rotation_angle, vec4 line_color, f
 }
 
 void sky() {
-	float current_time = TIME;
+	float current_time = AT_CUBEMAP_PASS ? 0.0 : TIME;
 	vec3 col = vec3(0.0); // Set up the initial sky color which will be added to later to produce the final result.
 	vec3 worldPos = EYEDIR; // Original shader set this up in the vertex() function. For sky shaders the overall equivalent is EYEDIR.
 	vec3 cloudsPos = EYEDIR; // The same is used for cloud rendering.
@@ -574,7 +577,7 @@ void sky() {
 	}
 	
 	// Draw overlay grids
-	{
+	if (!AT_CUBEMAP_PASS) {
 		float grid_thickness = 0.0002;
 		float grid_spacing = 0.261799; // 15 degrees
 		vec3 zenith_dir = vec3(0.0, 1.0, 0.0); // Y-axis aligned azimuthal

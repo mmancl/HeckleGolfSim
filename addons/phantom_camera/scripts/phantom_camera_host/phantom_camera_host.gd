@@ -694,8 +694,7 @@ func _check_pcam_physics() -> void:
 		## NOTE - Only supported in Godot 4.4 or later
 		if Engine.get_version_info().major == 4 and \
 		Engine.get_version_info().minor >= 4:
-			if (get_tree().physics_interpolation or _active_pcam_3d.get_follow_target_physics_based()) and interpolation_mode != InterpolationMode.IDLE:
-				#if get_tree().physics_interpolation or _active_pcam_3d.get_follow_target_physics_based():
+			if _active_pcam_3d.get_follow_target_physics_based() and interpolation_mode != InterpolationMode.IDLE:
 				_follow_target_physics_based = true
 				camera_3d.reset_physics_interpolation()
 				camera_3d.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_ON

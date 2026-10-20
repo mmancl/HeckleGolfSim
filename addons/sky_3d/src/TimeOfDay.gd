@@ -20,7 +20,7 @@ var _last_update: int = 0
 #####################
 
 @export_group("Global")
-@export var update_in_editor: bool = true :
+@export var update_in_editor: bool = false :
 	set(value):
 		update_in_editor = value
 		if Engine.is_editor_hint():
@@ -30,7 +30,7 @@ var _last_update: int = 0
 				pause()
 
 
-@export var update_in_game: bool = true :
+@export var update_in_game: bool = false :
 	set(value):
 		update_in_game = value
 		if not Engine.is_editor_hint():
@@ -40,7 +40,7 @@ var _last_update: int = 0
 				pause()
 
 
-@export_range(0.016, 10) var update_interval: float = 0.1 :
+@export_range(0.016, 10) var update_interval: float = 1.0 :
 	set(value):
 		update_interval = clamp(value, .016, 10)
 		if is_instance_valid(_update_timer):

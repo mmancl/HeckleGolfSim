@@ -104,9 +104,13 @@ function Get-ConnectedAdbDevices {
     $raw = @(cmd /c "adb devices" 2>$null | Select-String -Pattern "\tdevice$")
     $devs = @()
     foreach ($line in $raw) {
-        $devs += ($line.Line -split "\t")[0].Trim()
+        $devId = ($line.Line -split "\t")[0].Trim()
+        # Filter out mDNS service announcements (e.g. adb-..._adb-tls-connect._tcp)
+        if ($devId -and $devId -notmatch "^\s*adb-.*_adb-tls-connect") {
+            $devs += $devId
+        }
     }
-    return ,$devs
+    return $devs
 }
 
 $cachedDeviceFile = Join-Path $AndroidBuildDir ".last_connected_device"

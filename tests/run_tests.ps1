@@ -17,7 +17,8 @@
 [CmdletBinding()]
 param(
     [string]$TestName = "",
-    [string]$CustomGodotPath = ""
+    [string]$CustomGodotPath = "",
+    [int]$TimeoutSeconds = 30
 )
 
 $PSScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -78,17 +79,30 @@ foreach ($tf in $testFiles) {
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
-    $process = Start-Process -FilePath $godotBin `
-        -ArgumentList @("--headless", "-s", $relPath) `
-        -WorkingDirectory $RepoRoot `
-        -NoNewWindow `
-        -PassThru `
-        -Wait
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $godotBin
+    $psi.Arguments = "--headless -s $relPath"
+    $psi.WorkingDirectory = $RepoRoot
+    $psi.UseShellExecute = $false
+
+    $process = [System.Diagnostics.Process]::Start($psi)
+    $finished = $process.WaitForExit($TimeoutSeconds * 1000)
 
     $stopwatch.Stop()
     $elapsed = [Math]::Round($stopwatch.Elapsed.TotalSeconds, 2)
 
-    if ($process.ExitCode -eq 0) {
+    if (-not $finished) {
+        try {
+            $process.Kill()
+        } catch {}
+        Write-Host "FAIL (TIMEOUT: Godot hung after ${TimeoutSeconds}s, ${elapsed}s)" -ForegroundColor Red
+        $allPassed = $false
+        $results += [PSCustomObject]@{
+            Test = $tf.Name
+            Status = "TIMEOUT"
+            Duration = "${elapsed}s"
+        }
+    } elseif ($process.ExitCode -eq 0) {
         Write-Host "PASS (${elapsed}s)" -ForegroundColor Green
         $results += [PSCustomObject]@{
             Test = $tf.Name

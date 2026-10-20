@@ -36,7 +36,6 @@ func initialize(scene_path: String, config_path: String) -> void:
 		if course_scene == null:
 			push_error("[CourseManager] Could not instantiate course scene: %s" % scene_path)
 			return
-		_apply_course_graphics_quality(course_scene)
 		add_child(course_scene)
 		return
 		
@@ -57,8 +56,8 @@ func initialize(scene_path: String, config_path: String) -> void:
 	if course_scene == null:
 		push_error("[CourseManager] Could not instantiate course scene: %s" % scene_path)
 		return
-	_apply_course_graphics_quality(course_scene)
 	add_child(course_scene)
+
 
 
 func _load_course_config(config_path: String) -> void:

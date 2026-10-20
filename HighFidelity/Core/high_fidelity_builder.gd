@@ -3,13 +3,17 @@ class_name HighFidelityBuilder
 
 ## HighFidelityBuilder
 ## Master coordinator for High-fidelity desktop graphics.
-## Dynamically instantiates and configures Forward+ lighting, SDFGI, SSIL,
-## instanced 3D grass, and performance telemetry on desktop systems.
+## Dynamically instantiates and configures Forward+ lighting, SSAO, SSR,
+## GPU-instanced 3D grass, recessed 3D bunker lips, shoreline reeds, and performance telemetry.
 
 const HighFidelityLightingScript = preload("res://HighFidelity/Lighting/high_fidelity_lighting.gd")
 const HighFidelityOverlayScript = preload("res://HighFidelity/Core/high_fidelity_overlay.gd")
+const HighFidelityGrassScript = preload("res://HighFidelity/Foliage/high_fidelity_grass.gd")
+const CourseDetailEnhancerScript = preload("res://HighFidelity/Terrain/course_detail_enhancer.gd")
 
 var overlay_node: CanvasLayer = null
+var grass_node: Node3D = null
+
 
 static func is_supported() -> bool:
 	return not MobilePerformance.is_mobile()
@@ -18,13 +22,13 @@ static func is_supported() -> bool:
 static func apply_high_fidelity(scene_root: Node) -> Node3D:
 	if scene_root == null or not is_supported():
 		return null
-	
+
 	var existing = scene_root.get_node_or_null("HighFidelityBuilder")
 	if existing != null:
 		if existing.has_method("refresh"):
 			existing.refresh(scene_root)
 		return existing
-	
+
 	var script = load("res://HighFidelity/Core/high_fidelity_builder.gd") as GDScript
 	var builder = script.new() as Node3D
 	builder.name = "HighFidelityBuilder"
@@ -36,7 +40,7 @@ static func apply_high_fidelity(scene_root: Node) -> Node3D:
 static func remove_high_fidelity(scene_root: Node) -> void:
 	if scene_root == null:
 		return
-	
+
 	var existing = scene_root.get_node_or_null("HighFidelityBuilder")
 	if existing != null:
 		if existing.has_method("teardown"):
@@ -48,10 +52,21 @@ static func remove_high_fidelity(scene_root: Node) -> void:
 
 
 func setup(scene_root: Node) -> void:
-	# 1. Apply Forward+ Desktop Lighting, SDFGI, SSIL, PCSS Shadows & AgX Tonemapper
+	# 1. Apply Forward+ Desktop Lighting, SSAO, SSR, Crisp 4-Split Shadows & Calibrated AgX Tonemapper
 	HighFidelityLightingScript.apply(scene_root)
 
-	# 2. Add Diagnostic Telemetry HUD (toggleable with F3)
+	# 2. Ensure course 3D recessed bunkers, shoreline reeds, & horizon skirt exist and are visible
+	CourseDetailEnhancerScript.enhance_course_scene(scene_root, false)
+	_set_detail_nodes_visible(scene_root, true)
+
+	# 3. Spawn GPU MultiMesh 3D Grass System (Golfer Address Turf + Clumped Rough/Fescue)
+	if grass_node == null:
+		grass_node = HighFidelityGrassScript.new()
+		grass_node.name = "HighFidelityGrass"
+		add_child(grass_node)
+		grass_node.setup(scene_root)
+
+	# 4. Add Diagnostic Telemetry HUD (toggleable with F3)
 	if overlay_node == null:
 		overlay_node = HighFidelityOverlayScript.new()
 		add_child(overlay_node)
@@ -59,10 +74,30 @@ func setup(scene_root: Node) -> void:
 
 func refresh(scene_root: Node) -> void:
 	HighFidelityLightingScript.apply(scene_root)
+	CourseDetailEnhancerScript.enhance_course_scene(scene_root, false)
+	_set_detail_nodes_visible(scene_root, true)
+	if grass_node != null and grass_node.has_method("_refresh_anchor"):
+		grass_node.call("_refresh_anchor", true)
 
 
 func teardown(scene_root: Node) -> void:
 	HighFidelityLightingScript.remove(scene_root)
+	_set_detail_nodes_visible(scene_root, false)
+	if grass_node != null:
+		grass_node.queue_free()
+		grass_node = null
 	if overlay_node != null:
 		overlay_node.queue_free()
 		overlay_node = null
+
+
+static func _set_detail_nodes_visible(scene_root: Node, vis: bool) -> void:
+	if scene_root == null:
+		return
+	var bunkers := scene_root.get_node_or_null("HighFidelityBunkers") as Node3D
+	if bunkers != null:
+		bunkers.visible = vis
+	var reeds := scene_root.get_node_or_null("ShorelineReedsMultiMesh") as Node3D
+	if reeds != null:
+		reeds.visible = vis
+

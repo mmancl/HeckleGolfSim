@@ -11,6 +11,8 @@ var _check_button_list: Array[CheckButton] = []
 var _close_btn: Button = null
 var _reset_btn: Button = null
 var _done_btn: Button = null
+var _scroll: ScrollContainer = null
+var _modal_panel: PanelContainer = null
 
 func _init() -> void:
 	layer = 110
@@ -18,7 +20,21 @@ func _init() -> void:
 
 func _ready() -> void:
 	_build_ui()
+	_update_responsive_layout()
+	var vp = get_viewport()
+	if vp != null:
+		vp.size_changed.connect(_update_responsive_layout)
 	call_deferred("_grab_initial_focus")
+
+func _update_responsive_layout() -> void:
+	if _modal_panel == null or not is_instance_valid(_modal_panel):
+		return
+	var vp = get_viewport()
+	var vp_size = vp.get_visible_rect().size if vp != null else Vector2(1728, 972)
+	var is_mob: bool = MobilePerformance.is_mobile()
+	var target_w = clamp(vp_size.x * (0.92 if is_mob else 0.80), 520.0, 780.0)
+	var target_h = clamp(vp_size.y * (0.92 if is_mob else 0.85), 440.0, 680.0)
+	_modal_panel.custom_minimum_size = Vector2(target_w, target_h)
 
 func _grab_initial_focus() -> void:
 	if not _check_button_list.is_empty() and is_instance_valid(_check_button_list[0]):
@@ -48,10 +64,15 @@ func _build_ui() -> void:
 	# Modal Dialog Panel
 	var modal_panel := PanelContainer.new()
 	modal_panel.name = "ModalPanel"
-	modal_panel.custom_minimum_size = Vector2(780, 680)
+	var is_mob: bool = MobilePerformance.is_mobile()
+	var vp_size = get_viewport().get_visible_rect().size if get_viewport() != null else Vector2(1728, 972)
+	var target_w = clamp(vp_size.x * (0.92 if is_mob else 0.80), 520.0, 780.0)
+	var target_h = clamp(vp_size.y * (0.92 if is_mob else 0.85), 440.0, 680.0)
+	modal_panel.custom_minimum_size = Vector2(target_w, target_h)
 	modal_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	ThemeManager.apply_modal_style(modal_panel, 14)
 	center.add_child(modal_panel)
+	_modal_panel = modal_panel
 
 	var main_vbox := VBoxContainer.new()
 	main_vbox.add_theme_constant_override("separation", 12)
@@ -145,9 +166,20 @@ func _build_ui() -> void:
 	scroll.follow_focus = true
 	ThemeManager.apply_scroll_container_style(scroll, 20)
 
+	var scroll_margin := MarginContainer.new()
+	scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll_margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var scroll_pad_right: int = 68 if is_mob else 32
+	scroll_margin.add_theme_constant_override("margin_right", scroll_pad_right)
+	scroll_margin.add_theme_constant_override("margin_left", 4)
+	scroll_margin.add_theme_constant_override("margin_top", 4)
+	scroll_margin.add_theme_constant_override("margin_bottom", 4)
+	scroll.add_child(scroll_margin)
+
 	var stats_list_vbox := VBoxContainer.new()
 	stats_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	stats_list_vbox.add_theme_constant_override("separation", 12)
+	scroll_margin.add_child(stats_list_vbox)
 
 	var is_imperial: bool = GlobalSettings.range_settings.range_units.value == PhysicsEnums.Units.IMPERIAL if has_node("/root/GlobalSettings") else true
 
@@ -170,8 +202,8 @@ func _build_ui() -> void:
 		var sep := HSeparator.new()
 		stats_list_vbox.add_child(sep)
 
-	scroll.add_child(stats_list_vbox)
 	main_vbox.add_child(scroll)
+	_scroll = scroll
 
 	# Footer Actions: Reset to Defaults + Done Button
 	var footer_hbox := HBoxContainer.new()
@@ -207,6 +239,12 @@ func _build_ui() -> void:
 			var cb = _check_button_list[i]
 			if i == 0:
 				cb.focus_neighbor_top = cb.get_path_to(_close_btn)
+				cb.gui_input.connect(func(ev: InputEvent):
+					if ev.is_action_pressed("ui_up") or (ev is InputEventJoypadButton and ev.button_index == JOY_BUTTON_DPAD_UP and ev.pressed) or (ev is InputEventJoypadMotion and ev.axis == JOY_AXIS_LEFT_Y and ev.axis_value <= -0.5):
+						if _scroll != null and _scroll.scroll_vertical > 0:
+							_scroll.scroll_vertical = 0
+							get_viewport().set_input_as_handled()
+				)
 			else:
 				cb.focus_neighbor_top = cb.get_path_to(_check_button_list[i - 1])
 			if i < _check_button_list.size() - 1:
@@ -356,6 +394,28 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel") or (event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE):
 		close()
 		get_viewport().set_input_as_handled()
+		return
+
+	# Right Stick vertical scrolling
+	if event is InputEventJoypadMotion and event.axis == JOY_AXIS_RIGHT_Y:
+		if abs(event.axis_value) >= 0.2 and _scroll != null:
+			_scroll.scroll_vertical += int(event.axis_value * 18.0)
+			get_viewport().set_input_as_handled()
+			return
+
+	# Analog Triggers (LT / RT) for list page scrolling
+	if event is InputEventJoypadMotion:
+		var motion_ev = event as InputEventJoypadMotion
+		if motion_ev.axis == JOY_AXIS_TRIGGER_LEFT and motion_ev.axis_value > 0.6 and _scroll != null:
+			var page_h := int(max(_scroll.size.y * 0.7, 120.0))
+			_scroll.scroll_vertical = max(0, _scroll.scroll_vertical - page_h)
+			get_viewport().set_input_as_handled()
+			return
+		elif motion_ev.axis == JOY_AXIS_TRIGGER_RIGHT and motion_ev.axis_value > 0.6 and _scroll != null:
+			var page_h := int(max(_scroll.size.y * 0.7, 120.0))
+			_scroll.scroll_vertical += page_h
+			get_viewport().set_input_as_handled()
+			return
 
 func close() -> void:
 	modal_closed.emit()

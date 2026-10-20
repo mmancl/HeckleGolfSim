@@ -373,6 +373,10 @@ func _grab_initial_focus() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_visible_in_tree():
 		return
+	if has_node("/root/UIFocusGuard"):
+		var ufg = get_node("/root/UIFocusGuard")
+		if ufg.is_modal_active():
+			return
 	if event.is_action_pressed("ui_cancel"):
 		for child in get_children():
 			if (child is ConfirmationDialog or child is AcceptDialog) and child.visible:
@@ -397,7 +401,8 @@ func _add_player_ui(p_name: String, tee: String = "") -> void:
 		if resolved_tee.is_empty():
 			resolved_tee = "Blue"
 	var hand = MultiplayerManager.get_player_handedness(p_name)
-	var player_data = {"name": p_name, "tee": resolved_tee, "avatar": avatar_path, "email": email, "handedness": hand}
+	var bg = MultiplayerManager.get_player_ball_graphic(p_name)
+	var player_data = {"name": p_name, "tee": resolved_tee, "avatar": avatar_path, "email": email, "handedness": hand, "ball_graphic": bg}
 	players_to_add.append(player_data)
 	
 	var row = HBoxContainer.new()

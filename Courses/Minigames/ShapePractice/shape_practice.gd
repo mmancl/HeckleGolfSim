@@ -2,6 +2,7 @@ extends Node3D
 
 # Preloaded player scene
 var PlayerScene = preload("res://Player/player.tscn")
+const FlagBuilder = preload("res://Courses/Range/flag_builder.gd")
 
 # Minigame state
 var player = null
@@ -613,31 +614,11 @@ func _build_target_zone_node(data: Dictionary) -> StaticBody3D:
 	pin_node.position = Vector3(x_center, 0.02, z_center)
 	zone_body.add_child(pin_node)
 	
-	var pole = MeshInstance3D.new()
-	var pole_mesh = CylinderMesh.new()
-	pole_mesh.top_radius = 0.04
-	pole_mesh.bottom_radius = 0.04
-	pole_mesh.height = 3.6
-	pole.mesh = pole_mesh
-	var pole_mat = StandardMaterial3D.new()
-	pole_mat.albedo_color = Color.WHITE
-	pole.material_override = pole_mat
-	pole.position = Vector3(0.0, 1.8, 0.0)
-	pin_node.add_child(pole)
-	
-	var flag = MeshInstance3D.new()
-	var flag_mesh = PrismMesh.new()
-	flag_mesh.size = Vector3(0.8, 0.5, 0.04)
-	flag.mesh = flag_mesh
-	var flag_m = StandardMaterial3D.new()
-	flag_m.albedo_color = theme_color
-	flag_m.emission_enabled = true
-	flag_m.emission = theme_color
-	flag_m.emission_energy_multiplier = 1.0
-	flag.material_override = flag_m
-	flag.position = Vector3(0.4, 3.3, 0.0)
-	flag.rotation = Vector3(0.0, 0.0, -PI / 2)
-	pin_node.add_child(flag)
+	var q_str = ""
+	var gs = GlobalSettings if GlobalSettings != null else (get_node_or_null("/root/GlobalSettings") if is_inside_tree() else null)
+	if gs != null and gs.has_method("get_graphics_quality"):
+		q_str = gs.get_graphics_quality()
+	FlagBuilder.setup_target_flag(pin_node, 3.6, theme_color, 0.70, 0.48, false, q_str)
 	
 	# 5. Distance & Zone Label (Billboarded in 3D)
 	var label = Label3D.new()

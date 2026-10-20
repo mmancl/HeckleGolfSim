@@ -2,6 +2,7 @@ extends Node3D
 
 # Preloaded assets
 var PlayerScene = preload("res://Player/player.tscn")
+const FlagBuilder = preload("res://Courses/Range/flag_builder.gd")
 
 # Minigame state variables
 var player = null
@@ -40,7 +41,7 @@ var hole_data = [
 	{"dist_ft": 50, "angle_deg": 50.0, "desc": "Long Distance Lag"},
 ]
 var holes = []
-var cup_radius: float = 0.108
+var cup_radius: float = 0.054
 var hole_buttons = []
 var shot_counter: int = 0
 
@@ -70,6 +71,8 @@ var _settings_layer: CanvasLayer = null
 var raw_ball_data: Dictionary = {}
 var display_data: Dictionary = {}
 var sfx_applause_player: AudioStreamPlayer = null
+var user_aim_yaw_offset_deg: float = 0.0
+var _was_aiming_putting: bool = false
 
 # PvP Mode State
 const MinigamePlayerModal = preload("res://Courses/Minigames/minigame_player_modal.gd")
@@ -290,9 +293,14 @@ func _update_flagpole_color() -> void:
 	var flag = pin.get_node_or_null("Flag")
 	var ring = pin.get_node_or_null("TargetRing")
 	var active_col = get_active_player_color() if pvp_mode else Color(1.0, 0.1, 0.1)
-	if flag and flag.material_override is StandardMaterial3D:
-		flag.material_override.albedo_color = active_col
-		flag.material_override.emission = active_col
+	if flag != null:
+		if flag.has_method("set_flag_color"):
+			flag.set_flag_color(active_col)
+		elif "flag_color" in flag:
+			flag.set("flag_color", active_col)
+		elif flag.material_override is StandardMaterial3D:
+			flag.material_override.albedo_color = active_col
+			flag.material_override.emission = active_col
 	if ring and ring.material_override is StandardMaterial3D:
 		var ring_col = get_active_player_color() if pvp_mode else Color(0.0, 0.8, 1.0)
 		ring.material_override.albedo_color = Color(ring_col.r, ring_col.g, ring_col.b, 0.5)
@@ -1056,6 +1064,7 @@ func _setup_player() -> void:
 	player.ball.spawn_position = start_pos
 	player.ball.lie_type = "green"
 	player.ball.set_surface(PhysicsEnums.SurfaceType.GREEN)
+	player.set_profile(get_active_player_name())
 	player.ball.reset()
 
 # ----------------- TARGET HOLES -----------------
@@ -1081,8 +1090,8 @@ func _setup_holes() -> void:
 		var cup_white = MeshInstance3D.new()
 		cup_white.name = "CupWhite"
 		var white_mesh = CylinderMesh.new()
-		white_mesh.top_radius = 0.108
-		white_mesh.bottom_radius = 0.108
+		white_mesh.top_radius = cup_radius
+		white_mesh.bottom_radius = cup_radius
 		white_mesh.height = 0.003
 		cup_white.mesh = white_mesh
 		
@@ -1097,8 +1106,8 @@ func _setup_holes() -> void:
 		var cup_dark = MeshInstance3D.new()
 		cup_dark.name = "CupDark"
 		var dark_mesh = CylinderMesh.new()
-		dark_mesh.top_radius = 0.095
-		dark_mesh.bottom_radius = 0.095
+		dark_mesh.top_radius = 0.048
+		dark_mesh.bottom_radius = 0.048
 		dark_mesh.height = 0.0035
 		cup_dark.mesh = dark_mesh
 		
@@ -1115,6 +1124,7 @@ func _select_hole(index: int, reset_ball: bool = true) -> void:
 	if index < 0 or index >= holes.size():
 		return
 	selected_hole_index = index
+	user_aim_yaw_offset_deg = 0.0
 		
 	# Draw/Reposition flagpole
 	_spawn_flagpole(holes[index])
@@ -1178,36 +1188,12 @@ func _spawn_flagpole(pos: Vector3) -> void:
 	add_child(pin)
 	pin.global_position = pos
 	
-	# Pole
-	var pole = MeshInstance3D.new()
-	var pole_mesh = CylinderMesh.new()
-	pole_mesh.top_radius = 0.02
-	pole_mesh.bottom_radius = 0.02
-	pole_mesh.height = 2.0
-	pole.mesh = pole_mesh
-	
-	var pole_mat = StandardMaterial3D.new()
-	pole_mat.albedo_color = Color.WHITE
-	pole.material_override = pole_mat
-	pole.position = Vector3(0.0, 1.0, 0.0)
-	pin.add_child(pole)
-	
-	# Flag
-	var flag = MeshInstance3D.new()
-	var flag_mesh = PrismMesh.new()
-	flag_mesh.size = Vector3(0.4, 0.3, 0.02)
-	flag.mesh = flag_mesh
-	flag.name = "Flag"
-	
 	var flag_col = get_active_player_color() if pvp_mode else Color(1.0, 0.1, 0.1)
-	var flag_mat = StandardMaterial3D.new()
-	flag_mat.albedo_color = flag_col
-	flag_mat.emission_enabled = true
-	flag_mat.emission = flag_col
-	flag.material_override = flag_mat
-	flag.position = Vector3(0.2, 1.85, 0.0)
-	flag.rotation = Vector3(0.0, 0.0, -PI/2)
-	pin.add_child(flag)
+	var q_str = ""
+	var gs = GlobalSettings if GlobalSettings != null else (get_node_or_null("/root/GlobalSettings") if is_inside_tree() else null)
+	if gs != null and gs.has_method("get_graphics_quality"):
+		q_str = gs.get_graphics_quality()
+	FlagBuilder.setup_target_flag(pin, 2.0, flag_col, 0.42, 0.30, false, q_str)
 	
 	# Glow/Selection Ring
 	var ring = MeshInstance3D.new()
@@ -1238,6 +1224,7 @@ func _teleport_ball(pos: Vector3) -> void:
 	pos.y = get_height(pos.x, pos.z) + GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET
 	player.global_position = pos
 	player.ball.spawn_position = pos
+	player.set_profile(get_active_player_name())
 	player.ball.reset()
 	
 	last_putt_start_pos = pos
@@ -1264,7 +1251,7 @@ func _teleport_ball(pos: Vector3) -> void:
 			if lm.has_method("_update_hud_display"):
 				lm.call("_update_hud_display")
 
-func _update_aim_and_camera() -> void:
+func _update_aim_and_camera(is_aiming: bool = false) -> void:
 	if selected_hole_index < 0 or selected_hole_index >= holes.size():
 		return
 		
@@ -1272,22 +1259,24 @@ func _update_aim_and_camera() -> void:
 	var ball_pos = player.ball.global_position
 	
 	var diff = target_hole - ball_pos
-	var angle_rad = atan2(diff.z, diff.x)
+	var base_angle_rad = atan2(diff.z, diff.x)
+	var final_angle_rad = base_angle_rad - deg_to_rad(user_aim_yaw_offset_deg)
 	
 	# Apply aim yaw offset to player ball
-	player.ball.aim_yaw_offset_deg = rad_to_deg(-angle_rad)
+	player.ball.aim_yaw_offset_deg = rad_to_deg(-final_angle_rad)
 	
 	# Position camera behind the ball closer to ball and ground so slope is easy to read
-	var back_dir = Vector3(-cos(angle_rad), 0.0, -sin(angle_rad)).normalized()
+	var back_dir = Vector3(-cos(final_angle_rad), 0.0, -sin(final_angle_rad)).normalized()
 	var cam_pos = ball_pos + back_dir * 1.35 + Vector3.UP * 0.8
-	cam_pos = clamp_camera_position(cam_pos, 0.35)
+	if not is_aiming:
+		cam_pos = clamp_camera_position(cam_pos, 0.35)
 	
 	var dist = ball_pos.distance_to(target_hole)
 	var look_dist = clamp(dist * 0.4, 2.0, 6.0)
 	if dist < 2.0:
 		look_dist = dist
-	var fraction = clamp(look_dist / max(dist, 0.001), 0.0, 1.0)
-	var target_look = ball_pos.lerp(target_hole, fraction)
+	var forward_dir = Vector3(cos(final_angle_rad), 0.0, sin(final_angle_rad)).normalized()
+	var target_look = ball_pos + forward_dir * look_dist
 	
 	$Camera3D.global_position = cam_pos
 	$Camera3D.look_at(target_look)
@@ -1297,12 +1286,37 @@ func _update_aim_and_camera() -> void:
 
 # ----------------- INPUT & HIT SIMULATION -----------------
 
+func _process(delta: float) -> void:
+	if player and player.ball and player.ball.state == PhysicsEnums.BallState.REST:
+		if _settings_layer != null and is_instance_valid(_settings_layer) and _settings_layer.visible:
+			return
+		var turn_input := 0.0
+		if Input.is_action_pressed("aim_left") or Input.is_key_pressed(KEY_LEFT):
+			turn_input -= 1.0
+		if Input.is_action_pressed("aim_right") or Input.is_key_pressed(KEY_RIGHT):
+			turn_input += 1.0
+		if turn_input != 0.0:
+			_was_aiming_putting = true
+			user_aim_yaw_offset_deg += turn_input * 15.0 * delta
+			_update_aim_and_camera(true)
+		elif _was_aiming_putting:
+			_was_aiming_putting = false
+			_update_aim_and_camera(false)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if _settings_layer != null and is_instance_valid(_settings_layer):
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 			_close_settings()
 			get_viewport().set_input_as_handled()
 		return
+
+	# Fine aim adjustments when ball is at rest (arrow keys, D-pad, aim_left/aim_right)
+	if player and player.ball and player.ball.state == PhysicsEnums.BallState.REST:
+		if event.is_action_pressed("aim_left") or (event is InputEventKey and event.pressed and event.keycode == KEY_LEFT) or \
+		   event.is_action_pressed("aim_right") or (event is InputEventKey and event.pressed and event.keycode == KEY_RIGHT):
+			get_viewport().set_input_as_handled()
+			return
 
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:

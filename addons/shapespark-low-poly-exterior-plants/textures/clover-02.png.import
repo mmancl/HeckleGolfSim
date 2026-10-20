@@ -3,8 +3,8 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bilko5o08i3or"
-path.s3tc="res://.godot/imported/clover-02.png-2a8b63781a6fe8bc897547ecae8f989b.s3tc.ctex"
-path.etc2="res://.godot/imported/clover-02.png-2a8b63781a6fe8bc897547ecae8f989b.etc2.ctex"
+path.bptc="res://.godot/imported/clover-02.png-2a8b63781a6fe8bc897547ecae8f989b.bptc.ctex"
+path.astc="res://.godot/imported/clover-02.png-2a8b63781a6fe8bc897547ecae8f989b.astc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -13,13 +13,13 @@ metadata={
 [deps]
 
 source_file="res://addons/shapespark-low-poly-exterior-plants/textures/clover-02.png"
-dest_files=["res://.godot/imported/clover-02.png-2a8b63781a6fe8bc897547ecae8f989b.s3tc.ctex", "res://.godot/imported/clover-02.png-2a8b63781a6fe8bc897547ecae8f989b.etc2.ctex"]
+dest_files=["res://.godot/imported/clover-02.png-2a8b63781a6fe8bc897547ecae8f989b.bptc.ctex", "res://.godot/imported/clover-02.png-2a8b63781a6fe8bc897547ecae8f989b.astc.ctex"]
 
 [params]
 
 compress/mode=2
-compress/high_quality=false
-compress/lossy_quality=0.7
+compress/high_quality=true
+compress/lossy_quality=0.9
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

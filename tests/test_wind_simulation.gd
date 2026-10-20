@@ -181,8 +181,17 @@ func _initialize():
 
 	assert(label.text.contains("💨"), "Label must contain air moving icon 💨")
 	assert(label.text.contains("Wind 12 MPH"), "Label must contain 'Wind 12 MPH', got: " + label.text)
+	assert(label.text.contains("↑"), "Tailwind must show plain arrow ↑ in label, got: " + label.text)
+	assert(not label.text.contains("⬆"), "Label must NOT contain emoji box ⬆")
+	assert(not label.text.contains("font_size=28"), "Label must NOT have font_size=28 override distorting line spacing")
 	var wind_offset = badge.offset_right
 	assert(wind_offset > 300 and wind_offset < 420, "Badge must dynamically expand for wind, got: %f" % wind_offset)
+
+	# Crosswind check: ensure right crosswind produces plain arrow → and never emoji ➡
+	gs.current_wind_direction_rad = PI / 2.0
+	range_instance._update_aim_distance_label_text()
+	assert(label.text.contains("→"), "Right crosswind must show plain arrow → in label, got: " + label.text)
+	assert(not label.text.contains("➡"), "Label must NOT contain emoji box ➡")
 	print("  PASS: HUD Label text when enabled: '%s' (badge width: %0.1f)" % [label.text, wind_offset * 2])
 
 	# Disable wind
@@ -192,6 +201,21 @@ func _initialize():
 	var no_wind_offset = badge.offset_right
 	assert(no_wind_offset < wind_offset, "Badge must shrink when wind is disabled")
 	print("  PASS: HUD Label text when disabled: '%s' (badge width: %0.1f)" % [label.text, no_wind_offset * 2])
+
+	# RichTextLabel check: ensure bbcode thickness formatting is applied
+	canvas.remove_child(label)
+	label.free()
+	var rtl = RichTextLabel.new()
+	rtl.name = "AimDistanceLabel"
+	rtl.bbcode_enabled = true
+	canvas.add_child(rtl)
+	gs.range_settings.wind_enabled.set_value(true)
+	range_instance._update_aim_distance_label_text()
+	assert(rtl.text.contains("[outline_size=2]"), "RichTextLabel must contain outline_size=2 for thickened arrow, got: " + rtl.text)
+	assert(rtl.text.contains("[outline_color=#f5faff]"), "RichTextLabel must contain outline_color matching text")
+	assert(rtl.text.contains("[b]"), "RichTextLabel must contain bold tag for thickened arrow")
+	assert(not rtl.text.contains("font_size=28"), "RichTextLabel must not contain line-height distorting font_size=28")
+	print("  PASS: RichTextLabel thick arrow BBCode verified: %s" % rtl.text)
 
 	range_instance.free()
 

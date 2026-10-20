@@ -48,6 +48,10 @@ const TEE_COLOR_MAP: Dictionary = {
 
 
 func _ready() -> void:
+	add_to_group("modals")
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").push_lock(self)
+
 	var panel = $CenterContainer/PanelContainer
 	if panel != null:
 		ThemeManager.apply_modal_style(panel, 12)
@@ -615,4 +619,10 @@ func _load_texture(path: String) -> Texture2D:
 	if img != null:
 		return ImageTexture.create_from_image(img)
 	return null
+
+
+func _exit_tree() -> void:
+	if has_node("/root/UIFocusGuard"):
+		get_node("/root/UIFocusGuard").pop_lock(self)
+
 

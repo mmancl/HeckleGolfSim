@@ -142,6 +142,10 @@ func _grab_initial_focus() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_visible_in_tree():
 		return
+	if has_node("/root/UIFocusGuard"):
+		var ufg = get_node("/root/UIFocusGuard")
+		if ufg.is_modal_active():
+			return
 	if event.is_action_pressed("ui_cancel"):
 		if event is InputEventKey and (event.keycode == KEY_BACKSPACE or event.physical_keycode == KEY_BACKSPACE):
 			return

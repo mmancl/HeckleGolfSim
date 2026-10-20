@@ -42,6 +42,7 @@ var _scorecard_countdown_active: bool = false
 var _scorecard_countdown_paused: bool = false
 var _scorecard_view_tab: String = "All"
 var _last_scorecard_action_type: String = "toggle"
+var _tee_icon_cache: Dictionary = {}
 @onready var hud_manage_players = Panel.new()
 @onready var hud_overview = Panel.new()
 const MINIMAP_NORMAL_SIZE: Vector2 = Vector2(284, 333)
@@ -91,6 +92,8 @@ var announcer_btn: Button = null
 var tension_btn: Button = null
 var dist_btn: Button = null
 var rollout_btn: Button = null
+var track_averages_btn: Button = null
+var stuck_ball_btn: Button = null
 var _screen_offset_ctrl: Control = null
 var club_selector_node: Control = null
 
@@ -122,36 +125,62 @@ var gimme_title_lbl: Label = null
 var gimme_sub_lbl: Label = null
 var _gimme_tween: Tween = null
 var is_player_turn_ready: bool = true
+var _last_loaded_hole_id: String = ""
+var _last_loaded_hole_index: int = -1
+
+var hole_intro_card: PanelContainer = null
+var _hole_card_header_lbl: Label = null
+var _hole_card_hole_lbl: Label = null
+var _hole_card_par_lbl: Label = null
+var _hole_card_dist_lbl: Label = null
+var _hole_card_tween: Tween = null
+var _last_hole_card_hole_index: int = -999
+var _last_hole_card_hole_id: String = ""
 
 func is_gimme_banner_active() -> bool:
 	return gimme_banner != null and is_instance_valid(gimme_banner) and gimme_banner.visible and gimme_banner.modulate.a > 0.05
 
 func _ready() -> void:
+	_last_loaded_hole_id = ""
+	_last_loaded_hole_index = -1
+	_last_hole_card_hole_index = -999
+	_last_hole_card_hole_id = ""
 	MultiplayerManager.active_player_changed.connect(_on_active_player_changed)
+	if not MultiplayerManager.player_ball_graphic_changed.is_connected(_on_course_ball_graphic_changed):
+		MultiplayerManager.player_ball_graphic_changed.connect(_on_course_ball_graphic_changed)
+	if not MultiplayerManager.player_tee_changed.is_connected(_on_player_tee_changed):
+		MultiplayerManager.player_tee_changed.connect(_on_player_tee_changed)
 	MultiplayerManager.hole_completed.connect(_on_hole_completed)
 	MultiplayerManager.game_over.connect(_on_game_over)
 	MultiplayerManager.gimme_awarded.connect(_on_gimme_awarded)
 	MultiplayerManager.distance_queue_updated.connect(_update_distance_queue)
-	MultiplayerManager.shot_recorded.connect(func(_p, _s): _update_distance_queue())
+	MultiplayerManager.shot_recorded.connect(func(_p, _s):
+		_update_distance_queue()
+		_dismiss_hole_intro_card_early()
+	)
 	MultiplayerManager.catch_up_mode_changed.connect(func(_active, _name, _c, _t):
 		_update_catch_up_hud()
 	)
 	if has_node("/root/KeybindingManager"):
 		KeybindingManager.keybindings_changed.connect(_update_hud_tooltips)
 	
-	if get_parent() != null and get_parent() != get_tree().get_root() and get_parent().name != "CourseManager":
-		course_instance = get_parent()
-	else:
-		var current_scene = get_tree().current_scene
-		if current_scene != null and current_scene.name == "CourseManager":
-			var course_nodes = current_scene.get_children()
-			if not course_nodes.is_empty():
-				course_instance = course_nodes[0]
+	if course_instance == null:
+		if get_parent() != null and get_parent() != get_tree().get_root() and get_parent().name != "CourseManager":
+			course_instance = get_parent()
+		else:
+			var current_scene = get_tree().current_scene
+			if current_scene != null and current_scene.name == "CourseManager":
+				var course_nodes = current_scene.get_children()
+				if not course_nodes.is_empty():
+					course_instance = course_nodes[0]
 			
 	if course_instance != null:
 		var player_node = course_instance.get_node_or_null("Player")
 		if player_node != null:
 			active_ball = player_node.get("ball")
+			var init_p = MultiplayerManager.get_active_player()
+			if player_node.has_method("set_profile") and not init_p.is_empty():
+				player_node.set_profile(str(init_p.get("name", "")))
 
 	if has_node("/root/GlobalSettings"):
 		var gs = get_node("/root/GlobalSettings")
@@ -491,6 +520,177 @@ func _setup_hud() -> void:
 	g_vbox.add_child(gimme_sub_lbl)
 	
 	canvas.add_child(gimme_banner)
+	
+	# Hole Intro Slide-In Card (Positioned in middle of screen on top of all HUD elements)
+	hole_intro_card = PanelContainer.new()
+	hole_intro_card.name = "HoleIntroCard"
+	hole_intro_card.visible = false
+	hole_intro_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hole_intro_card.anchor_left = 0.5
+	hole_intro_card.anchor_right = 0.5
+	hole_intro_card.anchor_top = 0.38
+	hole_intro_card.anchor_bottom = 0.38
+	hole_intro_card.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	hole_intro_card.grow_vertical = Control.GROW_DIRECTION_BOTH
+	hole_intro_card.custom_minimum_size = Vector2(420, 115)
+	hole_intro_card.z_index = 50 # Render in front of helper buttons and panels
+	hole_intro_card.offset_left = -1620.0
+	hole_intro_card.offset_right = -1200.0
+	hole_intro_card.offset_top = -58.0
+	hole_intro_card.offset_bottom = 58.0
+	hole_intro_card.modulate = Color(1, 1, 1, 0)
+	
+	var hic_style = StyleBoxFlat.new()
+	hic_style.bg_color = Color(0.06, 0.08, 0.12, 0.92) # Deep obsidian slate glass
+	hic_style.border_width_left = 4
+	hic_style.border_width_top = 1
+	hic_style.border_width_right = 1
+	hic_style.border_width_bottom = 1
+	hic_style.border_color = Color(1.0, 0.76, 0.22, 0.95) # Amber gold left accent
+	hic_style.corner_radius_top_left = 12
+	hic_style.corner_radius_top_right = 12
+	hic_style.corner_radius_bottom_right = 12
+	hic_style.corner_radius_bottom_left = 12
+	hic_style.content_margin_left = 22
+	hic_style.content_margin_right = 22
+	hic_style.content_margin_top = 10
+	hic_style.content_margin_bottom = 10
+	hic_style.shadow_color = Color(0, 0, 0, 0.65)
+	hic_style.shadow_size = 14
+	hic_style.shadow_offset = Vector2(0, 4)
+	hole_intro_card.add_theme_stylebox_override("panel", hic_style)
+	
+	var hic_vbox = VBoxContainer.new()
+	hic_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hic_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	hic_vbox.add_theme_constant_override("separation", 4)
+	hole_intro_card.add_child(hic_vbox)
+	
+	_hole_card_header_lbl = Label.new()
+	_hole_card_header_lbl.name = "HoleCardHeaderLabel"
+	_hole_card_header_lbl.text = ""
+	_hole_card_header_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hole_card_header_lbl.add_theme_font_size_override("font_size", 12)
+	_hole_card_header_lbl.add_theme_color_override("font_color", Color(0.7, 0.78, 0.88))
+	_hole_card_header_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	_hole_card_header_lbl.add_theme_constant_override("outline_size", 2)
+	_hole_card_header_lbl.visible = false
+	hic_vbox.add_child(_hole_card_header_lbl)
+	
+	var hic_cols_hbox = HBoxContainer.new()
+	hic_cols_hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hic_cols_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	hic_cols_hbox.add_theme_constant_override("separation", 18)
+	hic_vbox.add_child(hic_cols_hbox)
+	
+	# Column 1: Hole
+	var hic_hole_col = VBoxContainer.new()
+	hic_hole_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hic_hole_col.alignment = BoxContainer.ALIGNMENT_CENTER
+	hic_hole_col.add_theme_constant_override("separation", 0)
+	var hic_hole_title = Label.new()
+	hic_hole_title.text = "HOLE"
+	hic_hole_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hic_hole_title.add_theme_font_size_override("font_size", 12)
+	hic_hole_title.add_theme_color_override("font_color", Color(0.68, 0.74, 0.82))
+	hic_hole_title.add_theme_color_override("font_outline_color", Color.BLACK)
+	hic_hole_title.add_theme_constant_override("outline_size", 2)
+	hic_hole_col.add_child(hic_hole_title)
+	
+	_hole_card_hole_lbl = Label.new()
+	_hole_card_hole_lbl.name = "HoleCardHoleNumLabel"
+	_hole_card_hole_lbl.text = "1"
+	_hole_card_hole_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hole_card_hole_lbl.add_theme_font_size_override("font_size", 34)
+	_hole_card_hole_lbl.add_theme_color_override("font_color", Color.WHITE)
+	_hole_card_hole_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	_hole_card_hole_lbl.add_theme_constant_override("outline_size", 4)
+	hic_hole_col.add_child(_hole_card_hole_lbl)
+	hic_cols_hbox.add_child(hic_hole_col)
+	
+	# Separator 1
+	var hic_sep1 = ColorRect.new()
+	hic_sep1.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hic_sep1.custom_minimum_size = Vector2(1, 40)
+	hic_sep1.color = Color(1, 1, 1, 0.15)
+	hic_sep1.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	hic_cols_hbox.add_child(hic_sep1)
+	
+	# Column 2: Par
+	var hic_par_col = VBoxContainer.new()
+	hic_par_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hic_par_col.alignment = BoxContainer.ALIGNMENT_CENTER
+	hic_par_col.add_theme_constant_override("separation", 0)
+	var hic_par_title = Label.new()
+	hic_par_title.text = "PAR"
+	hic_par_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hic_par_title.add_theme_font_size_override("font_size", 12)
+	hic_par_title.add_theme_color_override("font_color", Color(0.68, 0.74, 0.82))
+	hic_par_title.add_theme_color_override("font_outline_color", Color.BLACK)
+	hic_par_title.add_theme_constant_override("outline_size", 2)
+	hic_par_col.add_child(hic_par_title)
+	
+	_hole_card_par_lbl = Label.new()
+	_hole_card_par_lbl.name = "HoleCardParLabel"
+	_hole_card_par_lbl.text = "4"
+	_hole_card_par_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hole_card_par_lbl.add_theme_font_size_override("font_size", 34)
+	_hole_card_par_lbl.add_theme_color_override("font_color", Color.WHITE)
+	_hole_card_par_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	_hole_card_par_lbl.add_theme_constant_override("outline_size", 4)
+	hic_par_col.add_child(_hole_card_par_lbl)
+	hic_cols_hbox.add_child(hic_par_col)
+	
+	# Separator 2
+	var hic_sep2 = ColorRect.new()
+	hic_sep2.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hic_sep2.custom_minimum_size = Vector2(1, 40)
+	hic_sep2.color = Color(1, 1, 1, 0.15)
+	hic_sep2.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	hic_cols_hbox.add_child(hic_sep2)
+	
+	# Column 3: Distance
+	var hic_dist_col = VBoxContainer.new()
+	hic_dist_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hic_dist_col.alignment = BoxContainer.ALIGNMENT_CENTER
+	hic_dist_col.add_theme_constant_override("separation", 0)
+	var hic_dist_title = Label.new()
+	hic_dist_title.text = "DISTANCE"
+	hic_dist_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hic_dist_title.add_theme_font_size_override("font_size", 12)
+	hic_dist_title.add_theme_color_override("font_color", Color(0.68, 0.74, 0.82))
+	hic_dist_title.add_theme_color_override("font_outline_color", Color.BLACK)
+	hic_dist_title.add_theme_constant_override("outline_size", 2)
+	hic_dist_col.add_child(hic_dist_title)
+	
+	var hic_dist_val_hbox = HBoxContainer.new()
+	hic_dist_val_hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hic_dist_val_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	hic_dist_val_hbox.add_theme_constant_override("separation", 4)
+	
+	_hole_card_dist_lbl = Label.new()
+	_hole_card_dist_lbl.name = "HoleCardDistLabel"
+	_hole_card_dist_lbl.text = "---"
+	_hole_card_dist_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hole_card_dist_lbl.add_theme_font_size_override("font_size", 34)
+	_hole_card_dist_lbl.add_theme_color_override("font_color", Color(1.0, 0.82, 0.35)) # Amber gold
+	_hole_card_dist_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	_hole_card_dist_lbl.add_theme_constant_override("outline_size", 4)
+	hic_dist_val_hbox.add_child(_hole_card_dist_lbl)
+	
+	var hic_dist_unit = Label.new()
+	hic_dist_unit.text = "YDS"
+	hic_dist_unit.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	hic_dist_unit.add_theme_font_size_override("font_size", 13)
+	hic_dist_unit.add_theme_color_override("font_color", Color(0.85, 0.8, 0.7))
+	hic_dist_unit.add_theme_color_override("font_outline_color", Color.BLACK)
+	hic_dist_unit.add_theme_constant_override("outline_size", 2)
+	hic_dist_val_hbox.add_child(hic_dist_unit)
+	
+	hic_dist_col.add_child(hic_dist_val_hbox)
+	hic_cols_hbox.add_child(hic_dist_col)
+	
+	canvas.add_child(hole_intro_card)
 	
 	# Catch-Up HUD Banner (Bottom Center above stats bar)
 	catch_up_banner = PanelContainer.new()
@@ -893,7 +1093,26 @@ func _setup_hud() -> void:
 			if no_b != null:
 				no_b.call_deferred("grab_focus")
 			if has_node("/root/AnnouncerEngine"):
-				get_node("/root/AnnouncerEngine").call("SpeakHomeButtonHeckle")
+				var cur_score_rel := 0
+				if MultiplayerManager != null:
+					var p = MultiplayerManager.get_active_player()
+					if p != null:
+						for h_id in MultiplayerManager.hole_ids:
+							var sc = p.get("hole_scores", {}).get(h_id)
+							if sc != null and sc > 0:
+								var par_val = int(MultiplayerManager.hole_info.get(h_id, {}).get("Par", 4))
+								cur_score_rel += (int(sc) - par_val)
+				var cur_h_idx = clamp(MultiplayerManager.current_hole_index, 0, max(0, MultiplayerManager.hole_ids.size() - 1)) if MultiplayerManager != null else 0
+				var ctx = {
+					"game_mode": "course_play",
+					"hole_number": cur_h_idx + 1,
+					"hole_range": "front_nine" if cur_h_idx < 9 else "back_nine",
+					"score_relative_to_par": cur_score_rel,
+					"total_score_relative_to_par": cur_score_rel,
+					"score_status": "over_par" if cur_score_rel > 0 else ("under_par" if cur_score_rel < 0 else "even_par"),
+					"overall_score": "over_par" if cur_score_rel > 0 else ("under_par" if cur_score_rel < 0 else "even_par")
+				}
+				get_node("/root/AnnouncerEngine").call("SpeakHomeButtonHeckle", ctx)
 	)
 	canvas.add_child(home_btn)
 
@@ -1004,7 +1223,7 @@ func _setup_hud() -> void:
 			GlobalSettings.range_settings.tension_effects_enabled.value = new_val
 			GlobalSettings.save_settings()
 			if not new_val and has_node("/root/TensionManager"):
-				TensionManager.stop_tension()
+				TensionManager.stop_tension(true, true)
 			if new_val:
 				tension_btn.text = "💓 Suspense: ON"
 				apply_material_button_style(tension_btn, Color(0.75, 0.2, 0.3, 0.85))
@@ -1037,10 +1256,8 @@ func _setup_hud() -> void:
 	dist_menu.name = "DistanceMenu"
 	dist_menu.visible = false
 	dist_menu.inject_shot.connect(func(data):
-		var player_node = course_instance.get_node_or_null("Player") if course_instance != null else null
-		if player_node != null:
+		if course_instance != null and course_instance.has_method("_on_range_ui_hit_shot"):
 			course_instance.call("_on_range_ui_hit_shot", data)
-			player_node.call("_on_range_ui_hit_shot", data)
 	)
 	
 	# Distance Menu Button
@@ -1048,14 +1265,30 @@ func _setup_hud() -> void:
 	dist_btn.name = "HitDistanceButton"
 	dist_btn.text = "🎯 Hit Distance"
 	dist_btn.custom_minimum_size = Vector2(180, 56)
+	dist_btn.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	apply_material_button_style(dist_btn, Color(0.6, 0.2, 0.6, 0.85))
 	dist_btn.pressed.connect(func():
 		if dist_menu:
-			dist_menu.visible = not dist_menu.visible
 			if dist_menu.visible:
+				if dist_menu.has_method("close"):
+					dist_menu.close()
+				else:
+					dist_menu.visible = false
+				var vp = get_viewport()
+				if vp != null:
+					vp.gui_release_focus()
+			else:
+				dist_menu.visible = true
 				dist_menu.current_ball_node = active_ball
 				if course_instance != null and "aim_target_pos" in course_instance:
 					dist_menu.aim_target_node = course_instance.get("aim_target_pos")
+			_update_hit_distance_button_state()
+			_update_helpers_scroll_layout.call_deferred()
+	)
+	dist_btn.set_meta("toggle_target", dist_menu)
+	dist_menu.visibility_changed.connect(func():
+		_update_hit_distance_button_state()
+		_update_helpers_scroll_layout.call_deferred()
 	)
 	toggles_container.add_child(dist_btn)
 	toggles_container.add_child(dist_menu)
@@ -1172,6 +1405,48 @@ func _setup_hud() -> void:
 				apply_material_button_style(rollout_btn, Color(0.5, 0.5, 0.5, 0.85))
 	)
 	toggles_container.add_child(rollout_btn)
+
+	# Track Club Distances & Averages Toggle Button
+	track_averages_btn = Button.new()
+	track_averages_btn.name = "TrackAveragesButton"
+	var is_tracking_on = true
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and mp_mgr.has_method("is_club_averages_tracking_enabled"):
+		is_tracking_on = mp_mgr.is_club_averages_tracking_enabled()
+	track_averages_btn.text = "📊 Track Averages: ON" if is_tracking_on else "📊 Track Averages: OFF"
+	track_averages_btn.tooltip_text = "Toggle Club Distances & Shot Averages Tracking"
+	track_averages_btn.custom_minimum_size = Vector2(180, 56)
+	var initial_tracking_color = Color(0.18, 0.55, 0.65, 0.85) if is_tracking_on else Color(0.5, 0.5, 0.5, 0.85)
+	apply_material_button_style(track_averages_btn, initial_tracking_color)
+	track_averages_btn.pressed.connect(func():
+		var cur_state = true
+		var mp = get_node_or_null("/root/MultiplayerManager")
+		if mp != null and mp.has_method("is_club_averages_tracking_enabled"):
+			cur_state = mp.is_club_averages_tracking_enabled()
+		var new_state = not cur_state
+		if mp != null and mp.has_method("set_club_averages_tracking_enabled"):
+			mp.set_club_averages_tracking_enabled(new_state)
+		elif has_node("/root/GlobalSettings") and GlobalSettings.range_settings != null and "track_club_averages" in GlobalSettings.range_settings:
+			GlobalSettings.range_settings.track_club_averages.value = new_state
+			GlobalSettings.save_settings()
+		_update_track_averages_btn_state()
+	)
+	if mp_mgr != null and mp_mgr.has_signal("club_averages_tracking_toggled"):
+		mp_mgr.club_averages_tracking_toggled.connect(func(_enabled): _update_track_averages_btn_state())
+	toggles_container.add_child(track_averages_btn)
+
+	# Stuck Ball Relief Button
+	var s_btn = Button.new()
+	s_btn.name = "StuckBallButton"
+	s_btn.text = "⛳ Stuck Ball Relief"
+	s_btn.tooltip_text = "Move ball 2 yards closer to nearest fairway without counting a stroke"
+	s_btn.custom_minimum_size = Vector2(180, 56)
+	apply_material_button_style(s_btn, Color(0.75, 0.45, 0.15, 0.85))
+	s_btn.pressed.connect(func():
+		move_stuck_ball(2.0)
+	)
+	toggles_container.add_child(s_btn)
+	stuck_ball_btn = s_btn
 
 
 	var is_match_play = not MultiplayerManager.players.is_empty() and not MultiplayerManager.practice_mode_active
@@ -2450,24 +2725,25 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().gui_release_focus()
 				get_viewport().set_input_as_handled()
 				return
-			if range_ui != null:
-				var dist_m = range_ui.find_child("DistanceMenu", true, false)
-				if dist_m != null and is_instance_valid(dist_m) and dist_m.visible:
-					dist_m.visible = false
-					get_viewport().gui_release_focus()
-					get_viewport().set_input_as_handled()
-					return
-				var replay_modal = range_ui.call("get_active_swing_replay_modal") if range_ui.has_method("get_active_swing_replay_modal") else range_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
-				if replay_modal != null and is_instance_valid(replay_modal) and replay_modal.visible:
-					range_ui.call("toggle_prev_shot_analysis")
-					get_viewport().gui_release_focus()
-					get_viewport().set_input_as_handled()
-					return
-				if range_ui.has_node("SettingsLayer") and range_ui.get_node("SettingsLayer").visible:
-					range_ui.get_node("SettingsLayer").visible = false
-					get_viewport().gui_release_focus()
-					get_viewport().set_input_as_handled()
-					return
+			var dist_m = toggles_container.get_node_or_null("DistanceMenu") if toggles_container != null else null
+			if dist_m == null and range_ui != null:
+				dist_m = range_ui.find_child("DistanceMenu", true, false)
+			if dist_m != null and is_instance_valid(dist_m) and dist_m.visible:
+				dist_m.visible = false
+				get_viewport().gui_release_focus()
+				get_viewport().set_input_as_handled()
+				return
+			var replay_modal = range_ui.call("get_active_swing_replay_modal") if range_ui.has_method("get_active_swing_replay_modal") else range_ui.get_node_or_null("OverlayLayer/SwingReplayModal")
+			if replay_modal != null and is_instance_valid(replay_modal) and replay_modal.visible:
+				range_ui.call("toggle_prev_shot_analysis")
+				get_viewport().gui_release_focus()
+				get_viewport().set_input_as_handled()
+				return
+			if range_ui.has_node("SettingsLayer") and range_ui.get_node("SettingsLayer").visible:
+				range_ui.get_node("SettingsLayer").visible = false
+				get_viewport().gui_release_focus()
+				get_viewport().set_input_as_handled()
+				return
 
 		if event.is_action_pressed("mulligan"):
 			if mulligan_btn != null and is_instance_valid(mulligan_btn) and mulligan_btn.visible and not mulligan_btn.disabled:
@@ -2706,6 +2982,8 @@ func _update_hud_tooltips() -> void:
 		dist_btn.tooltip_text = "Hit Distance Menu [%s]" % km.get_action_summary_str("distance_menu_toggle")
 	if rollout_btn != null and is_instance_valid(rollout_btn):
 		rollout_btn.tooltip_text = "Toggle Ball Rollout & Bounce [%s]" % km.get_action_summary_str("rollout_toggle")
+	if stuck_ball_btn != null and is_instance_valid(stuck_ball_btn):
+		stuck_ball_btn.tooltip_text = "Move ball 2 yards closer to nearest fairway without counting a stroke"
 	if club_selector_node != null and is_instance_valid(club_selector_node):
 		var club_btn = club_selector_node.get("club_button") as Button
 		if club_btn != null and is_instance_valid(club_btn):
@@ -2781,8 +3059,34 @@ func _update_course_putting_cam_btn_state() -> void:
 			apply_material_button_style(putting_cam_btn, Color(0.15, 0.6, 0.3, 0.85))
 
 
+func _update_track_averages_btn_state() -> void:
+	var is_on := true
+	var mp = get_node_or_null("/root/MultiplayerManager")
+	if mp != null and mp.has_method("is_club_averages_tracking_enabled"):
+		is_on = mp.is_club_averages_tracking_enabled()
+	elif has_node("/root/GlobalSettings") and GlobalSettings.range_settings != null and "track_club_averages" in GlobalSettings.range_settings:
+		is_on = bool(GlobalSettings.range_settings.track_club_averages.value)
+	if track_averages_btn != null and is_instance_valid(track_averages_btn):
+		track_averages_btn.text = "📊 Track Averages: ON" if is_on else "📊 Track Averages: OFF"
+		var c = Color(0.18, 0.55, 0.65, 0.85) if is_on else Color(0.5, 0.5, 0.5, 0.85)
+		apply_material_button_style(track_averages_btn, c)
+
+
 func _on_debug_hit_distance_setting_changed(_val) -> void:
 	_update_hit_distance_button_visibility()
+
+
+func _update_hit_distance_button_state() -> void:
+	if dist_btn == null or not is_instance_valid(dist_btn):
+		return
+	var menu = toggles_container.get_node_or_null("DistanceMenu") if toggles_container != null else null
+	var is_open = menu != null and is_instance_valid(menu) and menu.visible
+	if is_open:
+		dist_btn.text = "🎯 Hit Distance: OPEN"
+		apply_material_button_style(dist_btn, Color(0.75, 0.25, 0.75, 0.9))
+	else:
+		dist_btn.text = "🎯 Hit Distance"
+		apply_material_button_style(dist_btn, Color(0.6, 0.2, 0.6, 0.85))
 
 
 func _update_hit_distance_button_visibility() -> void:
@@ -2797,8 +3101,21 @@ func _update_hit_distance_button_visibility() -> void:
 	var menu = toggles_container.get_node_or_null("DistanceMenu") if toggles_container != null else null
 	if not enabled and menu != null and menu.visible:
 		menu.visible = false
+	_update_hit_distance_button_state()
 	_update_helpers_scroll_layout.call_deferred()
 	call_deferred("_update_hud_focus_neighbors")
+
+
+func toggle_distance_menu() -> void:
+	var enabled := false
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.range_settings != null and gs.range_settings.settings.has("debug_show_hit_distance"):
+			enabled = bool(gs.range_settings.debug_show_hit_distance.value)
+	if not enabled:
+		return
+	if dist_btn != null and is_instance_valid(dist_btn):
+		dist_btn.emit_signal("pressed")
 
 
 func _get_current_green_vertices() -> PackedVector3Array:
@@ -2956,7 +3273,7 @@ func _update_top_hud(player: Dictionary) -> void:
 		return
 	var hole_id = MultiplayerManager.hole_ids[hole_idx]
 	var active_hole = MultiplayerManager.hole_info.get(hole_id, {})
-	var hole_par = active_hole.get("Par", 4)
+	var hole_par = int(round(float(active_hole.get("Par", 4))))
 	var strokes = player.get("strokes", 0)
 	var current_shot = strokes + 1
 	
@@ -3132,8 +3449,85 @@ func _update_minimap_position() -> void:
 
 
 
+func _on_course_ball_graphic_changed(player_name: String, _ball_graphic: String) -> void:
+	var cur_p = MultiplayerManager.get_active_player()
+	if not cur_p.is_empty() and cur_p.get("name", "").to_lower() == player_name.to_lower():
+		var player_node = course_instance.get_node_or_null("Player") if course_instance != null else null
+		if player_node != null and player_node.has_method("set_profile"):
+			player_node.set_profile(player_name)
+		elif active_ball != null and active_ball.has_method("apply_ball_graphic"):
+			var bg = MultiplayerManager.get_player_ball_graphic(player_name)
+			var av = MultiplayerManager.get_player_avatar(player_name)
+			var col = MultiplayerManager.get_player_color(cur_p)
+			active_ball.apply_ball_graphic(bg, av, player_name, col)
+
+func _get_tee_icon(tee_name: String, size: int = 14) -> ImageTexture:
+	var key = "%s_%d" % [tee_name.strip_edges().to_lower(), size]
+	if _tee_icon_cache.has(key):
+		return _tee_icon_cache[key]
+		
+	var col = TeeboxMarkerBuilder.get_tee_color(tee_name)
+	var img = Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var center = Vector2(size * 0.5, size * 0.5)
+	var r = (size * 0.5) - 1.0
+	for y in range(size):
+		for x in range(size):
+			var d = Vector2(x + 0.5, y + 0.5).distance_to(center)
+			if d <= r - 1.0:
+				img.set_pixel(x, y, col)
+			elif d <= r:
+				var border_col = Color(0.15, 0.15, 0.15, 0.9) if col.get_luminance() > 0.5 else Color(0.85, 0.85, 0.85, 0.8)
+				img.set_pixel(x, y, border_col)
+			elif d <= r + 0.75:
+				var alpha = clamp(1.0 - (d - r), 0.0, 1.0)
+				img.set_pixel(x, y, Color(0, 0, 0, alpha * 0.4))
+			else:
+				img.set_pixel(x, y, Color(0, 0, 0, 0))
+	var tex = ImageTexture.create_from_image(img)
+	_tee_icon_cache[key] = tex
+	return tex
+
+func _on_player_tee_changed(_p_idx: int, p_name: String, new_tee: String) -> void:
+	var active_p = MultiplayerManager.get_active_player()
+	if not active_p.is_empty() and active_p.get("name", "").to_lower() == p_name.to_lower():
+		if active_p.get("strokes", 0) == 0:
+			if course_instance != null and course_instance.has_method("get_height"):
+				var is_driver = MultiplayerManager.current_club.to_lower() in ["dr", "driver", "1w"]
+				var offset_y = 0.059435 if is_driver else (GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET)
+				active_p["position"].y = course_instance.get_height(active_p["position"].x, active_p["position"].z) + offset_y
+				active_p["last_starting_pos"] = active_p["position"]
+			if active_ball != null:
+				active_ball.spawn_position = active_p["position"]
+				active_ball.global_position = active_p["position"]
+				active_ball.reset()
+			var player_node_ref = course_instance.get_node_or_null("Player") if course_instance != null else null
+			if player_node_ref != null and player_node_ref.get("_last_starting_pos") != null:
+				player_node_ref._last_starting_pos = active_p["position"]
+			if course_instance != null:
+				if "current_hole_tee_dist_yards" in course_instance and course_instance.get("current_hole_location") != null:
+					course_instance.current_hole_tee_dist_yards = int(active_p["position"].distance_to(course_instance.current_hole_location) * 1.09361)
+				if course_instance.has_method("update_teebox_markers"):
+					course_instance.call("update_teebox_markers", new_tee)
+				course_instance.call("_update_hole_info_label", false)
+				reset_zoom_to_default()
+		_update_top_hud(active_p)
+	_update_distance_queue()
+
 func _on_active_player_changed(player: Dictionary) -> void:
-	if player.is_empty() or MultiplayerManager.hole_ids.is_empty():
+	if player.is_empty():
+		return
+
+	var player_node_ref = course_instance.get_node_or_null("Player") if course_instance != null else null
+	var p_name = str(player.get("name", ""))
+	if player_node_ref != null and player_node_ref.has_method("set_profile") and not p_name.is_empty():
+		player_node_ref.set_profile(p_name)
+	elif active_ball != null and active_ball.has_method("apply_ball_graphic") and not p_name.is_empty():
+		var bg = MultiplayerManager.get_player_ball_graphic(p_name) if MultiplayerManager != null and MultiplayerManager.has_method("get_player_ball_graphic") else player.get("ball_graphic", "single_line")
+		var av = MultiplayerManager.get_player_avatar(p_name) if MultiplayerManager != null and MultiplayerManager.has_method("get_player_avatar") else player.get("avatar", "")
+		var col = MultiplayerManager.get_player_color(player) if MultiplayerManager != null and MultiplayerManager.has_method("get_player_color") else player.get("color", Color(0.24, 0.46, 0.72))
+		active_ball.apply_ball_graphic(bg, av, p_name, col)
+
+	if MultiplayerManager.hole_ids.is_empty():
 		return
 		
 	_clear_map_markers()
@@ -3149,29 +3543,43 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			club_sel.update_bag_for_player(player.get("name", ""))
 
 	
+	var is_new_hole: bool = false
 	if course_instance != null:
 		if "_aim_is_manual" in course_instance:
 			course_instance.set("_aim_is_manual", false)
 		var hole_name = active_hole.get("Name", hole_id)
 		var current_hole_location = course_instance.get("current_hole_location")
-		var is_new_hole = _last_course_hole_id != hole_id or current_hole_location == null or current_hole_location.is_zero_approx()
+		is_new_hole = (_last_course_hole_id != hole_id) or (_last_loaded_hole_id != hole_id) or (_last_loaded_hole_index != hole_idx) or current_hole_location == null or current_hole_location.is_zero_approx()
 		
-		course_instance.current_hole_name = hole_name
-		course_instance.current_hole_par = active_hole.get("Par", 4)
-		var hole_loc = active_hole.get("Hole Location")
-		if hole_loc != null and is_new_hole:
-			course_instance.current_hole_location = Vector3(hole_loc[0], course_instance.get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
+		if is_new_hole:
 			_last_course_hole_id = hole_id
-			
-			if course_instance.has_node("PinMarker"):
-				course_instance.get_node("PinMarker").global_position = course_instance.current_hole_location
-				course_instance.get_node("PinMarker").visible = true
-			
-			var flag_pin = course_instance.get_node_or_null("FlagPin")
-			if flag_pin != null:
-				flag_pin.global_position = course_instance.current_hole_location
-				if course_instance.has_method("update_gimme_circles"):
-					course_instance.update_gimme_circles()
+			_last_loaded_hole_id = hole_id
+			_last_loaded_hole_index = hole_idx
+			if "current_hole_id" in course_instance:
+				course_instance.current_hole_id = hole_id
+			course_instance.current_hole_name = hole_name
+			course_instance.current_hole_par = int(round(float(active_hole.get("Par", 4))))
+			var hole_loc = active_hole.get("Hole Location")
+			if hole_loc != null:
+				course_instance.current_hole_location = Vector3(hole_loc[0], course_instance.get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
+				course_instance.aim_target_pos = Vector3.ZERO
+				
+				if course_instance.has_node("PinMarker"):
+					course_instance.get_node("PinMarker").global_position = course_instance.current_hole_location
+					course_instance.get_node("PinMarker").visible = true
+				
+				var flag_pin = course_instance.get_node_or_null("FlagPin")
+				if flag_pin != null:
+					flag_pin.global_position = course_instance.current_hole_location
+					if course_instance.has_method("update_gimme_circles"):
+						course_instance.update_gimme_circles()
+				elif course_instance.has_method("_spawn_flag_pin"):
+					course_instance.call("_spawn_flag_pin")
+		else:
+			if "current_hole_id" in course_instance and str(course_instance.current_hole_id).is_empty():
+				course_instance.current_hole_id = hole_id
+			course_instance.current_hole_name = hole_name
+			course_instance.current_hole_par = int(round(float(active_hole.get("Par", 4))))
 				
 		# Update tee-off distance
 		if player.get("strokes", 0) == 0 and course_instance != null and course_instance.has_method("get_height"):
@@ -3187,14 +3595,9 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			reset_zoom_to_default()
 		else:
 			_last_zoom_zone = -1
-			
-		# Update labels
-		course_instance.call("_update_hole_info_label", player["strokes"] > 0)
-		
-		# Update outline
-		if is_new_hole:
-			course_instance.call("update_hole_outline")
 
+	if player_node_ref == null and course_instance != null:
+		player_node_ref = course_instance.get_node_or_null("Player")
 	if active_ball != null:
 		var is_practice = course_instance != null and course_instance.get("practice_mode_active")
 		var is_multiplayer = MultiplayerManager.players.size() > 1
@@ -3203,7 +3606,6 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			should_initialize = false
 			
 		if should_initialize:
-			var player_node_ref = course_instance.get_node_or_null("Player") if course_instance != null else null
 			var initial_lie = player.get("lie_type", "teebox" if player.get("strokes", 0) == 0 else "fairway")
 			active_ball.spawn_position = player["position"]
 			active_ball.lie_type = initial_lie
@@ -3222,12 +3624,28 @@ func _on_active_player_changed(player: Dictionary) -> void:
 				course_instance.call("update_current_lie_and_reduction")
 			if player_node_ref != null:
 				player_node_ref.current_lie_type = active_ball.lie_type
-			
+
+	if course_instance != null:
+		# Update labels and outline with the ball now properly positioned at the hole/tee
+		course_instance.call("_update_hole_info_label", player["strokes"] > 0)
+		if is_new_hole:
+			course_instance.call("update_hole_outline")
+		if course_instance.has_method("update_teebox_markers"):
+			course_instance.call("update_teebox_markers", player.get("tee", "Blue"))
+
+	if active_ball != null:
+		var is_practice = course_instance != null and course_instance.get("practice_mode_active")
+		var is_multiplayer = MultiplayerManager.players.size() > 1
+		var should_initialize = true
+		if is_practice and not is_multiplayer and player.get("strokes", 0) > 0:
+			should_initialize = false
+
+		if should_initialize:
 			if course_instance != null and course_instance.has_method("update_auto_club"):
 				course_instance.call("update_auto_club", true)
 			
 			# Move camera target to focus on the active ball
-			var camera = course_instance.get_node_or_null("PhantomCamera3D")
+			var camera = course_instance.get_node_or_null("PhantomCamera3D") if course_instance != null else null
 			if camera != null:
 				var cam_target = player_node_ref.get_camera_target() if player_node_ref != null and player_node_ref.has_method("get_camera_target") else active_ball
 				camera.follow_target = cam_target
@@ -3244,7 +3662,7 @@ func _on_active_player_changed(player: Dictionary) -> void:
 				var target_aim = course_instance.get("aim_target_pos")
 				if is_putting and course_instance.get("current_hole_location") != null:
 					target_aim = course_instance.get("current_hole_location")
-				elif target_aim == null or target_aim.is_zero_approx():
+				elif target_aim == null or target_aim.is_zero_approx() or is_new_hole:
 					if course_instance.has_method("apply_default_aim"):
 						var sel_club = MultiplayerManager.current_club if "current_club" in MultiplayerManager else ""
 						target_aim = course_instance.call("apply_default_aim", sel_club)
@@ -3365,6 +3783,142 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			var lm = get_node("/root/LaunchMonitorManager")
 			if lm != null and lm.has_method("set_ready") and not lm.get("is_ready"):
 				lm.call("set_ready")
+
+	# Trigger hole intro card slide-in once per hole at hole start
+	var is_hole_start = (_last_hole_card_hole_index != hole_idx or _last_hole_card_hole_id != hole_id)
+	if is_hole_start and not MultiplayerManager.hole_ids.is_empty():
+		_last_hole_card_hole_index = hole_idx
+		_last_hole_card_hole_id = hole_id
+		var dist = _get_distance_to_hole_for_player(player, hole_id)
+		var hole_name = active_hole.get("Name", "")
+		var course_name = ""
+		if course_instance != null and "course_name" in course_instance and not str(course_instance.course_name).is_empty():
+			course_name = str(course_instance.course_name)
+		var hole_num = MultiplayerManager.get_hole_number(hole_idx)
+		var hole_par = int(round(float(active_hole.get("Par", 4))))
+		_show_hole_intro_card(hole_num, hole_par, dist, course_name, hole_name)
+
+
+func _get_distance_to_hole_for_player(p: Dictionary, hole_id: String) -> int:
+	if course_instance != null and "current_hole_tee_dist_yards" in course_instance and course_instance.current_hole_tee_dist_yards > 0:
+		return int(course_instance.current_hole_tee_dist_yards)
+	if course_instance != null and course_instance.get("current_hole_location") != null and not course_instance.current_hole_location.is_zero_approx() and p.has("position"):
+		var p_pos = Vector3(p["position"].x, 0.0, p["position"].z)
+		var h_pos = Vector3(course_instance.current_hole_location.x, 0.0, course_instance.current_hole_location.z)
+		var d = int(round(p_pos.distance_to(h_pos) * 1.09361))
+		if d > 0:
+			return d
+	var tee_col = p.get("tee", "Blue")
+	var hole_dist = _get_hole_distance(hole_id, tee_col)
+	if hole_dist > 0:
+		return hole_dist
+	return 0
+
+
+func _show_hole_intro_card(hole_num: int, par: int, dist: int, course_title: String = "", hole_name: String = "") -> void:
+	if hole_intro_card == null:
+		return
+	
+	if _hole_card_hole_lbl != null:
+		_hole_card_hole_lbl.text = str(hole_num)
+	if _hole_card_par_lbl != null:
+		_hole_card_par_lbl.text = str(par)
+	if _hole_card_dist_lbl != null:
+		_hole_card_dist_lbl.text = str(dist) if dist > 0 else "---"
+		
+	if _hole_card_header_lbl != null:
+		var header_text = ""
+		var clean_hole_name = hole_name.strip_edges()
+		var clean_course_name = course_title.strip_edges()
+		var is_generic_hole_name = clean_hole_name.is_empty() or clean_hole_name.to_lower() == ("hole %d" % hole_num).to_lower() or clean_hole_name.to_lower() == ("hole%d" % hole_num).to_lower()
+		
+		if not clean_course_name.is_empty() and not is_generic_hole_name:
+			header_text = "%s  •  %s" % [clean_course_name, clean_hole_name]
+		elif not clean_course_name.is_empty():
+			header_text = clean_course_name
+		elif not is_generic_hole_name:
+			header_text = clean_hole_name
+			
+		if not header_text.is_empty():
+			_hole_card_header_lbl.text = header_text.to_upper()
+			_hole_card_header_lbl.visible = true
+		else:
+			_hole_card_header_lbl.visible = false
+
+	if _hole_card_tween != null and _hole_card_tween.is_valid():
+		_hole_card_tween.kill()
+
+	var vp_w = 1920.0
+	if hole_intro_card.get_viewport() != null:
+		var vp_rect = hole_intro_card.get_viewport_rect()
+		if vp_rect.size.x > 100.0:
+			vp_w = vp_rect.size.x
+
+	var half_card_w = 210.0
+	var offscreen_left_offset = -(vp_w * 0.5) - 350.0
+	var offscreen_right_offset = (vp_w * 0.5) + 350.0
+
+	var entrance_left = offscreen_left_offset - half_card_w
+	var entrance_right = offscreen_left_offset + half_card_w
+	var exit_left = offscreen_right_offset - half_card_w
+	var exit_right = offscreen_right_offset + half_card_w
+	var onscreen_left = -half_card_w
+	var onscreen_right = half_card_w
+
+	hole_intro_card.visible = true
+	hole_intro_card.modulate = Color(1, 1, 1, 0)
+	hole_intro_card.offset_left = entrance_left
+	hole_intro_card.offset_right = entrance_right
+
+	_hole_card_tween = create_tween()
+	# Optional initial settle delay
+	_hole_card_tween.tween_interval(0.35)
+
+	# Phase 1: Slide in from the LEFT into the middle of the screen (1.5 seconds)
+	_hole_card_tween.tween_property(hole_intro_card, "offset_left", onscreen_left, 1.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_hole_card_tween.parallel().tween_property(hole_intro_card, "offset_right", onscreen_right, 1.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_hole_card_tween.parallel().tween_property(hole_intro_card, "modulate:a", 1.0, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+	# Phase 2: Dwell in the middle of the screen for 2.5 seconds so the player can comfortably read it
+	_hole_card_tween.tween_interval(2.5)
+
+	# Phase 3: Slide out to the RIGHT (1.5 seconds)
+	_hole_card_tween.tween_property(hole_intro_card, "offset_left", exit_left, 1.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	_hole_card_tween.parallel().tween_property(hole_intro_card, "offset_right", exit_right, 1.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	_hole_card_tween.parallel().tween_property(hole_intro_card, "modulate:a", 0.0, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+
+	# Hide upon completion
+	_hole_card_tween.tween_callback(func():
+		if is_instance_valid(hole_intro_card):
+			hole_intro_card.visible = false
+	)
+
+
+func _dismiss_hole_intro_card_early() -> void:
+	if hole_intro_card == null or not hole_intro_card.visible:
+		return
+	if _hole_card_tween != null and _hole_card_tween.is_valid():
+		_hole_card_tween.kill()
+
+	var vp_w = 1920.0
+	if hole_intro_card.get_viewport() != null:
+		var vp_rect = hole_intro_card.get_viewport_rect()
+		if vp_rect.size.x > 100.0:
+			vp_w = vp_rect.size.x
+	var half_card_w = 210.0
+	var offscreen_right_offset = (vp_w * 0.5) + 350.0
+	var exit_left = offscreen_right_offset - half_card_w
+	var exit_right = offscreen_right_offset + half_card_w
+
+	_hole_card_tween = create_tween()
+	_hole_card_tween.set_parallel(true)
+	_hole_card_tween.tween_property(hole_intro_card, "offset_left", exit_left, 0.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	_hole_card_tween.tween_property(hole_intro_card, "offset_right", exit_right, 0.5).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	_hole_card_tween.tween_property(hole_intro_card, "modulate:a", 0.0, 0.4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	_hole_card_tween.chain().tween_callback(func():
+		if is_instance_valid(hole_intro_card):
+			hole_intro_card.visible = false
+	)
 
 
 
@@ -3968,7 +4522,7 @@ func _on_gimme_awarded(player: Dictionary, extra_strokes: int) -> void:
 		var hole_idx = clamp(MultiplayerManager.current_hole_index, 0, max(0, MultiplayerManager.hole_ids.size() - 1))
 		var hole_id = MultiplayerManager.hole_ids[hole_idx] if not MultiplayerManager.hole_ids.is_empty() else ""
 		var current_hole = MultiplayerManager.hole_info.get(hole_id, {})
-		var par = current_hole.get("Par", 4)
+		var par = int(round(float(current_hole.get("Par", 4))))
 		var strokes = player.get("strokes", 0)
 		var hole_diff = strokes - par
 		var diff_text = "E"
@@ -4158,32 +4712,61 @@ func is_player_in_teebox() -> bool:
 	return false
 
 
-func is_player_on_wrong_green() -> bool:
-	if course_instance != null and course_instance.has_method("is_ball_on_wrong_green"):
-		var ball = active_ball
-		if ball == null:
-			var player_node = course_instance.get_node_or_null("Player")
-			if player_node != null:
-				ball = player_node.get("ball")
-		var ball_pos = ball.global_position if ball != null else Vector3.ZERO
-		return bool(course_instance.call("is_ball_on_wrong_green", ball_pos))
-	if active_ball != null and course_instance != null:
-		var pin_pos = course_instance.get("current_hole_location")
-		if pin_pos != null and not pin_pos.is_zero_approx():
-			var l = str(active_ball.get("lie_type")).to_lower()
-			if (l == "green" or l == "fringe") and active_ball.global_position.distance_to(pin_pos) > 55.0:
-				return true
+func move_stuck_ball(distance_yards: float = 2.0) -> bool:
+	if course_instance != null and course_instance.has_method("move_stuck_ball"):
+		var res = course_instance.call("move_stuck_ball", distance_yards)
+		_update_distance_queue()
+		return bool(res)
 	return false
 
 
-func is_player_on_green() -> bool:
-	if is_player_on_wrong_green():
-		return false
+var _cached_cp_wrong_green_pos: Vector3 = Vector3.INF
+var _cached_cp_wrong_green_res: bool = false
+
+func is_player_on_wrong_green() -> bool:
 	var ball = active_ball
 	if ball == null and course_instance != null:
 		var player_node = course_instance.get_node_or_null("Player")
 		if player_node != null:
 			ball = player_node.get("ball")
+	var ball_pos = ball.global_position if ball != null else Vector3.ZERO
+	if ball_pos.is_equal_approx(_cached_cp_wrong_green_pos):
+		return _cached_cp_wrong_green_res
+	_cached_cp_wrong_green_pos = ball_pos
+	_cached_cp_wrong_green_res = _calc_is_player_on_wrong_green(ball, ball_pos)
+	return _cached_cp_wrong_green_res
+
+func _calc_is_player_on_wrong_green(ball: Node, ball_pos: Vector3) -> bool:
+	if course_instance != null and course_instance.has_method("is_ball_on_wrong_green"):
+		return bool(course_instance.call("is_ball_on_wrong_green", ball_pos))
+	if ball != null and course_instance != null:
+		var pin_pos = course_instance.get("current_hole_location")
+		if pin_pos != null and not pin_pos.is_zero_approx():
+			var l = str(ball.get("lie_type")).to_lower()
+			if (l == "green" or l == "fringe") and ball_pos.distance_to(pin_pos) > 55.0:
+				return true
+	return false
+
+
+var _cached_cp_on_green_pos: Vector3 = Vector3.INF
+var _cached_cp_on_green_res: bool = false
+
+func is_player_on_green() -> bool:
+	var ball = active_ball
+	if ball == null and course_instance != null:
+		var player_node = course_instance.get_node_or_null("Player")
+		if player_node != null:
+			ball = player_node.get("ball")
+	var ball_pos = ball.global_position if ball != null else Vector3.ZERO
+	if ball_pos.is_equal_approx(_cached_cp_on_green_pos):
+		return _cached_cp_on_green_res
+	_cached_cp_on_green_pos = ball_pos
+	_cached_cp_on_green_res = _calc_is_player_on_green(ball)
+	return _cached_cp_on_green_res
+
+func _calc_is_player_on_green(ball: Node) -> bool:
+	if is_player_on_wrong_green():
+		return false
 	if ball != null:
 		var lie_str = str(ball.get("lie_type")).to_lower()
 		if lie_str == "green":
@@ -4200,14 +4783,25 @@ func is_player_on_green() -> bool:
 	return false
 
 
+var _cached_cp_on_fringe_pos: Vector3 = Vector3.INF
+var _cached_cp_on_fringe_res: bool = false
+
 func is_player_on_fringe() -> bool:
-	if is_player_on_wrong_green():
-		return false
 	var ball = active_ball
 	if ball == null and course_instance != null:
 		var player_node = course_instance.get_node_or_null("Player")
 		if player_node != null:
 			ball = player_node.get("ball")
+	var ball_pos = ball.global_position if ball != null else Vector3.ZERO
+	if ball_pos.is_equal_approx(_cached_cp_on_fringe_pos):
+		return _cached_cp_on_fringe_res
+	_cached_cp_on_fringe_pos = ball_pos
+	_cached_cp_on_fringe_res = _calc_is_player_on_fringe(ball)
+	return _cached_cp_on_fringe_res
+
+func _calc_is_player_on_fringe(ball: Node) -> bool:
+	if is_player_on_wrong_green():
+		return false
 	if ball != null:
 		var lie_str = str(ball.get("lie_type")).to_lower()
 		if lie_str == "fringe":
@@ -4224,11 +4818,30 @@ func is_player_on_fringe() -> bool:
 	return false
 
 
+var _cached_cp_def_putt_pos: Vector3 = Vector3.INF
+var _cached_cp_def_putt_club: String = ""
+var _cached_cp_def_putt_res: bool = false
+
 func is_default_club_putter() -> bool:
+	var ball = active_ball
+	var ball_pos = ball.global_position if ball != null else Vector3.ZERO
+	var current_c = ""
+	if course_instance != null and course_instance.has_method("_get_current_club"):
+		current_c = str(course_instance.call("_get_current_club")).to_lower()
+	if ball_pos.is_equal_approx(_cached_cp_def_putt_pos) and current_c == _cached_cp_def_putt_club:
+		return _cached_cp_def_putt_res
+	_cached_cp_def_putt_pos = ball_pos
+	_cached_cp_def_putt_club = current_c
+	_cached_cp_def_putt_res = _calc_is_default_club_putter(current_c)
+	return _cached_cp_def_putt_res
+
+func _calc_is_default_club_putter(current_c: String) -> bool:
 	if is_player_on_wrong_green():
 		return false
 	if course_instance != null and course_instance.has_method("is_default_club_putter"):
 		return bool(course_instance.call("is_default_club_putter"))
+	if not current_c.is_empty():
+		return current_c in ["pt", "putt", "putter"]
 	if course_instance != null and course_instance.has_method("get_default_club"):
 		var def_c = str(course_instance.call("get_default_club")).to_lower()
 		return def_c in ["pt", "putt", "putter"]
@@ -4451,77 +5064,95 @@ func _update_minimap() -> void:
 	_update_minimap_ball_marker(ball_pos, _last_zoom_zone, ball)
 
 	# --- Update Distance Tracker Panel ---
-	if _distance_tracker_panel != null and _back_lbl != null and _hole_lbl != null and _front_lbl != null:
-		if pin_pos != null:
-			var ball_pos_2d = Vector2(ball_pos.x, ball_pos.z)
-			var pin_pos_2d = Vector2(pin_pos.x, pin_pos.z)
-			
-			# Get direction from ball to pin on XZ plane
-			var pin_dir_2d = (pin_pos_2d - ball_pos_2d).normalized()
-			if pin_dir_2d.length_squared() < 0.001:
-				pin_dir_2d = Vector2(dir_3d.x, dir_3d.z).normalized()
-			
-			# Get green vertices
-			var global_verts = _get_cached_green_vertices()
-			if global_verts.is_empty():
-				# Fallback: create a circle of 24 points around pin_pos with a 15-yard (13.7m) radius
-				var radius = 13.7
-				for i in range(24):
-					var angle = i * PI * 2.0 / 24.0
-					global_verts.append(pin_pos + Vector3(cos(angle) * radius, 0, sin(angle) * radius))
-					
-			var min_proj_dist = 999999.0
-			var max_proj_dist = -999999.0
-			
-			for v in global_verts:
-				var v_2d = Vector2(v.x, v.z)
-				var proj = (v_2d - ball_pos_2d).dot(pin_dir_2d)
-				if proj < min_proj_dist:
-					min_proj_dist = proj
-				if proj > max_proj_dist:
-					max_proj_dist = proj
-					
-			# Distance to hole
-			var dist_hole = ball_pos.distance_to(pin_pos)
-			
-			# Check if putting / on the green or fringe
-			var is_putting = (not is_player_on_wrong_green()) and (is_default_club_putter() or is_player_on_green() or is_player_on_fringe())
+	_update_distance_tracker_panel(ball_pos, pin_pos, dir_3d)
 
-			if is_putting:
-				# Display as feet when putting on the green or fringe
-				var dist_back_ft = int(round(max_proj_dist * 3.28084))
-				var dist_hole_ft = int(round(dist_hole * 3.28084))
-				var dist_front_ft = int(round(min_proj_dist * 3.28084))
-				
-				if dist_front_ft < 0:
-					dist_front_ft = 0
-					
-				_back_lbl.text = str(dist_back_ft)
-				_hole_lbl.text = str(dist_hole_ft)
-				_front_lbl.text = str(dist_front_ft)
-				if _distance_unit_lbl != null:
-					_distance_unit_lbl.text = "FT"
-			else:
-				# Display as yards when off the green
-				var dist_back_yds = int(max_proj_dist * 1.09361)
-				var dist_hole_yds = int(dist_hole * 1.09361)
-				var dist_front_yds = int(min_proj_dist * 1.09361)
-				
-				# Clamp front distance to be at least 0
-				if dist_front_yds < 0:
-					dist_front_yds = 0
-					
-				_back_lbl.text = str(dist_back_yds)
-				_hole_lbl.text = str(dist_hole_yds)
-				_front_lbl.text = str(dist_front_yds)
-				if _distance_unit_lbl != null:
-					_distance_unit_lbl.text = "YDS"
-		else:
-			_back_lbl.text = "---"
-			_hole_lbl.text = "---"
-			_front_lbl.text = "---"
-			if _distance_unit_lbl != null:
-				_distance_unit_lbl.text = ""
+
+var _last_tracker_ball_pos: Vector3 = Vector3.INF
+var _last_tracker_pin_pos: Vector3 = Vector3.INF
+var _last_tracker_hole_idx: int = -1
+
+func _update_distance_tracker_panel(ball_pos: Vector3, pin_pos: Variant, dir_3d: Vector3) -> void:
+	if _distance_tracker_panel == null or _back_lbl == null or _hole_lbl == null or _front_lbl == null:
+		return
+	if pin_pos == null or not (pin_pos is Vector3):
+		_back_lbl.text = "---"
+		_hole_lbl.text = "---"
+		_front_lbl.text = "---"
+		if _distance_unit_lbl != null:
+			_distance_unit_lbl.text = ""
+		return
+
+	var hole_idx = MultiplayerManager.current_hole_index
+	if ball_pos.is_equal_approx(_last_tracker_ball_pos) and (pin_pos as Vector3).is_equal_approx(_last_tracker_pin_pos) and hole_idx == _last_tracker_hole_idx:
+		return
+
+	_last_tracker_ball_pos = ball_pos
+	_last_tracker_pin_pos = pin_pos
+	_last_tracker_hole_idx = hole_idx
+
+	var ball_pos_2d = Vector2(ball_pos.x, ball_pos.z)
+	var pin_pos_2d = Vector2((pin_pos as Vector3).x, (pin_pos as Vector3).z)
+	
+	# Get direction from ball to pin on XZ plane
+	var pin_dir_2d = (pin_pos_2d - ball_pos_2d).normalized()
+	if pin_dir_2d.length_squared() < 0.001:
+		pin_dir_2d = Vector2(dir_3d.x, dir_3d.z).normalized()
+	
+	# Get green vertices
+	var global_verts = _get_cached_green_vertices()
+	if global_verts.is_empty():
+		# Fallback: create a circle of 24 points around pin_pos with a 15-yard (13.7m) radius
+		var radius = 13.7
+		for i in range(24):
+			var angle = i * PI * 2.0 / 24.0
+			global_verts.append(pin_pos + Vector3(cos(angle) * radius, 0, sin(angle) * radius))
+			
+	var min_proj_dist = 999999.0
+	var max_proj_dist = -999999.0
+	
+	for v in global_verts:
+		var v_2d = Vector2(v.x, v.z)
+		var proj = (v_2d - ball_pos_2d).dot(pin_dir_2d)
+		if proj < min_proj_dist:
+			min_proj_dist = proj
+		if proj > max_proj_dist:
+			max_proj_dist = proj
+			
+	# Distance to hole
+	var dist_hole = ball_pos.distance_to(pin_pos)
+	
+	# Check if putting / on the green or fringe
+	var is_putting = (not is_player_on_wrong_green()) and (is_default_club_putter() or is_player_on_green() or is_player_on_fringe())
+
+	if is_putting:
+		# Display as feet when putting on the green or fringe
+		var dist_back_ft = int(round(max_proj_dist * 3.28084))
+		var dist_hole_ft = int(round(dist_hole * 3.28084))
+		var dist_front_ft = int(round(min_proj_dist * 3.28084))
+		
+		if dist_front_ft < 0:
+			dist_front_ft = 0
+			
+		_back_lbl.text = str(dist_back_ft)
+		_hole_lbl.text = str(dist_hole_ft)
+		_front_lbl.text = str(dist_front_ft)
+		if _distance_unit_lbl != null:
+			_distance_unit_lbl.text = "FT"
+	else:
+		# Display as yards when off the green
+		var dist_back_yds = int(max_proj_dist * 1.09361)
+		var dist_hole_yds = int(dist_hole * 1.09361)
+		var dist_front_yds = int(min_proj_dist * 1.09361)
+		
+		# Clamp front distance to be at least 0
+		if dist_front_yds < 0:
+			dist_front_yds = 0
+			
+		_back_lbl.text = str(dist_back_yds)
+		_hole_lbl.text = str(dist_hole_yds)
+		_front_lbl.text = str(dist_front_yds)
+		if _distance_unit_lbl != null:
+			_distance_unit_lbl.text = "YDS"
 
 
 const MINIMAP_FLAG_SVG: String = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 36" width="32" height="36">
@@ -5046,7 +5677,15 @@ func _update_helpers_scroll_layout() -> void:
 	if scroll_w <= 0 and is_bar_visible and v_bar != null:
 		scroll_w = int(v_bar.custom_minimum_size.x)
 	var shift = (scroll_w + 6) if scroll_w > 0 else 0
-	right_panel.offset_left = -280 - shift
+
+	var dist_menu = toggles_scroll.find_child("DistanceMenu", true, false)
+	var is_dist_menu_visible = dist_menu != null and is_instance_valid(dist_menu) and dist_menu.visible and toggles_scroll.visible
+	var dist_shift = 0
+	if is_dist_menu_visible:
+		var is_mob = MobilePerformance.is_mobile()
+		dist_shift = 220 if is_mob else 160
+
+	right_panel.offset_left = -280 - shift - dist_shift
 
 
 func _set_helpers_visible(is_vis: bool) -> void:
@@ -5502,11 +6141,11 @@ func _populate_scorecard(action_type: String) -> void:
 	var par_bg = Color(0.16, 0.22, 0.34, 0.88)
 	add_cell.call("Par", par_bg, false, Color(0.8, 0.8, 0.8), 15)
 	
-	var front_par_sum = 0
+	var front_par_sum: int = 0
 	for i in range(front_holes.size()):
 		var hole_id = front_holes[i]
 		var hole = MultiplayerManager.hole_info.get(hole_id, {})
-		var par = int(round(float(hole.get("Par", 4))))
+		var par: int = int(round(float(hole.get("Par", 4))))
 		front_par_sum += par
 		if render_front:
 			var is_act = (MultiplayerManager.get_hole_number_from_id(hole_id, i) == active_hole_num)
@@ -5515,12 +6154,12 @@ func _populate_scorecard(action_type: String) -> void:
 	if render_front and (num_holes > 9 or _scorecard_view_tab == "Front 9"):
 		add_cell.call(str(front_par_sum), par_bg, false, Color(1.0, 0.85, 0.38), 15)
 		
-	var back_par_sum = 0
+	var back_par_sum: int = 0
 	if num_holes > 9:
 		for i in range(back_holes.size()):
 			var hole_id = back_holes[i]
 			var hole = MultiplayerManager.hole_info.get(hole_id, {})
-			var par = int(round(float(hole.get("Par", 4))))
+			var par: int = int(round(float(hole.get("Par", 4))))
 			back_par_sum += par
 			if render_back:
 				var is_act = (MultiplayerManager.get_hole_number_from_id(hole_id, 9 + i) == active_hole_num)
@@ -5530,7 +6169,7 @@ func _populate_scorecard(action_type: String) -> void:
 			add_cell.call(str(back_par_sum), par_bg, false, Color(1.0, 0.85, 0.38), 15)
 			
 	if _scorecard_view_tab == "All":
-		var total_par = front_par_sum + (back_par_sum if num_holes > 9 else 0)
+		var total_par: int = front_par_sum + (back_par_sum if num_holes > 9 else 0)
 		add_cell.call(str(total_par), par_bg, false, Color(1.0, 0.85, 0.38), 15)
 
 	var sc_title = hud_scorecard.get_node_or_null("VBoxContainer/TitleLabel") as Label
@@ -5547,16 +6186,16 @@ func _populate_scorecard(action_type: String) -> void:
 		var row_bg = Color(0.14, 0.16, 0.20, 0.94) if p_idx % 2 == 0 else Color(0.09, 0.11, 0.14, 0.94)
 		
 		# Name cell
-		var name_text = "%s (%s)" % [p["name"], p["tee"]]
+		var name_text = p["name"]
 		if not p.get("team", "").is_empty() and MultiplayerManager.game_mode == "2v2 Scramble":
-			name_text = "%s [%s] (%s)" % [p["name"], p["team"], p["tee"]]
+			name_text = "%s [%s]" % [p["name"], p["team"]]
 		var name_fg = Color.WHITE
 		if not p.get("active", true):
 			name_text += " (Out)"
 			name_fg = Color(0.6, 0.6, 0.6)
 			
 		var cell = PanelContainer.new()
-		cell.custom_minimum_size = Vector2(200, 38)
+		cell.custom_minimum_size = Vector2(265, 38)
 		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cell.size_flags_vertical = Control.SIZE_FILL
 		
@@ -5573,7 +6212,7 @@ func _populate_scorecard(action_type: String) -> void:
 		
 		var hbox = HBoxContainer.new()
 		hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		hbox.add_theme_constant_override("separation", 8)
+		hbox.add_theme_constant_override("separation", 6)
 		cell.add_child(hbox)
 		
 		# Avatar or Color badge
@@ -5624,11 +6263,81 @@ func _populate_scorecard(action_type: String) -> void:
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		label.add_theme_color_override("font_color", name_fg)
-		label.add_theme_font_size_override("font_size", 16)
+		label.add_theme_font_size_override("font_size", 15)
 		label.add_theme_color_override("font_outline_color", Color.BLACK)
 		label.add_theme_constant_override("outline_size", 2)
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		hbox.add_child(label)
+		
+		# Tee selector dropdown with tee color swatch icon
+		var tee_opt = OptionButton.new()
+		tee_opt.custom_minimum_size = Vector2(98, 28)
+		tee_opt.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		tee_opt.focus_mode = Control.FOCUS_ALL
+		tee_opt.add_theme_font_size_override("font_size", 13)
+		tee_opt.expand_icon = true
+		tee_opt.add_theme_constant_override("icon_max_width", 14)
+		
+		var opt_style_normal = StyleBoxFlat.new()
+		opt_style_normal.bg_color = Color(0.12, 0.16, 0.24, 0.85)
+		opt_style_normal.border_width_left = 1
+		opt_style_normal.border_width_top = 1
+		opt_style_normal.border_width_right = 1
+		opt_style_normal.border_width_bottom = 1
+		opt_style_normal.border_color = Color(0.32, 0.42, 0.58, 0.6)
+		opt_style_normal.corner_radius_top_left = 6
+		opt_style_normal.corner_radius_top_right = 6
+		opt_style_normal.corner_radius_bottom_left = 6
+		opt_style_normal.corner_radius_bottom_right = 6
+		opt_style_normal.content_margin_left = 6
+		opt_style_normal.content_margin_right = 6
+		opt_style_normal.content_margin_top = 2
+		opt_style_normal.content_margin_bottom = 2
+		
+		var opt_style_hover = opt_style_normal.duplicate()
+		opt_style_hover.bg_color = Color(0.18, 0.26, 0.38, 0.95)
+		opt_style_hover.border_color = Color(0.45, 0.72, 1.0, 0.85)
+		
+		var opt_style_pressed = opt_style_hover.duplicate()
+		opt_style_pressed.bg_color = Color(0.10, 0.18, 0.30, 0.95)
+		
+		tee_opt.add_theme_stylebox_override("normal", opt_style_normal)
+		tee_opt.add_theme_stylebox_override("hover", opt_style_hover)
+		tee_opt.add_theme_stylebox_override("pressed", opt_style_pressed)
+		tee_opt.add_theme_stylebox_override("focus", opt_style_hover)
+		
+		var popup = tee_opt.get_popup()
+		if popup != null:
+			ThemeManager.style_popup_menu(popup, 14)
+			
+		var available_tees = MultiplayerManager.get_course_tees()
+		var player_tee = str(p.get("tee", "Blue"))
+		if not available_tees.has(player_tee):
+			available_tees.append(player_tee)
+			
+		for t_idx in range(available_tees.size()):
+			var t_name = available_tees[t_idx]
+			var t_icon = _get_tee_icon(t_name, 14)
+			tee_opt.add_icon_item(t_icon, t_name, t_idx)
+			if t_name.to_lower() == player_tee.to_lower():
+				tee_opt.selected = t_idx
+				
+		if not p.get("active", true):
+			tee_opt.disabled = true
+			
+		tee_opt.pressed.connect(func():
+			if _scorecard_countdown_active and not _scorecard_countdown_paused:
+				_on_scorecard_pause_toggled()
+		)
+		
+		var current_p_idx = p_idx
+		tee_opt.item_selected.connect(func(sel_idx):
+			var chosen_tee = tee_opt.get_item_text(sel_idx)
+			MultiplayerManager.set_player_tee(current_p_idx, chosen_tee)
+			_populate_scorecard(_last_scorecard_action_type)
+		)
+		hbox.add_child(tee_opt)
 		
 		var email_btn = Button.new()
 		email_btn.text = "✉️"
@@ -5910,6 +6619,10 @@ func _set_other_elements_visible(is_visible: bool) -> void:
 		forfeit_btn.visible = is_visible and is_match_play and p_strokes >= 10 and not p_holed
 	if not is_visible and forfeit_confirm_dialog != null and forfeit_confirm_dialog.visible:
 		forfeit_confirm_dialog.visible = false
+	if not is_visible and hole_intro_card != null and hole_intro_card.visible:
+		if _hole_card_tween != null and _hole_card_tween.is_valid():
+			_hole_card_tween.kill()
+		hole_intro_card.visible = false
 	if not is_visible:
 		if add_player_prompt_dialog != null and add_player_prompt_dialog.visible:
 			if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == add_player_prompt_dialog:
@@ -6460,7 +7173,7 @@ func _email_player_stats(p: Dictionary) -> void:
 	var distances = {}
 	for hole_id in MultiplayerManager.hole_ids:
 		var hole = MultiplayerManager.hole_info.get(hole_id, {})
-		pars[hole_id] = hole.get("Par", 4)
+		pars[hole_id] = int(round(float(hole.get("Par", 4))))
 		distances[hole_id] = { tee_color: _get_hole_distance(hole_id, tee_color) }
 
 	var match_data = {
@@ -6736,7 +7449,7 @@ func _get_player_best_hole(p: Dictionary) -> Dictionary:
 		var s = p["hole_scores"].get(hole_id)
 		if s != null:
 			var hole = MultiplayerManager.hole_info.get(hole_id, {})
-			var par = hole.get("Par", 4)
+			var par = int(round(float(hole.get("Par", 4))))
 			var diff = s - par
 			if diff < best_diff:
 				best_diff = diff
@@ -7163,6 +7876,8 @@ func _update_grid_button_state(active: bool) -> void:
 
 
 func _exit_tree() -> void:
+	if _hole_card_tween != null and _hole_card_tween.is_valid():
+		_hole_card_tween.kill()
 	if has_node("/root/ScreenOffsetManager"):
 		var som = get_node("/root/ScreenOffsetManager")
 		if som != null:

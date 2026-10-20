@@ -793,7 +793,84 @@ func _run_tests() -> void:
 	range_test_node.queue_free()
 	await process_frame
 
+	# Test 29: Settings Menu Stats Selection Controller Grid Navigation & Slider Pull-Up
+	print("\n--- Test 29: Settings Menu Stats Selection Controller Navigation & Slider Pull-Up ---")
+	var rs_scene = load("res://UI/Settings/RangeSettings/range_settings.tscn")
+	assert(rs_scene != null, "range_settings.tscn must load")
+	var rs = rs_scene.instantiate()
+	root.add_child(rs)
+	rs.visible = true
+	await process_frame
+	await process_frame
+	if rs.has_method("_on_settings_opened"):
+		rs._on_settings_opened()
+	await process_frame
+
+	var tab_container = rs.get_node_or_null("MarginContainer/VBoxContainer/TabContainer") as TabContainer
+	assert(tab_container != null, "TabContainer must exist in RangeSettings")
+	tab_container.current_tab = 1 # Stats tab
+	await process_frame
+
+	var stats_scroll = tab_container.get_node_or_null("Stats") as ScrollContainer
+	assert(stats_scroll != null, "Stats ScrollContainer must exist")
+	var stats_vbox = stats_scroll.get_node_or_null("MarginContainer/StatsVBox")
+	assert(stats_vbox != null, "StatsVBox must exist")
+
+	var check_buttons = stats_vbox.find_children("", "CheckButton", true, false)
+	assert(check_buttons.size() == 21, "Expected 21 stat check buttons, found %d" % check_buttons.size())
+
+	# 1. Focus neighbors wired in 2D grid
+	var cb0 = check_buttons[0]
+	var cb1 = check_buttons[1]
+	var cb3 = check_buttons[3]
+	assert(cb0.get_node(cb0.focus_neighbor_right) == cb1, "CB0 right neighbor must be CB1")
+	assert(cb1.get_node(cb1.focus_neighbor_left) == cb0, "CB1 left neighbor must be CB0")
+	assert(cb0.get_node(cb0.focus_neighbor_bottom) == cb3, "CB0 bottom neighbor must be CB3")
+	assert(cb3.get_node(cb3.focus_neighbor_top) == cb0, "CB3 top neighbor must be CB0")
+
+	# 2. Focus retention on toggle
+	var cb5 = check_buttons[5]
+	cb5.grab_focus()
+	await process_frame
+	cb5.button_pressed = not cb5.button_pressed
+	await process_frame
+	await process_frame
+	assert(root.gui_get_focus_owner() == cb5, "CB5 must retain focus after toggle")
+
+	# 3. Pulling up slider to 0 before leaving stats window
+	cb0.grab_focus()
+	await process_frame
+	stats_scroll.scroll_vertical = 350
+	await process_frame
+	var ev_up = InputEventAction.new()
+	ev_up.action = "ui_up"
+	ev_up.pressed = true
+	cb0.gui_input.emit(ev_up)
+	assert(stats_scroll.scroll_vertical == 0, "Pressing UP on top row when scrolled down must pull up slider to 0 first")
+	assert(root.gui_get_focus_owner() == cb0, "Focus must remain on cb0 after pulling up slider to top")
+
+	# 4. Right Stick analog scroll
+	stats_scroll.scroll_vertical = 100
+	var ev_rs_down = InputEventJoypadMotion.new()
+	ev_rs_down.axis = JOY_AXIS_RIGHT_Y
+	ev_rs_down.axis_value = 1.0
+	rs._unhandled_input(ev_rs_down)
+	assert(stats_scroll.scroll_vertical > 100, "Right stick down must scroll vertical")
+
+	# 5. Left Trigger page scroll
+	stats_scroll.scroll_vertical = 400
+	var ev_lt = InputEventJoypadMotion.new()
+	ev_lt.axis = JOY_AXIS_TRIGGER_LEFT
+	ev_lt.axis_value = 1.0
+	rs._unhandled_input(ev_lt)
+	assert(stats_scroll.scroll_vertical < 400, "Left Trigger must page up slider")
+
+	rs.queue_free()
+	await process_frame
+	print("  PASS: Settings Menu stats selection 2D grid, focus retention, right stick scroll, and slider pull-up verified.")
+
 	print("\n=======================================================")
 	print("  ALL CONTROLLER UI NAVIGATION TESTS PASSED SUCCESSFULLY! ")
 	print("=======================================================\n")
 	quit(0)
+
