@@ -12,5 +12,6 @@ enum SurfaceType {
     ROUGH, # Slow rollout
     FIRM, # Hardpan / cart-path style
     GREEN, # Putting green (spin check / possible spinback)
-    BUNKER # Sand bunker (low bounce, heavy drag, quick stop)
+    BUNKER, # Sand bunker (low bounce, heavy drag, quick stop)
+    CART_PATH # Hard paved path (high bounce and rollout retention)
 }

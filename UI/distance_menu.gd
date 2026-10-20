@@ -519,4 +519,3 @@ func _find_node_by_name(node: Node, target_name: String) -> Node:
 		if found:
 			return found
 	return null
-

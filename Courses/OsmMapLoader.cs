@@ -118,8 +118,10 @@ public partial class OsmMapLoader : Node
 
     private string _generationMessage = "";
     private ElevationMap? _currentElevationMap;
+    private double[]? _downloadedSatelliteImageBounds;
     private double _refLat;
     private double _refLon;
+    private const double SatelliteImageAspectRatio = 1.0;
     private double _metersPerLat = 111320.0;
     private double _metersPerLon = 111320.0;
 
@@ -176,13 +178,22 @@ public partial class OsmMapLoader : Node
         }
 
         byte[]? satImageBytes = null;
+        _downloadedSatelliteImageBounds = null;
         var bbox = CalculateBBoxFromOsmJson(osmJson, lat, lon);
         if (bbox != null)
         {
             bool isMobilePlatform = OS.GetName() == "Android" || OS.GetName() == "iOS";
-            int satRes = isMobilePlatform ? 1024 : 2048;
+            int satResolution = isMobilePlatform ? 1024 : 2048;
+            int satWidth = satResolution;
+            int satHeight = satResolution;
+            var satelliteBbox = GetSatelliteBBoxForAspectRatio(bbox, SatelliteImageAspectRatio);
             ReportProgress("Downloading satellite imagery...");
-            satImageBytes = await DownloadSatelliteImageAsync(bbox.LonMin, bbox.LatMin, bbox.LonMax, bbox.LatMax, satRes, satRes);
+            var satelliteResult = await DownloadSatelliteImageAsync(satelliteBbox, satWidth, satHeight);
+            if (satelliteResult != null)
+            {
+                satImageBytes = satelliteResult.ImageBytes;
+                _downloadedSatelliteImageBounds = satelliteResult.LocalBounds;
+            }
             
             ReportProgress("Downloading terrain elevation data...");
             await DownloadElevationDataAsync(bbox, globalCourseDir);
@@ -199,6 +210,295 @@ public partial class OsmMapLoader : Node
     {
         bool success = await GenerateCourseFromDataAsync(jsonString, courseName, lat, lon, satImageBytes);
         EmitCourseGenerated(success);
+    }
+
+    private sealed record CourseVariant(
+        string Title,
+        string SourceCourse,
+        string VariantType,
+        string[] SubCourses,
+        HashSet<long> HoleWayIds,
+        string OsmRelationName,
+        string OsmRelationId);
+
+    private async Task<bool> GenerateCourseFromDataAsync(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes)
+    {
+        List<CourseVariant> variants;
+        try
+        {
+            variants = BuildCourseVariants(jsonString, courseName);
+        }
+        catch (JsonException ex)
+        {
+            GD.PrintErr($"{LogPrefix} Failed to inspect OSM course variants: {ex.Message}");
+            _generationMessage = "Error: Could not read course layout data from OpenStreetMap.";
+            return false;
+        }
+
+        if (variants.Count == 0)
+        {
+            return await GenerateCourseVariantCoreAsync(jsonString, courseName, lat, lon, satImageBytes, null, null);
+        }
+
+        string baseSafeName = string.Concat(courseName.Split(Path.GetInvalidFileNameChars())).Replace(" ", "_");
+        string sourceElevationPath = Path.Combine(
+            ProjectSettings.GlobalizePath($"user://courses/{baseSafeName}"),
+            "elevation.dat");
+        var availableVariants = variants.Select(variant => variant.Title).ToList();
+        var generatedVariants = new List<string>();
+
+        for (int i = 0; i < variants.Count; i++)
+        {
+            var variant = variants[i];
+            ReportProgress($"Generating course variant {i + 1} of {variants.Count}: {variant.Title}...");
+
+            string variantSafeName = string.Concat(variant.Title.Split(Path.GetInvalidFileNameChars())).Replace(" ", "_");
+            string variantDirectory = ProjectSettings.GlobalizePath($"user://courses/{variantSafeName}");
+            try
+            {
+                Directory.CreateDirectory(variantDirectory);
+                string variantElevationPath = Path.Combine(variantDirectory, "elevation.dat");
+                if (File.Exists(sourceElevationPath) && !string.Equals(sourceElevationPath, variantElevationPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Copy(sourceElevationPath, variantElevationPath, true);
+                }
+            }
+            catch (IOException ex)
+            {
+                GD.PrintErr($"{LogPrefix} Failed to prepare elevation data for '{variant.Title}': {ex.Message}");
+                _generationMessage = $"Error: Could not prepare elevation data for '{variant.Title}'.";
+                return false;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                GD.PrintErr($"{LogPrefix} Access denied preparing files for '{variant.Title}': {ex.Message}");
+                _generationMessage = $"Error: Access denied while preparing '{variant.Title}'.";
+                return false;
+            }
+
+            bool success = await GenerateCourseVariantCoreAsync(
+                jsonString,
+                variant.Title,
+                lat,
+                lon,
+                satImageBytes,
+                variant,
+                availableVariants);
+            if (!success)
+            {
+                string failure = _generationMessage;
+                _generationMessage = $"Generated {generatedVariants.Count} of {variants.Count} course variants. Failed on '{variant.Title}'. {failure}";
+                return false;
+            }
+
+            generatedVariants.Add(variant.Title);
+        }
+
+        _generationMessage = $"Successfully generated {generatedVariants.Count} course variants: {string.Join(", ", generatedVariants)}.";
+        return true;
+    }
+
+    private static List<CourseVariant> BuildCourseVariants(string jsonString, string courseName)
+    {
+        using var doc = JsonDocument.Parse(jsonString);
+        if (!doc.RootElement.TryGetProperty("elements", out var elements) || elements.ValueKind != JsonValueKind.Array)
+        {
+            return new List<CourseVariant>();
+        }
+
+        var routeByHoleId = new Dictionary<long, string>();
+        var routes = new Dictionary<string, (string Name, HashSet<string> Refs, HashSet<long> HoleWayIds)>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var element in elements.EnumerateArray())
+        {
+            if (!element.TryGetProperty("type", out var typeProp) || typeProp.GetString() != "way" ||
+                !element.TryGetProperty("id", out var idProp) || !idProp.TryGetInt64(out long wayId) ||
+                !element.TryGetProperty("tags", out var tagsProp) || tagsProp.ValueKind != JsonValueKind.Object ||
+                !tagsProp.TryGetProperty("golf", out var golfProp) || golfProp.GetString() != "hole")
+            {
+                continue;
+            }
+
+            if (!element.TryGetProperty("nodes", out var nodesProp) || nodesProp.ValueKind != JsonValueKind.Array || nodesProp.GetArrayLength() < 2)
+            {
+                continue;
+            }
+
+            var tags = tagsProp.EnumerateObject().ToDictionary(tag => tag.Name, tag => tag.Value.GetString() ?? "");
+            string subCourse = ExtractSubCourseName(tags);
+            if (string.IsNullOrWhiteSpace(subCourse))
+            {
+                continue;
+            }
+
+            string refValue = tags.GetValueOrDefault("ref", "").Trim();
+            if (string.IsNullOrWhiteSpace(refValue))
+            {
+                continue;
+            }
+
+            if (!routes.TryGetValue(subCourse, out var route))
+            {
+                route = (subCourse, new HashSet<string>(StringComparer.OrdinalIgnoreCase), new HashSet<long>());
+            }
+
+            if (route.Refs.Add(refValue))
+            {
+                route.HoleWayIds.Add(wayId);
+            }
+            routeByHoleId[wayId] = route.Name;
+            routes[subCourse] = route;
+        }
+
+        var nineHoleRoutes = routes.Values
+            .Where(route => route.Refs.Count == 9)
+            .OrderBy(route => route.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (nineHoleRoutes.Count == 0)
+        {
+            return new List<CourseVariant>();
+        }
+
+        var routeByName = nineHoleRoutes.ToDictionary(route => route.Name, StringComparer.OrdinalIgnoreCase);
+        var relationVariants = new Dictionary<string, (string Id, string[] SubCourses, string Name, HashSet<long> HoleWayIds)>(StringComparer.Ordinal);
+        foreach (var element in elements.EnumerateArray())
+        {
+            if (!element.TryGetProperty("type", out var typeProp) || typeProp.GetString() != "relation" ||
+                !element.TryGetProperty("tags", out var tagsProp) || tagsProp.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            bool isCourseRelation =
+                (tagsProp.TryGetProperty("golf", out var golfProp) && golfProp.GetString() == "course") ||
+                (tagsProp.TryGetProperty("golf:course", out var courseProp) && courseProp.GetString() == "18_hole");
+            if (!isCourseRelation || !element.TryGetProperty("members", out var membersProp) || membersProp.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            if (!element.TryGetProperty("id", out var relationIdProp))
+            {
+                continue;
+            }
+            string relationId = relationIdProp.ToString();
+            string relationName = tagsProp.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
+
+            var memberRouteOrder = new List<string>();
+            foreach (var member in membersProp.EnumerateArray())
+            {
+                if (!member.TryGetProperty("type", out var memberType) || memberType.GetString() != "way" ||
+                    !member.TryGetProperty("ref", out var memberRef) || !memberRef.TryGetInt64(out long memberWayId) ||
+                    !routeByHoleId.TryGetValue(memberWayId, out var routeName))
+                {
+                    continue;
+                }
+                if (!memberRouteOrder.Contains(routeName, StringComparer.OrdinalIgnoreCase))
+                {
+                    memberRouteOrder.Add(routeName);
+                }
+            }
+
+            var namedRoutes = routeByName.Keys
+                .Select(routeName => new
+                {
+                    Name = routeName,
+                    Index = System.Text.RegularExpressions.Regex.IsMatch(
+                        relationName,
+                        $@"(?<![\p{{L}}\p{{N}}]){System.Text.RegularExpressions.Regex.Escape(routeName)}(?![\p{{L}}\p{{N}}])",
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                            ? relationName.IndexOf(routeName, StringComparison.OrdinalIgnoreCase)
+                            : -1
+                })
+                .Where(route => route.Index >= 0)
+                .OrderBy(route => route.Index)
+                .Select(route => route.Name)
+                .ToList();
+            var orderedRoutes = namedRoutes.Count == 2
+                ? namedRoutes
+                : memberRouteOrder;
+            if (orderedRoutes.Count != 2 ||
+                orderedRoutes.Any(routeName => !routeByName.ContainsKey(routeName)) ||
+                orderedRoutes.Any(routeName => !memberRouteOrder.Contains(routeName, StringComparer.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            string[] pair = orderedRoutes.ToArray();
+            var holeWayIds = new HashSet<long>(routeByName[pair[0]].HoleWayIds);
+            holeWayIds.UnionWith(routeByName[pair[1]].HoleWayIds);
+            relationVariants[relationId] = (relationId, pair, relationName, holeWayIds);
+        }
+
+        string[] availableRoutes = nineHoleRoutes.Select(route => route.Name).ToArray();
+        var variants = new List<CourseVariant>();
+        foreach (var route in nineHoleRoutes)
+        {
+            variants.Add(new CourseVariant(
+                $"{courseName} - {route.Name} (9 Holes)",
+                courseName,
+                "9-hole",
+                new[] { route.Name },
+                new HashSet<long>(route.HoleWayIds),
+                "",
+                ""));
+        }
+
+        var usedTitles = new HashSet<string>(variants.Select(variant => variant.Title), StringComparer.OrdinalIgnoreCase);
+        foreach (var relation in relationVariants.Values
+                     .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(item => item.Id, StringComparer.Ordinal))
+        {
+            if (relation.HoleWayIds.Count == 0)
+            {
+                continue;
+            }
+
+            string pairTitle = string.IsNullOrWhiteSpace(relation.Name)
+                ? string.Join(" + ", relation.SubCourses)
+                : relation.Name;
+            string title = $"{courseName} - {pairTitle} (18 Holes)";
+            if (!usedTitles.Add(title))
+            {
+                title = $"{title} [OSM {relation.Id}]";
+                usedTitles.Add(title);
+            }
+            variants.Add(new CourseVariant(
+                title,
+                courseName,
+                "18-hole",
+                relation.SubCourses,
+                relation.HoleWayIds,
+                relation.Name,
+                relation.Id));
+        }
+
+        GD.Print($"{LogPrefix} Found {availableRoutes.Length} nine-hole sub-courses and generated {variants.Count - availableRoutes.Length} OSM-defined 18-hole combinations for '{courseName}'.");
+        return variants;
+    }
+
+    public Godot.Collections.Array<Godot.Collections.Dictionary> GetCourseVariantPlan(string jsonString, string courseName)
+    {
+        var plan = new Godot.Collections.Array<Godot.Collections.Dictionary>();
+        foreach (var variant in BuildCourseVariants(jsonString, courseName))
+        {
+            var subCourses = new Godot.Collections.Array<string>();
+            foreach (string subCourse in variant.SubCourses)
+            {
+                subCourses.Add(subCourse);
+            }
+
+            plan.Add(new Godot.Collections.Dictionary
+            {
+                ["title"] = variant.Title,
+                ["variant_type"] = variant.VariantType,
+                ["sub_courses"] = subCourses,
+                ["hole_count"] = variant.HoleWayIds.Count,
+                ["osm_relation"] = variant.OsmRelationName,
+                ["osm_relation_id"] = variant.OsmRelationId
+            });
+        }
+        return plan;
     }
 
     private static List<string> GetCourseGeometryCandidateSlugs(string courseName)
@@ -501,7 +801,14 @@ public partial class OsmMapLoader : Node
         return "";
     }
 
-    private async Task<bool> GenerateCourseFromDataAsync(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes)
+    private async Task<bool> GenerateCourseVariantCoreAsync(
+        string jsonString,
+        string courseName,
+        double lat,
+        double lon,
+        byte[]? satImageBytes,
+        CourseVariant? variant,
+        List<string>? availableVariants)
     {
         _generationMessage = "";
         ReportProgress("Parsing course layout and golf features...");
@@ -713,7 +1020,7 @@ public partial class OsmMapLoader : Node
                 var relTagsToCopy = new Dictionary<string, string>();
                 foreach (var tag in rel.Tags)
                 {
-                    if (tag.Key == "golf" || tag.Key == "natural" || tag.Key == "landuse" || tag.Key == "leisure" || tag.Key == "ref" || tag.Key == "par" || tag.Key == "handicap" || tag.Key == "name")
+                    if (tag.Key == "golf" || tag.Key == "natural" || tag.Key == "landuse" || tag.Key == "leisure" || tag.Key == "ref" || tag.Key == "par" || tag.Key == "handicap" || tag.Key == "name" || tag.Key.StartsWith("dist:", StringComparison.OrdinalIgnoreCase))
                     {
                         relTagsToCopy[tag.Key] = tag.Value;
                     }
@@ -738,6 +1045,8 @@ public partial class OsmMapLoader : Node
                                     // bunkers — overwriting their golf tag breaks feature classification.
                                     if (kvp.Key == "golf" && targetWay.Tags.ContainsKey("golf"))
                                         continue;
+                                    if (kvp.Key == "name" && targetWay.Tags.GetValueOrDefault("golf") == "hole")
+                                        continue;
                                     targetWay.Tags[kvp.Key] = kvp.Value;
                                 }
                             }
@@ -756,6 +1065,14 @@ public partial class OsmMapLoader : Node
                         }
                     }
                 }
+            }
+
+            if (variant != null)
+            {
+                ways.RemoveAll(way =>
+                    way.Tags.TryGetValue("golf", out var golfType) &&
+                    golfType == "hole" &&
+                    !variant.HoleWayIds.Contains(way.Id));
             }
 
             // Find the main course boundary to filter out other golf courses in the radius
@@ -875,8 +1192,10 @@ public partial class OsmMapLoader : Node
             var exclusionPolygons = new List<ExclusionPolygon>();
             var holeInfo = new Dictionary<string, HoleConfig>();
             var tees = new List<TeeConfig>();
-            var unreferencedTees = new List<(List<string> Colors, Vector2 Location)>();
+            var unreferencedTees = new List<(List<string> Colors, Vector2 Location, Vector2[]? Polygon)>();
+            var teeCandidatesByHole = new Dictionary<(string HoleKey, string Color), List<TeeConfig>>();
             var lineOfPlayPaths = new List<List<Vector2>>();
+            var cartPaths = new List<List<Vector2>>();
 
             Func<Vector2, bool> isPointInMainCourse = (pt) => {
                 if (coursePolygons.Count == 0) return true;
@@ -954,10 +1273,15 @@ public partial class OsmMapLoader : Node
                 bool hasSubCourses = holeWays.Any(w => !string.IsNullOrEmpty(ExtractSubCourseName(w.Tags)));
                 if (hasSubCourses)
                 {
-                    // Group by sub-course name (e.g. "Blue", "Red", "White"), ordering groups alphabetically
-                    var groups = holeWays
+                    var groupedHoles = holeWays
                         .GroupBy(w => ExtractSubCourseName(w.Tags))
-                        .OrderBy(g => g.Key)
+                        .ToDictionary(g => g.Key, g => g);
+                    var groupOrder = variant != null
+                        ? variant.SubCourses
+                        : groupedHoles.Keys.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+                    var groups = groupOrder
+                        .Where(groupedHoles.ContainsKey)
+                        .Select(name => groupedHoles[name])
                         .ToList();
 
                     int assignedIdx = 1;
@@ -1031,9 +1355,14 @@ public partial class OsmMapLoader : Node
 
                 if (points.Count < 2) continue;
 
+                way.Tags.TryGetValue("golf", out string? golfType);
+                bool isCartPath = golfType != null
+                    && (golfType.Equals("cartpath", StringComparison.OrdinalIgnoreCase)
+                        || golfType.Equals("cart_path", StringComparison.OrdinalIgnoreCase));
+
                 // Check if the way belongs to the main course
                 var wayCenter = new Vector2(points.Average(p => p.X), points.Average(p => p.Y));
-                if (!isPointInMainCourse(wayCenter))
+                if (!isCartPath && !isPointInMainCourse(wayCenter))
                 {
                     // Do not skip the main golf course boundary ways/relations themselves
                     bool isMainBoundary = way.Tags.TryGetValue("leisure", out var l) && l == "golf_course";
@@ -1081,7 +1410,11 @@ public partial class OsmMapLoader : Node
                 }
 
                 // Determine golf type early so line features (hole, tee) are handled before polygon guard
-                way.Tags.TryGetValue("golf", out string? golfType);
+                if (isCartPath)
+                {
+                    cartPaths.Add(points);
+                    continue;
+                }
 
                 // Handle golf=hole as a LINE of play (tee → green), not a polygon
                 if (golfType == "hole")
@@ -1153,6 +1486,7 @@ public partial class OsmMapLoader : Node
                         HoleLocation = new float[] { pinPos.X, pinPos.Y },
                         TeeBoxes = existingHole?.TeeBoxes ?? new Dictionary<string, float[]>(),
                         HolePath = pathList,
+                        TeeDistancesMeters = ParseTeeDistances(way.Tags),
                         SubCourse = subCourse,
                         OriginalRef = origRef
                     };
@@ -1166,6 +1500,9 @@ public partial class OsmMapLoader : Node
                     var parsedColors = ParseTeeColors(way.Tags);
                     var center = new Vector2(points.Average(pt => pt.X), points.Average(pt => pt.Y));
                     string teeSubCourse = ExtractSubCourseName(way.Tags);
+                    Vector2[]? teePolygon = points.Count >= 3
+                        ? (points.First() == points.Last() ? points.Take(points.Count - 1).ToArray() : points.ToArray())
+                        : null;
 
                     string? refHole = null;
                     if (way.Tags.TryGetValue("ref", out refHole) && !string.IsNullOrWhiteSpace(refHole))
@@ -1180,14 +1517,15 @@ public partial class OsmMapLoader : Node
                                     HoleNum = hNum,
                                     Color = col,
                                     Location = new float[] { center.X, center.Y },
-                                    SubCourse = teeSubCourse
+                                    SubCourse = teeSubCourse,
+                                    Polygon = teePolygon
                                 });
                             }
                         }
                     }
                     else
                     {
-                        unreferencedTees.Add((parsedColors, center));
+                        unreferencedTees.Add((parsedColors, center, teePolygon));
                     }
 
                     // Also render the tee box visually if it has polygon geometry
@@ -1342,7 +1680,7 @@ public partial class OsmMapLoader : Node
                         }
                         else
                         {
-                            unreferencedTees.Add((parsedColors, nodePos));
+                            unreferencedTees.Add((parsedColors, nodePos, null));
                         }
                     }
                 }
@@ -1384,8 +1722,7 @@ public partial class OsmMapLoader : Node
 
                 if (matchedHoleKey != null && holeInfo.TryGetValue(matchedHoleKey, out var matchedHole))
                 {
-                    string colorKey = char.ToUpper(tee.Color[0]) + (tee.Color.Length > 1 ? tee.Color.Substring(1).ToLower() : "");
-                    matchedHole.TeeBoxes[colorKey] = tee.Location;
+                    AddTeeCandidate(teeCandidatesByHole, matchedHoleKey, tee);
                 }
             }
 
@@ -1403,16 +1740,23 @@ public partial class OsmMapLoader : Node
                     Vector2 holeStart = new Vector2(hole.HolePath[0][0], hole.HolePath[0][1]);
                     float dist = unref.Location.DistanceTo(holeStart);
 
-                    // Also check proximity to any already-assigned tees on this hole
-                    if (hole.TeeBoxes != null)
+                    // Referenced tees are staged until distance-based placement is resolved,
+                    // so include those candidates when associating unreferenced tee markers.
+                    foreach (var teeGroup in teeCandidatesByHole)
                     {
-                        foreach (var existingTee in hole.TeeBoxes.Values)
+                        if (!string.Equals(teeGroup.Key.HoleKey, kp.Key, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        foreach (var existingTee in teeGroup.Value)
                         {
-                            if (existingTee != null && existingTee.Length >= 2)
-                            {
-                                float eDist = unref.Location.DistanceTo(new Vector2(existingTee[0], existingTee[1]));
-                                if (eDist < dist) dist = eDist;
-                            }
+                            if (existingTee.Location == null || existingTee.Location.Length < 2)
+                                continue;
+                            float teeDistance = GetDistanceToTeeCandidate(
+                                unref.Location,
+                                new Vector2(existingTee.Location[0], existingTee.Location[1]),
+                                existingTee.Polygon);
+                            if (teeDistance < dist)
+                                dist = teeDistance;
                         }
                     }
 
@@ -1428,11 +1772,52 @@ public partial class OsmMapLoader : Node
                 {
                     foreach (var col in unref.Colors)
                     {
-                        string colorKey = char.ToUpper(col[0]) + (col.Length > 1 ? col.Substring(1).ToLower() : "");
-                        matchedHole.TeeBoxes[colorKey] = new float[] { unref.Location.X, unref.Location.Y };
+                        AddTeeCandidate(teeCandidatesByHole, bestHoleKey, new TeeConfig
+                        {
+                            Color = col,
+                            Location = new[] { unref.Location.X, unref.Location.Y },
+                            Polygon = unref.Polygon
+                        });
                     }
                     GD.Print($"{LogPrefix} Matched unreferenced tee ({string.Join("/", unref.Colors)}) at ({unref.Location.X:F1}, {unref.Location.Y:F1}) to {bestHoleKey} (dist: {minDistance:F1}m)");
                 }
+            }
+
+            foreach (var candidateGroup in teeCandidatesByHole)
+            {
+                if (!holeInfo.TryGetValue(candidateGroup.Key.HoleKey, out var hole))
+                    continue;
+
+                var candidates = candidateGroup.Value;
+                var selectedPosition = candidates[^1].Location;
+                if (hole.HolePath.Count > 0 &&
+                    hole.TeeDistancesMeters.TryGetValue(candidateGroup.Key.Color, out float teeDistanceMeters))
+                {
+                    Vector2 distanceTarget = GetPointAtDistanceFromHoleEnd(hole.HolePath, teeDistanceMeters);
+                    float nearestDistance = float.MaxValue;
+                    foreach (var candidate in candidates)
+                    {
+                        Vector2 candidatePosition = new(candidate.Location[0], candidate.Location[1]);
+                        if (candidate.Polygon != null && candidate.Polygon.Length >= 3)
+                        {
+                            candidatePosition = GetClosestPointInPolygon(distanceTarget, candidate.Polygon);
+                        }
+
+                        float distance = candidatePosition.DistanceTo(distanceTarget);
+                        if (distance < nearestDistance)
+                        {
+                            nearestDistance = distance;
+                            selectedPosition = new[] { candidatePosition.X, candidatePosition.Y };
+                        }
+                    }
+                }
+
+                hole.TeeBoxes[candidateGroup.Key.Color] = selectedPosition;
+            }
+
+            foreach (var hole in holeInfo.Values)
+            {
+                ApplyLegacyTeeFallbacks(hole);
             }
 
             // Ensure every hole has tee data
@@ -1447,42 +1832,6 @@ public partial class OsmMapLoader : Node
                     hole.TeeBoxes["Blue"] = new float[] { defX, defZ };
                     hole.TeeBoxes["White"] = new float[] { defX, defZ };
                     hole.TeeBoxes["Red"] = new float[] { defX, defZ };
-                }
-                else
-                {
-                    // If some tees were explicitly parsed, make sure standard colors ("Blue", "White", "Red")
-                    // have a valid mapped tee fallback so players selecting standard tees always land on a real tee pad.
-                    string fallbackKey = hole.TeeBoxes.ContainsKey("Blue") ? "Blue" : hole.TeeBoxes.Keys.First();
-                    var fallbackPos = hole.TeeBoxes[fallbackKey];
-
-                    if (!hole.TeeBoxes.ContainsKey("Blue"))
-                    {
-                        hole.TeeBoxes["Blue"] = (float[])fallbackPos.Clone();
-                    }
-                    if (!hole.TeeBoxes.ContainsKey("White"))
-                    {
-                        hole.TeeBoxes["White"] = (float[])fallbackPos.Clone();
-                    }
-                    if (!hole.TeeBoxes.ContainsKey("Red"))
-                    {
-                        // Red is the forward tee: if any forward tee exists (closest to pin), use it
-                        Vector2 pin = (hole.HoleLocation != null && hole.HoleLocation.Length >= 2)
-                            ? new Vector2(hole.HoleLocation[0], hole.HoleLocation[1])
-                            : Vector2.Zero;
-
-                        string forwardKey = fallbackKey;
-                        float minPinDist = float.MaxValue;
-                        foreach (var kvp in hole.TeeBoxes)
-                        {
-                            float d = new Vector2(kvp.Value[0], kvp.Value[1]).DistanceTo(pin);
-                            if (d < minPinDist)
-                            {
-                                minPinDist = d;
-                                forwardKey = kvp.Key;
-                            }
-                        }
-                        hole.TeeBoxes["Red"] = (float[])hole.TeeBoxes[forwardKey].Clone();
-                    }
                 }
             }
 
@@ -2496,6 +2845,12 @@ public partial class OsmMapLoader : Node
             // Generate unified terrain with mulch mapped around all tree positions!
             await CreateUnifiedTerrainAsync(courseMinX, courseMaxX, courseMinZ, courseMaxZ, subdivisionsX, subdivisionsZ, rootNode, exclusionPolygons, placedTreePositions);
 
+            cartPaths = MergeCartPaths(cartPaths, 2.0f);
+            for (int pathIndex = 0; pathIndex < cartPaths.Count; pathIndex++)
+            {
+                CreateCartPath(rootNode, cartPaths[pathIndex], pathIndex, exclusionPolygons);
+            }
+
             ReportProgress("Placing trees, greens, and course objects...");
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
@@ -3100,7 +3455,18 @@ public partial class OsmMapLoader : Node
                 Title = courseName,
                 CourseInfo = new CourseInfoConfig
                 {
-                    TeeColors = teeColors
+                    TeeColors = teeColors,
+                    SatelliteImageBounds = _downloadedSatelliteImageBounds,
+                    SatelliteImageBoundsVersion = 5,
+                    CartPaths = cartPaths.Count == 0
+                        ? null
+                        : cartPaths.Select(path => path.Select(point => new[] { point.X, point.Y }).ToList()).ToList(),
+                    SourceCourse = variant?.SourceCourse,
+                    SubCourses = variant?.SubCourses.ToList(),
+                    VariantType = variant?.VariantType,
+                    OsmRelation = string.IsNullOrWhiteSpace(variant?.OsmRelationName) ? null : variant.OsmRelationName,
+                    OsmRelationId = string.IsNullOrWhiteSpace(variant?.OsmRelationId) ? null : variant.OsmRelationId,
+                    AvailableVariants = availableVariants
                 },
                 HoleInfo = holeInfo
             };
@@ -5689,6 +6055,164 @@ public partial class OsmMapLoader : Node
             .ToList();
     }
 
+    public static Dictionary<string, float> ParseTeeDistances(Dictionary<string, string> tags)
+    {
+        var distances = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tag in tags)
+        {
+            if (!tag.Key.StartsWith("dist:", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string color = NormalizeTeeColor(tag.Key.Substring("dist:".Length));
+            if (string.IsNullOrWhiteSpace(color))
+                continue;
+
+            var match = System.Text.RegularExpressions.Regex.Match(
+                tag.Value,
+                @"^\s*(?<distance>\d+(?:[.,]\d+)?)\s*(?<unit>yards?|yds?|meters?|metres?|m)?\s*$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!match.Success ||
+                !double.TryParse(match.Groups["distance"].Value.Replace(',', '.'),
+                    NumberStyles.Float, CultureInfo.InvariantCulture, out double value) ||
+                value <= 0)
+            {
+                GD.PrintErr($"{LogPrefix} Ignoring invalid tee distance tag {tag.Key}={tag.Value}");
+                continue;
+            }
+
+            string unit = match.Groups["unit"].Value.ToLowerInvariant();
+            bool isMeters = unit == "m" || unit.StartsWith("meter") || unit.StartsWith("metre");
+            // Unitless dist:* values default to yards, as used by existing course data.
+            distances[color] = (float)(isMeters ? value : value * 0.9144);
+        }
+
+        return distances;
+    }
+
+    public static void ApplyLegacyTeeFallbacks(HoleConfig hole)
+    {
+        if (hole.TeeBoxes.Count == 0)
+            return;
+
+        string fallbackKey = hole.TeeBoxes.ContainsKey("Blue") ? "Blue" : hole.TeeBoxes.Keys.First();
+        var fallbackPosition = hole.TeeBoxes[fallbackKey];
+        if (!hole.TeeBoxes.ContainsKey("Blue") && !hole.TeeDistancesMeters.ContainsKey("Blue"))
+            hole.TeeBoxes["Blue"] = (float[])fallbackPosition.Clone();
+        if (!hole.TeeBoxes.ContainsKey("White") && !hole.TeeDistancesMeters.ContainsKey("White"))
+            hole.TeeBoxes["White"] = (float[])fallbackPosition.Clone();
+
+        if (!hole.TeeBoxes.ContainsKey("Red") && !hole.TeeDistancesMeters.ContainsKey("Red"))
+        {
+            Vector2 pin = hole.HoleLocation != null && hole.HoleLocation.Length >= 2
+                ? new Vector2(hole.HoleLocation[0], hole.HoleLocation[1])
+                : Vector2.Zero;
+            string forwardKey = fallbackKey;
+            float minPinDistance = float.MaxValue;
+            foreach (var tee in hole.TeeBoxes)
+            {
+                float distance = new Vector2(tee.Value[0], tee.Value[1]).DistanceTo(pin);
+                if (distance < minPinDistance)
+                {
+                    minPinDistance = distance;
+                    forwardKey = tee.Key;
+                }
+            }
+
+            hole.TeeBoxes["Red"] = (float[])hole.TeeBoxes[forwardKey].Clone();
+        }
+    }
+
+    private static string NormalizeTeeColor(string color)
+    {
+        string trimmed = color.Trim();
+        return string.IsNullOrEmpty(trimmed)
+            ? ""
+            : char.ToUpperInvariant(trimmed[0]) + trimmed.Substring(1).ToLowerInvariant();
+    }
+
+    private static void AddTeeCandidate(
+        Dictionary<(string HoleKey, string Color), List<TeeConfig>> candidatesByHole,
+        string holeKey,
+        TeeConfig candidate)
+    {
+        string color = NormalizeTeeColor(candidate.Color);
+        var key = (holeKey, color);
+        if (!candidatesByHole.TryGetValue(key, out var candidates))
+        {
+            candidates = new List<TeeConfig>();
+            candidatesByHole[key] = candidates;
+        }
+
+        candidates.Add(candidate);
+    }
+
+    public static Vector2 GetPointAtDistanceFromHoleEnd(List<float[]> holePath, float distanceMeters)
+    {
+        if (holePath == null || holePath.Count == 0)
+            return Vector2.Zero;
+
+        var end = new Vector2(holePath[^1][0], holePath[^1][1]);
+        float remainingDistance = Math.Max(0f, distanceMeters);
+        for (int i = holePath.Count - 1; i > 0; i--)
+        {
+            var start = new Vector2(holePath[i - 1][0], holePath[i - 1][1]);
+            var segment = start - end;
+            float segmentLength = segment.Length();
+            if (segmentLength <= 0f)
+            {
+                end = start;
+                continue;
+            }
+
+            if (remainingDistance <= segmentLength)
+                return end + segment * (remainingDistance / segmentLength);
+
+            remainingDistance -= segmentLength;
+            end = start;
+        }
+
+        return end;
+    }
+
+    public static Vector2 GetClosestPointInPolygon(Vector2 target, Vector2[] polygon)
+    {
+        if (polygon == null || polygon.Length == 0)
+            return target;
+        if (polygon.Length < 3)
+            return polygon[0];
+        if (PointInPolygon(target, polygon))
+            return target;
+
+        Vector2 closest = polygon[0];
+        float closestDistanceSquared = float.MaxValue;
+        for (int i = 0; i < polygon.Length; i++)
+        {
+            Vector2 start = polygon[i];
+            Vector2 segment = polygon[(i + 1) % polygon.Length] - start;
+            float segmentLengthSquared = segment.LengthSquared();
+            float t = segmentLengthSquared <= 0f
+                ? 0f
+                : Mathf.Clamp((target - start).Dot(segment) / segmentLengthSquared, 0f, 1f);
+            Vector2 point = start + segment * t;
+            float distanceSquared = target.DistanceSquaredTo(point);
+            if (distanceSquared < closestDistanceSquared)
+            {
+                closest = point;
+                closestDistanceSquared = distanceSquared;
+            }
+        }
+
+        return closest;
+    }
+
+    public static float GetDistanceToTeeCandidate(Vector2 point, Vector2 marker, Vector2[]? polygon)
+    {
+        float distance = point.DistanceTo(marker);
+        if (polygon != null && polygon.Length >= 3)
+            distance = Math.Min(distance, DistanceToPolygon(point, polygon));
+        return distance;
+    }
+
     private static NoiseTexture2D? _cachedWaterWaveNoiseTex;
     private static NoiseTexture2D? _cachedWaterNormalTex1;
     private static NoiseTexture2D? _cachedWaterNormalTex2;
@@ -5755,6 +6279,70 @@ public partial class OsmMapLoader : Node
     {
         [JsonPropertyName("Tee Colors")]
         public List<string> TeeColors { get; set; } = new();
+
+        [JsonPropertyName("Satellite Image Bounds")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public double[]? SatelliteImageBounds { get; set; }
+
+        [JsonPropertyName("Satellite Image Bounds Version")]
+        public int SatelliteImageBoundsVersion { get; set; }
+
+        [JsonPropertyName("Cart Paths")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<List<float[]>>? CartPaths { get; set; }
+
+        [JsonPropertyName("Source Course")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? SourceCourse { get; set; }
+
+        [JsonPropertyName("Sub-Courses")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? SubCourses { get; set; }
+
+        [JsonPropertyName("Variant Type")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? VariantType { get; set; }
+
+        [JsonPropertyName("OSM Relation")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? OsmRelation { get; set; }
+
+        [JsonPropertyName("OSM Relation ID")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? OsmRelationId { get; set; }
+
+        [JsonPropertyName("Available Variants")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? AvailableVariants { get; set; }
+    }
+
+    private static BBox GetSatelliteBBoxForAspectRatio(BBox bbox, double targetAspectRatio)
+    {
+        double centerLon = (bbox.LonMin + bbox.LonMax) * 0.5;
+        double centerLat = (bbox.LatMin + bbox.LatMax) * 0.5;
+        double widthMeters = (bbox.LonMax - bbox.LonMin) * bbox.MetersPerLon;
+        double heightMeters = (bbox.LatMax - bbox.LatMin) * bbox.MetersPerLat;
+        if (widthMeters / heightMeters < targetAspectRatio)
+        {
+            widthMeters = heightMeters * targetAspectRatio;
+        }
+        else
+        {
+            heightMeters = widthMeters / targetAspectRatio;
+        }
+        double halfWidthLon = widthMeters / bbox.MetersPerLon * 0.5;
+        double halfHeightLat = heightMeters / bbox.MetersPerLat * 0.5;
+        return new BBox
+        {
+            LonMin = centerLon - halfWidthLon,
+            LonMax = centerLon + halfWidthLon,
+            LatMin = centerLat - halfHeightLat,
+            LatMax = centerLat + halfHeightLat,
+            RefLat = bbox.RefLat,
+            RefLon = bbox.RefLon,
+            MetersPerLat = bbox.MetersPerLat,
+            MetersPerLon = bbox.MetersPerLon
+        };
     }
 
     public class HoleConfig
@@ -5781,6 +6369,9 @@ public partial class OsmMapLoader : Node
         public List<float[]> HolePath { get; set; } = new();
 
         [JsonIgnore]
+        public Dictionary<string, float> TeeDistancesMeters { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        [JsonIgnore]
         public string SubCourse { get; set; } = "";
 
         [JsonIgnore]
@@ -5793,6 +6384,7 @@ public partial class OsmMapLoader : Node
         public string Color { get; set; } = "blue";
         public float[] Location { get; set; } = new float[2];
         public string SubCourse { get; set; } = "";
+        public Vector2[]? Polygon { get; set; }
     }
 
     private class ExclusionPolygon
@@ -6024,25 +6616,87 @@ public partial class OsmMapLoader : Node
         return new Color(rSum / count, gSum / count, bSum / count);
     }
 
-    private async Task<byte[]?> DownloadSatelliteImageAsync(double lonMin, double latMin, double lonMax, double latMax, int width = 2048, int height = 2048)
+    private sealed record SatelliteImageResult(byte[] ImageBytes, double[] LocalBounds);
+
+    private async Task<SatelliteImageResult?> DownloadSatelliteImageAsync(BBox bbox, int width, int height)
     {
-        string bbox = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F6},{1:F6},{2:F6},{3:F6}", lonMin, latMin, lonMax, latMax);
-        string url = $"https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox={bbox}&bboxSR=4326&imageSR=4326&size={width},{height}&f=image&format=png";
+        string bboxParameter = string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            "{0:R},{1:R},{2:R},{3:R}",
+            bbox.LonMin,
+            bbox.LatMin,
+            bbox.LonMax,
+            bbox.LatMax);
+        string url = $"https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox={bboxParameter}&bboxSR=4326&imageSR=4326&size={width},{height}&adjustAspectRatio=false&f=json&format=png";
         
-        GD.Print($"{LogPrefix} Downloading satellite image for tree detection from: {url}");
+        GD.Print($"{LogPrefix} Requesting satellite image and rendered extent for tree detection.");
         try
         {
-            var response = await HttpClient.GetAsync(url);
-            if (!response.IsSuccessStatusCode)
+            using var metadataResponse = await HttpClient.GetAsync(url);
+            if (!metadataResponse.IsSuccessStatusCode)
             {
-                GD.PrintErr($"{LogPrefix} Satellite image download failed with status: {response.StatusCode}");
+                GD.PrintErr($"{LogPrefix} Satellite image export request failed with status: {metadataResponse.StatusCode}");
                 return null;
             }
-            return await response.Content.ReadAsByteArrayAsync();
+            using var metadataDocument = JsonDocument.Parse(await metadataResponse.Content.ReadAsStringAsync());
+            var root = metadataDocument.RootElement;
+            if (!root.TryGetProperty("href", out var hrefElement)
+                || !root.TryGetProperty("extent", out var extent)
+                || !extent.TryGetProperty("spatialReference", out var spatialReference)
+                || !spatialReference.TryGetProperty("wkid", out var wkidElement))
+            {
+                GD.PrintErr($"{LogPrefix} Satellite image export response did not include its image URL and geographic extent.");
+                return null;
+            }
+
+            int wkid = wkidElement.GetInt32();
+            if (wkid != 4326 && wkid != 4269)
+            {
+                GD.PrintErr($"{LogPrefix} Satellite image export returned unsupported spatial reference {wkid}; refusing to save unaligned imagery.");
+                return null;
+            }
+
+            double lonMin = extent.GetProperty("xmin").GetDouble();
+            double latMin = extent.GetProperty("ymin").GetDouble();
+            double lonMax = extent.GetProperty("xmax").GetDouble();
+            double latMax = extent.GetProperty("ymax").GetDouble();
+            if (!double.IsFinite(lonMin) || !double.IsFinite(latMin)
+                || !double.IsFinite(lonMax) || !double.IsFinite(latMax)
+                || lonMax <= lonMin || latMax <= latMin)
+            {
+                GD.PrintErr($"{LogPrefix} Satellite image export returned invalid geographic bounds.");
+                return null;
+            }
+
+            string imageUrl = hrefElement.GetString() ?? "";
+            if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var imageUri))
+            {
+                imageUri = new Uri(new Uri("https://services.arcgisonline.com"), imageUrl);
+            }
+            using var imageResponse = await HttpClient.GetAsync(imageUri);
+            if (!imageResponse.IsSuccessStatusCode)
+            {
+                GD.PrintErr($"{LogPrefix} Satellite image download failed with status: {imageResponse.StatusCode}");
+                return null;
+            }
+
+            var localBounds = new[]
+            {
+                (lonMin - bbox.RefLon) * bbox.MetersPerLon,
+                -(latMax - bbox.RefLat) * bbox.MetersPerLat,
+                (lonMax - bbox.RefLon) * bbox.MetersPerLon,
+                -(latMin - bbox.RefLat) * bbox.MetersPerLat
+            };
+            return new SatelliteImageResult(await imageResponse.Content.ReadAsByteArrayAsync(), localBounds);
+        }
+        catch (JsonException ex)
+        {
+            GD.PrintErr($"{LogPrefix} Satellite image export returned invalid metadata: {ex.Message}");
+            return null;
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"{LogPrefix} Failed to download satellite image: {ex}");
+            GD.PrintErr($"{LogPrefix} Failed to retrieve satellite image and extent: {ex}");
             return null;
         }
     }
@@ -6530,6 +7184,197 @@ public partial class OsmMapLoader : Node
             staticBody.SetMeta("boundary_polygon", uniquePoints);
         }
         CreateCollisionForPolygon(staticBody, uniquePoints, rootNode, exclusionPolygons);
+    }
+
+    private static List<List<Vector2>> MergeCartPaths(List<List<Vector2>> paths, float maximumJoinDistance)
+    {
+        var merged = paths
+            .Where(path => path.Count >= 2)
+            .Select(path => new List<Vector2>(path))
+            .ToList();
+        bool didMerge = true;
+        while (didMerge)
+        {
+            didMerge = false;
+            for (int firstIndex = 0; firstIndex < merged.Count && !didMerge; firstIndex++)
+            {
+                for (int secondIndex = firstIndex + 1; secondIndex < merged.Count; secondIndex++)
+                {
+                    var first = merged[firstIndex];
+                    var second = merged[secondIndex];
+                    float bestDistance = maximumJoinDistance;
+                    bool reverseFirst = false;
+                    bool reverseSecond = false;
+                    var endpointPairs = new[]
+                    {
+                        (First: first[^1], Second: second[0], ReverseFirst: false, ReverseSecond: false),
+                        (First: first[^1], Second: second[^1], ReverseFirst: false, ReverseSecond: true),
+                        (First: first[0], Second: second[0], ReverseFirst: true, ReverseSecond: false),
+                        (First: first[0], Second: second[^1], ReverseFirst: true, ReverseSecond: true)
+                    };
+                    var join = endpointPairs
+                        .Select(candidate => (Candidate: candidate, Distance: candidate.First.DistanceTo(candidate.Second)))
+                        .OrderBy(candidate => candidate.Distance)
+                        .First();
+                    if (join.Distance > bestDistance)
+                    {
+                        continue;
+                    }
+
+                    reverseFirst = join.Candidate.ReverseFirst;
+                    reverseSecond = join.Candidate.ReverseSecond;
+                    if (reverseFirst)
+                    {
+                        first.Reverse();
+                    }
+                    if (reverseSecond)
+                    {
+                        second.Reverse();
+                    }
+                    if (first[^1].DistanceTo(second[0]) > 0.001f)
+                    {
+                        first.Add((first[^1] + second[0]) * 0.5f);
+                    }
+                    first.AddRange(second.Skip(1));
+                    merged.RemoveAt(secondIndex);
+                    didMerge = true;
+                    break;
+                }
+            }
+        }
+        return merged;
+    }
+
+    private void CreateCartPath(Node3D rootNode, List<Vector2> points, int pathIndex, List<ExclusionPolygon> exclusions)
+    {
+        if (points.Count < 2)
+        {
+            return;
+        }
+
+        const float halfWidth = 1.25f;
+        const float maximumPointSpacing = 1.0f;
+        const float visualHeightOffset = 0.10f;
+        const float collisionHeightOffset = 0.06f;
+        var cleanPoints = new List<Vector2>();
+        foreach (var point in points)
+        {
+            if (cleanPoints.Count == 0 || cleanPoints[^1].DistanceSquaredTo(point) > 0.0001f)
+            {
+                cleanPoints.Add(point);
+            }
+        }
+        if (cleanPoints.Count < 2)
+        {
+            return;
+        }
+
+        var sampledPoints = new List<Vector2> { cleanPoints[0] };
+        for (int pointIndex = 1; pointIndex < cleanPoints.Count; pointIndex++)
+        {
+            Vector2 start = cleanPoints[pointIndex - 1];
+            Vector2 end = cleanPoints[pointIndex];
+            int subdivisions = Mathf.Max(1, Mathf.CeilToInt(start.DistanceTo(end) / maximumPointSpacing));
+            for (int subdivision = 1; subdivision <= subdivisions; subdivision++)
+            {
+                sampledPoints.Add(start.Lerp(end, subdivision / (float)subdivisions));
+            }
+        }
+        cleanPoints = sampledPoints;
+
+        var leftEdge = new Vector2[cleanPoints.Count];
+        var rightEdge = new Vector2[cleanPoints.Count];
+        for (int pointIndex = 0; pointIndex < cleanPoints.Count; pointIndex++)
+        {
+            Vector2 point = cleanPoints[pointIndex];
+            Vector2 previousDirection = pointIndex > 0
+                ? (point - cleanPoints[pointIndex - 1]).Normalized()
+                : (cleanPoints[1] - point).Normalized();
+            Vector2 nextDirection = pointIndex < cleanPoints.Count - 1
+                ? (cleanPoints[pointIndex + 1] - point).Normalized()
+                : previousDirection;
+            Vector2 previousNormal = new Vector2(-previousDirection.Y, previousDirection.X);
+            Vector2 nextNormal = new Vector2(-nextDirection.Y, nextDirection.X);
+            Vector2 miter = (previousNormal + nextNormal).Normalized();
+            if (miter.LengthSquared() < 0.001f)
+            {
+                miter = nextNormal;
+            }
+            float miterLength = Mathf.Min(halfWidth / Mathf.Max(Mathf.Abs(miter.Dot(nextNormal)), 0.25f), halfWidth * 2.5f);
+            Vector2 offset = miter * miterLength;
+            leftEdge[pointIndex] = point + offset;
+            rightEdge[pointIndex] = point - offset;
+        }
+
+        var vertices = new Vector3[cleanPoints.Count * 2];
+        var normals = new Vector3[vertices.Length];
+        var indices = new int[(cleanPoints.Count - 1) * 6];
+        for (int pointIndex = 0; pointIndex < cleanPoints.Count; pointIndex++)
+        {
+            Vector2 left = leftEdge[pointIndex];
+            Vector2 right = rightEdge[pointIndex];
+            vertices[pointIndex * 2] = new Vector3(left.X, GetHeightWithFeatures(left.X, left.Y, exclusions) + visualHeightOffset, left.Y);
+            vertices[pointIndex * 2 + 1] = new Vector3(right.X, GetHeightWithFeatures(right.X, right.Y, exclusions) + visualHeightOffset, right.Y);
+            normals[pointIndex * 2] = Vector3.Up;
+            normals[pointIndex * 2 + 1] = Vector3.Up;
+        }
+        for (int segmentIndex = 0; segmentIndex < cleanPoints.Count - 1; segmentIndex++)
+        {
+            int vertex = segmentIndex * 2;
+            int index = segmentIndex * 6;
+            indices[index] = vertex;
+            indices[index + 1] = vertex + 2;
+            indices[index + 2] = vertex + 1;
+            indices[index + 3] = vertex + 1;
+            indices[index + 4] = vertex + 2;
+            indices[index + 5] = vertex + 3;
+        }
+
+        var meshArrays = new Godot.Collections.Array();
+        meshArrays.Resize((int)Mesh.ArrayType.Max);
+        meshArrays[(int)Mesh.ArrayType.Vertex] = vertices;
+        meshArrays[(int)Mesh.ArrayType.Normal] = normals;
+        meshArrays[(int)Mesh.ArrayType.Index] = indices;
+        var mesh = new ArrayMesh();
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, meshArrays);
+
+        var material = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(0.015f, 0.015f, 0.015f),
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled
+        };
+        mesh.SurfaceSetMaterial(0, material);
+        var meshInstance = new MeshInstance3D
+        {
+            Name = $"cartpath_{pathIndex}",
+            Mesh = mesh
+        };
+        rootNode.AddChild(meshInstance);
+        meshInstance.Owner = rootNode;
+
+        var staticBody = new StaticBody3D { Name = $"cartpath_Static_{pathIndex}" };
+        staticBody.SetMeta("surface_type", (int)PhysicsEnums.SurfaceType.CartPath);
+        staticBody.SetMeta("is_cart_path", true);
+        var collisionShape = new CollisionShape3D();
+        var collisionFaces = mesh.GetFaces();
+        float collisionOffset = visualHeightOffset - collisionHeightOffset;
+        for (int faceIndex = 0; faceIndex < collisionFaces.Length; faceIndex++)
+        {
+            Vector3 faceVertex = collisionFaces[faceIndex];
+            faceVertex.Y -= collisionOffset;
+            collisionFaces[faceIndex] = faceVertex;
+        }
+        var collision = new ConcavePolygonShape3D
+        {
+            Data = collisionFaces,
+            BackfaceCollision = true
+        };
+        collisionShape.Shape = collision;
+        staticBody.AddChild(collisionShape);
+        rootNode.AddChild(staticBody);
+        staticBody.Owner = rootNode;
+        collisionShape.Owner = rootNode;
     }
 
     private void CreateTeeBoxMesh(Node3D rootNode, Vector2[] uniquePoints, string idSuffix, List<ExclusionPolygon> exclusionPolygons)
