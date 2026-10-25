@@ -49,6 +49,7 @@ static func remove_high_fidelity(scene_root: Node) -> void:
 		existing.queue_free()
 	else:
 		HighFidelityLightingScript.remove(scene_root)
+	_set_detail_nodes_visible(scene_root, false)
 
 
 func setup(scene_root: Node) -> void:
@@ -99,5 +100,16 @@ static func _set_detail_nodes_visible(scene_root: Node, vis: bool) -> void:
 		bunkers.visible = vis
 	var reeds := scene_root.get_node_or_null("ShorelineReedsMultiMesh") as Node3D
 	if reeds != null:
-		reeds.visible = vis
+		reeds.visible = true
+	var thick_grass := scene_root.get_node_or_null("ThickRoughGrassMultiMesh") as Node3D
+	if thick_grass != null:
+		thick_grass.visible = false
+	var thick_bushes := scene_root.get_node_or_null("ThickRoughBushes") as Node3D
+	if thick_bushes != null:
+		thick_bushes.visible = vis
+	for child in scene_root.get_children():
+		if child is Node3D and child.name.begins_with("ThickRoughGrass"):
+			child.visible = false
+		elif child is Node3D and (child.name.begins_with("ThickRough_") or child.name.begins_with("ThickRoughBush")):
+			child.visible = vis
 

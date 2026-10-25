@@ -21,8 +21,10 @@ uniform vec2 wind_direction = vec2(0.85, 0.52);
 uniform float wind_speed : hint_range(0.0, 5.0) = 1.35;
 uniform float wind_strength : hint_range(0.0, 0.4) = 0.08;
 
-uniform float max_render_distance : hint_range(5.0, 120.0) = 55.0;
-uniform float fade_start_distance : hint_range(3.0, 100.0) = 38.0;
+uniform float max_render_distance : hint_range(5.0, 320.0) = 180.0;
+uniform float fade_start_distance : hint_range(3.0, 260.0) = 120.0;
+uniform float head_ratio : hint_range(0.0, 1.0) = 0.0;
+uniform vec3 head_color : source_color = vec3(0.38, 0.25, 0.14);
 
 // Optional course splat map masking (R=green, G=fairway, B=bunker, A=mulch)
 uniform bool use_splat_mask = false;
@@ -35,6 +37,7 @@ varying float v_height_pct;
 varying float v_seed;
 varying vec3 v_instance_tint;
 varying float v_cull_mask;
+varying vec2 v_world_xz;
 
 void vertex() {
 	// UV.y goes from 0.0 at root to 1.0 at blade tip
@@ -43,6 +46,7 @@ void vertex() {
 	v_instance_tint = INSTANCE_CUSTOM.a > 0.001 ? INSTANCE_CUSTOM.rgb : vec3(1.0);
 
 	vec3 world_origin = MODEL_MATRIX[3].xyz;
+	v_world_xz = world_origin.xz;
 	vec3 cam_pos = INV_VIEW_MATRIX[3].xyz;
 	float dist = distance(world_origin, cam_pos);
 
@@ -54,8 +58,14 @@ void vertex() {
 	if (use_splat_mask && terrain_size_xz.x > 1.0 && terrain_size_xz.y > 1.0) {
 		vec2 uv2 = clamp((world_origin.xz - terrain_min_xz) / terrain_size_xz, vec2(0.0), vec2(1.0));
 		vec4 sp = textureLod(splat_map, uv2, 0.0);
-		float disallow = sp.r + sp.b + sp.a + (mask_allow_fairway ? 0.0 : sp.g * 0.85);
-		surface_allow = 1.0 - smoothstep(0.15, 0.55, disallow);
+		// B = Bunker/Sand, R = Green, G = Fairway
+		if (sp.b > 0.45 || sp.r > 0.45 || (!mask_allow_fairway && sp.g > 0.55)) {
+			surface_allow = 0.0;
+		} else {
+			// Smooth cutoff only when decisively transitioning into bunker, green, or fairway
+			float disallow = max(sp.r, max(sp.b, (mask_allow_fairway ? 0.0 : sp.g)));
+			surface_allow = 1.0 - smoothstep(0.35, 0.55, disallow);
+		}
 	}
 
 	v_cull_mask = dist_scale * surface_allow;
@@ -71,34 +81,44 @@ void vertex() {
 	VERTEX.xz += wind_dir * sway;
 	VERTEX.y -= abs(sway) * 0.22;
 
-	// Tilt blade normal upward toward sky for smooth turf shading across clusters
-	NORMAL = normalize(mix(vec3(0.0, 1.0, 0.0), NORMAL, 0.38));
+	// Tilt blade normal upward toward sky for smooth, velvety turf shading across canopy
+	NORMAL = normalize(mix(vec3(0.0, 1.0, 0.0), NORMAL, 0.22));
 }
 
 void fragment() {
-	if (v_cull_mask < 0.05) {
+	if (v_cull_mask < 0.02) {
 		discard;
 	}
-	// Tapered blade silhouette along UV.x (0..1 across blade width)
 	float blade_center_dist = abs(UV.x - 0.5) * 2.0;
-	float tip_taper = mix(0.95, 0.12, pow(v_height_pct, 1.6));
-	if (blade_center_dist > tip_taper) {
-		discard;
+
+	// Root-to-tip chlorophyll gradient (lush rich green matching authentic deep rough reference)
+	vec3 blade_col = mix(root_color, tip_color, smoothstep(0.0, 0.85, v_height_pct));
+
+	// Subtle sun-cured dry tip accent on random blades
+	if (dry_tip_ratio > 0.001) {
+		float dry_blade = step(1.0 - dry_tip_ratio, fract(v_seed * 17.31));
+		float dry_pct = smoothstep(0.70, 1.0, v_height_pct) * dry_blade;
+		blade_col = mix(blade_col, dry_tip_color, dry_pct * 0.65);
 	}
 
-	// Root-to-tip chlorophyll gradient with subtle sunlit fescue tips
-	vec3 top_col = mix(tip_color, dry_tip_color, step(1.0 - dry_tip_ratio, v_seed) * smoothstep(0.55, 1.0, v_height_pct));
-	vec3 blade_col = mix(root_color, top_col, smoothstep(0.0, 0.92, v_height_pct));
 	blade_col *= v_instance_tint;
 
+	// Soft natural blade-to-blade micro-variation
+	float blade_noise = fract(sin(v_seed * 43.12 + UV.x * 7.89) * 43758.5453);
+	blade_col *= (0.94 + 0.12 * blade_noise);
+
+	// Macro undulating turf grain across terrain (matches golf reference frames)
+	float macro_grain = sin(v_world_xz.x * 0.22 + v_world_xz.y * 0.15) * 0.5 + 0.5;
+	blade_col *= mix(0.93, 1.07, macro_grain);
+
 	// Center midrib highlight
-	float rib = 1.0 - smoothstep(0.0, 0.35, blade_center_dist);
-	blade_col *= (0.94 + 0.10 * rib);
+	float rib = 1.0 - smoothstep(0.0, 0.45, blade_center_dist);
+	blade_col *= (0.96 + 0.08 * rib);
 
 	ALBEDO = clamp(blade_col, 0.0, 1.0);
-	ROUGHNESS = mix(roughness + 0.15, roughness - 0.08, v_height_pct);
+	ROUGHNESS = mix(roughness + 0.08, roughness - 0.06, v_height_pct);
 	SPECULAR = specular * v_height_pct;
-	AO = mix(0.32, 1.0, smoothstep(0.0, 0.65, v_height_pct));
-	AO_LIGHT_AFFECT = 0.55;
-	BACKLIGHT = backlight_color * backlight_strength * (0.25 + 0.75 * v_height_pct);
+	AO = mix(0.72, 1.0, smoothstep(0.0, 0.65, v_height_pct));
+	AO_LIGHT_AFFECT = 0.25;
+	BACKLIGHT = backlight_color * backlight_strength * (0.40 + 0.60 * v_height_pct);
 }

@@ -18,8 +18,8 @@ uniform sampler2D tex_rough : source_color, filter_linear_mipmap_anisotropic, re
 uniform sampler2D normal_rough : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
 
 uniform vec3 sand_tint : source_color = vec3(1.12, 1.07, 0.97);
-uniform vec3 soil_lip_color : source_color = vec3(0.20, 0.15, 0.10);
-uniform vec3 deep_root_color : source_color = vec3(0.11, 0.08, 0.05);
+uniform vec3 soil_lip_color : source_color = vec3(0.42, 0.28, 0.16);
+uniform vec3 deep_root_color : source_color = vec3(0.24, 0.16, 0.09);
 uniform vec3 rough_collar_tint : source_color = vec3(0.80, 0.96, 0.74);
 
 varying vec3 v_world_pos;
@@ -74,15 +74,15 @@ void fragment() {
 	vec2 rake_tangent = vec2(cos(rake_phase), -sin(rake_phase)) * 0.42;
 	n_sand = normalize(vec3(n_sand.xy + rake_tangent + vec2(sand_grain) * 0.10, max(n_sand.z, 0.62)));
 
-	// 2. Steep vertical sod / dark earth lip wall with layered strata and exposed roots
+	// 2. Vertical sod / warm brown earthy lip wall with layered strata and exposed roots
 	float strata_noise = gnoise(vec2(v_world_pos.x * 3.5 + v_world_pos.z * 3.5, v_world_pos.y * 24.0));
 	float strata_band = sin(v_world_pos.y * 55.0 + strata_noise * 3.0) * 0.5 + 0.5;
 	float clod_noise = gnoise(v_world_pos.xz * 6.5);
 	vec3 col_lip = mix(deep_root_color, soil_lip_color, clamp(strata_noise * 0.5 + 0.5, 0.0, 1.0));
-	col_lip = mix(col_lip, vec3(0.34, 0.27, 0.18), strata_band * 0.28);
-	col_lip *= (0.80 + 0.40 * (clod_noise * 0.5 + 0.5));
-	// Pale sand streaks washing down the wall
-	col_lip = mix(col_lip, col_sand * 0.8, smoothstep(0.55, 0.95, gnoise(v_world_pos.xz * 9.0 + v_world_pos.y * 30.0) * 0.5 + 0.5) * 0.35);
+	col_lip = mix(col_lip, vec3(0.50, 0.35, 0.22), strata_band * 0.35);
+	col_lip *= (0.88 + 0.30 * (clod_noise * 0.5 + 0.5));
+	// Warm sand-soil wash streaks
+	col_lip = mix(col_lip, col_sand * 0.88, smoothstep(0.50, 0.95, gnoise(v_world_pos.xz * 9.0 + v_world_pos.y * 30.0) * 0.5 + 0.5) * 0.30);
 	vec3 n_lip = normalize(vec3(clod_noise * 0.80, strata_noise * 0.90 + (strata_band - 0.5) * 0.6, 1.0));
 
 	// 3. Overhanging rough turf rim, with tufted ragged fringe

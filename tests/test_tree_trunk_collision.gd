@@ -24,7 +24,7 @@ func _run_tests() -> void:
 	mock_tree_scene.name = "MockScene"
 	test_scene.add_child(mock_tree_scene)
 
-	# Create a mock tree matching OsmMapLoader tree instances
+	# Create a mock oak tree matching OsmMapLoader tree instances (tree-01-1 at 2.5x scale)
 	var mock_tree = StaticBody3D.new()
 	mock_tree.name = "Tree_10.0_10.0"
 	mock_tree.position = Vector3(10.0, 0.0, 10.0)
@@ -33,18 +33,19 @@ func _run_tests() -> void:
 	var mock_mesh = MeshInstance3D.new()
 	mock_mesh.name = "TreeMesh"
 	var cyl_mesh = CylinderMesh.new()
-	cyl_mesh.height = 6.0
-	cyl_mesh.top_radius = 0.4
-	cyl_mesh.bottom_radius = 0.4
+	cyl_mesh.resource_name = "tree-01-1_mesh"
+	cyl_mesh.height = 2.5
+	cyl_mesh.top_radius = 0.26
+	cyl_mesh.bottom_radius = 0.26
 	mock_mesh.mesh = cyl_mesh
 	mock_tree.add_child(mock_mesh)
 
 	var mock_col = CollisionShape3D.new()
 	var mock_cyl_shape = CylinderShape3D.new()
-	mock_cyl_shape.height = 5.6
-	mock_cyl_shape.radius = 0.38
+	mock_cyl_shape.height = 2.5
+	mock_cyl_shape.radius = 0.26
 	mock_col.shape = mock_cyl_shape
-	mock_col.position = Vector3(0.0, 2.0, 0.0)
+	mock_col.position = Vector3(0.0, 1.25, 0.0)
 	mock_tree.add_child(mock_col)
 
 	var mock_canopy = Area3D.new()
@@ -57,29 +58,70 @@ func _run_tests() -> void:
 	mock_canopy.add_child(mock_canopy_col)
 	mock_tree.add_child(mock_canopy)
 
+	# Also add a non-uniformly scaled variant pine tree (e.g. TreeMesh scaled 0.92x1.15 + node scaled 2.0x2.5)
+	var mock_pine = StaticBody3D.new()
+	mock_pine.name = "Tree_20.0_10.0"
+	mock_pine.position = Vector3(20.0, 0.0, 10.0)
+	mock_pine.scale = Vector3(2.0, 2.5, 2.0)
+	mock_pine.set_meta("is_pine", true)
+
+	var pine_mesh_inst = MeshInstance3D.new()
+	pine_mesh_inst.name = "TreeMesh"
+	pine_mesh_inst.scale = Vector3(0.92, 1.15, 0.92)
+	var pine_mesh = ArrayMesh.new()
+	pine_mesh.resource_name = "tree-03-3_mesh"
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.add_vertex(Vector3(0, 0, 0))
+	st.add_vertex(Vector3(0.2, 3.6, 0))
+	st.add_vertex(Vector3(-0.2, 3.6, 0))
+	st.commit(pine_mesh)
+	pine_mesh_inst.mesh = pine_mesh
+	mock_pine.add_child(pine_mesh_inst)
+
 	mock_tree_scene.add_child(mock_tree)
+	mock_tree_scene.add_child(mock_pine)
 
 	var stats: Dictionary = ptg_script.convert_scene_foliage_to_multimesh(mock_tree_scene, false)
-	assert(stats["trees_converted"] == 1, "Must convert 1 tree")
+	assert(stats["trees_converted"] == 2, "Must convert 2 trees")
 
 	var consolidated_body = mock_tree_scene.get_node_or_null("ConsolidatedFoliageCollision") as StaticBody3D
 	assert(consolidated_body != null, "ConsolidatedFoliageCollision must exist")
 	assert(consolidated_body.has_meta("is_tree") and bool(consolidated_body.get_meta("is_tree")), "Must have is_tree metadata")
 	assert(consolidated_body.is_in_group("trees"), "Must be added to trees group")
 
-	var trunk_shape_node: CollisionShape3D = null
+	var trunk_shapes: Array[CollisionShape3D] = []
 	for child in consolidated_body.get_children():
 		if child is CollisionShape3D:
-			trunk_shape_node = child
-			break
-	assert(trunk_shape_node != null, "Trunk CollisionShape3D must exist in consolidated body")
+			trunk_shapes.append(child as CollisionShape3D)
+	assert(trunk_shapes.size() == 2, "Must have 2 trunk CollisionShape3D nodes in consolidated body")
+
+	var trunk_shape_node: CollisionShape3D = trunk_shapes[0]
 	assert(trunk_shape_node.shape is CylinderShape3D, "Trunk collision shape must be CylinderShape3D")
+	assert(trunk_shape_node.scale.is_equal_approx(Vector3.ONE), "Trunk CollisionShape3D must use baked uniform scale Vector3.ONE")
 	var cyl_shape := trunk_shape_node.shape as CylinderShape3D
-	assert(cyl_shape.height >= 5.0, "Trunk shape height must be at least 5.0m (not a 1m stump), actual: %.2f" % cyl_shape.height)
-	assert(cyl_shape.radius >= 0.35, "Trunk shape radius must be at least 0.35m, actual: %.2f" % cyl_shape.radius)
-	# Center Y position scaled by 2.5
-	assert(trunk_shape_node.position.y >= 4.5, "Trunk position Y must cover elevated trunk, actual: %.2f" % trunk_shape_node.position.y)
-	print("  PASS: Consolidated foliage tree trunk has authentic full-height CylinderShape3D (height=%.2fm, radius=%.2fm, Y=%.2fm)." % [cyl_shape.height, cyl_shape.radius, trunk_shape_node.position.y])
+	# At 2.5x scale, visual radius 0.26 -> 0.65m (not oversized 0.95m+), visual trunk height 2.5 -> 6.25m (center Y = 3.125m)
+	assert(cyl_shape.radius >= 0.55 and cyl_shape.radius <= 0.72, "World trunk radius must tightly match 2.5x visual trunk (~0.65m), actual: %.2f" % cyl_shape.radius)
+	assert(cyl_shape.height >= 5.0 and cyl_shape.height <= 7.0, "World trunk height must match lower trunk below canopy split (~6.25m), actual: %.2f" % cyl_shape.height)
+	assert(absf(trunk_shape_node.position.y - cyl_shape.height * 0.5) < 0.1, "Trunk cylinder base must sit at ground Y=0, actual Y=%.2f" % trunk_shape_node.position.y)
+
+	# Verify pine variant does NOT double-scale and matches global_xf (2.0 * 0.92 = 1.84 XZ scale * 0.22m = 0.40m radius)
+	var pine_shape_node: CollisionShape3D = trunk_shapes[1]
+	var pine_cyl := pine_shape_node.shape as CylinderShape3D
+	assert(pine_shape_node.scale.is_equal_approx(Vector3.ONE), "Pine CollisionShape3D must use Vector3.ONE scale")
+	assert(absf(pine_cyl.radius - (0.22 * 2.0 * 0.92)) <= 0.03, "Pine trunk radius must match combined TreeMesh*Node scale (~0.40m), actual: %.2f" % pine_cyl.radius)
+
+	# Simulate a legacy pre-converted course with oversized 0.38m * 2.5 scale cylinder and verify sync_consolidated_foliage_collision fixes it
+	trunk_shape_node.scale = Vector3(2.5, 2.5, 2.5)
+	cyl_shape.radius = 0.38
+	cyl_shape.height = 5.6
+	consolidated_body.set_meta("trunk_collision_version", 1)
+	ptg_script.convert_scene_foliage_to_multimesh(mock_tree_scene, false)
+	var synced_col := consolidated_body.get_child(0) as CollisionShape3D
+	var synced_cyl := synced_col.shape as CylinderShape3D
+	assert(synced_col.scale.is_equal_approx(Vector3.ONE), "Synced trunk collider must have Vector3.ONE scale")
+	assert(synced_cyl.radius <= 0.72, "Synced trunk collider must replace oversized 0.38m*2.5 cylinder with tight 0.65m visual radius, actual: %.2f" % synced_cyl.radius)
+	print("  PASS: Consolidated foliage tree trunks tightly match visual trunk geometry (oak r=%.2fm h=%.2fm, pine r=%.2fm h=%.2fm)." % [synced_cyl.radius, synced_cyl.height, pine_cyl.radius, pine_cyl.height])
 
 	# --- Test 2: Ball Collision with Tree Trunk (Bounce & Depenetration) ---
 	print("\n--- Test 2: Ball Direct Trunk Impact & Physical Bounce ---")

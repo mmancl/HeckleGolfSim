@@ -17,6 +17,8 @@ shader_type spatial;
 // -- Splat map & Macro Terrain AO --
 uniform sampler2D splat_map : filter_linear, repeat_disable;
 uniform sampler2D terrain_ao_map : hint_default_white, filter_linear, repeat_disable;
+uniform sampler2D deep_rough_map : hint_default_black, filter_linear, repeat_disable;
+uniform bool has_deep_rough_map = false;
 
 // -- Surface albedo textures --
 uniform sampler2D tex_rough   : source_color, filter_linear_mipmap, repeat_enable;
@@ -82,8 +84,8 @@ varying vec3 v_world_normal;
 varying vec3 v_world_pos;
 
 void vertex() {
-    v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
-    v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
 void fragment() {
@@ -167,10 +169,24 @@ void fragment() {
 		vec3 col_rough = texture(tex_rough, uv_rough).rgb * vec3(0.84, 0.98, 0.80);
 		vec3 nr_rough = mix(vec3(0.0, 0.0, 1.0), texture(normal_rough, uv_rough).rgb * 2.0 - 1.0, 0.42);
 		float luma_r = dot(col_rough, vec3(0.299, 0.587, 0.114));
+		float ao_r = clamp(0.84 + luma_r * 0.35, 0.75, 1.0);
+		if (has_deep_rough_map) {
+			float dr = smoothstep(0.25, 0.75, texture(deep_rough_map, UV2).r) * smoothstep(0.15, 0.65, rough_w);
+			if (dr > 0.01) {
+				vec3 r_layer2 = texture(tex_rough, uv_rough * 1.9 + vec2(0.27, 0.43)).rgb;
+				float tuft = sin(v_world_pos.x * 11.0 + v_world_pos.z * 7.0) * cos(v_world_pos.x * 8.0 - v_world_pos.z * 13.0) * 0.5 + 0.5;
+				vec3 col_deep = mix(r_layer2 * vec3(0.78, 0.96, 0.72), col_rough * vec3(0.92, 1.06, 0.84), tuft);
+				float cut_lip = smoothstep(0.05, 0.45, dr) * (1.0 - smoothstep(0.50, 0.95, dr));
+				col_deep *= mix(1.0, 0.90, cut_lip);
+				col_rough = mix(col_rough, col_deep, dr);
+				nr_rough = normalize(mix(nr_rough, texture(normal_rough, uv_rough * 1.8).rgb * 2.0 - 1.0, dr * 0.50));
+				ao_r = mix(ao_r, mix(0.75, 0.98, tuft) * mix(1.0, 0.88, cut_lip), dr);
+			}
+		}
 		blended_albedo += col_rough * rough_w;
 		blended_normal += nr_rough * rough_w;
 		blended_roughness += clamp(roughness_rough - (luma_r - 0.35) * 0.08, 0.78, 0.98) * rough_w;
-		blended_ao += clamp(0.84 + luma_r * 0.35, 0.75, 1.0) * rough_w;
+		blended_ao += ao_r * rough_w;
 	}
 
 	if (fairway_w > 0.005) {
@@ -207,9 +223,11 @@ void fragment() {
 		float rake_wave = sin(rake_angle) * 0.5 + 0.5;
 		col_bunker *= mix(0.95, 1.05, rake_wave);
 
-		float bunker_edge = smoothstep(0.01, 0.28, bunker_w) * (1.0 - smoothstep(0.45, 0.95, bunker_w));
-		vec3 soil_color = vec3(0.22, 0.16, 0.10) * (0.88 + 0.24 * sin(UV.x * 2.0));
-		col_bunker = mix(col_bunker, soil_color, bunker_edge * 0.82);
+		float green_contact = smoothstep(0.02, 0.45, raw_green);
+		float bunker_edge = smoothstep(0.015, 0.38, bunker_w) * (1.0 - smoothstep(0.30, 0.82, bunker_w));
+		bunker_edge = max(bunker_edge, smoothstep(0.01, 0.35, bunker_w) * green_contact * (1.0 - smoothstep(0.40, 0.88, bunker_w)));
+		vec3 soil_color = vec3(0.42, 0.28, 0.16) * (0.88 + 0.24 * sin(UV.x * 2.0));
+		col_bunker = mix(col_bunker, soil_color, bunker_edge * 0.95);
 
 		vec3 nr_bunker = texture(normal_bunker, uv_bunker).rgb * 2.0 - 1.0;
 		vec2 rake_tangent = vec2(cos(rake_angle), sin(rake_angle)) * 0.28;

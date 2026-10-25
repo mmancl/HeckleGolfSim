@@ -234,12 +234,20 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 						n.material_override = stipple_mat
 				elif is_med:
 					n.material_override = null
+					if ResourceLoader.exists("res://HighFidelity/Terrain/course_detail_enhancer.gd"):
+						var cde = load("res://HighFidelity/Terrain/course_detail_enhancer.gd")
+						if cde != null and cde.has_method("ensure_deep_rough_map"):
+							cde.ensure_deep_rough_map(scene_root, n)
 				else:
 					var realistic_terrain = _create_realistic_terrain_material(base_m as ShaderMaterial, n)
 					if realistic_terrain != null:
 						n.material_override = realistic_terrain
 					else:
 						n.material_override = null
+					if ResourceLoader.exists("res://HighFidelity/Terrain/course_detail_enhancer.gd"):
+						var cde = load("res://HighFidelity/Terrain/course_detail_enhancer.gd")
+						if cde != null and cde.has_method("ensure_deep_rough_map"):
+							cde.ensure_deep_rough_map(scene_root, n)
 
 			# 2. Driving Range Ground Mesh
 			elif n.name == "DynamicGround" or (n_lower == "ground" and not is_terrain):
@@ -288,8 +296,15 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 				n.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 				if is_bush:
 					n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				if not n.has_meta("orig_surface_mats"):
+					var orig_mats: Array = []
+					for s in range(n.mesh.get_surface_count()):
+						var over_m = n.get_surface_override_material(s)
+						orig_mats.append(over_m if over_m != null else n.mesh.surface_get_material(s))
+					n.set_meta("orig_surface_mats", orig_mats)
+				var cached_n_mats: Array = n.get_meta("orig_surface_mats")
 				for s in range(n.mesh.get_surface_count()):
-					var orig_m = n.mesh.surface_get_material(s)
+					var orig_m: Material = cached_n_mats[s] if s < cached_n_mats.size() else n.mesh.surface_get_material(s)
 					var s_name = ""
 					if n.mesh is ArrayMesh:
 						s_name = (n.mesh as ArrayMesh).surface_get_name(s)
@@ -298,13 +313,13 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 						if low_m != null:
 							n.set_surface_override_material(s, low_m)
 					elif is_med:
-						n.set_surface_override_material(s, null)
+						n.set_surface_override_material(s, orig_m)
 					else:
 						var high_m = _get_realistic_tree_material(orig_m, s_name, s)
 						if high_m != null:
 							n.set_surface_override_material(s, high_m)
 						else:
-							n.set_surface_override_material(s, null)
+							n.set_surface_override_material(s, orig_m)
 
 		# 5. Spatial MultiMesh Foliage Chunks (TreeChunk_*, BushChunk_*, RockChunk_*)
 		elif n is MultiMeshInstance3D:
@@ -315,6 +330,10 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 			var is_rock_chunk := m_name.begins_with("rockchunk")
 			if (is_tree_chunk or is_bush_chunk or is_rock_chunk) and mmi.multimesh != null and mmi.multimesh.mesh != null:
 				if is_tree_chunk:
+					if ResourceLoader.exists("res://HighFidelity/Foliage/procedural_tree_generator.gd"):
+						var ptg = load("res://HighFidelity/Foliage/procedural_tree_generator.gd")
+						if ptg != null and ptg.has_method("upgrade_tree_chunk_mesh_in_place"):
+							ptg.upgrade_tree_chunk_mesh_in_place(mmi, mmi.get_index())
 					mmi.visibility_range_end = 190.0 if is_low else (330.0 if is_med else 560.0)
 					mmi.visibility_range_end_margin = 30.0
 					mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
@@ -426,6 +445,8 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 			if builder_script != null:
 				builder_script.remove_high_fidelity(scene_root)
 
+	_apply_deep_rough_blades(scene_root, is_med)
+
 	# Update teebox markers vibrancy if present in scene
 	if ResourceLoader.exists("res://Courses/Range/teebox_marker_builder.gd"):
 		var tmb = load("res://Courses/Range/teebox_marker_builder.gd")
@@ -441,6 +462,34 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 
 
 static var _low_tree_materials: Dictionary = {}
+
+## Medium (and mobile "High", which is downgraded to Medium) gets a smaller real-blade deep rough
+## field (>= 25% lie resistance zone). Desktop High gets the larger one through HighFidelityBuilder.
+## Low and driving range never get blades.
+static func _apply_deep_rough_blades(scene_root: Node, is_med: bool) -> void:
+	const NODE_NAME := "DeepRoughGrassMedium"
+	var existing := scene_root.get_node_or_null(NODE_NAME)
+	if not is_med or is_driving_range_node(scene_root):
+		if existing != null:
+			scene_root.remove_child(existing)
+			existing.queue_free()
+		return
+	if existing != null:
+		if existing.has_method("_refresh_anchor"):
+			existing.call("_refresh_anchor", true)
+		return
+	if not ResourceLoader.exists("res://HighFidelity/Foliage/high_fidelity_grass.gd"):
+		return
+	var grass_script = load("res://HighFidelity/Foliage/high_fidelity_grass.gd")
+	if grass_script == null:
+		return
+	var grass = grass_script.new()
+	grass.name = NODE_NAME
+	grass.deep_radius = 10.0 if is_mobile() else 14.0
+	grass.deep_cell = 0.55 if is_mobile() else 0.5
+	scene_root.add_child(grass)
+	grass.setup(scene_root)
+
 static var _low_tree_textures: Dictionary = {}
 
 static func _get_low_tree_texture(tex_filename: String) -> Texture2D:
@@ -614,7 +663,7 @@ static func _create_realistic_terrain_material(base_m: ShaderMaterial, n: MeshIn
 	# Transfer parameters from base_m
 	if base_m != null:
 		var params = [
-			"splat_map", "terrain_ao_map",
+			"splat_map", "terrain_ao_map", "deep_rough_map", "has_deep_rough_map",
 			"tex_rough", "tex_green", "tex_fairway", "tex_bunker", "tex_mulch",
 			"normal_rough", "normal_green", "normal_fairway", "normal_bunker", "normal_mulch",
 			"ao_rough", "ao_green", "ao_fairway", "ao_bunker", "ao_mulch",
@@ -637,6 +686,9 @@ static func _create_realistic_terrain_material(base_m: ShaderMaterial, n: MeshIn
 			mat.set_shader_parameter("terrain_ao_map", n.get_meta("orig_ao_map"))
 		if n.has_meta("orig_sun_direction"):
 			mat.set_shader_parameter("sun_direction", n.get_meta("orig_sun_direction"))
+	if n != null and n.has_meta("deep_rough_map"):
+		mat.set_shader_parameter("deep_rough_map", n.get_meta("deep_rough_map"))
+		mat.set_shader_parameter("has_deep_rough_map", true)
 			
 	# Fallback texture defaults if not set
 	if mat.get_shader_parameter("tex_rough") == null and ResourceLoader.exists("res://Courses/Environments/grass-rough/albedo.png"):
@@ -719,8 +771,12 @@ static func _get_realistic_bark_material(orig_mat: Material) -> Material:
 	mat.roughness = 0.94
 	
 	# Albedo texture
+	var is_species_bark: bool = false
 	if orig_mat is BaseMaterial3D and (orig_mat as BaseMaterial3D).albedo_texture != null:
 		mat.albedo_texture = (orig_mat as BaseMaterial3D).albedo_texture
+		var tex_path_l: String = str(mat.albedo_texture.resource_path).to_lower()
+		if tex_path_l.contains("birch") or tex_path_l.contains("pine") or tex_path_l.contains("willow"):
+			is_species_bark = true
 	elif ResourceLoader.exists("res://addons/shapespark-low-poly-exterior-plants/textures/bark.jpg"):
 		mat.albedo_texture = load("res://addons/shapespark-low-poly-exterior-plants/textures/bark.jpg") as Texture2D
 	
@@ -728,23 +784,21 @@ static func _get_realistic_bark_material(orig_mat: Material) -> Material:
 	if ResourceLoader.exists("res://Courses/Environments/tree-bark/normal.png"):
 		mat.normal_enabled = true
 		mat.normal_texture = load("res://Courses/Environments/tree-bark/normal.png") as Texture2D
-		mat.normal_scale = 1.2
+		mat.normal_scale = 1.15
 	if ResourceLoader.exists("res://Courses/Environments/tree-bark/roughness.png"):
 		mat.roughness_texture = load("res://Courses/Environments/tree-bark/roughness.png") as Texture2D
 	
-	mat.uv1_scale = Vector3(1.0, 2.5, 1.0)
+	mat.uv1_scale = Vector3(1.0, 1.0, 1.0)
 
-	# High-graphics 2048px seamless bark replaces the original low-res bark images
+	# Keep the authentic photographic bark albedo (bark.jpg / willow-bark.jpg / pine-bark.jpg / birch-bark.jpg)
+	# and pair it with high-resolution normal & roughness maps for crisp 3D bark micro-relief.
 	var bark_dir := "res://Courses/Environments/high/"
-	if ResourceLoader.exists(bark_dir + "bark_albedo.png"):
-		mat.albedo_texture = load(bark_dir + "bark_albedo.png") as Texture2D
-		mat.uv1_scale = Vector3(1.0, 1.0, 1.0)
-		if ResourceLoader.exists(bark_dir + "bark_normal.png"):
-			mat.normal_enabled = true
-			mat.normal_texture = load(bark_dir + "bark_normal.png") as Texture2D
-			mat.normal_scale = 1.0
-		if ResourceLoader.exists(bark_dir + "bark_roughness.png"):
-			mat.roughness_texture = load(bark_dir + "bark_roughness.png") as Texture2D
+	if ResourceLoader.exists(bark_dir + "bark_normal.png"):
+		mat.normal_enabled = true
+		mat.normal_texture = load(bark_dir + "bark_normal.png") as Texture2D
+		mat.normal_scale = 0.70 if is_species_bark else 0.90
+	if ResourceLoader.exists(bark_dir + "bark_roughness.png"):
+		mat.roughness_texture = load(bark_dir + "bark_roughness.png") as Texture2D
 	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	_realistic_bark_materials[cache_key] = mat
 	return mat
@@ -848,10 +902,13 @@ static func _get_realistic_foliage_material(orig_mat: Material, surface_name: St
 			mat.set_shader_parameter("leaf_detail_normal", load("res://Courses/Environments/high/leaf_normal.png"))
 			mat.set_shader_parameter("use_leaf_detail_normal", false)
 
-	mat.set_shader_parameter("backlight_color", Color(0.42, 0.58, 0.18))
-	mat.set_shader_parameter("backlight_strength", 0.90)
+	mat.set_shader_parameter("backlight_color", Color(0.20, 0.32, 0.08))
+	mat.set_shader_parameter("backlight_strength", 0.30)
 	mat.set_shader_parameter("canopy_depth_ao", 0.45)
-	mat.set_shader_parameter("alpha_scissor_threshold", 0.45)
+	mat.set_shader_parameter("spherical_normal_blend", 0.82)
+	mat.set_shader_parameter("alpha_scissor_threshold", 0.42)
+	mat.set_shader_parameter("roughness", 0.85)
+	mat.set_shader_parameter("specular", 0.08)
 
 	_ensure_wind_listener()
 

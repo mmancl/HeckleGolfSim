@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode cull_disabled, diffuse_burley, specular_schlick_ggx;
+render_mode depth_prepass_alpha, cull_disabled, diffuse_burley, specular_schlick_ggx;
 
 // ============================================================================
 // Photorealistic Tree Foliage Shader (High Graphics Mode - Lush Summer Parkland)
@@ -18,8 +18,8 @@ uniform sampler2D texture_normal : hint_normal, filter_linear_mipmap_anisotropic
 uniform float normal_depth : hint_range(0.0, 3.0) = 0.65;
 uniform bool use_normal_texture = false;
 uniform sampler2D texture_roughness : hint_roughness_r, filter_linear_mipmap, repeat_enable;
-uniform float roughness : hint_range(0.0, 1.0) = 0.62;
-uniform float specular : hint_range(0.0, 1.0) = 0.22;
+uniform float roughness : hint_range(0.0, 1.0) = 0.85;
+uniform float specular : hint_range(0.0, 1.0) = 0.08;
 
 // High-res seamless leaf detail (High graphics only): tiles over each card, original alpha keeps the silhouette
 uniform sampler2D leaf_detail_albedo : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -28,14 +28,14 @@ uniform bool use_leaf_detail = false;
 uniform bool use_leaf_detail_normal = false;
 uniform float leaf_detail_scale : hint_range(0.5, 16.0) = 3.0;
 
-// Foliage Subsurface & Backlight Transmission (Simulates sunlight penetrating translucent summer leaves)
-uniform vec3 backlight_color : source_color = vec3(0.46, 0.68, 0.20);
-uniform float backlight_strength : hint_range(0.0, 2.0) = 1.05;
+// Foliage Subsurface & Backlight Transmission (Natural translucent leaf glow, subtle to preserve shadow depth)
+uniform vec3 backlight_color : source_color = vec3(0.20, 0.32, 0.08);
+uniform float backlight_strength : hint_range(0.0, 2.0) = 0.30;
 
 // Canopy 3D Depth & Volumetric Self-Occlusion
-uniform float canopy_depth_ao : hint_range(0.0, 1.0) = 0.52;
-uniform float sun_top_boost : hint_range(0.0, 1.0) = 0.30;
-uniform float spherical_normal_blend : hint_range(0.0, 1.0) = 0.58;
+uniform float canopy_depth_ao : hint_range(0.0, 1.0) = 0.45;
+uniform float sun_top_boost : hint_range(0.0, 1.0) = 0.12;
+uniform float spherical_normal_blend : hint_range(0.0, 1.0) = 0.82;
 
 // Wind sway (Tuned for realistic natural breeze without circular motion)
 uniform vec2 wind_direction = vec2(0.85, 0.52);
@@ -62,9 +62,9 @@ void vertex() {
 		? INSTANCE_CUSTOM.a
 		: fract(sin(dot(floor(instance_origin.xz * 0.25), vec2(12.9898, 78.233))) * 43758.5453);
 
-	// Hemispherical canopy normal: blends flat polygon normals toward a lush dome normal
-	// so clusters catch sunlight smoothly like real volumetric 3D tree crowns
-	vec3 canopy_center = vec3(0.0, 3.2, 0.0);
+	// Hemispherical canopy normal: blends sub-lobe normals with overall crown dome normal
+	// so billowy clusters catch sunlight smoothly like real volumetric 3D tree crowns
+	vec3 canopy_center = vec3(0.0, 3.8, 0.0);
 	vec3 radial_dir = normalize(VERTEX - canopy_center);
 	if (VERTEX.y > 0.8) {
 		NORMAL = normalize(mix(NORMAL, radial_dir, spherical_normal_blend));
@@ -102,43 +102,33 @@ void fragment() {
 	ALPHA = final_alpha;
 	ALPHA_SCISSOR_THRESHOLD = alpha_scissor_threshold;
 
-	// Retain 100% of the authentic high-resolution branch texture clarity
+	// Double-sided normal correction: ensure backfaces reflect light outward with the crown dome
+	if (!FRONT_FACING) {
+		NORMAL = -NORMAL;
+	}
+
+	// Retain 100% of the authentic high-resolution photographic branch texture clarity
 	vec3 base_col = tex.rgb * albedo.rgb;
 	if (use_leaf_detail) {
 		vec3 leaf_col = texture(leaf_detail_albedo, UV * leaf_detail_scale).rgb;
-		base_col = mix(base_col, leaf_col * albedo.rgb, 0.15);
+		base_col = mix(base_col, leaf_col * albedo.rgb, 0.12);
 	}
 
-	// 1. 3D Canopy Volumetric Self-Occlusion & Sub-Canopy Pocket Depth:
-	float dist_from_center = length(v_local_vertex.xz);
-	float cluster_pocket = 0.90 + 0.10 * sin(v_local_vertex.x * 2.4 + v_local_vertex.y * 1.8) * cos(v_local_vertex.z * 2.4 - v_local_vertex.y * 1.5);
-	float canopy_core = clamp((dist_from_center / 1.75) * cluster_pocket, 1.0 - canopy_depth_ao, 1.05);
+	// 1. 3D Canopy Volumetric Self-Occlusion: deeper interior leaves are naturally in shadow
+	float dist_from_center = length(v_local_vertex - vec3(0.0, 3.8, 0.0));
+	float canopy_depth = clamp(dist_from_center / 2.6, 1.0 - canopy_depth_ao, 1.0);
 
-	// 2. Vertical Sunlight Gradient (Sunlit crown, rich forest lower shadow):
-	float height_grad = smoothstep(1.2, 6.2, v_local_vertex.y);
-	vec3 sun_tint = mix(vec3(0.82, 0.90, 0.80), vec3(1.08, 1.12, 0.95), height_grad * (0.65 + sun_top_boost));
+	// 2. Vertical Sunlight Gradient: gentle, warm top-of-canopy light
+	float height_grad = smoothstep(1.5, 6.2, v_local_vertex.y);
+	vec3 sun_tint = mix(vec3(0.90, 0.94, 0.88), vec3(1.02, 1.04, 0.96), height_grad * (0.80 + sun_top_boost));
 
-	// 3. Lush Summer Parkland Chlorophyll Palette:
-	vec3 summer_emerald = vec3(0.84, 0.98, 0.80);
-	vec3 summer_olive   = vec3(0.96, 1.04, 0.78);
-	vec3 summer_willow  = vec3(0.88, 1.06, 0.82);
-	vec3 summer_forest  = vec3(0.74, 0.90, 0.74);
+	// 3. MultiMesh / Species Chlorophyll Tint (natural, gentle variation)
+	vec3 instance_tint = v_instance_custom.a > 0.001 ? v_instance_custom.rgb : vec3(1.0);
 
-	vec3 auto_species_tint = v_tree_seed < 0.50
-		? mix(summer_emerald, summer_olive, v_tree_seed * 1.4)
-		: (v_tree_seed < 0.82 ? mix(summer_olive, summer_willow, (v_tree_seed - 0.50) * 3.0) : summer_forest);
+	ALBEDO = clamp(base_col * canopy_depth * sun_tint * instance_tint, 0.0, 1.0);
 
-	vec3 instance_tint = v_instance_custom.a > 0.001 ? v_instance_custom.rgb : auto_species_tint;
-
-	// High-frequency individual leaf chlorophyll variation across the canopy
-	float micro_leaf = sin(v_local_vertex.x * 12.0 + v_local_vertex.y * 10.0) * cos(v_local_vertex.z * 12.0 - v_local_vertex.y * 8.0);
-	vec3 leaf_variation = mix(vec3(0.96, 0.98, 0.95), vec3(1.04, 1.02, 0.97), micro_leaf * 0.5 + 0.5);
-
-	ALBEDO = clamp(base_col * canopy_core * sun_tint * instance_tint * leaf_variation, 0.0, 1.0);
-
-	// 4. Subsurface Backlight Transmission (sunlight penetrating translucent leaves):
-	float outer_leaf_mask = smoothstep(0.40, 1.0, canopy_core);
-	BACKLIGHT = backlight_color * instance_tint * backlight_strength * (0.45 + 0.55 * outer_leaf_mask);
+	// 4. Subsurface Backlight Transmission: subtle translucent warmth on outer sunlit leaves
+	BACKLIGHT = backlight_color * instance_tint * (backlight_strength * canopy_depth);
 
 	// 5. Normal & Roughness:
 	if (use_normal_texture) {
@@ -151,11 +141,11 @@ void fragment() {
 		NORMAL_MAP_DEPTH = normal_depth;
 	}
 
-	ROUGHNESS = clamp(roughness - micro_leaf * 0.04, 0.40, 0.88);
+	ROUGHNESS = roughness;
 	SPECULAR = specular;
 
 	// Ambient Occlusion
-	AO = clamp(mix(canopy_core, 1.0, 0.25), 0.35, 1.0);
-	AO_LIGHT_AFFECT = 0.40;
+	AO = clamp(canopy_depth, 0.40, 1.0);
+	AO_LIGHT_AFFECT = 0.50;
 }
 

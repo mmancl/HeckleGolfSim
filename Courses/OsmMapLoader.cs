@@ -130,15 +130,18 @@ public partial class OsmMapLoader : Node
 
     public void DownloadAndGenerateCourse(double lat, double lon, string courseName)
     {
-        DownloadAndGenerateCourse(lat, lon, courseName, false);
+        DownloadAndGenerateCourse(lat, lon, courseName, false, "");
     }
 
-    public async void DownloadAndGenerateCourse(double lat, double lon, string courseName, bool isCached)
+    public void DownloadAndGenerateCourse(double lat, double lon, string courseName, bool isCached)
+    {
+        DownloadAndGenerateCourse(lat, lon, courseName, isCached, "");
+    }
+
+    public async void DownloadAndGenerateCourse(double lat, double lon, string courseName, bool isCached, string location = "")
     {
         _generationMessage = "";
-        string safeName = string.Concat(courseName.Split(Path.GetInvalidFileNameChars())).Replace(" ", "_");
-        string courseDir = $"user://courses/{safeName}";
-        string globalCourseDir = ProjectSettings.GlobalizePath(courseDir);
+        var (safeName, courseDir, globalCourseDir, _) = ResolveCoursePathAndTitle(courseName, lat, lon, location);
 
         if (!Directory.Exists(globalCourseDir))
         {
@@ -192,12 +195,17 @@ public partial class OsmMapLoader : Node
             GD.Print($"{LogPrefix} Warning: Could not calculate course bounding box for satellite tree detection.");
         }
 
-        CallDeferred(MethodName.GenerateCourseDeferred, osmJson, courseName, lat, lon, satImageBytes ?? Array.Empty<byte>());
+        CallDeferred(MethodName.GenerateCourseDeferred, osmJson, courseName, lat, lon, satImageBytes ?? Array.Empty<byte>(), location);
     }
 
-    public async void GenerateCourseDeferred(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes)
+    public void GenerateCourseDeferred(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes)
     {
-        bool success = await GenerateCourseFromDataAsync(jsonString, courseName, lat, lon, satImageBytes);
+        GenerateCourseDeferred(jsonString, courseName, lat, lon, satImageBytes, "");
+    }
+
+    public async void GenerateCourseDeferred(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes, string location = "")
+    {
+        bool success = await GenerateCourseFromDataAsync(jsonString, courseName, lat, lon, satImageBytes, location);
         EmitCourseGenerated(success);
     }
 
@@ -320,7 +328,174 @@ public partial class OsmMapLoader : Node
         return slugs.Count > 0 ? slugs[0] : "";
     }
 
-    private static async Task<string> TryLoadPrepackagedGeometryAsync(string courseName)
+    private static readonly Dictionary<string, List<(double Lat, double Lon)>> _cachedSlugCoordinates = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object _slugCoordsLock = new();
+
+    private static void EnsureCachedSlugCoordinatesLoaded()
+    {
+        lock (_slugCoordsLock)
+        {
+            if (_cachedSlugCoordinates.Count > 0) return;
+            var catalog = LoadBundledCatalog();
+            foreach (var course in catalog)
+            {
+                if (course.Lat == 0 && course.Lon == 0) continue;
+                var slugs = GetCourseGeometryCandidateSlugs(course.Name);
+                foreach (var slug in slugs)
+                {
+                    if (!_cachedSlugCoordinates.TryGetValue(slug, out var list))
+                    {
+                        list = new List<(double Lat, double Lon)>();
+                        _cachedSlugCoordinates[slug] = list;
+                    }
+                    if (!list.Any(c => HaversineDistanceMeters(c.Lat, c.Lon, course.Lat, course.Lon) < 1000.0))
+                    {
+                        list.Add((course.Lat, course.Lon));
+                    }
+                }
+            }
+        }
+    }
+
+    private static bool TryGetCachedCourseCoordinates(string slug, out List<(double Lat, double Lon)> coordsList)
+    {
+        EnsureCachedSlugCoordinatesLoaded();
+        lock (_slugCoordsLock)
+        {
+            return _cachedSlugCoordinates.TryGetValue(slug, out coordsList!);
+        }
+    }
+
+    private static void RegisterCachedSlugCoordinate(string slug, double lat, double lon)
+    {
+        lock (_slugCoordsLock)
+        {
+            if (!_cachedSlugCoordinates.TryGetValue(slug, out var list))
+            {
+                list = new List<(double Lat, double Lon)>();
+                _cachedSlugCoordinates[slug] = list;
+            }
+            if (!list.Any(c => HaversineDistanceMeters(c.Lat, c.Lon, lat, lon) < 1000.0))
+            {
+                list.Add((lat, lon));
+            }
+        }
+    }
+
+    private static bool TryExtractFirstNodeFromJson(string json, out double lat, out double lon)
+    {
+        lat = 0;
+        lon = 0;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("elements", out var elements) && elements.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in elements.EnumerateArray())
+                {
+                    if (el.TryGetProperty("type", out var typeProp) && typeProp.GetString() == "node" &&
+                        el.TryGetProperty("lat", out var latProp) && el.TryGetProperty("lon", out var lonProp))
+                    {
+                        lat = latProp.GetDouble();
+                        lon = lonProp.GetDouble();
+                        return true;
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+        return false;
+    }
+
+    private static bool TryExtractFirstNodeFromPath(string path, out double lat, out double lon)
+    {
+        lat = 0;
+        lon = 0;
+        try
+        {
+            if (!Godot.FileAccess.FileExists(path)) return false;
+            using var fa = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
+            if (fa == null) return false;
+            if (path.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
+            {
+                byte[] gzBytes = fa.GetBuffer((long)fa.GetLength());
+                using var ms = new MemoryStream(gzBytes);
+                using var gzStream = new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionMode.Decompress);
+                using var reader = new StreamReader(gzStream, Encoding.UTF8);
+                string json = reader.ReadToEnd();
+                return TryExtractFirstNodeFromJson(json, out lat, out lon);
+            }
+            else
+            {
+                string json = fa.GetAsText();
+                return TryExtractFirstNodeFromJson(json, out lat, out lon);
+            }
+        }
+        catch
+        {
+        }
+        return false;
+    }
+
+    private static (string SafeName, string CourseDir, string GlobalCourseDir, string Title) ResolveCoursePathAndTitle(
+        string courseName, double lat, double lon, string location = "")
+    {
+        string baseName = string.Concat(courseName.Split(Path.GetInvalidFileNameChars())).Replace(" ", "_");
+        string safeName = baseName;
+        string courseDir = $"user://courses/{safeName}";
+        string globalCourseDir = ProjectSettings.GlobalizePath(courseDir);
+        string title = courseName;
+
+        string existingJsonPath = Path.Combine(globalCourseDir, "course.json");
+        if (File.Exists(existingJsonPath))
+        {
+            try
+            {
+                string existingJson = File.ReadAllText(existingJsonPath);
+                using var doc = JsonDocument.Parse(existingJson);
+                double existingLat = 0, existingLon = 0;
+                if (doc.RootElement.TryGetProperty("Latitude", out var latProp))
+                    existingLat = latProp.GetDouble();
+                if (doc.RootElement.TryGetProperty("Longitude", out var lonProp))
+                    existingLon = lonProp.GetDouble();
+
+                // If coordinates differ significantly (> 25 km), disambiguate folder and title
+                if ((existingLat != 0 || existingLon != 0) && (lat != 0 || lon != 0))
+                {
+                    double dist = HaversineDistanceMeters(lat, lon, existingLat, existingLon);
+                    if (dist > 25000.0)
+                    {
+                        string locFirst = !string.IsNullOrWhiteSpace(location) ? location.Split(',')[0].Trim() : "";
+                        string disambig = !string.IsNullOrEmpty(locFirst)
+                            ? string.Concat(locFirst.Split(Path.GetInvalidFileNameChars())).Replace(" ", "_")
+                            : $"{Math.Round(lat, 2)}_{Math.Round(lon, 2)}".Replace("-", "m").Replace(".", "_");
+                        safeName = $"{baseName}_{disambig}";
+                        courseDir = $"user://courses/{safeName}";
+                        globalCourseDir = ProjectSettings.GlobalizePath(courseDir);
+                        if (!string.IsNullOrEmpty(locFirst))
+                        {
+                            title = $"{courseName} ({locFirst})";
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{LogPrefix} Error checking existing course.json for disambiguation: {ex.Message}");
+            }
+        }
+
+        return (safeName, courseDir, globalCourseDir, title);
+    }
+
+    private static Task<string> TryLoadPrepackagedGeometryAsync(string courseName)
+    {
+        return TryLoadPrepackagedGeometryAsync(courseName, 0, 0);
+    }
+
+    private static async Task<string> TryLoadPrepackagedGeometryAsync(string courseName, double targetLat, double targetLon)
     {
         var slugs = GetCourseGeometryCandidateSlugs(courseName);
         if (slugs.Count == 0)
@@ -329,6 +504,16 @@ public partial class OsmMapLoader : Node
         var candidatePaths = new List<string>();
         foreach (var slug in slugs)
         {
+            if (targetLat != 0 || targetLon != 0)
+            {
+                if (TryGetCachedCourseCoordinates(slug, out var coordsList) &&
+                    !coordsList.Any(c => HaversineDistanceMeters(targetLat, targetLon, c.Lat, c.Lon) <= 25000.0))
+                {
+                    GD.Print($"{LogPrefix} Candidate cached slug '{slug}' is located > 25 km from requested coordinates ({targetLat}, {targetLon}). Skipping.");
+                    continue;
+                }
+            }
+
             candidatePaths.Add($"res://Courses/CachedGeometry/{slug}.json.gz");
             candidatePaths.Add($"res://Courses/CachedGeometry/{slug}.json");
             candidatePaths.Add($"user://cached_geometry/{slug}.json.gz");
@@ -345,27 +530,37 @@ public partial class OsmMapLoader : Node
                 using var fa = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
                 if (fa == null) continue;
 
+                string? decompressed = null;
                 if (path.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
                 {
                     byte[] gzBytes = fa.GetBuffer((long)fa.GetLength());
                     using var ms = new MemoryStream(gzBytes);
                     using var gzStream = new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionMode.Decompress);
                     using var reader = new StreamReader(gzStream, Encoding.UTF8);
-                    string decompressed = await reader.ReadToEndAsync();
-                    if (!string.IsNullOrWhiteSpace(decompressed))
-                    {
-                        GD.Print($"{LogPrefix} Successfully loaded pre-packaged geometry for '{courseName}' from {path} (0 API calls)!");
-                        return decompressed;
-                    }
+                    decompressed = await reader.ReadToEndAsync();
                 }
                 else
                 {
-                    string json = fa.GetAsText();
-                    if (!string.IsNullOrWhiteSpace(json))
+                    decompressed = fa.GetAsText();
+                }
+
+                if (!string.IsNullOrWhiteSpace(decompressed))
+                {
+                    if (targetLat != 0 || targetLon != 0)
                     {
-                        GD.Print($"{LogPrefix} Successfully loaded pre-packaged geometry for '{courseName}' from {path} (0 API calls)!");
-                        return json;
+                        if (TryExtractFirstNodeFromJson(decompressed, out double nLat, out double nLon))
+                        {
+                            double dist = HaversineDistanceMeters(targetLat, targetLon, nLat, nLon);
+                            if (dist > 25000.0)
+                            {
+                                GD.Print($"{LogPrefix} Cached geometry at {path} ({nLat}, {nLon}) is {dist / 1000.0:F1} km away from target ({targetLat}, {targetLon}). Skipping.");
+                                continue;
+                            }
+                        }
                     }
+
+                    GD.Print($"{LogPrefix} Successfully loaded pre-packaged geometry for '{courseName}' from {path} (0 API calls)!");
+                    return decompressed;
                 }
             }
             catch (Exception ex)
@@ -420,18 +615,18 @@ public partial class OsmMapLoader : Node
 
     private async Task<string> DownloadOsmDataAsync(double lat, double lon, string courseName, bool isCached = false)
     {
-        // 1. Check if pre-packaged or locally cached geometry exists (instant & 0 API calls)
-        string prepackaged = await TryLoadPrepackagedGeometryAsync(courseName);
+        // 1. Check if pre-packaged or locally cached geometry exists near requested coordinates
+        string prepackaged = await TryLoadPrepackagedGeometryAsync(courseName, lat, lon);
         if (!string.IsNullOrWhiteSpace(prepackaged))
         {
             ReportProgress($"Loaded pre-packaged map data for '{courseName}' (0 API calls)...");
             return prepackaged;
         }
 
-        // If this course is marked cached (or has cached geometry registered), never query OpenStreetMap Overpass
-        if (isCached || IsCourseCached(courseName))
+        // 2. Only enforce cache restriction if coordinates are missing (cannot query Overpass without coordinates)
+        if (lat == 0 && lon == 0)
         {
-            GD.PrintErr($"{LogPrefix} Cached geometry for '{courseName}' was requested but could not be loaded from local files. OpenStreetMap Overpass will NOT be queried for cached courses.");
+            GD.PrintErr($"{LogPrefix} Cached geometry for '{courseName}' was requested but could not be loaded from local files and no coordinates were provided. OpenStreetMap was not queried.");
             _generationMessage = $"Error: Cached map geometry for '{courseName}' could not be loaded from local files. OpenStreetMap was not queried.";
             return "";
         }
@@ -501,18 +696,16 @@ public partial class OsmMapLoader : Node
         return "";
     }
 
-    private async Task<bool> GenerateCourseFromDataAsync(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes)
+    private async Task<bool> GenerateCourseFromDataAsync(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes, string location = "")
     {
         _generationMessage = "";
         ReportProgress("Parsing course layout and golf features...");
         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
-        string safeName = string.Concat(courseName.Split(Path.GetInvalidFileNameChars())).Replace(" ", "_");
-        string courseDir = $"user://courses/{safeName}";
+        var (safeName, courseDir, globalCourseDir, courseTitle) = ResolveCoursePathAndTitle(courseName, lat, lon, location);
         string tscnPath = $"{courseDir}/course.tscn";
         string jsonPath = $"{courseDir}/course.json";
         string globalJsonPath = ProjectSettings.GlobalizePath(jsonPath);
-        string globalCourseDir = Path.GetDirectoryName(globalJsonPath) ?? "";
         if (!string.IsNullOrEmpty(globalCourseDir) && !Directory.Exists(globalCourseDir))
         {
             Directory.CreateDirectory(globalCourseDir);
@@ -943,9 +1136,57 @@ public partial class OsmMapLoader : Node
             var holesWithTeePolygons = new HashSet<string>();
 
             // Pre-process hole ways to assign consecutive unique hole keys ("Hole 01", "Hole 02", ...)
-            // and support multi-course / sub-course layouts (e.g. golf:course:name="Red", "White", "Blue")
+            // and support multi-course / sub-course layouts (e.g. golf:course:name="Red", "White", "Blue").
+            // When course boundary polygons are identified, strictly filter hole ways so neighboring courses' holes are excluded.
+            Func<OsmWay, bool> isHoleBelongingToCourse = (hw) => {
+                if (coursePolygons.Count == 0) return true;
+
+                // If hole explicitly names a course or subcourse, check if it matches the target course name
+                string holeCourse = ExtractSubCourseName(hw.Tags);
+                if (!string.IsNullOrEmpty(targetCourseName) && !string.IsNullOrEmpty(holeCourse))
+                {
+                    if (holeCourse.Equals(targetCourseName, StringComparison.OrdinalIgnoreCase) ||
+                        targetCourseName.Contains(holeCourse, StringComparison.OrdinalIgnoreCase) ||
+                        holeCourse.Contains(targetCourseName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+
+                // Verify that hole endpoints (tee or green/pin) or way center lie within the course polygons
+                var hPts = hw.NodeIds
+                    .Where(nodes.ContainsKey)
+                    .Select(id => nodes[id])
+                    .Select(coord => new Vector2(
+                        (float)((coord.Lon - refLon) * metersPerLon),
+                        -(float)((coord.Lat - refLat) * metersPerLat)
+                    ))
+                    .ToList();
+
+                if (hPts.Count < 2) return false;
+
+                Vector2 tee = hPts.First();
+                Vector2 pin = hPts.Last();
+                Vector2 center = new Vector2(hPts.Average(p => p.X), hPts.Average(p => p.Y));
+
+                foreach (var poly in coursePolygons)
+                {
+                    if (PointInPolygon(tee, poly) || PointInPolygon(pin, poly) || PointInPolygon(center, poly))
+                        return true;
+
+                    foreach (var v in poly)
+                    {
+                        if (tee.DistanceTo(v) < 30f || pin.DistanceTo(v) < 30f || center.DistanceTo(v) < 30f)
+                            return true;
+                    }
+                }
+
+                return false;
+            };
+
             var holeWays = ways
                 .Where(w => w.Tags.TryGetValue("golf", out var g) && g == "hole" && w.NodeIds.Count(nodes.ContainsKey) >= 2)
+                .Where(isHoleBelongingToCourse)
                 .ToList();
 
             var holeWayMapping = new Dictionary<long, (string HoleKey, string DisplayName, string SubCourse, string OriginalRef)>();
@@ -1033,7 +1274,15 @@ public partial class OsmMapLoader : Node
 
                 // Check if the way belongs to the main course
                 var wayCenter = new Vector2(points.Average(p => p.X), points.Average(p => p.Y));
-                if (!isPointInMainCourse(wayCenter))
+                way.Tags.TryGetValue("golf", out string? golfType);
+
+                // If this is a golf=hole way, strictly check whether it was accepted into holeWays
+                if (golfType == "hole")
+                {
+                    if (!holeWays.Any(hw => hw.Id == way.Id))
+                        continue;
+                }
+                else if (!isPointInMainCourse(wayCenter))
                 {
                     // Do not skip the main golf course boundary ways/relations themselves
                     bool isMainBoundary = way.Tags.TryGetValue("leisure", out var l) && l == "golf_course";
@@ -1079,9 +1328,6 @@ public partial class OsmMapLoader : Node
                         }
                     }
                 }
-
-                // Determine golf type early so line features (hole, tee) are handled before polygon guard
-                way.Tags.TryGetValue("golf", out string? golfType);
 
                 // Handle golf=hole as a LINE of play (tee → green), not a polygon
                 if (golfType == "hole")
@@ -1831,17 +2077,8 @@ public partial class OsmMapLoader : Node
                 }
             }
 
-            foreach (var poly in forestPolygons)
-            {
-                foreach (var pt in poly)
-                {
-                    if (pt.X < courseMinX) courseMinX = pt.X;
-                    if (pt.X > courseMaxX) courseMaxX = pt.X;
-                    if (pt.Y < courseMinZ) courseMinZ = pt.Y;
-                    if (pt.Y > courseMaxZ) courseMaxZ = pt.Y;
-                    hasValidPoints = true;
-                }
-            }
+            // Note: forestPolygons are excluded from course bounds calculation so bounds remain
+            // strictly anchored to the playable course features and stay aligned with satellite imagery.
 
             if (!hasValidPoints)
             {
@@ -1863,6 +2100,50 @@ public partial class OsmMapLoader : Node
 
             // 1. Adjust straight-line or dogleg hole paths to follow the fairway doglegs if needed
             var fairwayPolys = exclusionPolygons.Where(e => e.GolfType == "fairway").ToList();
+            var bunkerPolys = exclusionPolygons.Where(e => e.GolfType == "bunker").ToList();
+            var greenPolys = exclusionPolygons.Where(e => e.GolfType == "green").ToList();
+
+            Func<Vector2, float, bool> isTooCloseToBunker = (pt, minDist) =>
+            {
+                for (int i = 0; i < bunkerPolys.Count; i++)
+                {
+                    var bk = bunkerPolys[i];
+                    if (pt.X >= bk.MinX - minDist && pt.X <= bk.MaxX + minDist &&
+                        pt.Y >= bk.MinY - minDist && pt.Y <= bk.MaxY + minDist)
+                    {
+                        if (PointInPolygon(pt, bk.Polygon))
+                        {
+                            return true;
+                        }
+                        if (DistanceToPolygon(pt, bk.Polygon) < minDist)
+                        {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            };
+
+            Func<Vector2, float, bool> isTooCloseToGreen = (pt, minDist) =>
+            {
+                for (int i = 0; i < greenPolys.Count; i++)
+                {
+                    var gr = greenPolys[i];
+                    if (pt.X >= gr.MinX - minDist && pt.X <= gr.MaxX + minDist &&
+                        pt.Y >= gr.MinY - minDist && pt.Y <= gr.MaxY + minDist)
+                    {
+                        if (PointInPolygon(pt, gr.Polygon))
+                        {
+                            return true;
+                        }
+                        if (DistanceToPolygon(pt, gr.Polygon) < minDist)
+                        {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            };
             if (fairwayPolys.Count > 0)
             {
                 foreach (var kp in holeInfo)
@@ -1974,6 +2255,10 @@ public partial class OsmMapLoader : Node
                     float tz = -(float)((coord.Lat - refLat) * metersPerLat);
                     var pt = new Vector2(tx, tz);
 
+                    // Trees must never generate inside or too close to sand traps (< 5.0m) or greens (< 8.0m)
+                    if (isTooCloseToBunker(pt, 5.0f)) continue;
+                    if (isTooCloseToGreen(pt, 8.0f)) continue;
+
                     // Place tree directly where OSM specified (avoiding duplicates within 0.5m)
                     bool isDuplicate = false;
                     for (int i = 0; i < placedTreePositions.Count; i++)
@@ -1993,6 +2278,9 @@ public partial class OsmMapLoader : Node
 
             foreach (var pt in additionalTreePositions)
             {
+                if (isTooCloseToBunker(pt, 5.0f)) continue;
+                if (isTooCloseToGreen(pt, 8.0f)) continue;
+
                 bool isDuplicate = false;
                 for (int i = 0; i < placedTreePositions.Count; i++)
                 {
@@ -2097,6 +2385,7 @@ public partial class OsmMapLoader : Node
             };
 
             // Scan satellite imagery for additional trees in the rough and background
+            var candidatePoints = new List<Vector2>();
             if (satImage != null)
             {
                 ReportProgress("Scanning foliage from satellite imagery...");
@@ -2105,9 +2394,8 @@ public partial class OsmMapLoader : Node
                 GD.Print($"{LogPrefix} Scanning satellite imagery for tree positions...");
                 int satWidth = satImage.GetWidth();
                 int satHeight = satImage.GetHeight();
-                var candidatePoints = new List<Vector2>();
-                float spacing = isComputerPlatform ? 5.0f : (isMobilePlatform ? 8.0f : 6.5f); // Grid spacing in meters
-                float minDistanceBetweenTrees = isComputerPlatform ? 6.5f : 8.5f; // Minimum distance to keep trees apart
+                float spacing = isComputerPlatform ? 6.5f : (isMobilePlatform ? 9.0f : 8.0f); // Grid spacing in meters
+                float minDistanceBetweenTrees = isComputerPlatform ? 10.0f : 12.0f; // Minimum distance to keep trees apart
 
                 var gridPoints = new List<Vector2>();
                 for (float rx = courseMinX; rx <= courseMaxX; rx += spacing)
@@ -2147,8 +2435,14 @@ public partial class OsmMapLoader : Node
                         }
                         if (insideExclusion) return;
 
-                        // Strictly no generated trees close to fairway (< 10m)
-                        if (getDistToFairway(pt) < 10.0f) return;
+                        // Strictly no generated trees inside or close to bunker (< 5.0m)
+                        if (isTooCloseToBunker(pt, 5.0f)) return;
+
+                        // Strictly no generated trees inside or close to green (< 10.0m)
+                        if (isTooCloseToGreen(pt, 10.0f)) return;
+
+                        // Strictly no generated trees close to fairway (< 11m)
+                        if (getDistToFairway(pt) < 11.0f) return;
 
                         // Strictly no generated trees between tee box and fairway
                         if (isBetweenTeeAndFairway(pt)) return;
@@ -2190,7 +2484,18 @@ public partial class OsmMapLoader : Node
 
                         Color pixelColor = GetAveragedPixel(satImage, px, py);
                         float variance = GetLocalVariance(satImage, px, py);
-                        if (IsTreeColor(pixelColor) && (variance > 0.0001f || (pixelColor.G > pixelColor.R && pixelColor.G > pixelColor.B)))
+                        ColorToHsv(pixelColor, out _, out _, out float v);
+
+                        // Differentiate real 3D tree canopies/shadows from smooth fairway/rough turf.
+                        // Real tree crowns have dark values and pronounced shadow texture variance,
+                        // whereas mowed rough turf has low variance and mid-range brightness.
+                        bool isTreeCandidate = IsTreeColor(pixelColor) && (
+                            (v <= 0.26f && variance >= 0.0028f) ||
+                            (v > 0.26f && v <= 0.38f && variance >= 0.0042f) ||
+                            (v > 0.38f && variance >= 0.0075f)
+                        );
+
+                        if (isTreeCandidate)
                         {
                             localCandidates.Add(pt);
                         }
@@ -2203,38 +2508,85 @@ public partial class OsmMapLoader : Node
 
                 GD.Print($"{LogPrefix} Found {candidatePoints.Count} tree candidate locations from satellite imagery.");
 
-                int maxSatelliteTrees = isComputerPlatform ? 3000 : (isMobilePlatform ? 1000 : 1500);
+                // On mobile platforms, enforce a performance cap of 1,000 trees. On desktop/PC, retain all candidates without cap.
                 var selectedPoints = new List<Vector2>();
-                if (candidatePoints.Count > maxSatelliteTrees)
+                if (isMobilePlatform && candidatePoints.Count > 1000)
                 {
                     var rnd = new Random(42);
-                    var indices = Enumerable.Range(0, candidatePoints.Count).OrderBy(x => rnd.Next()).Take(maxSatelliteTrees).ToList();
+                    var indices = Enumerable.Range(0, candidatePoints.Count).OrderBy(x => rnd.Next()).Take(1000).ToList();
                     foreach (int idx in indices)
                     {
                         selectedPoints.Add(candidatePoints[idx]);
                     }
-                    GD.Print($"{LogPrefix} Capped satellite trees to {maxSatelliteTrees} (randomly sampled).");
+                    GD.Print($"{LogPrefix} Mobile platform detected: capped satellite trees to 1,000 (randomly sampled).");
                 }
                 else
                 {
+                    GD.Print($"{LogPrefix} Retaining all {candidatePoints.Count} candidate trees from satellite imagery (no cap on desktop/PC).");
                     selectedPoints = candidatePoints;
+                }
+
+                // Build fast 2D spatial hash grid so placing thousands of trees evaluates in milliseconds
+                float cellSz = minDistanceBetweenTrees;
+                float minDstSq = minDistanceBetweenTrees * minDistanceBetweenTrees;
+                var spatialGrid = new Dictionary<long, List<Vector2>>();
+
+                long GetGridKey(float gx_val, float gz_val)
+                {
+                    int g_x = (int)Math.Floor(gx_val / cellSz);
+                    int g_z = (int)Math.Floor(gz_val / cellSz);
+                    return ((long)g_x << 32) ^ (uint)g_z;
+                }
+
+                void RegisterTree(Vector2 pos)
+                {
+                    placedTreePositions.Add(pos);
+                    long k = GetGridKey(pos.X, pos.Y);
+                    if (!spatialGrid.TryGetValue(k, out var list))
+                    {
+                        list = new List<Vector2>(4);
+                        spatialGrid[k] = list;
+                    }
+                    list.Add(pos);
+                }
+
+                // Register all authentic OSM trees into spatial hash
+                var initialOsmTrees = placedTreePositions.ToArray();
+                placedTreePositions.Clear();
+                foreach (var pos in initialOsmTrees)
+                {
+                    RegisterTree(pos);
                 }
 
                 foreach (var pt in selectedPoints)
                 {
+                    int gx = (int)Math.Floor(pt.X / cellSz);
+                    int gz = (int)Math.Floor(pt.Y / cellSz);
                     bool tooClose = false;
-                    foreach (var placedPos in placedTreePositions)
+
+                    for (int dx = -1; dx <= 1 && !tooClose; dx++)
                     {
-                        if (pt.DistanceTo(placedPos) < minDistanceBetweenTrees)
+                        for (int dz = -1; dz <= 1; dz++)
                         {
-                            tooClose = true;
-                            break;
+                            long nk = ((long)(gx + dx) << 32) ^ (uint)(gz + dz);
+                            if (spatialGrid.TryGetValue(nk, out var cellList))
+                            {
+                                for (int c = 0; c < cellList.Count; c++)
+                                {
+                                    if (pt.DistanceSquaredTo(cellList[c]) < minDstSq)
+                                    {
+                                        tooClose = true;
+                                        break;
+                                    }
+                                }
+                                if (tooClose) break;
+                            }
                         }
                     }
 
                     if (!tooClose)
                     {
-                        placedTreePositions.Add(pt);
+                        RegisterTree(pt);
                     }
                 }
             }
@@ -2253,7 +2605,7 @@ public partial class OsmMapLoader : Node
                     float width = maxX - minX;
                     float height = maxY - minY;
                     float area = width * height;
-                    int targetForestTrees = Mathf.Clamp((int)(area / (isComputerPlatform ? 90f : (isMobilePlatform ? 250f : 180f))), 3, isComputerPlatform ? 160 : (isMobilePlatform ? 60 : 80));
+                    int targetForestTrees = Math.Max(3, (int)(area / (isComputerPlatform ? 80f : (isMobilePlatform ? 250f : 180f))));
 
                     var fRnd = new Random((int)(minX * 100f) ^ (int)(minY * 100f));
                     int forestSpawned = 0;
@@ -2281,8 +2633,14 @@ public partial class OsmMapLoader : Node
                             }
                             if (insideExclusion) continue;
 
-                            // Strictly no generated trees close to fairway (< 10m)
-                            if (getDistToFairway(rp) < 10.0f) continue;
+                            // Strictly no generated trees inside or close to bunker (< 5.0m)
+                            if (isTooCloseToBunker(rp, 5.0f)) continue;
+
+                            // Strictly no generated trees inside or close to green (< 10.0m)
+                            if (isTooCloseToGreen(rp, 10.0f)) continue;
+
+                            // Strictly no generated trees close to fairway (< 11m)
+                            if (getDistToFairway(rp) < 11.0f) continue;
 
                             // Strictly no generated trees between tee box and fairway
                             if (isBetweenTeeAndFairway(rp)) continue;
@@ -2312,12 +2670,13 @@ public partial class OsmMapLoader : Node
                 : (isMobilePlatform
                     ? Math.Clamp(Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 24, 100, 1000)
                     : Math.Max(120, Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 28));
-            if (placedTreePositions.Count < targetTreeCount)
+            bool satelliteScanSucceeded = satImage != null && candidatePoints.Count >= (int)(targetTreeCount * 0.30f);
+            if (placedTreePositions.Count < targetTreeCount && !satelliteScanSucceeded)
             {
                 GD.Print($"{LogPrefix} Tree count ({placedTreePositions.Count}) is below target ({targetTreeCount}). Generating procedural tree placement fallback...");
                 var procRnd = new Random(54321);
 
-                float minProcTreeDist = isComputerPlatform ? 6.5f : 8.5f;
+                float minProcTreeDist = isComputerPlatform ? 10.0f : 12.0f;
                 Func<Vector2, bool> isProceduralPointValid = (pt) =>
                 {
                     if (!isPointInMainCourse(pt)) return false;
@@ -2332,8 +2691,14 @@ public partial class OsmMapLoader : Node
                         }
                     }
 
-                    // Strictly no generated trees close to fairway (< 10m)
-                    if (getDistToFairway(pt) < 10.0f) return false;
+                    // Strictly no generated trees inside or close to bunker (< 5.0m)
+                    if (isTooCloseToBunker(pt, 5.0f)) return false;
+
+                    // Strictly no generated trees inside or close to green (< 10.0m)
+                    if (isTooCloseToGreen(pt, 10.0f)) return false;
+
+                    // Strictly no generated trees close to fairway (< 11m)
+                    if (getDistToFairway(pt) < 11.0f) return false;
 
                     // Strictly no generated trees between tee box and fairway
                     if (isBetweenTeeAndFairway(pt)) return false;
@@ -2358,9 +2723,9 @@ public partial class OsmMapLoader : Node
                 };
 
                 // Pass A: Hole corridor fairway framing stands
-                float stepA = isComputerPlatform ? 12f : 15f;
-                float[] leftOffsets = isComputerPlatform ? new float[] { -28f, -36f, -44f, -52f } : new float[] { -26f, -36f, -46f };
-                float[] rightOffsets = isComputerPlatform ? new float[] { 28f, 36f, 44f, 52f } : new float[] { 26f, 36f, 46f };
+                float stepA = isComputerPlatform ? 14f : 18f;
+                float[] leftOffsets = isComputerPlatform ? new float[] { -28f, -38f, -48f } : new float[] { -28f, -40f };
+                float[] rightOffsets = isComputerPlatform ? new float[] { 28f, 38f, 48f } : new float[] { 28f, 40f };
                 foreach (var path in lineOfPlayPaths)
                 {
                     if (path.Count < 2) continue;
@@ -2398,17 +2763,29 @@ public partial class OsmMapLoader : Node
                     }
                 }
 
-                // Pass B: Green backdrop clusters
-                int greenAttempts = isComputerPlatform ? 32 : 16;
+                // Pass B: Green backdrop clusters (strictly BEHIND green away from approach)
+                int greenAttempts = isComputerPlatform ? 16 : 8;
                 foreach (var kp in holeInfo)
                 {
                     if (kp.Value.HoleLocation == null || kp.Value.HoleLocation.Length < 2) continue;
                     var pinPos = new Vector2(kp.Value.HoleLocation[0], kp.Value.HoleLocation[1]);
 
+                    Vector2 approachDir = new Vector2(0, 1);
+                    if (kp.Value.HolePath != null && kp.Value.HolePath.Count >= 2)
+                    {
+                        var lastPathPt = new Vector2(kp.Value.HolePath[kp.Value.HolePath.Count - 2][0], kp.Value.HolePath[kp.Value.HolePath.Count - 2][1]);
+                        if (lastPathPt.DistanceSquaredTo(pinPos) > 1.0f)
+                        {
+                            approachDir = (pinPos - lastPathPt).Normalized();
+                        }
+                    }
+                    float baseRearAngle = Mathf.Atan2(approachDir.Y, approachDir.X);
+
                     for (int attempt = 0; attempt < greenAttempts; attempt++)
                     {
-                        float angle = (float)(procRnd.NextDouble() * Math.PI * 2.0);
-                        float dist = 18f + (float)procRnd.NextDouble() * 16f;
+                        // Fan out strictly in the rear hemisphere (+/- 60 degrees) behind the green
+                        float angle = baseRearAngle + (float)(procRnd.NextDouble() * 2.0 - 1.0) * (Mathf.Pi / 3.0f);
+                        float dist = 22f + (float)procRnd.NextDouble() * 14f;
                         var cand = pinPos + new Vector2(Mathf.Cos(angle) * dist, Mathf.Sin(angle) * dist);
                         if (isProceduralPointValid(cand))
                         {
@@ -2465,7 +2842,7 @@ public partial class OsmMapLoader : Node
                 // Pass D: Open rough filler if still below target
                 if (placedTreePositions.Count < targetTreeCount)
                 {
-                    float stepD = isComputerPlatform ? 12f : 18f;
+                    float stepD = isComputerPlatform ? 24f : 30f;
                     for (float rx = courseMinX + 15f; rx <= courseMaxX - 15f && placedTreePositions.Count < targetTreeCount; rx += stepD)
                     {
                         for (float rz = courseMinZ + 15f; rz <= courseMaxZ - 15f && placedTreePositions.Count < targetTreeCount; rz += stepD)
@@ -2625,6 +3002,8 @@ public partial class OsmMapLoader : Node
                             }
                         }
                         if (insideExclusion) continue;
+                        if (isTooCloseToBunker(pt, 3.5f)) continue;
+                        if (isTooCloseToGreen(pt, 5.0f)) continue;
 
                         bool tooCloseToLineOfPlay = false;
                         bool insideForest = false;
@@ -2674,72 +3053,8 @@ public partial class OsmMapLoader : Node
                 GD.Print($"{LogPrefix} Placed {bushCount} bushes clustered around trees.");
             }
 
-            // Procedurally spawn rock decorations around water hazards (skipped on mobile for performance)
-            if (!isMobilePlatform)
-            {
-                InitializeRockAssets();
-                if (_rockMeshes != null && _rockMeshes.Length > 0)
-                {
-                    var rand = new Random(42);
-                    float minStep = 1.0f;
-                    float stepJitter = 0.4f;
-                    int maxRocks = 1200;
-                    int spawnedRocks = 0;
-
-                    foreach (var waterPoly in waterPolygons)
-                    {
-                        if (spawnedRocks >= maxRocks) break;
-
-                        int numPoints = waterPoly.Length;
-                        for (int i = 0; i < numPoints; i++)
-                        {
-                            if (spawnedRocks >= maxRocks) break;
-
-                            Vector2 p1 = waterPoly[i];
-                            Vector2 p2 = waterPoly[(i + 1) % numPoints];
-                            float segmentLength = p1.DistanceTo(p2);
-                            
-                            // Spawn a rock every 1.0 to 1.4 meters to cover the full perimeter with no gaps
-                            float step = minStep + (float)rand.NextDouble() * stepJitter;
-                            for (float d = 0f; d < segmentLength; d += step)
-                            {
-                                if (spawnedRocks >= maxRocks) break;
-
-                                float t = d / segmentLength;
-                                Vector2 pos2d = p1.Lerp(p2, t);
-                                
-                                Vector2 dir = (p2 - p1).Normalized();
-                                Vector2 perp = new Vector2(-dir.Y, dir.X);
-                                
-                                // Jitter offset: -0.2m to +0.2m (keep aligned to water perimeter)
-                                float jitter = -0.2f + (float)rand.NextDouble() * 0.4f;
-                                Vector2 rockPos2d = pos2d + perp * jitter;
-                                
-                                float rockX = rockPos2d.X;
-                                float rockZ = rockPos2d.Y;
-                                float terrainY = GetHeightWithFeatures(rockX, rockZ, exclusionPolygons);
-                                
-                                // Scale variety (various sizes to look natural)
-                                float rScaleX = 0.8f + (float)rand.NextDouble() * 1.2f;
-                                float rScaleY = 0.5f + (float)rand.NextDouble() * 0.8f;
-                                float rScaleZ = 0.8f + (float)rand.NextDouble() * 1.2f;
-                                Vector3 rockScale = new Vector3(rScaleX, rScaleY, rScaleZ);
-                                
-                                float rotY = (float)(rand.NextDouble() * Math.PI * 2.0);
-                                var rockMesh = _rockMeshes[rand.Next(_rockMeshes.Length)];
-                                
-                                // Sit rock on terrain, keeping it above the depressed water level
-                                float baseHeight = GetHeight(rockX, rockZ);
-                                float spawnY = Math.Max(terrainY, baseHeight - 0.2f);
-                                Vector3 rockPos = new Vector3(rockX, spawnY + 0.1f, rockZ);
-                                SpawnRockAt(rootNode, rockPos, rockScale, rotY, rockMesh);
-                                spawnedRocks++;
-                            }
-                        }
-                    }
-                    GD.Print($"{LogPrefix} Placed {spawnedRocks} rock decorations around water hazards.");
-                }
-            }
+            // Tall grass around water hazards is procedurally generated all the way around every water hazard
+            // in CourseDetailEnhancer._build_shoreline_reeds (replacing legacy limited rock decorations).
 
             var madeUpDetails = new List<string>();
             if (madeUpFairways) madeUpDetails.Add("fairways");
@@ -3058,6 +3373,21 @@ public partial class OsmMapLoader : Node
                 rootNode.SetMeta("cart_path_polylines", cartPathPolylines);
             }
 
+            // Expose hole line of play paths so detail enhancers (thick rough fescue, bushes, cart paths)
+            // can generate rich vegetation across every hole on the course.
+            if (lineOfPlayPaths.Count > 0)
+            {
+                var gdHoleLines = new Godot.Collections.Array();
+                foreach (var path in lineOfPlayPaths)
+                {
+                    if (path != null && path.Count >= 2)
+                    {
+                        gdHoleLines.Add(path.ToArray());
+                    }
+                }
+                rootNode.SetMeta("hole_paths", gdHoleLines);
+            }
+
             // Convert individual foliage nodes into spatial MultiMesh chunks & build 3D recessed bunkers/reeds/horizon/cart paths
             var treeGenScript = GD.Load<Script>("res://HighFidelity/Foliage/procedural_tree_generator.gd");
             treeGenScript?.Call("convert_scene_foliage_to_multimesh", rootNode, true);
@@ -3097,7 +3427,10 @@ public partial class OsmMapLoader : Node
             var courseConfig = new CourseJsonConfig
             {
                 ScenePath = "course.tscn",
-                Title = courseName,
+                Title = courseTitle,
+                Latitude = lat,
+                Longitude = lon,
+                Location = location,
                 CourseInfo = new CourseInfoConfig
                 {
                     TeeColors = teeColors
@@ -3320,6 +3653,7 @@ public partial class OsmMapLoader : Node
             {
                 if (!IsInstanceValid(this)) return;
                 var godotResults = new Godot.Collections.Array();
+                bool forceOnline = options != null && options.ContainsKey("force_online") && options["force_online"].AsBool();
                 foreach (var item in rawResults)
                 {
                     var dict = new Godot.Collections.Dictionary();
@@ -3330,8 +3664,9 @@ public partial class OsmMapLoader : Node
                     dict["hole_count"] = item.HoleCount;
                     dict["last_updated"] = item.LastUpdated;
                     dict["is_catalog"] = item.IsCatalog;
-                    dict["is_cached"] = IsCourseCached(item.Name);
+                    dict["is_cached"] = forceOnline ? false : IsCourseCached(item.Name, item.Lat, item.Lon);
                     dict["is_pga_tour"] = item.IsPgaTour;
+                    dict["force_online"] = forceOnline;
                     godotResults.Add(dict);
                 }
                 EmitSignal(SignalName.SearchCompleted, godotResults);
@@ -3381,7 +3716,7 @@ public partial class OsmMapLoader : Node
                 if (!include18 && (item.HoleCount == 18 || item.HoleCount >= 18)) continue;
             }
 
-            if (!IsCourseCached(item.Name)) continue;
+            if (!IsCourseCached(item.Name, item.Lat, item.Lon)) continue;
 
             var dict = new Godot.Collections.Dictionary();
             dict["name"] = item.Name;
@@ -3450,14 +3785,50 @@ public partial class OsmMapLoader : Node
 
     public bool IsCourseCached(string courseName)
     {
+        return IsCourseCached(courseName, 0, 0);
+    }
+
+    public bool IsCourseCached(string courseName, double targetLat, double targetLon)
+    {
         if (string.IsNullOrWhiteSpace(courseName)) return false;
         var slugs = GetCourseGeometryCandidateSlugs(courseName);
         foreach (var slug in slugs)
         {
-            if (Godot.FileAccess.FileExists($"res://Courses/CachedGeometry/{slug}.json.gz") ||
-                Godot.FileAccess.FileExists($"res://Courses/CachedGeometry/{slug}.json"))
+            string gzPath = $"res://Courses/CachedGeometry/{slug}.json.gz";
+            string jsonPath = $"res://Courses/CachedGeometry/{slug}.json";
+            string? foundPath = null;
+            if (Godot.FileAccess.FileExists(gzPath)) foundPath = gzPath;
+            else if (Godot.FileAccess.FileExists(jsonPath)) foundPath = jsonPath;
+
+            if (foundPath == null) continue;
+
+            if (targetLat == 0 && targetLon == 0)
             {
                 return true;
+            }
+
+            // Verify proximity to target coordinates
+            if (TryGetCachedCourseCoordinates(slug, out var coordsList))
+            {
+                if (coordsList.Any(c => HaversineDistanceMeters(targetLat, targetLon, c.Lat, c.Lon) <= 25000.0))
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                if (TryExtractFirstNodeFromPath(foundPath, out double fLat, out double fLon))
+                {
+                    RegisterCachedSlugCoordinate(slug, fLat, fLon);
+                    if (HaversineDistanceMeters(targetLat, targetLon, fLat, fLon) <= 25000.0)
+                    {
+                        return true;
+                    }
+                }
+                else
+                {
+                    return true;
+                }
             }
         }
         return false;
@@ -3522,7 +3893,7 @@ public partial class OsmMapLoader : Node
         var results = new Godot.Collections.Array();
         foreach (var item in sorted)
         {
-            if (!IsCourseCached(item.Name)) continue;
+            if (!IsCourseCached(item.Name, item.Lat, item.Lon)) continue;
 
             var dict = new Godot.Collections.Dictionary();
             dict["name"] = item.Name;
@@ -3975,7 +4346,7 @@ public partial class OsmMapLoader : Node
             sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:1500, {c.Lat}, {c.Lon})[\"golf\"=\"hole\"];");
             if (requireLeisureGolf)
             {
-                sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:500, {c.Lat}, {c.Lon})[\"leisure\"=\"golf_course\"];");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:1500, {c.Lat}, {c.Lon})[\"leisure\"=\"golf_course\"];");
             }
             foreach (var ct in customTagList)
             {
@@ -3984,11 +4355,11 @@ public partial class OsmMapLoader : Node
                 {
                     string k = ct.Substring(0, sep).Trim();
                     string v = ct.Substring(sep + 1).Trim();
-                    sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:500, {c.Lat}, {c.Lon})[\"{k}\"=\"{v}\"];");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:1500, {c.Lat}, {c.Lon})[\"{k}\"=\"{v}\"];");
                 }
                 else
                 {
-                    sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:500, {c.Lat}, {c.Lon})[\"{ct.Trim()}\"];");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"  nwr(around:1500, {c.Lat}, {c.Lon})[\"{ct.Trim()}\"];");
                 }
             }
         }
@@ -5736,13 +6107,22 @@ public partial class OsmMapLoader : Node
     private class CourseJsonConfig
     {
         [JsonPropertyName("graphics_version")]
-        public int GraphicsVersion { get; set; } = 6;
+        public int GraphicsVersion { get; set; } = 13;
 
         [JsonPropertyName("scene_path")]
         public string ScenePath { get; set; } = "course.tscn";
 
         [JsonPropertyName("Title")]
         public string Title { get; set; } = "";
+
+        [JsonPropertyName("Latitude")]
+        public double Latitude { get; set; }
+
+        [JsonPropertyName("Longitude")]
+        public double Longitude { get; set; }
+
+        [JsonPropertyName("Location")]
+        public string Location { get; set; } = "";
 
         [JsonPropertyName("Course Info")]
         public CourseInfoConfig CourseInfo { get; set; } = new();
@@ -5938,6 +6318,12 @@ public partial class OsmMapLoader : Node
         float b = color.B;
 
         ColorToHsv(color, out float h, out float s, out float v);
+
+        // Reject sand trap / bunker colors (high brightness warm tan/sand tones)
+        if (v > 0.52f && r > 0.48f && (r >= b + 0.05f))
+        {
+            return false;
+        }
 
         // Profile 1: Standard / Bright Green Foliage (deciduous, fairway borders, sunlit canopies)
         // Hue: yellow-green to cyan-green (36° to 175°)
@@ -6336,6 +6722,50 @@ public partial class OsmMapLoader : Node
                 return false;
             };
 
+            Func<OsmWay, bool> isHoleBelongingToCourse = (hw) => {
+                if (coursePolygons.Count == 0) return true;
+
+                string holeCourse = ExtractSubCourseName(hw.Tags);
+                if (!string.IsNullOrEmpty(targetCourseName) && !string.IsNullOrEmpty(holeCourse))
+                {
+                    if (holeCourse.Equals(targetCourseName, StringComparison.OrdinalIgnoreCase) ||
+                        targetCourseName.Contains(holeCourse, StringComparison.OrdinalIgnoreCase) ||
+                        holeCourse.Contains(targetCourseName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+
+                var hPts = hw.NodeIds
+                    .Where(nodes.ContainsKey)
+                    .Select(id => nodes[id])
+                    .Select(coord => new Vector2(
+                        (float)((coord.Lon - refLon) * metersPerLon),
+                        -(float)((coord.Lat - refLat) * metersPerLat)
+                    ))
+                    .ToList();
+
+                if (hPts.Count < 2) return false;
+
+                Vector2 tee = hPts.First();
+                Vector2 pin = hPts.Last();
+                Vector2 center = new Vector2(hPts.Average(p => p.X), hPts.Average(p => p.Y));
+
+                foreach (var poly in coursePolygons)
+                {
+                    if (Geometry2D.IsPointInPolygon(tee, poly) || Geometry2D.IsPointInPolygon(pin, poly) || Geometry2D.IsPointInPolygon(center, poly))
+                        return true;
+
+                    foreach (var v in poly)
+                    {
+                        if (tee.DistanceTo(v) < 30f || pin.DistanceTo(v) < 30f || center.DistanceTo(v) < 30f)
+                            return true;
+                    }
+                }
+
+                return false;
+            };
+
             foreach (var way in ways)
             {
                 var points = way.NodeIds
@@ -6351,14 +6781,20 @@ public partial class OsmMapLoader : Node
 
                 // Check if the way belongs to the main course
                 var wayCenter = new Vector2(points.Average(p => p.X), points.Average(p => p.Y));
-                if (!isPointInMainCourse(wayCenter))
+                way.Tags.TryGetValue("golf", out string? golfType);
+
+                if (golfType == "hole")
+                {
+                    if (!isHoleBelongingToCourse(way))
+                        continue;
+                }
+                else if (!isPointInMainCourse(wayCenter))
                 {
                     bool isMainBoundary = (way.Tags.TryGetValue("leisure", out var l) && l == "golf_course") || way.Tags.ContainsKey("golf");
                     if (!isMainBoundary)
                         continue;
                 }
 
-                way.Tags.TryGetValue("golf", out string? golfType);
                 if (golfType == "hole")
                 {
                     lineOfPlayPaths.Add(new List<Vector2>(points));
@@ -6702,18 +7138,6 @@ public partial class OsmMapLoader : Node
                     else
                     {
                         waterDepression = Math.Max(waterDepression, maxDepth);
-                    }
-                }
-                else
-                {
-                    // Gentle approach slope bank leading down into water hazard (max 0.25m drop over 10m)
-                    float dist = DistanceToPolygon(point, excl.Polygon);
-                    float bankRadius = 10.0f;
-                    if (dist < bankRadius)
-                    {
-                        float t = 1.0f - (dist / bankRadius);
-                        float smoothT = QuinticSmoothstep(t);
-                        waterDepression = Math.Max(waterDepression, smoothT * 0.25f);
                     }
                 }
             }
@@ -7386,22 +7810,80 @@ public partial class OsmMapLoader : Node
     }
 
     /// <summary>
-    /// Validates whether a candidate tree point respects fairway and tee box clearance rules.
+    /// Checks whether a tree position is inside or too close to any bunker / sand trap polygon.
+    /// </summary>
+    public static bool IsTreeTooCloseToBunker(Vector2 pt, IEnumerable<Vector2[]> bunkerPolygons, float minDistance = 5.0f)
+    {
+        if (bunkerPolygons == null) return false;
+        foreach (var bk in bunkerPolygons)
+        {
+            if (bk == null || bk.Length < 3) continue;
+            if (PointInPolygon(pt, bk))
+            {
+                return true;
+            }
+            if (DistanceToPolygon(pt, bk) < minDistance)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether a tree position is inside or too close to any green polygon.
+    /// </summary>
+    public static bool IsTreeTooCloseToGreen(Vector2 pt, IEnumerable<Vector2[]> greenPolygons, float minDistance = 10.0f)
+    {
+        if (greenPolygons == null) return false;
+        foreach (var gr in greenPolygons)
+        {
+            if (gr == null || gr.Length < 3) continue;
+            if (PointInPolygon(pt, gr))
+            {
+                return true;
+            }
+            if (DistanceToPolygon(pt, gr) < minDistance)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Validates whether a candidate tree point respects fairway, bunker, green, and tee box clearance rules.
     /// </summary>
     public static bool IsProceduralTreePointValid(
         Vector2 pt,
         IEnumerable<Vector2[]> fairwayPolygons,
         Dictionary<string, HoleConfig>? holeData,
         float minFairwayDist = 14.0f,
-        float corridorHalfWidth = 18.0f)
+        float corridorHalfWidth = 18.0f,
+        IEnumerable<Vector2[]>? bunkerPolygons = null,
+        float minBunkerDist = 5.0f,
+        IEnumerable<Vector2[]>? greenPolygons = null,
+        float minGreenDist = 10.0f)
     {
-        // 1. Ensure no trees too close to fairway
+        // 1. Ensure no trees inside or too close to bunker (< 5.0m)
+        if (bunkerPolygons != null && IsTreeTooCloseToBunker(pt, bunkerPolygons, minBunkerDist))
+        {
+            return false;
+        }
+
+        // 2. Ensure no trees inside or too close to green (< 10.0m)
+        if (greenPolygons != null && IsTreeTooCloseToGreen(pt, greenPolygons, minGreenDist))
+        {
+            return false;
+        }
+
+        // 3. Ensure no trees too close to fairway
         if (IsTreeTooCloseToFairway(pt, fairwayPolygons, minFairwayDist))
         {
             return false;
         }
 
-        // 2. Ensure no trees between any tee box and fairway
+        // 4. Ensure no trees between any tee box and fairway
         if (holeData != null)
         {
             foreach (var kvp in holeData)
@@ -7436,6 +7918,46 @@ public partial class OsmMapLoader : Node
         }
 
         return true;
+    }
+
+    public bool CheckTreeTooCloseToBunker(Vector2 pt, Godot.Collections.Array bunkerPolygons, float minDistance = 5.0f)
+    {
+        var list = new List<Vector2[]>();
+        if (bunkerPolygons != null)
+        {
+            foreach (var item in bunkerPolygons)
+            {
+                if (item.VariantType == Variant.Type.PackedVector2Array)
+                {
+                    list.Add(item.AsVector2Array());
+                }
+                else if (item.Obj is Vector2[] vArr)
+                {
+                    list.Add(vArr);
+                }
+            }
+        }
+        return IsTreeTooCloseToBunker(pt, list, minDistance);
+    }
+
+    public bool CheckTreeTooCloseToGreen(Vector2 pt, Godot.Collections.Array greenPolygons, float minDistance = 10.0f)
+    {
+        var list = new List<Vector2[]>();
+        if (greenPolygons != null)
+        {
+            foreach (var item in greenPolygons)
+            {
+                if (item.VariantType == Variant.Type.PackedVector2Array)
+                {
+                    list.Add(item.AsVector2Array());
+                }
+                else if (item.Obj is Vector2[] vArr)
+                {
+                    list.Add(vArr);
+                }
+            }
+        }
+        return IsTreeTooCloseToGreen(pt, list, minDistance);
     }
 
     public bool CheckTreeTooCloseToFairway(Vector2 pt, Godot.Collections.Array fairwayPolygons, float minDistance = 14.0f)

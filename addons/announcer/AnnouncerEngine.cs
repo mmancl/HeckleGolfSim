@@ -68,7 +68,23 @@ public partial class AnnouncerEngine : Node
 
     // Idle announcement timer
     private float _idleTimer = 0.0f;
-    private const float IdleAnnouncementInterval = 45.0f; // 45 seconds
+    [Export]
+    public float IdleAnnouncementInterval { get; set; } = 55.0f; // 55 seconds (configurable)
+
+    public void SetIdleTimer(float seconds)
+    {
+        _idleTimer = seconds;
+    }
+
+    public float GetIdleTimer()
+    {
+        return _idleTimer;
+    }
+
+    public void ResetIdleTimer()
+    {
+        _idleTimer = 0.0f;
+    }
 
     private readonly Random _random = new();
     private bool _shotHadCommentary = false;
@@ -968,6 +984,21 @@ public partial class AnnouncerEngine : Node
                     if (actualClose != requiredClose) return false;
                     break;
                 }
+                case "high_apex":
+                {
+                    bool requiredHigh = Convert.ToBoolean(qualVal);
+                    bool actualHigh = GetBoolSafe(context, "high_apex", false);
+                    if (actualHigh != requiredHigh) return false;
+                    break;
+                }
+                case "min_apex":
+                case "min_apex_ft":
+                {
+                    float minApex = Convert.ToSingle(qualVal);
+                    float actualApex = GetFloatSafe(context, "apex_ft", 0.0f);
+                    if (actualApex < minApex) return false;
+                    break;
+                }
                 default:
                 {
                     if (context.TryGetValue(key, out var ctxVal))
@@ -1119,6 +1150,7 @@ public partial class AnnouncerEngine : Node
         // Check for severe launch catastrophes ONLY (pop-up skyball, wormburner skittering along the turf)
         bool isWormburner = vla < 3.0f && speedMph > 40.0f;
         bool isSkyball = vla > 35.0f && speedMph > 80.0f;
+        launchContext["high_apex"] = isSkyball;
 
         if (isWormburner)
         {
@@ -1234,6 +1266,17 @@ public partial class AnnouncerEngine : Node
         float targetDistYards = GetFloatSafe(shotData, "TargetDistance") * 1.09361f;
         string shotType = GetStringSafe(shotData, "ShotType");
 
+        float apexMeters = GetFloatFlexible(shotData, "Apex", "apex");
+        float apexFeet = GetFloatFlexible(shotData, "apex_ft", "ApexFeet");
+        if (apexFeet <= 0.0f && apexMeters > 0.0f)
+        {
+            apexFeet = apexMeters * 3.28084f;
+        }
+        bool isCrazyHighApex = CheckCrazyHighApex(shotData, totalDistYards);
+
+        context["high_apex"] = isCrazyHighApex;
+        context["apex_ft"] = apexFeet;
+
         bool isPutt = shotType.Equals("putt", StringComparison.OrdinalIgnoreCase);
 
         // --- PUTTING EVALUATION ---
@@ -1274,6 +1317,13 @@ public partial class AnnouncerEngine : Node
             return;
         }
 
+        // 3b. Crazy High Apex evaluation (balloon shot / extreme skyball reaching apex threshold)
+        if (CheckCrazyHighApex(shotData, totalDistYards))
+        {
+            PlayCategoryGuarded("crazy_high_apex", isHeckle: true, guaranteed: false, context);
+            return;
+        }
+
         // Surface definitions:
         // 0: Fairway, 1: FairwaySoft, 2: Rough, 3: Firm, 4: Green, 5: Bunker
         bool isOnGreen = (surfaceType == 4);
@@ -1296,7 +1346,9 @@ public partial class AnnouncerEngine : Node
         }
 
         // Severe Offline / Slice / Hook into Rough:
-        bool isSevereOffline = !isOnShortGrass && (Math.Abs(offlineYards) >= 45.0f || (totalDistYards > 40.0f && Math.Abs(offlineYards) >= 30.0f && (Math.Abs(offlineYards) / totalDistYards) > 0.28f));
+        bool isSlice = CheckSlice(shotData, offlineYards, totalDistYards);
+        bool isHook = CheckHook(shotData, offlineYards, totalDistYards);
+        bool isSevereOffline = !isOnShortGrass && (isSlice || isHook || Math.Abs(offlineYards) >= 45.0f || (totalDistYards > 40.0f && Math.Abs(offlineYards) >= 30.0f && (Math.Abs(offlineYards) / totalDistYards) > 0.28f));
 
         if (isChunked || isDuff)
         {
@@ -1306,7 +1358,7 @@ public partial class AnnouncerEngine : Node
 
         if (isSevereOffline)
         {
-            if (offlineYards > 0.0f)
+            if (isSlice || offlineYards > 0.0f)
             {
                 PlayCategoryGuarded("slice_into_rough", isHeckle: true, guaranteed: false, context);
             }
@@ -1492,5 +1544,103 @@ public partial class AnnouncerEngine : Node
             return val.AsString() ?? defaultValue;
         }
         return defaultValue;
+    }
+
+    public static float GetFloatFlexible(Dictionary dict, params string[] keys)
+    {
+        foreach (var k in keys)
+        {
+            if (dict.TryGetValue(k, out var val))
+            {
+                if (val.VariantType == Variant.Type.Float || val.VariantType == Variant.Type.Int)
+                {
+                    return (float)val;
+                }
+            }
+        }
+        return 0.0f;
+    }
+
+    public static bool HasKey(Dictionary dict, params string[] keys)
+    {
+        foreach (var k in keys)
+        {
+            if (dict.ContainsKey(k)) return true;
+        }
+        return false;
+    }
+
+    public bool CheckSlice(Dictionary shotData, float offlineYards, float totalDistYards)
+    {
+        float clubPath = GetFloatFlexible(shotData, "ClubPath", "RawClubPath", "Path");
+        float faceAngle = GetFloatFlexible(shotData, "FaceAngle", "RawFaceAngle", "Face");
+        float faceToPath = GetFloatFlexible(shotData, "FaceToPath");
+        float spinAxis = GetFloatFlexible(shotData, "SpinAxis");
+
+        bool hasPathOrFace = HasKey(shotData, "ClubPath", "RawClubPath", "Path", "FaceAngle", "RawFaceAngle", "Face");
+        if (hasPathOrFace)
+        {
+            // Out-to-in swing (negative club path) with an open club face (> 0)
+            if (clubPath <= -10.0f && faceAngle > 0.0f)
+                return true;
+
+            // In-to-out swing with wide open club face
+            if (clubPath > 10.0f && faceAngle > 10.0f)
+                return true;
+
+            // Significant open face relative to path
+            if (faceToPath >= 8.0f && (offlineYards > 15.0f || spinAxis > 10.0f))
+                return true;
+        }
+
+        // Severe slice offline trajectory
+        if (offlineYards >= 35.0f && totalDistYards > 40.0f)
+            return true;
+
+        return false;
+    }
+
+    public bool CheckHook(Dictionary shotData, float offlineYards, float totalDistYards)
+    {
+        float clubPath = GetFloatFlexible(shotData, "ClubPath", "RawClubPath", "Path");
+        float faceAngle = GetFloatFlexible(shotData, "FaceAngle", "RawFaceAngle", "Face");
+        float faceToPath = GetFloatFlexible(shotData, "FaceToPath");
+        float spinAxis = GetFloatFlexible(shotData, "SpinAxis");
+
+        bool hasPathOrFace = HasKey(shotData, "ClubPath", "RawClubPath", "Path", "FaceAngle", "RawFaceAngle", "Face");
+        if (hasPathOrFace)
+        {
+            // In-to-out swing with closed club face
+            if (clubPath >= 10.0f && faceAngle < 0.0f)
+                return true;
+
+            // Out-to-in swing with severely shut club face (pull hook)
+            if (clubPath < -10.0f && faceAngle <= -10.0f)
+                return true;
+
+            // Significant closed face relative to path
+            if (faceToPath <= -8.0f && (offlineYards < -15.0f || spinAxis < -10.0f))
+                return true;
+        }
+
+        // Severe hook offline trajectory
+        if (offlineYards <= -35.0f && totalDistYards > 40.0f)
+            return true;
+
+        return false;
+    }
+
+    public bool CheckCrazyHighApex(Dictionary shotData, float totalDistYards)
+    {
+        float apexMeters = GetFloatFlexible(shotData, "Apex", "apex");
+        float apexFeet = GetFloatFlexible(shotData, "apex_ft", "ApexFeet");
+        if (apexFeet <= 0.0f && apexMeters > 0.0f)
+        {
+            apexFeet = apexMeters * 3.28084f;
+        }
+        float vla = GetFloatFlexible(shotData, "VLA", "vla", "vla_deg");
+
+        // Extreme height >= 115 ft or steep pop-up balloon shot
+        return (apexFeet >= 115.0f) || (apexFeet >= 90.0f && totalDistYards < 130.0f && vla >= 24.0f);
     }
 }

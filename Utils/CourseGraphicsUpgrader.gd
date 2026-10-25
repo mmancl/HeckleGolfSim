@@ -12,7 +12,7 @@ class_name CourseGraphicsUpgrader
 ## - Optimizes `Sky3D` `Sky.PROCESS_MODE_REALTIME` & gradual clouds (0.005 / 0.003) to eliminate choppiness
 ## - Stamps `"graphics_version": 2` into `course.json` so subsequent launches have zero overhead.
 
-const CURRENT_COURSE_GRAPHICS_VERSION: int = 8
+const CURRENT_COURSE_GRAPHICS_VERSION: int = 17
 const ProceduralTreeGeneratorScript = preload("res://HighFidelity/Foliage/procedural_tree_generator.gd")
 const CourseDetailEnhancerScript = preload("res://HighFidelity/Terrain/course_detail_enhancer.gd")
 

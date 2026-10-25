@@ -108,7 +108,7 @@ static func build_custom_course(
 
 	# 2. Serialize course.json
 	var course_json_dict = {
-		"graphics_version": 6,
+		"graphics_version": 13,
 		"scene_path": "course.tscn",
 		"Title": title.strip_edges(),
 		"is_custom": true,

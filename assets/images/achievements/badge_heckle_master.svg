@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8E2800"/>
+      <stop offset="50%" stop-color="#B83B5E"/>
+      <stop offset="100%" stop-color="#4A0E4E"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <circle cx="64" cy="64" r="58" fill="url(#bg)" stroke="#FFB703" stroke-width="4" filter="url(#shadow)"/>
+  <circle cx="64" cy="64" r="50" fill="none" stroke="#FFB703" stroke-dasharray="3 3" stroke-width="1.5" opacity="0.8"/>
+  <g transform="translate(0, -6)">
+    <!-- Megaphone / Heckle Icon -->
+    <path d="M42 46 L58 40 L76 34 L76 66 L58 60 L42 54 Z" fill="#FFB703" stroke="#FFFFFF" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M42 46 L42 54 L36 52 L36 48 Z" fill="#FB8500"/>
+    <path d="M48 57 L48 67 L53 67 L53 59" fill="#F77F00"/>
+    <!-- Soundwaves / Heckles -->
+    <path d="M82 42 Q88 50 82 58" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M88 36 Q96 50 88 64" fill="none" stroke="#FFD166" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M94 30 Q104 50 94 70" fill="none" stroke="#FFB703" stroke-width="2" stroke-linecap="round"/>
+  </g>
+  <text x="64" y="86" font-family="sans-serif" font-size="9" font-weight="800" fill="#FFFFFF" text-anchor="middle" letter-spacing="0.5">HECKLE MASTER</text>
+  <text x="64" y="98" font-family="sans-serif" font-size="8.5" font-weight="600" fill="#FFD166" text-anchor="middle">ALL LINES HEARD</text>
+</svg>

@@ -42,8 +42,15 @@ void fragment() {
 	float vertex_y = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).y;
 	float vertical_depth = max(vertex_y - depth_texture_y, 0.0);
 
+	// Smooth shoreline transition: water cleanly fades to zero opacity right where it meets land,
+	// preventing floating opaque water planes or glowing blue water shining under shoreline grass/reeds.
+	float water_presence = smoothstep(0.0, 0.08, vertical_depth);
+	if (water_presence < 0.005) {
+		discard;
+	}
+
 	float depth_fade_blend = clamp(exp(-vertical_depth / max(depth_fade_distance, 0.05)), 0.0, 1.0);
-	float alpha_blend = clamp(1.0 - exp(-vertical_depth * absorbance), 0.15, 0.98);
+	float alpha_blend = clamp(1.0 - exp(-vertical_depth * absorbance), 0.0, 0.98);
 
 	// Dual-octave wind ripple normal maps
 	vec2 normal_offset1 = (TIME * wave_dir1) * wave_speed;
@@ -52,13 +59,13 @@ void fragment() {
 	vec3 n2 = texture(normal2, (uv_world_pos.xz / (wave_scale * 0.63)) + normal_offset2).rgb * 2.0 - 1.0;
 	vec3 ripple_n = normalize(vec3((n1.xy + n2.xy) * 0.28, 1.0));
 
-	// Subtle broken shoreline meniscus instead of a solid white outline
+	// Subtle broken shoreline meniscus only where actual water depth exists
 	float ripple_noise = sin(uv_world_pos.x * 3.7 + TIME * 1.4) * cos(uv_world_pos.z * 3.9 - TIME * 1.1) * 0.5 + 0.5;
-	float shore_edge = smoothstep(max(foam_amount, 0.02), 0.0, vertical_depth) * smoothstep(0.35, 0.85, ripple_noise);
+	float shore_edge = smoothstep(max(foam_amount, 0.02), 0.0, vertical_depth) * smoothstep(0.35, 0.85, ripple_noise) * water_presence;
 
-	// Schlick Fresnel sky reflection boost at grazing angles (matches 7:02 aerial pond reflection)
+	// Schlick Fresnel sky reflection boost at grazing angles (modulated by water depth so dry shoreline doesn't glow)
 	float ndotv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
-	float fresnel = pow(1.0 - ndotv, 4.0);
+	float fresnel = pow(1.0 - ndotv, 4.0) * water_presence;
 
 	vec3 base_water = mix(deep_color, shallow_color, depth_fade_blend);
 	// Darken neon legacy overrides if saved in older .tscn files
@@ -70,7 +77,7 @@ void fragment() {
 	color_out = mix(color_out, foam_color, shore_edge * 0.22);
 
 	ALBEDO = color_out;
-	ALPHA = clamp(max(alpha_blend, fresnel * 0.85), 0.0, 1.0);
+	ALPHA = clamp(max(alpha_blend, fresnel * 0.85) * water_presence, 0.0, 1.0);
 	METALLIC = mix(0.15, 0.65, fresnel);
 	SPECULAR = 0.75;
 	ROUGHNESS = clamp(roughness + shore_edge * 0.25, 0.02, 0.40);

@@ -595,10 +595,12 @@ func _get_nearby_trees(pos: Vector3, max_dist: float) -> Array:
 		var group_trees := get_tree().get_nodes_in_group("trees")
 		for t in group_trees:
 			if t is Node3D and not trees.has(t):
+				if t.name == "ConsolidatedFoliageCollision":
+					continue
 				var t_scale: float = 1.0
 				if "scale" in t:
 					t_scale = maxf(t.scale.x, maxf(t.scale.y, t.scale.z))
-				var trunk_rad := 0.45 * t_scale
+				var trunk_rad := 0.28 * t_scale
 				var t_pos: Vector3 = t.global_position
 				var dist_2d := Vector2(pos.x - t_pos.x, pos.z - t_pos.z).length()
 				if dist_2d <= (trunk_rad + max_dist):

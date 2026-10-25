@@ -186,7 +186,32 @@ func _initialize() -> void:
 	dummy_course.set_meta("is_driving_range", true)
 	var dr_res = TeeboxMarkerBuilder.update_course_teebox_markers(dummy_course, hole_data, "Blue")
 	assert(dr_res == null, "Must skip marker generation when is_driving_range is true")
+	dummy_course.remove_meta("is_driving_range")
 
+	# Sub-test 7: Fairway boundary check skips marker & sand bucket generation
+	print("\n--- Sub-test 7: Teebox inside Fairway Boundaries ---")
+	var course_with_fairway = Node3D.new()
+	course_with_fairway.name = "CourseWithFairway"
+	root.add_child(course_with_fairway)
+
+	# Mock is_point_in_fairway: Orange tee at (80.0, 15.0) is in fairway
+	course_with_fairway.set_script(load("res://tests/test_fairway_course_mock.gd"))
+
+	var hole_data_with_fairway = {
+		"Hole Location": [200.0, 0.0],
+		"Tee Boxes": {
+			"Blue": [10.0, 0.0],       # Outside fairway -> generates cluster
+			"White": [30.0, 0.0],      # Outside fairway -> generates cluster
+			"Orange": [80.0, 15.0]     # Inside fairway -> NO cluster (no sand bucket, no tee markers)
+		}
+	}
+
+	var fw_markers_root = TeeboxMarkerBuilder.update_course_teebox_markers(course_with_fairway, hole_data_with_fairway, "Orange", Vector3.ZERO, Callable(), false)
+	assert(fw_markers_root != null, "update_course_teebox_markers must return container")
+	assert(fw_markers_root.get_child_count() == 2, "Fairway teebox must NOT generate markers or sand bucket (expected 2 clusters, got %d)" % fw_markers_root.get_child_count())
+	print("  PASS: Tee box inside fairway skipped marker and sand bucket generation while remaining in course data.")
+
+	course_with_fairway.free()
 	dummy_course.free()
 	print("  PASS: Course marker updates, dynamic quality toggling, and driving range bypass verified.")
 

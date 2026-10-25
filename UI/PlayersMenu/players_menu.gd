@@ -1726,6 +1726,11 @@ func _render_player_profile(player_name: String) -> void:
 			var date_str = Time.get_date_string_from_unix_time(int(unix_t)) if unix_t > 0 else ""
 			status_l.text = "✓ Unlocked %s" % date_str if not date_str.is_empty() else "✓ Unlocked"
 			status_l.add_theme_color_override("font_color", Color(0.3, 0.9, 0.4))
+		elif ach_id == "all_heckles":
+			var heard_count = AchievementManager.get_heard_heckles_count(player_name)
+			var total_count_heckles = AchievementManager.get_total_heckles_count()
+			status_l.text = "🔒 %d / %d Heard" % [heard_count, total_count_heckles]
+			status_l.add_theme_color_override("font_color", Color(0.85, 0.7, 0.3))
 		else:
 			status_l.text = "🔒 Locked"
 			status_l.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))

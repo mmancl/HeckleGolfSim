@@ -3501,6 +3501,9 @@ func _on_active_player_changed(player: Dictionary) -> void:
 	if player.is_empty():
 		return
 
+	if has_node("/root/AnnouncerEngine"):
+		get_node("/root/AnnouncerEngine").call("ResetIdleTimer")
+
 	var player_node_ref = course_instance.get_node_or_null("Player") if course_instance != null else null
 	var p_name = str(player.get("name", ""))
 	if player_node_ref != null and player_node_ref.has_method("set_profile") and not p_name.is_empty():
@@ -3869,10 +3872,14 @@ func _show_hole_intro_card(hole_num: int, par: int, dist: int, course_title: Str
 	_hole_card_tween.tween_callback(func():
 		if is_instance_valid(hole_intro_card):
 			hole_intro_card.visible = false
+		if has_node("/root/AnnouncerEngine"):
+			get_node("/root/AnnouncerEngine").call("ResetIdleTimer")
 	)
 
 
 func _dismiss_hole_intro_card_early() -> void:
+	if has_node("/root/AnnouncerEngine"):
+		get_node("/root/AnnouncerEngine").call("ResetIdleTimer")
 	if hole_intro_card == null or not hole_intro_card.visible:
 		return
 	if _hole_card_tween != null and _hole_card_tween.is_valid():
@@ -4533,6 +4540,8 @@ func _on_gimme_awarded(player: Dictionary, extra_strokes: int) -> void:
 
 
 func _on_hole_completed(scores: Array) -> void:
+	if has_node("/root/AnnouncerEngine"):
+		get_node("/root/AnnouncerEngine").call("ResetIdleTimer")
 	is_player_turn_ready = false
 	reset_zoom_to_default()
 	_populate_scorecard("hole_completed")
@@ -4541,6 +4550,8 @@ func _on_hole_completed(scores: Array) -> void:
 
 
 func _on_game_over(scores: Array) -> void:
+	if has_node("/root/AnnouncerEngine"):
+		get_node("/root/AnnouncerEngine").call("ResetIdleTimer")
 	is_player_turn_ready = false
 	reset_zoom_to_default()
 	MultiplayerManager.is_finished = true

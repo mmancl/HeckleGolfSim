@@ -114,6 +114,71 @@ func _initialize():
 	assert(placed_trees[0] == Vector2(12.5, 45.2), "Tree position must match OSM coordinates")
 	print("  PASS: OSM course tree placement fidelity verified.")
 
+	# ---------------------------------------------------------
+	# Test 4: Verify Tree Bunker / Sand Trap Avoidance
+	# Ensures no trees are generated inside or too close to sand traps (< 5.0m threshold)
+	# ---------------------------------------------------------
+	print("\n--- Test 4: Tree Bunker Avoidance Validation ---")
+	var bunker_poly = PackedVector2Array([
+		Vector2(100, 100),
+		Vector2(120, 100),
+		Vector2(120, 115),
+		Vector2(100, 115)
+	])
+	var bunker_list: Array = [bunker_poly]
+
+	# Point directly inside sand trap: must be rejected
+	var inside_bunker = Vector2(110, 107)
+	assert(loader.CheckTreeTooCloseToBunker(inside_bunker, bunker_list, 5.0) == true,
+		"Tree inside bunker must be flagged as too close")
+
+	# Point 1.5m from bunker lip: must be rejected (< 5.0m)
+	var lip_bunker = Vector2(121.5, 107)
+	assert(loader.CheckTreeTooCloseToBunker(lip_bunker, bunker_list, 5.0) == true,
+		"Tree 1.5m from bunker edge must be flagged as too close")
+
+	# Point 4.0m from bunker: still too close (< 5.0m threshold)
+	var near_bunker = Vector2(100, 96)
+	assert(loader.CheckTreeTooCloseToBunker(near_bunker, bunker_list, 5.0) == true,
+		"Tree 4.0m from bunker edge must be flagged as too close")
+
+	# Point 6.5m from bunker: safe distance, permitted
+	var safe_bunker = Vector2(100, 93.5)
+	assert(loader.CheckTreeTooCloseToBunker(safe_bunker, bunker_list, 5.0) == false,
+		"Tree 6.5m from bunker edge must be permitted")
+
+	print("  PASS: All bunker avoidance checks passed.")
+
+	# ---------------------------------------------------------
+	# Test 5: Verify Tree Green Avoidance
+	# Ensures no trees are generated inside or too close to greens (< 10.0m threshold)
+	# ---------------------------------------------------------
+	print("\n--- Test 5: Tree Green Avoidance Validation ---")
+	var green_poly = PackedVector2Array([
+		Vector2(200, 200),
+		Vector2(230, 200),
+		Vector2(230, 230),
+		Vector2(200, 230)
+	])
+	var green_list: Array = [green_poly]
+
+	# Point directly on green: must be rejected
+	var inside_green = Vector2(215, 215)
+	assert(loader.CheckTreeTooCloseToGreen(inside_green, green_list, 10.0) == true,
+		"Tree inside green must be flagged as too close")
+
+	# Point 4.0m from green fringe: must be rejected (< 10.0m)
+	var fringe_green = Vector2(234, 215)
+	assert(loader.CheckTreeTooCloseToGreen(fringe_green, green_list, 10.0) == true,
+		"Tree 4m from green fringe must be flagged as too close")
+
+	# Point 14.0m from green: safe distance, permitted
+	var safe_green = Vector2(244, 215)
+	assert(loader.CheckTreeTooCloseToGreen(safe_green, green_list, 10.0) == false,
+		"Tree 14m from green edge must be permitted")
+
+	print("  PASS: All green avoidance checks passed.")
+
 	loader.free()
 	print("\n=======================================================")
 	print("ALL TREE FAIRWAY PROXIMITY AND CLEARANCE TESTS PASSED!")

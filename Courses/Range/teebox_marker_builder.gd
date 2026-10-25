@@ -590,6 +590,22 @@ static func update_course_teebox_markers(
 	# Build marker cluster for each unique teebox location
 	for loc in teebox_locations:
 		var p2d: Vector2 = loc["pos_2d"]
+		
+		# If this teebox position is inside fairway boundaries (e.g. kids stakes in the middle of fairway),
+		# do not generate the sand bucket or colored tee box markers.
+		if course_node != null:
+			if course_node.has_method("is_point_in_fairway") and bool(course_node.call("is_point_in_fairway", p2d)):
+				continue
+			elif course_node.has_method("get_distance_to_nearest_fairway"):
+				var ground_y_probe: float = 0.0
+				if height_callable.is_valid():
+					ground_y_probe = float(height_callable.call(p2d.x, p2d.y))
+				elif "get_height" in course_node and course_node.has_method("get_height"):
+					ground_y_probe = float(course_node.call("get_height", p2d.x, p2d.y))
+				var dist_fw: float = float(course_node.call("get_distance_to_nearest_fairway", Vector3(p2d.x, ground_y_probe, p2d.y)))
+				if dist_fw <= 0.001:
+					continue
+
 		var ground_y: float = 0.0
 		if height_callable.is_valid():
 			ground_y = float(height_callable.call(p2d.x, p2d.y))

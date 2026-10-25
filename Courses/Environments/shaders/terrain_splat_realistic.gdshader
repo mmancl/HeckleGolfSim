@@ -15,6 +15,8 @@ render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_sc
 // -- Splat map & Macro Terrain AO --
 uniform sampler2D splat_map : filter_linear, repeat_disable;
 uniform sampler2D terrain_ao_map : hint_default_white, filter_linear, repeat_disable;
+uniform sampler2D deep_rough_map : hint_default_black, filter_linear, repeat_disable;
+uniform bool has_deep_rough_map = false;
 
 // -- Surface albedo textures --
 uniform sampler2D tex_rough   : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -82,6 +84,7 @@ varying vec3 v_world_pos;
 varying vec3 v_cam_pos;
 
 void vertex() {
+	// Ground stays flush with collision; the elevated grass is real blade geometry (DeepRoughBladesMultiMesh)
 	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_cam_pos = INV_VIEW_MATRIX[3].xyz;
@@ -221,7 +224,7 @@ void fragment() {
 	vec3 view_dir = normalize(v_world_pos - v_cam_pos);
 
 	// -----------------------------------------------------------------------
-	// 3A. ROUGH: Deep lush parkland rough with clumped thatch & moisture pockets
+	// 3A. ROUGH: Lush green rough + Elevated 3D-textured Deep Rough (>= 25% lie resistance)
 	// -----------------------------------------------------------------------
 	if (rough_w > 0.005) {
 		vec3 r_fine = sample_notile(tex_rough, uv_rough, v_world_pos.xz);
@@ -230,28 +233,91 @@ void fragment() {
 			vec3 r_broad = texture(tex_rough, uv_rough * 0.41 + vec2(0.37, 0.71)).rgb;
 			r_base = mix(r_fine, r_broad, 0.30 * near_detail_fade);
 		}
-		// Authentic Warwick Hills deep summer rough (deep forest-olive green, not neon)
+		// Lush parkland green rough (zero yellow/straw discoloration)
 		float clump_patch = gnoise(v_world_pos.xz * 0.28);
-		vec3 rough_tint = mix(vec3(0.76, 0.94, 0.70), vec3(0.88, 1.02, 0.78), clump_patch * 0.5 + 0.5);
+		vec3 rough_tint = mix(vec3(0.72, 0.94, 0.68), vec3(0.84, 1.02, 0.76), clump_patch * 0.5 + 0.5);
 		vec3 col_rough = r_base * rough_tint * macro_turf_tint;
 
-		// Sun-cured golden patches and dense dark clumps for natural variety
-		float dry_patch = smoothstep(0.25, 0.70, gnoise(v_world_pos.xz * 0.11 + vec2(7.3, 2.9)));
-		col_rough = mix(col_rough, col_rough * vec3(1.22, 1.08, 0.62), dry_patch * 0.45);
-		float clump_dark = smoothstep(0.1, 0.6, gnoise(v_world_pos.xz * 1.6));
-		col_rough *= mix(1.0, 0.78, clump_dark * 0.5);
+		// Subtle broad mowing / contour bands visible across the rough
+		float rough_stripe_coord = dot(v_world_pos.xz, mow_perp) * 0.55;
+		float rough_stripe = smoothstep(0.30, 0.70, sin(rough_stripe_coord) * 0.5 + 0.5);
+		col_rough *= mix(0.92, 1.06, rough_stripe);
+
+		float clump_dark = smoothstep(0.15, 0.65, gnoise(v_world_pos.xz * 1.6));
+		col_rough *= mix(1.0, 0.84, clump_dark * 0.40);
+
 		// Fine grain stands in for individual blades at close range
 		float grain_r = turf_grain(v_world_pos.xz) * close_blade_fade;
-		col_rough *= 1.0 + grain_r * 0.35;
+		col_rough *= 1.0 + grain_r * 0.30;
 
 		vec3 nr_rough = texture(normal_rough, uv_rough).rgb * 2.0 - 1.0;
 		nr_rough = mix(vec3(0.0, 0.0, 1.0), nr_rough, 0.55);
-
 		float luma_r = dot(r_base, vec3(0.299, 0.587, 0.114));
+		float ao_r = clamp(0.78 + luma_r * 0.42, 0.70, 1.0);
+		float rough_r = clamp(roughness_rough - clump_patch * 0.05, 0.80, 0.98);
+
+		// Elevated Thick Rough Grass Texture wherever ball lie resistance >= 25%
+		if (has_deep_rough_map) {
+			float raw_dr = texture(deep_rough_map, UV2).r;
+			if (raw_dr > 0.01) {
+				// Feathered grassy cut-edge border between <25% intermediate rough and >=25% deep rough
+				float edge_tuft = gnoise(v_world_pos.xz * 2.8) * 0.5 + gnoise(v_world_pos.xz * 7.5) * 0.5;
+				float deep_rough_w = smoothstep(0.28, 0.72, raw_dr + edge_tuft * 0.22 * raw_dr * (1.0 - raw_dr));
+				deep_rough_w *= smoothstep(0.15, 0.65, rough_w);
+
+				// 3-layer parallax/relief thick grass blade canopy
+				vec2 para_step = (view_dir.xz / max(abs(view_dir.y), 0.28)) * 0.018;
+				vec2 wp0 = v_world_pos.xz;
+				vec2 wp1 = v_world_pos.xz + para_step * 0.5;
+				vec2 wp2 = v_world_pos.xz + para_step;
+
+				float tuft_l0 = gnoise(wp0 * 6.5) * 0.5 + 0.5;
+				float tuft_l1 = gnoise(wp1 * 14.5 + vec2(4.7, 9.2)) * 0.5 + 0.5;
+				float tuft_l2 = gnoise(wp2 * 31.0 + vec2(13.1, 2.8)) * 0.5 + 0.5;
+				float blade_fibers = gnoise(wp2 * 58.0) * 0.5 + 0.5;
+
+				vec3 tex_layer1 = texture(tex_rough, uv_rough * 1.35 + para_step * 0.25).rgb;
+				vec3 tex_layer2 = texture(tex_rough, uv_rough * 2.10 + para_step * 0.55 + vec2(0.23, 0.41)).rgb;
+
+				// Rich dark-green thatch crevices -> dense lush forest-green mid-blades -> sunlit green tips
+				float canopy_h = clamp(tuft_l0 * 0.30 + tuft_l1 * 0.42 + tuft_l2 * 0.28, 0.0, 1.0);
+				float tip_mask = smoothstep(0.46, 0.78, canopy_h + (blade_fibers - 0.5) * 0.22);
+				float thatch_pocket = 1.0 - smoothstep(0.22, 0.52, canopy_h);
+
+				vec3 deep_thatch_col = vec3(0.16, 0.26, 0.10);
+				vec3 mid_blade_col   = mix(tex_layer1, tex_layer2, 0.5) * vec3(0.84, 1.02, 0.76);
+				vec3 blade_tip_col   = mix(tex_layer2, r_base, 0.4) * vec3(0.96, 1.12, 0.82);
+
+				vec3 col_deep = mix(mid_blade_col, deep_thatch_col, thatch_pocket * 0.45);
+				col_deep = mix(col_deep, blade_tip_col, tip_mask * 0.65);
+				col_deep *= macro_turf_tint * mix(0.93, 1.07, rough_stripe);
+
+				// Raised mown step-up lip shadow and 3D bevel normal at the 25% transition cut
+				float cut_lip = smoothstep(0.04, 0.42, deep_rough_w) * (1.0 - smoothstep(0.48, 0.94, deep_rough_w));
+				col_deep *= mix(1.0, 0.90, cut_lip);
+
+				vec2 dr_texel = 1.5 / vec2(max(textureSize(deep_rough_map, 0), ivec2(1)));
+				float dr_x = texture(deep_rough_map, UV2 + vec2(dr_texel.x, 0.0)).r - texture(deep_rough_map, UV2 - vec2(dr_texel.x, 0.0)).r;
+				float dr_z = texture(deep_rough_map, UV2 + vec2(0.0, dr_texel.y)).r - texture(deep_rough_map, UV2 - vec2(0.0, dr_texel.y)).r;
+
+				// High-relief 3D blade tuft normals + cut-edge step bevel
+				float dh_x = gnoise((wp2 + vec2(0.03, 0.0)) * 22.0) - gnoise((wp2 - vec2(0.03, 0.0)) * 22.0);
+				float dh_z = gnoise((wp2 + vec2(0.0, 0.03)) * 22.0) - gnoise((wp2 - vec2(0.0, 0.03)) * 22.0);
+				vec3 nr_tuft = normalize(vec3(nr_rough.x + dh_x * 0.35 - dr_x * 1.2 * cut_lip, nr_rough.y + dh_z * 0.35 - dr_z * 1.2 * cut_lip, max(nr_rough.z, 0.80)));
+
+				float ao_deep = clamp(mix(0.74, 1.0, canopy_h) * mix(1.0, 0.88, cut_lip), 0.70, 1.0);
+
+				col_rough = mix(col_rough, col_deep, deep_rough_w);
+				nr_rough = normalize(mix(nr_rough, nr_tuft, deep_rough_w));
+				ao_r = mix(ao_r, ao_deep, deep_rough_w);
+				rough_r = mix(rough_r, 0.92, deep_rough_w);
+			}
+		}
+
 		blended_albedo += col_rough * rough_w;
 		blended_normal += nr_rough * rough_w;
-		blended_roughness += clamp(roughness_rough - clump_patch * 0.05, 0.80, 0.98) * rough_w;
-		blended_ao += clamp(0.78 + luma_r * 0.42, 0.70, 1.0) * rough_w;
+		blended_roughness += rough_r * rough_w;
+		blended_ao += ao_r * rough_w;
 	}
 
 	// -----------------------------------------------------------------------
@@ -363,11 +429,15 @@ void fragment() {
 		float rake_wave = sin(rake_angle) * 0.5 + 0.5;
 		col_bunker = clamp(col_bunker * mix(0.95, 1.04, rake_wave), 0.0, 1.0);
 
-		// Sharp sod & dark earth bunker lip transition
-		float bunker_lip = smoothstep(0.03, 0.26, bunker_w) * (1.0 - smoothstep(0.32, 0.68, bunker_w));
-		float lip_noise = gnoise(v_world_pos.xz * 1.2) * 0.5 + 0.5;
-		vec3 dark_soil = vec3(0.16, 0.12, 0.08) * (0.80 + 0.35 * lip_noise);
-		col_bunker = mix(col_bunker, dark_soil, bunker_lip * 0.88);
+		// Distinctive earthy bunker lip transition:
+		// Enhanced brown soil exposure around greens and fairways (matching real course reference)
+		float green_contact = smoothstep(0.02, 0.45, raw_green);
+		float bunker_lip = smoothstep(0.015, 0.38, bunker_w) * (1.0 - smoothstep(0.30, 0.82, bunker_w));
+		// Give bunkers abutting greens an extra rich, wider brown sod soil ledge
+		bunker_lip = max(bunker_lip, smoothstep(0.01, 0.35, bunker_w) * green_contact * (1.0 - smoothstep(0.40, 0.88, bunker_w)));
+		float lip_noise = gnoise(v_world_pos.xz * 1.5) * 0.5 + 0.5;
+		vec3 brown_soil = vec3(0.42, 0.28, 0.16) * (0.85 + 0.30 * lip_noise);
+		col_bunker = mix(col_bunker, brown_soil, bunker_lip * 0.95);
 
 		vec3 nr_bunker = texture(normal_bunker, uv_bunker).rgb * 2.0 - 1.0;
 		vec2 rake_tangent = vec2(cos(rake_angle), sin(rake_angle)) * 0.28;
@@ -399,8 +469,8 @@ void fragment() {
 		float mid_b = gnoise(v_world_pos.xz * 3.1 + vec2(11.0, 5.0));
 		float amp = rough_w * 0.22 + fairway_w * 0.07;
 		blended_albedo *= 1.0 + (mid_a * 0.6 + mid_b * 0.4) * amp * mid_fade;
-		// Sun-warmed highlights and cooler shade within the turf canopy
-		blended_albedo = mix(blended_albedo, blended_albedo * vec3(1.06, 1.05, 0.90), clamp(mid_b * 0.5 + 0.5, 0.0, 1.0) * 0.20 * mid_fade * grass_w_total);
+		// Lush green highlights and cooler shade within the turf canopy (no yellow cast)
+		blended_albedo = mix(blended_albedo, blended_albedo * vec3(0.98, 1.05, 0.94), clamp(mid_b * 0.5 + 0.5, 0.0, 1.0) * 0.20 * mid_fade * grass_w_total);
 	}
 
 	// Close-range (< 18m) procedural micro-blade normal perturbation at golfer address

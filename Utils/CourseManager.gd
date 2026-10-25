@@ -16,9 +16,13 @@ const DEFAULT_TEXTURE_INDICES := {
 	"Penalty": [5],
 }
 
+const CourseDetailEnhancerScript = preload("res://HighFidelity/Terrain/course_detail_enhancer.gd")
+const CourseGraphicsUpgraderScript = preload("res://Utils/CourseGraphicsUpgrader.gd")
+
 # Course state — populated after loading a course scene
 var course_info: Dictionary = {}
 var hole_info: Dictionary = {}
+var course_graphics_version: int = 1
 var _current_config_path: String = ""
 
 
@@ -37,6 +41,7 @@ func initialize(scene_path: String, config_path: String) -> void:
 			push_error("[CourseManager] Could not instantiate course scene: %s" % scene_path)
 			return
 		add_child(course_scene)
+		_ensure_course_details(course_scene)
 		return
 		
 	while true:
@@ -57,6 +62,16 @@ func initialize(scene_path: String, config_path: String) -> void:
 		push_error("[CourseManager] Could not instantiate course scene: %s" % scene_path)
 		return
 	add_child(course_scene)
+	_ensure_course_details(course_scene)
+
+
+func _ensure_course_details(course_scene: Node) -> void:
+	if course_scene == null:
+		return
+	var reeds := course_scene.get_node_or_null("ShorelineReedsMultiMesh")
+	if reeds == null or course_graphics_version < CourseGraphicsUpgraderScript.CURRENT_COURSE_GRAPHICS_VERSION:
+		CourseDetailEnhancerScript.enhance_course_scene(course_scene, false)
+	_apply_course_graphics_quality(course_scene)
 
 
 
@@ -79,6 +94,8 @@ func _load_course_config(config_path: String) -> void:
 	if typeof(parsed) != TYPE_DICTIONARY:
 		push_error("[CourseManager] Invalid JSON in %s." % config_path)
 		return
+
+	course_graphics_version = int(parsed.get("graphics_version", 1))
 
 	# Extract Course Info with defaults for missing keys
 	var info = parsed.get(COURSE_INFO_KEY, {})

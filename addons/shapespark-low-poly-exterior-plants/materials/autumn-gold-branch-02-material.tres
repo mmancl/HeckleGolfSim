@@ -4,8 +4,9 @@
 
 [resource]
 transparency = 2
-alpha_scissor_threshold = 0.5
+alpha_scissor_threshold = 0.42
 alpha_antialiasing_mode = 0
 cull_mode = 2
 albedo_texture = ExtResource("1_fe1h6")
-roughness = 0.85
+metallic_specular = 0.16
+roughness = 0.78

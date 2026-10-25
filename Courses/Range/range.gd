@@ -4123,22 +4123,35 @@ func _create_gimme_ring_mesh(pin_pos: Vector3, dist_meters: float, line_width: f
 		r_outer = maxf(r_outer, min_r + line_width)
 		var r_inner = maxf(r_outer - line_width, min_r)
 		
-		var r_mid = (r_outer + r_inner) * 0.5
-		var world_x = pin_pos.x + r_mid * u.x
-		var world_z = pin_pos.z + r_mid * u.y
+		# Sample height at outer, mid, and inner radii to ensure the ring follows sloping terrain
+		var world_x_mid = pin_pos.x + ((r_outer + r_inner) * 0.5) * u.x
+		var world_z_mid = pin_pos.z + ((r_outer + r_inner) * 0.5) * u.y
+		var world_x_out = pin_pos.x + r_outer * u.x
+		var world_z_out = pin_pos.z + r_outer * u.y
+		var world_x_in = pin_pos.x + r_inner * u.x
+		var world_z_in = pin_pos.z + r_inner * u.y
 		
-		var cache_key = Vector2i(roundi(world_x * 4.0), roundi(world_z * 4.0))
-		var ground_h: float
-		if height_cache.has(cache_key):
-			ground_h = height_cache[cache_key]
-		else:
-			ground_h = get_height(world_x, world_z)
-			height_cache[cache_key] = ground_h
+		var sample_height = func(wx: float, wz: float) -> float:
+			var cache_key = Vector2i(roundi(wx * 4.0), roundi(wz * 4.0))
+			if height_cache.has(cache_key):
+				return height_cache[cache_key]
+			var gh = get_height(wx, wz)
+			height_cache[cache_key] = gh
+			return gh
 			
-		var local_y = (ground_h + y_offset) - pin_pos.y
+		var ground_h_out = sample_height.call(world_x_out, world_z_out)
+		var ground_h_in = sample_height.call(world_x_in, world_z_in)
+		# Fall back to mid sample if inner/outer are identical or cached
+		if absf(ground_h_out - ground_h_in) < 0.001:
+			var ground_h_mid = sample_height.call(world_x_mid, world_z_mid)
+			ground_h_out = maxf(ground_h_out, ground_h_mid)
+			ground_h_in = maxf(ground_h_in, ground_h_mid)
+			
+		var local_y_out = (ground_h_out + y_offset) - pin_pos.y
+		var local_y_in = (ground_h_in + y_offset) - pin_pos.y
 		
-		outer_verts[i] = Vector3(r_outer * u.x, local_y, r_outer * u.y)
-		inner_verts[i] = Vector3(r_inner * u.x, local_y, r_inner * u.y)
+		outer_verts[i] = Vector3(r_outer * u.x, local_y_out, r_outer * u.y)
+		inner_verts[i] = Vector3(r_inner * u.x, local_y_in, r_inner * u.y)
 		
 	for i in range(steps):
 		var next_i = (i + 1) % steps
@@ -4171,9 +4184,7 @@ func _create_gimme_ring_material(color: Color, render_priority: int) -> Standard
 	mat.albedo_color = color
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat.polygon_offset_enabled = true
-	mat.polygon_offset_factor = -1.0
-	mat.polygon_offset_units = -10.0
+	mat.no_depth_test = false
 	mat.render_priority = render_priority
 	return mat
 
@@ -4197,7 +4208,7 @@ func update_gimme_circles() -> void:
 		mesh_1 = null
 		
 	if enabled_1:
-		var ring_mesh_1 = _create_gimme_ring_mesh(pin.global_position, dist_1_meters, 0.08, 0.020, boundary_segments, height_cache)
+		var ring_mesh_1 = _create_gimme_ring_mesh(pin.global_position, dist_1_meters, 0.08, 0.035, boundary_segments, height_cache)
 		if mesh_1 == null:
 			mesh_1 = MeshInstance3D.new()
 			mesh_1.name = "GimmeCircle1"
@@ -4225,7 +4236,7 @@ func update_gimme_circles() -> void:
 		mesh_2 = null
 		
 	if enabled_2:
-		var ring_mesh_2 = _create_gimme_ring_mesh(pin.global_position, dist_2_meters, 0.08, 0.023, boundary_segments, height_cache)
+		var ring_mesh_2 = _create_gimme_ring_mesh(pin.global_position, dist_2_meters, 0.08, 0.038, boundary_segments, height_cache)
 		if mesh_2 == null:
 			mesh_2 = MeshInstance3D.new()
 			mesh_2.name = "GimmeCircle2"
@@ -4253,7 +4264,7 @@ func update_gimme_circles() -> void:
 		mesh_3 = null
 		
 	if enabled_3:
-		var ring_mesh_3 = _create_gimme_ring_mesh(pin.global_position, dist_3_meters, 0.08, 0.026, boundary_segments, height_cache)
+		var ring_mesh_3 = _create_gimme_ring_mesh(pin.global_position, dist_3_meters, 0.08, 0.041, boundary_segments, height_cache)
 		if mesh_3 == null:
 			mesh_3 = MeshInstance3D.new()
 			mesh_3.name = "GimmeCircle3"
@@ -4950,6 +4961,8 @@ func _spawn_mountain_backdrop() -> void:
 
 
 func _on_player_profile_changed(player_name: String) -> void:
+	if has_node("/root/AnnouncerEngine"):
+		get_node("/root/AnnouncerEngine").call("ResetIdleTimer")
 	var session_rec = get_node_or_null("SessionRecorder")
 	if session_rec != null and not player_name.is_empty():
 		session_rec.username = player_name
@@ -5017,6 +5030,8 @@ func _get_current_club() -> String:
 
 
 func _on_club_selected(club_name: String) -> void:
+	if has_node("/root/AnnouncerEngine"):
+		get_node("/root/AnnouncerEngine").call("ResetIdleTimer")
 	_update_averages(club_name)
 	var is_pt = (club_name.to_lower() in ["pt", "putt", "putter"])
 	update_flagstick_collision(is_pt)

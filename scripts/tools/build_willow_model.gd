@@ -88,13 +88,13 @@ func _generate_willow_scene(palette: String, out_path: String, seed_val: int):
 
 	# Buttressed root flare trunk nodes:
 	var trunk_nodes = [
-		{"pos": Vector3(0, 0, 0), "r": 0.60},
-		{"pos": Vector3(rng.randf_range(-0.03, 0.03), 0.3, rng.randf_range(-0.03, 0.03)), "r": 0.48},
-		{"pos": Vector3(rng.randf_range(-0.04, 0.04), 0.8, rng.randf_range(-0.04, 0.04)), "r": 0.40},
-		{"pos": Vector3(rng.randf_range(-0.05, 0.05), 1.4, rng.randf_range(-0.05, 0.05)), "r": 0.35},
-		{"pos": Vector3(rng.randf_range(-0.06, 0.06), 1.9, rng.randf_range(-0.06, 0.06)), "r": 0.30},
+		{"pos": Vector3(0, 0, 0), "r": 0.54},
+		{"pos": Vector3(rng.randf_range(-0.03, 0.03), 0.3, rng.randf_range(-0.03, 0.03)), "r": 0.44},
+		{"pos": Vector3(rng.randf_range(-0.04, 0.04), 0.8, rng.randf_range(-0.04, 0.04)), "r": 0.38},
+		{"pos": Vector3(rng.randf_range(-0.05, 0.05), 1.4, rng.randf_range(-0.05, 0.05)), "r": 0.34},
+		{"pos": Vector3(rng.randf_range(-0.06, 0.06), 1.9, rng.randf_range(-0.06, 0.06)), "r": 0.29},
 	]
-	_build_tube_branch(st_trunk, trunk_nodes, 8, rng)
+	_build_tube_branch(st_trunk, trunk_nodes, 16, rng)
 
 	# 4 Flaring buttress root spurs spreading onto ground
 	for r_i in range(4):
@@ -104,7 +104,7 @@ func _generate_willow_scene(palette: String, out_path: String, seed_val: int):
 			{"pos": Vector3(cos(r_angle) * 0.60, 0.10, sin(r_angle) * 0.60), "r": 0.10},
 			{"pos": Vector3(cos(r_angle) * 0.85, 0.0, sin(r_angle) * 0.85), "r": 0.04},
 		]
-		_build_tube_branch(st_trunk, root_nodes, 5, rng)
+		_build_tube_branch(st_trunk, root_nodes, 8, rng)
 
 	var p_split = trunk_nodes[-1]["pos"]
 	var curtain_attach_points: Array[Vector3] = []
@@ -123,12 +123,12 @@ func _generate_willow_scene(palette: String, out_path: String, seed_val: int):
 		var p3 = Vector3(cos(angle) * r_top, h_top, sin(angle) * r_top)
 
 		var bough_nodes = [
-			{"pos": p_split, "r": 0.25},
-			{"pos": p1, "r": 0.19},
-			{"pos": p2, "r": 0.14},
+			{"pos": p_split, "r": 0.24},
+			{"pos": p1, "r": 0.18},
+			{"pos": p2, "r": 0.13},
 			{"pos": p3, "r": 0.08},
 		]
-		_build_tube_branch(st_trunk, bough_nodes, 6, rng)
+		_build_tube_branch(st_trunk, bough_nodes, 10, rng)
 
 		# Sub-branches arching at top of central dome
 		for sub_i in range(2):
@@ -141,7 +141,7 @@ func _generate_willow_scene(palette: String, out_path: String, seed_val: int):
 				{"pos": (p2 + sub_tip) * 0.5 + Vector3(0, rng.randf_range(0.15, 0.3), 0), "r": 0.07},
 				{"pos": sub_tip, "r": 0.04},
 			]
-			_build_tube_branch(st_trunk, sub_nodes, 5, rng)
+			_build_tube_branch(st_trunk, sub_nodes, 8, rng)
 			curtain_attach_points.append(sub_tip)
 
 	# Outer spreading scaffold limbs arching outward and up to rim
@@ -157,12 +157,12 @@ func _generate_willow_scene(palette: String, out_path: String, seed_val: int):
 		var p3 = Vector3(cos(angle) * limb_reach, limb_tip_h, sin(angle) * limb_reach)
 
 		var limb_nodes = [
-			{"pos": p_split, "r": 0.24},
-			{"pos": p1, "r": 0.18},
+			{"pos": p_split, "r": 0.23},
+			{"pos": p1, "r": 0.17},
 			{"pos": p2, "r": 0.12},
 			{"pos": p3, "r": 0.07},
 		]
-		_build_tube_branch(st_trunk, limb_nodes, 6, rng)
+		_build_tube_branch(st_trunk, limb_nodes, 10, rng)
 		curtain_attach_points.append(p3)
 
 		# Secondary outward arching branch
@@ -175,11 +175,12 @@ func _generate_willow_scene(palette: String, out_path: String, seed_val: int):
 			{"pos": (p2 + sub_tip) * 0.5 + Vector3(0, rng.randf_range(0.1, 0.25), 0), "r": 0.06},
 			{"pos": sub_tip, "r": 0.04},
 		]
-		_build_tube_branch(st_trunk, sub_nodes, 5, rng)
+		_build_tube_branch(st_trunk, sub_nodes, 8, rng)
 		curtain_attach_points.append(sub_tip)
 
-	st_trunk.generate_normals()
+	st_trunk.generate_tangents()
 	var willow_mesh = st_trunk.commit()
+	willow_mesh.surface_set_name(0, "Trunk")
 
 	# -------------------------------------------------------------
 	# 2. Surface 1: Crown Foliage Dome (Lush, Full Rounded Canopy Top & Shell)
@@ -247,7 +248,9 @@ func _generate_willow_scene(palette: String, out_path: String, seed_val: int):
 		var pos = Vector3(cos(angle) * rad, y, sin(angle) * rad)
 		_add_oriented_quad(st_crown, pos, rng.randf_range(1.5, 2.0), rng.randf_range(1.4, 1.9), angle + rng.randf_range(-0.5, 0.5), rng.randf_range(-0.3, 0.3), canopy_center, rng)
 
+	st_crown.generate_tangents()
 	st_crown.commit(willow_mesh)
+	willow_mesh.surface_set_name(1, "Branch-1")
 
 	# -------------------------------------------------------------
 	# 3. Surface 2: Cascading Weeping Foliage Curtains
@@ -292,7 +295,9 @@ func _generate_willow_scene(palette: String, out_path: String, seed_val: int):
 		_add_hanging_curtain_quad(st_curtain, tip, card_w, card_h, tip_angle + PI * 0.5, canopy_center, rng)
 		_add_hanging_curtain_quad(st_curtain, tip, card_w * 0.85, card_h * 0.9, tip_angle + PI * 0.15, canopy_center, rng)
 
+	st_curtain.generate_tangents()
 	st_curtain.commit(willow_mesh)
+	willow_mesh.surface_set_name(2, "Branch-2")
 
 	# -------------------------------------------------------------
 	# 4. Assemble StaticBody3D Scene
@@ -311,14 +316,14 @@ func _generate_willow_scene(palette: String, out_path: String, seed_val: int):
 	root.add_child(mesh_inst)
 	mesh_inst.owner = root
 
-	# Collision Shape for Trunk (Cylinder)
+	# Collision Shape for Trunk (Cylinder tightly fitting visible trunk below y=2.0m bough split)
 	var col_shape = CollisionShape3D.new()
 	col_shape.name = "CollisionShape3D"
 	var cyl = CylinderShape3D.new()
-	cyl.height = 2.6
-	cyl.radius = 0.45
+	cyl.height = 2.0
+	cyl.radius = 0.31
 	col_shape.shape = cyl
-	col_shape.position = Vector3(0, 1.3, 0)
+	col_shape.position = Vector3(0, 1.0, 0)
 	root.add_child(col_shape)
 	col_shape.owner = root
 
@@ -379,35 +384,42 @@ func _build_tube_branch(st: SurfaceTool, nodes: Array, sides: int, rng: RandomNu
 		up = right.cross(fwd).normalized()
 
 		var ring_verts: Array = []
-		for s in range(sides):
-			var theta = float(s) / float(sides) * TAU
-			var offset = (right * cos(theta) + up * sin(theta)) * r
+		for s in range(sides + 1):
+			var u = float(s) / float(sides)
+			var theta = u * TAU
+			var radial_n = (right * cos(theta) + up * sin(theta)).normalized()
+			var offset = radial_n * r
 			var v = pos + offset
-			var uv = Vector2(float(s) / float(sides), float(i) * 0.75)
-			ring_verts.append({"v": v, "uv": uv})
+			var uv = Vector2(u, float(i) * 0.75)
+			ring_verts.append({"v": v, "n": radial_n, "uv": uv})
 		rings.append(ring_verts)
 
 	for r_idx in range(rings.size() - 1):
 		var r0 = rings[r_idx]
 		var r1 = rings[r_idx + 1]
 		for s in range(sides):
-			var s_next = (s + 1) % sides
 			var p0 = r0[s]
-			var p1 = r0[s_next]
-			var p2 = r1[s_next]
+			var p1 = r0[s + 1]
+			var p2 = r1[s + 1]
 			var p3 = r1[s]
 
+			st.set_normal(p0["n"])
 			st.set_uv(p0["uv"])
 			st.add_vertex(p0["v"])
+			st.set_normal(p1["n"])
 			st.set_uv(p1["uv"])
 			st.add_vertex(p1["v"])
+			st.set_normal(p2["n"])
 			st.set_uv(p2["uv"])
 			st.add_vertex(p2["v"])
 
+			st.set_normal(p0["n"])
 			st.set_uv(p0["uv"])
 			st.add_vertex(p0["v"])
+			st.set_normal(p2["n"])
 			st.set_uv(p2["uv"])
 			st.add_vertex(p2["v"])
+			st.set_normal(p3["n"])
 			st.set_uv(p3["uv"])
 			st.add_vertex(p3["v"])
 

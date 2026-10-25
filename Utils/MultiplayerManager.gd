@@ -460,6 +460,8 @@ func start_hole() -> void:
 	print("[MultiplayerManager] Starting Hole: %s. Active Player: %s" % [hole_id, get_active_player().get("name", "None")])
 	emit_signal("distance_queue_updated")
 	save_current_match()
+	if has_node("/root/AnnouncerEngine"):
+		get_node("/root/AnnouncerEngine").call("ResetIdleTimer")
 
 static func format_queue_player_name(full_name: String) -> String:
 	var trimmed = full_name.strip_edges()

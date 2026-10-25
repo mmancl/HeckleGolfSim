@@ -18,58 +18,157 @@ static func get_lush_summer_instance_color(world_pos: Vector3, near_water: bool 
 	var wind_seed := clampf(0.05 + h2 * 0.94, 0.05, 0.99)
 
 	if near_water and h1 < 0.55:
-		# Shoreline Weeping Willow / Lush Water-Edge Olive-Lime
-		var willow := Color(0.88, 1.08, 0.78).lerp(Color(0.96, 1.12, 0.82), h2)
+		# Shoreline Weeping Willow / Natural Water-Edge Tone
+		var willow := Color(0.94, 1.02, 0.90).lerp(Color(0.98, 1.04, 0.93), h2)
 		return Color(willow.r, willow.g, willow.b, wind_seed)
 
 	if h1 < 0.50:
 		# Rich Summer Emerald Oak (50%)
-		var oak := Color(0.80, 0.98, 0.76).lerp(Color(0.88, 1.04, 0.82), h2)
+		var oak := Color(0.92, 0.98, 0.90).lerp(Color(0.97, 1.02, 0.95), h2)
 		return Color(oak.r, oak.g, oak.b, wind_seed)
 	elif h1 < 0.75:
-		# Sunlit Olive / Warm Lime Deciduous Crown (25%)
-		var olive := Color(0.94, 1.05, 0.75).lerp(Color(1.02, 1.08, 0.80), h2)
-		return Color(olive.r, olive.g, olive.b, wind_seed)
+		# Sunlit Parkland Deciduous Crown (25%)
+		var deciduous := Color(0.96, 1.02, 0.92).lerp(Color(1.02, 1.03, 0.95), h2)
+		return Color(deciduous.r, deciduous.g, deciduous.b, wind_seed)
 	elif h1 < 0.85:
-		# Parkland Weeping Willow / Bright Summer Maple (10%)
-		var maple := Color(0.86, 1.06, 0.78).lerp(Color(0.92, 1.10, 0.84), h2)
+		# Parkland Maple (10%)
+		var maple := Color(0.94, 1.01, 0.93).lerp(Color(0.98, 1.02, 0.96), h2)
 		return Color(maple.r, maple.g, maple.b, wind_seed)
 	elif h1 < 0.93:
-		# Silver Birch Bright Summer Canopy (8%)
-		var birch := Color(0.90, 1.04, 0.84).lerp(Color(0.98, 1.07, 0.88), h2)
+		# Silver Birch Summer Canopy (8%)
+		var birch := Color(0.95, 1.03, 0.94).lerp(Color(1.00, 1.04, 0.97), h2)
 		return Color(birch.r, birch.g, birch.b, wind_seed)
 	else:
 		# Deep Forest Pine / Spruce (7%)
-		var pine := Color(0.66, 0.86, 0.68).lerp(Color(0.74, 0.92, 0.74), h2)
+		var pine := Color(0.82, 0.92, 0.85).lerp(Color(0.88, 0.96, 0.90), h2)
 		return Color(pine.r, pine.g, pine.b, wind_seed)
 
 
-## Creates a procedural clumped 3D shoreline reed / marsh grass mesh for pond banks.
+## Creates a procedural clumped 3D shoreline reed / tall marsh grass mesh for pond banks.
 static func create_shoreline_reed_cluster_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 90210
-	var num_stalks := 14
+	var num_stalks := 36
 
 	for i in range(num_stalks):
-		var angle := rng.randf_range(0.0, TAU)
-		var dist := rng.randf_range(0.0, 0.55)
+		var angle := (float(i) / float(num_stalks)) * TAU + rng.randf_range(-0.22, 0.22)
+		var dist := sqrt(rng.randf()) * 0.78
 		var base := Vector3(cos(angle) * dist, 0.0, sin(angle) * dist)
-		var stalk_dir := rng.randf_range(0.0, TAU)
-		var lean := rng.randf_range(0.08, 0.28)
-		var h := rng.randf_range(0.65, 1.25)
-		var w := rng.randf_range(0.032, 0.052)
+		var stalk_dir := angle + rng.randf_range(-0.45, 0.45)
+		var lean := rng.randf_range(0.08, 0.32)
+		var is_tall_stalk := (i % 3 == 0)
+		var h := rng.randf_range(1.50, 2.10) if is_tall_stalk else rng.randf_range(1.05, 1.55)
+		var w := rng.randf_range(0.045, 0.075)
 
 		var fwd := Vector3(cos(stalk_dir), 0.0, sin(stalk_dir))
 		var right := Vector3(-fwd.z, 0.0, fwd.x) * (w * 0.5)
 
 		var p0 := base
-		var p1 := base + Vector3(0.0, h * 0.5, 0.0) + fwd * (lean * 0.4)
+		var p1 := base + Vector3(0.0, h * 0.52, 0.0) + fwd * (lean * 0.42)
 		var p2 := base + Vector3(0.0, h, 0.0) + fwd * lean
 
-		var n := (-fwd + Vector3(0.0, 0.65, 0.0)).normalized()
+		var n := (-fwd + Vector3(0.0, 0.68, 0.0)).normalized()
+
+		# Crossed double-blade planes at slight angle for full 360-degree volumetric density
+		for plane_idx in range(2):
+			var r_vec := right if plane_idx == 0 else Vector3(fwd.x, 0.0, fwd.z) * (w * 0.42)
+			# Lower segment
+			st.set_normal(n)
+			st.set_uv(Vector2(0.0, 1.0))
+			st.add_vertex(p0 - r_vec)
+			st.set_normal(n)
+			st.set_uv(Vector2(1.0, 1.0))
+			st.add_vertex(p0 + r_vec)
+			st.set_normal(n)
+			st.set_uv(Vector2(0.85, 0.5))
+			st.add_vertex(p1 + r_vec * 0.72)
+
+			st.set_normal(n)
+			st.set_uv(Vector2(0.0, 1.0))
+			st.add_vertex(p0 - r_vec)
+			st.set_normal(n)
+			st.set_uv(Vector2(0.85, 0.5))
+			st.add_vertex(p1 + r_vec * 0.72)
+			st.set_normal(n)
+			st.set_uv(Vector2(0.15, 0.5))
+			st.add_vertex(p1 - r_vec * 0.72)
+
+			# Upper segment tapering to feather/seedhead plume
+			st.set_normal(n)
+			st.set_uv(Vector2(0.15, 0.5))
+			st.add_vertex(p1 - r_vec * 0.72)
+			st.set_normal(n)
+			st.set_uv(Vector2(0.85, 0.5))
+			st.add_vertex(p1 + r_vec * 0.72)
+			st.set_normal(Vector3.UP)
+			st.set_uv(Vector2(0.5, 0.0))
+			st.add_vertex(p2)
+
+	# Grounded shoreline tussock base mound to eliminate hollow gaps and prevent water showing under roots
+	var base_pts := 12
+	var base_radius := 0.72
+	for bi in range(base_pts):
+		var a1 := (float(bi) / float(base_pts)) * TAU
+		var a2 := (float(bi + 1) / float(base_pts)) * TAU
+		var v_center := Vector3(0.0, 0.08, 0.0)
+		var v_edge1 := Vector3(cos(a1) * base_radius, 0.0, sin(a1) * base_radius)
+		var v_edge2 := Vector3(cos(a2) * base_radius, 0.0, sin(a2) * base_radius)
+		st.set_normal(Vector3.UP)
+		st.set_uv(Vector2(0.5, 1.0))
+		st.add_vertex(v_center)
+		st.set_normal(Vector3.UP)
+		st.set_uv(Vector2(0.0, 1.0))
+		st.add_vertex(v_edge1)
+		st.set_normal(Vector3.UP)
+		st.set_uv(Vector2(1.0, 1.0))
+		st.add_vertex(v_edge2)
+
+	var mesh := st.commit()
+	var mat := ShaderMaterial.new()
+	if ResourceLoader.exists("res://Courses/Environments/shaders/grass_blades_high.gdshader"):
+		mat.shader = load("res://Courses/Environments/shaders/grass_blades_high.gdshader") as Shader
+		mat.set_shader_parameter("root_color", Color(0.14, 0.30, 0.10))
+		mat.set_shader_parameter("tip_color", Color(0.32, 0.56, 0.20))
+		mat.set_shader_parameter("dry_tip_color", Color(0.64, 0.56, 0.38))
+		mat.set_shader_parameter("dry_tip_ratio", 0.42)
+		mat.set_shader_parameter("head_ratio", 0.38)
+		mat.set_shader_parameter("head_color", Color(0.40, 0.27, 0.15))
+		mat.set_shader_parameter("wind_strength", 0.09)
+		mat.set_shader_parameter("max_render_distance", 320.0)
+		mat.set_shader_parameter("fade_start_distance", 240.0)
+	mesh.surface_set_material(0, mat)
+	return mesh
+
+
+## Creates a procedural clumped 3D thick rough / fescue grass mesh for native rough and dunes.
+static func create_thick_rough_grass_cluster_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 45812
+	var num_blades := 28
+
+	for i in range(num_blades):
+		var angle := (float(i) / float(num_blades)) * TAU + rng.randf_range(-0.18, 0.18)
+		var dist := rng.randf_range(0.06, 0.88)
+		var base := Vector3(cos(angle) * dist, 0.0, sin(angle) * dist)
+		var out_dir := Vector3(cos(angle), 0.0, sin(angle)).normalized()
+		var lean := rng.randf_range(0.20, 0.52)
+		var h := rng.randf_range(0.85, 1.38)
+		var w := rng.randf_range(0.042, 0.072)
+
+		var fwd := (out_dir + Vector3(rng.randf_range(-0.25, 0.25), 0.0, rng.randf_range(-0.25, 0.25))).normalized()
+		var right := Vector3(-fwd.z, 0.0, fwd.x) * (w * 0.5)
+
+		var p0 := base
+		var p1 := base + Vector3(0.0, h * 0.52, 0.0) + fwd * (lean * 0.38)
+		var p2 := base + Vector3(0.0, h, 0.0) + fwd * lean
+
+		var n := (-fwd + Vector3(0.0, 0.70, 0.0)).normalized()
 
 		# Lower segment
 		st.set_normal(n)
@@ -80,39 +179,60 @@ static func create_shoreline_reed_cluster_mesh() -> ArrayMesh:
 		st.add_vertex(p0 + right)
 		st.set_normal(n)
 		st.set_uv(Vector2(0.85, 0.5))
-		st.add_vertex(p1 + right * 0.7)
+		st.add_vertex(p1 + right * 0.72)
 
 		st.set_normal(n)
 		st.set_uv(Vector2(0.0, 1.0))
 		st.add_vertex(p0 - right)
 		st.set_normal(n)
 		st.set_uv(Vector2(0.85, 0.5))
-		st.add_vertex(p1 + right * 0.7)
+		st.add_vertex(p1 + right * 0.72)
 		st.set_normal(n)
 		st.set_uv(Vector2(0.15, 0.5))
-		st.add_vertex(p1 - right * 0.7)
+		st.add_vertex(p1 - right * 0.72)
 
 		# Upper segment tapering to tip
 		st.set_normal(n)
 		st.set_uv(Vector2(0.15, 0.5))
-		st.add_vertex(p1 - right * 0.7)
+		st.add_vertex(p1 - right * 0.72)
 		st.set_normal(n)
 		st.set_uv(Vector2(0.85, 0.5))
-		st.add_vertex(p1 + right * 0.7)
+		st.add_vertex(p1 + right * 0.72)
 		st.set_normal(Vector3.UP)
 		st.set_uv(Vector2(0.5, 0.0))
 		st.add_vertex(p2)
+
+	# Grounded shoreline tussock base mound to eliminate hollow gaps and prevent water showing under roots
+	var base_pts := 12
+	var base_radius := 0.72
+	for bi in range(base_pts):
+		var a1 := (float(bi) / float(base_pts)) * TAU
+		var a2 := (float(bi + 1) / float(base_pts)) * TAU
+		var v_center := Vector3(0.0, 0.08, 0.0)
+		var v_edge1 := Vector3(cos(a1) * base_radius, 0.0, sin(a1) * base_radius)
+		var v_edge2 := Vector3(cos(a2) * base_radius, 0.0, sin(a2) * base_radius)
+		st.set_normal(Vector3.UP)
+		st.set_uv(Vector2(0.5, 1.0))
+		st.add_vertex(v_center)
+		st.set_normal(Vector3.UP)
+		st.set_uv(Vector2(0.0, 1.0))
+		st.add_vertex(v_edge1)
+		st.set_normal(Vector3.UP)
+		st.set_uv(Vector2(1.0, 1.0))
+		st.add_vertex(v_edge2)
 
 	var mesh := st.commit()
 	var mat := ShaderMaterial.new()
 	if ResourceLoader.exists("res://Courses/Environments/shaders/grass_blades_high.gdshader"):
 		mat.shader = load("res://Courses/Environments/shaders/grass_blades_high.gdshader") as Shader
-		mat.set_shader_parameter("root_color", Color(0.16, 0.28, 0.12))
-		mat.set_shader_parameter("tip_color", Color(0.42, 0.58, 0.26))
-		mat.set_shader_parameter("dry_tip_color", Color(0.62, 0.54, 0.32))
-		mat.set_shader_parameter("dry_tip_ratio", 0.35)
-		mat.set_shader_parameter("max_render_distance", 160.0)
-		mat.set_shader_parameter("fade_start_distance", 115.0)
+		mat.set_shader_parameter("root_color", Color(0.32, 0.30, 0.15))
+		mat.set_shader_parameter("tip_color", Color(0.68, 0.60, 0.34))
+		mat.set_shader_parameter("dry_tip_color", Color(0.82, 0.74, 0.46))
+		mat.set_shader_parameter("dry_tip_ratio", 0.60)
+		mat.set_shader_parameter("wind_strength", 0.085)
+		mat.set_shader_parameter("wind_speed", 1.25)
+		mat.set_shader_parameter("max_render_distance", 260.0)
+		mat.set_shader_parameter("fade_start_distance", 170.0)
 	mesh.surface_set_material(0, mat)
 	return mesh
 
@@ -130,8 +250,13 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 	if scene_root == null:
 		return stats
 
-	# Avoid double-conversion if already converted
-	if scene_root.get_node_or_null("MultiMeshFoliageContainer") != null:
+	# If already converted to MultiMeshFoliageContainer, ensure all TreeChunk_* meshes
+	# are upgraded from legacy boxy low-poly meshes to the new 16-sided volumetric 3D meshes,
+	# and synchronize ConsolidatedFoliageCollision so trunk colliders tightly align with visuals.
+	var existing_mm := scene_root.get_node_or_null("MultiMeshFoliageContainer")
+	if existing_mm != null:
+		upgrade_existing_multimesh_trees(existing_mm)
+		sync_consolidated_foliage_collision(scene_root, existing_mm, persist_for_save)
 		return stats
 
 	var tree_nodes: Array[Node3D] = []
@@ -176,6 +301,7 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 	static_col_body.collision_layer = 1
 	static_col_body.collision_mask = 0
 	static_col_body.set_meta("is_tree", true)
+	static_col_body.set_meta("trunk_collision_version", 2)
 	static_col_body.add_to_group("trees", true)
 	scene_root.add_child(static_col_body)
 	if persist_for_save:
@@ -193,22 +319,6 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 	if persist_for_save:
 		canopy_area.owner = scene_root
 
-	# Shared collision shapes matching authentic tree model dimensions
-	# Standard oak/foliage trees: 5.6m height, 0.38m trunk radius
-	var shared_trunk_shape := CylinderShape3D.new()
-	shared_trunk_shape.radius = 0.38
-	shared_trunk_shape.height = 5.6
-
-	# Weeping willows: 2.6m height, 0.45m trunk radius
-	var shared_willow_trunk_shape := CylinderShape3D.new()
-	shared_willow_trunk_shape.radius = 0.45
-	shared_willow_trunk_shape.height = 2.6
-
-	# Tall conifers/birches: 6.8m height, 0.34m trunk radius
-	var shared_tall_trunk_shape := CylinderShape3D.new()
-	shared_tall_trunk_shape.radius = 0.34
-	shared_tall_trunk_shape.height = 6.8
-
 	var shared_canopy_shape := SphereShape3D.new()
 	shared_canopy_shape.radius = 2.4
 
@@ -222,6 +332,7 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 	var chunk_buckets: Dictionary = {}
 	var mesh_lookup: Dictionary = {}
 	var category_lookup: Dictionary = {}
+	var shared_trunk_shape_cache: Dictionary = {}
 
 	# 1. Process Trees
 	for t_node in tree_nodes:
@@ -232,6 +343,8 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 		var pos := t_node.position
 
 		var m_path := mi.mesh.resource_path
+		if m_path.is_empty():
+			m_path = mi.mesh.resource_name
 		if m_path.is_empty():
 			m_path = "tree_mesh_" + str(mi.mesh.get_rid().get_id())
 		var key := "Tree__" + m_path
@@ -259,37 +372,11 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 		chunk_buckets[bucket_key]["transforms"].append(global_xf)
 		chunk_buckets[bucket_key]["colors"].append(get_lush_summer_instance_color(pos, near_water))
 
-		# Look for original trunk CollisionShape3D on t_node before converting
-		var orig_col: CollisionShape3D = null
-		for child in t_node.get_children():
-			if child is CollisionShape3D and child.get_parent() == t_node:
-				orig_col = child
-				break
-
-		# Add trunk collider to consolidated StaticBody3D with full trunk height & radius
-		var trunk_col := CollisionShape3D.new()
-		if orig_col != null and orig_col.shape != null:
-			trunk_col.shape = orig_col.shape
-			trunk_col.position = pos + Vector3(
-				orig_col.position.x * t_node.scale.x,
-				orig_col.position.y * t_node.scale.y,
-				orig_col.position.z * t_node.scale.z
-			)
-		else:
-			var is_willow_tree: bool = t_node.has_meta("is_willow") or m_path.containsn("willow")
-			var is_tall_tree: bool = t_node.has_meta("is_pine") or t_node.has_meta("is_birch") or m_path.containsn("pine") or m_path.containsn("birch")
-			if is_willow_tree:
-				trunk_col.shape = shared_willow_trunk_shape
-				trunk_col.position = pos + Vector3(0.0, 1.3 * t_node.scale.y, 0.0)
-			elif is_tall_tree:
-				trunk_col.shape = shared_tall_trunk_shape
-				trunk_col.position = pos + Vector3(0.0, 2.4 * t_node.scale.y, 0.0)
-			else:
-				trunk_col.shape = shared_trunk_shape
-				trunk_col.position = pos + Vector3(0.0, 2.0 * t_node.scale.y, 0.0)
-
-		trunk_col.scale = t_node.scale
-		trunk_col.rotation.y = t_node.rotation.y
+		# Build trunk collider directly from the visual mesh instance transform (global_xf)
+		# so the physics cylinder radius, height, and origin align 1:1 with the visible bark trunk
+		# without double-scaling variant TreeMesh transforms or applying non-uniform scale to Jolt cylinders.
+		var trunk_spec := get_visual_trunk_collider_spec(mi.mesh, m_path, t_node)
+		var trunk_col := _create_aligned_trunk_collision_shape(global_xf, trunk_spec, shared_trunk_shape_cache)
 		static_col_body.add_child(trunk_col)
 		if persist_for_save:
 			trunk_col.owner = scene_root
@@ -373,42 +460,8 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 		b_node.free()
 		stats["bushes_converted"] += 1
 
-	# 3. Process Water-Perimeter Rocks
+	# 3. Remove legacy Water-Perimeter Rocks (replaced by continuous tall shoreline grass in CourseDetailEnhancer)
 	for r_node in rock_nodes:
-		var mi := _find_first_mesh_instance(r_node)
-		if mi == null or mi.mesh == null:
-			continue
-		var global_xf := r_node.transform * mi.transform
-		var pos := r_node.position
-
-		var m_path := mi.mesh.resource_path
-		if m_path.is_empty():
-			m_path = "rock_mesh_" + str(mi.mesh.get_rid().get_id())
-		var key := "Rock__" + m_path
-		if not mesh_lookup.has(key):
-			mesh_lookup[key] = _duplicate_mesh_with_materials(mi)
-			category_lookup[key] = "Rock"
-
-		var cx := int(floor(pos.x / CHUNK_SIZE_M))
-		var cz := int(floor(pos.z / CHUNK_SIZE_M))
-		var bucket_key := "%s__%d_%d" % [key, cx, cz]
-		if not chunk_buckets.has(bucket_key):
-			chunk_buckets[bucket_key] = {
-				"mesh_key": key,
-				"transforms": [],
-				"colors": []
-			}
-
-		chunk_buckets[bucket_key]["transforms"].append(global_xf)
-		chunk_buckets[bucket_key]["colors"].append(Color(1.0, 1.0, 1.0, 1.0))
-
-		var rock_col := CollisionShape3D.new()
-		rock_col.shape = shared_rock_shape
-		rock_col.transform = global_xf
-		static_col_body.add_child(rock_col)
-		if persist_for_save:
-			rock_col.owner = scene_root
-
 		r_node.get_parent().remove_child(r_node)
 		r_node.free()
 		stats["rocks_converted"] += 1
@@ -433,9 +486,31 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 		mm.mesh = base_mesh.duplicate() as Mesh
 		mm.instance_count = count
 
+		var buf := PackedFloat32Array()
+		buf.resize(count * 16)
 		for i in range(count):
-			mm.set_instance_transform(i, xforms[i])
-			mm.set_instance_custom_data(i, cols[i])
+			var xf: Transform3D = xforms[i]
+			var col: Color = cols[i]
+			var b_idx := i * 16
+			buf[b_idx + 0] = xf.basis.x.x
+			buf[b_idx + 1] = xf.basis.y.x
+			buf[b_idx + 2] = xf.basis.z.x
+			buf[b_idx + 3] = xf.origin.x
+			buf[b_idx + 4] = xf.basis.x.y
+			buf[b_idx + 5] = xf.basis.y.y
+			buf[b_idx + 6] = xf.basis.z.y
+			buf[b_idx + 7] = xf.origin.y
+			buf[b_idx + 8] = xf.basis.x.z
+			buf[b_idx + 9] = xf.basis.y.z
+			buf[b_idx + 10] = xf.basis.z.z
+			buf[b_idx + 11] = xf.origin.z
+			buf[b_idx + 12] = col.r
+			buf[b_idx + 13] = col.g
+			buf[b_idx + 14] = col.b
+			buf[b_idx + 15] = col.a
+			mm.set_instance_transform(i, xf)
+			mm.set_instance_custom_data(i, col)
+		mm.buffer = buf
 
 		var mmi := MultiMeshInstance3D.new()
 		mmi.name = "%sChunk_%d" % [cat, chunk_idx]
@@ -484,3 +559,266 @@ static func _duplicate_mesh_with_materials(mi: MeshInstance3D) -> Mesh:
 		if override_m != null:
 			dup.surface_set_material(s, override_m)
 	return dup
+
+
+## Upgrades any legacy low-poly TreeChunk_* MultiMeshInstance3D inside `mm_container`
+## to use the realistic 16-sided smooth-trunk, multi-lobed 3D tree meshes while preserving materials,
+## and strips any legacy RockChunk_* MultiMesh nodes.
+static func upgrade_existing_multimesh_trees(mm_container: Node) -> int:
+	if mm_container == null:
+		return 0
+	var upgraded := 0
+	var idx := 0
+	var rocks_to_remove: Array[Node] = []
+	for child in mm_container.get_children():
+		if child is MultiMeshInstance3D:
+			var cname := child.name.to_lower()
+			if cname.begins_with("treechunk"):
+				if upgrade_tree_chunk_mesh_in_place(child as MultiMeshInstance3D, idx):
+					upgraded += 1
+				idx += 1
+			elif cname.begins_with("rockchunk"):
+				rocks_to_remove.append(child)
+	for rc in rocks_to_remove:
+		mm_container.remove_child(rc)
+		if rc.is_inside_tree():
+			rc.queue_free()
+		else:
+			rc.free()
+	return upgraded
+
+
+static func upgrade_tree_chunk_mesh_in_place(mmi: MultiMeshInstance3D, chunk_idx: int = 0) -> bool:
+	if mmi == null or mmi.multimesh == null or mmi.multimesh.mesh == null:
+		return false
+	var old_mesh := mmi.multimesh.mesh
+	# Enhanced photographic 3D tree meshes have resource_name ending in "_v4_photo"
+	if old_mesh.resource_name.ends_with("_v4_photo"):
+		return false
+
+	var mats: Array[Material] = []
+	if mmi.has_meta("orig_surface_mats"):
+		var cached: Array = mmi.get_meta("orig_surface_mats")
+		for m in cached:
+			mats.append(m as Material)
+	else:
+		for s in range(old_mesh.get_surface_count()):
+			mats.append(old_mesh.surface_get_material(s))
+
+	var sig := ""
+	for m in mats:
+		if m != null:
+			sig += " " + m.resource_path.to_lower()
+			if m is BaseMaterial3D and (m as BaseMaterial3D).albedo_texture != null:
+				sig += " " + (m as BaseMaterial3D).albedo_texture.resource_path.to_lower()
+			elif m is ShaderMaterial:
+				var tex = (m as ShaderMaterial).get_shader_parameter("texture_albedo")
+				if tex is Resource:
+					sig += " " + (tex as Resource).resource_path.to_lower()
+
+	var target_scene_path := ""
+	if sig.contains("willow"):
+		var w_idx := (chunk_idx % 3) + 1
+		target_scene_path = "res://addons/shapespark-low-poly-exterior-plants/bodies/tree-willow-%d-staticbody.tscn" % w_idx
+	elif sig.contains("pine") or sig.contains("branch-2"):
+		var p_idx := (chunk_idx % 4) + 1
+		target_scene_path = "res://addons/shapespark-low-poly-exterior-plants/meshes/tree-03-%d-mesh.tscn" % p_idx
+	elif sig.contains("birch") or sig.contains("branch-1") or sig.contains("autumn-red"):
+		var m_idx := (chunk_idx % 4) + 1
+		target_scene_path = "res://addons/shapespark-low-poly-exterior-plants/meshes/tree-02-%d-mesh.tscn" % m_idx
+	else:
+		var o_idx := (chunk_idx % 4) + 1
+		target_scene_path = "res://addons/shapespark-low-poly-exterior-plants/meshes/tree-01-%d-mesh.tscn" % o_idx
+
+	if not ResourceLoader.exists(target_scene_path):
+		return false
+	var sc := load(target_scene_path) as PackedScene
+	if sc == null:
+		return false
+	var inst := sc.instantiate()
+	var mi := _find_first_mesh_instance(inst)
+	var new_mesh: Mesh = null
+	if mi != null and mi.mesh != null:
+		new_mesh = _duplicate_mesh_with_materials(mi)
+	inst.free()
+	if new_mesh == null:
+		return false
+
+	# Re-apply original species materials (if valid BaseMaterial3D) so low/med/high switcher works seamlessly
+	if not sig.contains("willow"):
+		for s in range(min(new_mesh.get_surface_count(), mats.size())):
+			if mats[s] is StandardMaterial3D:
+				new_mesh.surface_set_material(s, mats[s])
+
+	var refreshed_orig_mats: Array = []
+	for s in range(new_mesh.get_surface_count()):
+		refreshed_orig_mats.append(new_mesh.surface_get_material(s))
+	mmi.set_meta("orig_surface_mats", refreshed_orig_mats)
+	mmi.multimesh.mesh = new_mesh
+	return true
+
+
+## Returns the exact local-space trunk cylinder dimensions (`radius`, `height`, `center_y`)
+## matching the visible cylindrical trunk bark geometry (below the upper canopy split) for `mesh`.
+static func get_visual_trunk_collider_spec(mesh: Mesh, mesh_hint: String = "", tree_node: Node = null) -> Dictionary:
+	var sig := mesh_hint.to_lower()
+	if mesh != null:
+		sig += " " + mesh.resource_path.to_lower() + " " + mesh.resource_name.to_lower()
+		for s in range(mesh.get_surface_count()):
+			var mat := mesh.surface_get_material(s)
+			if mat != null:
+				sig += " " + mat.resource_path.to_lower()
+	if tree_node != null:
+		if tree_node.has_meta("is_willow"):
+			sig += " willow"
+		if tree_node.has_meta("is_pine"):
+			sig += " pine"
+		if tree_node.has_meta("is_birch"):
+			sig += " birch"
+		if tree_node.has_meta("tree_type"):
+			sig += " " + str(tree_node.get_meta("tree_type")).to_lower()
+
+	# Custom primitive CylinderMesh fallback (e.g. unit tests)
+	if mesh is CylinderMesh and not sig.contains("tree-"):
+		var cm := mesh as CylinderMesh
+		var r := clampf((cm.top_radius + cm.bottom_radius) * 0.5, 0.12, 0.40)
+		var h := maxf(cm.height * 0.9, 1.5)
+		return {
+			"radius": r,
+			"height": h,
+			"center_y": h * 0.5
+		}
+
+	# 1. Weeping Willows (tree-willow-1..3): visible trunk r=0.18m from ground to main bough split at y=2.3m
+	if sig.contains("willow"):
+		return {
+			"radius": 0.18,
+			"height": 2.3,
+			"center_y": 1.15
+		}
+
+	# 2. Conifers / Pines / Spruces (tree-03-1..4, tree-pine-1..2): slender central trunk r=0.15m up to y=2.6m
+	if sig.contains("tree-03") or sig.contains("pine"):
+		return {
+			"radius": 0.15,
+			"height": 2.6,
+			"center_y": 1.3
+		}
+
+	# 3. Maples / Birches / Poplars (tree-02-1..4, tree-birch-1..2, tree-autumn-red-1..2):
+	#    visible trunk radius at ball impact height (y=0.5..2.35m) is ~0.16m
+	if sig.contains("tree-02") or sig.contains("birch") or sig.contains("autumn-red") or sig.contains("branch-1"):
+		return {
+			"radius": 0.16,
+			"height": 2.5,
+			"center_y": 1.25
+		}
+
+	# 4. Mature Broadleaf Oaks / Sycamores / Autumn Gold / Blossom (tree-01-1..4):
+	#    visible trunk radius at ball impact height (y=0.5..2.25m) is ~0.16m
+	return {
+		"radius": 0.16,
+		"height": 2.4,
+		"center_y": 1.2
+	}
+
+
+## Creates a world-space aligned `CollisionShape3D` with baked `CylinderShape3D` dimensions
+## and `scale = Vector3.ONE` directly from the visual mesh instance's `global_xf`.
+static func _create_aligned_trunk_collision_shape(global_xf: Transform3D, trunk_spec: Dictionary, shared_shape_cache: Dictionary = {}) -> CollisionShape3D:
+	var scale_vec := global_xf.basis.get_scale()
+	var xz_scale := maxf((absf(scale_vec.x) + absf(scale_vec.z)) * 0.5, 0.01)
+	var y_scale := maxf(absf(scale_vec.y), 0.01)
+
+	var local_r: float = float(trunk_spec.get("radius", 0.26))
+	var local_h: float = float(trunk_spec.get("height", 2.5))
+	var local_cy: float = float(trunk_spec.get("center_y", local_h * 0.5))
+
+	# Quantize to 1cm to maximize CylinderShape3D resource sharing across similar-sized trees
+	var world_r := snappedf(local_r * xz_scale, 0.01)
+	var world_h := snappedf(local_h * y_scale, 0.02)
+	var cache_key := "%.2f_%.2f" % [world_r, world_h]
+
+	var cyl: CylinderShape3D = shared_shape_cache.get(cache_key, null) as CylinderShape3D
+	if cyl == null:
+		cyl = CylinderShape3D.new()
+		cyl.radius = maxf(world_r, 0.08)
+		cyl.height = maxf(world_h, 0.5)
+		shared_shape_cache[cache_key] = cyl
+
+	var trunk_col := CollisionShape3D.new()
+	trunk_col.shape = cyl
+	# Use global_xf * Vector3(0, local_cy, 0) so the cylinder center is anchored to the exact visual trunk axis
+	trunk_col.position = global_xf.origin + Vector3(0.0, local_cy * y_scale, 0.0)
+	trunk_col.scale = Vector3.ONE
+	trunk_col.rotation = Vector3.ZERO
+	return trunk_col
+
+
+## Synchronizes `ConsolidatedFoliageCollision` trunk colliders in already-converted course scenes
+## so that every tree trunk collider matches the exact visual `MultiMeshInstance3D` transform and trunk radius/height.
+static func sync_consolidated_foliage_collision(scene_root: Node, mm_container: Node, persist_for_save: bool = false) -> int:
+	if scene_root == null or mm_container == null:
+		return 0
+
+	var static_col_body := scene_root.get_node_or_null("ConsolidatedFoliageCollision") as StaticBody3D
+	if static_col_body == null:
+		static_col_body = StaticBody3D.new()
+		static_col_body.name = "ConsolidatedFoliageCollision"
+		static_col_body.collision_layer = 1
+		static_col_body.collision_mask = 0
+		static_col_body.set_meta("is_tree", true)
+		static_col_body.add_to_group("trees", true)
+		scene_root.add_child(static_col_body)
+		if persist_for_save:
+			static_col_body.owner = scene_root
+
+	# Remove old oversized or double-scaled CylinderShape3D trunk colliders and legacy rock SphereShape3Ds
+	var old_trunk_cols: Array[Node] = []
+	var old_rock_cols: Array[Node] = []
+	for child in static_col_body.get_children():
+		if child is CollisionShape3D:
+			var cs := child as CollisionShape3D
+			if cs.shape is CylinderShape3D:
+				old_trunk_cols.append(cs)
+			elif cs.shape is SphereShape3D:
+				old_rock_cols.append(cs)
+
+	for rc in old_rock_cols:
+		static_col_body.remove_child(rc)
+		rc.free()
+
+	# OnlySkip if already at trunk_collision_version 3 AND existing cylinders already use uniform scale
+	if not persist_for_save and int(static_col_body.get_meta("trunk_collision_version", 0)) >= 3 and not old_trunk_cols.is_empty():
+		var first_cs := old_trunk_cols[0] as CollisionShape3D
+		if first_cs.scale.is_equal_approx(Vector3.ONE):
+			return 0
+
+	for old_c in old_trunk_cols:
+		static_col_body.remove_child(old_c)
+		old_c.free()
+
+	var shared_shape_cache: Dictionary = {}
+	var rebuilt_count := 0
+
+	for child in mm_container.get_children():
+		if not (child is MultiMeshInstance3D):
+			continue
+		var mmi := child as MultiMeshInstance3D
+		if not mmi.name.to_lower().begins_with("treechunk"):
+			continue
+		var mm := mmi.multimesh
+		if mm == null or mm.mesh == null or mm.instance_count <= 0:
+			continue
+
+		var trunk_spec := get_visual_trunk_collider_spec(mm.mesh, mmi.name)
+		for i in range(mm.instance_count):
+			var inst_xf := mm.get_instance_transform(i)
+			var trunk_col := _create_aligned_trunk_collision_shape(inst_xf, trunk_spec, shared_shape_cache)
+			static_col_body.add_child(trunk_col)
+			if persist_for_save:
+				trunk_col.owner = scene_root
+			rebuilt_count += 1
+
+	static_col_body.set_meta("trunk_collision_version", 3)
+	return rebuilt_count

@@ -45,6 +45,7 @@ signal manual_hit
 func _ready() -> void:
 	# Create new golf ball
 	ball = GolfBallClass.new()
+	ball.name = "GolfBall"
 	add_child(ball)
 	ball.rest.connect(_on_ball_rest)
 	

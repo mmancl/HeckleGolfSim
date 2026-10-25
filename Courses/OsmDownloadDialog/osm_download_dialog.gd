@@ -444,7 +444,13 @@ func _load_cached_courses() -> void:
 						var entry = item.duplicate()
 						var c_name = entry.get("name", "")
 						var lower_name = c_name.to_lower()
-						var is_cached = _is_slug_cached(c_name)
+						var lat = float(entry.get("lat", 0.0))
+						var lon = float(entry.get("lon", 0.0))
+						var is_cached = false
+						if _loader != null and _loader.has_method("IsCourseCached"):
+							is_cached = bool(_loader.call("IsCourseCached", c_name, lat, lon))
+						else:
+							is_cached = _is_slug_cached(c_name)
 						entry["is_catalog"] = true
 						entry["is_cached"] = is_cached
 						if entry.has("is_pga_tour"):
@@ -539,10 +545,16 @@ func _scan_loose_cached_geometries() -> void:
 
 
 func _is_course_cached(course: Dictionary) -> bool:
+	if course.get("force_online", false):
+		return false
 	if course.has("is_cached"):
 		return bool(course["is_cached"])
 	var c_name = course.get("name", "")
 	if not c_name.is_empty():
+		var lat = float(course.get("lat", 0.0))
+		var lon = float(course.get("lon", 0.0))
+		if (lat != 0.0 or lon != 0.0) and _loader != null and _loader.has_method("IsCourseCached"):
+			return bool(_loader.call("IsCourseCached", c_name, lat, lon))
 		var lower_name = c_name.to_lower()
 		if _cached_names_set.has(lower_name):
 			return true
@@ -897,6 +909,12 @@ func _perform_search(force_online: bool = false) -> void:
 	spinner.visible = false
 	_set_ui_disabled(false)
 
+	if should_force_online and results_array != null:
+		for item in results_array:
+			if item is Dictionary:
+				item["force_online"] = true
+				item["is_cached"] = false
+
 	if results_array == null or results_array.is_empty():
 		var hole_desc = ""
 		if btn_all_holes != null and btn_all_holes.button_pressed:
@@ -987,6 +1005,7 @@ func _on_download_pressed() -> void:
 	var course_name = course.get("name", "Unnamed Course")
 	var lat = course.get("lat", 0.0)
 	var lon = course.get("lon", 0.0)
+	var location = course.get("location", "")
 	var is_cached = _is_course_cached(course)
 
 	# Rate-limit enforcement for OSM direct downloads
@@ -1016,7 +1035,8 @@ func _on_download_pressed() -> void:
 	_start_download_notice_timer(current_token)
 
 	# Call C# download and generate and await signal
-	_loader.DownloadAndGenerateCourse(lat, lon, course_name, is_cached)
+	if _loader != null and _loader.has_method("DownloadAndGenerateCourse"):
+		_loader.call("DownloadAndGenerateCourse", lat, lon, course_name, is_cached, location)
 	var success = await _loader.CourseGenerated
 
 	_download_in_progress = false

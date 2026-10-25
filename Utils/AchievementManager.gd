@@ -246,6 +246,14 @@ var achievements_db: Dictionary = {
 		"category": "Special",
 		"rarity": "Rare"
 	},
+	"all_heckles": {
+		"id": "all_heckles",
+		"title": "Glutton for Punishment",
+		"description": "Hear all the heckle lines in Heckle Golf Sim",
+		"badge_path": "res://assets/images/achievements/badge_heckle_master.svg",
+		"category": "Special",
+		"rarity": "Legendary"
+	},
 	"all_achievements": {
 		"id": "all_achievements",
 		"title": "Grand Slam Champion",
@@ -258,10 +266,107 @@ var achievements_db: Dictionary = {
 
 var _player_data: Dictionary = {}
 var _popup_instance: Node = null
+var _all_heckle_filepaths: Dictionary = {} # Set of String filepath -> true
+var _total_heckles_count: int = 0
+const HECKLE_PROMPTS_PATH = "res://assets/audio/heckler/heckle_prompts.json"
+const PRAISE_CATEGORIES = ["under_par", "good_shot_fairway", "good_shot_green"]
 
 func _ready() -> void:
 	_player_data = _load_data()
+	_load_heckle_definitions()
 	call_deferred("_setup_popup_ui")
+	call_deferred("_connect_announcer_engine")
+
+func _connect_announcer_engine() -> void:
+	if has_node("/root/AnnouncerEngine"):
+		var announcer = get_node("/root/AnnouncerEngine")
+		if announcer.has_signal("AudioLinePlayed") and not announcer.is_connected("AudioLinePlayed", _on_audio_line_played):
+			announcer.connect("AudioLinePlayed", _on_audio_line_played)
+
+func _load_heckle_definitions() -> void:
+	_all_heckle_filepaths.clear()
+	_total_heckles_count = 0
+	if not FileAccess.file_exists(HECKLE_PROMPTS_PATH):
+		return
+	var file = FileAccess.open(HECKLE_PROMPTS_PATH, FileAccess.READ)
+	if file == null:
+		return
+	var json = JSON.new()
+	if json.parse(file.get_as_text()) == OK and typeof(json.data) == TYPE_DICTIONARY:
+		var categories = json.data.get("categories", {})
+		if typeof(categories) == TYPE_DICTIONARY:
+			for cat_name in categories.keys():
+				if cat_name in PRAISE_CATEGORIES:
+					continue # Ignore praise categories
+				var items = categories[cat_name]
+				if typeof(items) == TYPE_ARRAY:
+					for item in items:
+						if typeof(item) == TYPE_DICTIONARY:
+							var fp = item.get("filepath", "")
+							if not fp.is_empty():
+								_all_heckle_filepaths[fp] = true
+	_total_heckles_count = _all_heckle_filepaths.size()
+
+func _on_audio_line_played(category: String, filepath: String) -> void:
+	record_heckle_line_heard("", filepath, category)
+
+func record_heckle_line_heard(player_name: String, filepath: String, category: String = "") -> void:
+	if filepath.is_empty():
+		return
+		
+	# If category is praise, ignore
+	if category in PRAISE_CATEGORIES:
+		return
+		
+	# Ensure heckle definitions are loaded
+	if _all_heckle_filepaths.is_empty():
+		_load_heckle_definitions()
+		
+	# Check if this filepath is considered a heckle line
+	if not _all_heckle_filepaths.is_empty() and not _all_heckle_filepaths.has(filepath):
+		return
+
+	# If player_name is not provided, use active player from MultiplayerManager
+	if player_name.is_empty():
+		if has_node("/root/MultiplayerManager"):
+			var mp_mgr = get_node("/root/MultiplayerManager")
+			if mp_mgr.has_method("get_active_player"):
+				var active_p = mp_mgr.get_active_player()
+				if typeof(active_p) == TYPE_DICTIONARY:
+					player_name = active_p.get("name", "")
+
+	if player_name.is_empty():
+		player_name = "Player 1"
+
+	if not _player_data.has(player_name):
+		_player_data[player_name] = {}
+
+	var p_data = _player_data[player_name]
+	if not p_data.has("heard_heckles") or typeof(p_data["heard_heckles"]) != TYPE_DICTIONARY:
+		p_data["heard_heckles"] = {}
+
+	if p_data["heard_heckles"].has(filepath):
+		return # Already heard this line
+
+	p_data["heard_heckles"][filepath] = Time.get_unix_time_from_system()
+	_save_data()
+
+	var heard_count = p_data["heard_heckles"].size()
+	var total_target = _total_heckles_count if _total_heckles_count > 0 else 620
+	if heard_count >= total_target:
+		unlock_achievement(player_name, "all_heckles")
+
+func get_heard_heckles_count(player_name: String) -> int:
+	if player_name.is_empty() or not _player_data.has(player_name):
+		return 0
+	var p_data = _player_data.get(player_name, {})
+	var heard = p_data.get("heard_heckles", {})
+	return heard.size() if typeof(heard) == TYPE_DICTIONARY else 0
+
+func get_total_heckles_count() -> int:
+	if _total_heckles_count <= 0:
+		_load_heckle_definitions()
+	return _total_heckles_count if _total_heckles_count > 0 else 620
 
 func _setup_popup_ui() -> void:
 	if _popup_instance != null and is_instance_valid(_popup_instance):
@@ -302,7 +407,7 @@ func get_all_achievements() -> Array[Dictionary]:
 		"win_1_round", "win_5_rounds", "win_10_rounds", "win_50_rounds",
 		"long_drive", "putt_20_ft", "long_putt", "putt_40_ft", "putt_50_ft",
 		"chip_in_50", "chip_in_75", "chip_in_100",
-		"sand_save", "all_achievements"
+		"sand_save", "all_heckles", "all_achievements"
 	]
 	for id in order:
 		if achievements_db.has(id):
@@ -312,13 +417,20 @@ func get_all_achievements() -> Array[Dictionary]:
 func get_unlocked_achievements(player_name: String) -> Dictionary:
 	if player_name.is_empty():
 		return {}
-	return _player_data.get(player_name, {})
+	var p_data = _player_data.get(player_name, {})
+	var unlocked: Dictionary = {}
+	for k in p_data.keys():
+		if k == "heard_heckles":
+			continue
+		if achievements_db.has(k):
+			unlocked[k] = p_data[k]
+	return unlocked
 
 func is_unlocked(player_name: String, ach_id: String) -> bool:
 	if player_name.is_empty() or not achievements_db.has(ach_id):
 		return false
 	var p_ach = _player_data.get(player_name, {})
-	return p_ach.has(ach_id)
+	return p_ach.has(ach_id) and ach_id != "heard_heckles"
 
 func unlock_achievement(player_name: String, ach_id: String) -> bool:
 	if player_name.is_empty() or not achievements_db.has(ach_id):

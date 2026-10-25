@@ -256,21 +256,21 @@ func _init() -> void:
 		var c_str: String = str(clip)
 		assert(not c_str.ends_with("home_button_popup_32.wav"), "2-over par player must NEVER hear 'thirty strokes over par' prompt (popup_32)!")
 
-	# For a player 25 strokes over par: popup_32 SHOULD qualify
+	# For a player 30 strokes over par: popup_32 SHOULD qualify
 	var blowout_context = {
 		"game_mode": "course_play",
-		"score_relative_to_par": 25,
+		"score_relative_to_par": 30,
 		"hole_number": 14,
 		"hole_range": "back_nine"
 	}
 	var blowout_clips: Array = announcer.call("GetAvailableClipsForCategory", "home_button_popup", blowout_context)
-	print("  Clips for 25-over par player: %d" % blowout_clips.size())
+	print("  Clips for 30-over par player: %d" % blowout_clips.size())
 	var has_blowout_clip := false
 	for clip in blowout_clips:
 		if str(clip).ends_with("home_button_popup_32.wav"):
 			has_blowout_clip = true
 			break
-	assert(has_blowout_clip, "Blowout player (25 over par) must have 'thirty strokes over par' prompt eligible in pool")
+	assert(has_blowout_clip, "Blowout player (30 over par) must have 'thirty strokes over par' prompt eligible in pool")
 	print("  PASS: Home button popup strictly filters 30-strokes heckle based on player score.")
 
 	# -------------------------------------------------------------
@@ -289,6 +289,51 @@ func _init() -> void:
 		assert(not c_str.ends_with("home_button_popup_13.wav"), "Range must not play scorecard prompt")
 		assert(not c_str.ends_with("home_button_popup_25.wav"), "Range must not play 18 holes prompt")
 	print("  PASS: Driving range strictly excludes course-only and scorecard heckles.")
+
+	# -------------------------------------------------------------
+	# Test 10: High Apex Qualifier & Exclusion
+	# -------------------------------------------------------------
+	print("\n--- Test 10: High Apex Qualifier Filtering ---")
+	# In slice_into_rough, prompt 21 has high_apex: true ("Launched high, it curved right like it saw a ghost.")
+	var normal_slice_context = {
+		"high_apex": false,
+		"apex_ft": 65.0
+	}
+	var high_slice_context = {
+		"high_apex": true,
+		"apex_ft": 120.0
+	}
+
+	var normal_slice_clips: Array = announcer.call("GetAvailableClipsForCategory", "slice_into_rough", normal_slice_context)
+	var high_slice_clips: Array = announcer.call("GetAvailableClipsForCategory", "slice_into_rough", high_slice_context)
+
+	var has_slice_21_normal: bool = false
+	for clip in normal_slice_clips:
+		if str(clip).ends_with("slice_into_rough_21.wav"):
+			has_slice_21_normal = true
+			break
+	assert(not has_slice_21_normal, "slice_into_rough_21 must NOT match normal / low apex shots")
+
+	var has_slice_21_high: bool = false
+	for clip in high_slice_clips:
+		if str(clip).ends_with("slice_into_rough_21.wav"):
+			has_slice_21_high = true
+			break
+	assert(has_slice_21_high, "slice_into_rough_21 MUST match when high_apex is true")
+	print("  PASS: High apex qualifier strictly filters 'Launched high' slice heckles.")
+
+	# In crazy_high_apex, prompts mentioning 'apex' have high_apex: true
+	var crazy_high_clips: Array = announcer.call("GetAvailableClipsForCategory", "crazy_high_apex", high_slice_context)
+	var crazy_low_clips: Array = announcer.call("GetAvailableClipsForCategory", "crazy_high_apex", normal_slice_context)
+	print("  Crazy high apex clips: high_apex=true returned %d clips, high_apex=false returned %d clips" % [crazy_high_clips.size(), crazy_low_clips.size()])
+	assert(crazy_high_clips.size() > 0, "High apex shots must return qualifying crazy_high_apex clips")
+	var has_apex_clip_on_low: bool = false
+	for clip in crazy_low_clips:
+		if str(clip).ends_with("crazy_high_apex_05.wav") or str(clip).ends_with("crazy_high_apex_08.wav") or str(clip).ends_with("crazy_high_apex_11.wav"):
+			has_apex_clip_on_low = true
+			break
+	assert(not has_apex_clip_on_low, "Specific high apex qualified prompts must not match when high_apex is false")
+	print("  PASS: Crazy high apex heckles require high apex qualification.")
 
 	print("\n=======================================================")
 	print("  ALL ANNOUNCER QUALIFIER TESTS PASSED!                ")

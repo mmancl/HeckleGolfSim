@@ -97,8 +97,36 @@ func _process(_delta: float) -> bool:
 	if bunker_grass_mmi != null and bunker_grass_mmi.multimesh != null:
 		assert(bunker_grass_mmi.multimesh.instance_count == 0, "BunkerLipGrassMultiMesh instance_count must be 0 to keep sand traps free of grass weeds")
 	assert(mock_scene.has_node("ShorelineReedsMultiMesh"), "ShorelineReedsMultiMesh must exist around water pond")
+	var reeds_mmi := mock_scene.get_node("ShorelineReedsMultiMesh") as MultiMeshInstance3D
+	assert(reeds_mmi.multimesh != null and reeds_mmi.multimesh.instance_count >= 50, "ShorelineReedsMultiMesh must continuously surround the entire water pond perimeter (>= 50 clumps for 60m perimeter)")
 	assert(mock_scene.has_node("HorizonSkirt"), "HorizonSkirt outer terrain ring must exist")
 	assert(mock_scene.has_node("CartPaths"), "CartPaths extruded ribbon mesh must exist")
+	assert(not mock_scene.has_node("ThickRoughGrassMultiMesh"), "Long 3D grass patches (ThickRoughGrassMultiMesh) must not be spawned")
+	assert(int(detail_stats["thick_rough_grass"]) == 0, "Thick rough 3D grass cluster count must be 0")
+	assert(mock_scene.has_node("ThickRoughBushes"), "ThickRoughBushes container must exist in outer rough")
+	assert(int(detail_stats["thick_rough_bushes"]) > 0, "Thick rough sporadic bushes must be generated")
+
+	# Verify elevated deep_rough_map (>= 25% ball lie resistance, d >= 37.5m from fairway/green)
+	var ut := mock_scene.get_node("UnifiedTerrain") as MeshInstance3D
+	var ut_mat := ut.mesh.surface_get_material(0) as ShaderMaterial
+	assert(ut_mat.get_shader_parameter("has_deep_rough_map") == true, "UnifiedTerrain must have has_deep_rough_map enabled")
+	assert(ut_mat.get_shader_parameter("deep_rough_map") != null, "UnifiedTerrain must have deep_rough_map texture bound")
+	var dr_img: Image = ut.get_meta("deep_rough_image") as Image
+	assert(dr_img != null, "UnifiedTerrain must store deep_rough_image metadata")
+	# Fairway is [-10..10] in X and [-10..10] in Z on a [-100..100] x [-100..100] terrain (256x256).
+	# At world (25, 0) -> d = 15m from fairway (16% lie resistance < 25%) -> deep_rough_map must be 0.0
+	var px_near := int(round((25.0 - (-100.0)) / 200.0 * 255.0))
+	var pz_mid := int(round((0.0 - (-100.0)) / 200.0 * 255.0))
+	assert(dr_img.get_pixel(px_near, pz_mid).r < 0.05, "Rough at 15m (16% lie resistance < 25%) must NOT have elevated deep rough texture")
+	# At world (60, 0) -> d = 50m from fairway (30% lie resistance >= 25%) -> deep_rough_map must be 1.0
+	var px_far := int(round((60.0 - (-100.0)) / 200.0 * 255.0))
+	assert(dr_img.get_pixel(px_far, pz_mid).r > 0.95, "Rough at 50m (30% lie resistance >= 25%) MUST have elevated deep rough texture")
+
+	# Verify terrain_splat_realistic.gdshader has no yellow discoloration and uses deep_rough_map
+	var realistic_shader_code := FileAccess.get_file_as_string("res://Courses/Environments/shaders/terrain_splat_realistic.gdshader")
+	assert(not realistic_shader_code.contains("golden_straw_tint"), "terrain_splat_realistic.gdshader must not contain golden_straw_tint yellow discoloration")
+	assert(not realistic_shader_code.contains("dry_patch"), "terrain_splat_realistic.gdshader must not contain dry_patch yellow discoloration")
+	assert(realistic_shader_code.contains("deep_rough_map"), "terrain_splat_realistic.gdshader must sample deep_rough_map for >=25% lie resistance")
 
 	# Test concave bunker manifold extraction (ensures concave shapes are preserved and not flattened into convex hulls)
 	var l_faces := PackedVector3Array([
@@ -128,18 +156,69 @@ func _process(_delta: float) -> bool:
 		assert(env.ssao_enabled == true, "Builder must have applied HighFidelityLighting")
 		var grass_node := builder.get_node_or_null("HighFidelityGrass")
 		assert(grass_node != null, "HighFidelityGrass must be instantiated by HighFidelityBuilder")
+		assert(grass_node.has_node("DeepRoughBladesMultiMesh"), "Real 3D deep rough blade field must exist for the >=25% lie resistance zone")
+		var deep_mm := (grass_node.get_node("DeepRoughBladesMultiMesh") as MultiMeshInstance3D).multimesh
+		assert(deep_mm.instance_count >= 3000, "Deep rough blade field must be dense and performant")
+		# Verify bunker exclusion: grass must never activate when lie is sand or point is in bunker
+		var dummy_p = mock_scene.get_node_or_null("Player")
+		if dummy_p != null:
+			dummy_p.set("current_lie_type", "sand")
+			dummy_p.set("current_shot_reduction", 0.35)
+			assert(grass_node.call("_is_anchor_in_deep_rough", Vector3(10, 0, 10)) == false, "Deep rough must never activate in sand traps")
+			dummy_p.set("current_lie_type", "fairway")
+			assert(grass_node.call("_is_anchor_in_deep_rough", Vector3(10, 0, 10)) == false, "Deep rough must never activate on fairway")
+			dummy_p.set("current_lie_type", "rough")
+			dummy_p.set("current_shot_reduction", 0.26)
+			assert(grass_node.call("_is_anchor_in_deep_rough", Vector3(10, 0, 10)) == true, "Deep rough must activate in >= 25% rough")
+
+		var dense_clump: ArrayMesh = grass_node.call("_create_dense_deep_rough_mesh", 0.28, 0.028, 0.05)
+		assert(dense_clump != null and dense_clump.get_surface_count() > 0, "Dense turf mesh must generate successfully")
+		var arrays := dense_clump.surface_get_arrays(0)
+		var vert_count: int = (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+		assert(vert_count >= 400, "Dense 3-tier turf clump must have at least 400 vertices for 100%% seamless ground coverage")
+
+		# Verify calibrated deep rough material colors (natural lush turf matching Image 2, not pitch-black spikes)
+		var deep_mmi_node := grass_node.get_node("DeepRoughBladesMultiMesh") as MultiMeshInstance3D
+		assert(deep_mmi_node != null and deep_mmi_node.multimesh != null, "DeepRoughBladesMultiMesh must be created")
+		var deep_mat: ShaderMaterial = deep_mmi_node.multimesh.mesh.surface_get_material(0) as ShaderMaterial
+		assert(deep_mat != null, "Deep rough mesh must have a valid ShaderMaterial")
+		var root_c: Color = deep_mat.get_shader_parameter("root_color")
+		var tip_c: Color = deep_mat.get_shader_parameter("tip_color")
+		assert(root_c.g >= 0.20, "Root color must be lush deep green rather than pitch black")
+		assert(tip_c.g >= 0.45, "Tip color must be vibrant natural green")
+
 		if grass_node.has_node("AddressTurfMultiMesh"):
 			assert(grass_node.has_node("RoughFescueMultiMesh"), "RoughFescueMultiMesh must exist when grass meshes are enabled")
+		assert(not mock_scene.has_node("ThickRoughGrassMultiMesh"), "Long 3D grass patches must not exist on high graphics")
+		assert(mock_scene.get_node("ThickRoughBushes").visible == true, "Thick rough bushes must be visible on high graphics")
 		print("  PASS: HighFidelityBuilder and HighFidelityGrass active and verified.")
 
 		HighFidelityBuilder.remove_high_fidelity(mock_scene)
 		assert(not mock_scene.has_node("HighFidelityBuilder"), "Builder must be removed on teardown")
+		assert(mock_scene.get_node("ThickRoughBushes").visible == false, "Thick rough bushes must be hidden on low/medium graphics")
 		print("  PASS: HighFidelityBuilder removed and cleaned up.")
 
 	mock_scene.queue_free()
 
 	# 8. Test CourseGraphicsUpgrader end-to-end on a temporary v1 course directory
 	_test_course_graphics_upgrader()
+
+	# 9. Verify realistic 16-sided trunk & volumetric multi-lobe canopy tree meshes + in-place MultiMesh upgrade
+	for tree_mesh_path in [
+		"res://addons/shapespark-low-poly-exterior-plants/meshes/tree-01-1-mesh.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/meshes/tree-02-1-mesh.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/meshes/tree-03-1-mesh.tscn"
+	]:
+		var tm_scene := load(tree_mesh_path) as PackedScene
+		assert(tm_scene != null, "Tree mesh scene must load: " + tree_mesh_path)
+		var tm_inst := tm_scene.instantiate() as MeshInstance3D
+		assert(tm_inst != null and tm_inst.mesh is ArrayMesh, "Tree mesh must be an ArrayMesh")
+		var am := tm_inst.mesh as ArrayMesh
+		assert(am.get_surface_count() == 3, "Tree mesh must have 3 surfaces (Trunk, Branch-1, Branch-2)")
+		assert(am.surface_get_name(0) == "Trunk", "Surface 0 must be named Trunk")
+		assert(am.get_faces().size() >= 2600, "Realistic 16-sided trunk + multi-lobed canopy mesh must have >= 2600 face vertices, got %d" % am.get_faces().size())
+		tm_inst.free()
+	print("  PASS: Realistic 16-sided cylindrical trunk & dense multi-lobed canopy tree meshes verified.")
 
 	print("=======================================================")
 	print("ALL HIGH FIDELITY GRAPHICS & UPGRADER TESTS PASSED! 🎉")
@@ -202,6 +281,22 @@ func _create_mock_v1_course_scene() -> Node3D:
 	target.position = Vector3(60.0, 0.0, 0.0)
 	hole1.add_child(target)
 	target.owner = scene
+
+	# Fairway StaticBody3D [-10..10] x [-10..10]
+	var fw_body := StaticBody3D.new()
+	fw_body.name = "fairway_Static_1"
+	fw_body.set_meta("surface_type", 0)
+	var fw_col := CollisionShape3D.new()
+	var fw_shape := ConcavePolygonShape3D.new()
+	fw_shape.set_faces(PackedVector3Array([
+		Vector3(-10.0, 0.0, -10.0), Vector3(10.0, 0.0, -10.0), Vector3(10.0, 0.0, 10.0),
+		Vector3(-10.0, 0.0, -10.0), Vector3(10.0, 0.0, 10.0), Vector3(-10.0, 0.0, 10.0)
+	]))
+	fw_col.shape = fw_shape
+	fw_body.add_child(fw_col)
+	scene.add_child(fw_body)
+	fw_body.owner = scene
+	fw_col.owner = scene
 
 	# Bunker StaticBody3D with ConcavePolygonShape3D
 	var bunker_body := StaticBody3D.new()

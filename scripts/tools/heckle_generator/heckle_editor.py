@@ -119,10 +119,30 @@ ALLOWED_QUALIFIERS = {
         "description": "Ball landed within 4 yards (12 feet) of the pin",
         "values": [True, False]
     },
+    "is_iron": {
+        "type": "bool",
+        "description": "Whether the shot was hit using an iron (1i-9i)",
+        "values": [True, False]
+    },
+    "min_backspin": {
+        "type": "int",
+        "description": "Minimum backspin RPM required (e.g. 8000 for backspin praise)",
+        "placeholder": "e.g. 8000"
+    },
     "strokes": {
         "type": "int",
         "description": "Exact stroke count required (e.g. 8 for snowman heckles)",
         "placeholder": "e.g. 8"
+    },
+    "high_apex": {
+        "type": "bool",
+        "description": "Whether the shot reached a high apex or popup balloon trajectory",
+        "values": [True, False]
+    },
+    "min_apex_ft": {
+        "type": "int",
+        "description": "Minimum apex height in feet (e.g. 100 or 115)",
+        "placeholder": "e.g. 115"
     }
 }
 
@@ -1591,6 +1611,8 @@ function createPromptCard(category, index, promptObj) {
           <option value="birdie_chance">birdie_chance (true/false)</option>
           <option value="tee_shot">tee_shot (true/false)</option>
           <option value="close_to_pin">close_to_pin (true/false)</option>
+          <option value="is_iron">is_iron (true/false)</option>
+          <option value="min_backspin">min_backspin (e.g. 8000)</option>
           <option value="custom">Custom Qualifier...</option>
         </select>
 
@@ -1672,19 +1694,20 @@ function onQualifierTypeChange(cardId) {
         <option value="leaves">leaves (canopy pass)</option>
       </select>
     `;
-  } else if (["gir", "birdie_chance", "tee_shot", "close_to_pin", "tee_box"].includes(type)) {
+  } else if (["gir", "birdie_chance", "tee_shot", "close_to_pin", "tee_box", "is_iron"].includes(type)) {
     container.innerHTML = `
       <select class="qual-select" id="qual-val-${cardId}">
         <option value="true">true</option>
         <option value="false">false</option>
       </select>
     `;
-  } else if (["strokes", "min_score_relative_to_par", "max_score_relative_to_par", "max_hole", "min_hole"].includes(type)) {
+  } else if (["strokes", "min_score_relative_to_par", "max_score_relative_to_par", "max_hole", "min_hole", "min_backspin"].includes(type)) {
     let defVal = "8";
     if (type === "min_score_relative_to_par") defVal = "20";
     else if (type === "max_score_relative_to_par") defVal = "5";
     else if (type === "max_hole") defVal = "2";
     else if (type === "min_hole") defVal = "10";
+    else if (type === "min_backspin") defVal = "8000";
     container.innerHTML = `
       <input type="number" class="qual-input" id="qual-val-${cardId}" placeholder="Value" value="${defVal}">
     `;
