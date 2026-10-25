@@ -20,6 +20,12 @@ func _process(_delta: float) -> bool:
 	root.add_child(csharp_tester)
 	print("  PASS: C# OsmMapLoader tests executed successfully.")
 
+	var cart_path_tester_script = load("res://tests/TestCartPathBounce.cs")
+	assert(cart_path_tester_script != null, "TestCartPathBounce.cs must load")
+	var cart_path_tester = cart_path_tester_script.new()
+	assert(cart_path_tester != null, "TestCartPathBounce must instantiate")
+	root.add_child(cart_path_tester)
+
 	# 2. Test MultiplayerManager.get_tee_position_from_boxes
 	print("\n--- Sub-test 2: MultiplayerManager.get_tee_position_from_boxes ---")
 	var multiplayer_mgr = load("res://Utils/MultiplayerManager.gd")

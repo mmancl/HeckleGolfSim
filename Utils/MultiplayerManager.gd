@@ -755,6 +755,8 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 		var shot_num = active_player["strokes"]
 		stat_entry = {
 			"shot_num": shot_num,
+			"start_pos": start_pos,
+			"end_pos": final_position,
 			"club": current_club,
 			"speed_mph": raw_shot_data.get("BallSpeed", raw_shot_data.get("Speed", 0.0)) as float,
 			"ball_speed_mph": raw_shot_data.get("BallSpeed", raw_shot_data.get("Speed", 0.0)) as float,
@@ -2075,6 +2077,9 @@ func _serialize_players(players_array: Array[Dictionary]) -> Array:
 		if dup.has("position") and typeof(dup["position"]) == TYPE_VECTOR3:
 			var pos: Vector3 = dup["position"]
 			dup["position"] = [pos.x, pos.y, pos.z]
+		if dup.has("last_starting_pos") and typeof(dup["last_starting_pos"]) == TYPE_VECTOR3:
+			var start_pos: Vector3 = dup["last_starting_pos"]
+			dup["last_starting_pos"] = [start_pos.x, start_pos.y, start_pos.z]
 		# Convert Vector3 in shot_history
 		if dup.has("shot_history"):
 			var history_serialized = []
@@ -2093,14 +2098,18 @@ func _serialize_players(players_array: Array[Dictionary]) -> Array:
 					var shots_list = stats[hole_key]
 					if typeof(shots_list) == TYPE_ARRAY:
 						for shot in shots_list:
-							if typeof(shot) == TYPE_DICTIONARY and shot.has("position") and typeof(shot["position"]) == TYPE_VECTOR3:
-								var pos: Vector3 = shot["position"]
-								shot["position"] = [pos.x, pos.y, pos.z]
+							if typeof(shot) == TYPE_DICTIONARY:
+								for position_key in ["position", "start_pos", "end_pos"]:
+									if shot.has(position_key) and typeof(shot[position_key]) == TYPE_VECTOR3:
+										var pos: Vector3 = shot[position_key]
+										shot[position_key] = [pos.x, pos.y, pos.z]
 			elif typeof(stats) == TYPE_ARRAY:
 				for shot in stats:
-					if typeof(shot) == TYPE_DICTIONARY and shot.has("position") and typeof(shot["position"]) == TYPE_VECTOR3:
-						var pos: Vector3 = shot["position"]
-						shot["position"] = [pos.x, pos.y, pos.z]
+					if typeof(shot) == TYPE_DICTIONARY:
+						for position_key in ["position", "start_pos", "end_pos"]:
+							if shot.has(position_key) and typeof(shot[position_key]) == TYPE_VECTOR3:
+								var pos: Vector3 = shot[position_key]
+								shot[position_key] = [pos.x, pos.y, pos.z]
 						
 		# Convert Vector3 in last_shot_tracer_points
 		if dup.has("last_shot_tracer_points") and typeof(dup["last_shot_tracer_points"]) == TYPE_ARRAY:
@@ -2162,6 +2171,12 @@ func _deserialize_players(serialized_array: Array) -> Array[Dictionary]:
 				dup["position"] = Vector3(arr[0], arr[1], arr[2])
 			else:
 				dup["position"] = Vector3.ZERO
+		if dup.has("last_starting_pos"):
+			var start_pos = dup["last_starting_pos"]
+			if typeof(start_pos) == TYPE_ARRAY and start_pos.size() == 3:
+				dup["last_starting_pos"] = Vector3(start_pos[0], start_pos[1], start_pos[2])
+			elif typeof(start_pos) != TYPE_VECTOR3:
+				dup["last_starting_pos"] = dup.get("position", Vector3.ZERO)
 		# Convert shot_history back to Vector3
 		if dup.has("shot_history") and typeof(dup["shot_history"]) == TYPE_ARRAY:
 			var history_deserialized = []
@@ -2180,16 +2195,20 @@ func _deserialize_players(serialized_array: Array) -> Array[Dictionary]:
 					var shots_list = stats[hole_key]
 					if typeof(shots_list) == TYPE_ARRAY:
 						for shot in shots_list:
-							if typeof(shot) == TYPE_DICTIONARY and shot.has("position") and typeof(shot["position"]) == TYPE_ARRAY:
-								var arr = shot["position"]
-								if arr.size() == 3:
-									shot["position"] = Vector3(arr[0], arr[1], arr[2])
+							if typeof(shot) == TYPE_DICTIONARY:
+								for position_key in ["position", "start_pos", "end_pos"]:
+									if shot.has(position_key) and typeof(shot[position_key]) == TYPE_ARRAY:
+										var arr = shot[position_key]
+										if arr.size() == 3:
+											shot[position_key] = Vector3(arr[0], arr[1], arr[2])
 			elif typeof(stats) == TYPE_ARRAY:
 				for shot in stats:
-					if typeof(shot) == TYPE_DICTIONARY and shot.has("position") and typeof(shot["position"]) == TYPE_ARRAY:
-						var arr = shot["position"]
-						if arr.size() == 3:
-							shot["position"] = Vector3(arr[0], arr[1], arr[2])
+					if typeof(shot) == TYPE_DICTIONARY:
+						for position_key in ["position", "start_pos", "end_pos"]:
+							if shot.has(position_key) and typeof(shot[position_key]) == TYPE_ARRAY:
+								var arr = shot[position_key]
+								if arr.size() == 3:
+									shot[position_key] = Vector3(arr[0], arr[1], arr[2])
 							
 		# Convert Vector3 in last_shot_tracer_points back
 		if dup.has("last_shot_tracer_points") and typeof(dup["last_shot_tracer_points"]) == TYPE_ARRAY:

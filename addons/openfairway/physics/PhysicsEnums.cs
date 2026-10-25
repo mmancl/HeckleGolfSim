@@ -45,6 +45,8 @@ public static class PhysicsEnums
         /// <summary>Putting green - high spin grip at impact with low rolling resistance</summary>
         Green,
         /// <summary>Sand bunker - high granular resistance, minimal bounce and rollout</summary>
-        Bunker
+        Bunker,
+        /// <summary>Hard paved path - high bounce and rollout retention</summary>
+        CartPath
     }
 }
