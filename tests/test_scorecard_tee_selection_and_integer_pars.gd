@@ -169,11 +169,28 @@ func _initialize() -> void:
 		print("  Par cell column %d: '%s'" % [c, par_text])
 	print("  PASS: All Par row cells display pure integer values without decimal points.")
 
-	# Check Player Row contains OptionButton with tee options
+	# Check Player Row in default mode (Static TeeBadge)
 	var player_row_start = col_count * 3
 	var player_cell = grid.get_child(player_row_start)
 	var player_hbox = player_cell.get_child(0) as HBoxContainer
 	assert(player_hbox != null, "Player cell must contain an HBoxContainer")
+
+	var default_tee_badge = player_hbox.get_node_or_null("TeeBadge")
+	assert(default_tee_badge != null, "In default scorecard mode, player cell must have static TeeBadge")
+	var default_tee_opt = null
+	for child in player_hbox.get_children():
+		if child is OptionButton:
+			default_tee_opt = child
+			break
+	assert(default_tee_opt == null, "In default scorecard mode, player cell must NOT have tee OptionButton dropdown")
+	print("  PASS: Default scorecard displays static TeeBadge and hides dropdown.")
+
+	# Switch to settings mode and repopulate
+	cp_instance._scorecard_settings_mode = true
+	cp_instance._populate_scorecard("toggle")
+	grid = cp_instance.scorecard_grid
+	player_cell = grid.get_child(player_row_start)
+	player_hbox = player_cell.get_child(0) as HBoxContainer
 
 	var found_tee_opt: OptionButton = null
 	for child in player_hbox.get_children():
@@ -181,7 +198,7 @@ func _initialize() -> void:
 			found_tee_opt = child
 			break
 
-	assert(found_tee_opt != null, "Player cell must contain a tee OptionButton")
+	assert(found_tee_opt != null, "In settings mode, Player cell must contain a tee OptionButton")
 	assert(found_tee_opt.item_count >= detected_tees.size(), "OptionButton must have items for all course tees")
 	var selected_tee_text = found_tee_opt.get_item_text(found_tee_opt.selected)
 	assert(selected_tee_text.to_lower() == "red", "Player 1 selected tee must match current tee (Red), got %s" % selected_tee_text)
@@ -189,7 +206,7 @@ func _initialize() -> void:
 	print("  Player 1 OptionButton item count: ", found_tee_opt.item_count)
 	for i in range(found_tee_opt.item_count):
 		assert(found_tee_opt.get_item_icon(i) != null, "Tee option '%s' must have an icon" % found_tee_opt.get_item_text(i))
-	print("  PASS: Scorecard contains interactive OptionButton with tee color swatch icons.")
+	print("  PASS: Scorecard settings mode contains interactive OptionButton with tee color swatch icons.")
 
 	cp_instance.queue_free()
 

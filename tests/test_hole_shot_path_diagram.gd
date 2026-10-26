@@ -24,8 +24,8 @@ func _run_test() -> void:
 	shared_positions.append_array(other_positions)
 	var hole_tee_positions: Array[Vector3] = [
 		Vector3(0.0, 0.0, 0.0),
-		Vector3(10.0, 0.0, 0.0),
-		Vector3(20.0, 0.0, 0.0)
+		Vector3(0.0, 0.0, 10.0),
+		Vector3(0.0, 0.0, 20.0)
 	]
 	var cart_paths: Array[PackedVector2Array] = [
 		PackedVector2Array([Vector2(15.0, 0.0), Vector2(25.0, 90.0), Vector2(35.0, 180.0)])

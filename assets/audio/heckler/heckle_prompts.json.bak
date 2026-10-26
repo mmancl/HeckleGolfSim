@@ -2122,7 +2122,7 @@
                     "prompt": "[laughs] Haha! A runaway tractor, careening straight into the wild prairie."
                 },
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_0.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -2134,7 +2134,7 @@
                     "prompt": "Haha! The ghost was probably their previous swing, terrifying stuff."
                 },
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_1.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2158,7 +2158,7 @@
                     "prompt": "Haha! If it hits us in the broadcast booth, I am throwing my microphone."
                 },
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_3.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -2194,7 +2194,7 @@
                     "prompt": "Haha! And just like NASCAR, it ended in a spectacular crash."
                 },
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_6.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -2206,7 +2206,7 @@
                     "prompt": "Haha, I call it a reload! Tee up another one."
                 },
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_7.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2218,7 +2218,7 @@
                     "prompt": "[laughs] Haha! Earthworm territory, six feet under."
                 },
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_8.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2230,42 +2230,42 @@
                     "prompt": "Haha, the wind was completely calm! That was one hundred percent operator error."
                 },
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_9.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "A stunning leftward trajectory. Pure panic on the club face.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_10.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "Pure contact, that had so much left spin it could power a windmill.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_11.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "Ah, the classic left-side thicket tour. How lovely.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_12.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "You missed the fairway on the left by an absolute country mile.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_13.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "It took off and curved left with malicious intent.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_14.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2307,7 +2307,7 @@
                 "audio": "english_female",
                 "prompt": "You’re redefining the outer limits of the left-side hazard.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_20.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2321,7 +2321,7 @@
                 "audio": "english_female",
                 "prompt": "A gorgeous snap-hook. At least the bugs on the left side will have company.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_22.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2342,28 +2342,28 @@
                 "audio": "irish_accent2",
                 "prompt": "A puzzling swing—that had more leftward hook than a political cartoon.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_25.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "You really hate the right side of the course, don't you? Everything goes left.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_26.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "A spectacular leftward journey into the thorny unknown.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_27.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "Sailing through the breeze, it drifted so far left it needed a customs inspection.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_28.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2377,21 +2377,21 @@
                 "audio": "irish_accent2",
                 "prompt": "A wonderful hook! The trees on the left are ducking for cover.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_30.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "You didn't just miss the fairway; you declared war on the left rough.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_31.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "Clean off the face, it turned left and decided it lived there permanently.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_32.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2412,7 +2412,7 @@
                 "audio": "english_female",
                 "prompt": "A glorious arc into the left-hand wilderness. Zero chance of recovery.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_35.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -2440,14 +2440,14 @@
                 "audio": "irish_accent2",
                 "prompt": "The strike went left so violently it broke the laws of physics.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_39.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "You found the only patch of thorns on the entire left side. Impeccable aim.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_40.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2471,7 +2471,7 @@
                 "audio": "english_female",
                 "prompt": "You turned a routine tee shot into a catastrophic left-hand disaster.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_43.wav",
-                "enabled": true,
+                "enabled": false,
                 "qualifiers": {
                     "tee_shot": true
                 }
@@ -2481,7 +2481,7 @@
                 "audio": "irish_accent2",
                 "prompt": "Splendid. Another ball sacrificed to the left-side underbrush.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_44.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -2502,14 +2502,14 @@
                 "audio": "irish_accent2",
                 "prompt": "A stunning display of heavy-wristed confusion. Right into the left rough.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_47.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "Streaking through the air, it veered left with the panic of a cat in a room full of rocking chairs.",
                 "filepath": "res://assets/audio/heckler/hook_into_rough/hook_into_rough_48.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -3433,7 +3433,7 @@
                     "prompt": "Haha! I think it brought back atmospheric data, temperature is dropping up there."
                 },
                 "filepath": "res://assets/audio/heckler/crazy_high_apex/crazy_high_apex_1.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -3469,7 +3469,7 @@
                     "prompt": "Haha! And when it landed, it left a crater on the tee box."
                 },
                 "filepath": "res://assets/audio/heckler/crazy_high_apex/crazy_high_apex_4.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -3496,7 +3496,7 @@
                     "prompt": "Haha, straight down into its own pitch mark, plugged solid."
                 },
                 "filepath": "res://assets/audio/heckler/crazy_high_apex/crazy_high_apex_6.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -3604,7 +3604,7 @@
                 "audio": "irish_accent2",
                 "prompt": "Look at the flight—it achieved zero-gravity orbit before surrendering to gravity.",
                 "filepath": "res://assets/audio/heckler/crazy_high_apex/crazy_high_apex_18.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -3632,7 +3632,7 @@
                 "audio": "irish_accent2",
                 "prompt": "A bizarre attempt, that went straight up like a fireworks grand finale.",
                 "filepath": "res://assets/audio/heckler/crazy_high_apex/crazy_high_apex_22.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -3656,7 +3656,7 @@
                 "audio": "english_female",
                 "prompt": "You popped it straight up into the clouds. Real heavy-hitting stuff.",
                 "filepath": "res://assets/audio/heckler/crazy_high_apex/crazy_high_apex_25.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -3712,14 +3712,14 @@
                 "audio": "english_female",
                 "prompt": "You’re testing the structural integrity of the upper atmosphere today.",
                 "filepath": "res://assets/audio/heckler/crazy_high_apex/crazy_high_apex_33.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "Off the clubface, it went up like a rocket and came down like a lead weight.",
                 "filepath": "res://assets/audio/heckler/crazy_high_apex/crazy_high_apex_34.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -3733,7 +3733,7 @@
                 "audio": "irish_accent2",
                 "prompt": "It started with promise, but is currently doing a spacewalk before re-entering the atmosphere.",
                 "filepath": "res://assets/audio/heckler/crazy_high_apex/crazy_high_apex_36.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -3750,7 +3750,7 @@
                 "audio": "english_female",
                 "prompt": "Cleanly struck, that had so much air under it, it needed a flight attendant.",
                 "filepath": "res://assets/audio/heckler/crazy_high_apex/crazy_high_apex_38.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -3785,7 +3785,7 @@
                 "audio": "irish_accent2",
                 "prompt": "You launched that thing into the next time zone vertically.",
                 "filepath": "res://assets/audio/heckler/crazy_high_apex/crazy_high_apex_43.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -3820,7 +3820,7 @@
                 "audio": "english_female",
                 "prompt": "A tremendous rip, that had more hangtime than a Michael Jordan slam dunk.",
                 "filepath": "res://assets/audio/heckler/crazy_high_apex/crazy_high_apex_48.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -4297,7 +4297,7 @@
                     "prompt": "Hahaha! At the clubhouse bar, looking for a strong drink."
                 },
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_2.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4309,7 +4309,7 @@
                     "prompt": "Haha! Goodbye green, hello parking lot, a complete misjudgment."
                 },
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_3.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -4336,7 +4336,7 @@
                     "prompt": "[laughs] Haha! Friction has completely left the conversation."
                 },
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_5.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4348,7 +4348,7 @@
                     "prompt": "Haha! Next stop, the rough, please watch your step."
                 },
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_6.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -4360,7 +4360,7 @@
                     "prompt": "Hahaha! Do not tempt fate, they still have to putt back up the hill."
                 },
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_7.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4372,7 +4372,7 @@
                     "prompt": "Haha! And now they have a thirty-foot chip back onto the green."
                 },
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_8.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4405,7 +4405,7 @@
                 "audio": "english_female",
                 "prompt": "You hammered that putt so hard it deserted the putting green out of pure fright.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_12.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4419,7 +4419,7 @@
                 "audio": "english_female",
                 "prompt": "That putt had zero brakes and zero directional sense.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_14.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
@@ -4447,7 +4447,7 @@
                 "audio": "english_female",
                 "prompt": "That putt gained negative yards relative to the hole. Outstanding.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_18.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4468,14 +4468,14 @@
                 "audio": "irish_accent2",
                 "prompt": "It started with promise, but left the green faster than guests leaving a bad dinner party.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_21.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "You putted it so far past the hole you're practically playing the next tee box.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_22.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4496,14 +4496,14 @@
                 "audio": "irish_accent2",
                 "prompt": "Sailing through the breeze, it rolled off the green because it couldn't stand watching your putting form.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_25.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "You hit that putt with the intensity of a full drive off a cliff.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_26.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4517,7 +4517,7 @@
                 "audio": "irish_accent2",
                 "prompt": "That putt had so much mustard it flew right off the table.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_28.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4531,21 +4531,21 @@
                 "audio": "english_female",
                 "prompt": "A phenomenal display of putting it backwards relative to your objective.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_30.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "Clean off the face, it is rolling down the slope and off the green like a runaway train.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_31.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "You putted it with such force it should have come with a speed camera ticket.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_32.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4559,14 +4559,14 @@
                 "audio": "english_female",
                 "prompt": "That putt was supposed to find the cup, not the adjacent zip code.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_34.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "You added twenty feet of distance away from the pin with a single stroke.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_35.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4580,35 +4580,35 @@
                 "audio": "irish_accent2",
                 "prompt": "A legendary lag putt that lagged all the way off the putting surface.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_37.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "You putted it so hard it cleared the fringe like a steeplechase horse.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_38.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "Launched high, it hated the green so much it jumped ship.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_39.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "You managed to increase your distance to the pin while standing three feet away.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_40.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "That putt had legs—too bad they ran right off the green.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_41.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4629,28 +4629,28 @@
                 "audio": "irish_accent2",
                 "prompt": "That putt went so wide and long it left the county.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_44.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "You turned a routine two-putt into a multi-hazard journey.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_45.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
                 "audio": "irish_accent2",
                 "prompt": "Streaking through the air, it rolled off the green to escape your scorecard.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_46.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Sophia",
                 "audio": "english_female",
                 "prompt": "You putted it past the hole with enough velocity to break sound barriers.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_47.wav",
-                "enabled": true
+                "enabled": false
             },
             {
                 "name": "Connor",
@@ -4664,7 +4664,7 @@
                 "audio": "irish_accent2",
                 "prompt": "That putt went further away from the hole than where it started. Astounding math.",
                 "filepath": "res://assets/audio/heckler/terrible_putts_off_green/terrible_putts_off_green_49.wav",
-                "enabled": true
+                "enabled": false
             }
         ],
         "hitting_or_going_through_trees": [

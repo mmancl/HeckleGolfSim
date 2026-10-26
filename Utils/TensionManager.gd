@@ -1065,7 +1065,7 @@ func _update_debug_cone_visualizer() -> void:
 		gs = get_node_or_null("/root/GlobalSettings")
 
 	var enabled = false
-	if gs != null and gs.range_settings != null and gs.range_settings.settings.has("debug_show_suspense_cone"):
+	if gs != null and gs.range_settings != null and "debug_show_suspense_cone" in gs.range_settings and gs.range_settings.debug_show_suspense_cone != null:
 		enabled = bool(gs.range_settings.debug_show_suspense_cone.value)
 
 	if not enabled:

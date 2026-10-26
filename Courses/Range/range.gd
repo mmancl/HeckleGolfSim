@@ -840,7 +840,7 @@ func _ready() -> void:
 							current_hole_name = hole_name
 							current_hole_par = par
 							if hole_loc != null:
-								current_hole_location = Vector3(hole_loc[0], get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
+								current_hole_location = get_hole_location_for(hole_loc)
 								aim_target_pos = current_hole_location
 							
 							var is_mp = mp_mgr != null and not mp_mgr.players.is_empty()
@@ -856,7 +856,6 @@ func _ready() -> void:
 									$Player.ball.reset()
 								
 								if hole_loc != null:
-									current_hole_location = Vector3(hole_loc[0], get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
 									var dist_to_pin_yards = int(spawn_pos.distance_to(current_hole_location) * 1.09361)
 									current_hole_tee_dist_yards = dist_to_pin_yards
 									hole_lbl.text = "%s | Par %d | %d Yards | Ball: %d Yards to Pin" % [hole_name, par, dist_to_pin_yards, dist_to_pin_yards]
@@ -2835,7 +2834,7 @@ func load_practice_hole(idx: int) -> void:
 		update_current_lie_and_reduction()
 		
 		if hole_loc != null:
-			current_hole_location = Vector3(hole_loc[0], get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
+			current_hole_location = get_hole_location_for(hole_loc)
 			
 			var mp_mgr = get_node_or_null("/root/MultiplayerManager")
 			if mp_mgr != null and not mp_mgr.players.is_empty():
@@ -3037,9 +3036,13 @@ func _spawn_flag_pin() -> void:
 		return
 		
 	if has_node("PinMarker"):
-		get_node("PinMarker").queue_free()
+		var old_pm = get_node("PinMarker")
+		remove_child(old_pm)
+		old_pm.queue_free()
 	if has_node("FlagPin"):
-		get_node("FlagPin").queue_free()
+		var old_fp = get_node("FlagPin")
+		remove_child(old_fp)
+		old_fp.queue_free()
 		
 	# Create Pin Marker for aerial map view (glowing orange/yellow cylinder)
 	var pin_marker = MeshInstance3D.new()
@@ -4096,6 +4099,47 @@ func _get_green_edge_distance(pin_2d: Vector2, u: Vector2, boundary_segments: Ar
 	return min_t
 
 
+const RANDOM_PIN_MIN_EDGE_METERS := 1.524 # 5 feet
+
+
+## Returns the hole location for the given course-data location, randomized on the
+## green (never closer than 5 feet from the edge) when the setting is enabled.
+func get_hole_location_for(hole_loc: Array) -> Vector3:
+	var base := Vector3(hole_loc[0], get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
+	if GlobalSettings == null or GlobalSettings.range_settings == null:
+		return base
+	if not GlobalSettings.range_settings.settings.has("random_pin_enabled") or not bool(GlobalSettings.range_settings.random_pin_enabled.value):
+		return base
+	var segments: Array = _get_green_boundary_segments(base)
+	var triangles: Array = _get_green_triangles(base)
+	if segments.is_empty() or triangles.is_empty():
+		return base
+	var min_pt := Vector2(INF, INF)
+	var max_pt := Vector2(-INF, -INF)
+	for seg in segments:
+		for p in seg:
+			min_pt.x = minf(min_pt.x, p.x)
+			min_pt.y = minf(min_pt.y, p.y)
+			max_pt.x = maxf(max_pt.x, p.x)
+			max_pt.y = maxf(max_pt.y, p.y)
+	for _attempt in range(300):
+		var cand := Vector2(randf_range(min_pt.x, max_pt.x), randf_range(min_pt.y, max_pt.y))
+		var inside := false
+		for tri in triangles:
+			if _is_point_in_triangle_2d(cand, tri[0], tri[1], tri[2]):
+				inside = true
+				break
+		if not inside:
+			continue
+		var min_edge := INF
+		for seg in segments:
+			var closest: Vector2 = Geometry2D.get_closest_point_to_segment(cand, seg[0], seg[1])
+			min_edge = minf(min_edge, cand.distance_to(closest))
+		if min_edge >= RANDOM_PIN_MIN_EDGE_METERS:
+			return Vector3(cand.x, get_height(cand.x, cand.y), cand.y)
+	return base
+
+
 func _create_gimme_ring_mesh(pin_pos: Vector3, dist_meters: float, line_width: float, y_offset: float, boundary_segments: Array, height_cache: Dictionary = {}) -> ArrayMesh:
 	var st = SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -4184,7 +4228,7 @@ func _create_gimme_ring_material(color: Color, render_priority: int) -> Standard
 	mat.albedo_color = color
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat.no_depth_test = false
+	mat.no_depth_test = true
 	mat.render_priority = render_priority
 	return mat
 
@@ -4208,7 +4252,7 @@ func update_gimme_circles() -> void:
 		mesh_1 = null
 		
 	if enabled_1:
-		var ring_mesh_1 = _create_gimme_ring_mesh(pin.global_position, dist_1_meters, 0.08, 0.035, boundary_segments, height_cache)
+		var ring_mesh_1 = _create_gimme_ring_mesh(pin.global_position, dist_1_meters, 0.08, 0.06, boundary_segments, height_cache)
 		if mesh_1 == null:
 			mesh_1 = MeshInstance3D.new()
 			mesh_1.name = "GimmeCircle1"
@@ -4236,7 +4280,7 @@ func update_gimme_circles() -> void:
 		mesh_2 = null
 		
 	if enabled_2:
-		var ring_mesh_2 = _create_gimme_ring_mesh(pin.global_position, dist_2_meters, 0.08, 0.038, boundary_segments, height_cache)
+		var ring_mesh_2 = _create_gimme_ring_mesh(pin.global_position, dist_2_meters, 0.08, 0.065, boundary_segments, height_cache)
 		if mesh_2 == null:
 			mesh_2 = MeshInstance3D.new()
 			mesh_2.name = "GimmeCircle2"
@@ -4264,7 +4308,7 @@ func update_gimme_circles() -> void:
 		mesh_3 = null
 		
 	if enabled_3:
-		var ring_mesh_3 = _create_gimme_ring_mesh(pin.global_position, dist_3_meters, 0.08, 0.041, boundary_segments, height_cache)
+		var ring_mesh_3 = _create_gimme_ring_mesh(pin.global_position, dist_3_meters, 0.08, 0.07, boundary_segments, height_cache)
 		if mesh_3 == null:
 			mesh_3 = MeshInstance3D.new()
 			mesh_3.name = "GimmeCircle3"

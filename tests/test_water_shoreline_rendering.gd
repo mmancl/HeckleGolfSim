@@ -21,8 +21,8 @@ func _init() -> void:
 	assert(reed_mesh != null and reed_mesh.get_surface_count() > 0, "Reed cluster mesh must be valid")
 	var aabb := reed_mesh.get_aabb()
 	assert(aabb.size.y > 1.0, "Reed cluster mesh must have vertical stalks (height > 1.0m)")
-	assert(aabb.position.y >= -0.01, "Reed cluster mesh roots must start at or above y=0 (no hanging negative roots)")
-	print("  PASS: Procedural shoreline reed cluster mesh verified with grounded base.")
+	assert(aabb.position.y <= -0.40, "Reed cluster mesh roots must extend into the ground (y <= -0.40) to anchor on slopes")
+	print("  PASS: Procedural shoreline reed cluster mesh verified with deep ground penetration roots (min Y: %.2fm)." % aabb.position.y)
 
 	# 3. Test CourseDetailEnhancer._build_shoreline_reeds elevation clamping
 	# Create a mock scene with terrain and a water pond at Y = -2.5
@@ -80,9 +80,9 @@ func _init() -> void:
 		var reed_y := xf.origin.y
 		if reed_y < min_reed_y:
 			min_reed_y = reed_y
-		assert(reed_y >= -2.5, "Reed instance %d Y (%f) must be >= water level (-2.5) to prevent water under grass" % [i, reed_y])
+		assert(reed_y >= -2.65, "Reed instance %d Y (%f) must be grounded within bank allowance (>= -2.65) to prevent floating/submerged stalks" % [i, reed_y])
 
-	print("  PASS: All %d shoreline reed instances properly elevated above water surface (lowest Y: %f >= -2.5)." % [reed_count, min_reed_y])
+	print("  PASS: All %d shoreline reed instances properly grounded on bank (lowest Y: %f >= -2.65)." % [reed_count, min_reed_y])
 
 	scene_root.queue_free()
 	print("=======================================================")

@@ -232,22 +232,23 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 						if sun_dir != null:
 							stipple_mat.set_shader_parameter("sun_direction", sun_dir)
 						n.material_override = stipple_mat
+					_set_terrain_has_deep_rough_map(n, false)
 				elif is_med:
 					n.material_override = null
-					if ResourceLoader.exists("res://HighFidelity/Terrain/course_detail_enhancer.gd"):
-						var cde = load("res://HighFidelity/Terrain/course_detail_enhancer.gd")
-						if cde != null and cde.has_method("ensure_deep_rough_map"):
-							cde.ensure_deep_rough_map(scene_root, n)
+					# Thick rough texture only exists and renders in High graphic setting
+					_set_terrain_has_deep_rough_map(n, false)
 				else:
 					var realistic_terrain = _create_realistic_terrain_material(base_m as ShaderMaterial, n)
 					if realistic_terrain != null:
 						n.material_override = realistic_terrain
 					else:
 						n.material_override = null
+					var deep_map: Texture2D = null
 					if ResourceLoader.exists("res://HighFidelity/Terrain/course_detail_enhancer.gd"):
 						var cde = load("res://HighFidelity/Terrain/course_detail_enhancer.gd")
 						if cde != null and cde.has_method("ensure_deep_rough_map"):
-							cde.ensure_deep_rough_map(scene_root, n)
+							deep_map = cde.ensure_deep_rough_map(scene_root, n)
+					_set_terrain_has_deep_rough_map(n, true, deep_map)
 
 			# 2. Driving Range Ground Mesh
 			elif n.name == "DynamicGround" or (n_lower == "ground" and not is_terrain):
@@ -289,6 +290,33 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 						break
 
 			if is_foliage and n.mesh != null:
+				if is_bush:
+					if is_low:
+						n.visible = false
+					elif is_med:
+						n.visible = (n.get_index() % 2 == 0)
+					else:
+						n.visible = true
+				else:
+					var tier := 0
+					if n.has_meta("foliage_tier"):
+						tier = int(n.get_meta("foliage_tier"))
+					else:
+						tier = n.get_index() % 3
+						n.set_meta("foliage_tier", tier)
+					if is_low:
+						n.visible = (tier == 0)
+					elif is_med:
+						n.visible = (tier <= 1)
+					else:
+						n.visible = true
+
+				var p_node: Node = n.get_parent()
+				if p_node is CollisionObject3D:
+					for p_col in p_node.get_children():
+						if p_col is CollisionShape3D:
+							p_col.disabled = not n.visible
+
 				if n.material_override != null:
 					n.material_override = null
 				n.visibility_range_end = (140.0 if is_bush else 200.0) if is_low else ((200.0 if is_bush else 340.0) if is_med else (280.0 if is_bush else 550.0))
@@ -334,13 +362,39 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 						var ptg = load("res://HighFidelity/Foliage/procedural_tree_generator.gd")
 						if ptg != null and ptg.has_method("upgrade_tree_chunk_mesh_in_place"):
 							ptg.upgrade_tree_chunk_mesh_in_place(mmi, mmi.get_index())
+						if ptg != null and ptg.has_method("ensure_chunk_tiers"):
+							ptg.ensure_chunk_tiers(scene_root, mmi)
+
+					var low_cnt: int = mmi.get_meta("tier_low_count") if mmi.has_meta("tier_low_count") else maxi(1, int(mmi.multimesh.instance_count * 0.35))
+					var med_cnt: int = mmi.get_meta("tier_med_count") if mmi.has_meta("tier_med_count") else maxi(low_cnt, int(mmi.multimesh.instance_count * 0.70))
+
+					if is_low:
+						mmi.multimesh.visible_instance_count = low_cnt
+					elif is_med:
+						mmi.multimesh.visible_instance_count = med_cnt
+					else:
+						mmi.multimesh.visible_instance_count = -1
+
 					mmi.visibility_range_end = 190.0 if is_low else (330.0 if is_med else 560.0)
 					mmi.visibility_range_end_margin = 30.0
 					mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 				elif is_bush_chunk:
-					mmi.visibility_range_end = 120.0 if is_low else (190.0 if is_med else 270.0)
-					mmi.visibility_range_end_margin = 20.0
-					mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+					if is_low:
+						mmi.visible = false
+						mmi.multimesh.visible_instance_count = 0
+					elif is_med:
+						mmi.visible = true
+						var med_bush_cnt: int = mmi.get_meta("tier_med_count") if mmi.has_meta("tier_med_count") else maxi(1, int(mmi.multimesh.instance_count * 0.5))
+						mmi.multimesh.visible_instance_count = med_bush_cnt
+						mmi.visibility_range_end = 190.0
+						mmi.visibility_range_end_margin = 20.0
+						mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+					else:
+						mmi.visible = true
+						mmi.multimesh.visible_instance_count = -1
+						mmi.visibility_range_end = 270.0
+						mmi.visibility_range_end_margin = 20.0
+						mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 				else:
 					mmi.visibility_range_end = 130.0 if is_low else (200.0 if is_med else 290.0)
 					mmi.visibility_range_end_margin = 20.0
@@ -434,6 +488,31 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 		for child in n.get_children():
 			stack.append(child)
 
+	# Update consolidated trunk & canopy collision shapes according to foliage tier
+	var static_col := scene_root.get_node_or_null("ConsolidatedFoliageCollision")
+	if static_col != null:
+		for col in static_col.get_children():
+			if col is CollisionShape3D and col.has_meta("foliage_tier"):
+				var tier: int = col.get_meta("foliage_tier")
+				if is_low:
+					col.disabled = (tier > 0)
+				elif is_med:
+					col.disabled = (tier > 1)
+				else:
+					col.disabled = false
+
+	var canopy_area := scene_root.get_node_or_null("ConsolidatedCanopyArea")
+	if canopy_area != null:
+		for col in canopy_area.get_children():
+			if col is CollisionShape3D and col.has_meta("foliage_tier"):
+				var tier: int = col.get_meta("foliage_tier")
+				if is_low:
+					col.disabled = (tier > 0)
+				elif is_med:
+					col.disabled = (tier > 1)
+				else:
+					col.disabled = false
+
 	if is_high and not is_mobile():
 		if ResourceLoader.exists("res://HighFidelity/Core/high_fidelity_builder.gd"):
 			var builder_script = load("res://HighFidelity/Core/high_fidelity_builder.gd")
@@ -444,6 +523,8 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 			var builder_script = load("res://HighFidelity/Core/high_fidelity_builder.gd")
 			if builder_script != null:
 				builder_script.remove_high_fidelity(scene_root)
+		# Ensure thick rough bushes and meshes are hidden on Low and Medium
+		_hide_thick_rough_nodes(scene_root)
 
 	_apply_deep_rough_blades(scene_root, is_med)
 
@@ -463,32 +544,43 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 
 static var _low_tree_materials: Dictionary = {}
 
-## Medium (and mobile "High", which is downgraded to Medium) gets a smaller real-blade deep rough
-## field (>= 25% lie resistance zone). Desktop High gets the larger one through HighFidelityBuilder.
-## Low and driving range never get blades.
-static func _apply_deep_rough_blades(scene_root: Node, is_med: bool) -> void:
+## Thick rough real 3D grass blades only exist in High graphic setting (via HighFidelityBuilder).
+## On Medium, Low, or mobile, thick rough blade nodes must not exist.
+static func _apply_deep_rough_blades(scene_root: Node, _is_med: bool) -> void:
 	const NODE_NAME := "DeepRoughGrassMedium"
 	var existing := scene_root.get_node_or_null(NODE_NAME)
-	if not is_med or is_driving_range_node(scene_root):
-		if existing != null:
-			scene_root.remove_child(existing)
-			existing.queue_free()
-		return
 	if existing != null:
-		if existing.has_method("_refresh_anchor"):
-			existing.call("_refresh_anchor", true)
+		scene_root.remove_child(existing)
+		existing.queue_free()
+
+
+static func _hide_thick_rough_nodes(scene_root: Node) -> void:
+	if scene_root == null:
 		return
-	if not ResourceLoader.exists("res://HighFidelity/Foliage/high_fidelity_grass.gd"):
+	var thick_bushes := scene_root.get_node_or_null("ThickRoughBushes") as Node3D
+	if thick_bushes != null:
+		thick_bushes.visible = false
+	for child in scene_root.get_children():
+		if child is Node3D and (child.name.begins_with("ThickRough_") or child.name.begins_with("ThickRoughBush")):
+			child.visible = false
+
+
+static func _set_terrain_has_deep_rough_map(n: MeshInstance3D, enabled: bool, deep_tex: Texture2D = null) -> void:
+	if n == null:
 		return
-	var grass_script = load("res://HighFidelity/Foliage/high_fidelity_grass.gd")
-	if grass_script == null:
-		return
-	var grass = grass_script.new()
-	grass.name = NODE_NAME
-	grass.deep_radius = 10.0 if is_mobile() else 14.0
-	grass.deep_cell = 0.55 if is_mobile() else 0.5
-	scene_root.add_child(grass)
-	grass.setup(scene_root)
+	var mats: Array[ShaderMaterial] = []
+	if n.material_override is ShaderMaterial:
+		mats.append(n.material_override as ShaderMaterial)
+	if n.get_surface_override_material(0) is ShaderMaterial:
+		mats.append(n.get_surface_override_material(0) as ShaderMaterial)
+	if n.mesh != null and n.mesh.get_surface_count() > 0 and n.mesh.surface_get_material(0) is ShaderMaterial:
+		mats.append(n.mesh.surface_get_material(0) as ShaderMaterial)
+	for m in mats:
+		if deep_tex != null:
+			m.set_shader_parameter("deep_rough_map", deep_tex)
+		elif n.has_meta("deep_rough_map"):
+			m.set_shader_parameter("deep_rough_map", n.get_meta("deep_rough_map"))
+		m.set_shader_parameter("has_deep_rough_map", enabled)
 
 static var _low_tree_textures: Dictionary = {}
 

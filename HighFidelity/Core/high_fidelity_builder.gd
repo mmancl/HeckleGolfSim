@@ -113,3 +113,17 @@ static func _set_detail_nodes_visible(scene_root: Node, vis: bool) -> void:
 		elif child is Node3D and (child.name.begins_with("ThickRough_") or child.name.begins_with("ThickRoughBush")):
 			child.visible = vis
 
+	# Update terrain shader parameter so thick rough elevated textures only render on High graphics
+	for tname in ["UnifiedTerrain", "DynamicGround", "RoughGround", "Terrain", "TerrainMesh"]:
+		var terrain := scene_root.find_child(tname, true, false) as MeshInstance3D
+		if terrain != null:
+			var mats: Array[ShaderMaterial] = []
+			if terrain.material_override is ShaderMaterial:
+				mats.append(terrain.material_override as ShaderMaterial)
+			if terrain.get_surface_override_material(0) is ShaderMaterial:
+				mats.append(terrain.get_surface_override_material(0) as ShaderMaterial)
+			if terrain.mesh != null and terrain.mesh.get_surface_count() > 0 and terrain.mesh.surface_get_material(0) is ShaderMaterial:
+				mats.append(terrain.mesh.surface_get_material(0) as ShaderMaterial)
+			for m in mats:
+				m.set_shader_parameter("has_deep_rough_map", vis)
+

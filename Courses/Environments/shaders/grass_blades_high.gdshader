@@ -21,8 +21,8 @@ uniform vec2 wind_direction = vec2(0.85, 0.52);
 uniform float wind_speed : hint_range(0.0, 5.0) = 1.35;
 uniform float wind_strength : hint_range(0.0, 0.4) = 0.08;
 
-uniform float max_render_distance : hint_range(5.0, 320.0) = 180.0;
-uniform float fade_start_distance : hint_range(3.0, 260.0) = 120.0;
+uniform float max_render_distance : hint_range(5.0, 800.0) = 180.0;
+uniform float fade_start_distance : hint_range(3.0, 700.0) = 120.0;
 uniform float head_ratio : hint_range(0.0, 1.0) = 0.0;
 uniform vec3 head_color : source_color = vec3(0.38, 0.25, 0.14);
 

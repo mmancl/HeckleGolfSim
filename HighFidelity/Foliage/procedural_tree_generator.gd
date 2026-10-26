@@ -51,21 +51,23 @@ static func create_shoreline_reed_cluster_mesh() -> ArrayMesh:
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 90210
-	var num_stalks := 36
+	var num_stalks := 26
 
 	for i in range(num_stalks):
 		var angle := (float(i) / float(num_stalks)) * TAU + rng.randf_range(-0.22, 0.22)
-		var dist := sqrt(rng.randf()) * 0.78
+		var dist := sqrt(rng.randf()) * 0.32
 		var base := Vector3(cos(angle) * dist, 0.0, sin(angle) * dist)
 		var stalk_dir := angle + rng.randf_range(-0.45, 0.45)
-		var lean := rng.randf_range(0.08, 0.32)
+		var lean := rng.randf_range(0.06, 0.26)
 		var is_tall_stalk := (i % 3 == 0)
-		var h := rng.randf_range(1.50, 2.10) if is_tall_stalk else rng.randf_range(1.05, 1.55)
-		var w := rng.randf_range(0.045, 0.075)
+		var h := rng.randf_range(1.25, 1.80) if is_tall_stalk else rng.randf_range(0.80, 1.30)
+		var w := rng.randf_range(0.035, 0.065)
 
 		var fwd := Vector3(cos(stalk_dir), 0.0, sin(stalk_dir))
 		var right := Vector3(-fwd.z, 0.0, fwd.x) * (w * 0.5)
 
+		# Subterranean root vertex: extends 55cm below base into terrain so stalks firmly anchor on slopes
+		var p_sub := base - Vector3(0.0, 0.55, 0.0)
 		var p0 := base
 		var p1 := base + Vector3(0.0, h * 0.52, 0.0) + fwd * (lean * 0.42)
 		var p2 := base + Vector3(0.0, h, 0.0) + fwd * lean
@@ -75,7 +77,29 @@ static func create_shoreline_reed_cluster_mesh() -> ArrayMesh:
 		# Crossed double-blade planes at slight angle for full 360-degree volumetric density
 		for plane_idx in range(2):
 			var r_vec := right if plane_idx == 0 else Vector3(fwd.x, 0.0, fwd.z) * (w * 0.42)
-			# Lower segment
+
+			# Subterranean / ground penetration segment (ensures stalks firmly plant 55cm into terrain with 0 hover on slopes)
+			st.set_normal(n)
+			st.set_uv(Vector2(0.0, 1.0))
+			st.add_vertex(p_sub - r_vec)
+			st.set_normal(n)
+			st.set_uv(Vector2(1.0, 1.0))
+			st.add_vertex(p_sub + r_vec)
+			st.set_normal(n)
+			st.set_uv(Vector2(1.0, 1.0))
+			st.add_vertex(p0 + r_vec)
+
+			st.set_normal(n)
+			st.set_uv(Vector2(0.0, 1.0))
+			st.add_vertex(p_sub - r_vec)
+			st.set_normal(n)
+			st.set_uv(Vector2(1.0, 1.0))
+			st.add_vertex(p0 + r_vec)
+			st.set_normal(n)
+			st.set_uv(Vector2(0.0, 1.0))
+			st.add_vertex(p0 - r_vec)
+
+			# Lower above-ground segment
 			st.set_normal(n)
 			st.set_uv(Vector2(0.0, 1.0))
 			st.add_vertex(p0 - r_vec)
@@ -107,24 +131,51 @@ static func create_shoreline_reed_cluster_mesh() -> ArrayMesh:
 			st.set_uv(Vector2(0.5, 0.0))
 			st.add_vertex(p2)
 
-	# Grounded shoreline tussock base mound to eliminate hollow gaps and prevent water showing under roots
-	var base_pts := 12
-	var base_radius := 0.72
-	for bi in range(base_pts):
-		var a1 := (float(bi) / float(base_pts)) * TAU
-		var a2 := (float(bi + 1) / float(base_pts)) * TAU
-		var v_center := Vector3(0.0, 0.08, 0.0)
-		var v_edge1 := Vector3(cos(a1) * base_radius, 0.0, sin(a1) * base_radius)
-		var v_edge2 := Vector3(cos(a2) * base_radius, 0.0, sin(a2) * base_radius)
-		st.set_normal(Vector3.UP)
-		st.set_uv(Vector2(0.5, 1.0))
-		st.add_vertex(v_center)
-		st.set_normal(Vector3.UP)
+	# Dense ground-level undergrowth collar (12 leafy blades, 0.35m-0.60m) to form an opaque turf cushion at ground level
+	var num_undergrowth := 12
+	for j in range(num_undergrowth):
+		var u_angle := (float(j) / float(num_undergrowth)) * TAU + rng.randf_range(-0.25, 0.25)
+		var u_dist := rng.randf_range(0.04, 0.28)
+		var u_base := Vector3(cos(u_angle) * u_dist, 0.0, sin(u_angle) * u_dist)
+		var u_sub := u_base - Vector3(0.0, 0.45, 0.0)
+		var u_h := rng.randf_range(0.35, 0.60)
+		var u_w := rng.randf_range(0.04, 0.07)
+		var u_dir := Vector3(cos(u_angle), 0.0, sin(u_angle))
+		var u_right := Vector3(-u_dir.z, 0.0, u_dir.x) * (u_w * 0.5)
+		var u_tip := u_base + Vector3(0.0, u_h, 0.0) + u_dir * rng.randf_range(0.10, 0.24)
+		var u_n := Vector3.UP
+
+		# Subterranean anchor
+		st.set_normal(u_n)
 		st.set_uv(Vector2(0.0, 1.0))
-		st.add_vertex(v_edge1)
-		st.set_normal(Vector3.UP)
+		st.add_vertex(u_sub - u_right)
+		st.set_normal(u_n)
 		st.set_uv(Vector2(1.0, 1.0))
-		st.add_vertex(v_edge2)
+		st.add_vertex(u_sub + u_right)
+		st.set_normal(u_n)
+		st.set_uv(Vector2(1.0, 1.0))
+		st.add_vertex(u_base + u_right)
+
+		st.set_normal(u_n)
+		st.set_uv(Vector2(0.0, 1.0))
+		st.add_vertex(u_sub - u_right)
+		st.set_normal(u_n)
+		st.set_uv(Vector2(1.0, 1.0))
+		st.add_vertex(u_base + u_right)
+		st.set_normal(u_n)
+		st.set_uv(Vector2(0.0, 1.0))
+		st.add_vertex(u_base - u_right)
+
+		# Above-ground blade to tip
+		st.set_normal(u_n)
+		st.set_uv(Vector2(0.0, 1.0))
+		st.add_vertex(u_base - u_right)
+		st.set_normal(u_n)
+		st.set_uv(Vector2(1.0, 1.0))
+		st.add_vertex(u_base + u_right)
+		st.set_normal(u_n)
+		st.set_uv(Vector2(0.5, 0.0))
+		st.add_vertex(u_tip)
 
 	var mesh := st.commit()
 	var mat := ShaderMaterial.new()
@@ -137,8 +188,8 @@ static func create_shoreline_reed_cluster_mesh() -> ArrayMesh:
 		mat.set_shader_parameter("head_ratio", 0.38)
 		mat.set_shader_parameter("head_color", Color(0.40, 0.27, 0.15))
 		mat.set_shader_parameter("wind_strength", 0.09)
-		mat.set_shader_parameter("max_render_distance", 320.0)
-		mat.set_shader_parameter("fade_start_distance", 240.0)
+		mat.set_shader_parameter("max_render_distance", 650.0)
+		mat.set_shader_parameter("fade_start_distance", 500.0)
 	mesh.surface_set_material(0, mat)
 	return mesh
 
@@ -202,25 +253,6 @@ static func create_thick_rough_grass_cluster_mesh() -> ArrayMesh:
 		st.set_uv(Vector2(0.5, 0.0))
 		st.add_vertex(p2)
 
-	# Grounded shoreline tussock base mound to eliminate hollow gaps and prevent water showing under roots
-	var base_pts := 12
-	var base_radius := 0.72
-	for bi in range(base_pts):
-		var a1 := (float(bi) / float(base_pts)) * TAU
-		var a2 := (float(bi + 1) / float(base_pts)) * TAU
-		var v_center := Vector3(0.0, 0.08, 0.0)
-		var v_edge1 := Vector3(cos(a1) * base_radius, 0.0, sin(a1) * base_radius)
-		var v_edge2 := Vector3(cos(a2) * base_radius, 0.0, sin(a2) * base_radius)
-		st.set_normal(Vector3.UP)
-		st.set_uv(Vector2(0.5, 1.0))
-		st.add_vertex(v_center)
-		st.set_normal(Vector3.UP)
-		st.set_uv(Vector2(0.0, 1.0))
-		st.add_vertex(v_edge1)
-		st.set_normal(Vector3.UP)
-		st.set_uv(Vector2(1.0, 1.0))
-		st.add_vertex(v_edge2)
-
 	var mesh := st.commit()
 	var mat := ShaderMaterial.new()
 	if ResourceLoader.exists("res://Courses/Environments/shaders/grass_blades_high.gdshader"):
@@ -235,6 +267,173 @@ static func create_thick_rough_grass_cluster_mesh() -> ArrayMesh:
 		mat.set_shader_parameter("fade_start_distance", 170.0)
 	mesh.surface_set_material(0, mat)
 	return mesh
+
+
+## Extracts golf hole centerline / line of play corridors from `scene_root` or course metadata.
+static func extract_course_hole_corridors(scene_root: Node) -> Array:
+	var corridors: Array = []
+	if scene_root == null:
+		return corridors
+
+	# 1. Check root metadata (set by OsmMapLoader)
+	if scene_root.has_meta("hole_paths"):
+		var meta_paths = scene_root.get_meta("hole_paths")
+		if meta_paths is Array and not meta_paths.is_empty():
+			for p in meta_paths:
+				if p is PackedVector2Array or p is Array:
+					corridors.append(p)
+			if not corridors.is_empty():
+				return corridors
+
+	# 2. Check for Hole* child containers
+	for child in scene_root.get_children():
+		if child.name.begins_with("Hole"):
+			if child.has_meta("hole_path"):
+				var hp = child.get_meta("hole_path")
+				if hp is PackedVector2Array or hp is Array:
+					corridors.append(hp)
+					continue
+			var pts: Array[Vector2] = []
+			for h_child in child.get_children():
+				if h_child is Node3D:
+					var p_x: float = h_child.global_position.x if h_child.is_inside_tree() else (h_child.position.x + (child.position.x if child is Node3D else 0.0))
+					var p_z: float = h_child.global_position.z if h_child.is_inside_tree() else (h_child.position.z + (child.position.z if child is Node3D else 0.0))
+					pts.append(Vector2(p_x, p_z))
+			if pts.size() >= 2:
+				corridors.append(pts)
+	if not corridors.is_empty():
+		return corridors
+
+	# 3. Check for course.json in course directory
+	var scene_path: String = scene_root.scene_file_path if "scene_file_path" in scene_root else ""
+	if not scene_path.is_empty():
+		var json_path := scene_path.get_base_dir().path_join("course.json")
+		if FileAccess.file_exists(json_path):
+			var f := FileAccess.open(json_path, FileAccess.READ)
+			if f != null:
+				var json_text := f.get_as_text()
+				f.close()
+				var parsed = JSON.parse_string(json_text)
+				if parsed is Dictionary and parsed.has("course_info") and parsed["course_info"].has("holes"):
+					var holes: Dictionary = parsed["course_info"]["holes"]
+					for h_key in holes.keys():
+						var h_data = holes[h_key]
+						if h_data is Dictionary and h_data.has("hole_path"):
+							var hp_arr = h_data["hole_path"]
+							if hp_arr is Array and hp_arr.size() >= 2:
+								var p_v2: Array[Vector2] = []
+								for pt in hp_arr:
+									if pt is Array and pt.size() >= 2:
+										p_v2.append(Vector2(float(pt[0]), float(pt[1])))
+								if p_v2.size() >= 2:
+									corridors.append(p_v2)
+
+	return corridors
+
+
+## Computes the minimum distance from point `pt` to any segment along `corridor`.
+static func get_distance_to_corridor(pt: Vector2, corridor: Variant) -> float:
+	var count: int = corridor.size()
+	if count == 0:
+		return 999999.0
+	if count == 1:
+		var p0: Vector2 = corridor[0]
+		return pt.distance_to(p0)
+	var min_d := 999999.0
+	for i in range(count - 1):
+		var p1: Vector2 = corridor[i]
+		var p2: Vector2 = corridor[i + 1]
+		var closest: Vector2 = Geometry2D.get_closest_point_to_segment(pt, p1, p2)
+		var d := pt.distance_to(closest)
+		if d < min_d:
+			min_d = d
+	return min_d
+
+
+## Classifies tree entries into Low (0), Medium (1), and High (2) graphics tiers.
+## Groups trees by their closest golf hole corridor and assigns tiers proportionally within each
+## hole group so that the distribution of trees across every single hole is completely even and balanced.
+static func classify_trees_into_tiers(tree_entries: Array, corridors: Array) -> void:
+	if tree_entries.is_empty():
+		return
+
+	# Fallback if no hole corridors are defined (e.g. driving range or minigame scene)
+	if corridors.is_empty():
+		var min_x := 999999.0
+		var max_x := -999999.0
+		var min_z := 999999.0
+		var max_z := -999999.0
+		for entry in tree_entries:
+			var p: Vector3 = entry["pos"]
+			if p.x < min_x: min_x = p.x
+			if p.x > max_x: max_x = p.x
+			if p.z < min_z: min_z = p.z
+			if p.z > max_z: max_z = p.z
+		var grid_cells := 4
+		var span_x := maxf(1.0, (max_x - min_x) / float(grid_cells))
+		var span_z := maxf(1.0, (max_z - min_z) / float(grid_cells))
+
+		var zone_groups: Dictionary = {}
+		for entry in tree_entries:
+			var p: Vector3 = entry["pos"]
+			var gx := clampi(int((p.x - min_x) / span_x), 0, grid_cells - 1)
+			var gz := clampi(int((p.z - min_z) / span_z), 0, grid_cells - 1)
+			var z_key := "%d_%d" % [gx, gz]
+			if not zone_groups.has(z_key):
+				zone_groups[z_key] = []
+			entry["dist_to_corridor"] = 0.0
+			zone_groups[z_key].append(entry)
+
+		for z_key in zone_groups.keys():
+			_assign_tiers_to_group(zone_groups[z_key])
+		return
+
+	# Map each tree to closest corridor
+	var hole_groups: Array[Array] = []
+	for i in range(corridors.size()):
+		hole_groups.append([])
+
+	for entry in tree_entries:
+		var p: Vector3 = entry["pos"]
+		var pt := Vector2(p.x, p.z)
+		var best_idx := 0
+		var best_dist := 999999.0
+		for c_idx in range(corridors.size()):
+			var d := get_distance_to_corridor(pt, corridors[c_idx])
+			if d < best_dist:
+				best_dist = d
+				best_idx = c_idx
+		entry["dist_to_corridor"] = best_dist
+		hole_groups[best_idx].append(entry)
+
+	# Assign tiers per hole group so distribution is even across every hole
+	for group in hole_groups:
+		_assign_tiers_to_group(group)
+
+
+static func _assign_tiers_to_group(group: Array) -> void:
+	if group.is_empty():
+		return
+	# Sort group: Authentic OSM trees and willows first, then by distance to corridor ascending (framing first)
+	group.sort_custom(func(a, b):
+		var a_auth: bool = a.get("is_authentic", false) or a.get("near_water", false)
+		var b_auth: bool = b.get("is_authentic", false) or b.get("near_water", false)
+		if a_auth != b_auth:
+			return a_auth
+		return float(a.get("dist_to_corridor", 0.0)) < float(b.get("dist_to_corridor", 0.0))
+	)
+	var count := group.size()
+	# ~35% Low (framing), ~35% Medium (fill rough), ~30% High (deep forest)
+	var low_count := maxi(1, int(round(float(count) * 0.35)))
+	var med_count := maxi(low_count, int(round(float(count) * 0.70)))
+
+	for i in range(count):
+		if i < low_count:
+			group[i]["tier"] = 0 # Low
+		elif i < med_count:
+			group[i]["tier"] = 1 # Medium
+		else:
+			group[i]["tier"] = 2 # High
 
 
 ## Converts individual Tree_*, Bush_*, and Rock_* nodes in `scene_root` into spatial-chunked
@@ -252,10 +451,12 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 
 	# If already converted to MultiMeshFoliageContainer, ensure all TreeChunk_* meshes
 	# are upgraded from legacy boxy low-poly meshes to the new 16-sided volumetric 3D meshes,
-	# and synchronize ConsolidatedFoliageCollision so trunk colliders tightly align with visuals.
+	# classify instances into low/medium/high tiers with even hole distribution,
+	# and synchronize ConsolidatedFoliageCollision so trunk colliders tightly align with visuals and tiers.
 	var existing_mm := scene_root.get_node_or_null("MultiMeshFoliageContainer")
 	if existing_mm != null:
 		upgrade_existing_multimesh_trees(existing_mm)
+		ensure_multimesh_tiers(scene_root, existing_mm, persist_for_save)
 		sync_consolidated_foliage_collision(scene_root, existing_mm, persist_for_save)
 		return stats
 
@@ -334,7 +535,10 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 	var category_lookup: Dictionary = {}
 	var shared_trunk_shape_cache: Dictionary = {}
 
-	# 1. Process Trees
+	# 1. Process Trees: Gather all tree candidates, classify into Low/Medium/High tiers by hole corridor
+	var hole_corridors := extract_course_hole_corridors(scene_root)
+	var raw_trees: Array = []
+
 	for t_node in tree_nodes:
 		var mi := _find_first_mesh_instance(t_node)
 		if mi == null or mi.mesh == null:
@@ -352,16 +556,6 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 			mesh_lookup[key] = _duplicate_mesh_with_materials(mi)
 			category_lookup[key] = "Tree"
 
-		var cx := int(floor(pos.x / CHUNK_SIZE_M))
-		var cz := int(floor(pos.z / CHUNK_SIZE_M))
-		var bucket_key := "%s__%d_%d" % [key, cx, cz]
-		if not chunk_buckets.has(bucket_key):
-			chunk_buckets[bucket_key] = {
-				"mesh_key": key,
-				"transforms": [],
-				"colors": []
-			}
-
 		var near_water := false
 		var pos2d := Vector2(pos.x, pos.z)
 		for wp in water_positions:
@@ -369,65 +563,70 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 				near_water = true
 				break
 
-		chunk_buckets[bucket_key]["transforms"].append(global_xf)
-		chunk_buckets[bucket_key]["colors"].append(get_lush_summer_instance_color(pos, near_water))
-
-		# Build trunk collider directly from the visual mesh instance transform (global_xf)
-		# so the physics cylinder radius, height, and origin align 1:1 with the visible bark trunk
-		# without double-scaling variant TreeMesh transforms or applying non-uniform scale to Jolt cylinders.
-		var trunk_spec := get_visual_trunk_collider_spec(mi.mesh, m_path, t_node)
-		var trunk_col := _create_aligned_trunk_collision_shape(global_xf, trunk_spec, shared_trunk_shape_cache)
-		static_col_body.add_child(trunk_col)
-		if persist_for_save:
-			trunk_col.owner = scene_root
-
-		# Look for original CanopyArea on t_node
+		var is_auth: bool = t_node.has_meta("is_authentic") or t_node.name.to_lower().contains("authentic") or t_node.name.to_lower().contains("osm") or m_path.to_lower().contains("willow")
 		var orig_canopy: Area3D = t_node.get_node_or_null("CanopyArea") as Area3D
-		var orig_canopy_col: CollisionShape3D = null
+		var orig_canopy_shape: Shape3D = null
+		var orig_canopy_pos := Vector3.ZERO
 		if orig_canopy != null:
+			orig_canopy_pos = orig_canopy.position
 			for child in orig_canopy.get_children():
-				if child is CollisionShape3D:
-					orig_canopy_col = child
+				if child is CollisionShape3D and child.shape != null:
+					orig_canopy_shape = child.shape
 					break
+		var trunk_spec := get_visual_trunk_collider_spec(mi.mesh, m_path, t_node)
 
-		# Add canopy collider to consolidated Area3D
-		var canopy_col := CollisionShape3D.new()
-		if orig_canopy != null and orig_canopy_col != null and orig_canopy_col.shape != null:
-			canopy_col.shape = orig_canopy_col.shape
-			canopy_col.position = pos + Vector3(
-				orig_canopy.position.x * t_node.scale.x,
-				orig_canopy.position.y * t_node.scale.y,
-				orig_canopy.position.z * t_node.scale.z
-			)
-		else:
-			canopy_col.shape = shared_canopy_shape
-			canopy_col.position = pos + Vector3(0.0, 3.8 * t_node.scale.y, 0.0)
+		raw_trees.append({
+			"node": t_node,
+			"pos": pos,
+			"global_xf": global_xf,
+			"color": get_lush_summer_instance_color(pos, near_water),
+			"mesh_key": key,
+			"mesh_path": m_path,
+			"near_water": near_water,
+			"is_authentic": is_auth,
+			"trunk_spec": trunk_spec,
+			"orig_canopy_shape": orig_canopy_shape,
+			"orig_canopy_pos": orig_canopy_pos,
+			"scale": t_node.scale,
+			"rot_y": t_node.rotation.y,
+			"tier": 0
+		})
 
-		canopy_col.scale = t_node.scale
-		canopy_area.add_child(canopy_col)
-		if persist_for_save:
-			canopy_col.owner = scene_root
+	# Classify trees into tiers (0=Low, 1=Medium, 2=High) distributed evenly across all holes
+	classify_trees_into_tiers(raw_trees, hole_corridors)
+
+	for entry in raw_trees:
+		var pos: Vector3 = entry["pos"]
+		var cx := int(floor(pos.x / CHUNK_SIZE_M))
+		var cz := int(floor(pos.z / CHUNK_SIZE_M))
+		var bucket_key := "%s__%d_%d" % [entry["mesh_key"], cx, cz]
+		if not chunk_buckets.has(bucket_key):
+			chunk_buckets[bucket_key] = {
+				"mesh_key": entry["mesh_key"],
+				"category": "Tree",
+				"items": []
+			}
+		chunk_buckets[bucket_key]["items"].append(entry)
 
 		# Record metadata for CustomCourseBuilder hole extraction
 		var m_idx := 0
+		var m_path: String = entry["mesh_path"]
 		if m_path.contains("tree-02"):
 			m_idx = 1
 		elif m_path.contains("tree-03"):
 			m_idx = 2
+		var t_scale: Vector3 = entry["scale"]
 		tree_meta_records.append(pos.x)
 		tree_meta_records.append(pos.y)
 		tree_meta_records.append(pos.z)
-		tree_meta_records.append(t_node.scale.x)
-		tree_meta_records.append(t_node.scale.y)
-		tree_meta_records.append(t_node.scale.z)
-		tree_meta_records.append(t_node.rotation.y)
+		tree_meta_records.append(t_scale.x)
+		tree_meta_records.append(t_scale.y)
+		tree_meta_records.append(t_scale.z)
+		tree_meta_records.append(entry["rot_y"])
 		tree_meta_records.append(float(m_idx))
-
-		t_node.get_parent().remove_child(t_node)
-		t_node.free()
 		stats["trees_converted"] += 1
 
-	# 2. Process Bushes (Visual MultiMesh only — removing 2,400 tiny bush physics bodies saves massive CPU/Jolt broadphase time)
+	# 2. Process Bushes (Visual MultiMesh only — removing tiny bush physics bodies saves massive CPU/Jolt time)
 	for b_node in bush_nodes:
 		var mi := _find_first_mesh_instance(b_node)
 		if mi == null or mi.mesh == null:
@@ -449,15 +648,15 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 		if not chunk_buckets.has(bucket_key):
 			chunk_buckets[bucket_key] = {
 				"mesh_key": key,
-				"transforms": [],
-				"colors": []
+				"category": "Bush",
+				"items": []
 			}
 
-		chunk_buckets[bucket_key]["transforms"].append(global_xf)
-		chunk_buckets[bucket_key]["colors"].append(get_lush_summer_instance_color(pos, false))
-
-		b_node.get_parent().remove_child(b_node)
-		b_node.free()
+		chunk_buckets[bucket_key]["items"].append({
+			"global_xf": global_xf,
+			"color": get_lush_summer_instance_color(pos, false),
+			"tier": 1
+		})
 		stats["bushes_converted"] += 1
 
 	# 3. Remove legacy Water-Perimeter Rocks (replaced by continuous tall shoreline grass in CourseDetailEnhancer)
@@ -470,14 +669,33 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 	var chunk_idx := 0
 	for bucket_key in chunk_buckets.keys():
 		var bucket: Dictionary = chunk_buckets[bucket_key]
-		var xforms: Array = bucket["transforms"]
-		var cols: Array = bucket["colors"]
-		var count := xforms.size()
+		var cat: String = bucket.get("category", category_lookup.get(bucket["mesh_key"], "Tree"))
+		var items: Array = bucket["items"]
+		var count := items.size()
 		if count == 0:
 			continue
 
+		# Sort items by tier (Low first: 0, then Medium: 1, then High: 2)
+		items.sort_custom(func(a, b):
+			return int(a.get("tier", 0)) < int(b.get("tier", 0))
+		)
+
+		var c_low := 0
+		var c_med := 0
+		for item in items:
+			var t: int = item.get("tier", 0)
+			if t == 0:
+				c_low += 1
+				c_med += 1
+			elif t == 1:
+				c_med += 1
+
+		if cat == "Bush":
+			# Low graphics = 0 bushes, Medium = 50%, High = 100%
+			c_low = 0
+			c_med = maxi(1, int(count * 0.5))
+
 		var m_key: String = bucket["mesh_key"]
-		var cat: String = category_lookup.get(m_key, "Tree")
 		var base_mesh: Mesh = mesh_lookup[m_key]
 
 		var mm := MultiMesh.new()
@@ -489,8 +707,9 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 		var buf := PackedFloat32Array()
 		buf.resize(count * 16)
 		for i in range(count):
-			var xf: Transform3D = xforms[i]
-			var col: Color = cols[i]
+			var item: Dictionary = items[i]
+			var xf: Transform3D = item["global_xf"]
+			var col: Color = item["color"]
 			var b_idx := i * 16
 			buf[b_idx + 0] = xf.basis.x.x
 			buf[b_idx + 1] = xf.basis.y.x
@@ -510,11 +729,47 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 			buf[b_idx + 15] = col.a
 			mm.set_instance_transform(i, xf)
 			mm.set_instance_custom_data(i, col)
+
+			if cat == "Tree":
+				var trunk_spec: Dictionary = item.get("trunk_spec", {})
+				if not trunk_spec.is_empty():
+					var trunk_col := _create_aligned_trunk_collision_shape(xf, trunk_spec, shared_trunk_shape_cache)
+					trunk_col.set_meta("foliage_tier", item.get("tier", 0))
+					static_col_body.add_child(trunk_col)
+					if persist_for_save:
+						trunk_col.owner = scene_root
+
+				var canopy_col := CollisionShape3D.new()
+				canopy_col.set_meta("foliage_tier", item.get("tier", 0))
+				var pos: Vector3 = item["pos"]
+				var i_scale: Vector3 = item.get("scale", Vector3.ONE)
+				var c_shape: Shape3D = item.get("orig_canopy_shape", null)
+				var c_pos: Vector3 = item.get("orig_canopy_pos", Vector3.ZERO)
+				if c_shape != null:
+					canopy_col.shape = c_shape
+					canopy_col.position = pos + Vector3(
+						c_pos.x * i_scale.x,
+						c_pos.y * i_scale.y,
+						c_pos.z * i_scale.z
+					)
+				else:
+					canopy_col.shape = shared_canopy_shape
+					canopy_col.position = pos + Vector3(0.0, 3.8 * i_scale.y, 0.0)
+
+				canopy_col.scale = i_scale
+				canopy_area.add_child(canopy_col)
+				if persist_for_save:
+					canopy_col.owner = scene_root
+
 		mm.buffer = buf
 
 		var mmi := MultiMeshInstance3D.new()
+		mmi.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 		mmi.name = "%sChunk_%d" % [cat, chunk_idx]
 		mmi.multimesh = mm
+		mmi.set_meta("tier_low_count", c_low)
+		mmi.set_meta("tier_med_count", c_med)
+		mmi.set_meta("tier_high_count", count)
 
 		if cat == "Tree":
 			mmi.visibility_range_end = 500.0
@@ -537,9 +792,128 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 			mmi.owner = scene_root
 		chunk_idx += 1
 
+	# Safely free original individual tree and bush nodes now that all MultiMeshes and colliders are created
+	for t_node in tree_nodes:
+		if is_instance_valid(t_node):
+			if t_node.get_parent() != null:
+				t_node.get_parent().remove_child(t_node)
+			t_node.free()
+	for b_node in bush_nodes:
+		if is_instance_valid(b_node):
+			if b_node.get_parent() != null:
+				b_node.get_parent().remove_child(b_node)
+			b_node.free()
+
 	mm_container.set_meta("tree_records", tree_meta_records)
 	stats["chunks_created"] = chunk_idx
 	return stats
+
+
+## Upgrades any existing MultiMeshFoliageContainer so its MultiMesh instances
+## are sorted and tagged with tier_low_count, tier_med_count, tier_high_count
+## with even distribution across golf holes.
+static func ensure_multimesh_tiers(scene_root: Node, mm_container: Node = null, persist_for_save: bool = false) -> void:
+	if scene_root == null:
+		return
+	if mm_container == null:
+		mm_container = scene_root.get_node_or_null("MultiMeshFoliageContainer")
+	if mm_container == null:
+		return
+
+	var tree_chunks: Array[MultiMeshInstance3D] = []
+	var needs_upgrade := false
+	for child in mm_container.get_children():
+		if child is MultiMeshInstance3D:
+			var mmi := child as MultiMeshInstance3D
+			var cname := mmi.name.to_lower()
+			if cname.begins_with("treechunk"):
+				tree_chunks.append(mmi)
+				if not mmi.has_meta("tier_low_count") or not mmi.has_meta("tier_med_count"):
+					needs_upgrade = true
+			elif cname.begins_with("bushchunk"):
+				if not mmi.has_meta("tier_low_count") or not mmi.has_meta("tier_med_count"):
+					var b_cnt := mmi.multimesh.instance_count if mmi.multimesh != null else 0
+					mmi.set_meta("tier_low_count", 0)
+					mmi.set_meta("tier_med_count", maxi(1, int(b_cnt * 0.5)))
+					mmi.set_meta("tier_high_count", b_cnt)
+
+	if not needs_upgrade or tree_chunks.is_empty():
+		return
+
+	var hole_corridors := extract_course_hole_corridors(scene_root)
+
+	for mmi in tree_chunks:
+		var mm := mmi.multimesh
+		if mm == null or mm.instance_count <= 0:
+			continue
+		var count := mm.instance_count
+		var items: Array = []
+		for i in range(count):
+			var xf := mm.get_instance_transform(i)
+			var col := mm.get_instance_custom_data(i)
+			items.append({
+				"index": i,
+				"pos": xf.origin,
+				"global_xf": xf,
+				"color": col,
+				"tier": 0
+			})
+
+		classify_trees_into_tiers(items, hole_corridors)
+
+		items.sort_custom(func(a, b):
+			return int(a.get("tier", 0)) < int(b.get("tier", 0))
+		)
+
+		var c_low := 0
+		var c_med := 0
+		var buf := PackedFloat32Array()
+		buf.resize(count * 16)
+		for i in range(count):
+			var item: Dictionary = items[i]
+			var xf: Transform3D = item["global_xf"]
+			var col: Color = item["color"]
+			var t: int = item.get("tier", 0)
+			if t == 0:
+				c_low += 1
+				c_med += 1
+			elif t == 1:
+				c_med += 1
+
+			var b_idx := i * 16
+			buf[b_idx + 0] = xf.basis.x.x
+			buf[b_idx + 1] = xf.basis.y.x
+			buf[b_idx + 2] = xf.basis.z.x
+			buf[b_idx + 3] = xf.origin.x
+			buf[b_idx + 4] = xf.basis.x.y
+			buf[b_idx + 5] = xf.basis.y.y
+			buf[b_idx + 6] = xf.basis.z.y
+			buf[b_idx + 7] = xf.origin.y
+			buf[b_idx + 8] = xf.basis.x.z
+			buf[b_idx + 9] = xf.basis.y.z
+			buf[b_idx + 10] = xf.basis.z.z
+			buf[b_idx + 11] = xf.origin.z
+			buf[b_idx + 12] = col.r
+			buf[b_idx + 13] = col.g
+			buf[b_idx + 14] = col.b
+			buf[b_idx + 15] = col.a
+			mm.set_instance_transform(i, xf)
+			mm.set_instance_custom_data(i, col)
+
+		mm.buffer = buf
+		mmi.set_meta("tier_low_count", c_low)
+		mmi.set_meta("tier_med_count", c_med)
+		mmi.set_meta("tier_high_count", count)
+
+	sync_consolidated_foliage_collision(scene_root, mm_container, persist_for_save)
+
+
+static func ensure_chunk_tiers(scene_root: Node, mmi: MultiMeshInstance3D) -> void:
+	if mmi == null or mmi.multimesh == null or mmi.has_meta("tier_low_count"):
+		return
+	var mm_container = mmi.get_parent()
+	if mm_container != null:
+		ensure_multimesh_tiers(scene_root, mm_container, false)
 
 
 static func _find_first_mesh_instance(node: Node) -> MeshInstance3D:
@@ -788,10 +1162,10 @@ static func sync_consolidated_foliage_collision(scene_root: Node, mm_container: 
 		static_col_body.remove_child(rc)
 		rc.free()
 
-	# OnlySkip if already at trunk_collision_version 3 AND existing cylinders already use uniform scale
-	if not persist_for_save and int(static_col_body.get_meta("trunk_collision_version", 0)) >= 3 and not old_trunk_cols.is_empty():
+	# Only skip if already at trunk_collision_version 4 AND existing cylinders have foliage_tier and uniform scale
+	if not persist_for_save and int(static_col_body.get_meta("trunk_collision_version", 0)) >= 4 and not old_trunk_cols.is_empty():
 		var first_cs := old_trunk_cols[0] as CollisionShape3D
-		if first_cs.scale.is_equal_approx(Vector3.ONE):
+		if first_cs.scale.is_equal_approx(Vector3.ONE) and first_cs.has_meta("foliage_tier"):
 			return 0
 
 	for old_c in old_trunk_cols:
@@ -812,13 +1186,27 @@ static func sync_consolidated_foliage_collision(scene_root: Node, mm_container: 
 			continue
 
 		var trunk_spec := get_visual_trunk_collider_spec(mm.mesh, mmi.name)
+		var low_cnt: int = mmi.get_meta("tier_low_count", -1)
+		var med_cnt: int = mmi.get_meta("tier_med_count", -1)
 		for i in range(mm.instance_count):
 			var inst_xf := mm.get_instance_transform(i)
 			var trunk_col := _create_aligned_trunk_collision_shape(inst_xf, trunk_spec, shared_shape_cache)
+			var tier := 0
+			if low_cnt >= 0 and med_cnt >= 0:
+				if i < low_cnt:
+					tier = 0
+				elif i < med_cnt:
+					tier = 1
+				else:
+					tier = 2
+			else:
+				var t_frac := float(i) / float(maxi(1, mm.instance_count))
+				tier = 0 if t_frac < 0.35 else (1 if t_frac < 0.70 else 2)
+			trunk_col.set_meta("foliage_tier", tier)
 			static_col_body.add_child(trunk_col)
 			if persist_for_save:
 				trunk_col.owner = scene_root
 			rebuilt_count += 1
 
-	static_col_body.set_meta("trunk_collision_version", 3)
+	static_col_body.set_meta("trunk_collision_version", 4)
 	return rebuilt_count

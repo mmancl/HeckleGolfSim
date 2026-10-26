@@ -588,19 +588,19 @@ func _create_green_speed_selector() -> PanelContainer:
 	panel_style.corner_radius_top_right = 8
 	panel_style.corner_radius_bottom_left = 8
 	panel_style.corner_radius_bottom_right = 8
-	panel_style.content_margin_left = 12
-	panel_style.content_margin_right = 12
-	panel_style.content_margin_top = 8
-	panel_style.content_margin_bottom = 8
+	panel_style.content_margin_left = 10
+	panel_style.content_margin_right = 10
+	panel_style.content_margin_top = 3
+	panel_style.content_margin_bottom = 3
 	panel.add_theme_stylebox_override("panel", panel_style)
 
 	var hbox = HBoxContainer.new()
-	hbox.add_theme_constant_override("separation", 15)
+	hbox.add_theme_constant_override("separation", 8)
 	panel.add_child(hbox)
 
 	var lbl = Label.new()
-	lbl.text = "Green Speed: "
-	lbl.add_theme_font_size_override("font_size", 24)
+	lbl.text = "Green Speed:"
+	lbl.add_theme_font_size_override("font_size", 18)
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hbox.add_child(lbl)
 
@@ -609,19 +609,30 @@ func _create_green_speed_selector() -> PanelContainer:
 	slider.max_value = 16.0
 	slider.step = 0.5
 	slider.value = GlobalSettings.range_settings.green_speed.value
-	slider.custom_minimum_size = Vector2(200, 48 if MobilePerformance.is_mobile() else 36)
+	slider.custom_minimum_size = Vector2(110, 36 if MobilePerformance.is_mobile() else 24)
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	ThemeManager.apply_slider_style(slider, 48 if MobilePerformance.is_mobile() else 36, 200)
+	ThemeManager.apply_slider_style(slider, 36 if MobilePerformance.is_mobile() else 24, 110)
 	hbox.add_child(slider)
 
 	var val_lbl = Label.new()
 	val_lbl.text = "%.1f" % slider.value
-	val_lbl.add_theme_font_size_override("font_size", 24)
-	val_lbl.custom_minimum_size = Vector2(50, 0)
+	val_lbl.add_theme_font_size_override("font_size", 18)
+	val_lbl.custom_minimum_size = Vector2(36, 0)
 	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	val_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hbox.add_child(val_lbl)
+
+	hbox.add_child(VSeparator.new())
+	var pin_check = CheckBox.new()
+	pin_check.text = "Random Pin"
+	pin_check.add_theme_font_size_override("font_size", 18)
+	pin_check.button_pressed = bool(GlobalSettings.range_settings.random_pin_enabled.value)
+	pin_check.toggled.connect(func(on):
+		GlobalSettings.range_settings.random_pin_enabled.set_value(on)
+		GlobalSettings.save_settings()
+	)
+	hbox.add_child(pin_check)
 
 	slider.value_changed.connect(func(val):
 		GlobalSettings.range_settings.green_speed.set_value(val)

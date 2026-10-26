@@ -101,6 +101,15 @@ func _process(_delta: float) -> bool:
 	assert(reeds_mmi.multimesh != null and reeds_mmi.multimesh.instance_count >= 50, "ShorelineReedsMultiMesh must continuously surround the entire water pond perimeter (>= 50 clumps for 60m perimeter)")
 	assert(mock_scene.has_node("HorizonSkirt"), "HorizonSkirt outer terrain ring must exist")
 	assert(mock_scene.has_node("CartPaths"), "CartPaths extruded ribbon mesh must exist")
+	var cart_paths_node := mock_scene.get_node("CartPaths") as MeshInstance3D
+	assert(cart_paths_node.mesh != null, "CartPaths mesh must not be null")
+	var cp_mat := cart_paths_node.mesh.surface_get_material(0) as ShaderMaterial
+	assert(cp_mat != null and cp_mat.shader != null, "CartPaths must have a ShaderMaterial with cart_path.gdshader")
+	var cp_arrays := cart_paths_node.mesh.surface_get_arrays(0)
+	var cp_verts: PackedVector3Array = cp_arrays[Mesh.ARRAY_VERTEX]
+	assert(cp_verts.size() > 0, "CartPaths mesh must contain vertices")
+	for v in cp_verts:
+		assert(absf(v.y - 0.030) < 0.01, "Cart path vertex Y (%.4f) must conform snugly to terrain elevation at +0.030m and not float" % v.y)
 	assert(not mock_scene.has_node("ThickRoughGrassMultiMesh"), "Long 3D grass patches (ThickRoughGrassMultiMesh) must not be spawned")
 	assert(int(detail_stats["thick_rough_grass"]) == 0, "Thick rough 3D grass cluster count must be 0")
 	assert(mock_scene.has_node("ThickRoughBushes"), "ThickRoughBushes container must exist in outer rough")
@@ -146,6 +155,32 @@ func _process(_delta: float) -> bool:
 			break
 	assert(has_inner_corner, "Concave inner corner (10, 10) must be preserved and not bypassed by convex hull")
 
+	# Verify CourseDetailEnhancer upgrades existing cartpath_* MeshInstances from OsmMapLoader
+	var test_osm_scene := Node3D.new()
+	var test_cp_mi := MeshInstance3D.new()
+	test_cp_mi.name = "cartpath_0"
+	var test_arr := []
+	test_arr.resize(Mesh.ARRAY_MAX)
+	test_arr[Mesh.ARRAY_VERTEX] = PackedVector3Array([
+		Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(0, 0, 5),
+		Vector3(2, 0, 0), Vector3(2, 0, 5), Vector3(0, 0, 5)
+	])
+	test_arr[Mesh.ARRAY_INDEX] = PackedInt32Array([0, 1, 2, 3, 4, 5])
+	var test_mesh := ArrayMesh.new()
+	test_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, test_arr)
+	test_cp_mi.mesh = test_mesh
+	test_osm_scene.add_child(test_cp_mi)
+	var cp_upgraded := CourseDetailEnhancer._build_cart_paths(test_osm_scene, {}, false)
+	assert(cp_upgraded == true, "_build_cart_paths must return true for existing cartpath MeshInstances")
+	assert(test_osm_scene.has_node("cartpath_0"), "Existing cartpath_0 node must be preserved")
+	var upgraded_mi := test_osm_scene.get_node("cartpath_0") as MeshInstance3D
+	var upgraded_mat := upgraded_mi.get_surface_override_material(0) as ShaderMaterial
+	assert(upgraded_mat != null and upgraded_mat.shader != null, "cartpath_0 must receive cart_path.gdshader")
+	var upgraded_arrays := upgraded_mi.mesh.surface_get_arrays(0)
+	var upgraded_uvs = upgraded_arrays[Mesh.ARRAY_TEX_UV]
+	assert(upgraded_uvs != null and upgraded_uvs.size() == 6, "UVs must be auto-generated for cartpath without UVs")
+	test_osm_scene.free()
+
 	print("  PASS: CourseDetailEnhancer built recessed 3D bunkers, clean hazard lip, shoreline reeds, cart paths, and horizon skirt.")
 
 	# 7. Test HighFidelityBuilder coordinator lifecycle (including HighFidelityGrass & HighFidelityOverlay)
@@ -157,8 +192,17 @@ func _process(_delta: float) -> bool:
 		var grass_node := builder.get_node_or_null("HighFidelityGrass")
 		assert(grass_node != null, "HighFidelityGrass must be instantiated by HighFidelityBuilder")
 		assert(grass_node.has_node("DeepRoughBladesMultiMesh"), "Real 3D deep rough blade field must exist for the >=25% lie resistance zone")
-		var deep_mm := (grass_node.get_node("DeepRoughBladesMultiMesh") as MultiMeshInstance3D).multimesh
-		assert(deep_mm.instance_count >= 3000, "Deep rough blade field must be dense and performant")
+		var deep_mmi_check := grass_node.get_node("DeepRoughBladesMultiMesh") as MultiMeshInstance3D
+		var deep_mm := deep_mmi_check.multimesh
+		assert(deep_mm.instance_count >= 5000, "Deep rough blade field must have expanded 18m coverage (>= 5000 instances)")
+		assert(deep_mmi_check.visible == true, "Rough grass must remain visible across rough areas without landing pop-in")
+		# Verify cart path exclusion: grass must never spawn on or inside cart paths
+		var cp_segs: Array = grass_node.get("_cart_path_segments")
+		assert(cp_segs.size() > 0, "Cart path segments must be detected for grass exclusion")
+		var cp_mid: Vector2 = (cp_segs[0]["a"] + cp_segs[0]["b"]) * 0.5
+		assert(grass_node.call("_is_on_cart_path", cp_mid.x, cp_mid.y) == true, "Points inside cart path must be detected by _is_on_cart_path")
+		assert(grass_node.call("_is_in_bunker_or_hazard", cp_mid.x, cp_mid.y) == true, "Points on cart path must be excluded by _is_in_bunker_or_hazard")
+
 		# Verify bunker exclusion: grass must never activate when lie is sand or point is in bunker
 		var dummy_p = mock_scene.get_node_or_null("Player")
 		if dummy_p != null:
@@ -189,6 +233,7 @@ func _process(_delta: float) -> bool:
 
 		if grass_node.has_node("AddressTurfMultiMesh"):
 			assert(grass_node.has_node("RoughFescueMultiMesh"), "RoughFescueMultiMesh must exist when grass meshes are enabled")
+		assert(grass_node.get("_deep_rough_generated") == true, "Deep rough blades must be generated up front during setup")
 		assert(not mock_scene.has_node("ThickRoughGrassMultiMesh"), "Long 3D grass patches must not exist on high graphics")
 		assert(mock_scene.get_node("ThickRoughBushes").visible == true, "Thick rough bushes must be visible on high graphics")
 		print("  PASS: HighFidelityBuilder and HighFidelityGrass active and verified.")
@@ -196,7 +241,20 @@ func _process(_delta: float) -> bool:
 		HighFidelityBuilder.remove_high_fidelity(mock_scene)
 		assert(not mock_scene.has_node("HighFidelityBuilder"), "Builder must be removed on teardown")
 		assert(mock_scene.get_node("ThickRoughBushes").visible == false, "Thick rough bushes must be hidden on low/medium graphics")
-		print("  PASS: HighFidelityBuilder removed and cleaned up.")
+
+		# Verify thick rough exists and renders ONLY in High graphics setting
+		MobilePerformance.apply_graphics_quality(mock_scene, "Medium")
+		assert(not mock_scene.has_node("DeepRoughGrassMedium"), "Deep rough blades must not exist on Medium graphics")
+		assert(mock_scene.get_node("ThickRoughBushes").visible == false, "Thick rough bushes must be hidden on Medium graphics")
+		var ut_med := mock_scene.get_node("UnifiedTerrain") as MeshInstance3D
+		var ut_med_mat := ut_med.mesh.surface_get_material(0) as ShaderMaterial
+		assert(ut_med_mat.get_shader_parameter("has_deep_rough_map") == false, "Terrain has_deep_rough_map must be false on Medium graphics")
+
+		MobilePerformance.apply_graphics_quality(mock_scene, "Low")
+		assert(not mock_scene.has_node("DeepRoughGrassMedium"), "Deep rough blades must not exist on Low graphics")
+		assert(mock_scene.get_node("ThickRoughBushes").visible == false, "Thick rough bushes must be hidden on Low graphics")
+
+		print("  PASS: HighFidelityBuilder removed and thick rough confirmed exclusive to High graphics.")
 
 	mock_scene.queue_free()
 

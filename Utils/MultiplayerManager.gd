@@ -839,11 +839,31 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 				if gs_clap != null and gs_clap.has_method("play_golf_clap"):
 					gs_clap.play_golf_clap()
 
-			# Check gimme ranges if enabled (only if ball came to rest on the green or fringe)
+			# Check gimme ranges if enabled (only if ball came to rest on the green or fringe, or near pin if course has no configured green)
 			var active_gimmes = []
 			var gs_gimme = _get_global_settings()
 			var current_lie = str(active_player.get("lie_type", "")).to_lower()
-			if (current_lie == "green" or current_lie == "fringe") and gs_gimme != null and gs_gimme.range_settings != null:
+			var dist_to_pin_feet = dist_to_pin * 3.28084 # meters to feet
+			var is_eligible_lie = (current_lie == "green" or current_lie == "fringe")
+			if not is_eligible_lie and dist_to_pin <= 25.0:
+				var course_node = null
+				if player_node != null:
+					var p_parent = player_node.get_parent()
+					if p_parent != null:
+						course_node = p_parent.get_parent()
+				if course_node == null and is_inside_tree() and get_tree() != null:
+					course_node = get_tree().current_scene
+				var has_green_geo = false
+				if course_node != null and (course_node.has_method("get_distance_to_nearest_green") or course_node.has_method("is_inside_green") or course_node.has_method("get_distance_to_current_green")):
+					if course_node.has_method("get_distance_to_current_green"):
+						has_green_geo = (course_node.get_distance_to_current_green(final_position) <= 0.05 or course_node.get_distance_to_current_green(target_pin) <= 0.05)
+					elif course_node.has_method("get_distance_to_nearest_green"):
+						has_green_geo = (course_node.get_distance_to_nearest_green(final_position) <= 0.05 or course_node.get_distance_to_nearest_green(target_pin) <= 0.05)
+				# If course has no green polygon/geometry, allow gimme within range around the pin
+				if not has_green_geo:
+					is_eligible_lie = true
+
+			if is_eligible_lie and gs_gimme != null and gs_gimme.range_settings != null:
 				if gs_gimme.range_settings.gimme_range_1_enabled.value:
 					active_gimmes.append({
 						"strokes": 1,
@@ -861,8 +881,6 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 					})
 			
 			active_gimmes.sort_custom(func(a, b): return a["dist_feet"] < b["dist_feet"])
-			var dist_to_pin_feet = dist_to_pin * 3.28084 # meters to feet
-			
 			for gimme in active_gimmes:
 				if dist_to_pin_feet <= gimme["dist_feet"]:
 					_apply_gimme(active_player, gimme["strokes"], hole_ids[current_hole_index])
@@ -903,7 +921,7 @@ func _handle_scramble_shot(active_player: Dictionary) -> void:
 		return
 		
 	var hole_id = hole_ids[current_hole_index]
-	var current_hole = hole_info[hole_id]
+	var current_hole = hole_info.get(hole_id, {})
 	var hole_loc = current_hole.get("Hole Location", [0.0, 0.0])
 	var target_pin = Vector3(hole_loc[0], 0.0, hole_loc[1])
 	
@@ -960,7 +978,7 @@ func _handle_2v2_scramble_shot(active_player: Dictionary) -> void:
 		return
 		
 	var hole_id = hole_ids[current_hole_index]
-	var current_hole = hole_info[hole_id]
+	var current_hole = hole_info.get(hole_id, {})
 	var hole_loc = current_hole.get("Hole Location", [0.0, 0.0])
 	var target_pin = Vector3(hole_loc[0], 0.0, hole_loc[1])
 	
@@ -1936,7 +1954,7 @@ func toggle_player_active(idx: int, active: bool) -> void:
 		# Set position to current tee box
 		if current_hole_index < hole_ids.size():
 			var hole_id: String = hole_ids[current_hole_index]
-			var current_hole = hole_info[hole_id]
+			var current_hole = hole_info.get(hole_id, {})
 			var tee_boxes = current_hole.get("Tee Boxes", {})
 			var tee_pos = get_tee_position_from_boxes(tee_boxes, player.get("tee", "Blue"))
 			var is_driver = current_club.to_lower() in ["dr", "driver", "1w"]

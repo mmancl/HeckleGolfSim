@@ -27,8 +27,18 @@ var _current_config_path: String = ""
 
 
 func initialize(scene_path: String, config_path: String) -> void:
+	# 0% - 4%: Reading course configuration
+	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
+		SceneManager.set_loading_stage(0.0, "Reading course configuration...", 4.0)
 	_load_course_config(config_path)
-	
+	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
+		SceneManager.set_loading_stage(4.0, "Reading course configuration...", 4.0)
+	await get_tree().process_frame
+
+	# 5% - 30%: Loading 3D course geometry & terrain...
+	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
+		SceneManager.set_loading_stage(5.0, "Loading 3D course geometry & terrain...", 30.0)
+
 	var err = ResourceLoader.load_threaded_request(scene_path)
 	if err != OK:
 		push_error("[CourseManager] Failed to start threaded load for: %s. Falling back to synchronous load." % scene_path)
@@ -44,15 +54,31 @@ func initialize(scene_path: String, config_path: String) -> void:
 		_ensure_course_details(course_scene)
 		return
 		
+	var progress_arr := []
 	while true:
-		var status = ResourceLoader.load_threaded_get_status(scene_path)
+		progress_arr.clear()
+		var status = ResourceLoader.load_threaded_get_status(scene_path, progress_arr)
 		if status == ResourceLoader.THREAD_LOAD_LOADED:
 			break
 		elif status == ResourceLoader.THREAD_LOAD_FAILED or status == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
 			push_error("[CourseManager] Failed to load course scene asynchronously: %s" % scene_path)
 			return
+		
+		var raw_p: float = float(progress_arr[0]) if progress_arr.size() > 0 else 0.0
+		var mapped_percent: float = 5.0 + (raw_p * 25.0)
+		if SceneManager != null and SceneManager.has_method("set_loading_stage"):
+			SceneManager.set_loading_stage(mapped_percent, "Loading 3D course geometry & terrain...", 30.0)
 		await get_tree().process_frame
 		
+	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
+		SceneManager.set_loading_stage(30.0, "Loading 3D course geometry & terrain...", 30.0)
+	await get_tree().process_frame
+
+	# 31% - 40%: Constructing scene hierarchy...
+	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
+		SceneManager.set_loading_stage(31.0, "Constructing scene hierarchy...", 40.0)
+	await get_tree().process_frame
+
 	var packed = ResourceLoader.load_threaded_get(scene_path) as PackedScene
 	if packed == null:
 		push_error("[CourseManager] Could not load course scene: %s" % scene_path)
@@ -61,8 +87,32 @@ func initialize(scene_path: String, config_path: String) -> void:
 	if course_scene == null:
 		push_error("[CourseManager] Could not instantiate course scene: %s" % scene_path)
 		return
+
+	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
+		SceneManager.set_loading_stage(40.0, "Constructing scene hierarchy...", 40.0)
+	await get_tree().process_frame
+
+	# 41% - 75%: Mounting objects & physics colliders...
+	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
+		SceneManager.set_loading_stage(41.0, "Mounting objects & physics colliders...", 75.0)
+	await get_tree().process_frame
+
 	add_child(course_scene)
+
+	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
+		SceneManager.set_loading_stage(75.0, "Mounting objects & physics colliders...", 75.0)
+	await get_tree().process_frame
+
+	# 76% - 99%: Finalizing terrain & graphics quality...
+	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
+		SceneManager.set_loading_stage(76.0, "Finalizing terrain & graphics quality...", 99.0)
+	await get_tree().process_frame
+
 	_ensure_course_details(course_scene)
+
+	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
+		SceneManager.set_loading_stage(99.0, "Finalizing terrain & graphics quality...", 99.0)
+	await get_tree().process_frame
 
 
 func _ensure_course_details(course_scene: Node) -> void:
@@ -71,6 +121,9 @@ func _ensure_course_details(course_scene: Node) -> void:
 	var reeds := course_scene.get_node_or_null("ShorelineReedsMultiMesh")
 	if reeds == null or course_graphics_version < CourseGraphicsUpgraderScript.CURRENT_COURSE_GRAPHICS_VERSION:
 		CourseDetailEnhancerScript.enhance_course_scene(course_scene, false)
+	else:
+		# Ensure thick rough distance map is computed up front during loading screen
+		CourseDetailEnhancerScript.ensure_deep_rough_map(course_scene)
 	_apply_course_graphics_quality(course_scene)
 
 

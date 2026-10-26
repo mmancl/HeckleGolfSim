@@ -44,7 +44,7 @@ void fragment() {
 
 	// Smooth shoreline transition: water cleanly fades to zero opacity right where it meets land,
 	// preventing floating opaque water planes or glowing blue water shining under shoreline grass/reeds.
-	float water_presence = smoothstep(0.0, 0.08, vertical_depth);
+	float water_presence = smoothstep(0.02, 0.16, vertical_depth);
 	if (water_presence < 0.005) {
 		discard;
 	}

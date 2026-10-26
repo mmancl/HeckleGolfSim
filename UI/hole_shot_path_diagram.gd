@@ -63,7 +63,6 @@ func _draw() -> void:
 			mapped_cart_path.append(_map_world_position(point))
 		draw_polyline(mapped_cart_path, Color.WHITE, 4.0, true)
 		draw_polyline(mapped_cart_path, Color.BLACK, 2.5, true)
-	draw_rect(Rect2(Vector2(1, 1), size - Vector2(2, 2)), Color(0.75, 0.85, 0.75, 0.7), false, 1.0)
 	if _positions.size() < 2:
 		return
 
@@ -123,7 +122,7 @@ func _calculate_view() -> void:
 	var green := Vector2(_green_position.x, _green_position.z)
 	var tee_to_green := green - _tee_position
 	_forward = tee_to_green.normalized() if tee_to_green.length_squared() > 0.001 else Vector2.UP
-	_right = Vector2(_forward.y, -_forward.x)
+	_right = Vector2(-_forward.y, _forward.x)
 
 	var min_side := 0.0
 	var max_side := 0.0
@@ -142,13 +141,13 @@ func _calculate_view() -> void:
 		_max_forward = maxf(_max_forward, forward_distance)
 	_center_side = (min_side + max_side) * 0.5
 	var hole_length := maxf(_max_forward - _min_forward, 1.0)
-	var forward_padding := maxf(hole_length * 0.08, 12.0)
-	var side_padding := maxf(maxf((max_side - min_side) * 0.15, hole_length * 0.12), 20.0)
+	var forward_padding := maxf(hole_length * 0.05, 8.0)
+	var side_padding := maxf(maxf((max_side - min_side) * 0.10, hole_length * 0.07), 12.0)
 	_min_forward -= forward_padding
 	_max_forward += forward_padding
 	_half_width = maxf((max_side - min_side) * 0.5 + side_padding, 12.0)
 
-	var margin := Vector2(20.0, 24.0)
+	var margin := Vector2(10.0, 14.0)
 	_plot = Rect2(margin, size - margin * 2.0)
 	var world_width := _half_width * 2.0
 	var world_height := _max_forward - _min_forward

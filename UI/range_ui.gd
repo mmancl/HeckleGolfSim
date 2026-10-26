@@ -37,6 +37,10 @@ var _hide_helpers_btn: Button = null
 var _stats_btn: Button = null
 var _map_btn: Button = null
 var _skip_btn: Button = null
+var _imm_menu_btn: Button = null
+var _imm_menu_container: VBoxContainer = null
+var _train_menu_btn: Button = null
+var _train_menu_container: VBoxContainer = null
 var _announcer_btn: Button = null
 var _tension_btn: Button = null
 var _screen_offset_ctrl: Control = null
@@ -330,80 +334,17 @@ func _ready() -> void:
 		toggles_scroll.resized.connect(func(): _update_helpers_scroll_layout.call_deferred())
 		toggles_container.resized.connect(func(): _update_helpers_scroll_layout.call_deferred())
 
-		# Announcer Mute/Unmute Toggle Button
-		var announcer_btn = Button.new()
-		announcer_btn.name = "AnnouncerToggleButton"
-		var announcer_node = get_node_or_null("/root/AnnouncerEngine")
-		var is_announcer_on = announcer_node.get("AnnouncerRange") if announcer_node != null else false
-		announcer_btn.text = "🎙 Announcer: ON" if is_announcer_on else "🎙 Announcer: MUTED"
-		announcer_btn.tooltip_text = "Toggle Announcer Commentary"
-		announcer_btn.custom_minimum_size = Vector2(180, 56)
-		var initial_ann_color = Color(0.2, 0.6, 0.3, 0.85) if is_announcer_on else Color(0.5, 0.5, 0.5, 0.85)
-		apply_material_button_style(announcer_btn, initial_ann_color)
-		announcer_btn.pressed.connect(func():
-			var a = get_node_or_null("/root/AnnouncerEngine")
-			if a != null:
-				var current_val = a.get("AnnouncerRange") as bool
-				var new_val = not current_val
-				a.set("AnnouncerRange", new_val)
-				GlobalSettings.save_settings()
-				if new_val:
-					announcer_btn.text = "🎙 Announcer: ON"
-					apply_material_button_style(announcer_btn, Color(0.2, 0.6, 0.3, 0.85))
-					a.call("SpeakHecklesEnabled")
-				else:
-					announcer_btn.text = "🎙 Announcer: MUTED"
-					apply_material_button_style(announcer_btn, Color(0.5, 0.5, 0.5, 0.85))
-					a.call("SpeakHecklesDisabled")
-		)
-		toggles_container.add_child(announcer_btn)
-		_announcer_btn = announcer_btn
-		
-		# Suspense Heartbeat & Tunnel Vision Toggle Button
-		var tension_btn = Button.new()
-		tension_btn.name = "SuspenseToggleButton"
-		var is_tension_on = GlobalSettings.range_settings.tension_effects_enabled.value if has_node("/root/GlobalSettings") else true
-		tension_btn.text = "💓 Suspense: ON" if is_tension_on else "💓 Suspense: OFF"
-		tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision in Course Play"
-		tension_btn.custom_minimum_size = Vector2(180, 56)
-		var initial_tension_color = Color(0.75, 0.2, 0.3, 0.85) if is_tension_on else Color(0.5, 0.5, 0.5, 0.85)
-		apply_material_button_style(tension_btn, initial_tension_color)
-		tension_btn.pressed.connect(func():
-			if has_node("/root/GlobalSettings"):
-				var new_val = not GlobalSettings.range_settings.tension_effects_enabled.value
-				GlobalSettings.range_settings.tension_effects_enabled.value = new_val
-				GlobalSettings.save_settings()
-				if not new_val and has_node("/root/TensionManager"):
-					TensionManager.stop_tension()
-				if new_val:
-					tension_btn.text = "💓 Suspense: ON"
-					apply_material_button_style(tension_btn, Color(0.75, 0.2, 0.3, 0.85))
-				else:
-					tension_btn.text = "💓 Suspense: OFF"
-					apply_material_button_style(tension_btn, Color(0.5, 0.5, 0.5, 0.85))
-		)
-		toggles_container.add_child(tension_btn)
-		_tension_btn = tension_btn
+		# Distance Menu setup
+		var distance_menu_script = load("res://UI/distance_menu.gd")
+		var dist_menu = distance_menu_script.new()
+		dist_menu.name = "DistanceMenu"
+		dist_menu.visible = false
+		dist_menu.inject_shot.connect(_on_shot_injector_inject)
 
-		# Screen Offset Toggle & Slider
-		var so_script = load("res://UI/ScreenOffset/screen_offset_control.gd")
-		var so_ctrl = so_script.new()
-		so_ctrl.name = "ScreenOffsetControl"
-		so_ctrl.style_button = func(btn: Button, is_on: bool):
-			var c = Color(0.2, 0.5, 0.75, 0.85) if is_on else Color(0.5, 0.5, 0.5, 0.85)
-			apply_material_button_style(btn, c)
-		toggles_container.add_child(so_ctrl)
-		_screen_offset_ctrl = so_ctrl
-		if so_ctrl.has_signal("offset_toggled"):
-			so_ctrl.offset_toggled.connect(func(_on):
-				_update_helpers_scroll_layout.call_deferred()
-				call_deferred("_update_hud_focus_neighbors")
-			)
-
-		# Distance Menu Button
+		# Hit Menu (formerly Hit Distance) Button
 		var dist_btn = Button.new()
 		dist_btn.name = "HitDistanceButton"
-		dist_btn.text = "🎯 Hit Distance"
+		dist_btn.text = "🎯 Hit Menu"
 		dist_btn.custom_minimum_size = Vector2(180, 56)
 		dist_btn.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 		apply_material_button_style(dist_btn, Color(0.6, 0.2, 0.6, 0.85))
@@ -434,44 +375,99 @@ func _ready() -> void:
 				_update_hit_distance_button_state()
 				_update_helpers_scroll_layout.call_deferred()
 		)
-		toggles_container.add_child(dist_btn)
-		_dist_btn = dist_btn
-		
-		var distance_menu_script = load("res://UI/distance_menu.gd")
-		var dist_menu = distance_menu_script.new()
-		dist_menu.name = "DistanceMenu"
-		dist_menu.visible = false
 		dist_btn.set_meta("toggle_target", dist_menu)
-		dist_menu.inject_shot.connect(_on_shot_injector_inject)
 		dist_menu.visibility_changed.connect(func():
 			_update_hit_distance_button_state()
 			_update_helpers_scroll_layout.call_deferred()
 		)
+		toggles_container.add_child(dist_btn)
 		toggles_container.add_child(dist_menu)
+		_dist_btn = dist_btn
 		_update_hit_distance_button_visibility()
 
-		# Golfer Cam Toggle Button
-		var golfer_cam_btn = Button.new()
-		golfer_cam_btn.name = "GolferCamButton"
-		golfer_cam_btn.text = "📹 Golfer Cam: OFF"
-		golfer_cam_btn.tooltip_text = "Toggle Golfer Camera (Right-click for Setup)"
-		golfer_cam_btn.custom_minimum_size = Vector2(180, 56)
-		apply_material_button_style(golfer_cam_btn, Color(0.2, 0.45, 0.45, 0.85))
-		golfer_cam_btn.pressed.connect(func():
-			if not is_golfer_camera_enabled():
-				set_golfer_camera_visible(true)
-			elif is_golfer_camera_minimized():
-				restore_golfer_camera()
+		# --- Immersion Menu Submenu ---
+		var imm_menu_btn = Button.new()
+		imm_menu_btn.name = "ImmersionMenuButton"
+		imm_menu_btn.text = "🎭 Immersion Menu"
+		imm_menu_btn.tooltip_text = "Toggle Immersion Settings (Suspense, Announcer, Putting Cam, Screen Offset)"
+		imm_menu_btn.custom_minimum_size = Vector2(180, 56)
+		apply_material_button_style(imm_menu_btn, Color(0.35, 0.45, 0.6, 0.85))
+
+		var imm_menu_container = VBoxContainer.new()
+		imm_menu_container.name = "ImmersionMenuContainer"
+		imm_menu_container.add_theme_constant_override("separation", 10)
+		imm_menu_container.visible = false
+
+		imm_menu_btn.pressed.connect(func():
+			imm_menu_container.visible = not imm_menu_container.visible
+			if imm_menu_container.visible:
+				imm_menu_btn.text = "🎭 Immersion Menu: OPEN"
+				apply_material_button_style(imm_menu_btn, Color(0.45, 0.55, 0.75, 0.9))
 			else:
-				set_golfer_camera_visible(false)
+				imm_menu_btn.text = "🎭 Immersion Menu"
+				apply_material_button_style(imm_menu_btn, Color(0.35, 0.45, 0.6, 0.85))
+			_update_helpers_scroll_layout.call_deferred()
+			call_deferred("_update_hud_focus_neighbors")
 		)
-		golfer_cam_btn.gui_input.connect(func(ev: InputEvent):
-			if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_RIGHT:
-				open_camera_setup(false)
-				get_viewport().set_input_as_handled()
+		toggles_container.add_child(imm_menu_btn)
+		toggles_container.add_child(imm_menu_container)
+		_imm_menu_btn = imm_menu_btn
+		_imm_menu_container = imm_menu_container
+
+		# Suspense Heartbeat & Tunnel Vision Toggle Button
+		var tension_btn = Button.new()
+		tension_btn.name = "SuspenseToggleButton"
+		var is_tension_on = GlobalSettings.range_settings.tension_effects_enabled.value if has_node("/root/GlobalSettings") else true
+		tension_btn.text = "💓 Suspense: ON" if is_tension_on else "💓 Suspense: OFF"
+		tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision in Course Play"
+		tension_btn.custom_minimum_size = Vector2(180, 56)
+		var initial_tension_color = Color(0.75, 0.2, 0.3, 0.85) if is_tension_on else Color(0.5, 0.5, 0.5, 0.85)
+		apply_material_button_style(tension_btn, initial_tension_color)
+		tension_btn.pressed.connect(func():
+			if has_node("/root/GlobalSettings"):
+				var new_val = not GlobalSettings.range_settings.tension_effects_enabled.value
+				GlobalSettings.range_settings.tension_effects_enabled.value = new_val
+				GlobalSettings.save_settings()
+				if not new_val and has_node("/root/TensionManager"):
+					TensionManager.stop_tension()
+				if new_val:
+					tension_btn.text = "💓 Suspense: ON"
+					apply_material_button_style(tension_btn, Color(0.75, 0.2, 0.3, 0.85))
+				else:
+					tension_btn.text = "💓 Suspense: OFF"
+					apply_material_button_style(tension_btn, Color(0.5, 0.5, 0.5, 0.85))
 		)
-		toggles_container.add_child(golfer_cam_btn)
-		_golfer_cam_btn = golfer_cam_btn
+		imm_menu_container.add_child(tension_btn)
+		_tension_btn = tension_btn
+
+		# Announcer Mute/Unmute Toggle Button
+		var announcer_btn = Button.new()
+		announcer_btn.name = "AnnouncerToggleButton"
+		var announcer_node = get_node_or_null("/root/AnnouncerEngine")
+		var is_announcer_on = announcer_node.get("AnnouncerRange") if announcer_node != null else false
+		announcer_btn.text = "🎙 Announcer: ON" if is_announcer_on else "🎙 Announcer: MUTED"
+		announcer_btn.tooltip_text = "Toggle Announcer Commentary"
+		announcer_btn.custom_minimum_size = Vector2(180, 56)
+		var initial_ann_color = Color(0.2, 0.6, 0.3, 0.85) if is_announcer_on else Color(0.5, 0.5, 0.5, 0.85)
+		apply_material_button_style(announcer_btn, initial_ann_color)
+		announcer_btn.pressed.connect(func():
+			var a = get_node_or_null("/root/AnnouncerEngine")
+			if a != null:
+				var current_val = a.get("AnnouncerRange") as bool
+				var new_val = not current_val
+				a.set("AnnouncerRange", new_val)
+				GlobalSettings.save_settings()
+				if new_val:
+					announcer_btn.text = "🎙 Announcer: ON"
+					apply_material_button_style(announcer_btn, Color(0.2, 0.6, 0.3, 0.85))
+					a.call("SpeakHecklesEnabled")
+				else:
+					announcer_btn.text = "🎙 Announcer: MUTED"
+					apply_material_button_style(announcer_btn, Color(0.5, 0.5, 0.5, 0.85))
+					a.call("SpeakHecklesDisabled")
+		)
+		imm_menu_container.add_child(announcer_btn)
+		_announcer_btn = announcer_btn
 
 		# Putting Camera Toggle Button
 		var putting_cam_btn = Button.new()
@@ -493,8 +489,75 @@ func _ready() -> void:
 				open_camera_setup(true)
 				get_viewport().set_input_as_handled()
 		)
-		toggles_container.add_child(putting_cam_btn)
+		imm_menu_container.add_child(putting_cam_btn)
 		_putting_cam_btn = putting_cam_btn
+
+		# Screen Offset Toggle & Slider
+		var so_script = load("res://UI/ScreenOffset/screen_offset_control.gd")
+		var so_ctrl = so_script.new()
+		so_ctrl.name = "ScreenOffsetControl"
+		so_ctrl.style_button = func(btn: Button, is_on: bool):
+			var c = Color(0.2, 0.5, 0.75, 0.85) if is_on else Color(0.5, 0.5, 0.5, 0.85)
+			apply_material_button_style(btn, c)
+		imm_menu_container.add_child(so_ctrl)
+		_screen_offset_ctrl = so_ctrl
+		if so_ctrl.has_signal("offset_toggled"):
+			so_ctrl.offset_toggled.connect(func(_on):
+				_update_helpers_scroll_layout.call_deferred()
+				call_deferred("_update_hud_focus_neighbors")
+			)
+
+		# --- Training Menu Submenu ---
+		var train_menu_btn = Button.new()
+		train_menu_btn.name = "TrainingMenuButton"
+		train_menu_btn.text = "🎯 Training Menu"
+		train_menu_btn.tooltip_text = "Toggle Training Tools (Golfer Cam, Shot Analysis, Track Averages, Rollout)"
+		train_menu_btn.custom_minimum_size = Vector2(180, 56)
+		apply_material_button_style(train_menu_btn, Color(0.25, 0.5, 0.55, 0.85))
+
+		var train_menu_container = VBoxContainer.new()
+		train_menu_container.name = "TrainingMenuContainer"
+		train_menu_container.add_theme_constant_override("separation", 10)
+		train_menu_container.visible = false
+
+		train_menu_btn.pressed.connect(func():
+			train_menu_container.visible = not train_menu_container.visible
+			if train_menu_container.visible:
+				train_menu_btn.text = "🎯 Training Menu: OPEN"
+				apply_material_button_style(train_menu_btn, Color(0.35, 0.6, 0.68, 0.9))
+			else:
+				train_menu_btn.text = "🎯 Training Menu"
+				apply_material_button_style(train_menu_btn, Color(0.25, 0.5, 0.55, 0.85))
+			_update_helpers_scroll_layout.call_deferred()
+			call_deferred("_update_hud_focus_neighbors")
+		)
+		toggles_container.add_child(train_menu_btn)
+		toggles_container.add_child(train_menu_container)
+		_train_menu_btn = train_menu_btn
+		_train_menu_container = train_menu_container
+
+		# Golfer Cam Toggle Button
+		var golfer_cam_btn = Button.new()
+		golfer_cam_btn.name = "GolferCamButton"
+		golfer_cam_btn.text = "📹 Golfer Cam: OFF"
+		golfer_cam_btn.tooltip_text = "Toggle Golfer Camera (Right-click for Setup)"
+		golfer_cam_btn.custom_minimum_size = Vector2(180, 56)
+		apply_material_button_style(golfer_cam_btn, Color(0.2, 0.45, 0.45, 0.85))
+		golfer_cam_btn.pressed.connect(func():
+			if not is_golfer_camera_enabled():
+				set_golfer_camera_visible(true)
+			elif is_golfer_camera_minimized():
+				restore_golfer_camera()
+			else:
+				set_golfer_camera_visible(false)
+		)
+		golfer_cam_btn.gui_input.connect(func(ev: InputEvent):
+			if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_RIGHT:
+				open_camera_setup(false)
+				get_viewport().set_input_as_handled()
+		)
+		train_menu_container.add_child(golfer_cam_btn)
+		_golfer_cam_btn = golfer_cam_btn
 
 		# Shot Analysis Toggle Button
 		var shot_analysis_btn = Button.new()
@@ -517,7 +580,7 @@ func _ready() -> void:
 				shot_analysis_btn.text = "📊 Shot Analysis: OFF"
 				apply_material_button_style(shot_analysis_btn, Color(0.25, 0.35, 0.45, 0.85))
 		)
-		toggles_container.add_child(shot_analysis_btn)
+		train_menu_container.add_child(shot_analysis_btn)
 		_shot_analysis_btn = shot_analysis_btn
 
 		# Shot Traces Overlay Toggle Button (HotKey: T)
@@ -531,23 +594,8 @@ func _ready() -> void:
 		shot_traces_btn.pressed.connect(func():
 			toggle_shot_traces()
 		)
-		toggles_container.add_child(shot_traces_btn)
+		train_menu_container.add_child(shot_traces_btn)
 		_shot_traces_btn = shot_traces_btn
-
-		# Ball Rollout Toggle Button
-		var rollout_btn = Button.new()
-		rollout_btn.name = "RolloutToggleButton"
-		var is_rollout_on = is_rollout_enabled()
-		rollout_btn.text = "🔄 Rollout: ON" if is_rollout_on else "🔄 Rollout: OFF"
-		rollout_btn.tooltip_text = "Toggle Ball Rollout & Bounce"
-		rollout_btn.custom_minimum_size = Vector2(180, 56)
-		var initial_rollout_color = Color(0.2, 0.6, 0.4, 0.85) if is_rollout_on else Color(0.5, 0.5, 0.5, 0.85)
-		apply_material_button_style(rollout_btn, initial_rollout_color)
-		rollout_btn.pressed.connect(func():
-			toggle_rollout()
-		)
-		toggles_container.add_child(rollout_btn)
-		_rollout_btn = rollout_btn
 
 		# Track Club Distances & Averages Toggle Button
 		var track_averages_btn = Button.new()
@@ -576,8 +624,23 @@ func _ready() -> void:
 		)
 		if mp_mgr != null and mp_mgr.has_signal("club_averages_tracking_toggled"):
 			mp_mgr.club_averages_tracking_toggled.connect(func(_enabled): _update_track_averages_btn_state())
-		toggles_container.add_child(track_averages_btn)
+		train_menu_container.add_child(track_averages_btn)
 		_track_averages_btn = track_averages_btn
+
+		# Ball Rollout Toggle Button
+		var rollout_btn = Button.new()
+		rollout_btn.name = "RolloutToggleButton"
+		var is_rollout_on = is_rollout_enabled()
+		rollout_btn.text = "🔄 Rollout: ON" if is_rollout_on else "🔄 Rollout: OFF"
+		rollout_btn.tooltip_text = "Toggle Ball Rollout & Bounce"
+		rollout_btn.custom_minimum_size = Vector2(180, 56)
+		var initial_rollout_color = Color(0.2, 0.6, 0.4, 0.85) if is_rollout_on else Color(0.5, 0.5, 0.5, 0.85)
+		apply_material_button_style(rollout_btn, initial_rollout_color)
+		rollout_btn.pressed.connect(func():
+			toggle_rollout()
+		)
+		train_menu_container.add_child(rollout_btn)
+		_rollout_btn = rollout_btn
 
 		# Stuck Ball Button (Free drop 2 yards closer to nearest fairway)
 		var stuck_ball_btn = Button.new()
@@ -4402,7 +4465,7 @@ func _update_tooltips() -> void:
 	if _prev_shot_btn != null and is_instance_valid(_prev_shot_btn):
 		_prev_shot_btn.tooltip_text = "View analysis and recommendations for your previous shot [%s]" % km.get_action_summary_str("prev_shot_analysis_toggle")
 	if _dist_btn != null and is_instance_valid(_dist_btn):
-		_dist_btn.tooltip_text = "Hit Distance Menu [%s]" % km.get_action_summary_str("distance_menu_toggle")
+		_dist_btn.tooltip_text = "Hit Menu [%s]" % km.get_action_summary_str("distance_menu_toggle")
 	if _shot_traces_btn != null and is_instance_valid(_shot_traces_btn):
 		_shot_traces_btn.tooltip_text = "Toggle Flight Arc Traces & Dispersion View for current club [%s]" % km.get_action_summary_str("shot_traces_toggle")
 	if _rollout_btn != null and is_instance_valid(_rollout_btn):
@@ -4531,10 +4594,10 @@ func _update_hit_distance_button_state() -> void:
 		menu = get_node_or_null("DistanceMenu")
 	var is_open = menu != null and is_instance_valid(menu) and menu.visible
 	if is_open:
-		_dist_btn.text = "🎯 Hit Distance: OPEN"
+		_dist_btn.text = "🎯 Hit Menu: OPEN"
 		apply_material_button_style(_dist_btn, Color(0.75, 0.25, 0.75, 0.9))
 	else:
-		_dist_btn.text = "🎯 Hit Distance"
+		_dist_btn.text = "🎯 Hit Menu"
 		apply_material_button_style(_dist_btn, Color(0.6, 0.2, 0.6, 0.85))
 
 
@@ -4718,8 +4781,9 @@ func _update_hud_focus_neighbors() -> void:
 		if _home_btn != null and is_instance_valid(_home_btn):
 			_hide_helpers_btn.focus_neighbor_right = _hide_helpers_btn.get_path_to(_home_btn)
 		
-		if helpers_open and _announcer_btn != null and is_instance_valid(_announcer_btn):
-			_hide_helpers_btn.focus_neighbor_bottom = _hide_helpers_btn.get_path_to(_announcer_btn)
+		var first_helper: Control = _imm_menu_btn if (_imm_menu_btn != null and is_instance_valid(_imm_menu_btn) and _imm_menu_btn.visible) else _announcer_btn
+		if helpers_open and first_helper != null and is_instance_valid(first_helper):
+			_hide_helpers_btn.focus_neighbor_bottom = _hide_helpers_btn.get_path_to(first_helper)
 		elif club_btn != null and is_instance_valid(club_btn) and club_btn.visible:
 			_hide_helpers_btn.focus_neighbor_bottom = _hide_helpers_btn.get_path_to(club_btn)
 
@@ -4729,8 +4793,9 @@ func _update_hud_focus_neighbors() -> void:
 			club_btn.focus_neighbor_top = club_btn.get_path_to(_home_btn)
 		elif _settings_btn != null and is_instance_valid(_settings_btn):
 			club_btn.focus_neighbor_top = club_btn.get_path_to(_settings_btn)
-		if helpers_open and _announcer_btn != null and is_instance_valid(_announcer_btn):
-			club_btn.focus_neighbor_bottom = club_btn.get_path_to(_announcer_btn)
+		var first_helper_c: Control = _imm_menu_btn if (_imm_menu_btn != null and is_instance_valid(_imm_menu_btn) and _imm_menu_btn.visible) else _announcer_btn
+		if helpers_open and first_helper_c != null and is_instance_valid(first_helper_c):
+			club_btn.focus_neighbor_bottom = club_btn.get_path_to(first_helper_c)
 		elif _map_btn != null and is_instance_valid(_map_btn):
 			club_btn.focus_neighbor_bottom = club_btn.get_path_to(_map_btn)
 
@@ -4745,6 +4810,13 @@ func _update_hud_focus_neighbors() -> void:
 				elif ch is ScreenOffsetControl and ch.visible:
 					for foc in ch.get_focusables():
 						helper_controls.append(foc)
+				elif ch is VBoxContainer and ch.visible:
+					for sub_ch in ch.get_children():
+						if sub_ch is Button and sub_ch.visible:
+							helper_controls.append(sub_ch)
+						elif sub_ch is ScreenOffsetControl and sub_ch.visible:
+							for foc in sub_ch.get_focusables():
+								helper_controls.append(foc)
 		for i in range(helper_controls.size()):
 			var h_ctrl = helper_controls[i]
 			if i == 0:

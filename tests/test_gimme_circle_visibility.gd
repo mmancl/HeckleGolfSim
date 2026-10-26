@@ -17,6 +17,7 @@ func _initialize() -> void:
 	assert(mat != null, "Material must not be null")
 	assert(mat.render_priority == 2, "render_priority must be set")
 	assert(mat.cull_mode == BaseMaterial3D.CULL_DISABLED, "cull_mode must be CULL_DISABLED")
+	assert(mat.no_depth_test == true, "no_depth_test must be true so gimme rings never render hidden under ground")
 	print("Test 1 PASS: Gimme ring material offset and render properties verified")
 	
 	# Verify _create_gimme_ring_mesh generates valid geometry conforming to elevation

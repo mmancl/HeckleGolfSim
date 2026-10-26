@@ -41,7 +41,11 @@ var _scorecard_countdown_time_left: float = 0.0
 var _scorecard_countdown_active: bool = false
 var _scorecard_countdown_paused: bool = false
 var _scorecard_view_tab: String = "All"
+var _scorecard_selected_hole_index: int = -1
 var _last_scorecard_action_type: String = "toggle"
+var _scorecard_add_player_section: PanelContainer = null
+var _scorecard_settings_mode: bool = false
+var _scorecard_settings_btn: Button = null
 var _tee_icon_cache: Dictionary = {}
 @onready var hud_manage_players = Panel.new()
 @onready var hud_overview = Panel.new()
@@ -86,6 +90,10 @@ var grid_btn: Button = null
 var map_btn: Button = null
 var mulligan_btn: Button = null
 var forfeit_btn: Button = null
+var imm_menu_btn: Button = null
+var imm_menu_container: VBoxContainer = null
+var train_menu_btn: Button = null
+var train_menu_container: VBoxContainer = null
 var golfer_cam_btn: Button = null
 var putting_cam_btn: Button = null
 var announcer_btn: Button = null
@@ -1180,76 +1188,6 @@ func _setup_hud() -> void:
 	toggles_scroll.resized.connect(func(): _update_helpers_scroll_layout.call_deferred())
 	toggles_container.resized.connect(func(): _update_helpers_scroll_layout.call_deferred())
 
-	# Announcer Mute/Unmute Toggle Button
-	announcer_btn = Button.new()
-	announcer_btn.name = "AnnouncerToggleButton"
-	var announcer_node = get_node_or_null("/root/AnnouncerEngine")
-	var is_announcer_on = announcer_node.get("AnnouncerCoursePlay") if announcer_node != null else true
-	announcer_btn.text = "🎙 Announcer: ON" if is_announcer_on else "🎙 Announcer: MUTED"
-	announcer_btn.tooltip_text = "Toggle Announcer Commentary"
-	announcer_btn.custom_minimum_size = Vector2(180, 56)
-	var initial_ann_color = Color(0.2, 0.6, 0.3, 0.85) if is_announcer_on else Color(0.5, 0.5, 0.5, 0.85)
-	apply_material_button_style(announcer_btn, initial_ann_color)
-	announcer_btn.pressed.connect(func():
-		var a = get_node_or_null("/root/AnnouncerEngine")
-		if a != null:
-			var current_val = a.get("AnnouncerCoursePlay") as bool
-			var new_val = not current_val
-			a.set("AnnouncerCoursePlay", new_val)
-			GlobalSettings.save_settings()
-			if new_val:
-				announcer_btn.text = "🎙 Announcer: ON"
-				apply_material_button_style(announcer_btn, Color(0.2, 0.6, 0.3, 0.85))
-				a.call("SpeakHecklesEnabled")
-			else:
-				announcer_btn.text = "🎙 Announcer: MUTED"
-				apply_material_button_style(announcer_btn, Color(0.5, 0.5, 0.5, 0.85))
-				a.call("SpeakHecklesDisabled")
-	)
-	toggles_container.add_child(announcer_btn)
-
-	# Suspense Heartbeat & Tunnel Vision Toggle Button
-	tension_btn = Button.new()
-	tension_btn.name = "SuspenseToggleButton"
-	var is_tension_on = GlobalSettings.range_settings.tension_effects_enabled.value if has_node("/root/GlobalSettings") else true
-	tension_btn.text = "💓 Suspense: ON" if is_tension_on else "💓 Suspense: OFF"
-	tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision in Course Play"
-	tension_btn.custom_minimum_size = Vector2(180, 56)
-	var initial_tension_color = Color(0.75, 0.2, 0.3, 0.85) if is_tension_on else Color(0.5, 0.5, 0.5, 0.85)
-	apply_material_button_style(tension_btn, initial_tension_color)
-	tension_btn.pressed.connect(func():
-		if has_node("/root/GlobalSettings"):
-			var new_val = not GlobalSettings.range_settings.tension_effects_enabled.value
-			GlobalSettings.range_settings.tension_effects_enabled.value = new_val
-			GlobalSettings.save_settings()
-			if not new_val and has_node("/root/TensionManager"):
-				TensionManager.stop_tension(true, true)
-			if new_val:
-				tension_btn.text = "💓 Suspense: ON"
-				apply_material_button_style(tension_btn, Color(0.75, 0.2, 0.3, 0.85))
-			else:
-				tension_btn.text = "💓 Suspense: OFF"
-				apply_material_button_style(tension_btn, Color(0.5, 0.5, 0.5, 0.85))
-	)
-	toggles_container.add_child(tension_btn)
-
-	# Screen Offset Toggle & Dual Sliders (General & Putter)
-	var so_script = load("res://UI/ScreenOffset/screen_offset_control.gd")
-	var so_ctrl = so_script.new()
-	so_ctrl.name = "ScreenOffsetControl"
-	so_ctrl.is_course_play = true
-	so_ctrl.show_putter_slider = true
-	so_ctrl.style_button = func(btn: Button, is_on: bool):
-		var c = Color(0.2, 0.5, 0.75, 0.85) if is_on else Color(0.5, 0.5, 0.5, 0.85)
-		apply_material_button_style(btn, c)
-	toggles_container.add_child(so_ctrl)
-	_screen_offset_ctrl = so_ctrl
-	if so_ctrl.has_signal("offset_toggled"):
-		so_ctrl.offset_toggled.connect(func(_on):
-			_update_helpers_scroll_layout.call_deferred()
-			call_deferred("_update_hud_focus_neighbors")
-		)
-
 	# Distance Menu setup
 	var distance_menu_script = load("res://UI/distance_menu.gd")
 	var dist_menu = distance_menu_script.new()
@@ -1260,10 +1198,10 @@ func _setup_hud() -> void:
 			course_instance.call("_on_range_ui_hit_shot", data)
 	)
 	
-	# Distance Menu Button
+	# Hit Menu (formerly Hit Distance) Button
 	dist_btn = Button.new()
 	dist_btn.name = "HitDistanceButton"
-	dist_btn.text = "🎯 Hit Distance"
+	dist_btn.text = "🎯 Hit Menu"
 	dist_btn.custom_minimum_size = Vector2(180, 56)
 	dist_btn.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
 	apply_material_button_style(dist_btn, Color(0.6, 0.2, 0.6, 0.85))
@@ -1294,36 +1232,85 @@ func _setup_hud() -> void:
 	toggles_container.add_child(dist_menu)
 	_update_hit_distance_button_visibility()
 
-	# Golfer Cam Toggle Button
-	golfer_cam_btn = Button.new()
-	golfer_cam_btn.name = "GolferCamButton"
-	golfer_cam_btn.text = "📹 Golfer Cam: OFF"
-	golfer_cam_btn.tooltip_text = "Toggle Golfer Camera (Right-click for Setup)"
-	golfer_cam_btn.custom_minimum_size = Vector2(180, 56)
-	apply_material_button_style(golfer_cam_btn, Color(0.2, 0.45, 0.45, 0.85))
-	golfer_cam_btn.pressed.connect(func():
-		if range_ui != null:
-			var enabled = range_ui.call("is_golfer_camera_enabled") if range_ui.has_method("is_golfer_camera_enabled") else false
-			var minimized = range_ui.call("is_golfer_camera_minimized") if range_ui.has_method("is_golfer_camera_minimized") else false
-			if not enabled:
-				range_ui.call("set_golfer_camera_visible", true)
-			elif minimized:
-				if range_ui.has_method("restore_golfer_camera"):
-					range_ui.call("restore_golfer_camera")
-				else:
-					range_ui.call("set_golfer_camera_visible", true)
+	# --- Immersion Menu Submenu ---
+	imm_menu_btn = Button.new()
+	imm_menu_btn.name = "ImmersionMenuButton"
+	imm_menu_btn.text = "🎭 Immersion Menu"
+	imm_menu_btn.tooltip_text = "Toggle Immersion Settings (Suspense, Announcer, Putting Cam, Screen Offset)"
+	imm_menu_btn.custom_minimum_size = Vector2(180, 56)
+	apply_material_button_style(imm_menu_btn, Color(0.35, 0.45, 0.6, 0.85))
+
+	imm_menu_container = VBoxContainer.new()
+	imm_menu_container.name = "ImmersionMenuContainer"
+	imm_menu_container.add_theme_constant_override("separation", 10)
+	imm_menu_container.visible = false
+
+	imm_menu_btn.pressed.connect(func():
+		imm_menu_container.visible = not imm_menu_container.visible
+		if imm_menu_container.visible:
+			imm_menu_btn.text = "🎭 Immersion Menu: OPEN"
+			apply_material_button_style(imm_menu_btn, Color(0.45, 0.55, 0.75, 0.9))
+		else:
+			imm_menu_btn.text = "🎭 Immersion Menu"
+			apply_material_button_style(imm_menu_btn, Color(0.35, 0.45, 0.6, 0.85))
+		_update_helpers_scroll_layout.call_deferred()
+		call_deferred("_update_hud_focus_neighbors")
+	)
+	toggles_container.add_child(imm_menu_btn)
+	toggles_container.add_child(imm_menu_container)
+
+	# Suspense Heartbeat & Tunnel Vision Toggle Button
+	tension_btn = Button.new()
+	tension_btn.name = "SuspenseToggleButton"
+	var is_tension_on = GlobalSettings.range_settings.tension_effects_enabled.value if has_node("/root/GlobalSettings") else true
+	tension_btn.text = "💓 Suspense: ON" if is_tension_on else "💓 Suspense: OFF"
+	tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision in Course Play"
+	tension_btn.custom_minimum_size = Vector2(180, 56)
+	var initial_tension_color = Color(0.75, 0.2, 0.3, 0.85) if is_tension_on else Color(0.5, 0.5, 0.5, 0.85)
+	apply_material_button_style(tension_btn, initial_tension_color)
+	tension_btn.pressed.connect(func():
+		if has_node("/root/GlobalSettings"):
+			var new_val = not GlobalSettings.range_settings.tension_effects_enabled.value
+			GlobalSettings.range_settings.tension_effects_enabled.value = new_val
+			GlobalSettings.save_settings()
+			if not new_val and has_node("/root/TensionManager"):
+				TensionManager.stop_tension(true, true)
+			if new_val:
+				tension_btn.text = "💓 Suspense: ON"
+				apply_material_button_style(tension_btn, Color(0.75, 0.2, 0.3, 0.85))
 			else:
-				range_ui.call("set_golfer_camera_visible", false)
-			_update_course_golfer_cam_btn_state()
+				tension_btn.text = "💓 Suspense: OFF"
+				apply_material_button_style(tension_btn, Color(0.5, 0.5, 0.5, 0.85))
 	)
-	golfer_cam_btn.gui_input.connect(func(ev: InputEvent):
-		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_RIGHT:
-			if range_ui != null and range_ui.has_method("open_camera_setup"):
-				range_ui.call("open_camera_setup", false)
-				get_viewport().set_input_as_handled()
+	imm_menu_container.add_child(tension_btn)
+
+	# Announcer Mute/Unmute Toggle Button
+	announcer_btn = Button.new()
+	announcer_btn.name = "AnnouncerToggleButton"
+	var announcer_node = get_node_or_null("/root/AnnouncerEngine")
+	var is_announcer_on = announcer_node.get("AnnouncerCoursePlay") if announcer_node != null else true
+	announcer_btn.text = "🎙 Announcer: ON" if is_announcer_on else "🎙 Announcer: MUTED"
+	announcer_btn.tooltip_text = "Toggle Announcer Commentary"
+	announcer_btn.custom_minimum_size = Vector2(180, 56)
+	var initial_ann_color = Color(0.2, 0.6, 0.3, 0.85) if is_announcer_on else Color(0.5, 0.5, 0.5, 0.85)
+	apply_material_button_style(announcer_btn, initial_ann_color)
+	announcer_btn.pressed.connect(func():
+		var a = get_node_or_null("/root/AnnouncerEngine")
+		if a != null:
+			var current_val = a.get("AnnouncerCoursePlay") as bool
+			var new_val = not current_val
+			a.set("AnnouncerCoursePlay", new_val)
+			GlobalSettings.save_settings()
+			if new_val:
+				announcer_btn.text = "🎙 Announcer: ON"
+				apply_material_button_style(announcer_btn, Color(0.2, 0.6, 0.3, 0.85))
+				a.call("SpeakHecklesEnabled")
+			else:
+				announcer_btn.text = "🎙 Announcer: MUTED"
+				apply_material_button_style(announcer_btn, Color(0.5, 0.5, 0.5, 0.85))
+				a.call("SpeakHecklesDisabled")
 	)
-	toggles_container.add_child(golfer_cam_btn)
-	_update_course_golfer_cam_btn_state()
+	imm_menu_container.add_child(announcer_btn)
 
 	# Putting Cam Toggle Button
 	putting_cam_btn = Button.new()
@@ -1353,8 +1340,83 @@ func _setup_hud() -> void:
 				range_ui.call("open_camera_setup", true)
 				get_viewport().set_input_as_handled()
 	)
-	toggles_container.add_child(putting_cam_btn)
+	imm_menu_container.add_child(putting_cam_btn)
 	_update_course_putting_cam_btn_state()
+
+	# Screen Offset Toggle & Dual Sliders (General & Putter)
+	var so_script = load("res://UI/ScreenOffset/screen_offset_control.gd")
+	var so_ctrl = so_script.new()
+	so_ctrl.name = "ScreenOffsetControl"
+	so_ctrl.is_course_play = true
+	so_ctrl.show_putter_slider = true
+	so_ctrl.style_button = func(btn: Button, is_on: bool):
+		var c = Color(0.2, 0.5, 0.75, 0.85) if is_on else Color(0.5, 0.5, 0.5, 0.85)
+		apply_material_button_style(btn, c)
+	imm_menu_container.add_child(so_ctrl)
+	_screen_offset_ctrl = so_ctrl
+	if so_ctrl.has_signal("offset_toggled"):
+		so_ctrl.offset_toggled.connect(func(_on):
+			_update_helpers_scroll_layout.call_deferred()
+			call_deferred("_update_hud_focus_neighbors")
+		)
+
+	# --- Training Menu Submenu ---
+	train_menu_btn = Button.new()
+	train_menu_btn.name = "TrainingMenuButton"
+	train_menu_btn.text = "🎯 Training Menu"
+	train_menu_btn.tooltip_text = "Toggle Training Tools (Golfer Cam, Shot Analysis, Track Averages, Rollout)"
+	train_menu_btn.custom_minimum_size = Vector2(180, 56)
+	apply_material_button_style(train_menu_btn, Color(0.25, 0.5, 0.55, 0.85))
+
+	train_menu_container = VBoxContainer.new()
+	train_menu_container.name = "TrainingMenuContainer"
+	train_menu_container.add_theme_constant_override("separation", 10)
+	train_menu_container.visible = false
+
+	train_menu_btn.pressed.connect(func():
+		train_menu_container.visible = not train_menu_container.visible
+		if train_menu_container.visible:
+			train_menu_btn.text = "🎯 Training Menu: OPEN"
+			apply_material_button_style(train_menu_btn, Color(0.35, 0.6, 0.68, 0.9))
+		else:
+			train_menu_btn.text = "🎯 Training Menu"
+			apply_material_button_style(train_menu_btn, Color(0.25, 0.5, 0.55, 0.85))
+		_update_helpers_scroll_layout.call_deferred()
+		call_deferred("_update_hud_focus_neighbors")
+	)
+	toggles_container.add_child(train_menu_btn)
+	toggles_container.add_child(train_menu_container)
+
+	# Golfer Cam Toggle Button
+	golfer_cam_btn = Button.new()
+	golfer_cam_btn.name = "GolferCamButton"
+	golfer_cam_btn.text = "📹 Golfer Cam: OFF"
+	golfer_cam_btn.tooltip_text = "Toggle Golfer Camera (Right-click for Setup)"
+	golfer_cam_btn.custom_minimum_size = Vector2(180, 56)
+	apply_material_button_style(golfer_cam_btn, Color(0.2, 0.45, 0.45, 0.85))
+	golfer_cam_btn.pressed.connect(func():
+		if range_ui != null:
+			var enabled = range_ui.call("is_golfer_camera_enabled") if range_ui.has_method("is_golfer_camera_enabled") else false
+			var minimized = range_ui.call("is_golfer_camera_minimized") if range_ui.has_method("is_golfer_camera_minimized") else false
+			if not enabled:
+				range_ui.call("set_golfer_camera_visible", true)
+			elif minimized:
+				if range_ui.has_method("restore_golfer_camera"):
+					range_ui.call("restore_golfer_camera")
+				else:
+					range_ui.call("set_golfer_camera_visible", true)
+			else:
+				range_ui.call("set_golfer_camera_visible", false)
+			_update_course_golfer_cam_btn_state()
+	)
+	golfer_cam_btn.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_RIGHT:
+			if range_ui != null and range_ui.has_method("open_camera_setup"):
+				range_ui.call("open_camera_setup", false)
+				get_viewport().set_input_as_handled()
+	)
+	train_menu_container.add_child(golfer_cam_btn)
+	_update_course_golfer_cam_btn_state()
 
 	# Shot Analysis Toggle Button
 	var shot_analysis_btn = Button.new()
@@ -1379,32 +1441,7 @@ func _setup_hud() -> void:
 				shot_analysis_btn.text = "📊 Shot Analysis: OFF"
 				apply_material_button_style(shot_analysis_btn, Color(0.25, 0.35, 0.45, 0.85))
 	)
-	toggles_container.add_child(shot_analysis_btn)
-
-	# Ball Rollout Toggle Button
-	rollout_btn = Button.new()
-	rollout_btn.name = "RolloutToggleButton"
-	var is_rollout_on = GlobalSettings.range_settings.ball_rollout_enabled.value if has_node("/root/GlobalSettings") else true
-	rollout_btn.text = "🔄 Rollout: ON" if is_rollout_on else "🔄 Rollout: OFF"
-	rollout_btn.tooltip_text = "Toggle Ball Rollout & Bounce"
-	rollout_btn.custom_minimum_size = Vector2(180, 56)
-	var initial_rollout_color = Color(0.2, 0.6, 0.4, 0.85) if is_rollout_on else Color(0.5, 0.5, 0.5, 0.85)
-	apply_material_button_style(rollout_btn, initial_rollout_color)
-	rollout_btn.pressed.connect(func():
-		if has_node("/root/GlobalSettings"):
-			var new_val = not GlobalSettings.range_settings.ball_rollout_enabled.value
-			GlobalSettings.range_settings.ball_rollout_enabled.value = new_val
-			GlobalSettings.save_settings()
-			if range_ui != null and range_ui.has_method("set_rollout_enabled"):
-				range_ui.call("set_rollout_enabled", new_val)
-			if new_val:
-				rollout_btn.text = "🔄 Rollout: ON"
-				apply_material_button_style(rollout_btn, Color(0.2, 0.6, 0.4, 0.85))
-			else:
-				rollout_btn.text = "🔄 Rollout: OFF"
-				apply_material_button_style(rollout_btn, Color(0.5, 0.5, 0.5, 0.85))
-	)
-	toggles_container.add_child(rollout_btn)
+	train_menu_container.add_child(shot_analysis_btn)
 
 	# Track Club Distances & Averages Toggle Button
 	track_averages_btn = Button.new()
@@ -1433,7 +1470,32 @@ func _setup_hud() -> void:
 	)
 	if mp_mgr != null and mp_mgr.has_signal("club_averages_tracking_toggled"):
 		mp_mgr.club_averages_tracking_toggled.connect(func(_enabled): _update_track_averages_btn_state())
-	toggles_container.add_child(track_averages_btn)
+	train_menu_container.add_child(track_averages_btn)
+
+	# Ball Rollout Toggle Button
+	rollout_btn = Button.new()
+	rollout_btn.name = "RolloutToggleButton"
+	var is_rollout_on = GlobalSettings.range_settings.ball_rollout_enabled.value if has_node("/root/GlobalSettings") else true
+	rollout_btn.text = "🔄 Rollout: ON" if is_rollout_on else "🔄 Rollout: OFF"
+	rollout_btn.tooltip_text = "Toggle Ball Rollout & Bounce"
+	rollout_btn.custom_minimum_size = Vector2(180, 56)
+	var initial_rollout_color = Color(0.2, 0.6, 0.4, 0.85) if is_rollout_on else Color(0.5, 0.5, 0.5, 0.85)
+	apply_material_button_style(rollout_btn, initial_rollout_color)
+	rollout_btn.pressed.connect(func():
+		if has_node("/root/GlobalSettings"):
+			var new_val = not GlobalSettings.range_settings.ball_rollout_enabled.value
+			GlobalSettings.range_settings.ball_rollout_enabled.value = new_val
+			GlobalSettings.save_settings()
+			if range_ui != null and range_ui.has_method("set_rollout_enabled"):
+				range_ui.call("set_rollout_enabled", new_val)
+			if new_val:
+				rollout_btn.text = "🔄 Rollout: ON"
+				apply_material_button_style(rollout_btn, Color(0.2, 0.6, 0.4, 0.85))
+			else:
+				rollout_btn.text = "🔄 Rollout: OFF"
+				apply_material_button_style(rollout_btn, Color(0.5, 0.5, 0.5, 0.85))
+	)
+	train_menu_container.add_child(rollout_btn)
 
 	# Stuck Ball Relief Button
 	var s_btn = Button.new()
@@ -1460,15 +1522,6 @@ func _setup_hud() -> void:
 		apply_material_button_style(scorecard_btn, Color(0.72, 0.56, 0.24, 0.85)) # Gold color
 		scorecard_btn.pressed.connect(_on_scorecard_toggle_pressed)
 		toggles_container.add_child(scorecard_btn)
-
-		# Manage Players Toggle Button
-		var players_btn = Button.new()
-		players_btn.name = "ManagePlayersButton"
-		players_btn.text = "👥 Players"
-		players_btn.custom_minimum_size = Vector2(180, 56)
-		apply_material_button_style(players_btn, Color(0.25, 0.55, 0.35, 0.85)) # Green-ish
-		players_btn.pressed.connect(_on_manage_players_toggle_pressed)
-		toggles_container.add_child(players_btn)
 
 	# If in practice mode, create practice buttons (initially hidden, shown only in map view)
 	if MultiplayerManager.practice_mode_active and not GlobalSettings.is_chipping_minigame:
@@ -1520,10 +1573,10 @@ func _setup_hud() -> void:
 		toggles_container.add_child(next_btn)
 		
 		# Move them to the top of toggles_container so they are ordered nicely
-		var top_idx = announcer_btn.get_index()
-		toggles_container.move_child(place_btn, top_idx + 1)
-		toggles_container.move_child(prev_btn, top_idx + 2)
-		toggles_container.move_child(next_btn, top_idx + 3)
+		var top_idx = imm_menu_btn.get_index() if imm_menu_btn != null and is_instance_valid(imm_menu_btn) else 0
+		toggles_container.move_child(place_btn, top_idx)
+		toggles_container.move_child(prev_btn, top_idx + 1)
+		toggles_container.move_child(next_btn, top_idx + 2)
 	
 	# Reparent ClubSelector to canvas directly underneath SettingsButton and HideHelpersButton
 	if range_ui != null:
@@ -1969,7 +2022,14 @@ func _setup_hud() -> void:
 	var vbox = VBoxContainer.new()
 	vbox.name = "VBoxContainer"
 	vbox.add_theme_constant_override("separation", 14)
-	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vbox.anchor_left = 0.0
+	vbox.anchor_top = 0.0
+	vbox.anchor_right = 1.0
+	vbox.anchor_bottom = 1.0
+	vbox.offset_left = 16
+	vbox.offset_top = 16
+	vbox.offset_right = -16
+	vbox.offset_bottom = -16
 	hud_scorecard.add_child(vbox)
 	
 	var sc_title = Label.new()
@@ -1982,12 +2042,32 @@ func _setup_hud() -> void:
 	sc_title.add_theme_constant_override("outline_size", 4)
 	vbox.add_child(sc_title)
 	
+	# Scorecard Settings Cog Button (Top Right)
+	_scorecard_settings_btn = Button.new()
+	_scorecard_settings_btn.name = "ScorecardSettingsBtn"
+	_scorecard_settings_btn.text = "⚙️"
+	_scorecard_settings_btn.tooltip_text = "Toggle Player Settings"
+	_scorecard_settings_btn.custom_minimum_size = Vector2(48, 48)
+	_scorecard_settings_btn.anchor_left = 1.0
+	_scorecard_settings_btn.anchor_right = 1.0
+	_scorecard_settings_btn.anchor_top = 0.0
+	_scorecard_settings_btn.anchor_bottom = 0.0
+	_scorecard_settings_btn.offset_left = -68
+	_scorecard_settings_btn.offset_top = 16
+	_scorecard_settings_btn.offset_right = -20
+	_scorecard_settings_btn.offset_bottom = 64
+	_scorecard_settings_btn.focus_mode = Control.FOCUS_ALL
+	_scorecard_settings_btn.add_theme_font_size_override("font_size", 20)
+	_update_scorecard_settings_button_style()
+	_scorecard_settings_btn.pressed.connect(_on_scorecard_settings_toggled)
+	hud_scorecard.add_child(_scorecard_settings_btn)
+	
 	var scroll = ScrollContainer.new()
 	scroll.name = "ScorecardScroll"
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	ThemeManager.apply_scroll_container_style(scroll, 28)
 	vbox.add_child(scroll)
 	
@@ -2003,6 +2083,122 @@ func _setup_hud() -> void:
 	scroll.add_child(_scorecard_content)
 	_scorecard_content.add_child(scorecard_grid)
 
+	# Add Player section within scorecard
+	_scorecard_add_player_section = PanelContainer.new()
+	_scorecard_add_player_section.name = "ScorecardAddPlayerSection"
+	_scorecard_add_player_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scorecard_add_player_section.visible = false
+	
+	var sc_add_style = StyleBoxFlat.new()
+	sc_add_style.bg_color = Color(0.08, 0.11, 0.16, 0.95)
+	sc_add_style.border_width_left = 1
+	sc_add_style.border_width_top = 1
+	sc_add_style.border_width_right = 1
+	sc_add_style.border_width_bottom = 1
+	sc_add_style.border_color = Color(0.25, 0.55, 0.35, 0.7) # Green-ish accent
+	sc_add_style.corner_radius_top_left = 8
+	sc_add_style.corner_radius_top_right = 8
+	sc_add_style.corner_radius_bottom_left = 8
+	sc_add_style.corner_radius_bottom_right = 8
+	sc_add_style.content_margin_left = 14
+	sc_add_style.content_margin_right = 14
+	sc_add_style.content_margin_top = 8
+	sc_add_style.content_margin_bottom = 8
+	_scorecard_add_player_section.add_theme_stylebox_override("panel", sc_add_style)
+	
+	var sc_add_row = HBoxContainer.new()
+	sc_add_row.name = "AddRow"
+	sc_add_row.add_theme_constant_override("separation", 10)
+	sc_add_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scorecard_add_player_section.add_child(sc_add_row)
+	
+	var sc_add_title = Label.new()
+	sc_add_title.name = "TitleLabel"
+	sc_add_title.text = "➕ Add Player:"
+	sc_add_title.add_theme_font_size_override("font_size", 14)
+	sc_add_title.add_theme_color_override("font_color", Color(0.9, 0.92, 1.0))
+	sc_add_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	sc_add_row.add_child(sc_add_title)
+	
+	var sc_player_select_opt = OptionButton.new()
+	sc_player_select_opt.name = "PlayerSelectOpt"
+	sc_player_select_opt.custom_minimum_size = Vector2(170, 36)
+	sc_player_select_opt.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	sc_player_select_opt.focus_mode = Control.FOCUS_ALL
+	var sc_sel_popup = sc_player_select_opt.get_popup()
+	if sc_sel_popup != null:
+		ThemeManager.style_popup_menu(sc_sel_popup, 14)
+	sc_add_row.add_child(sc_player_select_opt)
+	
+	var sc_name_input = LineEdit.new()
+	sc_name_input.name = "NameInput"
+	sc_name_input.placeholder_text = "Golfer Name"
+	sc_name_input.custom_minimum_size = Vector2(160, 36)
+	sc_name_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sc_name_input.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	sc_name_input.focus_mode = Control.FOCUS_ALL
+	sc_add_row.add_child(sc_name_input)
+	
+	var sc_tee_opt = OptionButton.new()
+	sc_tee_opt.name = "TeeOpt"
+	sc_tee_opt.custom_minimum_size = Vector2(115, 36)
+	sc_tee_opt.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	sc_tee_opt.focus_mode = Control.FOCUS_ALL
+	var sc_tee_popup = sc_tee_opt.get_popup()
+	if sc_tee_popup != null:
+		ThemeManager.style_popup_menu(sc_tee_popup, 14)
+	sc_add_row.add_child(sc_tee_opt)
+	
+	var sc_add_btn = Button.new()
+	sc_add_btn.name = "AddBtn"
+	sc_add_btn.text = "Add Player"
+	sc_add_btn.custom_minimum_size = Vector2(120, 36)
+	sc_add_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	sc_add_btn.focus_mode = Control.FOCUS_ALL
+	apply_material_button_style(sc_add_btn, Color(0.24, 0.46, 0.72, 0.85))
+	sc_add_row.add_child(sc_add_btn)
+	
+	sc_player_select_opt.item_selected.connect(func(index):
+		if index == 0:
+			sc_name_input.visible = true
+			sc_name_input.call_deferred("grab_focus")
+		else:
+			sc_name_input.visible = false
+			var p_name = sc_player_select_opt.get_item_text(index)
+			var pref_tee = MultiplayerManager.get_player_preferred_tee(p_name)
+			if not pref_tee.is_empty():
+				for t_i in range(sc_tee_opt.item_count):
+					if sc_tee_opt.get_item_text(t_i).to_lower() == pref_tee.to_lower():
+						sc_tee_opt.selected = t_i
+						break
+	)
+	
+	sc_add_btn.pressed.connect(func():
+		if _scorecard_countdown_active and not _scorecard_countdown_paused:
+			_on_scorecard_pause_toggled()
+		var p_name = ""
+		if sc_player_select_opt.selected == 0:
+			p_name = sc_name_input.text.strip_edges()
+			if p_name.is_empty():
+				p_name = "Player " + str(MultiplayerManager.players.size() + 1)
+		else:
+			p_name = sc_player_select_opt.get_item_text(sc_player_select_opt.selected)
+			
+		var tee_color = sc_tee_opt.get_item_text(sc_tee_opt.selected) if sc_tee_opt.selected >= 0 and sc_tee_opt.item_count > 0 else "Blue"
+		sc_name_input.clear()
+		
+		if MultiplayerManager.current_hole_index > 0:
+			_show_add_player_dialog(p_name, tee_color)
+		else:
+			MultiplayerManager.add_new_player_with_mode(p_name, tee_color, "current_hole")
+			_refresh_scorecard_add_player_section()
+			_populate_scorecard(_last_scorecard_action_type)
+			_update_distance_queue()
+			sc_player_select_opt.call_deferred("grab_focus")
+	)
+	
+	_scorecard_content.add_child(_scorecard_add_player_section)
+	
 	_hole_shot_summary = VBoxContainer.new()
 	_hole_shot_summary.name = "HoleShotSummary"
 	_hole_shot_summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2381,8 +2577,9 @@ func _update_hud_focus_neighbors() -> void:
 			hide_helpers_btn.focus_neighbor_right = hide_helpers_btn.get_path_to(home_btn)
 		
 		var helpers_open = (toggles_scroll != null and is_instance_valid(toggles_scroll) and toggles_scroll.visible)
-		if helpers_open and announcer_btn != null and is_instance_valid(announcer_btn):
-			hide_helpers_btn.focus_neighbor_bottom = hide_helpers_btn.get_path_to(announcer_btn)
+		var first_helper: Control = imm_menu_btn if (imm_menu_btn != null and is_instance_valid(imm_menu_btn) and imm_menu_btn.visible) else announcer_btn
+		if helpers_open and first_helper != null and is_instance_valid(first_helper):
+			hide_helpers_btn.focus_neighbor_bottom = hide_helpers_btn.get_path_to(first_helper)
 		elif add_remove_btn != null and is_instance_valid(add_remove_btn):
 			hide_helpers_btn.focus_neighbor_bottom = hide_helpers_btn.get_path_to(add_remove_btn)
 
@@ -2397,6 +2594,13 @@ func _update_hud_focus_neighbors() -> void:
 				elif ch is ScreenOffsetControl and ch.visible:
 					for foc in ch.get_focusables():
 						helper_controls.append(foc)
+				elif ch is VBoxContainer and ch.visible:
+					for sub_ch in ch.get_children():
+						if sub_ch is Button and sub_ch.visible:
+							helper_controls.append(sub_ch)
+						elif sub_ch is ScreenOffsetControl and sub_ch.visible:
+							for foc in sub_ch.get_focusables():
+								helper_controls.append(foc)
 		for i in range(helper_controls.size()):
 			var h_ctrl = helper_controls[i]
 			if i == 0 and hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
@@ -2721,6 +2925,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			if hud_scorecard != null and is_instance_valid(hud_scorecard) and hud_scorecard.visible:
 				_stop_scorecard_countdown()
 				hud_scorecard.visible = false
+				_scorecard_selected_hole_index = -1
+				_scorecard_settings_mode = false
+				_update_scorecard_settings_button_style()
 				_set_other_elements_visible(true)
 				get_viewport().gui_release_focus()
 				get_viewport().set_input_as_handled()
@@ -2979,7 +3186,7 @@ func _update_hud_tooltips() -> void:
 	if tension_btn != null and is_instance_valid(tension_btn):
 		tension_btn.tooltip_text = "Toggle Suspense Heartbeat & Tunnel Vision [%s]" % km.get_action_summary_str("suspense_toggle")
 	if dist_btn != null and is_instance_valid(dist_btn):
-		dist_btn.tooltip_text = "Hit Distance Menu [%s]" % km.get_action_summary_str("distance_menu_toggle")
+		dist_btn.tooltip_text = "Hit Menu [%s]" % km.get_action_summary_str("distance_menu_toggle")
 	if rollout_btn != null and is_instance_valid(rollout_btn):
 		rollout_btn.tooltip_text = "Toggle Ball Rollout & Bounce [%s]" % km.get_action_summary_str("rollout_toggle")
 	if stuck_ball_btn != null and is_instance_valid(stuck_ball_btn):
@@ -3082,10 +3289,10 @@ func _update_hit_distance_button_state() -> void:
 	var menu = toggles_container.get_node_or_null("DistanceMenu") if toggles_container != null else null
 	var is_open = menu != null and is_instance_valid(menu) and menu.visible
 	if is_open:
-		dist_btn.text = "🎯 Hit Distance: OPEN"
+		dist_btn.text = "🎯 Hit Menu: OPEN"
 		apply_material_button_style(dist_btn, Color(0.75, 0.25, 0.75, 0.9))
 	else:
-		dist_btn.text = "🎯 Hit Distance"
+		dist_btn.text = "🎯 Hit Menu"
 		apply_material_button_style(dist_btn, Color(0.6, 0.2, 0.6, 0.85))
 
 
@@ -3562,7 +3769,10 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			course_instance.current_hole_par = int(round(float(active_hole.get("Par", 4))))
 			var hole_loc = active_hole.get("Hole Location")
 			if hole_loc != null:
-				course_instance.current_hole_location = Vector3(hole_loc[0], course_instance.get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
+				if course_instance.has_method("get_hole_location_for"):
+					course_instance.current_hole_location = course_instance.get_hole_location_for(hole_loc)
+				else:
+					course_instance.current_hole_location = Vector3(hole_loc[0], course_instance.get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
 				course_instance.aim_target_pos = Vector3.ZERO
 				
 				if course_instance.has_node("PinMarker"):
@@ -3570,7 +3780,7 @@ func _on_active_player_changed(player: Dictionary) -> void:
 					course_instance.get_node("PinMarker").visible = true
 				
 				var flag_pin = course_instance.get_node_or_null("FlagPin")
-				if flag_pin != null:
+				if flag_pin != null and not flag_pin.is_queued_for_deletion():
 					flag_pin.global_position = course_instance.current_hole_location
 					if course_instance.has_method("update_gimme_circles"):
 						course_instance.update_gimme_circles()
@@ -4564,6 +4774,7 @@ func _on_hole_completed(scores: Array) -> void:
 		get_node("/root/AnnouncerEngine").call("ResetIdleTimer")
 	is_player_turn_ready = false
 	reset_zoom_to_default()
+	_scorecard_selected_hole_index = MultiplayerManager.current_hole_index
 	_populate_scorecard("hole_completed")
 	hud_scorecard.visible = true
 	_set_other_elements_visible(false)
@@ -5754,8 +5965,13 @@ func _on_scorecard_toggle_pressed() -> void:
 	if hud_scorecard.visible:
 		_stop_scorecard_countdown()
 		hud_scorecard.visible = false
+		_scorecard_selected_hole_index = -1
+		_scorecard_settings_mode = false
+		_update_scorecard_settings_button_style()
 		_set_other_elements_visible(true)
 	else:
+		if _scorecard_selected_hole_index < 0:
+			_scorecard_selected_hole_index = MultiplayerManager.current_hole_index
 		_populate_scorecard("toggle")
 		hud_scorecard.visible = true
 		_set_other_elements_visible(false)
@@ -5776,18 +5992,20 @@ func _get_hole_distance(hole_id: String, tee_color: String) -> int:
 func _get_hole_shot_positions(player: Dictionary, hole_id: String, tee_boxes: Dictionary, world_to_course: Transform3D) -> Array[Vector3]:
 	var shot_stats: Array = []
 	var player_stats = player.get("shot_stats", {})
-	if typeof(player_stats) == TYPE_DICTIONARY and typeof(player_stats.get(hole_id, [])) == TYPE_ARRAY:
+	if typeof(player_stats) == TYPE_DICTIONARY and player_stats.has(hole_id) and typeof(player_stats[hole_id]) == TYPE_ARRAY:
 		shot_stats = player_stats[hole_id]
 
 	var fallback_positions: Array[Vector3] = []
 	var tee_position: Array = MultiplayerManager.get_tee_position_from_boxes(tee_boxes, player.get("tee", "Blue"))
 	if tee_position.size() >= 2:
 		fallback_positions.append(Vector3(float(tee_position[0]), 0.0, float(tee_position[1])))
-	var shot_history = player.get("shot_history", [])
-	if typeof(shot_history) == TYPE_ARRAY:
-		for end_position in shot_history:
-			if typeof(end_position) == TYPE_VECTOR3:
-				fallback_positions.append(world_to_course * end_position)
+	var is_current_hole = (MultiplayerManager.current_hole_index < MultiplayerManager.hole_ids.size() and MultiplayerManager.hole_ids[MultiplayerManager.current_hole_index] == hole_id)
+	if is_current_hole:
+		var shot_history = player.get("shot_history", [])
+		if typeof(shot_history) == TYPE_ARRAY:
+			for end_position in shot_history:
+				if typeof(end_position) == TYPE_VECTOR3:
+					fallback_positions.append(world_to_course * end_position)
 	return HoleShotPathDiagram.get_positions_from_shot_stats(shot_stats, fallback_positions, world_to_course)
 
 
@@ -5795,22 +6013,26 @@ func _populate_hole_shot_summary(action_type: String) -> void:
 	if _hole_shot_summary == null:
 		return
 	for child in _hole_shot_summary.get_children():
+		_hole_shot_summary.remove_child(child)
 		child.queue_free()
-	_hole_shot_summary.visible = action_type == "hole_completed"
+	_hole_shot_summary.visible = (action_type == "hole_completed" or action_type == "toggle")
 	if not _hole_shot_summary.visible or MultiplayerManager.hole_ids.is_empty():
 		return
 
-	var hole_index = MultiplayerManager.current_hole_index
+	var hole_index = _scorecard_selected_hole_index
+	if hole_index < 0 or hole_index >= MultiplayerManager.hole_ids.size():
+		hole_index = MultiplayerManager.current_hole_index
 	if hole_index < 0 or hole_index >= MultiplayerManager.hole_ids.size():
 		return
 	var hole_id: String = MultiplayerManager.hole_ids[hole_index]
+	var active_hole_num = MultiplayerManager.get_hole_number_from_id(hole_id, hole_index)
 
 	var player_order: Array[Dictionary] = []
 	for player_index in range(MultiplayerManager.players.size()):
 		var player: Dictionary = MultiplayerManager.players[player_index]
 		var hole_scores: Dictionary = player.get("hole_scores", {})
 		var score = hole_scores.get(hole_id)
-		if score == null and player.get("active", true):
+		if score == null and player.get("active", true) and hole_index == MultiplayerManager.current_hole_index:
 			score = player.get("strokes", 0)
 		var previous_hole_id = MultiplayerManager.hole_ids[hole_index - 1] if hole_index > 0 else ""
 		var previous_score = hole_scores.get(previous_hole_id) if not previous_hole_id.is_empty() else null
@@ -5834,7 +6056,7 @@ func _populate_hole_shot_summary(action_type: String) -> void:
 	var green_position := Vector3.ZERO
 	if hole_location.size() >= 2:
 		green_position = Vector3(float(hole_location[0]), 0.0, float(hole_location[1]))
-	var course_manager = get_node_or_null("/root/CourseManager")
+	var course_manager = get_node_or_null("/root/CourseManager") if is_inside_tree() else null
 	var config_path: String = course_manager.call("get_current_config_path") if course_manager != null and course_manager.has_method("get_current_config_path") else ""
 	var satellite_path = config_path.get_base_dir().path_join("satellite.png") if not config_path.is_empty() else ""
 	var satellite_image: Image = null
@@ -5865,15 +6087,93 @@ func _populate_hole_shot_summary(action_type: String) -> void:
 					cart_path.append(Vector2(float(saved_point[0]), float(saved_point[1])))
 			if cart_path.size() >= 2:
 				cart_paths.append(cart_path)
+
+	# Section Header for Shot Review
+	var header_box = VBoxContainer.new()
+	header_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	header_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_box.add_theme_constant_override("separation", 2)
+	_hole_shot_summary.add_child(header_box)
+	
+	var title_lbl = Label.new()
+	title_lbl.name = "HoleShotTitleLabel"
+	var hole_par = int(round(float(current_hole.get("Par", 4))))
+	title_lbl.text = "Hole %s Shot Review (Par %d)" % [active_hole_num, hole_par]
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 20)
+	title_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.38))
+	title_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	title_lbl.add_theme_constant_override("outline_size", 3)
+	header_box.add_child(title_lbl)
+	
+	var hint_lbl = Label.new()
+	hint_lbl.name = "HoleShotHintLabel"
+	hint_lbl.text = "Select any hole number above to view shot history"
+	hint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint_lbl.add_theme_font_size_override("font_size", 13)
+	hint_lbl.add_theme_color_override("font_color", Color(0.68, 0.74, 0.84))
+	header_box.add_child(hint_lbl)
+
+	# Centering wrapper for cards
+	var cards_wrapper = HBoxContainer.new()
+	cards_wrapper.name = "HoleShotCardsWrapper"
+	cards_wrapper.alignment = BoxContainer.ALIGNMENT_CENTER
+	cards_wrapper.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_hole_shot_summary.add_child(cards_wrapper)
+
 	var player_cards = GridContainer.new()
 	player_cards.name = "HoleShotPlayerCards"
-	player_cards.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	player_cards.add_theme_constant_override("h_separation", 10)
-	player_cards.add_theme_constant_override("v_separation", 10)
-	var cards_available_width = get_viewport().get_visible_rect().size.x * 0.92 - 64.0
-	player_cards.columns = mini(player_order.size(), maxi(1, int(floor((cards_available_width + 10.0) / 270.0))))
-	_hole_shot_summary.add_child(player_cards)
-	var card_width = clampf((cards_available_width - (player_cards.columns - 1) * 10.0) / player_cards.columns, 190.0, 300.0)
+	player_cards.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	player_cards.add_theme_constant_override("h_separation", 16)
+	player_cards.add_theme_constant_override("v_separation", 16)
+	cards_wrapper.add_child(player_cards)
+
+	var vp = get_viewport()
+	var vp_size = vp.get_visible_rect().size if vp != null else Vector2(1920, 1080)
+	var cards_available_width = maxf(vp_size.x * 0.90 - 64.0, 320.0)
+	var max_cols = mini(player_order.size(), maxi(1, int(floor((cards_available_width + 16.0) / 240.0))))
+	player_cards.columns = max_cols
+	
+	var num_card_rows = int(ceil(float(player_order.size()) / float(max_cols)))
+
+	# Dynamically calculate available vertical budget so the scorecard NEVER spawns or needs a scrollbar
+	var modal_h = vp_size.y * 0.94
+	var vbox_total_h = modal_h - 32.0 # 16px margins top & bottom in hud_scorecard
+	var has_filter_tabs = (MultiplayerManager.hole_ids.size() > 9)
+	# Fixed VBox elements: Title (44px), filter tabs if >9 holes (46px), actions row (54px), separations (28-42px) & buffer (16px)
+	var vbox_overhead = (184.0 if has_filter_tabs else 126.0) + 16.0
+	var scroll_avail_h = maxf(vbox_total_h - vbox_overhead, 180.0)
+
+	# Content overhead in ScorecardContent: Grid rows (40px per row), add-player bar if visible, separations, summary header
+	var num_players_in_grid = MultiplayerManager.players.size()
+	var grid_h = float(3 + num_players_in_grid) * 40.0
+	var add_player_h = 68.0 if (_scorecard_add_player_section != null and _scorecard_add_player_section.visible) else 0.0
+	var content_separations = 16.0 + (16.0 if add_player_h > 0.0 else 0.0)
+	var summary_header_h = 48.0 + 8.0 # Header labels + summary separation
+	var non_cards_scroll_h = grid_h + add_player_h + content_separations + summary_header_h
+
+	# Player card overhead: vertical gaps between rows + card padding & labels (~58px per row)
+	var card_row_gaps = float(maxi(0, num_card_rows - 1)) * 16.0
+	var card_overhead_total = float(num_card_rows) * 58.0
+
+	var avail_for_diagrams = maxf(scroll_avail_h - non_cards_scroll_h - card_row_gaps - card_overhead_total, 120.0)
+	var max_allowed_image_height = maxf(avail_for_diagrams / float(num_card_rows), 120.0)
+
+	var max_width_per_col = (cards_available_width - float(max_cols - 1) * 16.0) / float(max_cols)
+	var card_width = clampf(max_width_per_col, 200.0, 480.0)
+	var max_image_width = card_width - 24.0
+
+	# Scale image height proportionally to fit within available vertical budget
+	var image_height = clampf(max_allowed_image_height, 120.0, 460.0)
+	var desired_image_width = image_height / 1.15
+	var image_width: float = 0.0
+	if desired_image_width > max_image_width:
+		image_width = max_image_width
+		image_height = minf(image_height, image_width * 1.15)
+	else:
+		image_width = desired_image_width
+		card_width = image_width + 24.0
+
 	var hole_tee_positions: Array[Vector3] = []
 	for tee_value in tee_boxes.values():
 		if typeof(tee_value) == TYPE_ARRAY and tee_value.size() >= 2:
@@ -5899,24 +6199,28 @@ func _populate_hole_shot_summary(action_type: String) -> void:
 		player_card.custom_minimum_size = Vector2(card_width, 0)
 		player_card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		var card_style = StyleBoxFlat.new()
-		card_style.bg_color = Color(0.10, 0.14, 0.21, 0.92)
-		card_style.border_width_left = 3
-		card_style.border_width_top = 1
-		card_style.border_width_right = 1
-		card_style.border_width_bottom = 1
+		card_style.bg_color = Color(0.08, 0.12, 0.18, 0.95)
+		card_style.border_width_left = 2
+		card_style.border_width_top = 2
+		card_style.border_width_right = 2
+		card_style.border_width_bottom = 2
+		card_style.corner_radius_top_left = 16
+		card_style.corner_radius_top_right = 16
+		card_style.corner_radius_bottom_left = 16
+		card_style.corner_radius_bottom_right = 16
 		var player_color := Color(0.35, 0.65, 0.9)
 		var color_value = player.get("color")
 		if typeof(color_value) == TYPE_COLOR:
 			player_color = color_value
 		var is_hole_winner = player_order[rank]["score"] == player_order[0]["score"] and player_order[rank]["score"] < 2147483647
-		card_style.border_color = Color(1.0, 0.85, 0.38) if is_hole_winner else player_color
-		card_style.content_margin_left = 10
-		card_style.content_margin_right = 10
-		card_style.content_margin_top = 7
-		card_style.content_margin_bottom = 7
+		card_style.border_color = Color(0.72, 0.56, 0.24, 0.85) if is_hole_winner else player_color
+		card_style.content_margin_left = 12
+		card_style.content_margin_right = 12
+		card_style.content_margin_top = 10
+		card_style.content_margin_bottom = 12
 		player_card.add_theme_stylebox_override("panel", card_style)
 		var player_row = VBoxContainer.new()
-		player_row.add_theme_constant_override("separation", 3)
+		player_row.add_theme_constant_override("separation", 6)
 		player_card.add_child(player_row)
 
 		var score_label = Label.new()
@@ -5927,14 +6231,49 @@ func _populate_hole_shot_summary(action_type: String) -> void:
 		player_row.add_child(score_label)
 
 		if shot_distances.is_empty():
+			var no_shots_panel = PanelContainer.new()
+			no_shots_panel.custom_minimum_size = Vector2(image_width, minf(160.0, image_height))
+			var no_shots_style = StyleBoxFlat.new()
+			no_shots_style.bg_color = Color(0.06, 0.08, 0.12, 0.6)
+			no_shots_style.border_width_left = 1
+			no_shots_style.border_width_top = 1
+			no_shots_style.border_width_right = 1
+			no_shots_style.border_width_bottom = 1
+			no_shots_style.border_color = Color(0.25, 0.3, 0.4, 0.4)
+			no_shots_style.corner_radius_top_left = 12
+			no_shots_style.corner_radius_top_right = 12
+			no_shots_style.corner_radius_bottom_left = 12
+			no_shots_style.corner_radius_bottom_right = 12
+			no_shots_panel.add_theme_stylebox_override("panel", no_shots_style)
+			
 			var no_shots_label = Label.new()
-			no_shots_label.text = "No shot path recorded"
-			no_shots_label.add_theme_color_override("font_color", Color(0.82, 0.87, 0.94))
-			player_row.add_child(no_shots_label)
+			no_shots_label.text = "No shots recorded for Hole %s" % active_hole_num
+			no_shots_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			no_shots_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			no_shots_label.add_theme_color_override("font_color", Color(0.70, 0.75, 0.85))
+			no_shots_label.add_theme_font_size_override("font_size", 14)
+			no_shots_panel.add_child(no_shots_label)
+			player_row.add_child(no_shots_panel)
 		else:
+			var diagram_frame = PanelContainer.new()
+			diagram_frame.name = "DiagramFrame"
+			diagram_frame.clip_contents = true
+			var frame_style = StyleBoxFlat.new()
+			frame_style.bg_color = Color(0.04, 0.07, 0.10, 0.95)
+			frame_style.border_width_left = 1
+			frame_style.border_width_top = 1
+			frame_style.border_width_right = 1
+			frame_style.border_width_bottom = 1
+			frame_style.border_color = Color(0.35, 0.45, 0.60, 0.5)
+			frame_style.corner_radius_top_left = 12
+			frame_style.corner_radius_top_right = 12
+			frame_style.corner_radius_bottom_left = 12
+			frame_style.corner_radius_bottom_right = 12
+			diagram_frame.add_theme_stylebox_override("panel", frame_style)
+
 			var shot_path = HoleShotPathDiagram.new()
-			var image_width = card_width - 20.0
-			shot_path.custom_minimum_size = Vector2(image_width, image_width)
+			shot_path.name = "HoleShotPathDiagram"
+			shot_path.custom_minimum_size = Vector2(image_width, image_height)
 			shot_path.set_shot_path(
 				positions,
 				shot_distances,
@@ -5945,16 +6284,78 @@ func _populate_hole_shot_summary(action_type: String) -> void:
 				shared_shot_positions,
 				cart_paths
 			)
-			player_row.add_child(shot_path)
+			diagram_frame.add_child(shot_path)
+			player_row.add_child(diagram_frame)
 		player_cards.add_child(player_card)
+
+
+func _refresh_scorecard_add_player_section() -> void:
+	if _scorecard_add_player_section == null or not is_instance_valid(_scorecard_add_player_section):
+		return
+	_scorecard_add_player_section.visible = _scorecard_settings_mode
+	if not _scorecard_settings_mode:
+		return
+	var select_opt = _scorecard_add_player_section.get_node_or_null("AddRow/PlayerSelectOpt") as OptionButton
+	var name_input = _scorecard_add_player_section.get_node_or_null("AddRow/NameInput") as LineEdit
+	var tee_opt = _scorecard_add_player_section.get_node_or_null("AddRow/TeeOpt") as OptionButton
+	if select_opt == null or name_input == null or tee_opt == null:
+		return
+		
+	select_opt.clear()
+	select_opt.add_item("New Golfer...", 0)
+	
+	var active_names = []
+	for p in MultiplayerManager.players:
+		active_names.append(p.get("name", "").to_lower())
+		
+	var saved_golfers = MultiplayerManager.get_registered_players()
+	var s_idx = 1
+	for g in saved_golfers:
+		var g_name = g.get("name", "")
+		if not g_name.is_empty() and not active_names.has(g_name.to_lower()):
+			select_opt.add_item(g_name, s_idx)
+			s_idx += 1
+			
+	select_opt.selected = 0
+	name_input.visible = true
+	
+	tee_opt.clear()
+	var course_tees = MultiplayerManager.get_course_tees()
+	if course_tees.is_empty():
+		course_tees = ["Blue", "Red", "White", "Black", "Gold"]
+	for t_idx in range(course_tees.size()):
+		var t_name = course_tees[t_idx]
+		var t_icon = _get_tee_icon(t_name, 14)
+		tee_opt.add_icon_item(t_icon, t_name, t_idx)
+
+
+func _update_scorecard_settings_button_style() -> void:
+	if _scorecard_settings_btn == null or not is_instance_valid(_scorecard_settings_btn):
+		return
+	if _scorecard_settings_mode:
+		apply_circular_button_style(_scorecard_settings_btn, Color(0.24, 0.46, 0.72, 0.95))
+		_scorecard_settings_btn.tooltip_text = "Hide Player Settings"
+	else:
+		apply_circular_button_style(_scorecard_settings_btn, Color(0.12, 0.16, 0.24, 0.85))
+		_scorecard_settings_btn.tooltip_text = "Show Player Settings (Pause, Remove, Add Players, Change Tees)"
+
+
+func _on_scorecard_settings_toggled() -> void:
+	if _scorecard_countdown_active and not _scorecard_countdown_paused:
+		_on_scorecard_pause_toggled()
+	_scorecard_settings_mode = not _scorecard_settings_mode
+	_update_scorecard_settings_button_style()
+	_populate_scorecard(_last_scorecard_action_type)
 
 
 func _populate_scorecard(action_type: String) -> void:
 	_last_scorecard_action_type = action_type
+	_refresh_scorecard_add_player_section()
 	_populate_hole_shot_summary(action_type)
 	
 	# Clear previous cells
 	for child in scorecard_grid.get_children():
+		scorecard_grid.remove_child(child)
 		child.queue_free()
 		
 	var num_holes = MultiplayerManager.hole_ids.size()
@@ -6014,34 +6415,47 @@ func _populate_scorecard(action_type: String) -> void:
 			
 	# Columns configuration based on selected view tab
 	var columns = ["Player"]
+	var column_hole_indices: Array[int] = [-1]
 	var render_front = (_scorecard_view_tab == "All" or _scorecard_view_tab == "Front 9")
 	var render_back = (num_holes > 9 and (_scorecard_view_tab == "All" or _scorecard_view_tab == "Back 9"))
 	
 	if render_front:
 		for i in range(front_holes.size()):
 			columns.append(str(MultiplayerManager.get_hole_number_from_id(front_holes[i], i)))
+			column_hole_indices.append(i)
 		if num_holes > 9 and _scorecard_view_tab == "All":
 			columns.append("OUT")
+			column_hole_indices.append(-1)
 		elif _scorecard_view_tab == "Front 9":
 			columns.append("OUT")
+			column_hole_indices.append(-1)
 			
 	if render_back:
 		for i in range(back_holes.size()):
 			columns.append(str(MultiplayerManager.get_hole_number_from_id(back_holes[i], 9 + i)))
+			column_hole_indices.append(9 + i)
 		columns.append("IN")
+		column_hole_indices.append(-1)
 		
 	if _scorecard_view_tab == "All":
 		columns.append("TOT")
+		column_hole_indices.append(-1)
 		
 	scorecard_grid.columns = columns.size()
 	
 	var header_bg = Color(0.10, 0.14, 0.22, 0.96)
-	var active_hole_num = MultiplayerManager.get_current_hole_number()
+	if _scorecard_selected_hole_index < 0 or _scorecard_selected_hole_index >= num_holes:
+		_scorecard_selected_hole_index = MultiplayerManager.current_hole_index
+	if _scorecard_selected_hole_index < 0 or _scorecard_selected_hole_index >= num_holes:
+		_scorecard_selected_hole_index = 0
+		
+	var active_hole_id = MultiplayerManager.hole_ids[_scorecard_selected_hole_index] if _scorecard_selected_hole_index < num_holes else ""
+	var active_hole_num = MultiplayerManager.get_hole_number_from_id(active_hole_id, _scorecard_selected_hole_index)
 	
 	# Helper for cell creation with crisp, compact styling
-	var add_cell = func(text: String, bg: Color, is_header: bool = false, fg: Color = Color.WHITE, font_size: int = 16, is_active: bool = false):
+	var add_cell = func(text: String, bg: Color, is_header: bool = false, fg: Color = Color.WHITE, font_size: int = 16, is_active: bool = false, min_width: float = 48.0):
 		var cell = PanelContainer.new()
-		cell.custom_minimum_size = Vector2(48, 38)
+		cell.custom_minimum_size = Vector2(min_width, 38)
 		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cell.size_flags_vertical = Control.SIZE_FILL
 		
@@ -6108,14 +6522,72 @@ func _populate_scorecard(action_type: String) -> void:
 		cell.add_child(widget)
 		scorecard_grid.add_child(cell)
 
+	var player_col_width = 240.0 if not _scorecard_settings_mode else 400.0
+	
 	# --- 1. HEADER ROW ---
-	for col in columns:
-		var is_act = (col.is_valid_int() and int(col) == active_hole_num)
-		add_cell.call(col, header_bg, true, Color.WHITE, 16, is_act)
+	for c_idx in range(columns.size()):
+		var col = columns[c_idx]
+		var h_idx = column_hole_indices[c_idx]
+		var is_hole_col = (h_idx >= 0)
+		var is_act = (is_hole_col and h_idx == _scorecard_selected_hole_index)
+		
+		if is_hole_col:
+			var btn = Button.new()
+			btn.custom_minimum_size = Vector2(48, 38)
+			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			btn.size_flags_vertical = Control.SIZE_FILL
+			btn.text = col
+			btn.focus_mode = Control.FOCUS_NONE
+			btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+			btn.add_theme_font_size_override("font_size", 16)
+			btn.tooltip_text = "View Hole %s shot history" % col
+			
+			var style_norm = StyleBoxFlat.new()
+			if is_act:
+				style_norm.bg_color = header_bg.lerp(Color(0.20, 0.42, 0.68, 0.95), 0.35)
+				style_norm.border_width_left = 1
+				style_norm.border_width_top = 1
+				style_norm.border_width_right = 1
+				style_norm.border_width_bottom = 1
+				style_norm.border_color = Color(0.35, 0.72, 1.0, 0.85)
+			else:
+				style_norm.bg_color = header_bg
+				style_norm.border_width_right = 1
+				style_norm.border_width_bottom = 1
+				style_norm.border_color = Color(0.3, 0.35, 0.45, 0.35)
+			style_norm.content_margin_left = 6
+			style_norm.content_margin_right = 6
+			style_norm.content_margin_top = 4
+			style_norm.content_margin_bottom = 4
+			
+			var style_hover = style_norm.duplicate()
+			style_hover.bg_color = header_bg.lerp(Color(0.25, 0.50, 0.80, 0.95), 0.5)
+			style_hover.border_color = Color(0.50, 0.82, 1.0, 1.0)
+			
+			var style_pressed = style_hover.duplicate()
+			style_pressed.bg_color = header_bg.lerp(Color(0.15, 0.35, 0.60, 0.95), 0.6)
+			
+			btn.add_theme_stylebox_override("normal", style_norm)
+			btn.add_theme_stylebox_override("hover", style_hover)
+			btn.add_theme_stylebox_override("pressed", style_pressed)
+			btn.add_theme_color_override("font_color", Color.WHITE)
+			btn.add_theme_color_override("font_outline_color", Color.BLACK)
+			btn.add_theme_constant_override("outline_size", 3)
+			
+			var target_hole_idx = h_idx
+			btn.pressed.connect(func():
+				if _scorecard_countdown_active and not _scorecard_countdown_paused:
+					_on_scorecard_pause_toggled()
+				_scorecard_selected_hole_index = target_hole_idx
+				_populate_scorecard(_last_scorecard_action_type)
+			)
+			scorecard_grid.add_child(btn)
+		else:
+			add_cell.call(col, header_bg, true, Color.WHITE, 16, is_act, player_col_width if col == "Player" else 48.0)
 		
 	# --- 2. DISTANCE ROW ---
 	var dist_bg = Color(0.13, 0.18, 0.28, 0.88)
-	add_cell.call("Yds (%s)" % tee_color, dist_bg, false, Color(0.8, 0.8, 0.8), 15)
+	add_cell.call("Yds (%s)" % tee_color, dist_bg, false, Color(0.8, 0.8, 0.8), 15, false, player_col_width)
 	
 	var front_dist_sum = 0
 	for i in range(front_holes.size()):
@@ -6148,7 +6620,7 @@ func _populate_scorecard(action_type: String) -> void:
 
 	# --- 3. PAR ROW ---
 	var par_bg = Color(0.16, 0.22, 0.34, 0.88)
-	add_cell.call("Par", par_bg, false, Color(0.8, 0.8, 0.8), 15)
+	add_cell.call("Par", par_bg, false, Color(0.8, 0.8, 0.8), 15, false, player_col_width)
 	
 	var front_par_sum: int = 0
 	for i in range(front_holes.size()):
@@ -6190,21 +6662,40 @@ func _populate_scorecard(action_type: String) -> void:
 	var is_skins_mode = (MultiplayerManager.game_mode == "Skins")
 	var is_ctp_mode = (MultiplayerManager.game_mode == "Closest to Pin")
 	
+	# Active player count to determine if removal is permitted (min 1 active player)
+	var active_count = 0
+	for plyr in MultiplayerManager.players:
+		if plyr.get("active", true):
+			active_count += 1
+	var can_remove = (active_count > 1)
+	
 	for p_idx in range(MultiplayerManager.players.size()):
 		var p = MultiplayerManager.players[p_idx]
+		var is_p_active = p.get("active", true)
+		var is_p_paused = p.get("paused", false)
+		var is_p_catching_up = (MultiplayerManager.is_in_catch_up and MultiplayerManager.catch_up_player_name == p.get("name", ""))
 		var row_bg = Color(0.14, 0.16, 0.20, 0.94) if p_idx % 2 == 0 else Color(0.09, 0.11, 0.14, 0.94)
 		
 		# Name cell
 		var name_text = p["name"]
 		if not p.get("team", "").is_empty() and MultiplayerManager.game_mode == "2v2 Scramble":
 			name_text = "%s [%s]" % [p["name"], p["team"]]
+		var status_str = ""
 		var name_fg = Color.WHITE
-		if not p.get("active", true):
-			name_text += " (Out)"
+		if not is_p_active:
+			status_str = " (Out)"
 			name_fg = Color(0.6, 0.6, 0.6)
+		elif is_p_paused:
+			status_str = " (⏸️ Paused)"
+			name_fg = Color(1.0, 0.82, 0.35)
+		elif is_p_catching_up:
+			status_str = " (⛳ Catching up)"
+			name_fg = Color(0.35, 0.85, 1.0)
+			
+		name_text += status_str
 			
 		var cell = PanelContainer.new()
-		cell.custom_minimum_size = Vector2(265, 38)
+		cell.custom_minimum_size = Vector2(player_col_width, 38)
 		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cell.size_flags_vertical = Control.SIZE_FILL
 		
@@ -6272,81 +6763,175 @@ func _populate_scorecard(action_type: String) -> void:
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		label.add_theme_color_override("font_color", name_fg)
-		label.add_theme_font_size_override("font_size", 15)
+		label.add_theme_font_size_override("font_size", 14)
 		label.add_theme_color_override("font_outline_color", Color.BLACK)
 		label.add_theme_constant_override("outline_size", 2)
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		hbox.add_child(label)
 		
-		# Tee selector dropdown with tee color swatch icon
-		var tee_opt = OptionButton.new()
-		tee_opt.custom_minimum_size = Vector2(98, 28)
-		tee_opt.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		tee_opt.focus_mode = Control.FOCUS_ALL
-		tee_opt.add_theme_font_size_override("font_size", 13)
-		tee_opt.expand_icon = true
-		tee_opt.add_theme_constant_override("icon_max_width", 14)
-		
-		var opt_style_normal = StyleBoxFlat.new()
-		opt_style_normal.bg_color = Color(0.12, 0.16, 0.24, 0.85)
-		opt_style_normal.border_width_left = 1
-		opt_style_normal.border_width_top = 1
-		opt_style_normal.border_width_right = 1
-		opt_style_normal.border_width_bottom = 1
-		opt_style_normal.border_color = Color(0.32, 0.42, 0.58, 0.6)
-		opt_style_normal.corner_radius_top_left = 6
-		opt_style_normal.corner_radius_top_right = 6
-		opt_style_normal.corner_radius_bottom_left = 6
-		opt_style_normal.corner_radius_bottom_right = 6
-		opt_style_normal.content_margin_left = 6
-		opt_style_normal.content_margin_right = 6
-		opt_style_normal.content_margin_top = 2
-		opt_style_normal.content_margin_bottom = 2
-		
-		var opt_style_hover = opt_style_normal.duplicate()
-		opt_style_hover.bg_color = Color(0.18, 0.26, 0.38, 0.95)
-		opt_style_hover.border_color = Color(0.45, 0.72, 1.0, 0.85)
-		
-		var opt_style_pressed = opt_style_hover.duplicate()
-		opt_style_pressed.bg_color = Color(0.10, 0.18, 0.30, 0.95)
-		
-		tee_opt.add_theme_stylebox_override("normal", opt_style_normal)
-		tee_opt.add_theme_stylebox_override("hover", opt_style_hover)
-		tee_opt.add_theme_stylebox_override("pressed", opt_style_pressed)
-		tee_opt.add_theme_stylebox_override("focus", opt_style_hover)
-		
-		var popup = tee_opt.get_popup()
-		if popup != null:
-			ThemeManager.style_popup_menu(popup, 14)
-			
-		var available_tees = MultiplayerManager.get_course_tees()
 		var player_tee = str(p.get("tee", "Blue"))
-		if not available_tees.has(player_tee):
-			available_tees.append(player_tee)
+		if _scorecard_settings_mode:
+			# Tee selector dropdown with tee color swatch icon
+			var tee_opt = OptionButton.new()
+			tee_opt.name = "TeeOpt"
+			tee_opt.custom_minimum_size = Vector2(98, 28)
+			tee_opt.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			tee_opt.focus_mode = Control.FOCUS_ALL
+			tee_opt.add_theme_font_size_override("font_size", 13)
+			tee_opt.expand_icon = true
+			tee_opt.add_theme_constant_override("icon_max_width", 14)
 			
-		for t_idx in range(available_tees.size()):
-			var t_name = available_tees[t_idx]
-			var t_icon = _get_tee_icon(t_name, 14)
-			tee_opt.add_icon_item(t_icon, t_name, t_idx)
-			if t_name.to_lower() == player_tee.to_lower():
-				tee_opt.selected = t_idx
+			var opt_style_normal = StyleBoxFlat.new()
+			opt_style_normal.bg_color = Color(0.12, 0.16, 0.24, 0.85)
+			opt_style_normal.border_width_left = 1
+			opt_style_normal.border_width_top = 1
+			opt_style_normal.border_width_right = 1
+			opt_style_normal.border_width_bottom = 1
+			opt_style_normal.border_color = Color(0.32, 0.42, 0.58, 0.6)
+			opt_style_normal.corner_radius_top_left = 6
+			opt_style_normal.corner_radius_top_right = 6
+			opt_style_normal.corner_radius_bottom_left = 6
+			opt_style_normal.corner_radius_bottom_right = 6
+			opt_style_normal.content_margin_left = 6
+			opt_style_normal.content_margin_right = 6
+			opt_style_normal.content_margin_top = 2
+			opt_style_normal.content_margin_bottom = 2
+			
+			var opt_style_hover = opt_style_normal.duplicate()
+			opt_style_hover.bg_color = Color(0.18, 0.26, 0.38, 0.95)
+			opt_style_hover.border_color = Color(0.45, 0.72, 1.0, 0.85)
+			
+			var opt_style_pressed = opt_style_hover.duplicate()
+			opt_style_pressed.bg_color = Color(0.10, 0.18, 0.30, 0.95)
+			
+			tee_opt.add_theme_stylebox_override("normal", opt_style_normal)
+			tee_opt.add_theme_stylebox_override("hover", opt_style_hover)
+			tee_opt.add_theme_stylebox_override("pressed", opt_style_pressed)
+			tee_opt.add_theme_stylebox_override("focus", opt_style_hover)
+			
+			var popup = tee_opt.get_popup()
+			if popup != null:
+				ThemeManager.style_popup_menu(popup, 14)
 				
-		if not p.get("active", true):
-			tee_opt.disabled = true
+			var available_tees = MultiplayerManager.get_course_tees()
+			if not available_tees.has(player_tee):
+				available_tees.append(player_tee)
+				
+			for t_idx in range(available_tees.size()):
+				var t_name = available_tees[t_idx]
+				var t_icon = _get_tee_icon(t_name, 14)
+				tee_opt.add_icon_item(t_icon, t_name, t_idx)
+				if t_name.to_lower() == player_tee.to_lower():
+					tee_opt.selected = t_idx
+					
+			if not p.get("active", true):
+				tee_opt.disabled = true
+				
+			tee_opt.pressed.connect(func():
+				if _scorecard_countdown_active and not _scorecard_countdown_paused:
+					_on_scorecard_pause_toggled()
+			)
 			
-		tee_opt.pressed.connect(func():
-			if _scorecard_countdown_active and not _scorecard_countdown_paused:
-				_on_scorecard_pause_toggled()
-		)
-		
-		var current_p_idx = p_idx
-		tee_opt.item_selected.connect(func(sel_idx):
-			var chosen_tee = tee_opt.get_item_text(sel_idx)
-			MultiplayerManager.set_player_tee(current_p_idx, chosen_tee)
-			_populate_scorecard(_last_scorecard_action_type)
-		)
-		hbox.add_child(tee_opt)
+			var current_p_idx = p_idx
+			tee_opt.item_selected.connect(func(sel_idx):
+				var chosen_tee = tee_opt.get_item_text(sel_idx)
+				MultiplayerManager.set_player_tee(current_p_idx, chosen_tee)
+				_populate_scorecard(_last_scorecard_action_type)
+			)
+			hbox.add_child(tee_opt)
+			
+			# Pause / Resume Button
+			if is_p_active:
+				var pause_btn = Button.new()
+				pause_btn.name = "PauseBtn_%d" % p_idx
+				pause_btn.custom_minimum_size = Vector2(80, 28)
+				pause_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+				pause_btn.focus_mode = Control.FOCUS_ALL
+				pause_btn.add_theme_font_size_override("font_size", 12)
+				var cur_idx = p_idx
+				if is_p_paused:
+					pause_btn.text = "▶ Resume"
+					pause_btn.tooltip_text = "Resume player"
+					apply_material_button_style(pause_btn, Color(0.2, 0.6, 0.5, 0.9))
+					pause_btn.pressed.connect(func():
+						if _scorecard_countdown_active and not _scorecard_countdown_paused:
+							_on_scorecard_pause_toggled()
+						var saved = p.get("saved_paused_state", {})
+						var paused_hole_idx = saved.get("hole_index", MultiplayerManager.current_hole_index)
+						if paused_hole_idx == MultiplayerManager.current_hole_index:
+							MultiplayerManager.resume_player(cur_idx, "same_hole")
+							_populate_scorecard(_last_scorecard_action_type)
+						else:
+							_show_resume_player_dialog(cur_idx, p, paused_hole_idx)
+					)
+				else:
+					pause_btn.text = "⏸ Pause"
+					pause_btn.tooltip_text = "Pause player"
+					apply_material_button_style(pause_btn, Color(0.85, 0.55, 0.15, 0.9))
+					pause_btn.disabled = MultiplayerManager.is_in_catch_up
+					pause_btn.pressed.connect(func():
+						if _scorecard_countdown_active and not _scorecard_countdown_paused:
+							_on_scorecard_pause_toggled()
+						MultiplayerManager.pause_player(cur_idx)
+						_populate_scorecard(_last_scorecard_action_type)
+					)
+				hbox.add_child(pause_btn)
+
+			# Remove / Add Back Button
+			var toggle_btn = Button.new()
+			toggle_btn.name = "ToggleBtn_%d" % p_idx
+			toggle_btn.custom_minimum_size = Vector2(74, 28)
+			toggle_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			toggle_btn.focus_mode = Control.FOCUS_ALL
+			toggle_btn.add_theme_font_size_override("font_size", 12)
+			var t_idx = p_idx
+			if is_p_active:
+				toggle_btn.text = "Remove"
+				toggle_btn.tooltip_text = "Remove player from round"
+				apply_material_button_style(toggle_btn, Color(0.56, 0.22, 0.22, 0.85))
+				toggle_btn.disabled = not can_remove
+				toggle_btn.pressed.connect(func():
+					if _scorecard_countdown_active and not _scorecard_countdown_paused:
+						_on_scorecard_pause_toggled()
+					MultiplayerManager.toggle_player_active(t_idx, false)
+					_populate_scorecard(_last_scorecard_action_type)
+				)
+			else:
+				toggle_btn.text = "Add Back"
+				toggle_btn.tooltip_text = "Add player back into round"
+				apply_material_button_style(toggle_btn, Color(0.25, 0.55, 0.35, 0.85))
+				toggle_btn.pressed.connect(func():
+					if _scorecard_countdown_active and not _scorecard_countdown_paused:
+						_on_scorecard_pause_toggled()
+					MultiplayerManager.toggle_player_active(t_idx, true)
+					_populate_scorecard(_last_scorecard_action_type)
+					_update_distance_queue()
+				)
+			hbox.add_child(toggle_btn)
+		else:
+			# Static tee color swatch indicator when settings are closed
+			var tee_badge = HBoxContainer.new()
+			tee_badge.name = "TeeBadge"
+			tee_badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			tee_badge.add_theme_constant_override("separation", 5)
+			
+			var t_icon_rect = TextureRect.new()
+			t_icon_rect.texture = _get_tee_icon(player_tee, 14)
+			t_icon_rect.custom_minimum_size = Vector2(14, 14)
+			t_icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			t_icon_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			t_icon_rect.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			tee_badge.add_child(t_icon_rect)
+			
+			var t_lbl = Label.new()
+			t_lbl.text = player_tee
+			t_lbl.add_theme_font_size_override("font_size", 13)
+			t_lbl.add_theme_color_override("font_color", Color(0.85, 0.85, 0.9))
+			t_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			tee_badge.add_child(t_lbl)
+			
+			hbox.add_child(tee_badge)
 		
 		var email_btn = Button.new()
 		email_btn.text = "✉️"
@@ -6396,7 +6981,7 @@ func _populate_scorecard(action_type: String) -> void:
 				if p.get("active", true) and p["strokes"] > 0:
 					display_score = str(p["strokes"])
 					front_score_sum += p["strokes"]
-					if not p["holed_out"]:
+					if not p.get("holed_out", false):
 						display_score += "*"
 			else:
 				var s = p["hole_scores"].get(hole_id)
@@ -6440,7 +7025,7 @@ func _populate_scorecard(action_type: String) -> void:
 					if p.get("active", true) and p["strokes"] > 0:
 						display_score = str(p["strokes"])
 						back_score_sum += p["strokes"]
-						if not p["holed_out"]:
+						if not p.get("holed_out", false):
 							display_score += "*"
 				else:
 					var s = p["hole_scores"].get(hole_id)
@@ -6490,6 +7075,9 @@ func _populate_scorecard(action_type: String) -> void:
 			action_btn.pressed.connect(func():
 				_stop_scorecard_countdown()
 				hud_scorecard.visible = false
+				_scorecard_selected_hole_index = -1
+				_scorecard_settings_mode = false
+				_update_scorecard_settings_button_style()
 				_set_other_elements_visible(true)
 			)
 	elif action_type == "hole_completed":
@@ -6503,6 +7091,7 @@ func _populate_scorecard(action_type: String) -> void:
 			else:
 				action_btn.text = "Finish Round" if is_final_hole else "Next Hole"
 			action_btn.pressed.connect(func():
+				_scorecard_selected_hole_index = -1
 				_on_scorecard_advance()
 			)
 		_start_scorecard_countdown(3.5 if MultiplayerManager.is_in_catch_up else 5.0)
@@ -6511,6 +7100,7 @@ func _populate_scorecard(action_type: String) -> void:
 		if action_btn != null:
 			action_btn.text = "Main Menu"
 			action_btn.pressed.connect(func():
+				_scorecard_selected_hole_index = -1
 				SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")
 			)
 
@@ -6585,6 +7175,7 @@ func _update_scorecard_countdown_display() -> void:
 func _on_scorecard_advance() -> void:
 	_stop_scorecard_countdown()
 	hud_scorecard.visible = false
+	_scorecard_selected_hole_index = -1
 	_set_other_elements_visible(true)
 	reset_zoom_to_default()
 	MultiplayerManager.advance_hole()
@@ -6648,51 +7239,48 @@ func _set_other_elements_visible(is_visible: bool) -> void:
 
 
 func _on_manage_players_toggle_pressed() -> void:
-	if forfeit_confirm_dialog != null and forfeit_confirm_dialog.visible:
-		forfeit_confirm_dialog.visible = false
-	if add_player_prompt_dialog != null and add_player_prompt_dialog.visible:
-		_dismiss_add_player_dialog()
-	if resume_player_prompt_dialog != null and resume_player_prompt_dialog.visible:
-		_dismiss_resume_player_dialog()
-	if hud_scorecard.visible:
-		_stop_scorecard_countdown()
-		hud_scorecard.visible = false
-	if hud_overview.visible:
-		hud_overview.visible = false
-	if hud_manage_players.visible:
-		_close_manage_players_panel()
-	else:
-		_open_manage_players_panel()
+	_on_scorecard_toggle_pressed()
 
 
 func _open_manage_players_panel() -> void:
-	_populate_manage_players()
-	_refresh_manage_players_dropdown()
-	hud_manage_players.visible = true
+	if _scorecard_selected_hole_index < 0:
+		_scorecard_selected_hole_index = MultiplayerManager.current_hole_index
+	_populate_scorecard("toggle")
+	hud_scorecard.visible = true
 	_set_other_elements_visible(false)
-	UIFocusGuard.push_lock(hud_manage_players)
-	hud_manage_players.set_meta("on_focus_lock_popped", Callable(self, "_on_manage_players_lock_popped"))
-	var select_opt = hud_manage_players.get_node_or_null("VBoxContainer/AddSection/AddRow/PlayerSelectOpt") as Control
-	if select_opt != null and select_opt.is_visible_in_tree():
-		select_opt.call_deferred("grab_focus")
+	if hud_manage_players != null and hud_manage_players.get_parent() != null:
+		_populate_manage_players()
+		_refresh_manage_players_dropdown()
+		hud_manage_players.visible = true
+		UIFocusGuard.push_lock(hud_manage_players)
+		hud_manage_players.set_meta("on_focus_lock_popped", Callable(self, "_on_manage_players_lock_popped"))
+		var select_opt = hud_manage_players.get_node_or_null("VBoxContainer/AddSection/AddRow/PlayerSelectOpt") as Control
+		if select_opt != null and select_opt.is_visible_in_tree():
+			select_opt.call_deferred("grab_focus")
 
 
 func _close_manage_players_panel() -> void:
 	if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == hud_manage_players:
 		UIFocusGuard.pop_lock(false)
-	hud_manage_players.visible = false
-	_set_other_elements_visible(true)
-	var players_btn = find_child("ManagePlayersButton", true, false) as Control
-	if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
-		players_btn.call_deferred("grab_focus")
+	if hud_manage_players != null:
+		hud_manage_players.visible = false
+	if hud_scorecard != null and hud_scorecard.visible:
+		_stop_scorecard_countdown()
+		hud_scorecard.visible = false
+		_scorecard_selected_hole_index = -1
+		_set_other_elements_visible(true)
+	var sc_btn = find_child("ScorecardToggleButton", true, false) as Control
+	if sc_btn != null and is_instance_valid(sc_btn) and sc_btn.is_visible_in_tree():
+		sc_btn.call_deferred("grab_focus")
 
 
 func _on_manage_players_lock_popped() -> void:
-	hud_manage_players.visible = false
+	if hud_manage_players != null:
+		hud_manage_players.visible = false
 	_set_other_elements_visible(true)
-	var players_btn = find_child("ManagePlayersButton", true, false) as Control
-	if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
-		players_btn.call_deferred("grab_focus")
+	var sc_btn = find_child("ScorecardToggleButton", true, false) as Control
+	if sc_btn != null and is_instance_valid(sc_btn) and sc_btn.is_visible_in_tree():
+		sc_btn.call_deferred("grab_focus")
 
 
 func _refresh_manage_players_dropdown() -> void:
@@ -6949,15 +7537,17 @@ func _show_add_player_dialog(p_name: String, tee_color: String) -> void:
 			UIFocusGuard.pop_lock(false)
 		add_player_prompt_dialog.visible = false
 		hud_manage_players.visible = false
-		_set_other_elements_visible(true)
 		MultiplayerManager.add_new_player_with_mode(p_name, tee_color, "current_hole")
 		_refresh_manage_players_dropdown()
 		_populate_manage_players()
+		_refresh_scorecard_add_player_section()
 		_populate_scorecard("toggle")
 		_update_distance_queue()
-		var players_btn = find_child("ManagePlayersButton", true, false) as Control
-		if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
-			players_btn.call_deferred("grab_focus")
+		hud_scorecard.visible = true
+		_set_other_elements_visible(false)
+		var sc_btn = find_child("ScorecardToggleButton", true, false) as Control
+		if sc_btn != null and is_instance_valid(sc_btn) and sc_btn.is_visible_in_tree():
+			sc_btn.call_deferred("grab_focus")
 	)
 	vbox.add_child(join_cur_btn)
 	
@@ -6972,16 +7562,18 @@ func _show_add_player_dialog(p_name: String, tee_color: String) -> void:
 			UIFocusGuard.pop_lock(false)
 		add_player_prompt_dialog.visible = false
 		hud_manage_players.visible = false
+		hud_scorecard.visible = false
 		_set_other_elements_visible(true)
 		MultiplayerManager.add_new_player_with_mode(p_name, tee_color, "catch_up")
 		_refresh_manage_players_dropdown()
 		_populate_manage_players()
+		_refresh_scorecard_add_player_section()
 		_populate_scorecard("toggle")
 		_update_catch_up_hud()
 		_update_distance_queue()
-		var players_btn = find_child("ManagePlayersButton", true, false) as Control
-		if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
-			players_btn.call_deferred("grab_focus")
+		var sc_btn = find_child("ScorecardToggleButton", true, false) as Control
+		if sc_btn != null and is_instance_valid(sc_btn) and sc_btn.is_visible_in_tree():
+			sc_btn.call_deferred("grab_focus")
 	)
 	vbox.add_child(play_missed_btn)
 	
@@ -7015,12 +7607,19 @@ func _dismiss_add_player_dialog() -> void:
 	if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == add_player_prompt_dialog:
 		UIFocusGuard.pop_lock(false)
 	add_player_prompt_dialog.visible = false
-	_open_manage_players_panel()
+	_populate_scorecard(_last_scorecard_action_type)
+	hud_scorecard.visible = true
+	_set_other_elements_visible(false)
+	if hud_manage_players != null and hud_manage_players.get_parent() != null:
+		hud_manage_players.visible = true
+		UIFocusGuard.push_lock(hud_manage_players)
 
 
 func _on_add_player_lock_popped() -> void:
 	add_player_prompt_dialog.visible = false
-	_open_manage_players_panel()
+	_populate_scorecard(_last_scorecard_action_type)
+	hud_scorecard.visible = true
+	_set_other_elements_visible(false)
 
 
 func _show_resume_player_dialog(idx: int, p: Dictionary, paused_hole_idx: int) -> void:
@@ -7065,14 +7664,15 @@ func _show_resume_player_dialog(idx: int, p: Dictionary, paused_hole_idx: int) -
 			UIFocusGuard.pop_lock(false)
 		resume_player_prompt_dialog.visible = false
 		hud_manage_players.visible = false
+		hud_scorecard.visible = false
 		_set_other_elements_visible(true)
 		MultiplayerManager.resume_player(idx, "catch_up")
 		_populate_manage_players()
 		_populate_scorecard("toggle")
 		_update_catch_up_hud()
-		var players_btn = find_child("ManagePlayersButton", true, false) as Control
-		if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
-			players_btn.call_deferred("grab_focus")
+		var sc_btn = find_child("ScorecardToggleButton", true, false) as Control
+		if sc_btn != null and is_instance_valid(sc_btn) and sc_btn.is_visible_in_tree():
+			sc_btn.call_deferred("grab_focus")
 	)
 	vbox.add_child(catch_up_btn)
 	
@@ -7087,13 +7687,14 @@ func _show_resume_player_dialog(idx: int, p: Dictionary, paused_hole_idx: int) -
 			UIFocusGuard.pop_lock(false)
 		resume_player_prompt_dialog.visible = false
 		hud_manage_players.visible = false
-		_set_other_elements_visible(true)
 		MultiplayerManager.resume_player(idx, "current_hole")
 		_populate_manage_players()
 		_populate_scorecard("toggle")
-		var players_btn = find_child("ManagePlayersButton", true, false) as Control
-		if players_btn != null and is_instance_valid(players_btn) and players_btn.is_visible_in_tree():
-			players_btn.call_deferred("grab_focus")
+		hud_scorecard.visible = true
+		_set_other_elements_visible(false)
+		var sc_btn = find_child("ScorecardToggleButton", true, false) as Control
+		if sc_btn != null and is_instance_valid(sc_btn) and sc_btn.is_visible_in_tree():
+			sc_btn.call_deferred("grab_focus")
 	)
 	vbox.add_child(skip_btn)
 	
@@ -7127,12 +7728,19 @@ func _dismiss_resume_player_dialog() -> void:
 	if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == resume_player_prompt_dialog:
 		UIFocusGuard.pop_lock(false)
 	resume_player_prompt_dialog.visible = false
-	_open_manage_players_panel()
+	_populate_scorecard(_last_scorecard_action_type)
+	hud_scorecard.visible = true
+	_set_other_elements_visible(false)
+	if hud_manage_players != null and hud_manage_players.get_parent() != null:
+		hud_manage_players.visible = true
+		UIFocusGuard.push_lock(hud_manage_players)
 
 
 func _on_resume_player_lock_popped() -> void:
 	resume_player_prompt_dialog.visible = false
-	_open_manage_players_panel()
+	_populate_scorecard(_last_scorecard_action_type)
+	hud_scorecard.visible = true
+	_set_other_elements_visible(false)
 
 
 var _last_dialog_nav_time: float = 0.0

@@ -684,7 +684,7 @@ public partial class AnnouncerEngine : Node
                         if (activePVar.VariantType == Variant.Type.Dictionary)
                         {
                             var activeP = activePVar.AsGodotDictionary();
-                            int holeStrokes = activeP.TryGetValue("strokes", out var sVal) ? Convert.ToInt32(sVal) : 0;
+                            int holeStrokes = activeP.TryGetValue("strokes", out var sVal) ? VariantToInt(sVal) : 0;
                             ctx["strokes"] = holeStrokes;
                             ctx["tee_box"] = (holeStrokes <= 1);
 
@@ -698,7 +698,7 @@ public partial class AnnouncerEngine : Node
                                     var holeInfoDict = holeInfoVar.AsGodotDictionary();
                                     foreach (var kvp in scoresDict)
                                     {
-                                        int sc = Convert.ToInt32(kvp.Value);
+                                        int sc = VariantToInt(kvp.Value);
                                         if (sc > 0)
                                         {
                                             int par = 4;
@@ -706,7 +706,7 @@ public partial class AnnouncerEngine : Node
                                             {
                                                 var hDict = hInfo.AsGodotDictionary();
                                                 if (hDict.TryGetValue("Par", out var parVal))
-                                                    par = Convert.ToInt32(parVal);
+                                                    par = VariantToInt(parVal, 4);
                                             }
                                             totalDiff += (sc - par);
                                         }
@@ -796,7 +796,7 @@ public partial class AnnouncerEngine : Node
                 }
                 case "min_score_relative_to_par":
                 {
-                    int requiredMin = Convert.ToInt32(qualVal);
+                    int requiredMin = ToIntSafe(qualVal);
                     int actualRel = (int)GetFloatSafe(context, "score_relative_to_par", -999.0f);
                     if (actualRel == -999)
                         actualRel = (int)GetFloatSafe(context, "total_score_relative_to_par", -999.0f);
@@ -805,7 +805,7 @@ public partial class AnnouncerEngine : Node
                 }
                 case "max_score_relative_to_par":
                 {
-                    int requiredMax = Convert.ToInt32(qualVal);
+                    int requiredMax = ToIntSafe(qualVal);
                     int actualRel = (int)GetFloatSafe(context, "score_relative_to_par", 999.0f);
                     if (actualRel == 999)
                         actualRel = (int)GetFloatSafe(context, "total_score_relative_to_par", 999.0f);
@@ -893,14 +893,14 @@ public partial class AnnouncerEngine : Node
                 }
                 case "min_hole":
                 {
-                    int minHole = Convert.ToInt32(qualVal);
+                    int minHole = ToIntSafe(qualVal);
                     int holeNum = (int)GetFloatSafe(context, "hole_number", -1.0f);
                     if (holeNum != -1 && holeNum < minHole) return false;
                     break;
                 }
                 case "max_hole":
                 {
-                    int maxHole = Convert.ToInt32(qualVal);
+                    int maxHole = ToIntSafe(qualVal);
                     int holeNum = (int)GetFloatSafe(context, "hole_number", -1.0f);
                     if (holeNum != -1 && holeNum > maxHole) return false;
                     break;
@@ -918,7 +918,7 @@ public partial class AnnouncerEngine : Node
                 }
                 case "tee_box":
                 {
-                    bool reqTeeBox = Convert.ToBoolean(qualVal);
+                    bool reqTeeBox = ToBoolSafe(qualVal);
                     bool actTeeBox = GetBoolSafe(context, "tee_box", false);
                     bool teeShot = GetBoolSafe(context, "tee_shot", false);
                     int strokes = (int)GetFloatSafe(context, "strokes", -1.0f);
@@ -928,28 +928,28 @@ public partial class AnnouncerEngine : Node
                 }
                 case "strokes":
                 {
-                    int requiredStrokes = Convert.ToInt32(qualVal);
+                    int requiredStrokes = ToIntSafe(qualVal);
                     int actualStrokes = (int)GetFloatSafe(context, "strokes", -1.0f);
                     if (actualStrokes != requiredStrokes) return false;
                     break;
                 }
                 case "gir":
                 {
-                    bool requiredGir = Convert.ToBoolean(qualVal);
+                    bool requiredGir = ToBoolSafe(qualVal);
                     bool actualGir = GetBoolSafe(context, "gir", false);
                     if (actualGir != requiredGir) return false;
                     break;
                 }
                 case "birdie_chance":
                 {
-                    bool requiredChance = Convert.ToBoolean(qualVal);
+                    bool requiredChance = ToBoolSafe(qualVal);
                     bool actualChance = GetBoolSafe(context, "birdie_chance", false);
                     if (actualChance != requiredChance) return false;
                     break;
                 }
                 case "tee_shot":
                 {
-                    bool requiredTee = Convert.ToBoolean(qualVal);
+                    bool requiredTee = ToBoolSafe(qualVal);
                     bool actualTee = GetBoolSafe(context, "tee_shot", false);
                     int actualStrokes = (int)GetFloatSafe(context, "strokes", -1.0f);
                     if (actualStrokes == 1) actualTee = true;
@@ -977,7 +977,7 @@ public partial class AnnouncerEngine : Node
                 }
                 case "close_to_pin":
                 {
-                    bool requiredClose = Convert.ToBoolean(qualVal);
+                    bool requiredClose = ToBoolSafe(qualVal);
                     bool actualClose = GetBoolSafe(context, "close_to_pin", false);
                     float distYds = GetFloatSafe(context, "distance_to_pin_yards", 999.0f);
                     if (distYds <= 4.0f) actualClose = true;
@@ -986,7 +986,7 @@ public partial class AnnouncerEngine : Node
                 }
                 case "high_apex":
                 {
-                    bool requiredHigh = Convert.ToBoolean(qualVal);
+                    bool requiredHigh = ToBoolSafe(qualVal);
                     bool actualHigh = GetBoolSafe(context, "high_apex", false);
                     if (actualHigh != requiredHigh) return false;
                     break;
@@ -994,7 +994,7 @@ public partial class AnnouncerEngine : Node
                 case "min_apex":
                 case "min_apex_ft":
                 {
-                    float minApex = Convert.ToSingle(qualVal);
+                    float minApex = ToFloatSafe(qualVal);
                     float actualApex = GetFloatSafe(context, "apex_ft", 0.0f);
                     if (actualApex < minApex) return false;
                     break;
@@ -1522,6 +1522,82 @@ public partial class AnnouncerEngine : Node
                 return ((int)val) != 0;
             }
         }
+        return defaultValue;
+    }
+
+    private static int GetIntSafe(Dictionary dict, string key, int defaultValue = 0)
+    {
+        if (dict.TryGetValue(key, out var val))
+        {
+            if (val.VariantType == Variant.Type.Int)
+            {
+                return (int)val;
+            }
+            if (val.VariantType == Variant.Type.Float)
+            {
+                return (int)(float)val;
+            }
+            if (val.VariantType == Variant.Type.String && int.TryParse((string)val, out int parsed))
+            {
+                return parsed;
+            }
+        }
+        return defaultValue;
+    }
+
+    private static int VariantToInt(Variant val, int defaultValue = 0)
+    {
+        if (val.VariantType == Variant.Type.Int) return (int)val;
+        if (val.VariantType == Variant.Type.Float) return (int)(float)val;
+        if (val.VariantType == Variant.Type.String && int.TryParse((string)val, out int parsed)) return parsed;
+        return defaultValue;
+    }
+
+    private static int ToIntSafe(object? obj, int defaultValue = 0)
+    {
+        if (obj == null) return defaultValue;
+        if (obj is Variant v) return VariantToInt(v, defaultValue);
+        if (obj is int i) return i;
+        if (obj is long l) return (int)l;
+        if (obj is float f) return (int)f;
+        if (obj is double d) return (int)d;
+        if (obj is bool b) return b ? 1 : 0;
+        if (int.TryParse(obj.ToString(), out int parsed)) return parsed;
+        if (float.TryParse(obj.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float fParsed)) return (int)fParsed;
+        return defaultValue;
+    }
+
+    private static bool ToBoolSafe(object? obj, bool defaultValue = false)
+    {
+        if (obj == null) return defaultValue;
+        if (obj is Variant v)
+        {
+            if (v.VariantType == Variant.Type.Bool) return (bool)v;
+            if (v.VariantType == Variant.Type.Int) return (int)v != 0;
+            if (v.VariantType == Variant.Type.String && bool.TryParse((string)v, out bool vb)) return vb;
+            return defaultValue;
+        }
+        if (obj is bool b) return b;
+        if (obj is int i) return i != 0;
+        if (obj is long l) return l != 0;
+        if (bool.TryParse(obj.ToString(), out bool parsed)) return parsed;
+        return defaultValue;
+    }
+
+    private static float ToFloatSafe(object? obj, float defaultValue = 0.0f)
+    {
+        if (obj == null) return defaultValue;
+        if (obj is Variant v)
+        {
+            if (v.VariantType == Variant.Type.Float || v.VariantType == Variant.Type.Int) return (float)v;
+            if (v.VariantType == Variant.Type.String && float.TryParse((string)v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float vf)) return vf;
+            return defaultValue;
+        }
+        if (obj is float f) return f;
+        if (obj is double d) return (float)d;
+        if (obj is int i) return i;
+        if (obj is long l) return l;
+        if (float.TryParse(obj.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float parsed)) return parsed;
         return defaultValue;
     }
 

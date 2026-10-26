@@ -119,6 +119,7 @@ public partial class OsmMapLoader : Node
     private string _generationMessage = "";
     private ElevationMap? _currentElevationMap;
     private double[]? _downloadedSatelliteImageBounds;
+    private byte[]? _downloadedCoursePhotoBytes;
     private double _refLat;
     private double _refLon;
     private const double SatelliteImageAspectRatio = 1.0;
@@ -128,6 +129,45 @@ public partial class OsmMapLoader : Node
     public string GetGenerationMessage()
     {
         return _generationMessage;
+    }
+
+    public int MaxTrees { get; set; } = 6000;
+    public bool GenerateWaterLongGrass { get; set; } = true;
+    public bool Create18HolePermutations { get; set; } = false;
+    public bool GenerateBushes { get; set; } = true;
+    public bool GenerateCartPaths { get; set; } = true;
+    public bool Generate3dBunkers { get; set; } = true;
+    public bool HasCustomGenerationSettings { get; set; } = false;
+
+    public void LoadCourseGenerationSettings(bool forceReload = false)
+    {
+        if (HasCustomGenerationSettings && !forceReload)
+        {
+            return;
+        }
+
+        try
+        {
+            var cfg = new ConfigFile();
+            if (cfg.Load("user://osm_download_settings.cfg") == Error.Ok)
+            {
+                if (cfg.HasSection("course_generation"))
+                {
+                    MaxTrees = (int)cfg.GetValue("course_generation", "max_trees", 6000);
+                    GenerateWaterLongGrass = (bool)cfg.GetValue("course_generation", "generate_water_long_grass", true);
+                    Create18HolePermutations = (bool)cfg.GetValue("course_generation", "create_18_hole_permutations", false);
+                    GenerateBushes = (bool)cfg.GetValue("course_generation", "generate_bushes", true);
+                    GenerateCartPaths = (bool)cfg.GetValue("course_generation", "generate_cart_paths", true);
+                    Generate3dBunkers = (bool)cfg.GetValue("course_generation", "generate_3d_bunkers", true);
+                    HasCustomGenerationSettings = true;
+                    GD.Print($"{LogPrefix} Loaded course generation settings from user config: MaxTrees={MaxTrees}, WaterLongGrass={GenerateWaterLongGrass}, 18HolePermutations={Create18HolePermutations}, Bushes={GenerateBushes}, CartPaths={GenerateCartPaths}, 3dBunkers={Generate3dBunkers}.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Failed to read user course generation settings: {ex.Message}");
+        }
     }
 
     public void DownloadAndGenerateCourse(double lat, double lon, string courseName)
@@ -142,6 +182,7 @@ public partial class OsmMapLoader : Node
 
     public async void DownloadAndGenerateCourse(double lat, double lon, string courseName, bool isCached, string location = "")
     {
+        LoadCourseGenerationSettings();
         _generationMessage = "";
         var (safeName, courseDir, globalCourseDir, _) = ResolveCoursePathAndTitle(courseName, lat, lon, location);
 
@@ -180,6 +221,10 @@ public partial class OsmMapLoader : Node
             return;
         }
 
+        _downloadedCoursePhotoBytes = null;
+        ReportProgress("Downloading course photo...");
+        _downloadedCoursePhotoBytes = await DownloadCoursePhotoAsync(courseName, location, lat, lon);
+
         byte[]? satImageBytes = null;
         _downloadedSatelliteImageBounds = null;
         var bbox = CalculateBBoxFromOsmJson(osmJson, lat, lon);
@@ -216,6 +261,7 @@ public partial class OsmMapLoader : Node
 
     public async void GenerateCourseDeferred(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes, string location = "")
     {
+        LoadCourseGenerationSettings();
         bool success = await GenerateCourseFromDataAsync(jsonString, courseName, lat, lon, satImageBytes, location);
         EmitCourseGenerated(success);
     }
@@ -231,16 +277,25 @@ public partial class OsmMapLoader : Node
 
     private async Task<bool> GenerateCourseFromDataAsync(string jsonString, string courseName, double lat, double lon, byte[]? satImageBytes, string location = "")
     {
-        List<CourseVariant> variants;
-        try
+        LoadCourseGenerationSettings();
+
+        List<CourseVariant> variants = new();
+        if (Create18HolePermutations)
         {
-            variants = BuildCourseVariants(jsonString, courseName);
+            try
+            {
+                variants = BuildCourseVariants(jsonString, courseName);
+            }
+            catch (JsonException ex)
+            {
+                GD.PrintErr($"{LogPrefix} Failed to inspect OSM course variants: {ex.Message}");
+                _generationMessage = "Error: Could not read course layout data from OpenStreetMap.";
+                return false;
+            }
         }
-        catch (JsonException ex)
+        else
         {
-            GD.PrintErr($"{LogPrefix} Failed to inspect OSM course variants: {ex.Message}");
-            _generationMessage = "Error: Could not read course layout data from OpenStreetMap.";
-            return false;
+            GD.Print($"{LogPrefix} 18-hole permutations disabled by course generation settings. Generating single course with all holes.");
         }
 
         if (variants.Count == 0)
@@ -1021,6 +1076,18 @@ public partial class OsmMapLoader : Node
         }
         bool isMobilePlatform = OS.GetName() == "Android" || OS.GetName() == "iOS";
         bool isComputerPlatform = OS.GetName() == "Windows" || OS.GetName() == "macOS" || OS.GetName() == "Linux";
+
+        if (_downloadedCoursePhotoBytes != null && _downloadedCoursePhotoBytes.Length > 0)
+        {
+            try
+            {
+                File.WriteAllBytes(Path.Combine(globalCourseDir, "course_photo.jpg"), _downloadedCoursePhotoBytes);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"{LogPrefix} Failed to save course_photo.jpg: {ex.Message}");
+            }
+        }
 
         Image? satImage = null;
         if (satImageBytes != null && satImageBytes.Length > 0)
@@ -2735,9 +2802,11 @@ public partial class OsmMapLoader : Node
                 return false;
             };
 
+            int effectiveMaxTrees = MaxTrees;
+
             // Scan satellite imagery for additional trees in the rough and background
             var candidatePoints = new List<Vector2>();
-            if (satImage != null)
+            if (satImage != null && effectiveMaxTrees > 0)
             {
                 ReportProgress("Scanning foliage from satellite imagery...");
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
@@ -2745,8 +2814,16 @@ public partial class OsmMapLoader : Node
                 GD.Print($"{LogPrefix} Scanning satellite imagery for tree positions...");
                 int satWidth = satImage.GetWidth();
                 int satHeight = satImage.GetHeight();
-                float spacing = isComputerPlatform ? 6.5f : (isMobilePlatform ? 9.0f : 8.0f); // Grid spacing in meters
-                float minDistanceBetweenTrees = isComputerPlatform ? 10.0f : 12.0f; // Minimum distance to keep trees apart
+                float spacing = effectiveMaxTrees > 4000
+                    ? (isComputerPlatform ? 5.0f : 6.5f)
+                    : (effectiveMaxTrees > 1800
+                        ? (isComputerPlatform ? 6.5f : (isMobilePlatform ? 9.0f : 8.0f))
+                        : (isComputerPlatform ? 9.0f : 11.0f));
+                float minDistanceBetweenTrees = effectiveMaxTrees > 4000
+                    ? (isComputerPlatform ? 7.5f : 9.0f)
+                    : (effectiveMaxTrees > 1800
+                        ? (isComputerPlatform ? 10.0f : 12.0f)
+                        : (isComputerPlatform ? 14.0f : 16.0f));
 
                 var gridPoints = new List<Vector2>();
                 for (float rx = courseMinX; rx <= courseMaxX; rx += spacing)
@@ -2817,7 +2894,7 @@ public partial class OsmMapLoader : Node
                                 var path = lineOfPlayPaths[pIdx];
                                 for (int i = 0; i < path.Count - 1; i++)
                                 {
-                                    if (DistanceToSegment(pt, path[i], path[i + 1]) < 14.0f)
+                                    if (DistanceToSegment(pt, path[i], path[i + 1]) < 15.0f)
                                     {
                                         tooCloseToLineOfPlay = true;
                                         break;
@@ -2843,7 +2920,7 @@ public partial class OsmMapLoader : Node
                         bool isTreeCandidate = IsTreeColor(pixelColor) && (
                             (v <= 0.26f && variance >= 0.0028f) ||
                             (v > 0.26f && v <= 0.38f && variance >= 0.0042f) ||
-                            (v > 0.38f && variance >= 0.0075f)
+                            (v > 0.40f && variance >= 0.0080f)
                         );
 
                         if (isTreeCandidate)
@@ -2858,24 +2935,6 @@ public partial class OsmMapLoader : Node
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
                 GD.Print($"{LogPrefix} Found {candidatePoints.Count} tree candidate locations from satellite imagery.");
-
-                // On mobile platforms, enforce a performance cap of 1,000 trees. On desktop/PC, retain all candidates without cap.
-                var selectedPoints = new List<Vector2>();
-                if (isMobilePlatform && candidatePoints.Count > 1000)
-                {
-                    var rnd = new Random(42);
-                    var indices = Enumerable.Range(0, candidatePoints.Count).OrderBy(x => rnd.Next()).Take(1000).ToList();
-                    foreach (int idx in indices)
-                    {
-                        selectedPoints.Add(candidatePoints[idx]);
-                    }
-                    GD.Print($"{LogPrefix} Mobile platform detected: capped satellite trees to 1,000 (randomly sampled).");
-                }
-                else
-                {
-                    GD.Print($"{LogPrefix} Retaining all {candidatePoints.Count} candidate trees from satellite imagery (no cap on desktop/PC).");
-                    selectedPoints = candidatePoints;
-                }
 
                 // Build fast 2D spatial hash grid so placing thousands of trees evaluates in milliseconds
                 float cellSz = minDistanceBetweenTrees;
@@ -2909,7 +2968,10 @@ public partial class OsmMapLoader : Node
                     RegisterTree(pos);
                 }
 
-                foreach (var pt in selectedPoints)
+                // Evaluate all candidate points from satellite imagery against spatial hash grid
+                // to build the complete, uncorrupted set of valid tree positions.
+                var validSatelliteTrees = new List<Vector2>();
+                foreach (var pt in candidatePoints)
                 {
                     int gx = (int)Math.Floor(pt.X / cellSz);
                     int gz = (int)Math.Floor(pt.Y / cellSz);
@@ -2938,16 +3000,65 @@ public partial class OsmMapLoader : Node
                     if (!tooClose)
                     {
                         RegisterTree(pt);
+                        validSatelliteTrees.Add(pt);
                     }
+                }
+
+                // If placed trees exceed user-configured limit, retain authentic OSM trees and prioritize
+                // satellite trees along the hole corridors so every hole looks lush and properly framed.
+                if (effectiveMaxTrees > 0 && placedTreePositions.Count > effectiveMaxTrees)
+                {
+                    int satBudget = Math.Max(0, effectiveMaxTrees - initialOsmTrees.Length);
+                    if (validSatelliteTrees.Count > satBudget)
+                    {
+                        float GetMinDistanceToHoles(Vector2 pt)
+                        {
+                            float minDist = float.MaxValue;
+                            for (int pIdx = 0; pIdx < lineOfPlayPaths.Count; pIdx++)
+                            {
+                                var path = lineOfPlayPaths[pIdx];
+                                for (int i = 0; i < path.Count - 1; i++)
+                                {
+                                    float d = DistanceToSegment(pt, path[i], path[i + 1]);
+                                    if (d < minDist) minDist = d;
+                                }
+                            }
+                            return minDist;
+                        }
+
+                        // Keep trees framing hole corridors first, then remaining budget
+                        var sortedSatelliteTrees = validSatelliteTrees.OrderBy(pt => GetMinDistanceToHoles(pt)).ToList();
+                        var keptSet = sortedSatelliteTrees.Take(satBudget).ToHashSet();
+
+                        placedTreePositions.Clear();
+                        spatialGrid.Clear();
+                        foreach (var pos in initialOsmTrees)
+                        {
+                            RegisterTree(pos);
+                        }
+                        foreach (var pos in validSatelliteTrees)
+                        {
+                            if (keptSet.Contains(pos))
+                            {
+                                RegisterTree(pos);
+                            }
+                        }
+                        GD.Print($"{LogPrefix} Satellite trees capped to {satBudget} with hole-corridor framing prioritized (total placed: {placedTreePositions.Count}).");
+                    }
+                }
+                else
+                {
+                    GD.Print($"{LogPrefix} Retaining all {validSatelliteTrees.Count} valid satellite trees (total placed: {placedTreePositions.Count}, cap: {effectiveMaxTrees}).");
                 }
             }
 
             // Populate all OSM forest and wood polygons
-            if (forestPolygons.Count > 0)
+            if (effectiveMaxTrees > 0 && placedTreePositions.Count < effectiveMaxTrees && forestPolygons.Count > 0)
             {
                 GD.Print($"{LogPrefix} Populating {forestPolygons.Count} OSM forest/wood polygons with trees...");
                 foreach (var forestPoly in forestPolygons)
                 {
+                    if (placedTreePositions.Count >= effectiveMaxTrees) break;
                     if (forestPoly.Length < 3) continue;
                     float minX = forestPoly.Min(p => p.X);
                     float maxX = forestPoly.Max(p => p.X);
@@ -2957,6 +3068,7 @@ public partial class OsmMapLoader : Node
                     float height = maxY - minY;
                     float area = width * height;
                     int targetForestTrees = Math.Max(3, (int)(area / (isComputerPlatform ? 80f : (isMobilePlatform ? 250f : 180f))));
+                    targetForestTrees = Math.Min(targetForestTrees, effectiveMaxTrees - placedTreePositions.Count);
 
                     var fRnd = new Random((int)(minX * 100f) ^ (int)(minY * 100f));
                     int forestSpawned = 0;
@@ -3016,13 +3128,23 @@ public partial class OsmMapLoader : Node
             }
 
             // Guaranteed procedural tree placement fallback if tree count is too low or satellite scan yielded few/no trees
+            int targetTreesPerHole = effectiveMaxTrees > 4000 ? 120 : (effectiveMaxTrees > 1800 ? 65 : 35);
             int targetTreeCount = isComputerPlatform
-                ? Math.Max(240, Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 56)
+                ? Math.Max(240, Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * targetTreesPerHole)
                 : (isMobilePlatform
-                    ? Math.Clamp(Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 24, 100, 1000)
-                    : Math.Max(120, Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * 28));
-            bool satelliteScanSucceeded = satImage != null && candidatePoints.Count >= (int)(targetTreeCount * 0.30f);
-            if (placedTreePositions.Count < targetTreeCount && !satelliteScanSucceeded)
+                    ? Math.Clamp(Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * Math.Min(24, targetTreesPerHole), 100, 1000)
+                    : Math.Max(120, Math.Max(lineOfPlayPaths.Count, holeInfo.Count) * targetTreesPerHole));
+
+            if (effectiveMaxTrees > 0)
+            {
+                targetTreeCount = Math.Min(targetTreeCount, effectiveMaxTrees);
+            }
+            else
+            {
+                targetTreeCount = 0;
+            }
+
+            if (effectiveMaxTrees > 0 && placedTreePositions.Count < targetTreeCount)
             {
                 GD.Print($"{LogPrefix} Tree count ({placedTreePositions.Count}) is below target ({targetTreeCount}). Generating procedural tree placement fallback...");
                 var procRnd = new Random(54321);
@@ -3030,6 +3152,7 @@ public partial class OsmMapLoader : Node
                 float minProcTreeDist = isComputerPlatform ? 10.0f : 12.0f;
                 Func<Vector2, bool> isProceduralPointValid = (pt) =>
                 {
+                    if (placedTreePositions.Count >= effectiveMaxTrees) return false;
                     if (!isPointInMainCourse(pt)) return false;
 
                     for (int i = 0; i < exclusionPolygons.Count; i++)
@@ -3079,12 +3202,13 @@ public partial class OsmMapLoader : Node
                 float[] rightOffsets = isComputerPlatform ? new float[] { 28f, 38f, 48f } : new float[] { 28f, 40f };
                 foreach (var path in lineOfPlayPaths)
                 {
+                    if (placedTreePositions.Count >= effectiveMaxTrees) break;
                     if (path.Count < 2) continue;
                     float totalLength = 0f;
                     for (int i = 0; i < path.Count - 1; i++) totalLength += path[i].DistanceTo(path[i + 1]);
                     if (totalLength < 40f) continue;
 
-                    for (float d = 30f; d < totalLength - 20f; d += stepA)
+                    for (float d = 30f; d < totalLength - 20f && placedTreePositions.Count < effectiveMaxTrees; d += stepA)
                     {
                         var centerPt = GetPointOnPolyline(path, d);
                         var nextPt = GetPointOnPolyline(path, Math.Min(d + 5f, totalLength));
@@ -3095,6 +3219,7 @@ public partial class OsmMapLoader : Node
                         // Left stands
                         foreach (var off in leftOffsets)
                         {
+                            if (placedTreePositions.Count >= effectiveMaxTrees) break;
                             var cand = centerPt + perp * (off + (float)(procRnd.NextDouble() * 8.0 - 4.0)) + fwd * (float)(procRnd.NextDouble() * 6.0 - 3.0);
                             if (isProceduralPointValid(cand))
                             {
@@ -3105,6 +3230,7 @@ public partial class OsmMapLoader : Node
                         // Right stands
                         foreach (var off in rightOffsets)
                         {
+                            if (placedTreePositions.Count >= effectiveMaxTrees) break;
                             var cand = centerPt + perp * (off + (float)(procRnd.NextDouble() * 8.0 - 4.0)) + fwd * (float)(procRnd.NextDouble() * 6.0 - 3.0);
                             if (isProceduralPointValid(cand))
                             {
@@ -3118,6 +3244,7 @@ public partial class OsmMapLoader : Node
                 int greenAttempts = isComputerPlatform ? 16 : 8;
                 foreach (var kp in holeInfo)
                 {
+                    if (placedTreePositions.Count >= effectiveMaxTrees) break;
                     if (kp.Value.HoleLocation == null || kp.Value.HoleLocation.Length < 2) continue;
                     var pinPos = new Vector2(kp.Value.HoleLocation[0], kp.Value.HoleLocation[1]);
 
@@ -3132,7 +3259,7 @@ public partial class OsmMapLoader : Node
                     }
                     float baseRearAngle = Mathf.Atan2(approachDir.Y, approachDir.X);
 
-                    for (int attempt = 0; attempt < greenAttempts; attempt++)
+                    for (int attempt = 0; attempt < greenAttempts && placedTreePositions.Count < effectiveMaxTrees; attempt++)
                     {
                         // Fan out strictly in the rear hemisphere (+/- 60 degrees) behind the green
                         float angle = baseRearAngle + (float)(procRnd.NextDouble() * 2.0 - 1.0) * (Mathf.Pi / 3.0f);
@@ -3149,6 +3276,7 @@ public partial class OsmMapLoader : Node
                 int teeAttempts = isComputerPlatform ? 12 : 6;
                 foreach (var kp in holeInfo)
                 {
+                    if (placedTreePositions.Count >= effectiveMaxTrees) break;
                     if (kp.Value.TeeBoxes != null)
                     {
                         Vector2 target;
@@ -3167,6 +3295,7 @@ public partial class OsmMapLoader : Node
 
                         foreach (var teeKvp in kp.Value.TeeBoxes)
                         {
+                            if (placedTreePositions.Count >= effectiveMaxTrees) break;
                             if (teeKvp.Value == null || teeKvp.Value.Length < 2) continue;
                             var teePos = new Vector2(teeKvp.Value[0], teeKvp.Value[1]);
 
@@ -3175,7 +3304,7 @@ public partial class OsmMapLoader : Node
                                 : new Vector2(0, 1);
                             float baseRearAngle = Mathf.Atan2(-fwd.Y, -fwd.X);
 
-                            for (int attempt = 0; attempt < teeAttempts; attempt++)
+                            for (int attempt = 0; attempt < teeAttempts && placedTreePositions.Count < effectiveMaxTrees; attempt++)
                             {
                                 // Fan out strictly in the rear hemisphere (+/- 60 degrees) behind the tee box
                                 float angle = baseRearAngle + (float)(procRnd.NextDouble() * 2.0 - 1.0) * (Mathf.Pi / 3.0f);
@@ -3194,9 +3323,9 @@ public partial class OsmMapLoader : Node
                 if (placedTreePositions.Count < targetTreeCount)
                 {
                     float stepD = isComputerPlatform ? 24f : 30f;
-                    for (float rx = courseMinX + 15f; rx <= courseMaxX - 15f && placedTreePositions.Count < targetTreeCount; rx += stepD)
+                    for (float rx = courseMinX + 15f; rx <= courseMaxX - 15f && placedTreePositions.Count < targetTreeCount && placedTreePositions.Count < effectiveMaxTrees; rx += stepD)
                     {
-                        for (float rz = courseMinZ + 15f; rz <= courseMaxZ - 15f && placedTreePositions.Count < targetTreeCount; rz += stepD)
+                        for (float rz = courseMinZ + 15f; rz <= courseMaxZ - 15f && placedTreePositions.Count < targetTreeCount && placedTreePositions.Count < effectiveMaxTrees; rz += stepD)
                         {
                             var cand = new Vector2(
                                 rx + (float)(procRnd.NextDouble() * 10.0 - 5.0),
@@ -3213,6 +3342,11 @@ public partial class OsmMapLoader : Node
                 GD.Print($"{LogPrefix} Normal tree generation completed. Total trees placed: {placedTreePositions.Count}.");
             }
 
+            if (effectiveMaxTrees <= 0)
+            {
+                placedTreePositions.Clear();
+            }
+
             float cellSize = isMobilePlatform ? 5.0f : 2.0f;
             int maxSubdiv = isMobilePlatform ? 250 : 600;
             int subdivisionsX = Mathf.Clamp((int)Math.Ceiling(courseWidth / cellSize), 40, maxSubdiv);
@@ -3224,10 +3358,13 @@ public partial class OsmMapLoader : Node
             // Generate unified terrain with mulch mapped around all tree positions!
             await CreateUnifiedTerrainAsync(courseMinX, courseMaxX, courseMinZ, courseMaxZ, subdivisionsX, subdivisionsZ, rootNode, exclusionPolygons, placedTreePositions);
 
-            cartPaths = MergeCartPaths(cartPaths, 2.0f);
-            for (int pathIndex = 0; pathIndex < cartPaths.Count; pathIndex++)
+            if (GenerateCartPaths)
             {
-                CreateCartPath(rootNode, cartPaths[pathIndex], pathIndex, exclusionPolygons);
+                cartPaths = MergeCartPaths(cartPaths, 2.0f);
+                for (int pathIndex = 0; pathIndex < cartPaths.Count; pathIndex++)
+                {
+                    CreateCartPath(rootNode, cartPaths[pathIndex], pathIndex, exclusionPolygons);
+                }
             }
 
             ReportProgress("Placing trees, greens, and course objects...");
@@ -3319,12 +3456,20 @@ public partial class OsmMapLoader : Node
             GD.Print($"{LogPrefix} Placed {placedTreePositions.Count} trees total ({placedWillowCount} weeping willows: 1 or infrequently 2 max per water feature, none elsewhere).");
 
             // Spawn random bushes clustered around a subset of trees (capped at 100 on mobile, 2400 on computer, 1200 on desktop)
-            if (placedTreePositions.Count > 0)
+            if (GenerateBushes && placedTreePositions.Count > 0)
             {
                 GD.Print($"{LogPrefix} Placing bushes clustered around trees...");
                 var bushRnd = new Random(99);
                 int bushCount = 0;
                 int maxBushes = isComputerPlatform ? 2400 : (isMobilePlatform ? 100 : 1200);
+                if (effectiveMaxTrees <= 1500)
+                {
+                    maxBushes = (int)(maxBushes * 0.25f);
+                }
+                else if (effectiveMaxTrees <= 3500)
+                {
+                    maxBushes = (int)(maxBushes * 0.50f);
+                }
                 var placedBushPositions = new List<Vector2>();
 
                 var treeIndices = Enumerable.Range(0, placedTreePositions.Count).OrderBy(x => bushRnd.Next()).ToList();
@@ -3706,23 +3851,36 @@ public partial class OsmMapLoader : Node
 
             // Extract OSM cart path polylines if available
             var cartPathPolylines = new Godot.Collections.Array();
-            foreach (var w in ways)
+            if (cartPaths != null && cartPaths.Count > 0)
             {
-                bool isCartPath = (w.Tags.TryGetValue("golf", out var gTag) && gTag == "cartpath") ||
-                                  (w.Tags.TryGetValue("highway", out var hTag) && (hTag == "path" || hTag == "footway"));
-                if (!isCartPath || w.NodeIds.Count < 2)
-                    continue;
-                var pts = w.NodeIds
-                    .Where(nodes.ContainsKey)
-                    .Select(id => nodes[id])
-                    .Select(coord => new Vector2(
-                        (float)((coord.Lon - refLon) * metersPerLon),
-                        -(float)((coord.Lat - refLat) * metersPerLat)
-                    ))
-                    .ToArray();
-                if (pts.Length >= 2)
+                foreach (var path in cartPaths)
                 {
-                    cartPathPolylines.Add(pts);
+                    if (path.Count >= 2)
+                    {
+                        cartPathPolylines.Add(path.ToArray());
+                    }
+                }
+            }
+            else
+            {
+                foreach (var w in ways)
+                {
+                    bool isCartPath = (w.Tags.TryGetValue("golf", out var gTag) && (gTag == "cartpath" || gTag == "cart_path")) ||
+                                      (w.Tags.TryGetValue("highway", out var hTag) && (hTag == "path" || hTag == "footway"));
+                    if (!isCartPath || w.NodeIds.Count < 2)
+                        continue;
+                    var pts = w.NodeIds
+                        .Where(nodes.ContainsKey)
+                        .Select(id => nodes[id])
+                        .Select(coord => new Vector2(
+                            (float)((coord.Lon - refLon) * metersPerLon),
+                            -(float)((coord.Lat - refLat) * metersPerLat)
+                        ))
+                        .ToArray();
+                    if (pts.Length >= 2)
+                    {
+                        cartPathPolylines.Add(pts);
+                    }
                 }
             }
             if (cartPathPolylines.Count > 0)
@@ -3748,6 +3906,14 @@ public partial class OsmMapLoader : Node
             // Convert individual foliage nodes into spatial MultiMesh chunks & build 3D recessed bunkers/reeds/horizon/cart paths
             var treeGenScript = GD.Load<Script>("res://HighFidelity/Foliage/procedural_tree_generator.gd");
             treeGenScript?.Call("convert_scene_foliage_to_multimesh", rootNode, true);
+
+            rootNode.SetMeta("generate_water_long_grass", GenerateWaterLongGrass);
+            rootNode.SetMeta("generate_bushes", GenerateBushes);
+            rootNode.SetMeta("generate_cart_paths", GenerateCartPaths);
+            rootNode.SetMeta("generate_3d_bunkers", Generate3dBunkers);
+            rootNode.SetMeta("max_trees", MaxTrees);
+            rootNode.SetMeta("create_18_hole_permutations", Create18HolePermutations);
+
             var detailEnhancerScript = GD.Load<Script>("res://HighFidelity/Terrain/course_detail_enhancer.gd");
             detailEnhancerScript?.Call("enhance_course_scene", rootNode, true);
 
@@ -7006,6 +7172,187 @@ public partial class OsmMapLoader : Node
 
     private sealed record SatelliteImageResult(byte[] ImageBytes, double[] LocalBounds);
 
+    /// <summary>
+    /// Downloads a representative photo of the course (the one Google shows when searching the address).
+    /// Uses the Google Places API (New) when an API key is configured via the
+    /// GOOGLE_PLACES_API_KEY environment variable or the "heckle/google_places_api_key" project setting.
+    /// Falls back to the Wikipedia lead image. Returns null when nothing is found; never throws.
+    /// </summary>
+    private async Task<byte[]?> DownloadCoursePhotoAsync(string courseName, string location, double lat, double lon)
+    {
+        try
+        {
+            string? apiKey = System.Environment.GetEnvironmentVariable("GOOGLE_PLACES_API_KEY");
+            if (string.IsNullOrWhiteSpace(apiKey) && ProjectSettings.HasSetting("heckle/google_places_api_key"))
+            {
+                apiKey = ProjectSettings.GetSetting("heckle/google_places_api_key").AsString();
+            }
+
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(15));
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                string query = string.IsNullOrWhiteSpace(location) ? courseName : $"{courseName} {location}";
+                var body = new Dictionary<string, object> { ["textQuery"] = query, ["maxResultCount"] = 1 };
+                if (lat != 0 || lon != 0)
+                {
+                    body["locationBias"] = new Dictionary<string, object>
+                    {
+                        ["circle"] = new Dictionary<string, object>
+                        {
+                            ["center"] = new Dictionary<string, object> { ["latitude"] = lat, ["longitude"] = lon },
+                            ["radius"] = 20000.0
+                        }
+                    };
+                }
+
+                using var searchRequest = new HttpRequestMessage(HttpMethod.Post, "https://places.googleapis.com/v1/places:searchText");
+                searchRequest.Headers.Add("X-Goog-Api-Key", apiKey);
+                searchRequest.Headers.Add("X-Goog-FieldMask", "places.photos");
+                searchRequest.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+                using var searchResponse = await HttpClient.SendAsync(searchRequest, cts.Token);
+                if (searchResponse.IsSuccessStatusCode)
+                {
+                    using var doc = JsonDocument.Parse(await searchResponse.Content.ReadAsStringAsync(cts.Token));
+                    if (doc.RootElement.TryGetProperty("places", out var places) && places.GetArrayLength() > 0 &&
+                        places[0].TryGetProperty("photos", out var photos) && photos.GetArrayLength() > 0 &&
+                        photos[0].TryGetProperty("name", out var photoName))
+                    {
+                        string mediaUrl = $"https://places.googleapis.com/v1/{photoName.GetString()}/media?maxWidthPx=1600&key={Uri.EscapeDataString(apiKey)}";
+                        using var photoResponse = await HttpClient.GetAsync(mediaUrl, cts.Token);
+                        if (photoResponse.IsSuccessStatusCode)
+                        {
+                            var bytes = await photoResponse.Content.ReadAsByteArrayAsync(cts.Token);
+                            if (bytes.Length > 0)
+                            {
+                                GD.Print($"{LogPrefix} Downloaded Google Places photo for '{courseName}' ({bytes.Length} bytes).");
+                                return bytes;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    GD.PrintErr($"{LogPrefix} Google Places search failed: {(int)searchResponse.StatusCode}");
+                }
+            }
+
+            // Keyless web image search (Google Images requires JavaScript, so Bing Images is used)
+            var searchPhoto = await DownloadPhotoFromWebImageSearchAsync(
+                string.IsNullOrWhiteSpace(location) ? $"{courseName} golf course" : $"{courseName} {location} golf course", cts.Token);
+            if (searchPhoto != null)
+            {
+                GD.Print($"{LogPrefix} Downloaded web search photo for '{courseName}' ({searchPhoto.Length} bytes).");
+                return searchPhoto;
+            }
+
+            // Fallback: Wikipedia lead image for the course
+            string wikiUrl = "https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=1280&format=json&gsrsearch="
+                + Uri.EscapeDataString($"{courseName} golf");
+            using var wikiResponse = await HttpClient.GetAsync(wikiUrl, cts.Token);
+            if (wikiResponse.IsSuccessStatusCode)
+            {
+                using var wikiDoc = JsonDocument.Parse(await wikiResponse.Content.ReadAsStringAsync(cts.Token));
+                if (wikiDoc.RootElement.TryGetProperty("query", out var q) && q.TryGetProperty("pages", out var pages))
+                {
+                    foreach (var page in pages.EnumerateObject())
+                    {
+                        if (page.Value.TryGetProperty("thumbnail", out var thumb) && thumb.TryGetProperty("source", out var src))
+                        {
+                            using var imgResponse = await HttpClient.GetAsync(src.GetString(), cts.Token);
+                            if (imgResponse.IsSuccessStatusCode)
+                            {
+                                return await imgResponse.Content.ReadAsByteArrayAsync(cts.Token);
+                            }
+                        }
+                    }
+                }
+            }
+            // Last resort: nearest geotagged Wikimedia Commons photo (within 1 km of the course)
+            if (lat != 0 || lon != 0)
+            {
+                string commonsUrl = "https://commons.wikimedia.org/w/api.php?action=query&generator=geosearch&ggsnamespace=6&ggsradius=1000&ggslimit=10"
+                    + "&prop=imageinfo&iiprop=url|mime&iiurlwidth=1280&format=json&ggscoord="
+                    + Uri.EscapeDataString(string.Format(CultureInfo.InvariantCulture, "{0}|{1}", lat, lon));
+                using var commonsResponse = await HttpClient.GetAsync(commonsUrl, cts.Token);
+                if (commonsResponse.IsSuccessStatusCode)
+                {
+                    using var commonsDoc = JsonDocument.Parse(await commonsResponse.Content.ReadAsStringAsync(cts.Token));
+                    if (commonsDoc.RootElement.TryGetProperty("query", out var cq) && cq.TryGetProperty("pages", out var cpages))
+                    {
+                        foreach (var page in cpages.EnumerateObject())
+                        {
+                            if (!page.Value.TryGetProperty("imageinfo", out var infos) || infos.GetArrayLength() == 0)
+                                continue;
+                            var info = infos[0];
+                            if (!info.TryGetProperty("mime", out var mime) || mime.GetString() != "image/jpeg")
+                                continue;
+                            string? thumb = info.TryGetProperty("thumburl", out var t) ? t.GetString() : null;
+                            if (string.IsNullOrEmpty(thumb))
+                                continue;
+                            using var imgResponse = await HttpClient.GetAsync(thumb, cts.Token);
+                            if (imgResponse.IsSuccessStatusCode)
+                            {
+                                GD.Print($"{LogPrefix} Using Wikimedia Commons photo for '{courseName}'.");
+                                return await imgResponse.Content.ReadAsByteArrayAsync(cts.Token);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Course photo download failed: {ex.Message}");
+        }
+        return null;
+    }
+
+    private static async Task<byte[]?> DownloadPhotoFromWebImageSearchAsync(string query, System.Threading.CancellationToken token)
+    {
+        const string browserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0";
+        try
+        {
+            using var searchRequest = new HttpRequestMessage(HttpMethod.Get,
+                $"https://www.bing.com/images/search?q={Uri.EscapeDataString(query)}&form=HDRSC2&first=1");
+            searchRequest.Headers.TryAddWithoutValidation("User-Agent", browserUserAgent);
+            using var searchResponse = await HttpClient.SendAsync(searchRequest, token);
+            if (!searchResponse.IsSuccessStatusCode)
+                return null;
+
+            string html = await searchResponse.Content.ReadAsStringAsync(token);
+            var matches = System.Text.RegularExpressions.Regex.Matches(html, "murl&quot;:&quot;(https?://[^&]+)&quot;");
+            int attempts = 0;
+            foreach (System.Text.RegularExpressions.Match match in matches)
+            {
+                if (attempts++ >= 6)
+                    break;
+                try
+                {
+                    using var imageRequest = new HttpRequestMessage(HttpMethod.Get, System.Net.WebUtility.HtmlDecode(match.Groups[1].Value));
+                    imageRequest.Headers.TryAddWithoutValidation("User-Agent", browserUserAgent);
+                    using var imageResponse = await HttpClient.SendAsync(imageRequest, token);
+                    if (!imageResponse.IsSuccessStatusCode)
+                        continue;
+                    string? mediaType = imageResponse.Content.Headers.ContentType?.MediaType;
+                    if (mediaType != "image/jpeg" && mediaType != "image/png" && mediaType != "image/webp")
+                        continue;
+                    var bytes = await imageResponse.Content.ReadAsByteArrayAsync(token);
+                    if (bytes.Length > 20_000 && bytes.Length < 10_000_000)
+                        return bytes;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Try the next result
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Web image search failed: {ex.Message}");
+        }
+        return null;
+    }
+
     private async Task<SatelliteImageResult?> DownloadSatelliteImageAsync(BBox bbox, int width, int height)
     {
         string bboxParameter = string.Format(
@@ -7692,8 +8039,8 @@ public partial class OsmMapLoader : Node
 
         const float halfWidth = 1.25f;
         const float maximumPointSpacing = 1.0f;
-        const float visualHeightOffset = 0.10f;
-        const float collisionHeightOffset = 0.06f;
+        const float visualHeightOffset = 0.035f;
+        const float collisionHeightOffset = 0.020f;
         var cleanPoints = new List<Vector2>();
         foreach (var point in points)
         {
@@ -7746,15 +8093,24 @@ public partial class OsmMapLoader : Node
 
         var vertices = new Vector3[cleanPoints.Count * 2];
         var normals = new Vector3[vertices.Length];
+        var uvs = new Vector2[vertices.Length];
         var indices = new int[(cleanPoints.Count - 1) * 6];
+        float accumulatedDistance = 0f;
         for (int pointIndex = 0; pointIndex < cleanPoints.Count; pointIndex++)
         {
+            if (pointIndex > 0)
+            {
+                accumulatedDistance += cleanPoints[pointIndex].DistanceTo(cleanPoints[pointIndex - 1]);
+            }
+            float v = accumulatedDistance * 0.25f;
             Vector2 left = leftEdge[pointIndex];
             Vector2 right = rightEdge[pointIndex];
             vertices[pointIndex * 2] = new Vector3(left.X, GetHeightWithFeatures(left.X, left.Y, exclusions) + visualHeightOffset, left.Y);
             vertices[pointIndex * 2 + 1] = new Vector3(right.X, GetHeightWithFeatures(right.X, right.Y, exclusions) + visualHeightOffset, right.Y);
             normals[pointIndex * 2] = Vector3.Up;
             normals[pointIndex * 2 + 1] = Vector3.Up;
+            uvs[pointIndex * 2] = new Vector2(0f, v);
+            uvs[pointIndex * 2 + 1] = new Vector2(1f, v);
         }
         for (int segmentIndex = 0; segmentIndex < cleanPoints.Count - 1; segmentIndex++)
         {
@@ -7772,17 +8128,30 @@ public partial class OsmMapLoader : Node
         meshArrays.Resize((int)Mesh.ArrayType.Max);
         meshArrays[(int)Mesh.ArrayType.Vertex] = vertices;
         meshArrays[(int)Mesh.ArrayType.Normal] = normals;
+        meshArrays[(int)Mesh.ArrayType.TexUV] = uvs;
         meshArrays[(int)Mesh.ArrayType.Index] = indices;
         var mesh = new ArrayMesh();
         mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, meshArrays);
 
-        var material = new StandardMaterial3D
+        if (ResourceLoader.Exists("res://Courses/Environments/shaders/cart_path.gdshader"))
         {
-            AlbedoColor = new Color(0.015f, 0.015f, 0.015f),
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled
-        };
-        mesh.SurfaceSetMaterial(0, material);
+            var shaderMat = new ShaderMaterial
+            {
+                Shader = GD.Load<Shader>("res://Courses/Environments/shaders/cart_path.gdshader")
+            };
+            mesh.SurfaceSetMaterial(0, shaderMat);
+        }
+        else
+        {
+            var material = new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.79f, 0.63f, 0.39f),
+                Roughness = 0.90f,
+                MetallicSpecular = 0.10f,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled
+            };
+            mesh.SurfaceSetMaterial(0, material);
+        }
         var meshInstance = new MeshInstance3D
         {
             Name = $"cartpath_{pathIndex}",

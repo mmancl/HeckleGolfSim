@@ -294,7 +294,7 @@ grow_vertical = 2
 
 [node name="SettingsPanel" type="PanelContainer" parent="SettingsOverlay/SettingsCenter"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(740, 520)
+custom_minimum_size = Vector2(760, 560)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_bg")
 
@@ -307,7 +307,7 @@ theme_override_constants/margin_bottom = 20
 
 [node name="SettingsVBox" type="VBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin"]
 layout_mode = 2
-theme_override_constants/separation = 14
+theme_override_constants/separation = 12
 
 [node name="SettingsHeaderHBox" type="HBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox"]
 layout_mode = 2
@@ -318,7 +318,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(1, 1, 1, 1)
 theme_override_font_sizes/font_size = 22
-text = "⚙ Course Search & Filter Settings"
+text = "⚙ Course Download & Generation Settings"
 
 [node name="SettingsCloseButton" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsHeaderHBox"]
 unique_name_in_owner = true
@@ -335,35 +335,170 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_warn")
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.84, 0.45, 1)
 theme_override_font_sizes/font_size = 13
-text = "⚠️ Warning: There is no guarantee that a course found with changed filters will work properly. The default filters are in place to ensure a well-defined course with complete 9 or 18 hole layouts is selected."
+text = "⚠️ Configure search filtering and 3D course generation preferences. Changed generation options will be remembered and applied whenever downloading courses."
 autowrap_mode = 2
 
-[node name="HoleCountCard" type="PanelContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox"]
+[node name="SettingsScroll" type="ScrollContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="CardsVBox" type="VBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 12
+
+[node name="CourseGenCard" type="PanelContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_card")
 
-[node name="HoleCountVBox" type="VBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard"]
+[node name="CourseGenVBox" type="VBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="HoleCountTitle" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard/HoleCountVBox"]
+[node name="CourseGenTitle" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.82, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "3D Course Generation Options"
+
+[node name="CourseGenDesc" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
+theme_override_font_sizes/font_size = 13
+text = "Configure preferred 3D features and hole layout options when downloading courses."
+
+[node name="PresetButtonsHBox" type="HBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PresetLabel" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox/PresetButtonsHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.93, 0.98, 1)
+theme_override_font_sizes/font_size = 15
+text = "Detail Preset:"
+
+[node name="BtnPresetLow" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox/PresetButtonsHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(100, 38)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+toggle_mode = true
+button_pressed = false
+text = "Low"
+
+[node name="BtnPresetMedium" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox/PresetButtonsHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(100, 38)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+toggle_mode = true
+button_pressed = true
+text = "Medium"
+
+[node name="BtnPresetHigh" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox/PresetButtonsHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(100, 38)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+toggle_mode = true
+button_pressed = false
+text = "High"
+
+[node name="TreeCountRow" type="HBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="TreeCountLabel" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox/TreeCountRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.93, 0.98, 1)
+theme_override_font_sizes/font_size = 15
+text = "# of Trees Generated (Max):"
+
+[node name="TreeCountSpinBox" type="SpinBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox/TreeCountRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(130, 36)
+layout_mode = 2
+max_value = 12000.0
+step = 50.0
+value = 6000.0
+rounded = true
+
+[node name="TreeCountHint" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox/TreeCountRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.68, 0.76, 1)
+theme_override_font_sizes/font_size = 12
+text = "(Low: 1,000, Med: 2,500, High: 6,000)"
+
+[node name="WaterLongGrassCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+button_pressed = true
+text = " Generate water long grass (shoreline reeds around hazards)"
+
+[node name="Permutations18HoleCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+button_pressed = false
+text = " Create 18-hole permutations for courses > 18 holes"
+
+[node name="Permutations18HoleHint" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.68, 0.76, 1)
+theme_override_font_sizes/font_size = 12
+text = "   When disabled (default), generates a single unified course with all holes (e.g. 27 or 36 holes in one course)."
+
+[node name="BushesCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+button_pressed = true
+text = " Generate bushes clustered near trees"
+
+[node name="CartPathsCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+button_pressed = true
+text = " Generate cart paths"
+
+[node name="Bunkers3dCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+button_pressed = true
+text = " Generate recessed 3D bunkers & sculpted sand lips"
+
+[node name="HoleCountCard" type="PanelContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="HoleCountVBox" type="VBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/HoleCountCard"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="HoleCountTitle" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/HoleCountCard/HoleCountVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.35, 0.82, 1, 1)
 theme_override_font_sizes/font_size = 16
 text = "Hole Count Filter"
 
-[node name="HoleCountDesc" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard/HoleCountVBox"]
+[node name="HoleCountDesc" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/HoleCountCard/HoleCountVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
 theme_override_font_sizes/font_size = 13
 text = "Select course sizes to include. Selecting 'All' includes any course regardless of detected holes."
 
-[node name="HoleButtonsHBox" type="HBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard/HoleCountVBox"]
+[node name="HoleButtonsHBox" type="HBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/HoleCountCard/HoleCountVBox"]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="Btn9Hole" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard/HoleCountVBox/HoleButtonsHBox"]
+[node name="Btn9Hole" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/HoleCountCard/HoleCountVBox/HoleButtonsHBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(140, 42)
 layout_mode = 2
@@ -372,7 +507,7 @@ toggle_mode = true
 button_pressed = true
 text = "9 Holes"
 
-[node name="Btn18Hole" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard/HoleCountVBox/HoleButtonsHBox"]
+[node name="Btn18Hole" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/HoleCountCard/HoleCountVBox/HoleButtonsHBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(140, 42)
 layout_mode = 2
@@ -381,7 +516,7 @@ toggle_mode = true
 button_pressed = true
 text = "18 Holes"
 
-[node name="BtnAllHoles" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/HoleCountCard/HoleCountVBox/HoleButtonsHBox"]
+[node name="BtnAllHoles" type="Button" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/HoleCountCard/HoleCountVBox/HoleButtonsHBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(220, 42)
 layout_mode = 2
@@ -390,41 +525,41 @@ toggle_mode = true
 button_pressed = false
 text = "All (Exclude Hole Filter)"
 
-[node name="TagFilterCard" type="PanelContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox"]
+[node name="TagFilterCard" type="PanelContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_card")
 
-[node name="TagFilterVBox" type="VBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard"]
+[node name="TagFilterVBox" type="VBoxContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/TagFilterCard"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="TagFilterTitle" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+[node name="TagFilterTitle" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/TagFilterCard/TagFilterVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.35, 0.82, 1, 1)
 theme_override_font_sizes/font_size = 16
 text = "OpenStreetMap Tag Filtering"
 
-[node name="TagFilterDesc" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+[node name="TagFilterDesc" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/TagFilterCard/TagFilterVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
 theme_override_font_sizes/font_size = 13
 text = "Configure the tag filters used during search. Disable 'leisure=golf_course' or supply custom labels."
 
-[node name="LeisureGolfCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+[node name="LeisureGolfCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/TagFilterCard/TagFilterVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 15
 button_pressed = true
 text = " Filter by 'leisure=golf_course'"
 
-[node name="CustomTagsLabel" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+[node name="CustomTagsLabel" type="Label" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/TagFilterCard/TagFilterVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
 theme_override_font_sizes/font_size = 13
 text = "Custom OSM Tags / Labels (comma-separated, e.g. leisure=golf_course, sport=golf):"
 
-[node name="CustomTagsInput" type="LineEdit" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+[node name="CustomTagsInput" type="LineEdit" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/TagFilterCard/TagFilterVBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
@@ -432,14 +567,14 @@ theme_override_font_sizes/font_size = 15
 placeholder_text = "e.g. leisure=golf_course, sport=golf, golf=course"
 clear_button_enabled = true
 
-[node name="CachedOnlyCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+[node name="CachedOnlyCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/TagFilterCard/TagFilterVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 15
 button_pressed = false
 text = " Search cached courses only (Bypass online OSM)"
 
-[node name="ForceOnlineCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/TagFilterCard/TagFilterVBox"]
+[node name="ForceOnlineCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/TagFilterCard/TagFilterVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 15

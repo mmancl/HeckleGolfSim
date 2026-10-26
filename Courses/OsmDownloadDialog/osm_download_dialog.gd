@@ -88,6 +88,17 @@ static func is_pga_tour_course(course: Dictionary) -> bool:
 @onready var settings_dimmer: ColorRect = %SettingsDimmer
 @onready var settings_panel: PanelContainer = %SettingsPanel
 @onready var settings_close_button: Button = %SettingsCloseButton
+@onready var course_gen_card: PanelContainer = %CourseGenCard
+@onready var btn_preset_low: Button = %BtnPresetLow
+@onready var btn_preset_medium: Button = %BtnPresetMedium
+@onready var btn_preset_high: Button = %BtnPresetHigh
+@onready var tree_count_spin_box: SpinBox = %TreeCountSpinBox
+@onready var water_long_grass_check: CheckBox = %WaterLongGrassCheck
+@onready var permutations_18_hole_check: CheckBox = %Permutations18HoleCheck
+@onready var bushes_check: CheckBox = %BushesCheck
+@onready var cart_paths_check: CheckBox = %CartPathsCheck
+@onready var bunkers_3d_check: CheckBox = %Bunkers3dCheck
+var _current_preset: String = "medium"
 @onready var hole_count_card: PanelContainer = %HoleCountCard
 @onready var tag_filter_card: PanelContainer = %TagFilterCard
 @onready var btn_9_hole: Button = %Btn9Hole
@@ -146,6 +157,12 @@ func _ready() -> void:
 	if settings_close_button != null:
 		ThemeManager.apply_nav_button_style(settings_close_button, 6)
 		settings_close_button.pressed.connect(_on_settings_closed)
+	if course_gen_card != null:
+		ThemeManager.apply_card_panel_style(course_gen_card, false, 8, 14, 10, 14, 10)
+	if tree_count_spin_box != null:
+		var s_line_edit = tree_count_spin_box.get_line_edit()
+		if s_line_edit != null:
+			ThemeManager.apply_input_style(s_line_edit, 6)
 	if hole_count_card != null:
 		ThemeManager.apply_card_panel_style(hole_count_card, false, 8, 14, 10, 14, 10)
 	if tag_filter_card != null:
@@ -171,8 +188,29 @@ func _ready() -> void:
 	if btn_all_holes != null:
 		btn_all_holes.toggled.connect(_on_btn_all_holes_toggled)
 
+	if btn_preset_low != null:
+		btn_preset_low.pressed.connect(func(): _apply_preset("low"))
+	if btn_preset_medium != null:
+		btn_preset_medium.pressed.connect(func(): _apply_preset("medium"))
+	if btn_preset_high != null:
+		btn_preset_high.pressed.connect(func(): _apply_preset("high"))
+
+	if tree_count_spin_box != null:
+		tree_count_spin_box.value_changed.connect(_on_generation_option_changed)
+	if bushes_check != null:
+		bushes_check.toggled.connect(_on_generation_option_changed)
+	if cart_paths_check != null:
+		cart_paths_check.toggled.connect(_on_generation_option_changed)
+	if water_long_grass_check != null:
+		water_long_grass_check.toggled.connect(func(_p): _save_search_settings())
+	if permutations_18_hole_check != null:
+		permutations_18_hole_check.toggled.connect(func(_p): _save_search_settings())
+	if bunkers_3d_check != null:
+		bunkers_3d_check.toggled.connect(func(_p): _save_search_settings())
+
 	_load_search_settings()
 	_update_hole_buttons_visual()
+	_update_preset_buttons_visual()
 
 	cancel_button.pressed.connect(_on_cancel_pressed)
 	download_button.pressed.connect(_on_download_pressed)
@@ -779,6 +817,83 @@ func _update_hole_buttons_visual() -> void:
 		ThemeManager.apply_nav_button_style(btn_all_holes, 6)
 
 
+func _apply_preset(preset: String) -> void:
+	_current_preset = preset
+	match preset:
+		"low":
+			if tree_count_spin_box != null:
+				tree_count_spin_box.value = 1000.0
+			if bushes_check != null:
+				bushes_check.button_pressed = false
+			if cart_paths_check != null:
+				cart_paths_check.button_pressed = false
+		"medium":
+			if tree_count_spin_box != null:
+				tree_count_spin_box.value = 2500.0
+			if bushes_check != null:
+				bushes_check.button_pressed = true
+			if cart_paths_check != null:
+				cart_paths_check.button_pressed = true
+		"high":
+			if tree_count_spin_box != null:
+				tree_count_spin_box.value = 6000.0
+			if bushes_check != null:
+				bushes_check.button_pressed = true
+			if cart_paths_check != null:
+				cart_paths_check.button_pressed = true
+	_update_preset_buttons_visual()
+	_save_search_settings()
+
+
+func _detect_preset_from_values() -> String:
+	var t = int(tree_count_spin_box.value) if tree_count_spin_box != null else 2500
+	var b = bushes_check.button_pressed if bushes_check != null else true
+	var c = cart_paths_check.button_pressed if cart_paths_check != null else true
+	if t == 6000 and b == true and c == true:
+		return "high"
+	elif t == 2500 and b == true and c == true:
+		return "medium"
+	elif t == 1000 and b == false and c == false:
+		return "low"
+	return ""
+
+
+func _on_generation_option_changed(_val = null) -> void:
+	_current_preset = _detect_preset_from_values()
+	_update_preset_buttons_visual()
+	_save_search_settings()
+
+
+func _update_preset_buttons_visual() -> void:
+	if btn_preset_low == null or btn_preset_medium == null or btn_preset_high == null:
+		return
+	var active = _current_preset
+	if active.is_empty():
+		active = _detect_preset_from_values()
+		_current_preset = active
+
+	btn_preset_low.set_pressed_no_signal(active == "low")
+	btn_preset_medium.set_pressed_no_signal(active == "medium")
+	btn_preset_high.set_pressed_no_signal(active == "high")
+
+	if active == "low":
+		ThemeManager.apply_primary_button_style(btn_preset_low, 6)
+		ThemeManager.apply_nav_button_style(btn_preset_medium, 6)
+		ThemeManager.apply_nav_button_style(btn_preset_high, 6)
+	elif active == "high":
+		ThemeManager.apply_nav_button_style(btn_preset_low, 6)
+		ThemeManager.apply_nav_button_style(btn_preset_medium, 6)
+		ThemeManager.apply_primary_button_style(btn_preset_high, 6)
+	elif active == "medium":
+		ThemeManager.apply_nav_button_style(btn_preset_low, 6)
+		ThemeManager.apply_primary_button_style(btn_preset_medium, 6)
+		ThemeManager.apply_nav_button_style(btn_preset_high, 6)
+	else:
+		ThemeManager.apply_nav_button_style(btn_preset_low, 6)
+		ThemeManager.apply_nav_button_style(btn_preset_medium, 6)
+		ThemeManager.apply_nav_button_style(btn_preset_high, 6)
+
+
 func _on_reset_defaults_pressed() -> void:
 	if btn_9_hole != null:
 		btn_9_hole.set_pressed_no_signal(true)
@@ -794,13 +909,28 @@ func _on_reset_defaults_pressed() -> void:
 		cached_only_check.button_pressed = false
 	if force_online_check != null:
 		force_online_check.button_pressed = false
+
+	var is_mobile_platform := OS.get_name() == "Android" or OS.get_name() == "iOS"
+	_apply_preset("medium" if is_mobile_platform else "high")
+	if water_long_grass_check != null:
+		water_long_grass_check.button_pressed = true
+	if permutations_18_hole_check != null:
+		permutations_18_hole_check.button_pressed = false
+	if bunkers_3d_check != null:
+		bunkers_3d_check.button_pressed = true
+
 	_update_hole_buttons_visual()
+	_update_preset_buttons_visual()
 	_save_search_settings()
 	if _is_showing_cached:
 		_show_all_cached_courses()
 
 
 func _load_search_settings() -> void:
+	var is_mobile_platform := OS.get_name() == "Android" or OS.get_name() == "iOS"
+	var default_trees := 2500.0 if is_mobile_platform else 6000.0
+	var default_preset := "medium" if is_mobile_platform else "high"
+
 	var cfg = ConfigFile.new()
 	var err = cfg.load(SETTINGS_FILE)
 	if err == OK:
@@ -827,6 +957,21 @@ func _load_search_settings() -> void:
 			cached_only_check.button_pressed = cfg.get_value("search_filter", "cached_only", false)
 		if force_online_check != null:
 			force_online_check.button_pressed = cfg.get_value("search_filter", "force_online", false)
+
+		_current_preset = cfg.get_value("course_generation", "preset", default_preset)
+		if tree_count_spin_box != null:
+			tree_count_spin_box.value = float(cfg.get_value("course_generation", "max_trees", default_trees))
+		if water_long_grass_check != null:
+			water_long_grass_check.button_pressed = bool(cfg.get_value("course_generation", "generate_water_long_grass", true))
+		if permutations_18_hole_check != null:
+			permutations_18_hole_check.button_pressed = bool(cfg.get_value("course_generation", "create_18_hole_permutations", false))
+		if bushes_check != null:
+			bushes_check.button_pressed = bool(cfg.get_value("course_generation", "generate_bushes", true))
+		if cart_paths_check != null:
+			cart_paths_check.button_pressed = bool(cfg.get_value("course_generation", "generate_cart_paths", true))
+		if bunkers_3d_check != null:
+			bunkers_3d_check.button_pressed = bool(cfg.get_value("course_generation", "generate_3d_bunkers", true))
+		_update_preset_buttons_visual()
 	else:
 		if btn_9_hole != null: btn_9_hole.set_pressed_no_signal(true)
 		if btn_18_hole != null: btn_18_hole.set_pressed_no_signal(true)
@@ -835,6 +980,14 @@ func _load_search_settings() -> void:
 		if custom_tags_input != null: custom_tags_input.text = ""
 		if cached_only_check != null: cached_only_check.button_pressed = false
 		if force_online_check != null: force_online_check.button_pressed = false
+		_current_preset = default_preset
+		if tree_count_spin_box != null: tree_count_spin_box.value = default_trees
+		if water_long_grass_check != null: water_long_grass_check.button_pressed = true
+		if permutations_18_hole_check != null: permutations_18_hole_check.button_pressed = false
+		if bushes_check != null: bushes_check.button_pressed = true
+		if cart_paths_check != null: cart_paths_check.button_pressed = true
+		if bunkers_3d_check != null: bunkers_3d_check.button_pressed = true
+		_update_preset_buttons_visual()
 
 
 func _save_search_settings() -> void:
@@ -854,6 +1007,20 @@ func _save_search_settings() -> void:
 		cfg.set_value("search_filter", "cached_only", cached_only_check.button_pressed)
 	if force_online_check != null:
 		cfg.set_value("search_filter", "force_online", force_online_check.button_pressed)
+
+	cfg.set_value("course_generation", "preset", _current_preset)
+	if tree_count_spin_box != null:
+		cfg.set_value("course_generation", "max_trees", int(tree_count_spin_box.value))
+	if water_long_grass_check != null:
+		cfg.set_value("course_generation", "generate_water_long_grass", water_long_grass_check.button_pressed)
+	if permutations_18_hole_check != null:
+		cfg.set_value("course_generation", "create_18_hole_permutations", permutations_18_hole_check.button_pressed)
+	if bushes_check != null:
+		cfg.set_value("course_generation", "generate_bushes", bushes_check.button_pressed)
+	if cart_paths_check != null:
+		cfg.set_value("course_generation", "generate_cart_paths", cart_paths_check.button_pressed)
+	if bunkers_3d_check != null:
+		cfg.set_value("course_generation", "generate_3d_bunkers", bunkers_3d_check.button_pressed)
 	cfg.save(SETTINGS_FILE)
 
 
@@ -1034,6 +1201,9 @@ func _on_download_pressed() -> void:
 	var current_token = _download_token
 	_start_download_notice_timer(current_token)
 
+	# Apply preferred course generation configuration
+	_apply_course_generation_settings_to_loader()
+
 	# Call C# download and generate and await signal
 	if _loader != null and _loader.has_method("DownloadAndGenerateCourse"):
 		_loader.call("DownloadAndGenerateCourse", lat, lon, course_name, is_cached, location)
@@ -1123,7 +1293,25 @@ func _update_progress_status(msg: String) -> void:
 		status_label.text = msg
 
 
+func _apply_course_generation_settings_to_loader() -> void:
+	if _loader == null:
+		return
+	if "MaxTrees" in _loader:
+		_loader.set("MaxTrees", int(tree_count_spin_box.value) if tree_count_spin_box != null else 2000)
+	if "GenerateWaterLongGrass" in _loader:
+		_loader.set("GenerateWaterLongGrass", water_long_grass_check.button_pressed if water_long_grass_check != null else true)
+	if "Create18HolePermutations" in _loader:
+		_loader.set("Create18HolePermutations", permutations_18_hole_check.button_pressed if permutations_18_hole_check != null else false)
+	if "GenerateBushes" in _loader:
+		_loader.set("GenerateBushes", bushes_check.button_pressed if bushes_check != null else true)
+	if "GenerateCartPaths" in _loader:
+		_loader.set("GenerateCartPaths", cart_paths_check.button_pressed if cart_paths_check != null else true)
+	if "Generate3dBunkers" in _loader:
+		_loader.set("Generate3dBunkers", bunkers_3d_check.button_pressed if bunkers_3d_check != null else true)
+	if "HasCustomGenerationSettings" in _loader:
+		_loader.set("HasCustomGenerationSettings", true)
+
+
 func _exit_tree() -> void:
 	if has_node("/root/UIFocusGuard"):
 		get_node("/root/UIFocusGuard").pop_lock(self)
-

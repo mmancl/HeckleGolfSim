@@ -13,7 +13,7 @@ const ProceduralTreeGeneratorScript = preload("res://HighFidelity/Foliage/proced
 const HighFidelityGrassScript = preload("res://HighFidelity/Foliage/high_fidelity_grass.gd")
 
 
-static func enhance_course_scene(scene_root: Node, persist_for_save: bool = false) -> Dictionary:
+static func enhance_course_scene(scene_root: Node, persist_for_save: bool = false, options: Dictionary = {}) -> Dictionary:
 	var result := {
 		"bunkers_built": 0,
 		"shoreline_reeds": 0,
@@ -27,12 +27,72 @@ static func enhance_course_scene(scene_root: Node, persist_for_save: bool = fals
 
 	_strip_legacy_grass_nodes(scene_root)
 	var height_map := _build_terrain_height_lookup(scene_root)
-	result["bunkers_built"] = _build_recessed_3d_bunkers(scene_root, height_map, persist_for_save)
-	result["shoreline_reeds"] = _build_shoreline_reeds(scene_root, height_map, persist_for_save)
+	scene_root.set_meta("terrain_height_lookup", height_map)
+
+	var gen_bunkers := true
+	if options.has("generate_3d_bunkers"):
+		gen_bunkers = bool(options["generate_3d_bunkers"])
+	elif scene_root.has_meta("generate_3d_bunkers"):
+		gen_bunkers = bool(scene_root.get_meta("generate_3d_bunkers"))
+	elif FileAccess.file_exists("user://osm_download_settings.cfg"):
+		var cfg := ConfigFile.new()
+		if cfg.load("user://osm_download_settings.cfg") == OK:
+			gen_bunkers = bool(cfg.get_value("course_generation", "generate_3d_bunkers", true))
+
+	if gen_bunkers:
+		result["bunkers_built"] = _build_recessed_3d_bunkers(scene_root, height_map, persist_for_save)
+	else:
+		result["bunkers_built"] = 0
+
+	var gen_reeds := true
+	if options.has("generate_water_long_grass"):
+		gen_reeds = bool(options["generate_water_long_grass"])
+	elif scene_root.has_meta("generate_water_long_grass"):
+		gen_reeds = bool(scene_root.get_meta("generate_water_long_grass"))
+	elif FileAccess.file_exists("user://osm_download_settings.cfg"):
+		var cfg := ConfigFile.new()
+		if cfg.load("user://osm_download_settings.cfg") == OK:
+			gen_reeds = bool(cfg.get_value("course_generation", "generate_water_long_grass", true))
+
+	if gen_reeds:
+		result["shoreline_reeds"] = _build_shoreline_reeds(scene_root, height_map, persist_for_save)
+	else:
+		result["shoreline_reeds"] = 0
+
 	result["horizon_skirt"] = _build_horizon_skirt(scene_root, height_map, persist_for_save)
-	result["cart_paths"] = _build_cart_paths(scene_root, height_map, persist_for_save)
+
+	var gen_cart_paths := true
+	if options.has("generate_cart_paths"):
+		gen_cart_paths = bool(options["generate_cart_paths"])
+	elif scene_root.has_meta("generate_cart_paths"):
+		gen_cart_paths = bool(scene_root.get_meta("generate_cart_paths"))
+	elif FileAccess.file_exists("user://osm_download_settings.cfg"):
+		var cfg := ConfigFile.new()
+		if cfg.load("user://osm_download_settings.cfg") == OK:
+			gen_cart_paths = bool(cfg.get_value("course_generation", "generate_cart_paths", true))
+
+	if gen_cart_paths:
+		result["cart_paths"] = _build_cart_paths(scene_root, height_map, persist_for_save)
+	else:
+		result["cart_paths"] = false
+
 	result["thick_rough_grass"] = 0
-	result["thick_rough_bushes"] = _build_thick_rough_bushes(scene_root, height_map, persist_for_save)
+
+	var gen_bushes := true
+	if options.has("generate_bushes"):
+		gen_bushes = bool(options["generate_bushes"])
+	elif scene_root.has_meta("generate_bushes"):
+		gen_bushes = bool(scene_root.get_meta("generate_bushes"))
+	elif FileAccess.file_exists("user://osm_download_settings.cfg"):
+		var cfg := ConfigFile.new()
+		if cfg.load("user://osm_download_settings.cfg") == OK:
+			gen_bushes = bool(cfg.get_value("course_generation", "generate_bushes", true))
+
+	if gen_bushes:
+		result["thick_rough_bushes"] = _build_thick_rough_bushes(scene_root, height_map, persist_for_save)
+	else:
+		result["thick_rough_bushes"] = 0
+
 	ensure_deep_rough_map(scene_root)
 	_upgrade_water_materials(scene_root)
 	return result
@@ -43,12 +103,15 @@ static func _strip_legacy_grass_nodes(scene_root: Node) -> void:
 	var stack: Array[Node] = [scene_root]
 	while not stack.is_empty():
 		var n: Node = stack.pop_back()
+		if n.name == "MultiMeshFoliageContainer":
+			continue
 		for c in n.get_children():
 			var cn := String(c.name)
 			if cn == "BunkerLipGrassMultiMesh" or cn == "ShorelineReedsMultiMesh" \
 					or cn == "HighFidelityBunkers" \
 					or cn == "ThickRoughGrassMultiMesh" \
 					or cn == "ThickRoughBushes" \
+					or cn == "CartPaths" \
 					or cn.begins_with("ThickRough_") \
 					or cn.begins_with("BushChunk_") or cn.begins_with("Bush_") \
 					or cn.begins_with("RockChunk_") or cn.begins_with("Rock_"):
@@ -72,12 +135,25 @@ static func _build_terrain_height_lookup(scene_root: Node) -> Dictionary:
 		"avg_edge_y": 0.0,
 		"grid": {}
 	}
-	var terrain := scene_root.find_child("UnifiedTerrain", true, false) as MeshInstance3D
+	var terrain: MeshInstance3D = null
+	for tname in ["UnifiedTerrain", "DynamicGround", "RoughGround", "Terrain", "TerrainMesh"]:
+		terrain = scene_root.find_child(tname, true, false) as MeshInstance3D
+		if terrain != null and terrain.mesh != null and terrain.mesh.get_surface_count() > 0:
+			break
+	if terrain == null:
+		for child in scene_root.find_children("*", "MeshInstance3D", true, false):
+			var cn := child.name.to_lower()
+			if (cn.contains("terrain") or cn.contains("ground")) and not cn.contains("preview"):
+				var mi := child as MeshInstance3D
+				if mi.mesh != null and mi.mesh.get_surface_count() > 0:
+					terrain = mi
+					break
 	if terrain == null or terrain.mesh == null or terrain.mesh.get_surface_count() == 0:
 		return info
 
 	var aabb := terrain.mesh.get_aabb()
-	var t_pos := terrain.global_position if terrain.is_inside_tree() else terrain.position
+	var t_xform := terrain.global_transform if terrain.is_inside_tree() else terrain.transform
+	var t_pos := t_xform.origin
 	info["min_x"] = t_pos.x + aabb.position.x
 	info["max_x"] = t_pos.x + aabb.position.x + aabb.size.x
 	info["min_z"] = t_pos.z + aabb.position.z
@@ -87,17 +163,71 @@ static func _build_terrain_height_lookup(scene_root: Node) -> Dictionary:
 	if arrays.size() <= Mesh.ARRAY_VERTEX:
 		return info
 	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	if verts.is_empty():
+		return info
+
+	var num_verts := verts.size()
+	# Check if vertices form a regular row-major grid (as generated by OsmMapLoader or PlaneMesh)
+	var z0 := verts[0].z
+	var cols := 0
+	for i in range(1, num_verts):
+		if absf(verts[i].z - z0) > 0.001:
+			cols = i
+			break
+
+	if cols >= 2 and (num_verts % cols) == 0:
+		var rows := num_verts / cols
+		var h_array := PackedFloat32Array()
+		h_array.resize(num_verts)
+		var min_vx := INF
+		var max_vx := -INF
+		var min_vz := INF
+		var max_vz := -INF
+		var edge_sum := 0.0
+		var edge_cnt := 0
+
+		for i in range(num_verts):
+			var wv := t_xform * verts[i]
+			h_array[i] = wv.y
+			if wv.x < min_vx: min_vx = wv.x
+			if wv.x > max_vx: max_vx = wv.x
+			if wv.z < min_vz: min_vz = wv.z
+			if wv.z > max_vz: max_vz = wv.z
+
+			var r := i / cols
+			var c := i % cols
+			if r == 0 or r == rows - 1 or c == 0 or c == cols - 1:
+				edge_sum += wv.y
+				edge_cnt += 1
+
+		info["is_regular_grid"] = true
+		info["cols"] = cols
+		info["rows"] = rows
+		info["grid_min_x"] = min_vx
+		info["grid_max_x"] = max_vx
+		info["grid_min_z"] = min_vz
+		info["grid_max_z"] = max_vz
+		info["min_x"] = min_vx
+		info["max_x"] = max_vx
+		info["min_z"] = min_vz
+		info["max_z"] = max_vz
+		info["height_array"] = h_array
+		if edge_cnt > 0:
+			info["avg_edge_y"] = edge_sum / float(edge_cnt)
+		return info
+
 	var grid: Dictionary = {}
 	var edge_sum := 0.0
 	var edge_cnt := 0
-	var cell := 4.0
+	var cell := 2.0
 
 	for v in verts:
-		var vx := t_pos.x + v.x
-		var vy := t_pos.y + v.y
-		var vz := t_pos.z + v.z
-		var gx := int(round(vx / cell))
-		var gz := int(round(vz / cell))
+		var wv := t_xform * v
+		var vx := wv.x
+		var vy := wv.y
+		var vz := wv.z
+		var gx := int(floor(vx / cell))
+		var gz := int(floor(vz / cell))
 		grid[Vector2i(gx, gz)] = vy
 		if absf(vx - info["min_x"]) < 8.0 or absf(vx - info["max_x"]) < 8.0 or absf(vz - info["min_z"]) < 8.0 or absf(vz - info["max_z"]) < 8.0:
 			edge_sum += vy
@@ -105,15 +235,40 @@ static func _build_terrain_height_lookup(scene_root: Node) -> Dictionary:
 
 	if edge_cnt > 0:
 		info["avg_edge_y"] = edge_sum / float(edge_cnt)
+	info["cell_size"] = cell
 	info["grid"] = grid
 	return info
 
 
 static func _sample_height(wx: float, wz: float, info: Dictionary, fallback_y: float = 0.0) -> float:
+	if info.get("is_regular_grid", false):
+		var cols: int = info.get("cols", 0)
+		var rows: int = info.get("rows", 0)
+		var g_min_x: float = info.get("grid_min_x", 0.0)
+		var g_max_x: float = info.get("grid_max_x", 1.0)
+		var g_min_z: float = info.get("grid_min_z", 0.0)
+		var g_max_z: float = info.get("grid_max_z", 1.0)
+		var span_x := g_max_x - g_min_x
+		var span_z := g_max_z - g_min_z
+		if cols >= 2 and rows >= 2 and span_x > 0.001 and span_z > 0.001:
+			var u := clampf((wx - g_min_x) / span_x, 0.0, 1.0) * float(cols - 1)
+			var v := clampf((wz - g_min_z) / span_z, 0.0, 1.0) * float(rows - 1)
+			var c0 := mini(int(floor(u)), cols - 2)
+			var r0 := mini(int(floor(v)), rows - 2)
+			var tc := u - float(c0)
+			var tr := v - float(r0)
+			var h_arr: PackedFloat32Array = info.get("height_array", PackedFloat32Array())
+			if h_arr.size() == cols * rows:
+				var h00 := h_arr[r0 * cols + c0]
+				var h10 := h_arr[r0 * cols + c0 + 1]
+				var h01 := h_arr[(r0 + 1) * cols + c0]
+				var h11 := h_arr[(r0 + 1) * cols + c0 + 1]
+				return lerpf(lerpf(h00, h10, tc), lerpf(h01, h11, tc), tr)
+
 	var grid: Dictionary = info.get("grid", {})
 	if grid.is_empty():
 		return fallback_y
-	var cell := 4.0
+	var cell: float = float(info.get("cell_size", 4.0))
 	var fx := wx / cell
 	var fz := wz / cell
 	var ix := int(floor(fx))
@@ -124,7 +279,7 @@ static func _sample_height(wx: float, wz: float, info: Dictionary, fallback_y: f
 	var k00 := Vector2i(ix, iz)
 	var h00: float = grid.get(k00, NAN)
 	if is_nan(h00):
-		for r in range(1, 4):
+		for r in range(1, 6):
 			for dx in range(-r, r + 1):
 				for dz in range(-r, r + 1):
 					var k := Vector2i(ix + dx, iz + dz)
@@ -252,6 +407,7 @@ static func _build_recessed_3d_bunkers(scene_root: Node, height_info: Dictionary
 		built += 1
 
 	var mmi := MultiMeshInstance3D.new()
+	mmi.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	mmi.name = "BunkerLipGrassMultiMesh"
 	# Sand traps should be clean hazards without grass shoots or weeds
 	var mm := MultiMesh.new()
@@ -628,6 +784,42 @@ static func _get_water_surface_max_y(faces: PackedVector3Array, xform: Transform
 	return my if my > -90000.0 else xform.origin.y
 
 
+static func _sample_water_surface_y(wx: float, wz: float, faces: PackedVector3Array, xform: Transform3D, fallback_y: float) -> float:
+	if faces.is_empty():
+		return fallback_y
+	var best_d_sq := INF
+	var best_y := fallback_y
+	for i in range(faces.size()):
+		var wv := xform * faces[i]
+		var dx := wv.x - wx
+		var dz := wv.z - wz
+		var d_sq := dx * dx + dz * dz
+		if d_sq < best_d_sq:
+			best_d_sq = d_sq
+			best_y = wv.y
+			if d_sq < 0.04:
+				break
+	return best_y
+
+
+static func _orient_polygon_with_3d_ccw(poly: PackedVector2Array, poly_3d: PackedVector3Array) -> Dictionary:
+	var n := poly.size()
+	if n < 3:
+		return { "poly": poly, "poly_3d": poly_3d }
+	var area := 0.0
+	for i in range(n):
+		var a := poly[i]
+		var b := poly[(i + 1) % n]
+		area += (a.x * b.y - b.x * a.y)
+	if area < 0.0:
+		var rev2 := poly.duplicate()
+		rev2.reverse()
+		var rev3 := poly_3d.duplicate()
+		rev3.reverse()
+		return { "poly": rev2, "poly_3d": rev3 }
+	return { "poly": poly, "poly_3d": poly_3d }
+
+
 static func _orient_polygon_ccw(poly: PackedVector2Array) -> PackedVector2Array:
 	var n := poly.size()
 	if n < 3:
@@ -654,6 +846,7 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 			existing_reeds.free()
 
 	var water_polygons: Array[PackedVector2Array] = []
+	var water_boundaries_3d: Array[PackedVector3Array] = []
 	var water_fallback_y: Array[float] = []
 
 	# 1. Extract exact water polygons and accurate surface elevations from water StaticBody3D / CollisionObject3D nodes
@@ -665,7 +858,10 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 
 		var child_xform: Transform3D = (child as Node3D).global_transform if (child as Node3D).is_inside_tree() else _get_relative_transform_to_root(child as Node3D, scene_root)
 		var poly := PackedVector2Array()
+		var poly_3d := PackedVector3Array()
 		var poly_water_y := child_xform.origin.y
+		var water_faces := PackedVector3Array()
+		var faces_xform := child_xform
 
 		# Find exact water surface Y from collision mesh faces
 		var found_faces := false
@@ -673,7 +869,9 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 			if sub is CollisionShape3D and (sub as CollisionShape3D).shape is ConcavePolygonShape3D:
 				var faces := ((sub as CollisionShape3D).shape as ConcavePolygonShape3D).get_faces()
 				if not faces.is_empty():
-					poly_water_y = _get_water_surface_max_y(faces, child_xform * (sub as CollisionShape3D).transform)
+					faces_xform = child_xform * (sub as CollisionShape3D).transform
+					water_faces = faces
+					poly_water_y = _get_water_surface_max_y(faces, faces_xform)
 					found_faces = true
 					break
 
@@ -685,7 +883,10 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 				var mi_xform: Transform3D = mi.global_transform if mi.is_inside_tree() else _get_relative_transform_to_root(mi, scene_root)
 				var faces := mi.mesh.get_faces()
 				if not faces.is_empty():
+					faces_xform = mi_xform
+					water_faces = faces
 					poly_water_y = _get_water_surface_max_y(faces, mi_xform)
+					found_faces = true
 
 		for meta_key in ["water_points", "boundary_polygon"]:
 			if child.has_meta(meta_key):
@@ -693,13 +894,17 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 				if p_meta is PackedVector2Array and (p_meta as PackedVector2Array).size() >= 3:
 					for pt in (p_meta as PackedVector2Array):
 						var wp := child_xform * Vector3(pt.x, 0.0, pt.y)
+						var wy := _sample_water_surface_y(wp.x, wp.z, water_faces, faces_xform, poly_water_y) if found_faces else _sample_height(wp.x, wp.z, height_info, poly_water_y)
 						poly.append(Vector2(wp.x, wp.z))
+						poly_3d.append(Vector3(wp.x, wy, wp.z))
 					break
 				elif p_meta is Array and (p_meta as Array).size() >= 3:
 					for pt in (p_meta as Array):
 						if pt is Vector2:
 							var wp := child_xform * Vector3((pt as Vector2).x, 0.0, (pt as Vector2).y)
+							var wy := _sample_water_surface_y(wp.x, wp.z, water_faces, faces_xform, poly_water_y) if found_faces else _sample_height(wp.x, wp.z, height_info, poly_water_y)
 							poly.append(Vector2(wp.x, wp.z))
+							poly_3d.append(Vector3(wp.x, wy, wp.z))
 					if poly.size() >= 3:
 						break
 
@@ -709,7 +914,9 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 					var cp := sub as CollisionPolygon3D
 					for pt in cp.polygon:
 						var wp := child_xform * (cp.transform * Vector3(pt.x, 0.0, pt.y))
+						var wy := _sample_water_surface_y(wp.x, wp.z, water_faces, faces_xform, poly_water_y) if found_faces else _sample_height(wp.x, wp.z, height_info, poly_water_y)
 						poly.append(Vector2(wp.x, wp.z))
+						poly_3d.append(Vector3(wp.x, wy, wp.z))
 					break
 				elif sub is CollisionShape3D and (sub as CollisionShape3D).shape is ConcavePolygonShape3D:
 					var cs := sub as CollisionShape3D
@@ -717,10 +924,14 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 					var boundary := _extract_boundary_polygon_from_faces(faces, child_xform * cs.transform)
 					if boundary.size() >= 3:
 						poly = boundary
+						for bp in boundary:
+							var wy := _sample_water_surface_y(bp.x, bp.y, faces, child_xform * cs.transform, poly_water_y)
+							poly_3d.append(Vector3(bp.x, wy, bp.y))
 						break
 
 		if poly.size() >= 3:
 			water_polygons.append(poly)
+			water_boundaries_3d.append(poly_3d)
 			water_fallback_y.append(poly_water_y)
 
 	# 2. Fallback: Extract boundary polygons from any Water MeshInstance3D if no water StaticBody3D was found
@@ -743,7 +954,12 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 				var boundary := _extract_boundary_polygon_from_faces(faces, mi_xform)
 				var mi_water_y := _get_water_surface_max_y(faces, mi_xform)
 				if boundary.size() >= 3:
+					var boundary_3d := PackedVector3Array()
+					for bp in boundary:
+						var wy := _sample_water_surface_y(bp.x, bp.y, faces, mi_xform, mi_water_y)
+						boundary_3d.append(Vector3(bp.x, wy, bp.y))
 					water_polygons.append(boundary)
+					water_boundaries_3d.append(boundary_3d)
 					water_fallback_y.append(mi_water_y)
 				else:
 					var arrays := mi.mesh.surface_get_arrays(0)
@@ -758,7 +974,12 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 							if hull.size() > 3 and hull[hull.size() - 1].is_equal_approx(hull[0]):
 								hull.remove_at(hull.size() - 1)
 							if hull.size() >= 3:
+								var hull_3d := PackedVector3Array()
+								for hp in hull:
+									var wy := _sample_water_surface_y(hp.x, hp.y, faces, mi_xform, mi_water_y)
+									hull_3d.append(Vector3(hp.x, wy, hp.y))
 								water_polygons.append(hull)
+								water_boundaries_3d.append(hull_3d)
 								water_fallback_y.append(mi_water_y)
 
 	if water_polygons.is_empty():
@@ -769,53 +990,68 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 777111
 
-	# Place tall grass / marsh reeds continuously ALL the way around every water hazard with no limit
-	# Staggered multi-layer band (shallow water line + shore bank) to match real natural cattail stands
-	var min_step := 0.65
+	# Place tall grass / marsh reeds continuously ALL the way around every water hazard
+	# Staggered 3-tier dense wetland band (shoreline margin + mid bank + upper rough buffer)
+	var min_step := 0.48
 	var step_jitter := 0.20
 
 	for p_idx in range(water_polygons.size()):
 		var raw_poly := water_polygons[p_idx]
-		var water_level_y := water_fallback_y[p_idx]
-		# Orient CCW so outward normal points reliably onto dry land
-		var poly := _orient_polygon_ccw(raw_poly)
+		var raw_poly_3d := water_boundaries_3d[p_idx] if p_idx < water_boundaries_3d.size() else PackedVector3Array()
+		var oriented := _orient_polygon_with_3d_ccw(raw_poly, raw_poly_3d)
+		var poly: PackedVector2Array = oriented["poly"]
+		var poly_3d: PackedVector3Array = oriented["poly_3d"]
 		var num_pts := poly.size()
 		for i in range(num_pts):
 			var p1 := poly[i]
 			var p2 := poly[(i + 1) % num_pts]
+			var p1_3d: Vector3 = poly_3d[i] if i < poly_3d.size() else Vector3(p1.x, water_fallback_y[p_idx], p1.y)
+			var p2_3d: Vector3 = poly_3d[(i + 1) % num_pts] if ((i + 1) % num_pts) < poly_3d.size() else Vector3(p2.x, water_fallback_y[p_idx], p2.y)
 			var seg_len := p1.distance_to(p2)
 			if seg_len < 0.05:
 				continue
 
 			var dir := (p2 - p1) / seg_len
-			# Inward normal is (-dir.y, dir.x); Outward normal (toward shore bank) is (dir.y, -dir.x)
+			# Outward normal (toward shore bank) is (dir.y, -dir.x) for CCW polygon
 			var outward := Vector2(dir.y, -dir.x)
 			var d := 0.0
 			while d < seg_len:
 				var t := d / seg_len
 				var base_pt := p1.lerp(p2, t)
+				var local_water_y := lerpf(p1_3d.y, p2_3d.y, t)
 
-				# Cluster 1: Waterline bank border (0.25m to 0.70m from water edge onto bank)
-				var off1 := outward * rng.randf_range(0.25, 0.70)
+				# Cluster 1: Shoreline margin (0.50m to 1.05m onto dry shore bank)
+				var off1 := outward * rng.randf_range(0.50, 1.05)
 				var pos1 := base_pt + off1
-				var wy1 := _sample_height(pos1.x, pos1.y, height_info, water_level_y)
-				wy1 = maxf(wy1, water_level_y + 0.02)
+				var wy1 := _sample_height(pos1.x, pos1.y, height_info, local_water_y)
+				wy1 = maxf(wy1, local_water_y - 0.12)
 				var rot_y1 := rng.randf_range(0.0, TAU)
-				var s_xz1 := rng.randf_range(0.90, 1.25)
-				var s_y1 := rng.randf_range(0.90, 1.20)
-				reed_xforms.append(Transform3D(Basis(Vector3.UP, rot_y1).scaled(Vector3(s_xz1, s_y1, s_xz1)), Vector3(pos1.x, maxf(wy1 - 0.03, water_level_y + 0.01), pos1.y)))
+				var s_xz1 := rng.randf_range(0.85, 1.15)
+				var s_y1 := rng.randf_range(0.85, 1.25)
+				reed_xforms.append(Transform3D(Basis(Vector3.UP, rot_y1).scaled(Vector3(s_xz1, s_y1, s_xz1)), Vector3(pos1.x, wy1, pos1.y)))
 				reed_colors.append(Color(rng.randf_range(0.86, 1.06), rng.randf_range(0.90, 1.08), rng.randf_range(0.80, 1.02), rng.randf_range(0.05, 0.99)))
 
-				# Cluster 2: Shore bank buffer (0.70m to 1.45m up the bank slope)
-				var off2 := outward * rng.randf_range(0.70, 1.45)
+				# Cluster 2: Mid bank slope (1.20m to 2.15m up the bank slope)
+				var off2 := outward * rng.randf_range(1.20, 2.15)
 				var pos2 := base_pt + off2
-				var wy2 := _sample_height(pos2.x, pos2.y, height_info, water_level_y)
-				wy2 = maxf(wy2, water_level_y + 0.04)
+				var wy2 := _sample_height(pos2.x, pos2.y, height_info, local_water_y)
+				wy2 = maxf(wy2, local_water_y - 0.12)
 				var rot_y2 := rng.randf_range(0.0, TAU)
-				var s_xz2 := rng.randf_range(0.85, 1.20)
-				var s_y2 := rng.randf_range(0.85, 1.15)
-				reed_xforms.append(Transform3D(Basis(Vector3.UP, rot_y2).scaled(Vector3(s_xz2, s_y2, s_xz2)), Vector3(pos2.x, maxf(wy2 - 0.03, water_level_y + 0.02), pos2.y)))
+				var s_xz2 := rng.randf_range(0.80, 1.12)
+				var s_y2 := rng.randf_range(0.80, 1.20)
+				reed_xforms.append(Transform3D(Basis(Vector3.UP, rot_y2).scaled(Vector3(s_xz2, s_y2, s_xz2)), Vector3(pos2.x, wy2, pos2.y)))
 				reed_colors.append(Color(rng.randf_range(0.84, 1.04), rng.randf_range(0.88, 1.06), rng.randf_range(0.78, 1.00), rng.randf_range(0.05, 0.99)))
+
+				# Cluster 3: Upper bank wetland rough buffer (2.25m to 3.45m up the bank slope)
+				var off3 := outward * rng.randf_range(2.25, 3.45)
+				var pos3 := base_pt + off3
+				var wy3 := _sample_height(pos3.x, pos3.y, height_info, local_water_y)
+				wy3 = maxf(wy3, local_water_y - 0.12)
+				var rot_y3 := rng.randf_range(0.0, TAU)
+				var s_xz3 := rng.randf_range(0.78, 1.08)
+				var s_y3 := rng.randf_range(0.75, 1.15)
+				reed_xforms.append(Transform3D(Basis(Vector3.UP, rot_y3).scaled(Vector3(s_xz3, s_y3, s_xz3)), Vector3(pos3.x, wy3, pos3.y)))
+				reed_colors.append(Color(rng.randf_range(0.82, 1.02), rng.randf_range(0.86, 1.04), rng.randf_range(0.76, 0.98), rng.randf_range(0.05, 0.99)))
 
 				d += min_step + rng.randf() * step_jitter
 
@@ -834,6 +1070,8 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 	for i in range(reed_xforms.size()):
 		var xf: Transform3D = reed_xforms[i]
 		var col: Color = reed_colors[i]
+		mm.set_instance_transform(i, xf)
+		mm.set_instance_custom_data(i, col)
 		var base_idx := i * 16
 		buf[base_idx + 0] = xf.basis.x.x
 		buf[base_idx + 1] = xf.basis.y.x
@@ -851,16 +1089,15 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 		buf[base_idx + 13] = col.g
 		buf[base_idx + 14] = col.b
 		buf[base_idx + 15] = col.a
-		mm.set_instance_transform(i, xf)
-		mm.set_instance_custom_data(i, col)
 	mm.buffer = buf
 
 	var mmi := MultiMeshInstance3D.new()
+	mmi.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	mmi.name = "ShorelineReedsMultiMesh"
 	mmi.multimesh = mm
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mmi.visibility_range_end = 350.0
-	mmi.visibility_range_end_margin = 40.0
+	mmi.visibility_range_end = 700.0
+	mmi.visibility_range_end_margin = 60.0
 	mmi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	scene_root.add_child(mmi)
 	if persist_for_save:
@@ -987,6 +1224,61 @@ static func _upgrade_water_materials(scene_root: Node) -> void:
 
 
 static func _build_cart_paths(scene_root: Node, height_info: Dictionary, persist_for_save: bool) -> bool:
+	# 1. If scene already has cartpath MeshInstances (e.g. from OsmMapLoader), upgrade them to cart_path.gdshader
+	var existing_cartpaths: Array[MeshInstance3D] = []
+	for child in scene_root.get_children():
+		if child is MeshInstance3D and child.name.to_lower().begins_with("cartpath_") and not child.name.to_lower().begins_with("cartpath_static_"):
+			existing_cartpaths.append(child as MeshInstance3D)
+
+	if not existing_cartpaths.is_empty():
+		var shader_res: Shader = null
+		if ResourceLoader.exists("res://Courses/Environments/shaders/cart_path.gdshader"):
+			shader_res = load("res://Courses/Environments/shaders/cart_path.gdshader") as Shader
+
+		for cp_mi in existing_cartpaths:
+			var mat: Material = cp_mi.get_surface_override_material(0)
+			if mat == null and cp_mi.mesh != null and cp_mi.mesh.get_surface_count() > 0:
+				mat = cp_mi.mesh.surface_get_material(0)
+			var sm: ShaderMaterial = mat as ShaderMaterial
+			if sm == null or sm.shader != shader_res:
+				if shader_res != null:
+					sm = ShaderMaterial.new()
+					sm.shader = shader_res
+					cp_mi.set_surface_override_material(0, sm)
+					if cp_mi.mesh != null:
+						cp_mi.mesh.surface_set_material(0, sm)
+
+			# Ensure mesh has valid UV coordinates so the shader feathering and packed stone texture render correctly
+			if cp_mi.mesh is ArrayMesh:
+				var am := cp_mi.mesh as ArrayMesh
+				if am.get_surface_count() > 0:
+					var arrays := am.surface_get_arrays(0)
+					var uvs = arrays[Mesh.ARRAY_TEX_UV]
+					var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+					var needs_uvs := false
+					if uvs == null or uvs.is_empty():
+						needs_uvs = true
+					elif uvs.size() >= 2 and uvs[0] == Vector2.ZERO and uvs[1] == Vector2.ZERO:
+						needs_uvs = true
+
+					if needs_uvs and verts.size() >= 4:
+						var new_uvs := PackedVector2Array()
+						new_uvs.resize(verts.size())
+						var cum_dist := 0.0
+						for vi in range(0, verts.size() - 1, 2):
+							if vi >= 2:
+								cum_dist += verts[vi].distance_to(verts[vi - 2])
+							var v_coord := cum_dist * 0.25
+							new_uvs[vi] = Vector2(0.0, v_coord)
+							new_uvs[vi + 1] = Vector2(1.0, v_coord)
+						arrays[Mesh.ARRAY_TEX_UV] = new_uvs
+						var new_mesh := ArrayMesh.new()
+						new_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+						if sm != null:
+							new_mesh.surface_set_material(0, sm)
+						cp_mi.mesh = new_mesh
+		return true
+
 	if scene_root.get_node_or_null("CartPaths") != null:
 		return false
 
@@ -1020,14 +1312,14 @@ static func _build_cart_paths(scene_root: Node, height_info: Dictionary, persist
 		if pts.size() < 2:
 			continue
 
-		# Subdivide long segments so the ribbon drapes smoothly over terrain undulations
+		# Subdivide long segments tightly (1.0m) so ribbon drapes smoothly over terrain undulations without floating
 		var dense := PackedVector2Array()
 		dense.append(pts[0])
 		for i in range(pts.size() - 1):
 			var a := pts[i]
 			var b := pts[i + 1]
 			var dist := a.distance_to(b)
-			var steps := maxi(1, int(ceil(dist / 3.5)))
+			var steps := maxi(1, int(ceil(dist / 1.0)))
 			for s in range(1, steps + 1):
 				dense.append(a.lerp(b, float(s) / float(steps)))
 
@@ -1055,8 +1347,8 @@ static func _build_cart_paths(scene_root: Node, height_info: Dictionary, persist
 
 			var lp2 := cur - perp * half_width
 			var rp2 := cur + perp * half_width
-			var ly := _sample_height(lp2.x, lp2.y, height_info, base_y) + 0.024
-			var ry := _sample_height(rp2.x, rp2.y, height_info, base_y) + 0.024
+			var ly := _sample_height(lp2.x, lp2.y, height_info, base_y) + 0.030
+			var ry := _sample_height(rp2.x, rp2.y, height_info, base_y) + 0.030
 			var cur_left := Vector3(lp2.x, ly, lp2.y)
 			var cur_right := Vector3(rp2.x, ry, rp2.y)
 
@@ -1105,6 +1397,28 @@ static func _build_cart_paths(scene_root: Node, height_info: Dictionary, persist
 	scene_root.add_child(path_mi)
 	if persist_for_save:
 		path_mi.owner = scene_root
+
+	# Ensure physics collision exists for cart path bounce
+	var has_cart_static := false
+	for child in scene_root.find_children("*", "StaticBody3D", true, false):
+		if child.has_meta("is_cart_path") or child.name.to_lower().contains("cartpath"):
+			has_cart_static = true
+			break
+	if not has_cart_static:
+		var cart_body := StaticBody3D.new()
+		cart_body.name = "CartPath_Static"
+		cart_body.set_meta("surface_type", 6) # PhysicsEnums.SurfaceType.CART_PATH
+		cart_body.set_meta("is_cart_path", true)
+		var col_shape := CollisionShape3D.new()
+		var concave := ConcavePolygonShape3D.new()
+		concave.set_faces(path_mesh.get_faces())
+		col_shape.shape = concave
+		cart_body.add_child(col_shape)
+		scene_root.add_child(cart_body)
+		if persist_for_save:
+			cart_body.owner = scene_root
+			col_shape.owner = scene_root
+
 	return true
 
 
@@ -1187,9 +1501,21 @@ static func ensure_deep_rough_map(scene_root: Node, terrain_node: MeshInstance3D
 			mats.append(terrain.get_surface_override_material(0) as ShaderMaterial)
 		if terrain.mesh.surface_get_material(0) is ShaderMaterial:
 			mats.append(terrain.mesh.surface_get_material(0) as ShaderMaterial)
+		var is_high_graphics := true
+		if ResourceLoader.exists("res://Utils/mobile_performance.gd"):
+			var mp = load("res://Utils/mobile_performance.gd")
+			if mp != null and mp.is_mobile():
+				is_high_graphics = false
+		if is_high_graphics and Engine.get_main_loop() is SceneTree:
+			var tree := Engine.get_main_loop() as SceneTree
+			if tree != null and tree.root != null and tree.root.has_node("GlobalSettings"):
+				var gs = tree.root.get_node("GlobalSettings")
+				if gs != null and gs.has_method("get_graphics_quality"):
+					is_high_graphics = (gs.get_graphics_quality() == "High")
+
 		for m in mats:
 			m.set_shader_parameter("deep_rough_map", deep_tex)
-			m.set_shader_parameter("has_deep_rough_map", true)
+			m.set_shader_parameter("has_deep_rough_map", is_high_graphics)
 	return deep_tex
 
 
@@ -1219,7 +1545,33 @@ static func _build_deep_rough_map(scene_root: Node, terrain: MeshInstance3D) -> 
 
 	var seeded_any := false
 
-	# 1. Seed fairways, greens, and tees directly from StaticBody3D shapes/polygons (matching range.gd)
+	# 1. Fast Path: If splat_map is available on terrain, seed directly from G (fairway) and R (green) channels
+	var splat_tex: Texture2D = null
+	var base_m: Material = terrain.mesh.surface_get_material(0)
+	if base_m == null:
+		base_m = terrain.material_override
+	if base_m is ShaderMaterial:
+		splat_tex = (base_m as ShaderMaterial).get_shader_parameter("splat_map") as Texture2D
+	if splat_tex == null and terrain.has_meta("orig_splat_map"):
+		splat_tex = terrain.get_meta("orig_splat_map") as Texture2D
+	if splat_tex != null:
+		var simg := splat_tex.get_image()
+		if simg != null:
+			if simg.is_compressed():
+				simg = simg.duplicate()
+				simg.decompress()
+			var sw := simg.get_width()
+			var sh := simg.get_height()
+			for gz in range(tex_size):
+				var sy := clampi(int(round(float(gz) / float(tex_size - 1) * float(sh - 1))), 0, sh - 1)
+				for gx in range(tex_size):
+					var sx := clampi(int(round(float(gx) / float(tex_size - 1) * float(sw - 1))), 0, sw - 1)
+					var c := simg.get_pixel(sx, sy)
+					if c.r > 0.40 or c.g > 0.40:
+						dist_grid[gz * tex_size + gx] = 0.0
+						seeded_any = true
+
+	# 2. Mark tee boxes into tee_mask (and fallback to static bodies if no splat_map was present)
 	for child in scene_root.find_children("*", "CollisionObject3D", true, false):
 		var cname := child.name.to_lower()
 		var st: int = int(child.get_meta("surface_type", -1))
@@ -1232,6 +1584,9 @@ static func _build_deep_rough_map(scene_root: Node, terrain: MeshInstance3D) -> 
 		var is_tee: bool = (cname.begins_with("tee_static") or cname.contains("tee")) and not is_green
 		var is_fairway: bool = (cname.begins_with("fairway_static") or cname.contains("fairway") or (st == 0 and not is_tee)) and not is_green and not is_tee
 		if not is_green and not is_fairway and not is_tee:
+			continue
+		# If already seeded from splat map, we only need tee bodies for tee_mask
+		if seeded_any and not is_tee:
 			continue
 
 		var child_xform: Transform3D = (child as Node3D).transform
@@ -1285,30 +1640,6 @@ static func _build_deep_rough_map(scene_root: Node, terrain: MeshInstance3D) -> 
 					else:
 						_seed_triangle_on_dist_grid(dist_grid, tex_size, min_x, min_z, step_x, step_z, inv_w, inv_d, a, b, c)
 						seeded_any = true
-
-	# Fallback: If no static bodies were present, seed from splat_map R (green) and G (fairway) channels
-	if not seeded_any:
-		var splat_tex: Texture2D = null
-		var base_m: Material = terrain.mesh.surface_get_material(0)
-		if base_m == null:
-			base_m = terrain.material_override
-		if base_m is ShaderMaterial:
-			splat_tex = (base_m as ShaderMaterial).get_shader_parameter("splat_map") as Texture2D
-		if splat_tex == null and terrain.has_meta("orig_splat_map"):
-			splat_tex = terrain.get_meta("orig_splat_map") as Texture2D
-		if splat_tex != null:
-			var simg := splat_tex.get_image()
-			if simg != null and not simg.is_compressed():
-				var sw := simg.get_width()
-				var sh := simg.get_height()
-				for gz in range(tex_size):
-					var sy := clampi(int(round(float(gz) / float(tex_size - 1) * float(sh - 1))), 0, sh - 1)
-					for gx in range(tex_size):
-						var sx := clampi(int(round(float(gx) / float(tex_size - 1) * float(sw - 1))), 0, sw - 1)
-						var c := simg.get_pixel(sx, sy)
-						if c.r > 0.45 or c.g > 0.45:
-							dist_grid[gz * tex_size + gx] = 0.0
-							seeded_any = true
 
 	# Also mark cart paths into tee_mask so elevated deep rough never overlaps paths
 	var cart_paths: Array = []
@@ -1405,11 +1736,13 @@ static func _build_deep_rough_map(scene_root: Node, terrain: MeshInstance3D) -> 
 			pixels[idx] = 0
 			continue
 		var d: float = dist_grid[idx]
-		var w: float = smoothstep(36.0, 38.5, d)
+		var w: float = smoothstep(20.0, 37.5, d)
 		pixels[idx] = int(clampf(round(w * 255.0), 0.0, 255.0))
 
 	var img := Image.create_from_data(tex_size, tex_size, false, Image.FORMAT_L8, pixels)
 	terrain.set_meta("deep_rough_image", img)
+	if scene_root != null:
+		scene_root.set_meta("deep_rough_image", img)
 	return ImageTexture.create_from_image(img)
 
 
@@ -1508,13 +1841,16 @@ static func _build_thick_rough_bushes(scene_root: Node, height_info: Dictionary,
 			if pscn != null:
 				var inst = pscn.instantiate()
 				if inst != null:
+					var mi: MeshInstance3D = null
 					if inst is MeshInstance3D and inst.mesh != null:
-						bush_meshes.append(inst.mesh)
+						mi = inst
 					else:
 						for ch in inst.get_children():
 							if ch is MeshInstance3D and ch.mesh != null:
-								bush_meshes.append(ch.mesh)
+								mi = ch
 								break
+					if mi != null and mi.mesh != null:
+						bush_meshes.append(mi.mesh.duplicate())
 					inst.free()
 
 	if bush_meshes.is_empty():
@@ -1572,6 +1908,18 @@ static func _build_thick_rough_bushes(scene_root: Node, height_info: Dictionary,
 
 	var container := Node3D.new()
 	container.name = "ThickRoughBushes"
+	var is_high_bushes := true
+	if ResourceLoader.exists("res://Utils/mobile_performance.gd"):
+		var mp = load("res://Utils/mobile_performance.gd")
+		if mp != null and mp.is_mobile():
+			is_high_bushes = false
+	if is_high_bushes and Engine.get_main_loop() is SceneTree:
+		var tree := Engine.get_main_loop() as SceneTree
+		if tree != null and tree.root != null and tree.root.has_node("GlobalSettings"):
+			var gs = tree.root.get_node("GlobalSettings")
+			if gs != null and gs.has_method("get_graphics_quality"):
+				is_high_bushes = (gs.get_graphics_quality() == "High")
+	container.visible = is_high_bushes
 	scene_root.add_child(container)
 	if persist_for_save:
 		container.owner = scene_root
@@ -1608,6 +1956,7 @@ static func _build_thick_rough_bushes(scene_root: Node, height_info: Dictionary,
 		mm.buffer = b_buf
 
 		var mmi := MultiMeshInstance3D.new()
+		mmi.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 		mmi.name = "ThickRoughBushMesh_%d" % t_idx
 		mmi.multimesh = mm
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
