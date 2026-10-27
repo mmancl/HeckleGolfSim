@@ -1,0 +1,455 @@
+name: Multiplatform Build & Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release Tag (leave empty to use current project.godot version, e.g. v0.139.3)'
+        required: false
+        default: ''
+      deploy_play_store:
+        description: 'Deploy Android AAB to Google Play tracks (draft status)'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: multiplatform-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # =========================================================================
+  # 1. BUILD WINDOWS DESKTOP
+  # =========================================================================
+  build-windows:
+    name: Build Windows Desktop
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Cache Godot & Export Templates
+        id: cache-godot-windows
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\Godot
+            ~\AppData\Roaming\Godot\export_templates
+          key: godot-4.7-mono-windows-v1
+
+      - name: Download Godot 4.7 Mono & Windows Templates
+        if: steps.cache-godot-windows.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "$HOME\Godot" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$HOME\AppData\Roaming\Godot\export_templates\4.7.stable.mono" -Force | Out-Null
+
+          # Download Godot Mono Editor for Windows
+          Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_win64.zip" -OutFile "$HOME\Godot\godot.zip"
+          Expand-Archive -Path "$HOME\Godot\godot.zip" -DestinationPath "$HOME\Godot\bin" -Force
+
+          # Download Export Templates
+          Invoke-WebRequest -Uri "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_export_templates.tpz" -OutFile "$HOME\Godot\templates.zip"
+          Expand-Archive -Path "$HOME\Godot\templates.zip" -DestinationPath "$HOME\Godot\templates_extracted" -Force
+          Copy-Item -Path "$HOME\Godot\templates_extracted\templates\*" -Destination "$HOME\AppData\Roaming\Godot\export_templates\4.7.stable.mono" -Recurse -Force
+          Remove-Item "$HOME\Godot\templates.zip", "$HOME\Godot\templates_extracted" -Recurse -Force
+
+      - name: Locate Godot Executable
+        shell: pwsh
+        run: |
+          $godotExe = (Get-ChildItem -Path "$HOME\Godot" -Filter "*console.exe" -Recurse | Select-Object -First 1).FullName
+          if (-not $godotExe) {
+            $godotExe = (Get-ChildItem -Path "$HOME\Godot" -Filter "Godot*.exe" -Recurse | Select-Object -First 1).FullName
+          }
+          Write-Host "GODOT_BIN=$godotExe"
+          Add-Content -Path $env:GITHUB_ENV -Value "GODOT_BIN=$godotExe"
+
+      - name: Build Windows Release Package
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\scripts\build\build_windows.ps1 -CustomGodotPath "$env:GODOT_BIN" -Clean
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeckleGolfSim-Windows
+          path: dist/HeckleGolfSim-Windows-*.zip
+
+  # =========================================================================
+  # 2. BUILD MACOS
+  # =========================================================================
+  build-macos:
+    name: Build macOS Universal
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Cache Godot & Export Templates
+        id: cache-godot-macos
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Godot
+            ~/Library/Application Support/Godot/export_templates
+          key: godot-4.7-mono-macos-universal-v1
+
+      - name: Download Godot 4.7 Mono & Templates
+        if: steps.cache-godot-macos.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/Godot
+          mkdir -p "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono"
+
+          curl -L -o ~/Godot/godot_mono.zip "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_macos.universal.zip"
+          unzip -q ~/Godot/godot_mono.zip -d ~/Godot/
+
+          curl -L -o ~/Godot/templates.tpz "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_export_templates.tpz"
+          unzip -q ~/Godot/templates.tpz -d ~/Godot/templates_extracted
+          cp -r ~/Godot/templates_extracted/templates/* "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono/"
+          rm -rf ~/Godot/templates_extracted ~/Godot/templates.tpz
+
+      - name: Locate Godot Executable
+        run: |
+          GODOT_BIN=$(find ~/Godot -name "Godot" -type f | head -n 1)
+          chmod +x "$GODOT_BIN"
+          echo "GODOT_BIN=$GODOT_BIN" >> $GITHUB_ENV
+
+      - name: Build macOS Release Package
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File ./scripts/build/build_mac.ps1 -CustomGodotPath "$env:GODOT_BIN" -Clean
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeckleGolfSim-macOS
+          path: dist/HeckleGolfSim-macOS-*.zip
+
+  # =========================================================================
+  # 3. BUILD IOS (IPA)
+  # =========================================================================
+  build-ios:
+    name: Build iOS Package
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Cache Godot & Export Templates
+        id: cache-godot-ios
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Godot
+            ~/Library/Application Support/Godot/export_templates
+          key: godot-4.7-mono-macos-universal-v1
+
+      - name: Download Godot 4.7 Mono & Templates
+        if: steps.cache-godot-ios.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/Godot
+          mkdir -p "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono"
+
+          curl -L -o ~/Godot/godot_mono.zip "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_macos.universal.zip"
+          unzip -q ~/Godot/godot_mono.zip -d ~/Godot/
+
+          curl -L -o ~/Godot/templates.tpz "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_export_templates.tpz"
+          unzip -q ~/Godot/templates.tpz -d ~/Godot/templates_extracted
+          cp -r ~/Godot/templates_extracted/templates/* "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono/"
+          rm -rf ~/Godot/templates_extracted ~/Godot/templates.tpz
+
+      - name: Locate Godot Executable
+        run: |
+          GODOT_BIN=$(find ~/Godot -name "Godot" -type f | head -n 1)
+          chmod +x "$GODOT_BIN"
+          echo "GODOT_BIN=$GODOT_BIN" >> $GITHUB_ENV
+
+      - name: Build C# Solution
+        run: dotnet build HeckleGolfSim.csproj -c Release
+
+      - name: Export iOS Preset via Godot
+        run: |
+          mkdir -p ios_export
+          mkdir -p dist
+          "$GODOT_BIN" --headless --import || true
+          "$GODOT_BIN" --headless --export-release "iOS" ios_export/HeckleGolfSim.ipa
+
+      - name: Build and Package Unsigned .ipa
+        run: |
+          XCODEPROJ=$(find ios_export -name "*.xcodeproj" -maxdepth 2 | head -n 1)
+          if [ -z "$XCODEPROJ" ]; then
+            XCODEPROJ=$(find . -name "*.xcodeproj" -not -path "*/build_output/*" | head -n 1)
+          fi
+          if [ -z "$XCODEPROJ" ]; then
+            echo "ERROR: Could not find any .xcodeproj directory!"
+            ls -la ios_export/
+            exit 1
+          fi
+          echo "Found Xcode project at: $XCODEPROJ"
+
+          if [ -f "$XCODEPROJ/project.pbxproj" ]; then
+            sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' "$XCODEPROJ/project.pbxproj" || true
+            sed -i '' 's/CODE_SIGNING_ALLOWED = YES;/CODE_SIGNING_ALLOWED = NO;/g' "$XCODEPROJ/project.pbxproj" || true
+            sed -i '' 's/CODE_SIGN_IDENTITY = ".*";/CODE_SIGN_IDENTITY = "";/g' "$XCODEPROJ/project.pbxproj" || true
+          fi
+
+          find ios_export -name "*-Info.plist" -o -name "Info.plist" | while read -r plist; do
+            /usr/libexec/PlistBuddy -c "Add :NSBluetoothAlwaysUsageDescription string Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSBluetoothAlwaysUsageDescription Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :NSBluetoothPeripheralUsageDescription string Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSBluetoothPeripheralUsageDescription Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || true
+          done
+
+          SCHEME_NAME=$(xcodebuild -list -project "$XCODEPROJ" | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' | head -n 1 | xargs)
+          if [ -z "$SCHEME_NAME" ]; then
+            SCHEME_NAME="Heckle Golf"
+          fi
+
+          mkdir -p build_output/Payload
+          xcodebuild -project "$XCODEPROJ" \
+            -scheme "$SCHEME_NAME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build_output/derived \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+          APP_DIR=$(find build_output/derived -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_DIR" ]; then
+            echo "ERROR: .app directory not found in build_output/derived"
+            exit 1
+          fi
+
+          cp -r "$APP_DIR" build_output/Payload/
+          cd build_output
+          zip -qr ../dist/HeckleGolfSim.ipa Payload
+          cd ..
+
+      - name: Upload iOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeckleGolfSim-iOS
+          path: dist/HeckleGolfSim.ipa
+
+  # =========================================================================
+  # 4. BUILD & SIGN ANDROID AAB
+  # =========================================================================
+  build-android:
+    name: Build & Sign Android AAB
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup .NET 9 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Cache Godot & Export Templates
+        id: cache-godot-linux
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Godot
+            ~/.local/share/godot/export_templates
+          key: godot-4.7-mono-linux-v1
+
+      - name: Download Godot 4.7 Mono & Linux/Android Templates
+        if: steps.cache-godot-linux.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/Godot
+          mkdir -p ~/.local/share/godot/export_templates/4.7.stable.mono
+
+          curl -L -o ~/Godot/godot.zip "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_linux_x86_64.zip"
+          unzip -q ~/Godot/godot.zip -d ~/Godot/
+
+          curl -L -o ~/Godot/templates.tpz "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_export_templates.tpz"
+          unzip -q ~/Godot/templates.tpz -d ~/Godot/templates_extracted
+          cp -r ~/Godot/templates_extracted/templates/* ~/.local/share/godot/export_templates/4.7.stable.mono/
+          rm -rf ~/Godot/templates_extracted ~/Godot/templates.tpz
+
+      - name: Locate Godot Executable
+        run: |
+          GODOT_BIN=$(find ~/Godot -name "Godot*linux*x86_64" -type f | head -n 1)
+          chmod +x "$GODOT_BIN"
+          echo "GODOT_BIN=$GODOT_BIN" >> $GITHUB_ENV
+
+      - name: Decode Android Keystore
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > release.keystore
+          if [ ! -s release.keystore ]; then
+            echo "ERROR: release.keystore is empty. Check ANDROID_KEYSTORE_BASE64 secret."
+            exit 1
+          fi
+
+      - name: Ensure Android Build Directories
+        run: |
+          mkdir -p dist
+          mkdir -p android/build/assetPackInstallTime/src/main/assets
+          rm -f android/build/src/main/assets/_cl_
+          chmod +x android/build/gradlew
+
+      - name: Build C# Solution & Export Android Project
+        run: |
+          dotnet build HeckleGolfSim.csproj -c Release
+          "$GODOT_BIN" --headless --import || true
+
+      - name: Read Version Metadata
+        id: meta
+        run: |
+          VERSION_NAME=$(grep 'config/version=' project.godot | cut -d'"' -f2)
+          VERSION_CODE=$(grep 'version/code=' export_presets.cfg | head -n 1 | cut -d'=' -f2)
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "Building Version: $VERSION_NAME (Code: $VERSION_CODE)"
+
+      - name: Build Android App Bundle (.aab) with Gradle
+        run: |
+          cd android/build
+          ./gradlew bundleMonoRelease \
+            -Pexport_package_name=com.hecklegolf.simulator \
+            -Pexport_version_name="${{ steps.meta.outputs.VERSION_NAME }}" \
+            -Pexport_version_code="${{ steps.meta.outputs.VERSION_CODE }}" \
+            -Pexport_version_min_sdk=30 \
+            -Pexport_version_target_sdk=36 \
+            -Pexport_format=aab \
+            -Pexport_edition=mono \
+            -Pexport_build_type=release \
+            -Pperform_signing=false
+
+      - name: Sign Android App Bundle with Jarsigner
+        run: |
+          AAB_SOURCE=$(find android/build -name "*.aab" | head -n 1)
+          if [ -z "$AAB_SOURCE" ]; then
+            echo "ERROR: No .aab found after gradle build"
+            exit 1
+          fi
+          echo "Found AAB at: $AAB_SOURCE"
+          cp "$AAB_SOURCE" dist/HeckleGolfSim.aab
+
+          jarsigner -verbose \
+            -sigalg SHA256withRSA \
+            -digestalg SHA-256 \
+            -keystore release.keystore \
+            -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -keypass "${{ secrets.ANDROID_KEY_PASSWORD }}" \
+            dist/HeckleGolfSim.aab "${{ secrets.ANDROID_KEY_ALIAS }}"
+
+          jarsigner -verify dist/HeckleGolfSim.aab
+          echo "AAB successfully signed and verified."
+
+      - name: Upload Android Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeckleGolfSim-Android
+          path: dist/HeckleGolfSim.aab
+
+  # =========================================================================
+  # 5. PUBLISH RELEASE & DEPLOY TO GOOGLE PLAY
+  # =========================================================================
+  release-and-deploy:
+    name: Publish Release & Deploy Tracks
+    needs: [build-windows, build-macos, build-ios, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release_artifacts
+
+      - name: Organize Release Files
+        run: |
+          mkdir -p dist
+          find release_artifacts -type f -name "*.zip" -exec cp {} dist/ \;
+          find release_artifacts -type f -name "*.ipa" -exec cp {} dist/ \;
+          find release_artifacts -type f -name "*.aab" -exec cp {} dist/ \;
+          echo "=== Release Files Ready ==="
+          ls -lh dist/
+
+      - name: Determine Release Tag
+        id: release_info
+        run: |
+          PROJECT_VER=$(grep 'config/version=' project.godot | cut -d'"' -f2)
+          if [ -n "${{ inputs.release_tag }}" ]; then
+            TAG="${{ inputs.release_tag }}"
+          else
+            TAG="v$PROJECT_VER"
+          fi
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+          echo "PROJECT_VER=$PROJECT_VER" >> $GITHUB_OUTPUT
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_info.outputs.TAG }}
+          name: Heckle Golf Simulator ${{ steps.release_info.outputs.TAG }}
+          files: |
+            dist/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+      - name: Setup Play Store Service Account
+        if: ${{ inputs.deploy_play_store && env.HAVE_PLAY_KEY == 'true' }}
+        env:
+          HAVE_PLAY_KEY: ${{ secrets.PLAY_STORE_JSON_KEY != '' }}
+        run: |
+          echo "${{ secrets.PLAY_STORE_JSON_KEY }}" > service_account.json
+
+      # Deploy draft release to Open Testing
+      - name: Deploy to Google Play (Open Testing Track - Draft)
+        if: ${{ inputs.deploy_play_store && env.HAVE_PLAY_KEY == 'true' }}
+        env:
+          HAVE_PLAY_KEY: ${{ secrets.PLAY_STORE_JSON_KEY != '' }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJson: service_account.json
+          packageName: com.hecklegolf.simulator
+          releaseFiles: dist/HeckleGolfSim.aab
+          track: open
+          status: draft
+
+      # Deploy draft release to Closed Testing (alpha)
+      - name: Deploy to Google Play (Closed Testing Alpha Track - Draft)
+        if: ${{ inputs.deploy_play_store && env.HAVE_PLAY_KEY == 'true' }}
+        env:
+          HAVE_PLAY_KEY: ${{ secrets.PLAY_STORE_JSON_KEY != '' }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJson: service_account.json
+          packageName: com.hecklegolf.simulator
+          releaseFiles: dist/HeckleGolfSim.aab
+          track: alpha
+          status: draft

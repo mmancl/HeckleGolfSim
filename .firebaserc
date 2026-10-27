@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "heckle-golf-sim"
+  },
+  "targets": {
+    "heckle-golf-sim": {
+      "hosting": {
+        "heckle-golf-sim": [
+          "heckle-golf-sim"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

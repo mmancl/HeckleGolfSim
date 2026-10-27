@@ -49,6 +49,9 @@ android_old/build/
 __pycache__/
 *.pyc
 
+# Firebase CLI cache
+.firebase/
+
 # Ignore large binary files
 *.scn
 
