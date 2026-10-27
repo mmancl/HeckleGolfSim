@@ -202,8 +202,12 @@ if ($Zip) {
     }
     
     Write-Host ""
-    Write-Host "[3/3] Packaging into ZIP archive for Google Drive upload..." -ForegroundColor Green
-    Compress-Archive -Path "$StagingRoot\*" -DestinationPath $ZipPath -CompressionLevel Optimal
+    Write-Host "[3/3] Packaging into ZIP archive..." -ForegroundColor Green
+    if (Get-Command "tar.exe" -ErrorAction SilentlyContinue) {
+        tar.exe -a -c -f $ZipPath -C $StagingRoot .
+    } else {
+        Compress-Archive -Path "$StagingRoot\*" -DestinationPath $ZipPath -CompressionLevel Fast
+    }
     
     $fileItem = Get-Item $ZipPath
     $sizeMB = [math]::Round($fileItem.Length / 1MB, 2)

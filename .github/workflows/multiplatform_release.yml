@@ -311,9 +311,15 @@ jobs:
             exit 1
           fi
 
-      - name: Ensure Android Build Directories
+      - name: Ensure Android Build Template & Directories
         run: |
           mkdir -p dist
+          # Extract android template gradle files from export templates if not already present in git
+          TEMPLATE_ZIP="$HOME/.local/share/godot/export_templates/4.7.stable.mono/android_source.zip"
+          if [ -f "$TEMPLATE_ZIP" ]; then
+            mkdir -p android/build
+            unzip -o -q "$TEMPLATE_ZIP" -d android/build
+          fi
           mkdir -p android/build/assetPackInstallTime/src/main/assets
           rm -f android/build/src/main/assets/_cl_
           chmod +x android/build/gradlew

@@ -120,7 +120,13 @@ if (-not $GodotExe) {
 Write-Host "Godot Binary:   $GodotExe" -ForegroundColor Gray
 
 # 4. Check Export Templates
-$TemplatesDir = Join-Path $env:APPDATA "Godot\export_templates\4.7.stable.mono"
+$TemplatesDir = if ($env:APPDATA) {
+    Join-Path $env:APPDATA "Godot\export_templates\4.7.stable.mono"
+} elseif ($env:HOME) {
+    Join-Path $env:HOME "Library/Application Support/Godot/export_templates/4.7.stable.mono"
+} else {
+    Join-Path (Get-Location).Path "export_templates"
+}
 $MacTemplate = Join-Path $TemplatesDir "macos.zip"
 if (-not (Test-Path $MacTemplate)) {
     Write-Host "macOS export template not found. Downloading templates..." -ForegroundColor Yellow

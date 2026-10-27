@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Downloads and installs Godot 4.7 Mono export templates.
 .DESCRIPTION
@@ -19,7 +19,13 @@ Write-Host "=======================================================" -Foreground
 Write-Host "   Godot Export Template Installer ($Version)" -ForegroundColor Cyan
 Write-Host "=======================================================" -ForegroundColor Cyan
 
-$templatesDir = Join-Path $env:APPDATA "Godot\export_templates\$Version"
+$templatesDir = if ($env:APPDATA) {
+    Join-Path $env:APPDATA "Godot\export_templates\$Version"
+} elseif ($env:HOME) {
+    Join-Path $env:HOME "Library/Application Support/Godot/export_templates/$Version"
+} else {
+    Join-Path (Get-Location).Path "export_templates\$Version"
+}
 if (-not (Test-Path $templatesDir)) {
     New-Item -ItemType Directory -Path $templatesDir -Force | Out-Null
 }
@@ -36,8 +42,9 @@ if (-not $Force -and (Test-Path $winReleaseTemplate) -and (Test-Path $macTemplat
 
 $downloadUrl = "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_export_templates.tpz"
 # Note: Expand-Archive requires .zip extension
-$tempZip = Join-Path $env:TEMP "Godot_v4.7-stable_mono_export_templates.zip"
-$tempExtract = Join-Path $env:TEMP "godot_templates_extract"
+$tempDir = if ($env:TEMP) { $env:TEMP } elseif ($env:TMPDIR) { $env:TMPDIR } else { "/tmp" }
+$tempZip = Join-Path $tempDir "Godot_v4.7-stable_mono_export_templates.zip"
+$tempExtract = Join-Path $tempDir "godot_templates_extract"
 
 Write-Host "Downloading Godot 4.7 Mono export templates (~1.1 GB)..." -ForegroundColor Yellow
 Write-Host "Source: $downloadUrl" -ForegroundColor Gray
