@@ -421,8 +421,14 @@ jobs:
             echo "Downloading artifacts from run ${{ inputs.from_run_id }}..."
             gh run download "${{ inputs.from_run_id }}" --dir release_artifacts
           else
-            echo "Downloading assets from latest GitHub release..."
-            gh release download --dir release_artifacts || true
+            echo "Finding most recent release with assets..."
+            # Find the latest release that actually has assets uploaded
+            LATEST_TAG=$(gh release list -L 10 | awk '$1 ~ /^Heckle/ && $2 != "Latest" {print $3; exit}')
+            if [ -z "$LATEST_TAG" ]; then
+              LATEST_TAG=$(gh release list -L 10 | awk '$1 ~ /^Heckle/ {print $2; exit}')
+            fi
+            echo "Downloading assets from release $LATEST_TAG..."
+            gh release download "$LATEST_TAG" --dir release_artifacts
           fi
 
       - name: Organize Release Files
