@@ -19,6 +19,19 @@ Whenever you make changes to this codebase that add features, fix bugs, modify U
    - Update `version` in [addons/openfairway/plugin.cfg](file:///c:/Users/micha/Repositories/HeckleGolfSim/addons/openfairway/plugin.cfg) if modified.
 4. Inform the user of both the new app version (`config/version`) and the Google Play version code (`version/code`) in your response summary.
 
+### Player-Friendly Release Notes Documentation Rule
+Whenever you make changes to this codebase that add features, fix bugs, adjust UI, tune gameplay, or refactor code:
+1. **Maintain [CHANGES_SINCE_LAST_RELEASE.md](file:///c:/Users/micha/Repositories/HeckleGolfSim/CHANGES_SINCE_LAST_RELEASE.md)**:
+   - With every change, document the updates in [CHANGES_SINCE_LAST_RELEASE.md](file:///c:/Users/micha/Repositories/HeckleGolfSim/CHANGES_SINCE_LAST_RELEASE.md).
+   - Write **clear, player-friendly release notes** describing what was changed from a player or user perspective (avoid internal code jargon, class names, or implementation details; focus on gameplay benefits, new options, visual improvements, and bug fixes).
+2. **Accumulate Notes Across Changes**:
+   - Do NOT delete or overwrite existing unreleased entries in [CHANGES_SINCE_LAST_RELEASE.md](file:///c:/Users/micha/Repositories/HeckleGolfSim/CHANGES_SINCE_LAST_RELEASE.md); append or integrate your notes so all changes since the last release accumulate together.
+   - Use clean Markdown bullet points. You may group items under intuitive player-facing headings if helpful (e.g. `### New Features`, `### Improvements`, `### Bug Fixes`).
+3. **Backend / Technical-Only Improvements**:
+   - If a change is strictly backend, developer tooling, or internal code cleanup with NO user-facing impact, you do not need to add user-facing notes (or you may leave the file empty). When a release is triggered with an empty file, the release pipeline automatically notes: `Backend system improvements/code cleanup. No user facing changes.`
+4. **Summary Communication**:
+   - In your response summary to the user, include a quick highlight of the release notes added to [CHANGES_SINCE_LAST_RELEASE.md](file:///c:/Users/micha/Repositories/HeckleGolfSim/CHANGES_SINCE_LAST_RELEASE.md).
+
 ### Token & Execution Efficiency Rules
 1. **Targeted File Inspection (Always Slice File Views)**:
    - Always slice file reads using `StartLine` and `EndLine` in `view_file` to examine only relevant methods, blocks, or line ranges.

@@ -40,6 +40,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
 
       - name: Setup .NET 9 SDK
         uses: actions/setup-dotnet@v4
@@ -104,6 +107,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
 
       - name: Setup .NET 9 SDK
         uses: actions/setup-dotnet@v4
@@ -160,6 +166,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
 
       - name: Setup .NET 9 SDK
         uses: actions/setup-dotnet@v4
@@ -276,6 +285,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -404,6 +416,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
 
       - name: Download all build artifacts from current run
         if: ${{ !inputs.skip_builds }}
@@ -448,11 +463,52 @@ jobs:
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
           echo "PROJECT_VER=$PROJECT_VER" >> $GITHUB_OUTPUT
 
+      - name: Prepare Release Notes
+        id: release_notes
+        run: |
+          python3 - << 'EOF'
+          import os
+
+          changes_file = "CHANGES_SINCE_LAST_RELEASE.md"
+          raw_text = ""
+          if os.path.exists(changes_file):
+              with open(changes_file, "r", encoding="utf-8") as f:
+                  raw_text = f.read().strip()
+
+          # Filter out markdown comments or blank lines
+          meaningful_lines = [
+              line.strip() for line in raw_text.splitlines()
+              if line.strip() and not line.strip().startswith("<!--")
+          ]
+
+          if meaningful_lines:
+              release_notes = raw_text + "\n"
+          else:
+              release_notes = "Backend system improvements/code cleanup. No user facing changes.\n"
+
+          # Write out release notes for GitHub Release
+          with open("RELEASE_NOTES.md", "w", encoding="utf-8") as f:
+              f.write(release_notes)
+
+          # Prepare Google Play release notes (max 500 characters)
+          os.makedirs("distribution/whatsnew", exist_ok=True)
+          play_text = release_notes.strip()
+          if len(play_text) > 500:
+              play_text = play_text[:497] + "..."
+          with open("distribution/whatsnew/whatsnew-en-US", "w", encoding="utf-8") as f:
+              f.write(play_text + "\n")
+
+          print("=== Prepared Release Notes ===")
+          print(release_notes)
+          EOF
+
       - name: Create or Update GitHub Release
+        id: create_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_info.outputs.TAG }}
           name: Heckle Golf Simulator ${{ steps.release_info.outputs.TAG }}
+          body_path: RELEASE_NOTES.md
           files: |
             dist/*
           draft: false
@@ -481,6 +537,7 @@ jobs:
           releaseFiles: dist/HeckleGolfSim.aab
           track: beta
           status: draft
+          whatsNewDirectory: distribution/whatsnew
 
       # Deploy draft release to Closed Testing (track: alpha)
       - name: Deploy to Google Play (Closed Testing Alpha Track - Draft)
@@ -494,3 +551,33 @@ jobs:
           releaseFiles: dist/HeckleGolfSim.aab
           track: alpha
           status: draft
+          whatsNewDirectory: distribution/whatsnew
+
+      - name: Clear Changes File for Next Release
+        if: success()
+        run: |
+          CHANGES_FILE="CHANGES_SINCE_LAST_RELEASE.md"
+          if [ -f "$CHANGES_FILE" ]; then
+            if [ -s "$CHANGES_FILE" ]; then
+              echo "Clearing $CHANGES_FILE for next release cycle..."
+              : > "$CHANGES_FILE"
+
+              if [ "${{ github.ref_type }}" = "branch" ]; then
+                git config user.name "github-actions[bot]"
+                git config user.email "github-actions[bot]@users.noreply.github.com"
+                git add "$CHANGES_FILE"
+                if ! git diff --cached --quiet; then
+                  git commit -m "chore: clear $CHANGES_FILE for next release cycle [skip ci]"
+                  git pull --rebase origin "${{ github.ref_name }}" || true
+                  git push origin "HEAD:${{ github.ref_name }}"
+                  echo "Successfully pushed cleared $CHANGES_FILE to ${{ github.ref_name }}."
+                fi
+              else
+                echo "Release triggered from non-branch ref (${{ github.ref }}), skipping commit."
+              fi
+            else
+              echo "$CHANGES_FILE is already empty; no clearing or commit required."
+            fi
+          else
+            echo "$CHANGES_FILE does not exist; skipping."
+          fi
