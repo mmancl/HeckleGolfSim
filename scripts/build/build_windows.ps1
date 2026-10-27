@@ -203,8 +203,18 @@ if ($Zip) {
     
     Write-Host ""
     Write-Host "[3/3] Packaging into ZIP archive..." -ForegroundColor Green
-    Add-Type -AssemblyName 'System.IO.Compression.FileSystem'
-    [System.IO.Compression.ZipFile]::CreateFromDirectory($StagingRoot, $ZipPath, [System.IO.Compression.CompressionLevel]::Fastest, $false)
+    # Push into staging dir so tar captures files without leading folder/dot prefixes
+    Push-Location $StagingRoot
+    try {
+        if (Get-Command "tar.exe" -ErrorAction SilentlyContinue) {
+            & tar.exe -a -c -f $ZipPath *
+        } else {
+            Add-Type -AssemblyName 'System.IO.Compression.FileSystem'
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($StagingRoot, $ZipPath, [System.IO.Compression.CompressionLevel]::Fastest, $false)
+        }
+    } finally {
+        Pop-Location
+    }
     
     $fileItem = Get-Item $ZipPath
     $sizeMB = [math]::Round($fileItem.Length / 1MB, 2)
