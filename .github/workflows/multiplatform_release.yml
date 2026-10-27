@@ -3,6 +3,15 @@ name: Multiplatform Build & Release
 on:
   workflow_dispatch:
     inputs:
+      skip_builds:
+        description: 'Skip platform builds (use existing release or artifacts to run publish/deploy only)'
+        required: false
+        type: boolean
+        default: false
+      from_run_id:
+        description: 'Run ID to download artifacts from if skipping builds (leave blank for latest release)'
+        required: false
+        default: ''
       release_tag:
         description: 'Release Tag (leave empty to use current project.godot version, e.g. v0.139.3)'
         required: false
@@ -26,6 +35,7 @@ jobs:
   # =========================================================================
   build-windows:
     name: Build Windows Desktop
+    if: ${{ !inputs.skip_builds }}
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -89,6 +99,7 @@ jobs:
   # =========================================================================
   build-macos:
     name: Build macOS Universal
+    if: ${{ !inputs.skip_builds }}
     runs-on: macos-latest
     steps:
       - name: Checkout repository
@@ -144,6 +155,7 @@ jobs:
   # =========================================================================
   build-ios:
     name: Build iOS Package
+    if: ${{ !inputs.skip_builds }}
     runs-on: macos-latest
     steps:
       - name: Checkout repository
@@ -259,6 +271,7 @@ jobs:
   # =========================================================================
   build-android:
     name: Build & Sign Android AAB
+    if: ${{ !inputs.skip_builds }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -386,15 +399,31 @@ jobs:
   release-and-deploy:
     name: Publish Release & Deploy Tracks
     needs: [build-windows, build-macos, build-ios, build-android]
+    if: always() && !cancelled() && (!needs.build-windows.result || needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped') && (!needs.build-android.result || needs.build-android.result == 'success' || needs.build-android.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download all build artifacts
+      - name: Download all build artifacts from current run
+        if: ${{ !inputs.skip_builds }}
         uses: actions/download-artifact@v4
         with:
           path: release_artifacts
+
+      - name: Download build artifacts from previous run or latest release
+        if: ${{ inputs.skip_builds }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release_artifacts
+          if [ -n "${{ inputs.from_run_id }}" ]; then
+            echo "Downloading artifacts from run ${{ inputs.from_run_id }}..."
+            gh run download "${{ inputs.from_run_id }}" --dir release_artifacts
+          else
+            echo "Downloading assets from latest GitHub release..."
+            gh release download --dir release_artifacts || true
+          fi
 
       - name: Organize Release Files
         run: |
@@ -438,8 +467,8 @@ jobs:
           # Validate JSON format before proceeding
           python3 -c "import json; json.load(open('service_account.json'))"
 
-      # Deploy draft release to Open Testing
-      - name: Deploy to Google Play (Open Testing Track - Draft)
+      # Deploy draft release to Open Testing (track: beta)
+      - name: Deploy to Google Play (Open Testing Beta Track - Draft)
         if: ${{ inputs.deploy_play_store && env.HAVE_PLAY_KEY == 'true' }}
         env:
           HAVE_PLAY_KEY: ${{ secrets.PLAY_STORE_JSON_KEY != '' }}
@@ -448,10 +477,10 @@ jobs:
           serviceAccountJson: service_account.json
           packageName: com.hecklegolf.simulator
           releaseFiles: dist/HeckleGolfSim.aab
-          track: open
+          track: beta
           status: draft
 
-      # Deploy draft release to Closed Testing (alpha)
+      # Deploy draft release to Closed Testing (track: alpha)
       - name: Deploy to Google Play (Closed Testing Alpha Track - Draft)
         if: ${{ inputs.deploy_play_store && env.HAVE_PLAY_KEY == 'true' }}
         env:

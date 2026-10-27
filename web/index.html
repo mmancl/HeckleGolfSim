@@ -3,166 +3,1210 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Heckle Golf Simulator</title>
+  <title>IT Golf | Free Golf Simulator</title>
+  <meta name="description" content="IT Golf – a free, cross-platform golf simulator with real-world OpenStreetMap courses, minigames, launch monitor support, and online stat tracking.">
+  <meta property="og:title" content="IT Golf | Free Golf Simulator">
+  <meta property="og:description" content="Real-world courses. Free to play. Anywhere.">
+  <meta property="og:image" content="images/heckle_splash_feature.png">
+  <link rel="icon" type="image/png" href="images/app_icon.png">
+
   <style>
+    /* ─── Design Tokens ─────────────────────────────────────────── */
     :root {
-      --bg-dark: #0f172a;
-      --card-bg: #1e293b;
-      --accent: #22c55e;
-      --accent-hover: #16a34a;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
+      --bg:          #0a0f1e;
+      --bg2:         #0f1829;
+      --card:        #141f35;
+      --card-border: rgba(255,255,255,0.07);
+      --green:       #22c55e;
+      --green-dim:   #16a34a;
+      --green-glow:  rgba(34,197,94,0.18);
+      --blue:        #38bdf8;
+      --text:        #f1f5f9;
+      --muted:       #94a3b8;
+      --radius:      14px;
+      --nav-h:       70px;
     }
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    }
+
+    /* ─── Reset & Base ──────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
     body {
-      background-color: var(--bg-dark);
+      background: var(--bg);
       color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+    }
+    a { color: inherit; text-decoration: none; }
+    img { max-width: 100%; display: block; }
+
+    /* ─── Scrollbar ─────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--green-dim); border-radius: 3px; }
+
+    /* ─── NAV ───────────────────────────────────────────────────── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: var(--nav-h);
+      background: rgba(10,15,30,0.85);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--card-border);
       display: flex;
-      flex-direction: column;
-      min-height: 100vh;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      z-index: 100;
+    }
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-weight: 800;
+      font-size: 1.25rem;
+      letter-spacing: -0.04em;
+    }
+    .nav-logo img { width: 36px; height: 36px; border-radius: 8px; }
+    .nav-logo span { color: var(--green); }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      list-style: none;
+    }
+    .nav-links a {
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text); }
+
+    .nav-cta {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .btn-nav-icon {
+      display: flex;
       align-items: center;
       justify-content: center;
-      padding: 2rem 1rem;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      transition: border-color 0.2s, background 0.2s;
+      color: var(--muted);
     }
-    .container {
-      max-width: 800px;
-      width: 100%;
-      text-align: center;
+    .btn-nav-icon:hover { border-color: var(--green); color: var(--green); background: var(--green-glow); }
+    .btn-signin {
+      padding: 0.45rem 1rem;
+      border-radius: 8px;
+      background: var(--card);
+      border: 1px solid var(--green);
+      color: var(--green);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
     }
-    h1 {
-      font-size: 2.75rem;
-      margin-bottom: 0.5rem;
-      font-weight: 800;
-      letter-spacing: -0.05em;
-    }
-    h1 span {
-      color: var(--accent);
-    }
-    p.subtitle {
-      color: var(--text-muted);
-      font-size: 1.15rem;
-      margin-bottom: 2.5rem;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 1.25rem;
-      margin-bottom: 3rem;
-    }
-    .card {
-      background: var(--card-bg);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 12px;
-      padding: 1.75rem 1.25rem;
+    .btn-signin:hover { background: var(--green); color: #000; }
+
+    /* hamburger – hidden on desktop */
+    .hamburger { display: none; background: none; border: none; cursor: pointer; color: var(--text); }
+
+    /* ─── HERO ──────────────────────────────────────────────────── */
+    .hero {
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      transition: transform 0.2s ease, border-color 0.2s ease;
+      justify-content: center;
+      text-align: center;
+      padding: calc(var(--nav-h) + 3rem) 1.5rem 4rem;
+      background:
+        radial-gradient(ellipse 70% 55% at 50% 0%, rgba(34,197,94,0.12) 0%, transparent 70%),
+        var(--bg);
+      position: relative;
+      overflow: hidden;
     }
-    .card:hover {
-      transform: translateY(-4px);
-      border-color: var(--accent);
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%2322c55e' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+      pointer-events: none;
     }
-    .card h3 {
-      margin-bottom: 0.5rem;
-      font-size: 1.25rem;
-    }
-    .card p {
-      color: var(--text-muted);
-      font-size: 0.9rem;
-      margin-bottom: 1.25rem;
-      flex-grow: 1;
-    }
-    .btn {
-      display: inline-block;
-      width: 100%;
-      padding: 0.75rem 1rem;
-      background: var(--accent);
-      color: #000;
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.85rem;
+      border-radius: 999px;
+      border: 1px solid rgba(34,197,94,0.4);
+      background: rgba(34,197,94,0.08);
+      font-size: 0.78rem;
       font-weight: 600;
-      border-radius: 8px;
-      text-decoration: none;
-      transition: background-color 0.2s ease;
+      color: var(--green);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 1.5rem;
     }
-    .btn:hover {
-      background: var(--accent-hover);
-      color: #fff;
+    .hero h1 {
+      font-size: clamp(2.6rem, 7vw, 5rem);
+      font-weight: 900;
+      letter-spacing: -0.04em;
+      line-height: 1.05;
+      margin-bottom: 1.25rem;
+      max-width: 780px;
     }
-    .btn-secondary {
-      background: rgba(255, 255, 255, 0.1);
+    .hero h1 span { color: var(--green); }
+    .hero p {
+      font-size: clamp(1rem, 2.5vw, 1.2rem);
+      color: var(--muted);
+      max-width: 580px;
+      margin: 0 auto 2.5rem;
+    }
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+      margin-bottom: 3.5rem;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.85rem 1.75rem;
+      background: var(--green);
+      color: #000;
+      font-weight: 700;
+      font-size: 1rem;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.15s;
+      box-shadow: 0 0 28px rgba(34,197,94,0.35);
+    }
+    .btn-primary:hover { background: var(--green-dim); transform: translateY(-2px); color: #fff; }
+    .btn-outline {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.85rem 1.75rem;
+      background: transparent;
       color: var(--text);
+      font-weight: 600;
+      font-size: 1rem;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.2);
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s, transform 0.15s;
     }
-    .btn-secondary:hover {
-      background: rgba(255, 255, 255, 0.2);
+    .btn-outline:hover { border-color: var(--green); background: var(--green-glow); color: var(--green); transform: translateY(-2px); }
+
+    .hero-screenshot {
+      width: 100%;
+      max-width: 900px;
+      border-radius: 18px;
+      border: 1px solid var(--card-border);
+      box-shadow: 0 30px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(34,197,94,0.1);
+      overflow: hidden;
     }
-    footer {
-      color: var(--text-muted);
+    .hero-screenshot img { width: 100%; }
+
+    /* ─── SECTIONS ──────────────────────────────────────────────── */
+    section { padding: 5rem 1.5rem; }
+    .section-inner { max-width: 1100px; margin: 0 auto; }
+    .section-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--green);
+      margin-bottom: 0.75rem;
+    }
+    .section-title {
+      font-size: clamp(1.75rem, 4vw, 2.75rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 1rem;
+    }
+    .section-desc {
+      color: var(--muted);
+      font-size: 1.05rem;
+      max-width: 600px;
+      margin-bottom: 3rem;
+    }
+
+    /* ─── VIDEO ─────────────────────────────────────────────────── */
+    #video { background: var(--bg2); }
+    .video-wrapper {
+      position: relative;
+      padding-bottom: 56.25%;
+      height: 0;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--card-border);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    .video-wrapper iframe {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      border: none;
+    }
+
+    /* ─── FEATURES ──────────────────────────────────────────────── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+    }
+    .feature-card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 1.75rem;
+      transition: border-color 0.2s, transform 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .feature-card::before {
+      content: '';
+      position: absolute;
+      top: -1px; left: -1px; right: -1px;
+      height: 3px;
+      background: linear-gradient(90deg, var(--green), var(--blue));
+      border-radius: var(--radius) var(--radius) 0 0;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .feature-card:hover { border-color: rgba(34,197,94,0.3); transform: translateY(-4px); }
+    .feature-card:hover::before { opacity: 1; }
+    .feature-icon {
+      font-size: 2rem;
+      margin-bottom: 1rem;
+      display: block;
+    }
+    .feature-card h3 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    .feature-card p { color: var(--muted); font-size: 0.92rem; }
+
+    /* ─── SCREENSHOTS ───────────────────────────────────────────── */
+    #screenshots { background: var(--bg2); }
+    .screenshots-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 1.25rem;
+    }
+    .screenshot-card {
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--card-border);
+      transition: transform 0.2s, box-shadow 0.2s;
+      cursor: pointer;
+    }
+    .screenshot-card:hover {
+      transform: scale(1.02);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+      border-color: rgba(34,197,94,0.4);
+    }
+    .screenshot-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; }
+    .screenshot-label {
+      background: var(--card);
+      padding: 0.65rem 1rem;
       font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--muted);
+    }
+
+    /* ─── DOWNLOAD ──────────────────────────────────────────────── */
+    .download-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 1.25rem;
+    }
+    .dl-card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 2rem 1.5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 0.75rem;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .dl-card:hover { border-color: rgba(34,197,94,0.4); transform: translateY(-4px); }
+    .dl-icon { font-size: 2.5rem; }
+    .dl-card h3 { font-size: 1.1rem; font-weight: 700; }
+    .dl-card p { color: var(--muted); font-size: 0.875rem; flex: 1; }
+    .btn-dl {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      width: 100%;
+      padding: 0.7rem 1rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s, opacity 0.2s;
+    }
+    .btn-dl-green { background: var(--green); color: #000; border: none; }
+    .btn-dl-green:hover { background: var(--green-dim); color: #fff; }
+    .btn-dl-outline { background: transparent; color: var(--text); border: 1px solid rgba(255,255,255,0.2); }
+    .btn-dl-outline:hover { border-color: var(--green); color: var(--green); background: var(--green-glow); }
+    .btn-dl-disabled { background: rgba(255,255,255,0.07); color: var(--muted); border: 1px solid var(--card-border); cursor: not-allowed; opacity: 0.6; }
+    .badge-coming { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; background: rgba(34,197,94,0.12); color: var(--green); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-top: -0.25rem; }
+
+    /* ─── STATS / SIGN IN ───────────────────────────────────────── */
+    #stats-signin { background: var(--bg2); }
+    .signin-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3rem;
+      align-items: center;
+    }
+    .signin-info h2 { font-size: clamp(1.6rem, 3.5vw, 2.4rem); font-weight: 800; letter-spacing: -0.03em; margin-bottom: 1rem; }
+    .signin-info p { color: var(--muted); font-size: 1rem; margin-bottom: 1.5rem; }
+    .signin-bullets { list-style: none; display: flex; flex-direction: column; gap: 0.65rem; margin-bottom: 2rem; }
+    .signin-bullets li {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.6rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .signin-bullets li::before { content: '✓'; color: var(--green); font-weight: 700; flex-shrink: 0; }
+
+    .signin-card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 2.5rem 2rem;
+    }
+    .signin-card h3 { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .signin-card p { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.75rem; }
+
+    .form-group { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem; }
+    .form-group label { font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+    .form-group input {
+      padding: 0.7rem 0.9rem;
+      background: var(--bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus { border-color: var(--green); }
+    .form-group input::placeholder { color: var(--muted); }
+
+    .btn-signin-form {
+      width: 100%;
+      padding: 0.8rem;
+      background: var(--green);
+      color: #000;
+      font-weight: 700;
+      font-size: 0.95rem;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-top: 0.5rem;
+    }
+    .btn-signin-form:hover { background: var(--green-dim); color: #fff; }
+
+    .divider { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0; color: var(--muted); font-size: 0.8rem; }
+    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--card-border); }
+
+    .btn-google {
+      width: 100%;
+      padding: 0.75rem;
+      background: #fff;
+      color: #1a1a1a;
+      font-weight: 600;
+      font-size: 0.9rem;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+      transition: opacity 0.2s, box-shadow 0.2s;
+    }
+    .btn-google:hover { opacity: 0.92; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+    .btn-google svg { width: 18px; height: 18px; }
+
+    .signin-note {
+      text-align: center;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 1.25rem;
+    }
+    .signin-note a { color: var(--green); }
+
+    /* Stats preview (shown after sign-in) */
+    #stats-panel { display: none; }
+    .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+    .stat-box {
+      background: var(--bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 1rem;
+      text-align: center;
+    }
+    .stat-box .val { font-size: 1.75rem; font-weight: 800; color: var(--green); }
+    .stat-box .lbl { font-size: 0.78rem; color: var(--muted); margin-top: 0.2rem; }
+    .coming-soon-overlay {
+      position: relative;
+    }
+    .coming-soon-overlay::after {
+      content: 'Stat history coming soon';
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10,15,30,0.8);
+      backdrop-filter: blur(4px);
+      border-radius: 10px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--green);
+      letter-spacing: 0.04em;
+    }
+
+    /* ─── COMMUNITY ─────────────────────────────────────────────── */
+    .community-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.5rem;
+    }
+    .community-card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.75rem;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .community-card:hover { border-color: rgba(34,197,94,0.35); transform: translateY(-3px); }
+    .community-icon { font-size: 2.25rem; }
+    .community-card h3 { font-size: 1.05rem; font-weight: 700; }
+    .community-card p { color: var(--muted); font-size: 0.9rem; flex: 1; }
+    .btn-community {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.6rem 1.1rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.88rem;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: var(--text);
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .btn-community:hover { background: var(--green-glow); border-color: var(--green); color: var(--green); }
+
+    /* ─── FOOTER ────────────────────────────────────────────────── */
+    footer {
+      background: var(--bg);
+      border-top: 1px solid var(--card-border);
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    footer a { color: var(--green); }
+    .footer-inner { max-width: 700px; margin: 0 auto; display: flex; flex-direction: column; gap: 0.75rem; align-items: center; }
+    .footer-links { display: flex; gap: 1.5rem; flex-wrap: wrap; justify-content: center; }
+    .footer-links a { color: var(--muted); transition: color 0.2s; }
+    .footer-links a:hover { color: var(--text); }
+
+    /* ─── MODAL (sign-in) ───────────────────────────────────────── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(6px);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 18px;
+      padding: 2.5rem 2rem;
+      width: 100%;
+      max-width: 420px;
+      position: relative;
+    }
+    .modal-close {
+      position: absolute;
+      top: 1rem; right: 1rem;
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 1.25rem;
+      cursor: pointer;
+      line-height: 1;
+      transition: color 0.2s;
+    }
+    .modal-close:hover { color: var(--text); }
+
+    /* ─── AUTH STATE ────────────────────────────────────────────── */
+    .user-greeting { display: none; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--muted); }
+    .user-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--green-dim);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem; font-weight: 700; color: #000;
+    }
+
+    /* ─── LIGHTBOX ──────────────────────────────────────────────── */
+    #lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.92);
+      z-index: 300;
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+    }
+    #lightbox.open { display: flex; }
+    #lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 10px; }
+
+    /* ─── RESPONSIVE ────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+      .hamburger { display: block; }
+      .nav-links.mobile-open {
+        display: flex;
+        flex-direction: column;
+        position: fixed;
+        top: var(--nav-h); left: 0; right: 0;
+        background: rgba(10,15,30,0.98);
+        border-bottom: 1px solid var(--card-border);
+        padding: 1.5rem 2rem;
+        gap: 1rem;
+      }
+      .signin-container { grid-template-columns: 1fr; }
+      .signin-card { padding: 1.75rem 1.25rem; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 480px) {
+      .hero-actions { flex-direction: column; align-items: stretch; }
+      .btn-primary, .btn-outline { justify-content: center; }
+      .stats-grid { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Heckle Golf <span>Simulator</span></h1>
-    <p class="subtitle">Realistic golf simulation, minigames, cross-platform matches, and online leaderboards.</p>
 
-    <div class="grid">
-      <!-- Windows -->
-      <div class="card">
-        <h3>Windows</h3>
-        <p>64-bit desktop build (.exe / installer)</p>
-        <a id="win-download" href="#" class="btn">Download .exe</a>
-      </div>
+  <!-- ══ NAVIGATION ════════════════════════════════════════════ -->
+  <nav>
+    <a href="#" class="nav-logo">
+      <img src="images/app_icon.png" alt="IT Golf icon">
+      IT <span>Golf</span>
+    </a>
 
-      <!-- macOS -->
-      <div class="card">
-        <h3>macOS</h3>
-        <p>Universal macOS build (.dmg / .zip)</p>
-        <a id="mac-download" href="#" class="btn">Download .dmg</a>
-      </div>
+    <ul class="nav-links" id="nav-links">
+      <li><a href="#video">Video</a></li>
+      <li><a href="#features">Features</a></li>
+      <li><a href="#screenshots">Screenshots</a></li>
+      <li><a href="#download">Download</a></li>
+      <li><a href="#community">Community</a></li>
+    </ul>
 
-      <!-- Android -->
-      <div class="card">
-        <h3>Android</h3>
-        <p>Get it on Google Play Store or APK</p>
-        <a id="android-link" href="#" class="btn btn-secondary">Google Play</a>
-      </div>
+    <div class="nav-cta">
+      <!-- YouTube -->
+      <a href="https://www.youtube.com/@hecklegolfsimulator" target="_blank" rel="noopener" class="btn-nav-icon" id="nav-yt" title="YouTube" aria-label="YouTube Channel">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31.3 31.3 0 0 0 0 12a31.3 31.3 0 0 0 .5 5.8A3 3 0 0 0 2.6 20c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31.3 31.3 0 0 0 24 12a31.3 31.3 0 0 0-.5-5.8zM9.8 15.6V8.4L15.8 12l-6 3.6z"/></svg>
+      </a>
+      <!-- Discord -->
+      <a href="https://discord.gg/brHATRsFKB" target="_blank" rel="noopener" class="btn-nav-icon" id="nav-discord" title="Discord" aria-label="Discord Server">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3c-.2.4-.5.9-.7 1.3a18.3 18.3 0 0 0-5.4 0C9.1 3.9 8.8 3.4 8.6 3A19.7 19.7 0 0 0 3.7 4.4C.5 9.2-.3 13.8.1 18.4a20 20 0 0 0 6 3 14.8 14.8 0 0 0 1.3-2 12.8 12.8 0 0 1-2-.9l.5-.4a14.3 14.3 0 0 0 12.2 0l.5.4a12.9 12.9 0 0 1-2 1 14.8 14.8 0 0 0 1.3 2 19.9 19.9 0 0 0 6-3c.5-5.2-.9-9.8-3.6-14zM8 15.5c-1.2 0-2.2-1.1-2.2-2.5S6.8 10.5 8 10.5s2.2 1.1 2.2 2.5S9.2 15.5 8 15.5zm8 0c-1.2 0-2.2-1.1-2.2-2.5s1-2.5 2.2-2.5 2.2 1.1 2.2 2.5-1 2.5-2.2 2.5z"/></svg>
+      </a>
 
-      <!-- iOS -->
-      <div class="card">
-        <h3>iOS (IPA / Sideload)</h3>
-        <p>Sideload package (.ipa) for iOS</p>
-        <a id="ios-download" href="#" class="btn btn-secondary">Download .ipa</a>
+      <!-- Sign In nav button -->
+      <button class="btn-signin" id="nav-signin-btn">Sign In</button>
+      <!-- User greeting (shown when signed in) -->
+      <div class="user-greeting" id="user-greeting">
+        <div class="user-avatar" id="user-avatar">?</div>
+        <span id="user-name">Player</span>
+        <button id="signout-btn" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.78rem;" title="Sign out">✕</button>
       </div>
     </div>
 
-    <footer>
-      &copy; Heckle Golf Sim. All rights reserved.
-    </footer>
+    <button class="hamburger" id="hamburger" aria-label="Toggle menu">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+  </nav>
+
+  <!-- ══ HERO ══════════════════════════════════════════════════ -->
+  <section class="hero">
+    <span class="hero-badge">🏌️ Free to Play</span>
+    <h1>Golf Simulator for<br><span>Every Course on Earth</span></h1>
+    <p>IT Golf brings real-world OpenStreetMap courses, fun minigames, and launch monitor support to your fingertips — completely free.</p>
+    <div class="hero-actions">
+      <a href="https://play.google.com/store/apps/details?id=com.hecklegolf.simulator&hl=en_US" class="btn-primary" target="_blank" rel="noopener">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3 20.5v-17c0-.83.94-1.3 1.6-.8l14 8.5a1 1 0 0 1 0 1.6l-14 8.5c-.66.5-1.6.03-1.6-.8z"/></svg>
+        Get on Google Play
+      </a>
+      <a href="#video" class="btn-outline">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Watch Overview
+      </a>
+    </div>
+    <div class="hero-screenshot">
+      <img src="images/course_play_tee_view.png" alt="IT Golf course tee view screenshot" loading="lazy">
+    </div>
+  </section>
+
+  <!-- ══ VIDEO ═════════════════════════════════════════════════ -->
+  <section id="video">
+    <div class="section-inner">
+      <p class="section-label">App Overview</p>
+      <h2 class="section-title">See IT Golf in Action</h2>
+      <p class="section-desc">Watch a full walkthrough of the latest features, courses, and gameplay modes.</p>
+      <div class="video-wrapper">
+        <iframe
+          src="https://www.youtube.com/embed/OnNmUdonL74"
+          title="IT Golf App Overview"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowfullscreen
+          loading="lazy">
+        </iframe>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ FEATURES ══════════════════════════════════════════════ -->
+  <section id="features">
+    <div class="section-inner">
+      <p class="section-label">What's Inside</p>
+      <h2 class="section-title">Everything a Golfer Needs</h2>
+      <p class="section-desc">From casual putting practice to full 18-hole rounds with friends — IT Golf has you covered, for free.</p>
+      <div class="features-grid">
+
+        <div class="feature-card">
+          <span class="feature-icon">🗺️</span>
+          <h3>Real-World Courses via OpenStreetMap</h3>
+          <p>Download and play virtually any golf course in the world using real OpenStreetMap data. No artificial course library limitations.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">🆓</span>
+          <h3>Completely Free to Play</h3>
+          <p>No subscriptions, no license fees, no paywalls. IT Golf is fully free — just download and tee off.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">📡</span>
+          <h3>Launch Monitor Support</h3>
+          <p>Compatible with popular launch monitors so you can bring real swing data into your simulator sessions.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">🎯</span>
+          <h3>Minigames & Practice Modes</h3>
+          <p>Sharpen your short game with putting and chipping challenges, closest-to-pin contests, and loft control drills.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">👥</span>
+          <h3>Multiplayer &amp; Cross-Platform</h3>
+          <p>Play against friends across Android, iOS, Windows, and macOS — all in the same lobby.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">📊</span>
+          <h3>Stat Tracking &amp; Leaderboards</h3>
+          <p>Track your round history, scoring trends, and compete on online leaderboards. Sign in to view your stats from any device.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">🏌️</span>
+          <h3>Full Course Play</h3>
+          <p>Tee-to-green with scorecard tracking, overhead maps, and realistic hole layouts sourced from real course data.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">📱</span>
+          <h3>Mobile-First Design</h3>
+          <p>Designed for touch on Android and iOS with an intuitive UI, while also supporting full keyboard & mouse on desktop.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">⚙️</span>
+          <h3>Advanced Shot Controls</h3>
+          <p>Shape control, loft adjustment, and power mechanics give skilled players deep control over every shot.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ SCREENSHOTS ════════════════════════════════════════════ -->
+  <section id="screenshots">
+    <div class="section-inner">
+      <p class="section-label">In-App Screenshots</p>
+      <h2 class="section-title">A Closer Look</h2>
+      <p class="section-desc">Real screenshots from the app — no mockups, no renders.</p>
+      <div class="screenshots-grid">
+
+        <div class="screenshot-card" onclick="openLightbox('images/course_play_tee_view.png')">
+          <img src="images/course_play_tee_view.png" alt="Course tee view" loading="lazy">
+          <div class="screenshot-label">Course Play – Tee View</div>
+        </div>
+
+        <div class="screenshot-card" onclick="openLightbox('images/course_play_overhead_map.png')">
+          <img src="images/course_play_overhead_map.png" alt="Overhead hole map" loading="lazy">
+          <div class="screenshot-label">Overhead Hole Map</div>
+        </div>
+
+        <div class="screenshot-card" onclick="openLightbox('images/osm_course_downloader.png')">
+          <img src="images/osm_course_downloader.png" alt="Course downloader" loading="lazy">
+          <div class="screenshot-label">OpenStreetMap Course Downloader</div>
+        </div>
+
+        <div class="screenshot-card" onclick="openLightbox('images/putting_practice_minigame.png')">
+          <img src="images/putting_practice_minigame.png" alt="Putting minigame" loading="lazy">
+          <div class="screenshot-label">Putting Practice Minigame</div>
+        </div>
+
+        <div class="screenshot-card" onclick="openLightbox('images/chipping_practice_minigame.png')">
+          <img src="images/chipping_practice_minigame.png" alt="Chipping minigame" loading="lazy">
+          <div class="screenshot-label">Chipping Practice Minigame</div>
+        </div>
+
+        <div class="screenshot-card" onclick="openLightbox('images/scorecard_view.png')">
+          <img src="images/scorecard_view.png" alt="Scorecard view" loading="lazy">
+          <div class="screenshot-label">Scorecard &amp; Match History</div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ DOWNLOAD ═══════════════════════════════════════════════ -->
+  <section id="download">
+    <div class="section-inner">
+      <p class="section-label">Get the App</p>
+      <h2 class="section-title">Available on All Platforms</h2>
+      <p class="section-desc">Download IT Golf for free on your preferred device. No purchase required.</p>
+
+      <!-- Release version badge -->
+      <div id="release-badge" style="display:none; margin-bottom:1.5rem;">
+        <span style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.3rem 0.85rem;border-radius:999px;border:1px solid rgba(34,197,94,0.35);background:rgba(34,197,94,0.08);font-size:0.8rem;color:var(--green);font-weight:600;">
+          🏷️ Latest release: <span id="release-tag"></span>
+          &nbsp;·&nbsp;
+          <a id="release-notes-link" href="https://github.com/mmancl/HeckleGolfSim/releases/latest" target="_blank" rel="noopener" style="color:var(--green);text-decoration:underline;text-underline-offset:2px;">Release notes ↗</a>
+        </span>
+      </div>
+
+      <div class="download-grid">
+
+        <!-- Android -->
+        <div class="dl-card">
+          <span class="dl-icon">🤖</span>
+          <h3>Android</h3>
+          <p>Available now on Google Play. Supports Android 8.0 and above.</p>
+          <a href="https://play.google.com/store/apps/details?id=com.hecklegolf.simulator&hl=en_US"
+             class="btn-dl btn-dl-green" target="_blank" rel="noopener">
+            ▶ Google Play
+          </a>
+        </div>
+
+        <!-- iOS -->
+        <div class="dl-card">
+          <span class="dl-icon">🍎</span>
+          <h3>iOS</h3>
+          <p>Sideload the app using the latest .ipa from GitHub Releases.</p>
+          <a id="dl-ios" href="https://github.com/mmancl/HeckleGolfSim/releases/latest"
+             class="btn-dl btn-dl-outline" target="_blank" rel="noopener">
+            ⏳ Loading…
+          </a>
+        </div>
+
+        <!-- Windows -->
+        <div class="dl-card">
+          <span class="dl-icon">🪟</span>
+          <h3>Windows</h3>
+          <p>64-bit Windows desktop build (.zip) for full keyboard &amp; mouse play.</p>
+          <a id="dl-windows" href="https://github.com/mmancl/HeckleGolfSim/releases/latest"
+             class="btn-dl btn-dl-outline" target="_blank" rel="noopener">
+            ⏳ Loading…
+          </a>
+        </div>
+
+        <!-- macOS -->
+        <div class="dl-card">
+          <span class="dl-icon">🍏</span>
+          <h3>macOS</h3>
+          <p>Universal macOS build (.zip) for Apple Silicon and Intel Macs.</p>
+          <a id="dl-mac" href="https://github.com/mmancl/HeckleGolfSim/releases/latest"
+             class="btn-dl btn-dl-outline" target="_blank" rel="noopener">
+            ⏳ Loading…
+          </a>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ STATS / SIGN IN ════════════════════════════════════════ -->
+  <section id="stats-signin">
+    <div class="section-inner">
+      <div class="signin-container">
+
+        <div class="signin-info">
+          <p class="section-label">Player Portal</p>
+          <h2>Track Your Stats<br>from Any Device</h2>
+          <p>Sign in with your IT Golf account to view your round history, scoring trends, and performance stats directly from the web.</p>
+          <ul class="signin-bullets">
+            <li>Full round history and scorecards</li>
+            <li>Handicap & scoring trends over time</li>
+            <li>Minigame personal bests</li>
+            <li>Online leaderboard rankings</li>
+            <li>Synced across all your devices</li>
+          </ul>
+          <p style="font-size:0.85rem; color:var(--muted);">
+            🚧 Web stat history is <strong style="color:var(--green);">coming soon</strong>. Create your account in-app today so your rounds are ready when it launches.
+          </p>
+        </div>
+
+        <div class="signin-card">
+          <h3>Sign In to Your Account</h3>
+          <p>Use the same account as the IT Golf app.</p>
+
+          <!-- Google Sign-In -->
+          <button class="btn-google" id="google-signin-btn">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+            </svg>
+            Continue with Google
+          </button>
+
+          <div class="divider">or</div>
+
+          <!-- Email/password form -->
+          <form id="signin-form" autocomplete="on">
+            <div class="form-group">
+              <label for="email">Email</label>
+              <input type="email" id="email" placeholder="you@example.com" autocomplete="email" required>
+            </div>
+            <div class="form-group">
+              <label for="password">Password</label>
+              <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" required>
+            </div>
+            <button type="submit" class="btn-signin-form">Sign In</button>
+          </form>
+
+          <p class="signin-note">
+            No account? <a href="#download">Download the app</a> and create one in-game.
+          </p>
+
+          <!-- Signed-in panel (shown after auth) -->
+          <div id="stats-panel">
+            <div class="stats-grid coming-soon-overlay">
+              <div class="stat-box"><div class="val">–</div><div class="lbl">Rounds Played</div></div>
+              <div class="stat-box"><div class="val">–</div><div class="lbl">Best Score</div></div>
+              <div class="stat-box"><div class="val">–</div><div class="lbl">Avg Score</div></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ COMMUNITY ═════════════════════════════════════════════ -->
+  <section id="community">
+    <div class="section-inner">
+      <p class="section-label">Join the Community</p>
+      <h2 class="section-title">Golfers Playing Together</h2>
+      <p class="section-desc">Connect with other players, share course setups, get early updates, and help shape the future of IT Golf.</p>
+      <div class="community-grid">
+
+        <div class="community-card">
+          <span class="community-icon">▶️</span>
+          <h3>YouTube</h3>
+          <p>Watch gameplay videos, feature walkthroughs, and update announcements on our YouTube channel.</p>
+          <a href="https://www.youtube.com/@hecklegolfsimulator" target="_blank" rel="noopener" class="btn-community">
+            Watch Now →
+          </a>
+        </div>
+
+        <div class="community-card">
+          <span class="community-icon">💬</span>
+          <h3>Discord</h3>
+          <p>Join our Discord server to chat with other players, report bugs, suggest features, and get early access news.</p>
+          <a href="https://discord.gg/brHATRsFKB" target="_blank" rel="noopener" class="btn-community">
+            Join Server →
+          </a>
+        </div>
+
+        <div class="community-card">
+          <span class="community-icon">🗺️</span>
+          <h3>OpenStreetMap Courses</h3>
+          <p>Don't see your course? Contribute to OpenStreetMap and it'll appear in IT Golf. The more you add, the better for everyone.</p>
+          <a href="https://www.openstreetmap.org" target="_blank" rel="noopener" class="btn-community">
+            Contribute →
+          </a>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ FOOTER ════════════════════════════════════════════════ -->
+  <footer>
+    <div class="footer-inner">
+      <div class="nav-logo" style="justify-content:center">
+        <img src="images/app_icon.png" alt="IT Golf icon" style="width:28px;height:28px;border-radius:6px">
+        IT <span style="color:var(--green)">Golf</span>
+      </div>
+      <div class="footer-links">
+        <a href="#features">Features</a>
+        <a href="#screenshots">Screenshots</a>
+        <a href="#download">Download</a>
+        <a href="#stats-signin">Sign In</a>
+        <a href="https://www.youtube.com/@hecklegolfsimulator" target="_blank" rel="noopener">YouTube</a>
+        <a href="https://discord.gg/brHATRsFKB" target="_blank" rel="noopener">Discord</a>
+      </div>
+      <p>© 2025 IT Golf Simulator. All rights reserved. Built with ❤️ using <a href="https://godotengine.org" target="_blank" rel="noopener">Godot Engine</a>.</p>
+    </div>
+  </footer>
+
+  <!-- ══ LIGHTBOX ══════════════════════════════════════════════ -->
+  <div id="lightbox" onclick="closeLightbox()">
+    <img id="lightbox-img" src="" alt="">
   </div>
 
-  <!-- Firebase SDK -->
+  <!-- ══ FIREBASE + AUTH ═══════════════════════════════════════ -->
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
+    import { initializeApp }      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getAnalytics }       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
+    import {
+      getAuth,
+      onAuthStateChanged,
+      signInWithEmailAndPassword,
+      signInWithPopup,
+      GoogleAuthProvider,
+      signOut
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
     const firebaseConfig = {
-      apiKey: "AIzaSyDEdlLgd1OspjvXW5fY90ICVCpkZJM8Vbs",
-      authDomain: "heckle-golf-sim.firebaseapp.com",
-      projectId: "heckle-golf-sim",
-      storageBucket: "heckle-golf-sim.firebasestorage.app",
+      apiKey:            "AIzaSyDEdlLgd1OspjvXW5fY90ICVCpkZJM8Vbs",
+      authDomain:        "heckle-golf-sim.firebaseapp.com",
+      projectId:         "heckle-golf-sim",
+      storageBucket:     "heckle-golf-sim.firebasestorage.app",
       messagingSenderId: "1065092687873",
-      appId: "1:1065092687873:web:10986b68064a218751b800",
-      measurementId: "G-XWTKP6N4WX"
+      appId:             "1:1065092687873:web:10986b68064a218751b800",
+      measurementId:     "G-XWTKP6N4WX"
     };
 
-    const app = initializeApp(firebaseConfig);
+    const app       = initializeApp(firebaseConfig);
     const analytics = getAnalytics(app);
+    const auth      = getAuth(app);
+    const provider  = new GoogleAuthProvider();
+
+    // ── Auth State ─────────────────────────────────────────────
+    onAuthStateChanged(auth, (user) => {
+      const btnSignin    = document.getElementById('nav-signin-btn');
+      const greeting     = document.getElementById('user-greeting');
+      const avatarEl     = document.getElementById('user-avatar');
+      const nameEl       = document.getElementById('user-name');
+      const statsPanel   = document.getElementById('stats-panel');
+      const signinForm   = document.getElementById('signin-form');
+      const googleBtn    = document.getElementById('google-signin-btn');
+      const divider      = document.querySelector('.divider');
+      const signinNote   = document.querySelector('.signin-note');
+      const cardTitle    = document.querySelector('.signin-card h3');
+      const cardDesc     = document.querySelector('.signin-card > p');
+
+      if (user) {
+        // Show greeting, hide sign-in button
+        btnSignin.style.display    = 'none';
+        greeting.style.display     = 'flex';
+        const initials = (user.displayName || user.email || '?').charAt(0).toUpperCase();
+        avatarEl.textContent       = initials;
+        nameEl.textContent         = user.displayName || user.email;
+
+        // Update sign-in card to show welcome state
+        if (cardTitle) cardTitle.textContent  = `Welcome back, ${user.displayName ? user.displayName.split(' ')[0] : 'Golfer'}!`;
+        if (cardDesc)  cardDesc.textContent   = 'Your stats will appear here once web tracking launches.';
+        if (signinForm)  signinForm.style.display   = 'none';
+        if (googleBtn)   googleBtn.style.display     = 'none';
+        if (divider)     divider.style.display       = 'none';
+        if (signinNote)  signinNote.style.display    = 'none';
+        if (statsPanel)  statsPanel.style.display    = 'block';
+      } else {
+        btnSignin.style.display    = '';
+        greeting.style.display     = 'none';
+        if (cardTitle) cardTitle.textContent  = 'Sign In to Your Account';
+        if (cardDesc)  cardDesc.textContent   = 'Use the same account as the IT Golf app.';
+        if (signinForm)  signinForm.style.display   = '';
+        if (googleBtn)   googleBtn.style.display     = '';
+        if (divider)     divider.style.display       = '';
+        if (signinNote)  signinNote.style.display    = '';
+        if (statsPanel)  statsPanel.style.display    = 'none';
+      }
+    });
+
+    // ── Email/Password Sign-In ──────────────────────────────────
+    document.getElementById('signin-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email    = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const btn      = e.target.querySelector('button[type="submit"]');
+      btn.textContent = 'Signing in…';
+      btn.disabled    = true;
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+      } catch (err) {
+        btn.textContent = 'Sign In';
+        btn.disabled    = false;
+        alert('Sign-in failed: ' + (err.message || 'Unknown error'));
+      }
+    });
+
+    // ── Google Sign-In ──────────────────────────────────────────
+    document.getElementById('google-signin-btn').addEventListener('click', async () => {
+      try {
+        await signInWithPopup(auth, provider);
+      } catch (err) {
+        if (err.code !== 'auth/popup-closed-by-user') {
+          alert('Google sign-in failed: ' + (err.message || 'Unknown error'));
+        }
+      }
+    });
+
+    // ── Nav Sign-In button ──────────────────────────────────────
+    document.getElementById('nav-signin-btn').addEventListener('click', () => {
+      document.getElementById('stats-signin').scrollIntoView({ behavior: 'smooth' });
+    });
+
+    // ── Sign Out ────────────────────────────────────────────────
+    document.getElementById('signout-btn').addEventListener('click', async () => {
+      await signOut(auth);
+    });
   </script>
+
+  <!-- ══ GITHUB RELEASE FETCHER ═══════════════════════════════ -->
+  <script>
+    (async function loadRelease() {
+      const REPO = 'mmancl/HeckleGolfSim';
+      const API  = `https://api.github.com/repos/${REPO}/releases/latest`;
+
+      // Asset name patterns — Android (.aab/.apk) intentionally excluded; links to Google Play instead
+      const SKIP = (name) => name.endsWith('.aab') || name.endsWith('.apk');
+      const PATTERNS = {
+        ios:     (name) => name.endsWith('.ipa'),
+        windows: (name) => name.toLowerCase().includes('windows') && name.endsWith('.zip'),
+        mac:     (name) => name.toLowerCase().includes('macos') && name.endsWith('.zip'),
+      };
+
+      const ids = {
+        ios:     document.getElementById('dl-ios'),
+        windows: document.getElementById('dl-windows'),
+        mac:     document.getElementById('dl-mac'),
+      };
+
+      try {
+        const res  = await fetch(API, { headers: { Accept: 'application/vnd.github+json' } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const tag  = data.tag_name;
+
+        // Show version badge
+        const badge = document.getElementById('release-badge');
+        const tagEl = document.getElementById('release-tag');
+        if (badge && tagEl) { tagEl.textContent = tag; badge.style.display = ''; }
+
+        // Update release notes link
+        const rnLink = document.getElementById('release-notes-link');
+        if (rnLink) rnLink.href = data.html_url;
+
+        // Map each asset to its button
+        for (const asset of data.assets) {
+          if (SKIP(asset.name)) continue; // Android builds go to Google Play, not direct download
+          for (const [key, matcher] of Object.entries(PATTERNS)) {
+            if (matcher(asset.name)) {
+              const el = ids[key];
+              if (el) {
+                el.href        = asset.browser_download_url;
+                const size     = (asset.size / 1024 / 1024).toFixed(0);
+                const labels   = { ios: `Download .ipa (${size} MB)`, windows: `Download .zip (${size} MB)`, mac: `Download .zip (${size} MB)` };
+                el.textContent = labels[key] || `Download (${size} MB)`;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        // On error, fall back to releases page for each button
+        console.warn('Could not fetch release:', err);
+        const fallback = `https://github.com/${REPO}/releases/latest`;
+        for (const el of Object.values(ids)) {
+          if (el) { el.href = fallback; el.textContent = 'View on GitHub ↗'; }
+        }
+      }
+    })();
+  </script>
+
+  <!-- ══ UI SCRIPTS ════════════════════════════════════════════ -->
+  <script>
+    // Hamburger menu
+    const hamburger = document.getElementById('hamburger');
+    const navLinks  = document.getElementById('nav-links');
+    hamburger.addEventListener('click', () => {
+      navLinks.classList.toggle('mobile-open');
+    });
+    navLinks.querySelectorAll('a').forEach(a => {
+      a.addEventListener('click', () => navLinks.classList.remove('mobile-open'));
+    });
+
+    // Lightbox
+    function openLightbox(src) {
+      document.getElementById('lightbox-img').src = src;
+      document.getElementById('lightbox').classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.remove('open');
+      document.body.style.overflow = '';
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeLightbox();
+    });
+  </script>
+
 </body>
 </html>

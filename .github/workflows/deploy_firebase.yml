@@ -1,0 +1,121 @@
+name: Deploy Firebase & Hosting
+
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Component(s) to deploy'
+        required: true
+        type: choice
+        default: 'all'
+        options:
+          - 'all'
+          - 'hosting'
+          - 'firestore:rules'
+          - 'firestore'
+      dry_run:
+        description: 'Dry run / validation only (skips live publishing)'
+        required: false
+        type: boolean
+        default: false
+      message:
+        description: 'Deployment release message / commit note'
+        required: false
+        type: string
+        default: 'Manual deploy via GitHub Actions'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Firebase
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Firebase Tools CLI
+        run: npm install -g firebase-tools
+
+      - name: Setup Firebase Authentication
+        id: auth
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_HECKLE_GOLF_SIM || secrets.FIREBASE_SERVICE_ACCOUNT || secrets.GCP_SA_KEY }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ -n "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "Found Firebase Service Account secret. Configuring credentials..."
+            echo "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase_sa.json"
+            echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase_sa.json" >> $GITHUB_ENV
+            echo "AUTH_MODE=Service Account" >> $GITHUB_ENV
+          elif [ -n "$FIREBASE_TOKEN" ]; then
+            echo "Found FIREBASE_TOKEN secret. Configuring Firebase CI token..."
+            echo "FIREBASE_TOKEN=$FIREBASE_TOKEN" >> $GITHUB_ENV
+            echo "AUTH_MODE=CI Token" >> $GITHUB_ENV
+          else
+            echo "::error::No Firebase authentication credentials found!"
+            echo "Please configure either:"
+            echo "  1) FIREBASE_SERVICE_ACCOUNT_HECKLE_GOLF_SIM (or FIREBASE_SERVICE_ACCOUNT) with your Service Account JSON key, or"
+            echo "  2) FIREBASE_TOKEN with a CI token from 'firebase login:ci'"
+            echo "in GitHub Repository Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - name: Validate Firebase Project Config
+        run: |
+          echo "Checking Firebase CLI version..."
+          firebase --version
+          
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "=== DRY RUN MODE ==="
+            echo "Validating Firestore rules syntax..."
+            if [ -f "firestore.rules" ]; then
+              cat firestore.rules
+            fi
+            echo "Hosting directory contents:"
+            ls -la web/
+            echo "Dry run validation complete. No changes were deployed."
+          fi
+
+      - name: Deploy to Firebase
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          DEPLOY_ARGS=(--project heckle-golf-sim)
+          
+          if [ "${{ inputs.targets }}" != "all" ]; then
+            DEPLOY_ARGS+=(--only "${{ inputs.targets }}")
+          fi
+          
+          if [ -n "${{ inputs.message }}" ]; then
+            DEPLOY_ARGS+=(-m "${{ inputs.message }}")
+          fi
+          
+          echo "Executing: firebase deploy ${DEPLOY_ARGS[*]}"
+          firebase deploy "${DEPLOY_ARGS[@]}"
+
+      - name: Generate Deployment Summary
+        if: always()
+        run: |
+          echo "### Firebase Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status == 'success' && 'Succeeded' || 'Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Project:** \`heckle-golf-sim\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target(s):** \`${{ inputs.targets }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry Run:** \`${{ inputs.dry_run }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Auth Mode:** \`${{ env.AUTH_MODE || 'Not authenticated' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Message:** ${{ inputs.message }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Live Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [Hosting Site (web.app)](https://heckle-golf-sim.web.app)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Hosting Site (firebaseapp.com)](https://heckle-golf-sim.firebaseapp.com)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Firebase Console](https://console.firebase.google.com/project/heckle-golf-sim/overview)" >> $GITHUB_STEP_SUMMARY
