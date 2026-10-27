@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>IT Golf | Free Golf Simulator</title>
-  <meta name="description" content="IT Golf – a free, cross-platform golf simulator with real-world OpenStreetMap courses, minigames, launch monitor support, and online stat tracking.">
-  <meta property="og:title" content="IT Golf | Free Golf Simulator">
-  <meta property="og:description" content="Real-world courses. Free to play. Anywhere.">
+  <title>Heckle Golf Simulator | Free Golf Simulator</title>
+  <meta name="description" content="Heckle Golf Simulator – a free, cross-platform golf simulator with real-world OpenStreetMap courses, AI heckling commentary, launch monitor support, and online stat tracking.">
+  <meta property="og:title" content="Heckle Golf Simulator | Free Golf Simulator">
+  <meta property="og:description" content="Real-world courses. Live heckling. Free to play.">
   <meta property="og:image" content="images/heckle_splash_feature.png">
   <link rel="icon" type="image/png" href="images/app_icon.png">
 
@@ -38,181 +38,99 @@
     }
     a { color: inherit; text-decoration: none; }
     img { max-width: 100%; display: block; }
-
-    /* ─── Scrollbar ─────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: var(--bg); }
     ::-webkit-scrollbar-thumb { background: var(--green-dim); border-radius: 3px; }
 
     /* ─── NAV ───────────────────────────────────────────────────── */
     nav {
-      position: fixed;
-      top: 0; left: 0; right: 0;
+      position: fixed; top: 0; left: 0; right: 0;
       height: var(--nav-h);
       background: rgba(10,15,30,0.85);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
       border-bottom: 1px solid var(--card-border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 2rem;
-      z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 2rem; z-index: 100;
     }
     .nav-logo {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      font-weight: 800;
-      font-size: 1.25rem;
-      letter-spacing: -0.04em;
+      display: flex; align-items: center; gap: 0.6rem;
+      font-weight: 800; font-size: 1.2rem; letter-spacing: -0.04em;
     }
     .nav-logo img { width: 36px; height: 36px; border-radius: 8px; }
-    .nav-logo span { color: var(--green); }
-
-    .nav-links {
-      display: flex;
-      align-items: center;
-      gap: 1.5rem;
-      list-style: none;
-    }
-    .nav-links a {
-      color: var(--muted);
-      font-size: 0.9rem;
-      font-weight: 500;
-      transition: color 0.2s;
-    }
+    .nav-logo .logo-green { color: var(--green); }
+    .nav-links { display: flex; align-items: center; gap: 1.5rem; list-style: none; }
+    .nav-links a { color: var(--muted); font-size: 0.9rem; font-weight: 500; transition: color 0.2s; }
     .nav-links a:hover { color: var(--text); }
-
-    .nav-cta {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
+    .nav-cta { display: flex; align-items: center; gap: 0.75rem; }
     .btn-nav-icon {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 36px;
-      height: 36px;
-      border-radius: 8px;
-      background: var(--card);
-      border: 1px solid var(--card-border);
-      transition: border-color 0.2s, background 0.2s;
-      color: var(--muted);
+      display: flex; align-items: center; justify-content: center;
+      width: 36px; height: 36px; border-radius: 8px;
+      background: var(--card); border: 1px solid var(--card-border);
+      transition: border-color 0.2s, background 0.2s; color: var(--muted);
     }
     .btn-nav-icon:hover { border-color: var(--green); color: var(--green); background: var(--green-glow); }
     .btn-signin {
-      padding: 0.45rem 1rem;
-      border-radius: 8px;
-      background: var(--card);
-      border: 1px solid var(--green);
-      color: var(--green);
-      font-size: 0.85rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s, color 0.2s;
+      padding: 0.45rem 1rem; border-radius: 8px;
+      background: var(--card); border: 1px solid var(--green);
+      color: var(--green); font-size: 0.85rem; font-weight: 600;
+      cursor: pointer; transition: background 0.2s, color 0.2s;
     }
     .btn-signin:hover { background: var(--green); color: #000; }
-
-    /* hamburger – hidden on desktop */
     .hamburger { display: none; background: none; border: none; cursor: pointer; color: var(--text); }
+    .user-greeting { display: none; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--muted); }
+    .user-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--green-dim);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem; font-weight: 700; color: #000;
+    }
 
     /* ─── HERO ──────────────────────────────────────────────────── */
     .hero {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; text-align: center;
       padding: calc(var(--nav-h) + 3rem) 1.5rem 4rem;
-      background:
-        radial-gradient(ellipse 70% 55% at 50% 0%, rgba(34,197,94,0.12) 0%, transparent 70%),
-        var(--bg);
-      position: relative;
-      overflow: hidden;
+      background: radial-gradient(ellipse 70% 55% at 50% 0%, rgba(34,197,94,0.12) 0%, transparent 70%), var(--bg);
+      position: relative; overflow: hidden;
     }
     .hero::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%2322c55e' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+      content: ''; position: absolute; inset: 0;
+      background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none'%3E%3Cg fill='%2322c55e' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
       pointer-events: none;
     }
     .hero-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      padding: 0.3rem 0.85rem;
-      border-radius: 999px;
-      border: 1px solid rgba(34,197,94,0.4);
-      background: rgba(34,197,94,0.08);
-      font-size: 0.78rem;
-      font-weight: 600;
-      color: var(--green);
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      margin-bottom: 1.5rem;
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.3rem 0.85rem; border-radius: 999px;
+      border: 1px solid rgba(34,197,94,0.4); background: rgba(34,197,94,0.08);
+      font-size: 0.78rem; font-weight: 600; color: var(--green);
+      letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 1.5rem;
     }
     .hero h1 {
-      font-size: clamp(2.6rem, 7vw, 5rem);
-      font-weight: 900;
-      letter-spacing: -0.04em;
-      line-height: 1.05;
-      margin-bottom: 1.25rem;
-      max-width: 780px;
+      font-size: clamp(2.6rem, 7vw, 5rem); font-weight: 900;
+      letter-spacing: -0.04em; line-height: 1.05;
+      margin-bottom: 1.25rem; max-width: 820px;
     }
     .hero h1 span { color: var(--green); }
-    .hero p {
-      font-size: clamp(1rem, 2.5vw, 1.2rem);
-      color: var(--muted);
-      max-width: 580px;
-      margin: 0 auto 2.5rem;
-    }
-    .hero-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1rem;
-      justify-content: center;
-      margin-bottom: 3.5rem;
-    }
+    .hero p { font-size: clamp(1rem, 2.5vw, 1.2rem); color: var(--muted); max-width: 600px; margin: 0 auto 2.5rem; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; margin-bottom: 3.5rem; }
     .btn-primary {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.85rem 1.75rem;
-      background: var(--green);
-      color: #000;
-      font-weight: 700;
-      font-size: 1rem;
-      border-radius: 10px;
-      border: none;
-      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.85rem 1.75rem; background: var(--green); color: #000;
+      font-weight: 700; font-size: 1rem; border-radius: 10px; border: none; cursor: pointer;
       transition: background 0.2s, transform 0.15s;
       box-shadow: 0 0 28px rgba(34,197,94,0.35);
     }
     .btn-primary:hover { background: var(--green-dim); transform: translateY(-2px); color: #fff; }
     .btn-outline {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.85rem 1.75rem;
-      background: transparent;
-      color: var(--text);
-      font-weight: 600;
-      font-size: 1rem;
-      border-radius: 10px;
-      border: 1px solid rgba(255,255,255,0.2);
-      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.85rem 1.75rem; background: transparent; color: var(--text);
+      font-weight: 600; font-size: 1rem; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.2); cursor: pointer;
       transition: border-color 0.2s, background 0.2s, transform 0.15s;
     }
     .btn-outline:hover { border-color: var(--green); background: var(--green-glow); color: var(--green); transform: translateY(-2px); }
-
     .hero-screenshot {
-      width: 100%;
-      max-width: 900px;
-      border-radius: 18px;
+      width: 100%; max-width: 900px; border-radius: 18px;
       border: 1px solid var(--card-border);
       box-shadow: 0 30px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(34,197,94,0.1);
       overflow: hidden;
@@ -223,128 +141,143 @@
     section { padding: 5rem 1.5rem; }
     .section-inner { max-width: 1100px; margin: 0 auto; }
     .section-label {
-      font-size: 0.75rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--green);
-      margin-bottom: 0.75rem;
+      font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--green); margin-bottom: 0.75rem;
     }
     .section-title {
-      font-size: clamp(1.75rem, 4vw, 2.75rem);
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      line-height: 1.15;
-      margin-bottom: 1rem;
+      font-size: clamp(1.75rem, 4vw, 2.75rem); font-weight: 800;
+      letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 1rem;
     }
-    .section-desc {
-      color: var(--muted);
-      font-size: 1.05rem;
-      max-width: 600px;
-      margin-bottom: 3rem;
-    }
+    .section-desc { color: var(--muted); font-size: 1.05rem; max-width: 600px; margin-bottom: 3rem; }
 
     /* ─── VIDEO ─────────────────────────────────────────────────── */
     #video { background: var(--bg2); }
     .video-wrapper {
-      position: relative;
-      padding-bottom: 56.25%;
-      height: 0;
-      border-radius: var(--radius);
-      overflow: hidden;
+      position: relative; padding-bottom: 56.25%; height: 0;
+      border-radius: var(--radius); overflow: hidden;
       border: 1px solid var(--card-border);
       box-shadow: 0 20px 60px rgba(0,0,0,0.5);
     }
-    .video-wrapper iframe {
-      position: absolute;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      border: none;
-    }
+    .video-wrapper iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
 
     /* ─── FEATURES ──────────────────────────────────────────────── */
     .features-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
       gap: 1.5rem;
     }
     .feature-card {
-      background: var(--card);
-      border: 1px solid var(--card-border);
-      border-radius: var(--radius);
-      padding: 1.75rem;
-      transition: border-color 0.2s, transform 0.2s;
-      position: relative;
-      overflow: hidden;
+      background: var(--card); border: 1px solid var(--card-border);
+      border-radius: var(--radius); padding: 1.75rem;
+      cursor: pointer; position: relative; overflow: hidden;
+      transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+      user-select: none;
     }
     .feature-card::before {
-      content: '';
-      position: absolute;
-      top: -1px; left: -1px; right: -1px;
-      height: 3px;
+      content: ''; position: absolute; top: -1px; left: -1px; right: -1px; height: 3px;
       background: linear-gradient(90deg, var(--green), var(--blue));
       border-radius: var(--radius) var(--radius) 0 0;
-      opacity: 0;
-      transition: opacity 0.2s;
+      opacity: 0; transition: opacity 0.2s;
     }
-    .feature-card:hover { border-color: rgba(34,197,94,0.3); transform: translateY(-4px); }
+    .feature-card:hover { border-color: rgba(34,197,94,0.45); transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
     .feature-card:hover::before { opacity: 1; }
-    .feature-icon {
-      font-size: 2rem;
-      margin-bottom: 1rem;
-      display: block;
+    .feature-card:active { transform: translateY(-2px); }
+    .feature-icon { font-size: 2rem; margin-bottom: 1rem; display: block; }
+    .feature-card h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .feature-card p { color: var(--muted); font-size: 0.9rem; margin-bottom: 1rem; }
+    .feature-click-hint {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      font-size: 0.78rem; color: var(--green); font-weight: 600;
+      opacity: 0; transition: opacity 0.2s; letter-spacing: 0.03em;
     }
-    .feature-card h3 {
-      font-size: 1.15rem;
-      font-weight: 700;
-      margin-bottom: 0.5rem;
+    .feature-card:hover .feature-click-hint { opacity: 1; }
+
+    /* ─── FEATURE MODAL ─────────────────────────────────────────── */
+    .feature-modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.78);
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      z-index: 300; align-items: center; justify-content: center;
+      padding: 1.5rem; cursor: pointer;
     }
-    .feature-card p { color: var(--muted); font-size: 0.92rem; }
+    .feature-modal-overlay.open { display: flex; }
+    .feature-modal {
+      background: var(--card); border: 1px solid rgba(34,197,94,0.2);
+      border-radius: 20px; width: 100%; max-width: 760px;
+      max-height: 90vh; overflow-y: auto;
+      cursor: default; position: relative;
+      box-shadow: 0 40px 100px rgba(0,0,0,0.6);
+      animation: modal-in 0.25s ease;
+    }
+    @keyframes modal-in { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: none; } }
+    .feature-modal-header {
+      padding: 2rem 2rem 1.25rem;
+      border-bottom: 1px solid var(--card-border);
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
+    }
+    .feature-modal-title { display: flex; align-items: center; gap: 0.75rem; }
+    .feature-modal-title .icon { font-size: 2rem; }
+    .feature-modal-title h2 { font-size: 1.4rem; font-weight: 800; letter-spacing: -0.02em; }
+    .modal-close-btn {
+      background: rgba(255,255,255,0.08); border: 1px solid var(--card-border);
+      border-radius: 8px; color: var(--muted); font-size: 1.1rem;
+      width: 32px; height: 32px; cursor: pointer; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.2s, color 0.2s;
+    }
+    .modal-close-btn:hover { background: rgba(255,255,255,0.15); color: var(--text); }
+    .feature-modal-body { padding: 1.75rem 2rem 2rem; }
+    .feature-modal-desc { color: var(--muted); font-size: 1rem; line-height: 1.7; margin-bottom: 1.5rem; }
+    .feature-modal-bullets { list-style: none; display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1.75rem; }
+    .feature-modal-bullets li {
+      display: flex; align-items: flex-start; gap: 0.6rem;
+      color: var(--muted); font-size: 0.93rem;
+    }
+    .feature-modal-bullets li::before { content: '✓'; color: var(--green); font-weight: 700; flex-shrink: 0; }
+    .feature-modal-media {
+      border-radius: 12px; overflow: hidden;
+      border: 1px solid var(--card-border);
+      background: var(--bg);
+    }
+    .feature-modal-media img { width: 100%; display: block; }
+    .feature-modal-media .placeholder-media {
+      aspect-ratio: 16/9; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 0.75rem;
+      background: linear-gradient(135deg, rgba(34,197,94,0.06) 0%, rgba(56,189,248,0.06) 100%);
+      color: var(--muted); font-size: 0.85rem; text-align: center; padding: 2rem;
+    }
+    .placeholder-media .ph-icon { font-size: 3rem; opacity: 0.5; }
+    .placeholder-media p { opacity: 0.7; }
+    .feature-modal-video { position: relative; padding-bottom: 56.25%; height: 0; border-radius: 12px; overflow: hidden; border: 1px solid var(--card-border); }
+    .feature-modal-video iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
 
     /* ─── SCREENSHOTS ───────────────────────────────────────────── */
     #screenshots { background: var(--bg2); }
-    .screenshots-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 1.25rem;
-    }
+    .screenshots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.25rem; }
     .screenshot-card {
-      border-radius: var(--radius);
-      overflow: hidden;
+      border-radius: var(--radius); overflow: hidden;
       border: 1px solid var(--card-border);
-      transition: transform 0.2s, box-shadow 0.2s;
-      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s; cursor: pointer;
     }
-    .screenshot-card:hover {
-      transform: scale(1.02);
-      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
-      border-color: rgba(34,197,94,0.4);
-    }
+    .screenshot-card:hover { transform: scale(1.02); box-shadow: 0 12px 40px rgba(0,0,0,0.5); border-color: rgba(34,197,94,0.4); }
     .screenshot-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; }
-    .screenshot-label {
-      background: var(--card);
-      padding: 0.65rem 1rem;
-      font-size: 0.85rem;
-      font-weight: 500;
-      color: var(--muted);
-    }
+    .screenshot-label { background: var(--card); padding: 0.65rem 1rem; font-size: 0.85rem; font-weight: 500; color: var(--muted); }
 
     /* ─── DOWNLOAD ──────────────────────────────────────────────── */
-    .download-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-      gap: 1.25rem;
+    .release-badge-row { margin-bottom: 1.75rem; }
+    .release-pill {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.35rem 0.9rem; border-radius: 999px;
+      border: 1px solid rgba(34,197,94,0.35); background: rgba(34,197,94,0.08);
+      font-size: 0.8rem; color: var(--green); font-weight: 600;
     }
+    .release-pill a { color: var(--green); text-decoration: underline; text-underline-offset: 2px; }
+    .download-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1.25rem; }
     .dl-card {
-      background: var(--card);
-      border: 1px solid var(--card-border);
-      border-radius: var(--radius);
-      padding: 2rem 1.5rem;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      gap: 0.75rem;
+      background: var(--card); border: 1px solid var(--card-border);
+      border-radius: var(--radius); padding: 2rem 1.5rem;
+      display: flex; flex-direction: column; align-items: center;
+      text-align: center; gap: 0.75rem;
       transition: border-color 0.2s, transform 0.2s;
     }
     .dl-card:hover { border-color: rgba(34,197,94,0.4); transform: translateY(-4px); }
@@ -352,160 +285,72 @@
     .dl-card h3 { font-size: 1.1rem; font-weight: 700; }
     .dl-card p { color: var(--muted); font-size: 0.875rem; flex: 1; }
     .btn-dl {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.4rem;
-      width: 100%;
-      padding: 0.7rem 1rem;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 0.9rem;
-      cursor: pointer;
-      transition: background 0.2s, color 0.2s, opacity 0.2s;
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+      width: 100%; padding: 0.7rem 1rem; border-radius: 8px;
+      font-weight: 600; font-size: 0.88rem; cursor: pointer;
+      transition: background 0.2s, color 0.2s;
     }
     .btn-dl-green { background: var(--green); color: #000; border: none; }
     .btn-dl-green:hover { background: var(--green-dim); color: #fff; }
     .btn-dl-outline { background: transparent; color: var(--text); border: 1px solid rgba(255,255,255,0.2); }
     .btn-dl-outline:hover { border-color: var(--green); color: var(--green); background: var(--green-glow); }
-    .btn-dl-disabled { background: rgba(255,255,255,0.07); color: var(--muted); border: 1px solid var(--card-border); cursor: not-allowed; opacity: 0.6; }
-    .badge-coming { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; background: rgba(34,197,94,0.12); color: var(--green); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-top: -0.25rem; }
 
     /* ─── STATS / SIGN IN ───────────────────────────────────────── */
     #stats-signin { background: var(--bg2); }
-    .signin-container {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 3rem;
-      align-items: center;
-    }
+    .signin-container { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center; }
     .signin-info h2 { font-size: clamp(1.6rem, 3.5vw, 2.4rem); font-weight: 800; letter-spacing: -0.03em; margin-bottom: 1rem; }
     .signin-info p { color: var(--muted); font-size: 1rem; margin-bottom: 1.5rem; }
     .signin-bullets { list-style: none; display: flex; flex-direction: column; gap: 0.65rem; margin-bottom: 2rem; }
-    .signin-bullets li {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.6rem;
-      color: var(--muted);
-      font-size: 0.95rem;
-    }
+    .signin-bullets li { display: flex; align-items: flex-start; gap: 0.6rem; color: var(--muted); font-size: 0.95rem; }
     .signin-bullets li::before { content: '✓'; color: var(--green); font-weight: 700; flex-shrink: 0; }
-
-    .signin-card {
-      background: var(--card);
-      border: 1px solid var(--card-border);
-      border-radius: var(--radius);
-      padding: 2.5rem 2rem;
-    }
+    .signin-card { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 2.5rem 2rem; }
     .signin-card h3 { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; }
-    .signin-card p { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.75rem; }
-
+    .signin-card > p { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.75rem; }
     .form-group { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem; }
     .form-group label { font-size: 0.82rem; font-weight: 600; color: var(--muted); }
     .form-group input {
-      padding: 0.7rem 0.9rem;
-      background: var(--bg);
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      color: var(--text);
-      font-size: 0.95rem;
-      outline: none;
-      transition: border-color 0.2s;
+      padding: 0.7rem 0.9rem; background: var(--bg); border: 1px solid var(--card-border);
+      border-radius: 8px; color: var(--text); font-size: 0.95rem; outline: none; transition: border-color 0.2s;
     }
     .form-group input:focus { border-color: var(--green); }
     .form-group input::placeholder { color: var(--muted); }
-
     .btn-signin-form {
-      width: 100%;
-      padding: 0.8rem;
-      background: var(--green);
-      color: #000;
-      font-weight: 700;
-      font-size: 0.95rem;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: background 0.2s;
-      margin-top: 0.5rem;
+      width: 100%; padding: 0.8rem; background: var(--green); color: #000;
+      font-weight: 700; font-size: 0.95rem; border: none; border-radius: 8px;
+      cursor: pointer; transition: background 0.2s; margin-top: 0.5rem;
     }
     .btn-signin-form:hover { background: var(--green-dim); color: #fff; }
-
     .divider { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0; color: var(--muted); font-size: 0.8rem; }
     .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--card-border); }
-
     .btn-google {
-      width: 100%;
-      padding: 0.75rem;
-      background: #fff;
-      color: #1a1a1a;
-      font-weight: 600;
-      font-size: 0.9rem;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.6rem;
+      width: 100%; padding: 0.75rem; background: #fff; color: #1a1a1a;
+      font-weight: 600; font-size: 0.9rem; border: none; border-radius: 8px;
+      cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.6rem;
       transition: opacity 0.2s, box-shadow 0.2s;
     }
     .btn-google:hover { opacity: 0.92; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
     .btn-google svg { width: 18px; height: 18px; }
-
-    .signin-note {
-      text-align: center;
-      font-size: 0.78rem;
-      color: var(--muted);
-      margin-top: 1.25rem;
-    }
+    .signin-note { text-align: center; font-size: 0.78rem; color: var(--muted); margin-top: 1.25rem; }
     .signin-note a { color: var(--green); }
-
-    /* Stats preview (shown after sign-in) */
     #stats-panel { display: none; }
     .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
-    .stat-box {
-      background: var(--bg);
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      padding: 1rem;
-      text-align: center;
-    }
+    .stat-box { background: var(--bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 1rem; text-align: center; }
     .stat-box .val { font-size: 1.75rem; font-weight: 800; color: var(--green); }
     .stat-box .lbl { font-size: 0.78rem; color: var(--muted); margin-top: 0.2rem; }
-    .coming-soon-overlay {
-      position: relative;
-    }
+    .coming-soon-overlay { position: relative; }
     .coming-soon-overlay::after {
-      content: 'Stat history coming soon';
-      position: absolute;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(10,15,30,0.8);
-      backdrop-filter: blur(4px);
-      border-radius: 10px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      color: var(--green);
-      letter-spacing: 0.04em;
+      content: 'Stat history coming soon'; position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(10,15,30,0.8); backdrop-filter: blur(4px); border-radius: 10px;
+      font-size: 0.85rem; font-weight: 600; color: var(--green); letter-spacing: 0.04em;
     }
 
     /* ─── COMMUNITY ─────────────────────────────────────────────── */
-    .community-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 1.5rem;
-    }
+    .community-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.5rem; }
     .community-card {
-      background: var(--card);
-      border: 1px solid var(--card-border);
-      border-radius: var(--radius);
-      padding: 2rem;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.75rem;
+      background: var(--card); border: 1px solid var(--card-border);
+      border-radius: var(--radius); padding: 2rem;
+      display: flex; flex-direction: column; align-items: flex-start; gap: 0.75rem;
       transition: border-color 0.2s, transform 0.2s;
     }
     .community-card:hover { border-color: rgba(34,197,94,0.35); transform: translateY(-3px); }
@@ -513,27 +358,17 @@
     .community-card h3 { font-size: 1.05rem; font-weight: 700; }
     .community-card p { color: var(--muted); font-size: 0.9rem; flex: 1; }
     .btn-community {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      padding: 0.6rem 1.1rem;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 0.88rem;
-      border: 1px solid rgba(255,255,255,0.15);
-      color: var(--text);
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.6rem 1.1rem; border-radius: 8px; font-weight: 600; font-size: 0.88rem;
+      border: 1px solid rgba(255,255,255,0.15); color: var(--text);
       transition: background 0.2s, border-color 0.2s;
     }
     .btn-community:hover { background: var(--green-glow); border-color: var(--green); color: var(--green); }
 
     /* ─── FOOTER ────────────────────────────────────────────────── */
     footer {
-      background: var(--bg);
-      border-top: 1px solid var(--card-border);
-      padding: 2.5rem 1.5rem;
-      text-align: center;
-      color: var(--muted);
-      font-size: 0.85rem;
+      background: var(--bg); border-top: 1px solid var(--card-border);
+      padding: 2.5rem 1.5rem; text-align: center; color: var(--muted); font-size: 0.85rem;
     }
     footer a { color: var(--green); }
     .footer-inner { max-width: 700px; margin: 0 auto; display: flex; flex-direction: column; gap: 0.75rem; align-items: center; }
@@ -541,60 +376,11 @@
     .footer-links a { color: var(--muted); transition: color 0.2s; }
     .footer-links a:hover { color: var(--text); }
 
-    /* ─── MODAL (sign-in) ───────────────────────────────────────── */
-    .modal-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.7);
-      backdrop-filter: blur(6px);
-      z-index: 200;
-      align-items: center;
-      justify-content: center;
-      padding: 1.5rem;
-    }
-    .modal-overlay.open { display: flex; }
-    .modal {
-      background: var(--card);
-      border: 1px solid var(--card-border);
-      border-radius: 18px;
-      padding: 2.5rem 2rem;
-      width: 100%;
-      max-width: 420px;
-      position: relative;
-    }
-    .modal-close {
-      position: absolute;
-      top: 1rem; right: 1rem;
-      background: none;
-      border: none;
-      color: var(--muted);
-      font-size: 1.25rem;
-      cursor: pointer;
-      line-height: 1;
-      transition: color 0.2s;
-    }
-    .modal-close:hover { color: var(--text); }
-
-    /* ─── AUTH STATE ────────────────────────────────────────────── */
-    .user-greeting { display: none; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--muted); }
-    .user-avatar {
-      width: 28px; height: 28px; border-radius: 50%;
-      background: var(--green-dim);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 0.75rem; font-weight: 700; color: #000;
-    }
-
     /* ─── LIGHTBOX ──────────────────────────────────────────────── */
     #lightbox {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.92);
-      z-index: 300;
-      align-items: center;
-      justify-content: center;
-      cursor: zoom-out;
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.92); z-index: 400;
+      align-items: center; justify-content: center; cursor: zoom-out;
     }
     #lightbox.open { display: flex; }
     #lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 10px; }
@@ -604,33 +390,31 @@
       .nav-links { display: none; }
       .hamburger { display: block; }
       .nav-links.mobile-open {
-        display: flex;
-        flex-direction: column;
-        position: fixed;
-        top: var(--nav-h); left: 0; right: 0;
+        display: flex; flex-direction: column;
+        position: fixed; top: var(--nav-h); left: 0; right: 0;
         background: rgba(10,15,30,0.98);
         border-bottom: 1px solid var(--card-border);
-        padding: 1.5rem 2rem;
-        gap: 1rem;
+        padding: 1.5rem 2rem; gap: 1rem;
       }
       .signin-container { grid-template-columns: 1fr; }
       .signin-card { padding: 1.75rem 1.25rem; }
       .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .feature-modal { margin: 0.5rem; max-height: 95vh; }
+      .feature-modal-header, .feature-modal-body { padding: 1.25rem; }
     }
     @media (max-width: 480px) {
       .hero-actions { flex-direction: column; align-items: stretch; }
       .btn-primary, .btn-outline { justify-content: center; }
-      .stats-grid { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
 <body>
 
-  <!-- ══ NAVIGATION ════════════════════════════════════════════ -->
+  <!-- ══ NAV ═══════════════════════════════════════════════════ -->
   <nav>
     <a href="#" class="nav-logo">
-      <img src="images/app_icon.png" alt="IT Golf icon">
-      IT <span>Golf</span>
+      <img src="images/app_icon.png" alt="Heckle Golf Simulator icon">
+      Heckle <span class="logo-green">Golf</span>
     </a>
 
     <ul class="nav-links" id="nav-links">
@@ -642,18 +426,15 @@
     </ul>
 
     <div class="nav-cta">
-      <!-- YouTube -->
-      <a href="https://www.youtube.com/@hecklegolfsimulator" target="_blank" rel="noopener" class="btn-nav-icon" id="nav-yt" title="YouTube" aria-label="YouTube Channel">
+      <a href="https://www.youtube.com/@hecklegolfsimulator" target="_blank" rel="noopener"
+         class="btn-nav-icon" title="YouTube" aria-label="YouTube Channel">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31.3 31.3 0 0 0 0 12a31.3 31.3 0 0 0 .5 5.8A3 3 0 0 0 2.6 20c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31.3 31.3 0 0 0 24 12a31.3 31.3 0 0 0-.5-5.8zM9.8 15.6V8.4L15.8 12l-6 3.6z"/></svg>
       </a>
-      <!-- Discord -->
-      <a href="https://discord.gg/brHATRsFKB" target="_blank" rel="noopener" class="btn-nav-icon" id="nav-discord" title="Discord" aria-label="Discord Server">
+      <a href="https://discord.gg/brHATRsFKB" target="_blank" rel="noopener"
+         class="btn-nav-icon" title="Discord" aria-label="Discord Server">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3c-.2.4-.5.9-.7 1.3a18.3 18.3 0 0 0-5.4 0C9.1 3.9 8.8 3.4 8.6 3A19.7 19.7 0 0 0 3.7 4.4C.5 9.2-.3 13.8.1 18.4a20 20 0 0 0 6 3 14.8 14.8 0 0 0 1.3-2 12.8 12.8 0 0 1-2-.9l.5-.4a14.3 14.3 0 0 0 12.2 0l.5.4a12.9 12.9 0 0 1-2 1 14.8 14.8 0 0 0 1.3 2 19.9 19.9 0 0 0 6-3c.5-5.2-.9-9.8-3.6-14zM8 15.5c-1.2 0-2.2-1.1-2.2-2.5S6.8 10.5 8 10.5s2.2 1.1 2.2 2.5S9.2 15.5 8 15.5zm8 0c-1.2 0-2.2-1.1-2.2-2.5s1-2.5 2.2-2.5 2.2 1.1 2.2 2.5-1 2.5-2.2 2.5z"/></svg>
       </a>
-
-      <!-- Sign In nav button -->
       <button class="btn-signin" id="nav-signin-btn">Sign In</button>
-      <!-- User greeting (shown when signed in) -->
       <div class="user-greeting" id="user-greeting">
         <div class="user-avatar" id="user-avatar">?</div>
         <span id="user-name">Player</span>
@@ -662,17 +443,20 @@
     </div>
 
     <button class="hamburger" id="hamburger" aria-label="Toggle menu">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
     </button>
   </nav>
 
   <!-- ══ HERO ══════════════════════════════════════════════════ -->
   <section class="hero">
-    <span class="hero-badge">🏌️ Free to Play</span>
-    <h1>Golf Simulator for<br><span>Every Course on Earth</span></h1>
-    <p>IT Golf brings real-world OpenStreetMap courses, fun minigames, and launch monitor support to your fingertips — completely free.</p>
+    <span class="hero-badge">🏌️ Free to Play · No Subscriptions</span>
+    <h1>Golf Simulator with<br><span>Live Heckling Commentary</span></h1>
+    <p>Real-world courses from OpenStreetMap, AI-powered heckling after every shot, swing analysis, and full cross-platform multiplayer — completely free.</p>
     <div class="hero-actions">
-      <a href="https://play.google.com/store/apps/details?id=com.hecklegolf.simulator&hl=en_US" class="btn-primary" target="_blank" rel="noopener">
+      <a href="https://play.google.com/store/apps/details?id=com.hecklegolf.simulator&hl=en_US"
+         class="btn-primary" target="_blank" rel="noopener">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3 20.5v-17c0-.83.94-1.3 1.6-.8l14 8.5a1 1 0 0 1 0 1.6l-14 8.5c-.66.5-1.6.03-1.6-.8z"/></svg>
         Get on Google Play
       </a>
@@ -682,7 +466,7 @@
       </a>
     </div>
     <div class="hero-screenshot">
-      <img src="images/course_play_tee_view.png" alt="IT Golf course tee view screenshot" loading="lazy">
+      <img src="images/course_play_tee_view.png" alt="Heckle Golf Simulator course tee view" loading="lazy">
     </div>
   </section>
 
@@ -690,16 +474,13 @@
   <section id="video">
     <div class="section-inner">
       <p class="section-label">App Overview</p>
-      <h2 class="section-title">See IT Golf in Action</h2>
+      <h2 class="section-title">See Heckle Golf in Action</h2>
       <p class="section-desc">Watch a full walkthrough of the latest features, courses, and gameplay modes.</p>
       <div class="video-wrapper">
-        <iframe
-          src="https://www.youtube.com/embed/OnNmUdonL74"
-          title="IT Golf App Overview"
+        <iframe src="https://www.youtube.com/embed/OnNmUdonL74"
+          title="Heckle Golf Simulator App Overview"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowfullscreen
-          loading="lazy">
-        </iframe>
+          allowfullscreen loading="lazy"></iframe>
       </div>
     </div>
   </section>
@@ -709,63 +490,9 @@
     <div class="section-inner">
       <p class="section-label">What's Inside</p>
       <h2 class="section-title">Everything a Golfer Needs</h2>
-      <p class="section-desc">From casual putting practice to full 18-hole rounds with friends — IT Golf has you covered, for free.</p>
-      <div class="features-grid">
-
-        <div class="feature-card">
-          <span class="feature-icon">🗺️</span>
-          <h3>Real-World Courses via OpenStreetMap</h3>
-          <p>Download and play virtually any golf course in the world using real OpenStreetMap data. No artificial course library limitations.</p>
-        </div>
-
-        <div class="feature-card">
-          <span class="feature-icon">🆓</span>
-          <h3>Completely Free to Play</h3>
-          <p>No subscriptions, no license fees, no paywalls. IT Golf is fully free — just download and tee off.</p>
-        </div>
-
-        <div class="feature-card">
-          <span class="feature-icon">📡</span>
-          <h3>Launch Monitor Support</h3>
-          <p>Compatible with popular launch monitors so you can bring real swing data into your simulator sessions.</p>
-        </div>
-
-        <div class="feature-card">
-          <span class="feature-icon">🎯</span>
-          <h3>Minigames & Practice Modes</h3>
-          <p>Sharpen your short game with putting and chipping challenges, closest-to-pin contests, and loft control drills.</p>
-        </div>
-
-        <div class="feature-card">
-          <span class="feature-icon">👥</span>
-          <h3>Multiplayer &amp; Cross-Platform</h3>
-          <p>Play against friends across Android, iOS, Windows, and macOS — all in the same lobby.</p>
-        </div>
-
-        <div class="feature-card">
-          <span class="feature-icon">📊</span>
-          <h3>Stat Tracking &amp; Leaderboards</h3>
-          <p>Track your round history, scoring trends, and compete on online leaderboards. Sign in to view your stats from any device.</p>
-        </div>
-
-        <div class="feature-card">
-          <span class="feature-icon">🏌️</span>
-          <h3>Full Course Play</h3>
-          <p>Tee-to-green with scorecard tracking, overhead maps, and realistic hole layouts sourced from real course data.</p>
-        </div>
-
-        <div class="feature-card">
-          <span class="feature-icon">📱</span>
-          <h3>Mobile-First Design</h3>
-          <p>Designed for touch on Android and iOS with an intuitive UI, while also supporting full keyboard & mouse on desktop.</p>
-        </div>
-
-        <div class="feature-card">
-          <span class="feature-icon">⚙️</span>
-          <h3>Advanced Shot Controls</h3>
-          <p>Shape control, loft adjustment, and power mechanics give skilled players deep control over every shot.</p>
-        </div>
-
+      <p class="section-desc">Click any feature to learn more. From casual putting practice to full 18-hole rounds with live commentary — Heckle Golf has you covered, for free.</p>
+      <div class="features-grid" id="features-grid">
+        <!-- Cards injected by JS -->
       </div>
     </div>
   </section>
@@ -777,37 +504,30 @@
       <h2 class="section-title">A Closer Look</h2>
       <p class="section-desc">Real screenshots from the app — no mockups, no renders.</p>
       <div class="screenshots-grid">
-
         <div class="screenshot-card" onclick="openLightbox('images/course_play_tee_view.png')">
           <img src="images/course_play_tee_view.png" alt="Course tee view" loading="lazy">
           <div class="screenshot-label">Course Play – Tee View</div>
         </div>
-
         <div class="screenshot-card" onclick="openLightbox('images/course_play_overhead_map.png')">
           <img src="images/course_play_overhead_map.png" alt="Overhead hole map" loading="lazy">
           <div class="screenshot-label">Overhead Hole Map</div>
         </div>
-
         <div class="screenshot-card" onclick="openLightbox('images/osm_course_downloader.png')">
           <img src="images/osm_course_downloader.png" alt="Course downloader" loading="lazy">
           <div class="screenshot-label">OpenStreetMap Course Downloader</div>
         </div>
-
         <div class="screenshot-card" onclick="openLightbox('images/putting_practice_minigame.png')">
           <img src="images/putting_practice_minigame.png" alt="Putting minigame" loading="lazy">
           <div class="screenshot-label">Putting Practice Minigame</div>
         </div>
-
         <div class="screenshot-card" onclick="openLightbox('images/chipping_practice_minigame.png')">
           <img src="images/chipping_practice_minigame.png" alt="Chipping minigame" loading="lazy">
           <div class="screenshot-label">Chipping Practice Minigame</div>
         </div>
-
         <div class="screenshot-card" onclick="openLightbox('images/scorecard_view.png')">
           <img src="images/scorecard_view.png" alt="Scorecard view" loading="lazy">
           <div class="screenshot-label">Scorecard &amp; Match History</div>
         </div>
-
       </div>
     </div>
   </section>
@@ -817,28 +537,25 @@
     <div class="section-inner">
       <p class="section-label">Get the App</p>
       <h2 class="section-title">Available on All Platforms</h2>
-      <p class="section-desc">Download IT Golf for free on your preferred device. No purchase required.</p>
+      <p class="section-desc">Download Heckle Golf Simulator for free on your preferred device. No purchase required.</p>
 
-      <!-- Release version badge -->
-      <div id="release-badge" style="display:none; margin-bottom:1.5rem;">
-        <span style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.3rem 0.85rem;border-radius:999px;border:1px solid rgba(34,197,94,0.35);background:rgba(34,197,94,0.08);font-size:0.8rem;color:var(--green);font-weight:600;">
+      <div class="release-badge-row" id="release-badge-row" style="display:none;">
+        <span class="release-pill">
           🏷️ Latest release: <span id="release-tag"></span>
           &nbsp;·&nbsp;
-          <a id="release-notes-link" href="https://github.com/mmancl/HeckleGolfSim/releases/latest" target="_blank" rel="noopener" style="color:var(--green);text-decoration:underline;text-underline-offset:2px;">Release notes ↗</a>
+          <a id="release-notes-link" href="https://github.com/mmancl/HeckleGolfSim/releases/latest"
+             target="_blank" rel="noopener">Release notes ↗</a>
         </span>
       </div>
 
       <div class="download-grid">
-
         <!-- Android -->
         <div class="dl-card">
           <span class="dl-icon">🤖</span>
           <h3>Android</h3>
           <p>Available now on Google Play. Supports Android 8.0 and above.</p>
           <a href="https://play.google.com/store/apps/details?id=com.hecklegolf.simulator&hl=en_US"
-             class="btn-dl btn-dl-green" target="_blank" rel="noopener">
-            ▶ Google Play
-          </a>
+             class="btn-dl btn-dl-green" target="_blank" rel="noopener">▶ Google Play</a>
         </div>
 
         <!-- iOS -->
@@ -846,10 +563,9 @@
           <span class="dl-icon">🍎</span>
           <h3>iOS</h3>
           <p>Sideload the app using the latest .ipa from GitHub Releases.</p>
-          <a id="dl-ios" href="https://github.com/mmancl/HeckleGolfSim/releases/latest"
-             class="btn-dl btn-dl-outline" target="_blank" rel="noopener">
-            ⏳ Loading…
-          </a>
+          <a id="dl-ios"
+             href="https://github.com/mmancl/HeckleGolfSim/releases/latest"
+             class="btn-dl btn-dl-outline" target="_blank" rel="noopener">View on GitHub ↗</a>
         </div>
 
         <!-- Windows -->
@@ -857,10 +573,9 @@
           <span class="dl-icon">🪟</span>
           <h3>Windows</h3>
           <p>64-bit Windows desktop build (.zip) for full keyboard &amp; mouse play.</p>
-          <a id="dl-windows" href="https://github.com/mmancl/HeckleGolfSim/releases/latest"
-             class="btn-dl btn-dl-outline" target="_blank" rel="noopener">
-            ⏳ Loading…
-          </a>
+          <a id="dl-windows"
+             href="https://github.com/mmancl/HeckleGolfSim/releases/latest"
+             class="btn-dl btn-dl-outline" target="_blank" rel="noopener">View on GitHub ↗</a>
         </div>
 
         <!-- macOS -->
@@ -868,12 +583,10 @@
           <span class="dl-icon">🍏</span>
           <h3>macOS</h3>
           <p>Universal macOS build (.zip) for Apple Silicon and Intel Macs.</p>
-          <a id="dl-mac" href="https://github.com/mmancl/HeckleGolfSim/releases/latest"
-             class="btn-dl btn-dl-outline" target="_blank" rel="noopener">
-            ⏳ Loading…
-          </a>
+          <a id="dl-mac"
+             href="https://github.com/mmancl/HeckleGolfSim/releases/latest"
+             class="btn-dl btn-dl-outline" target="_blank" rel="noopener">View on GitHub ↗</a>
         </div>
-
       </div>
     </div>
   </section>
@@ -882,14 +595,14 @@
   <section id="stats-signin">
     <div class="section-inner">
       <div class="signin-container">
-
         <div class="signin-info">
           <p class="section-label">Player Portal</p>
           <h2>Track Your Stats<br>from Any Device</h2>
-          <p>Sign in with your IT Golf account to view your round history, scoring trends, and performance stats directly from the web.</p>
+          <p>Sign in with your Heckle Golf account to view your round history, scoring trends, and performance stats directly from the web.</p>
           <ul class="signin-bullets">
             <li>Full round history and scorecards</li>
-            <li>Handicap & scoring trends over time</li>
+            <li>Handicap &amp; scoring trends over time</li>
+            <li>Swing analysis improvement history</li>
             <li>Minigame personal bests</li>
             <li>Online leaderboard rankings</li>
             <li>Synced across all your devices</li>
@@ -901,9 +614,8 @@
 
         <div class="signin-card">
           <h3>Sign In to Your Account</h3>
-          <p>Use the same account as the IT Golf app.</p>
+          <p>Use the same account as the Heckle Golf app.</p>
 
-          <!-- Google Sign-In -->
           <button class="btn-google" id="google-signin-btn">
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -916,7 +628,6 @@
 
           <div class="divider">or</div>
 
-          <!-- Email/password form -->
           <form id="signin-form" autocomplete="on">
             <div class="form-group">
               <label for="email">Email</label>
@@ -929,11 +640,8 @@
             <button type="submit" class="btn-signin-form">Sign In</button>
           </form>
 
-          <p class="signin-note">
-            No account? <a href="#download">Download the app</a> and create one in-game.
-          </p>
+          <p class="signin-note">No account? <a href="#download">Download the app</a> and create one in-game.</p>
 
-          <!-- Signed-in panel (shown after auth) -->
           <div id="stats-panel">
             <div class="stats-grid coming-soon-overlay">
               <div class="stat-box"><div class="val">–</div><div class="lbl">Rounds Played</div></div>
@@ -942,46 +650,41 @@
             </div>
           </div>
         </div>
-
       </div>
     </div>
   </section>
 
-  <!-- ══ COMMUNITY ═════════════════════════════════════════════ -->
+  <!-- ══ COMMUNITY ══════════════════════════════════════════════ -->
   <section id="community">
     <div class="section-inner">
       <p class="section-label">Join the Community</p>
       <h2 class="section-title">Golfers Playing Together</h2>
-      <p class="section-desc">Connect with other players, share course setups, get early updates, and help shape the future of IT Golf.</p>
+      <p class="section-desc">Connect with other players, share setups, get early updates, and help shape the future of Heckle Golf Simulator.</p>
       <div class="community-grid">
-
         <div class="community-card">
           <span class="community-icon">▶️</span>
           <h3>YouTube</h3>
-          <p>Watch gameplay videos, feature walkthroughs, and update announcements on our YouTube channel.</p>
-          <a href="https://www.youtube.com/@hecklegolfsimulator" target="_blank" rel="noopener" class="btn-community">
-            Watch Now →
-          </a>
+          <p>Watch gameplay videos, feature walkthroughs, and update announcements on our channel.</p>
+          <a href="https://www.youtube.com/@hecklegolfsimulator" target="_blank" rel="noopener" class="btn-community">Watch Now →</a>
         </div>
-
         <div class="community-card">
           <span class="community-icon">💬</span>
           <h3>Discord</h3>
-          <p>Join our Discord server to chat with other players, report bugs, suggest features, and get early access news.</p>
-          <a href="https://discord.gg/brHATRsFKB" target="_blank" rel="noopener" class="btn-community">
-            Join Server →
-          </a>
+          <p>Chat with other players, report bugs, suggest features, and get early access news from the dev.</p>
+          <a href="https://discord.gg/brHATRsFKB" target="_blank" rel="noopener" class="btn-community">Join Server →</a>
         </div>
-
+        <div class="community-card">
+          <span class="community-icon">⚙️</span>
+          <h3>GitHub</h3>
+          <p>Browse the source code, report issues, follow development progress, and download the latest releases directly.</p>
+          <a href="https://github.com/mmancl/HeckleGolfSim" target="_blank" rel="noopener" class="btn-community">View Repo →</a>
+        </div>
         <div class="community-card">
           <span class="community-icon">🗺️</span>
-          <h3>OpenStreetMap Courses</h3>
-          <p>Don't see your course? Contribute to OpenStreetMap and it'll appear in IT Golf. The more you add, the better for everyone.</p>
-          <a href="https://www.openstreetmap.org" target="_blank" rel="noopener" class="btn-community">
-            Contribute →
-          </a>
+          <h3>OpenStreetMap</h3>
+          <p>Don't see your course? Contribute to OpenStreetMap and it'll appear in Heckle Golf. The more you add, the better for everyone.</p>
+          <a href="https://www.openstreetmap.org" target="_blank" rel="noopener" class="btn-community">Contribute →</a>
         </div>
-
       </div>
     </div>
   </section>
@@ -989,9 +692,9 @@
   <!-- ══ FOOTER ════════════════════════════════════════════════ -->
   <footer>
     <div class="footer-inner">
-      <div class="nav-logo" style="justify-content:center">
-        <img src="images/app_icon.png" alt="IT Golf icon" style="width:28px;height:28px;border-radius:6px">
-        IT <span style="color:var(--green)">Golf</span>
+      <div style="display:flex;align-items:center;gap:0.5rem;justify-content:center;font-weight:800;font-size:1.1rem;letter-spacing:-0.03em;">
+        <img src="images/app_icon.png" alt="" style="width:26px;height:26px;border-radius:6px;">
+        Heckle <span style="color:var(--green);">Golf Simulator</span>
       </div>
       <div class="footer-links">
         <a href="#features">Features</a>
@@ -1000,30 +703,288 @@
         <a href="#stats-signin">Sign In</a>
         <a href="https://www.youtube.com/@hecklegolfsimulator" target="_blank" rel="noopener">YouTube</a>
         <a href="https://discord.gg/brHATRsFKB" target="_blank" rel="noopener">Discord</a>
+        <a href="https://github.com/mmancl/HeckleGolfSim" target="_blank" rel="noopener">GitHub</a>
       </div>
-      <p>© 2025 IT Golf Simulator. All rights reserved. Built with ❤️ using <a href="https://godotengine.org" target="_blank" rel="noopener">Godot Engine</a>.</p>
+      <p>© 2025 Heckle Golf Simulator. All rights reserved. Built with ❤️ using <a href="https://godotengine.org" target="_blank" rel="noopener">Godot Engine</a>.</p>
     </div>
   </footer>
+
+  <!-- ══ FEATURE MODAL ══════════════════════════════════════════ -->
+  <div class="feature-modal-overlay" id="feature-modal-overlay" onclick="closeFeatureModal(event)">
+    <div class="feature-modal" id="feature-modal">
+      <div class="feature-modal-header">
+        <div class="feature-modal-title">
+          <span class="icon" id="modal-icon"></span>
+          <h2 id="modal-title"></h2>
+        </div>
+        <button class="modal-close-btn" onclick="closeFeatureModal(null, true)" aria-label="Close">✕</button>
+      </div>
+      <div class="feature-modal-body">
+        <p class="feature-modal-desc" id="modal-desc"></p>
+        <ul class="feature-modal-bullets" id="modal-bullets"></ul>
+        <div class="feature-modal-media" id="modal-media"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- ══ LIGHTBOX ══════════════════════════════════════════════ -->
   <div id="lightbox" onclick="closeLightbox()">
     <img id="lightbox-img" src="" alt="">
   </div>
 
-  <!-- ══ FIREBASE + AUTH ═══════════════════════════════════════ -->
+  <!-- ══ FEATURE DATA + CARD RENDERER ══════════════════════════ -->
+  <script>
+    const FEATURES = [
+      {
+        icon: '🎙️',
+        title: 'Live Heckling Commentary',
+        summary: 'AI-powered commentary that heckles your bad shots and celebrates the great ones.',
+        desc: 'Every round in Heckle Golf Simulator comes alive with real-time AI commentary that reacts to exactly what just happened on the course. Blade one into the rough? You\'ll hear about it. Drain a long putt? The crowd goes wild. No two rounds sound the same.',
+        bullets: [
+          'Contextual commentary reacts to each shot in real time',
+          'Celebrates great shots and roasts the bad ones',
+          'Adds a fun, competitive edge to solo and multiplayer rounds',
+          'The signature feature that makes every round memorable',
+        ],
+        media: { type: 'placeholder', icon: '🎙️', label: 'Heckling commentary screenshot coming soon' },
+      },
+      {
+        icon: '📈',
+        title: 'Shot Swing Analysis',
+        summary: 'Get feedback on every swing with improvement recommendations tailored to your game.',
+        desc: 'After each shot, Heckle Golf breaks down what happened — club path, face angle, impact quality — and gives you actionable recommendations to improve. Over time, you\'ll see your trends and watch your scores drop.',
+        bullets: [
+          'Per-shot analysis with key swing metrics',
+          'Improvement tips tailored to your weaknesses',
+          'Track your progress over multiple rounds',
+          'Works with or without a connected launch monitor',
+        ],
+        media: { type: 'placeholder', icon: '📈', label: 'Swing analysis screenshot coming soon' },
+      },
+      {
+        icon: '🏗️',
+        title: 'Custom Course Builder',
+        summary: 'Piece together holes from any real-world courses to build your perfect round.',
+        desc: 'Why limit yourself to 18 holes from one course? Heckle Golf\'s custom course builder lets you mix and match holes from any courses in the OpenStreetMap library — create your ultimate dream round or compete on a wild mashup with friends.',
+        bullets: [
+          'Select individual holes from any downloaded OSM course',
+          'Combine holes from multiple courses into a single round',
+          'Save and share your custom course layouts',
+          'Perfect for creating unique multiplayer challenges',
+        ],
+        media: { type: 'image', src: 'images/osm_course_downloader.png', alt: 'OpenStreetMap Course Downloader' },
+      },
+      {
+        icon: '🗺️',
+        title: 'Real-World Courses via OpenStreetMap',
+        summary: 'Download and play virtually any golf course in the world using real map data.',
+        desc: 'Heckle Golf generates playable golf courses from OpenStreetMap data — meaning you can search for nearly any real golf course on the planet and tee it up. No artificial course library. No DLC. Just the whole world of golf.',
+        bullets: [
+          'Thousands of real-world courses available',
+          'Generated from actual satellite and mapping data',
+          'Download new courses directly from within the app',
+          'Contribute missing courses via OpenStreetMap',
+        ],
+        media: { type: 'image', src: 'images/osm_course_downloader.png', alt: 'OpenStreetMap Course Downloader' },
+      },
+      {
+        icon: '🆓',
+        title: 'Completely Free to Play',
+        summary: 'No subscriptions, no license fees, no paywalls — just download and tee off.',
+        desc: 'Heckle Golf Simulator is 100% free. No monthly subscription, no one-time license fee, no pay-to-win mechanics. Every feature — courses, minigames, multiplayer, stat tracking — is available to every player.',
+        bullets: [
+          'Zero cost to download and play',
+          'No subscription tiers or paywalls',
+          'All features available to every player',
+          'Open source — transparent development on GitHub',
+        ],
+        media: { type: 'placeholder', icon: '🆓', label: 'Free forever — no catches' },
+      },
+      {
+        icon: '📡',
+        title: 'Launch Monitor Support',
+        summary: 'Bring real swing data into your simulator sessions with popular launch monitors.',
+        desc: 'Connect your physical launch monitor to Heckle Golf and play with real ball-flight data. Whether you\'re in a garage simulator setup or just want to see your actual numbers on a virtual course, launch monitor integration ties it all together.',
+        bullets: [
+          'Compatible with popular consumer launch monitors',
+          'Real ball speed, launch angle, and spin data',
+          'Seamless connection via Bluetooth or network',
+          'Play full rounds or practice sessions with real data',
+        ],
+        media: { type: 'placeholder', icon: '📡', label: 'Launch monitor integration screenshot coming soon' },
+      },
+      {
+        icon: '🎯',
+        title: 'Minigames & Practice Modes',
+        summary: 'Sharpen your short game with putting, chipping, and closest-to-pin challenges.',
+        desc: 'Sometimes you don\'t want a full 18-hole commitment. Heckle Golf\'s minigame suite lets you jump straight into focused practice — whether you\'re working on lag putts, chip-ins, or competing in closest-to-pin contests.',
+        bullets: [
+          'Putting practice with distance and break challenges',
+          'Chipping practice with target zones',
+          'Closest-to-pin competitions for multiplayer fun',
+          'Loft control and shape control drills',
+        ],
+        media: { type: 'image', src: 'images/putting_practice_minigame.png', alt: 'Putting Practice Minigame' },
+      },
+      {
+        icon: '👥',
+        title: 'Multiplayer & Cross-Platform',
+        summary: 'Play against friends across Android, iOS, Windows, and macOS in the same lobby.',
+        desc: 'Heckle Golf\'s cross-platform multiplayer lets anyone join the same round regardless of device. Android vs iOS vs desktop — it all works. Challenge friends to a round, host closest-to-pin contests, or jump into a scramble format.',
+        bullets: [
+          'Cross-platform lobbies across all supported devices',
+          'Real-time multiplayer rounds with friends',
+          'Competitive formats including stroke play and scrambles',
+          'Online leaderboards for global bragging rights',
+        ],
+        media: { type: 'placeholder', icon: '👥', label: 'Multiplayer lobby screenshot coming soon' },
+      },
+      {
+        icon: '📊',
+        title: 'Stat Tracking & Round History',
+        summary: 'Track your scores, trends, and best rounds — synced across all your devices.',
+        desc: 'Every round you play is saved to your Heckle Golf account. View your scoring trends, personal bests per course, handicap progression, and minigame records. Sign in on the web to access your full history anywhere.',
+        bullets: [
+          'Full scorecard history for every round played',
+          'Per-course personal bests and averages',
+          'Handicap and scoring trend tracking',
+          'Web dashboard access (coming soon)',
+        ],
+        media: { type: 'image', src: 'images/match_history_menu.png', alt: 'Match History Menu' },
+      },
+    ];
+
+    // ── Render feature cards ────────────────────────────────────
+    const grid = document.getElementById('features-grid');
+    FEATURES.forEach((f, i) => {
+      const card = document.createElement('div');
+      card.className = 'feature-card';
+      card.setAttribute('role', 'button');
+      card.setAttribute('tabindex', '0');
+      card.setAttribute('aria-label', `Learn more about ${f.title}`);
+      card.innerHTML = `
+        <span class="feature-icon">${f.icon}</span>
+        <h3>${f.title}</h3>
+        <p>${f.summary}</p>
+        <span class="feature-click-hint">Learn more →</span>
+      `;
+      card.addEventListener('click', () => openFeatureModal(i));
+      card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') openFeatureModal(i); });
+      grid.appendChild(card);
+    });
+
+    // ── Feature Modal ───────────────────────────────────────────
+    function openFeatureModal(index) {
+      const f = FEATURES[index];
+      document.getElementById('modal-icon').textContent  = f.icon;
+      document.getElementById('modal-title').textContent = f.title;
+      document.getElementById('modal-desc').textContent  = f.desc;
+
+      const ul = document.getElementById('modal-bullets');
+      ul.innerHTML = f.bullets.map(b => `<li>${b}</li>`).join('');
+
+      const media = document.getElementById('modal-media');
+      if (f.media.type === 'image') {
+        media.innerHTML = `<img src="${f.media.src}" alt="${f.media.alt}" loading="lazy">`;
+      } else if (f.media.type === 'video') {
+        media.innerHTML = `<div class="feature-modal-video"><iframe src="${f.media.src}" title="${f.title}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
+      } else {
+        media.innerHTML = `<div class="placeholder-media"><div class="ph-icon">${f.media.icon}</div><p>${f.media.label}</p></div>`;
+      }
+
+      document.getElementById('feature-modal-overlay').classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeFeatureModal(event, force) {
+      if (!force && event && event.target !== document.getElementById('feature-modal-overlay')) return;
+      document.getElementById('feature-modal-overlay').classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeFeatureModal(null, true);
+    });
+  </script>
+
+  <!-- ══ GITHUB RELEASE FETCHER ═════════════════════════════════ -->
+  <script>
+    (async function loadRelease() {
+      const REPO    = 'mmancl/HeckleGolfSim';
+      const FALLBACK = `https://github.com/${REPO}/releases/latest`;
+
+      // Buttons already default to "View on GitHub ↗" — only upgrade on success
+      const ids = {
+        ios:     document.getElementById('dl-ios'),
+        windows: document.getElementById('dl-windows'),
+        mac:     document.getElementById('dl-mac'),
+      };
+
+      // Android (.aab/.apk) intentionally excluded — links to Google Play
+      const SKIP = (name) => name.endsWith('.aab') || name.endsWith('.apk');
+      const PATTERNS = {
+        ios:     (name) => name.endsWith('.ipa'),
+        windows: (name) => name.toLowerCase().includes('windows') && name.endsWith('.zip'),
+        mac:     (name) => name.toLowerCase().includes('macos') && name.endsWith('.zip'),
+      };
+      const LABELS = {
+        ios:     (mb) => `Download .ipa (${mb} MB)`,
+        windows: (mb) => `Download .zip (${mb} MB)`,
+        mac:     (mb) => `Download .zip (${mb} MB)`,
+      };
+
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+
+        const res = await fetch(
+          `https://api.github.com/repos/${REPO}/releases/latest`,
+          { headers: { Accept: 'application/vnd.github+json' }, signal: controller.signal }
+        );
+        clearTimeout(timeout);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = await res.json();
+        const tag  = data.tag_name;
+
+        // Show version badge
+        const badgeRow = document.getElementById('release-badge-row');
+        const tagEl    = document.getElementById('release-tag');
+        const rnLink   = document.getElementById('release-notes-link');
+        if (badgeRow && tagEl) { tagEl.textContent = tag; badgeRow.style.display = ''; }
+        if (rnLink) rnLink.href = data.html_url;
+
+        // Match assets to buttons
+        for (const asset of data.assets) {
+          if (SKIP(asset.name)) continue;
+          for (const [key, matcher] of Object.entries(PATTERNS)) {
+            if (matcher(asset.name)) {
+              const el = ids[key];
+              if (el) {
+                const mb = (asset.size / 1024 / 1024).toFixed(0);
+                el.href        = asset.browser_download_url;
+                el.textContent = LABELS[key](mb);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        // Buttons already show "View on GitHub ↗" with the correct fallback href — nothing to do
+        console.info('GitHub release fetch skipped:', err.name === 'AbortError' ? 'timeout' : err.message);
+      }
+    })();
+  </script>
+
+  <!-- ══ FIREBASE + AUTH ════════════════════════════════════════ -->
   <script type="module">
-    import { initializeApp }      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getAnalytics }       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
+    import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getAnalytics }    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
     import {
-      getAuth,
-      onAuthStateChanged,
-      signInWithEmailAndPassword,
-      signInWithPopup,
-      GoogleAuthProvider,
-      signOut
+      getAuth, onAuthStateChanged, signInWithEmailAndPassword,
+      signInWithPopup, GoogleAuthProvider, signOut
     } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
-    const firebaseConfig = {
+    const app  = initializeApp({
       apiKey:            "AIzaSyDEdlLgd1OspjvXW5fY90ICVCpkZJM8Vbs",
       authDomain:        "heckle-golf-sim.firebaseapp.com",
       projectId:         "heckle-golf-sim",
@@ -1031,167 +992,80 @@
       messagingSenderId: "1065092687873",
       appId:             "1:1065092687873:web:10986b68064a218751b800",
       measurementId:     "G-XWTKP6N4WX"
-    };
+    });
+    getAnalytics(app);
+    const auth     = getAuth(app);
+    const provider = new GoogleAuthProvider();
 
-    const app       = initializeApp(firebaseConfig);
-    const analytics = getAnalytics(app);
-    const auth      = getAuth(app);
-    const provider  = new GoogleAuthProvider();
-
-    // ── Auth State ─────────────────────────────────────────────
     onAuthStateChanged(auth, (user) => {
-      const btnSignin    = document.getElementById('nav-signin-btn');
-      const greeting     = document.getElementById('user-greeting');
-      const avatarEl     = document.getElementById('user-avatar');
-      const nameEl       = document.getElementById('user-name');
-      const statsPanel   = document.getElementById('stats-panel');
-      const signinForm   = document.getElementById('signin-form');
-      const googleBtn    = document.getElementById('google-signin-btn');
-      const divider      = document.querySelector('.divider');
-      const signinNote   = document.querySelector('.signin-note');
-      const cardTitle    = document.querySelector('.signin-card h3');
-      const cardDesc     = document.querySelector('.signin-card > p');
+      const btnSignin  = document.getElementById('nav-signin-btn');
+      const greeting   = document.getElementById('user-greeting');
+      const avatarEl   = document.getElementById('user-avatar');
+      const nameEl     = document.getElementById('user-name');
+      const statsPanel = document.getElementById('stats-panel');
+      const form       = document.getElementById('signin-form');
+      const googleBtn  = document.getElementById('google-signin-btn');
+      const divider    = document.querySelector('.divider');
+      const note       = document.querySelector('.signin-note');
+      const cardH3     = document.querySelector('.signin-card h3');
+      const cardP      = document.querySelector('.signin-card > p');
 
       if (user) {
-        // Show greeting, hide sign-in button
-        btnSignin.style.display    = 'none';
-        greeting.style.display     = 'flex';
-        const initials = (user.displayName || user.email || '?').charAt(0).toUpperCase();
-        avatarEl.textContent       = initials;
-        nameEl.textContent         = user.displayName || user.email;
-
-        // Update sign-in card to show welcome state
-        if (cardTitle) cardTitle.textContent  = `Welcome back, ${user.displayName ? user.displayName.split(' ')[0] : 'Golfer'}!`;
-        if (cardDesc)  cardDesc.textContent   = 'Your stats will appear here once web tracking launches.';
-        if (signinForm)  signinForm.style.display   = 'none';
-        if (googleBtn)   googleBtn.style.display     = 'none';
-        if (divider)     divider.style.display       = 'none';
-        if (signinNote)  signinNote.style.display    = 'none';
-        if (statsPanel)  statsPanel.style.display    = 'block';
+        btnSignin.style.display  = 'none';
+        greeting.style.display   = 'flex';
+        avatarEl.textContent     = (user.displayName || user.email || '?').charAt(0).toUpperCase();
+        nameEl.textContent       = user.displayName || user.email;
+        if (cardH3)    cardH3.textContent = `Welcome back, ${user.displayName ? user.displayName.split(' ')[0] : 'Golfer'}!`;
+        if (cardP)     cardP.textContent  = 'Your stats will appear here once web tracking launches.';
+        if (form)      form.style.display      = 'none';
+        if (googleBtn) googleBtn.style.display = 'none';
+        if (divider)   divider.style.display   = 'none';
+        if (note)      note.style.display      = 'none';
+        if (statsPanel) statsPanel.style.display = 'block';
       } else {
-        btnSignin.style.display    = '';
-        greeting.style.display     = 'none';
-        if (cardTitle) cardTitle.textContent  = 'Sign In to Your Account';
-        if (cardDesc)  cardDesc.textContent   = 'Use the same account as the IT Golf app.';
-        if (signinForm)  signinForm.style.display   = '';
-        if (googleBtn)   googleBtn.style.display     = '';
-        if (divider)     divider.style.display       = '';
-        if (signinNote)  signinNote.style.display    = '';
-        if (statsPanel)  statsPanel.style.display    = 'none';
+        btnSignin.style.display  = '';
+        greeting.style.display   = 'none';
+        if (cardH3)    cardH3.textContent = 'Sign In to Your Account';
+        if (cardP)     cardP.textContent  = 'Use the same account as the Heckle Golf app.';
+        if (form)      form.style.display      = '';
+        if (googleBtn) googleBtn.style.display = '';
+        if (divider)   divider.style.display   = '';
+        if (note)      note.style.display      = '';
+        if (statsPanel) statsPanel.style.display = 'none';
       }
     });
 
-    // ── Email/Password Sign-In ──────────────────────────────────
     document.getElementById('signin-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const email    = document.getElementById('email').value;
-      const password = document.getElementById('password').value;
-      const btn      = e.target.querySelector('button[type="submit"]');
-      btn.textContent = 'Signing in…';
-      btn.disabled    = true;
+      const btn = e.target.querySelector('button[type="submit"]');
+      btn.textContent = 'Signing in…'; btn.disabled = true;
       try {
-        await signInWithEmailAndPassword(auth, email, password);
+        await signInWithEmailAndPassword(auth, document.getElementById('email').value, document.getElementById('password').value);
       } catch (err) {
-        btn.textContent = 'Sign In';
-        btn.disabled    = false;
+        btn.textContent = 'Sign In'; btn.disabled = false;
         alert('Sign-in failed: ' + (err.message || 'Unknown error'));
       }
     });
 
-    // ── Google Sign-In ──────────────────────────────────────────
     document.getElementById('google-signin-btn').addEventListener('click', async () => {
-      try {
-        await signInWithPopup(auth, provider);
-      } catch (err) {
-        if (err.code !== 'auth/popup-closed-by-user') {
-          alert('Google sign-in failed: ' + (err.message || 'Unknown error'));
-        }
-      }
+      try { await signInWithPopup(auth, provider); }
+      catch (err) { if (err.code !== 'auth/popup-closed-by-user') alert('Google sign-in failed: ' + err.message); }
     });
 
-    // ── Nav Sign-In button ──────────────────────────────────────
     document.getElementById('nav-signin-btn').addEventListener('click', () => {
       document.getElementById('stats-signin').scrollIntoView({ behavior: 'smooth' });
     });
 
-    // ── Sign Out ────────────────────────────────────────────────
-    document.getElementById('signout-btn').addEventListener('click', async () => {
-      await signOut(auth);
-    });
-  </script>
-
-  <!-- ══ GITHUB RELEASE FETCHER ═══════════════════════════════ -->
-  <script>
-    (async function loadRelease() {
-      const REPO = 'mmancl/HeckleGolfSim';
-      const API  = `https://api.github.com/repos/${REPO}/releases/latest`;
-
-      // Asset name patterns — Android (.aab/.apk) intentionally excluded; links to Google Play instead
-      const SKIP = (name) => name.endsWith('.aab') || name.endsWith('.apk');
-      const PATTERNS = {
-        ios:     (name) => name.endsWith('.ipa'),
-        windows: (name) => name.toLowerCase().includes('windows') && name.endsWith('.zip'),
-        mac:     (name) => name.toLowerCase().includes('macos') && name.endsWith('.zip'),
-      };
-
-      const ids = {
-        ios:     document.getElementById('dl-ios'),
-        windows: document.getElementById('dl-windows'),
-        mac:     document.getElementById('dl-mac'),
-      };
-
-      try {
-        const res  = await fetch(API, { headers: { Accept: 'application/vnd.github+json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const tag  = data.tag_name;
-
-        // Show version badge
-        const badge = document.getElementById('release-badge');
-        const tagEl = document.getElementById('release-tag');
-        if (badge && tagEl) { tagEl.textContent = tag; badge.style.display = ''; }
-
-        // Update release notes link
-        const rnLink = document.getElementById('release-notes-link');
-        if (rnLink) rnLink.href = data.html_url;
-
-        // Map each asset to its button
-        for (const asset of data.assets) {
-          if (SKIP(asset.name)) continue; // Android builds go to Google Play, not direct download
-          for (const [key, matcher] of Object.entries(PATTERNS)) {
-            if (matcher(asset.name)) {
-              const el = ids[key];
-              if (el) {
-                el.href        = asset.browser_download_url;
-                const size     = (asset.size / 1024 / 1024).toFixed(0);
-                const labels   = { ios: `Download .ipa (${size} MB)`, windows: `Download .zip (${size} MB)`, mac: `Download .zip (${size} MB)` };
-                el.textContent = labels[key] || `Download (${size} MB)`;
-              }
-            }
-          }
-        }
-      } catch (err) {
-        // On error, fall back to releases page for each button
-        console.warn('Could not fetch release:', err);
-        const fallback = `https://github.com/${REPO}/releases/latest`;
-        for (const el of Object.values(ids)) {
-          if (el) { el.href = fallback; el.textContent = 'View on GitHub ↗'; }
-        }
-      }
-    })();
+    document.getElementById('signout-btn').addEventListener('click', () => signOut(auth));
   </script>
 
   <!-- ══ UI SCRIPTS ════════════════════════════════════════════ -->
   <script>
-    // Hamburger menu
+    // Hamburger
     const hamburger = document.getElementById('hamburger');
     const navLinks  = document.getElementById('nav-links');
-    hamburger.addEventListener('click', () => {
-      navLinks.classList.toggle('mobile-open');
-    });
-    navLinks.querySelectorAll('a').forEach(a => {
-      a.addEventListener('click', () => navLinks.classList.remove('mobile-open'));
-    });
+    hamburger.addEventListener('click', () => navLinks.classList.toggle('mobile-open'));
+    navLinks.querySelectorAll('a').forEach(a => a.addEventListener('click', () => navLinks.classList.remove('mobile-open')));
 
     // Lightbox
     function openLightbox(src) {
@@ -1203,9 +1077,7 @@
       document.getElementById('lightbox').classList.remove('open');
       document.body.style.overflow = '';
     }
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeLightbox();
-    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); });
   </script>
 
 </body>
