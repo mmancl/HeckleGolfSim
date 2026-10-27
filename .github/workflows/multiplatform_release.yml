@@ -422,11 +422,7 @@ jobs:
             gh run download "${{ inputs.from_run_id }}" --dir release_artifacts
           else
             echo "Finding most recent release with assets..."
-            # Find the latest release that actually has assets uploaded
-            LATEST_TAG=$(gh release list -L 10 | awk '$1 ~ /^Heckle/ && $2 != "Latest" {print $3; exit}')
-            if [ -z "$LATEST_TAG" ]; then
-              LATEST_TAG=$(gh release list -L 10 | awk '$1 ~ /^Heckle/ {print $2; exit}')
-            fi
+            LATEST_TAG=$(gh release list -L 5 --json tagName -q '.[0].tagName')
             echo "Downloading assets from release $LATEST_TAG..."
             gh release download "$LATEST_TAG" --dir release_artifacts
           fi
