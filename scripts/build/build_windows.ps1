@@ -203,11 +203,8 @@ if ($Zip) {
     
     Write-Host ""
     Write-Host "[3/3] Packaging into ZIP archive..." -ForegroundColor Green
-    if (Get-Command "tar.exe" -ErrorAction SilentlyContinue) {
-        tar.exe -a -c -f $ZipPath -C $StagingRoot .
-    } else {
-        Compress-Archive -Path "$StagingRoot\*" -DestinationPath $ZipPath -CompressionLevel Fast
-    }
+    Add-Type -AssemblyName 'System.IO.Compression.FileSystem'
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($StagingRoot, $ZipPath, [System.IO.Compression.CompressionLevel]::Fastest, $false)
     
     $fileItem = Get-Item $ZipPath
     $sizeMB = [math]::Round($fileItem.Length / 1MB, 2)

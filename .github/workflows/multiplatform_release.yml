@@ -431,8 +431,11 @@ jobs:
         if: ${{ inputs.deploy_play_store && env.HAVE_PLAY_KEY == 'true' }}
         env:
           HAVE_PLAY_KEY: ${{ secrets.PLAY_STORE_JSON_KEY != '' }}
+          PLAY_KEY_DATA: ${{ secrets.PLAY_STORE_JSON_KEY }}
         run: |
-          echo "${{ secrets.PLAY_STORE_JSON_KEY }}" > service_account.json
+          printf '%s\n' "$PLAY_KEY_DATA" > service_account.json
+          # Validate JSON format before proceeding
+          python3 -c "import json; json.load(open('service_account.json'))"
 
       # Deploy draft release to Open Testing
       - name: Deploy to Google Play (Open Testing Track - Draft)
