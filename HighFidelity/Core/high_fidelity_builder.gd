@@ -100,7 +100,13 @@ static func _set_detail_nodes_visible(scene_root: Node, vis: bool) -> void:
 		bunkers.visible = vis
 	var reeds := scene_root.get_node_or_null("ShorelineReedsMultiMesh") as Node3D
 	if reeds != null:
-		reeds.visible = true
+		var is_low := false
+		var main_loop = Engine.get_main_loop()
+		if main_loop is SceneTree and (main_loop as SceneTree).root != null:
+			var gs = (main_loop as SceneTree).root.get_node_or_null("GlobalSettings")
+			if gs != null and gs.has_method("get_graphics_quality"):
+				is_low = (gs.get_graphics_quality() == "Low")
+		reeds.visible = not is_low
 	var thick_grass := scene_root.get_node_or_null("ThickRoughGrassMultiMesh") as Node3D
 	if thick_grass != null:
 		thick_grass.visible = false

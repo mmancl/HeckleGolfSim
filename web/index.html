@@ -453,7 +453,7 @@
   <section class="hero">
     <span class="hero-badge">🏌️ Free to Play · No Subscriptions</span>
     <h1>Golf Simulator with<br><span>Live Heckling Commentary</span></h1>
-    <p>Real-world courses from OpenStreetMap, AI-powered heckling after every shot, swing analysis, and full cross-platform multiplayer — completely free.</p>
+    <p>Real-world courses from OpenStreetMap, AI-powered heckling after every shot, swing analysis, and fun practice minigames — completely free.</p>
     <div class="hero-actions">
       <a href="https://play.google.com/store/apps/details?id=com.hecklegolf.simulator&hl=en_US"
          class="btn-primary" target="_blank" rel="noopener">
@@ -466,7 +466,7 @@
       </a>
     </div>
     <div class="hero-screenshot">
-      <img src="images/course_play_tee_view.png" alt="Heckle Golf Simulator course tee view" loading="lazy">
+      <img src="images/hero_gameplay.jpg" alt="Heckle Golf Simulator gameplay tee view and launch telemetry" loading="eager">
     </div>
   </section>
 
@@ -746,7 +746,7 @@
           'Adds a fun, competitive edge to solo and multiplayer rounds',
           'The signature feature that makes every round memorable',
         ],
-        media: { type: 'placeholder', icon: '🎙️', label: 'Heckling commentary screenshot coming soon' },
+        media: { type: 'image', src: 'images/feature_heckling.png', alt: 'Heckle Audio & Qualifier Editor showing contextual commentary prompts' },
       },
       {
         icon: '📈',
@@ -759,7 +759,7 @@
           'Track your progress over multiple rounds',
           'Works with or without a connected launch monitor',
         ],
-        media: { type: 'placeholder', icon: '📈', label: 'Swing analysis screenshot coming soon' },
+        media: { type: 'image', src: 'images/feature_swing_analysis.png', alt: 'Recommended Fixes panel showing club delivery analysis and prioritized swing fixes' },
       },
       {
         icon: '🏗️',
@@ -772,7 +772,7 @@
           'Save and share your custom course layouts',
           'Perfect for creating unique multiplayer challenges',
         ],
-        media: { type: 'image', src: 'images/osm_course_downloader.png', alt: 'OpenStreetMap Course Downloader' },
+        media: { type: 'image', src: 'images/feature_custom_courses.png', alt: 'Create Custom Course editor showing hole selection and aerial overview' },
       },
       {
         icon: '🗺️',
@@ -785,20 +785,7 @@
           'Download new courses directly from within the app',
           'Contribute missing courses via OpenStreetMap',
         ],
-        media: { type: 'image', src: 'images/osm_course_downloader.png', alt: 'OpenStreetMap Course Downloader' },
-      },
-      {
-        icon: '🆓',
-        title: 'Completely Free to Play',
-        summary: 'No subscriptions, no license fees, no paywalls — just download and tee off.',
-        desc: 'Heckle Golf Simulator is 100% free. No monthly subscription, no one-time license fee, no pay-to-win mechanics. Every feature — courses, minigames, multiplayer, stat tracking — is available to every player.',
-        bullets: [
-          'Zero cost to download and play',
-          'No subscription tiers or paywalls',
-          'All features available to every player',
-          'Open source — transparent development on GitHub',
-        ],
-        media: { type: 'placeholder', icon: '🆓', label: 'Free forever — no catches' },
+        media: { type: 'image', src: 'images/feature_osm_courses.png', alt: 'OpenStreetMap course downloader showing 6553 cached courses' },
       },
       {
         icon: '📡',
@@ -811,7 +798,20 @@
           'Seamless connection via Bluetooth or network',
           'Play full rounds or practice sessions with real data',
         ],
-        media: { type: 'placeholder', icon: '📡', label: 'Launch monitor integration screenshot coming soon' },
+        media: { type: 'image', src: 'images/feature_launch_monitor.png', alt: 'Connect Launch Monitor dialog showing Bluetooth and GSPro network options' },
+      },
+      {
+        icon: '🆓',
+        title: 'Completely Free to Play',
+        summary: 'No subscriptions, no license fees, no paywalls — just download and tee off.',
+        desc: 'Heckle Golf Simulator is 100% free. No monthly subscription, no one-time license fee, no pay-to-win mechanics. Every feature — courses, minigames, multiplayer, stat tracking — is available to every player.',
+        bullets: [
+          'Zero cost to download and play',
+          'No subscription tiers or paywalls',
+          'All features available to every player',
+          'Open source — transparent development on GitHub',
+        ],
+        media: { type: 'image', src: 'images/feature_free_opensource.png', alt: 'Heckle Golf Simulator open source repository on GitHub' },
       },
       {
         icon: '🎯',
@@ -828,29 +828,29 @@
       },
       {
         icon: '👥',
-        title: 'Multiplayer & Cross-Platform',
-        summary: 'Play against friends across Android, iOS, Windows, and macOS in the same lobby.',
-        desc: 'Heckle Golf\'s cross-platform multiplayer lets anyone join the same round regardless of device. Android vs iOS vs desktop — it all works. Challenge friends to a round, host closest-to-pin contests, or jump into a scramble format.',
+        title: 'Multiplayer & Cross-Platform (Coming Soon)',
+        summary: 'Play against friends across Android, iOS, Windows, and macOS in the same lobby — coming soon.',
+        desc: 'Cross-platform multiplayer is currently under active development. Once launched, Heckle Golf\'s lobbies will let anyone join the same round regardless of device — Android vs iOS vs desktop. You\'ll be able to challenge friends to a round, host closest-to-pin contests, or jump into a scramble format.',
         bullets: [
-          'Cross-platform lobbies across all supported devices',
+          'Under active development — coming in a future update',
+          'Cross-platform lobbies planned for Android, iOS, Windows, and macOS',
           'Real-time multiplayer rounds with friends',
-          'Competitive formats including stroke play and scrambles',
-          'Online leaderboards for global bragging rights',
+          'Competitive formats including stroke play, scrambles, and closest-to-pin',
         ],
-        media: { type: 'placeholder', icon: '👥', label: 'Multiplayer lobby screenshot coming soon' },
+        media: { type: 'placeholder', icon: '👥', label: 'Multiplayer features are coming soon — currently under development!' },
       },
       {
         icon: '📊',
         title: 'Stat Tracking & Round History',
         summary: 'Track your scores, trends, and best rounds — synced across all your devices.',
-        desc: 'Every round you play is saved to your Heckle Golf account. View your scoring trends, personal bests per course, handicap progression, and minigame records. Sign in on the web to access your full history anywhere.',
+        desc: 'Every round you play is saved to your Heckle Golf account. View your scoring trends, club delivery averages, carry distances, swing recommendations, and minigame records. Sign in on the web to access your full history anywhere.',
         bullets: [
           'Full scorecard history for every round played',
-          'Per-course personal bests and averages',
-          'Handicap and scoring trend tracking',
+          'Club delivery averages, strike tendencies, and carry distances',
+          'Per-course personal bests and scoring averages',
           'Web dashboard access (coming soon)',
         ],
-        media: { type: 'image', src: 'images/match_history_menu.png', alt: 'Match History Menu' },
+        media: { type: 'image', src: 'images/feature_stats.png', alt: 'Club distances, strike tendencies, and swing recommendations stats dashboard' },
       },
     ];
 

@@ -80,7 +80,7 @@ func _is_mobile_view() -> bool:
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	z_index = 200
+	z_index = 500
 	_recenter_modal()
 	if get_viewport() != null and not get_viewport().size_changed.is_connected(_on_viewport_resized):
 		get_viewport().size_changed.connect(_on_viewport_resized)

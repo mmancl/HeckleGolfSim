@@ -349,10 +349,12 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 						else:
 							n.set_surface_override_material(s, orig_m)
 
-		# 5. Spatial MultiMesh Foliage Chunks (TreeChunk_*, BushChunk_*, RockChunk_*)
+		# 5. Spatial MultiMesh Foliage Chunks (TreeChunk_*, BushChunk_*, RockChunk_*, ShorelineReedsMultiMesh)
 		elif n is MultiMeshInstance3D:
 			var mmi := n as MultiMeshInstance3D
 			var m_name := mmi.name.to_lower()
+			if m_name.begins_with("shorelinereeds"):
+				mmi.visible = not is_low
 			var is_tree_chunk := m_name.begins_with("treechunk")
 			var is_bush_chunk := m_name.begins_with("bushchunk")
 			var is_rock_chunk := m_name.begins_with("rockchunk")
@@ -540,9 +542,21 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 		if fb != null and fb.has_method("apply_graphics_quality_to_flags"):
 			fb.apply_graphics_quality_to_flags(scene_root, quality)
 
+	# Ensure grass/reeds around water hazards are hidden on Low quality
+	_apply_shoreline_reeds_visibility(scene_root, not is_low)
+
 
 
 static var _low_tree_materials: Dictionary = {}
+
+static func _apply_shoreline_reeds_visibility(scene_root: Node, visible: bool) -> void:
+	if scene_root == null:
+		return
+	var root_reeds := scene_root.get_node_or_null("ShorelineReedsMultiMesh") as Node3D
+	if root_reeds != null:
+		root_reeds.visible = visible
+	for child in scene_root.find_children("*ShorelineReeds*", "Node3D", true, false):
+		(child as Node3D).visible = visible
 
 ## Thick rough real 3D grass blades only exist in High graphic setting (via HighFidelityBuilder).
 ## On Medium, Low, or mobile, thick rough blade nodes must not exist.
@@ -571,10 +585,14 @@ static func _set_terrain_has_deep_rough_map(n: MeshInstance3D, enabled: bool, de
 	var mats: Array[ShaderMaterial] = []
 	if n.material_override is ShaderMaterial:
 		mats.append(n.material_override as ShaderMaterial)
-	if n.get_surface_override_material(0) is ShaderMaterial:
-		mats.append(n.get_surface_override_material(0) as ShaderMaterial)
-	if n.mesh != null and n.mesh.get_surface_count() > 0 and n.mesh.surface_get_material(0) is ShaderMaterial:
-		mats.append(n.mesh.surface_get_material(0) as ShaderMaterial)
+	if n.mesh != null:
+		for s in range(n.mesh.get_surface_count()):
+			var som = n.get_surface_override_material(s)
+			if som is ShaderMaterial and not mats.has(som):
+				mats.append(som as ShaderMaterial)
+			var sm = n.mesh.surface_get_material(s)
+			if sm is ShaderMaterial and not mats.has(sm):
+				mats.append(sm as ShaderMaterial)
 	for m in mats:
 		if deep_tex != null:
 			m.set_shader_parameter("deep_rough_map", deep_tex)
@@ -583,90 +601,111 @@ static func _set_terrain_has_deep_rough_map(n: MeshInstance3D, enabled: bool, de
 		m.set_shader_parameter("has_deep_rough_map", enabled)
 
 static var _low_tree_textures: Dictionary = {}
-
-static func _get_low_tree_texture(tex_filename: String) -> Texture2D:
-	if _low_tree_textures.has(tex_filename):
-		return _low_tree_textures[tex_filename]
-	
-	# Strip any imported suffixes like .s3tc.ctex
-	var clean_name = tex_filename
-	if clean_name.contains("."):
-		var parts = clean_name.split(".")
-		if parts.size() >= 2:
-			clean_name = parts[0] + "." + parts[1]
-	
-	var res_path = "res://addons/shapespark-low-poly-exterior-plants/textures_low/" + clean_name
-	var tex: Texture2D = null
-	if ResourceLoader.exists(res_path):
-		tex = load(res_path) as Texture2D
-	
-	if tex == null:
-		var global_p = ProjectSettings.globalize_path(res_path)
-		if FileAccess.file_exists(global_p):
-			var img = Image.load_from_file(global_p)
-			if img != null:
-				tex = ImageTexture.create_from_image(img)
-	
-	if tex != null:
-		_low_tree_textures[tex_filename] = tex
-	return tex
-
+static var _foliage_low_shader: Shader = null
+static var _trunk_low_shader: Shader = null
 
 static func _get_low_tree_material(orig_mat: Material, surface_name: String, surface_idx: int = 0) -> Material:
-	var cache_key = "%d_%s" % [surface_idx, surface_name]
-	var orig_tex_filename = ""
-	var is_trunk = (surface_idx == 0) or surface_name.to_lower().contains("trunk") or surface_name.to_lower().contains("bark")
-	
+	var s_lower = surface_name.to_lower()
+	var orig_path = ""
+	var albedo_tex: Texture2D = null
+
 	if orig_mat != null:
-		cache_key += "_" + orig_mat.resource_path
-		if orig_mat is StandardMaterial3D or orig_mat is BaseMaterial3D:
-			var base_m = orig_mat as BaseMaterial3D
-			if base_m.albedo_texture != null:
-				var path_lower = base_m.albedo_texture.resource_path.to_lower()
-				orig_tex_filename = base_m.albedo_texture.resource_path.get_file()
-				if path_lower.contains("bark"):
-					is_trunk = true
-				elif path_lower.contains("branch") or path_lower.contains("leaf") or path_lower.contains("clover") or path_lower.contains("shrub") or path_lower.contains("hedge"):
-					is_trunk = false
-	
-	if is_trunk and orig_tex_filename.is_empty():
-		orig_tex_filename = "bark.jpg"
-	
+		orig_path = orig_mat.resource_path.to_lower()
+		if orig_mat is BaseMaterial3D:
+			albedo_tex = (orig_mat as BaseMaterial3D).albedo_texture
+		elif orig_mat is ShaderMaterial:
+			var tex = (orig_mat as ShaderMaterial).get_shader_parameter("texture_albedo")
+			if tex is Texture2D:
+				albedo_tex = tex
+
+	var tex_path = albedo_tex.resource_path.to_lower() if albedo_tex != null else ""
+	var is_trunk = (surface_idx == 0) or s_lower.contains("trunk") or s_lower.contains("bark") or tex_path.contains("bark")
+	if tex_path.contains("branch") or tex_path.contains("leaf") or tex_path.contains("clover") or tex_path.contains("shrub") or tex_path.contains("hedge"):
+		is_trunk = false
+
+	var cache_key = "%d_%s_%s_%s" % [surface_idx, s_lower, orig_path, tex_path]
 	if _low_tree_materials.has(cache_key):
 		return _low_tree_materials[cache_key]
-	
-	var low_m = StandardMaterial3D.new()
-	low_m.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
-	low_m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
-	
+
+	if _foliage_low_shader == null and ResourceLoader.exists("res://Courses/Environments/shaders/foliage_low.gdshader"):
+		_foliage_low_shader = load("res://Courses/Environments/shaders/foliage_low.gdshader") as Shader
+	if _trunk_low_shader == null and ResourceLoader.exists("res://Courses/Environments/shaders/trunk_low.gdshader"):
+		_trunk_low_shader = load("res://Courses/Environments/shaders/trunk_low.gdshader") as Shader
+
+	var combined_sig = (s_lower + " " + orig_path + " " + tex_path).to_lower()
+
 	if is_trunk:
-		# Trunk: clean stylized warm wood tone with matte finish, zero photo noise
-		var bark_tex = _get_low_tree_texture("bark.jpg")
-		if bark_tex != null:
-			low_m.albedo_texture = bark_tex
-			low_m.albedo_color = Color(0.92, 0.88, 0.84)
+		# Trunk: clean stylized wood tone with 2-step cel shading, zero photographic noise
+		var wood_color := Color(0.36, 0.24, 0.15)
+		var wood_shadow := Color(0.23, 0.14, 0.09)
+
+		if combined_sig.contains("birch"):
+			wood_color = Color(0.86, 0.84, 0.80)
+			wood_shadow = Color(0.66, 0.63, 0.58)
+		elif combined_sig.contains("pine"):
+			wood_color = Color(0.44, 0.27, 0.16)
+			wood_shadow = Color(0.28, 0.16, 0.10)
+		elif combined_sig.contains("willow"):
+			wood_color = Color(0.40, 0.32, 0.22)
+			wood_shadow = Color(0.26, 0.20, 0.13)
+
+		if _trunk_low_shader != null:
+			var sm = ShaderMaterial.new()
+			sm.shader = _trunk_low_shader
+			sm.set_shader_parameter("wood_color", wood_color)
+			sm.set_shader_parameter("wood_shadow_color", wood_shadow)
+			_low_tree_materials[cache_key] = sm
+			return sm
 		else:
-			low_m.albedo_color = Color(0.38, 0.24, 0.15)
-		low_m.roughness = 0.95
-		low_m.diffuse_mode = BaseMaterial3D.DIFFUSE_LAMBERT_WRAP
+			var low_m = StandardMaterial3D.new()
+			low_m.albedo_color = wood_color
+			low_m.roughness = 1.0
+			low_m.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+			low_m.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON
+			_low_tree_materials[cache_key] = low_m
+			return low_m
 	else:
-		# Foliage / Leaves: stylized cartoon leaf cutout with toon cel-shading, alpha scissor, double-sided
-		if not orig_tex_filename.is_empty():
-			var low_leaf_tex = _get_low_tree_texture(orig_tex_filename)
-			if low_leaf_tex != null:
-				low_m.albedo_texture = low_leaf_tex
-		if low_m.albedo_texture == null and orig_mat is BaseMaterial3D and (orig_mat as BaseMaterial3D).albedo_texture != null:
-			low_m.albedo_texture = (orig_mat as BaseMaterial3D).albedo_texture
-		
-		low_m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-		low_m.alpha_scissor_threshold = 0.5
-		low_m.cull_mode = BaseMaterial3D.CULL_DISABLED
-		low_m.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON
-		low_m.roughness = 1.0
-		low_m.albedo_color = Color(1.0, 1.0, 1.0)
-	
-	_low_tree_materials[cache_key] = low_m
-	return low_m
+		# Foliage / Leaves: stylized cartoon leaf cutout with 3-tone cel posterization
+		var foliage_color := Color(0.28, 0.62, 0.24) # Rich parkland summer green
+
+		if combined_sig.contains("autumn-gold") or combined_sig.contains("gold"):
+			foliage_color = Color(0.95, 0.72, 0.16)
+		elif combined_sig.contains("autumn-red") or combined_sig.contains("red"):
+			foliage_color = Color(0.85, 0.22, 0.14)
+		elif combined_sig.contains("blossom"):
+			foliage_color = Color(0.98, 0.78, 0.85)
+		elif combined_sig.contains("pine") or combined_sig.contains("branch-2"):
+			foliage_color = Color(0.18, 0.38, 0.20)
+		elif combined_sig.contains("birch") or combined_sig.contains("branch-1"):
+			foliage_color = Color(0.40, 0.72, 0.25)
+		elif combined_sig.contains("willow"):
+			foliage_color = Color(0.48, 0.68, 0.22)
+
+		if albedo_tex == null:
+			if ResourceLoader.exists("res://addons/shapespark-low-poly-exterior-plants/textures/branch-01.png"):
+				albedo_tex = load("res://addons/shapespark-low-poly-exterior-plants/textures/branch-01.png") as Texture2D
+
+		if _foliage_low_shader != null:
+			var sm = ShaderMaterial.new()
+			sm.shader = _foliage_low_shader
+			sm.set_shader_parameter("albedo_color", foliage_color)
+			if albedo_tex != null:
+				sm.set_shader_parameter("texture_albedo", albedo_tex)
+			_low_tree_materials[cache_key] = sm
+			return sm
+		else:
+			var low_m = StandardMaterial3D.new()
+			if albedo_tex != null:
+				low_m.albedo_texture = albedo_tex
+			low_m.albedo_color = foliage_color
+			low_m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+			low_m.alpha_scissor_threshold = 0.45
+			low_m.cull_mode = BaseMaterial3D.CULL_DISABLED
+			low_m.diffuse_mode = BaseMaterial3D.DIFFUSE_TOON
+			low_m.roughness = 1.0
+			low_m.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+			_low_tree_materials[cache_key] = low_m
+			return low_m
 
 
 static func _create_high_quality_range_turf() -> ShaderMaterial:
@@ -859,7 +898,7 @@ static func _get_realistic_bark_material(orig_mat: Material) -> Material:
 	var mat = StandardMaterial3D.new()
 	mat.diffuse_mode = BaseMaterial3D.DIFFUSE_BURLEY
 	mat.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
-	mat.specular = 0.04
+	mat.metallic_specular = 0.04
 	mat.roughness = 0.94
 	
 	# Albedo texture

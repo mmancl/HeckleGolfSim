@@ -718,16 +718,16 @@ func _spawn_range_trees() -> void:
 	var tree_paths: Array[String] = [
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-1-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-2-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-3-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-4-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-1-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-2-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-3-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-4-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-1-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-2-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-3-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-4-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-autumn-gold-1-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-autumn-gold-2-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-autumn-red-1-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-birch-1-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-pine-1-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-willow-2-staticbody.tscn",
 	]
 
 	var tree_scenes: Array[PackedScene] = []

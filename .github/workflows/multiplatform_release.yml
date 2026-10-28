@@ -525,8 +525,8 @@ jobs:
           # Validate JSON format before proceeding
           python3 -c "import json; json.load(open('service_account.json'))"
 
-      # Deploy draft release to Open Testing (track: beta)
-      - name: Deploy to Google Play (Open Testing Beta Track - Draft)
+      # Deploy draft release to Open (Beta) and Closed (Alpha) tracks simultaneously
+      - name: Deploy to Google Play (Beta & Alpha Tracks - Draft)
         if: ${{ inputs.deploy_play_store && env.HAVE_PLAY_KEY == 'true' }}
         env:
           HAVE_PLAY_KEY: ${{ secrets.PLAY_STORE_JSON_KEY != '' }}
@@ -536,20 +536,7 @@ jobs:
           packageName: com.hecklegolf.simulator
           releaseFiles: dist/HeckleGolfSim.aab
           track: beta
-          status: draft
-          whatsNewDirectory: distribution/whatsnew
-
-      # Deploy draft release to Closed Testing (track: alpha)
-      - name: Deploy to Google Play (Closed Testing Alpha Track - Draft)
-        if: ${{ inputs.deploy_play_store && env.HAVE_PLAY_KEY == 'true' }}
-        env:
-          HAVE_PLAY_KEY: ${{ secrets.PLAY_STORE_JSON_KEY != '' }}
-        uses: r0adkll/upload-google-play@v1
-        with:
-          serviceAccountJson: service_account.json
-          packageName: com.hecklegolf.simulator
-          releaseFiles: dist/HeckleGolfSim.aab
-          track: alpha
+          userFraction: 0.99
           status: draft
           whatsNewDirectory: distribution/whatsnew
 

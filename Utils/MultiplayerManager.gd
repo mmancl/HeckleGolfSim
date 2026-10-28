@@ -839,29 +839,56 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 				if gs_clap != null and gs_clap.has_method("play_golf_clap"):
 					gs_clap.play_golf_clap()
 
-			# Check gimme ranges if enabled (only if ball came to rest on the green or fringe, or near pin if course has no configured green)
+			# Check gimme ranges if enabled (strictly only if ball came to rest on the green, never on fringe or off-green)
 			var active_gimmes = []
 			var gs_gimme = _get_global_settings()
 			var current_lie = str(active_player.get("lie_type", "")).to_lower()
 			var dist_to_pin_feet = dist_to_pin * 3.28084 # meters to feet
-			var is_eligible_lie = (current_lie == "green" or current_lie == "fringe")
-			if not is_eligible_lie and dist_to_pin <= 25.0:
-				var course_node = null
-				if player_node != null:
-					var p_parent = player_node.get_parent()
-					if p_parent != null:
-						course_node = p_parent.get_parent()
-				if course_node == null and is_inside_tree() and get_tree() != null:
-					course_node = get_tree().current_scene
-				var has_green_geo = false
-				if course_node != null and (course_node.has_method("get_distance_to_nearest_green") or course_node.has_method("is_inside_green") or course_node.has_method("get_distance_to_current_green")):
-					if course_node.has_method("get_distance_to_current_green"):
-						has_green_geo = (course_node.get_distance_to_current_green(final_position) <= 0.05 or course_node.get_distance_to_current_green(target_pin) <= 0.05)
-					elif course_node.has_method("get_distance_to_nearest_green"):
-						has_green_geo = (course_node.get_distance_to_nearest_green(final_position) <= 0.05 or course_node.get_distance_to_nearest_green(target_pin) <= 0.05)
-				# If course has no green polygon/geometry, allow gimme within range around the pin
-				if not has_green_geo:
+
+			# Resolve course node with green geometry methods
+			var course_node = null
+			if player_node != null:
+				var p_p = player_node.get_parent()
+				if p_p != null:
+					if p_p.has_method("get_distance_to_nearest_green") or p_p.has_method("get_distance_to_current_green"):
+						course_node = p_p
+					elif p_p.get_parent() != null and (p_p.get_parent().has_method("get_distance_to_nearest_green") or p_p.get_parent().has_method("get_distance_to_current_green")):
+						course_node = p_p.get_parent()
+			if course_node == null and is_inside_tree() and get_tree() != null:
+				var curr_scene = get_tree().current_scene
+				if curr_scene != null:
+					if curr_scene.get("course_instance") != null and (curr_scene.get("course_instance").has_method("get_distance_to_nearest_green") or curr_scene.get("course_instance").has_method("get_distance_to_current_green")):
+						course_node = curr_scene.get("course_instance")
+					elif curr_scene.has_method("get_distance_to_nearest_green") or curr_scene.has_method("get_distance_to_current_green"):
+						course_node = curr_scene
+					else:
+						var r_child = curr_scene.find_child("Range", true, false)
+						if r_child != null and (r_child.has_method("get_distance_to_nearest_green") or r_child.has_method("get_distance_to_current_green")):
+							course_node = r_child
+
+			# Check if hole has configured green geometry
+			var has_green_geo = false
+			if course_node != null:
+				if course_node.has_method("get_distance_to_current_green"):
+					has_green_geo = (course_node.get_distance_to_current_green(target_pin) <= 0.05 or course_node.get_distance_to_current_green(final_position) <= 0.05)
+				elif course_node.has_method("get_distance_to_nearest_green"):
+					has_green_geo = (course_node.get_distance_to_nearest_green(target_pin) <= 0.05 or course_node.get_distance_to_nearest_green(final_position) <= 0.05)
+
+			# Strict green eligibility: gimmes are strictly confined to the green
+			var is_eligible_lie = false
+			if has_green_geo:
+				if current_lie == "green":
 					is_eligible_lie = true
+				elif course_node != null:
+					if course_node.has_method("get_distance_to_current_green") and course_node.get_distance_to_current_green(final_position) <= 0.001:
+						is_eligible_lie = true
+					elif course_node.has_method("get_distance_to_nearest_green") and course_node.get_distance_to_nearest_green(final_position) <= 0.001:
+						is_eligible_lie = true
+			else:
+				# Fallback only for driving range / courses with zero green geometry defined
+				# Ball must NOT be in a hazard/sand/bunker
+				if current_lie != "sand" and current_lie != "bunker" and current_lie != "water" and current_lie != "hazard":
+					is_eligible_lie = (dist_to_pin <= 25.0)
 
 			if is_eligible_lie and gs_gimme != null and gs_gimme.range_settings != null:
 				if gs_gimme.range_settings.gimme_range_1_enabled.value:

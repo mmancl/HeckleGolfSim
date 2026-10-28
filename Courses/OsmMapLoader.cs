@@ -227,7 +227,7 @@ public partial class OsmMapLoader : Node
 
         byte[]? satImageBytes = null;
         _downloadedSatelliteImageBounds = null;
-        var bbox = CalculateBBoxFromOsmJson(osmJson, lat, lon);
+        var bbox = CalculateBBoxFromOsmJson(osmJson, lat, lon, courseName);
         if (bbox != null)
         {
             bool isMobilePlatform = OS.GetName() == "Android" || OS.GetName() == "iOS";
@@ -1337,114 +1337,19 @@ public partial class OsmMapLoader : Node
                     !variant.HoleWayIds.Contains(way.Id));
             }
 
-            // Find the main course boundary to filter out other golf courses in the radius
-            double closestDist = double.MaxValue;
-            OsmWay closestWay = null;
-            OsmRelation closestRel = null;
+            // Identify target and neighboring golf course boundaries
+            string preferredName = variant != null && !string.IsNullOrWhiteSpace(variant.SourceCourse)
+                ? variant.SourceCourse
+                : courseName;
+            var boundaryInfo = IdentifyCourseBoundaries(ways, relations, nodes, lat, lon, preferredName, refLat, refLon, metersPerLat, metersPerLon);
+            string targetCourseName = boundaryInfo.TargetCourseName;
+            var coursePolygons = boundaryInfo.CoursePolygons;
+            var otherCoursePolygons = boundaryInfo.OtherCoursePolygons;
+            var otherCourseNames = boundaryInfo.OtherCourseNames;
 
-            foreach (var way in ways)
+            if (coursePolygons.Count > 0)
             {
-                if (way.Tags.TryGetValue("leisure", out var leisure) && leisure == "golf_course")
-                {
-                    var wayNodes = way.NodeIds.Where(nodes.ContainsKey).Select(id => nodes[id]).ToList();
-                    if (wayNodes.Count > 0)
-                    {
-                        double avgLat = wayNodes.Average(n => n.Lat);
-                        double avgLon = wayNodes.Average(n => n.Lon);
-                        double dLat = avgLat - lat;
-                        double dLon = avgLon - lon;
-                        double dist = dLat * dLat + dLon * dLon;
-                        if (dist < closestDist)
-                        {
-                            closestDist = dist;
-                            closestWay = way;
-                            closestRel = null;
-                        }
-                    }
-                }
-            }
-
-            foreach (var rel in relations)
-            {
-                if (rel.Tags.TryGetValue("leisure", out var leisure) && leisure == "golf_course")
-                {
-                    var memberWays = rel.Members
-                        .Where(m => m.Type == "way")
-                        .Select(m => ways.FirstOrDefault(w => w.Id == m.Ref))
-                        .Where(w => w != null)
-                        .ToList();
-
-                    var allNodeCoords = memberWays
-                        .SelectMany(w => w.NodeIds)
-                        .Where(nodes.ContainsKey)
-                        .Select(id => nodes[id])
-                        .ToList();
-
-                    if (allNodeCoords.Count > 0)
-                    {
-                        double avgLat = allNodeCoords.Average(n => n.Lat);
-                        double avgLon = allNodeCoords.Average(n => n.Lon);
-                        double dLat = avgLat - lat;
-                        double dLon = avgLon - lon;
-                        double dist = dLat * dLat + dLon * dLon;
-                        if (dist < closestDist)
-                        {
-                            closestDist = dist;
-                            closestRel = rel;
-                            closestWay = null;
-                        }
-                    }
-                }
-            }
-
-            string targetCourseName = "";
-            if (closestRel != null && closestRel.Tags.TryGetValue("name", out var relName))
-            {
-                targetCourseName = relName;
-            }
-            else if (closestWay != null && closestWay.Tags.TryGetValue("name", out var wayName))
-            {
-                targetCourseName = wayName;
-            }
-
-            // Gather all boundary polygons for golf courses with the same name, or just the closest one if nameless
-            var coursePolygons = new List<Vector2[]>();
-            
-            var matchingWays = ways.Where(w => 
-                w.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
-                (string.IsNullOrEmpty(targetCourseName) ? w == closestWay : (w.Tags.TryGetValue("name", out var n) && n == targetCourseName))
-            ).ToList();
-
-            foreach (var w in matchingWays)
-            {
-                var pts = w.NodeIds
-                    .Where(nodes.ContainsKey)
-                    .Select(id => nodes[id])
-                    .Select(coord => new Vector2(
-                        (float)((coord.Lon - refLon) * metersPerLon),
-                        -(float)((coord.Lat - refLat) * metersPerLat)
-                    ))
-                    .ToArray();
-                if (pts.Length >= 3)
-                {
-                    coursePolygons.Add(pts);
-                }
-            }
-
-            var matchingRels = relations.Where(r => 
-                r.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
-                (string.IsNullOrEmpty(targetCourseName) ? r == closestRel : (r.Tags.TryGetValue("name", out var n) && n == targetCourseName))
-            ).ToList();
-
-            foreach (var r in matchingRels)
-            {
-                var assembled = AssembleRelationPolygons(r, ways, nodes, refLat, refLon, metersPerLat, metersPerLon);
-                coursePolygons.AddRange(assembled);
-            }
-
-            if (closestWay != null || closestRel != null)
-            {
-                GD.Print($"{LogPrefix} Identified main golf course boundary: '{targetCourseName}' with {coursePolygons.Count} polygon parts.");
+                GD.Print($"{LogPrefix} Identified main golf course boundary: '{targetCourseName}' with {coursePolygons.Count} polygon parts ({otherCoursePolygons.Count} other course polygon parts, {otherCourseNames.Count} neighboring courses).");
             }
             else
             {
@@ -1459,37 +1364,7 @@ public partial class OsmMapLoader : Node
             var lineOfPlayPaths = new List<List<Vector2>>();
             var cartPaths = new List<List<Vector2>>();
 
-            Func<Vector2, bool> isPointInMainCourse = (pt) => {
-                if (coursePolygons.Count == 0) return true;
-                foreach (var poly in coursePolygons)
-                {
-                    if (PointInPolygon(pt, poly))
-                        return true;
-                    foreach (var vertex in poly)
-                    {
-                        if (pt.DistanceTo(vertex) < 60f)
-                            return true;
-                    }
-                }
-                for (int pIdx = 0; pIdx < lineOfPlayPaths.Count; pIdx++)
-                {
-                    var path = lineOfPlayPaths[pIdx];
-                    for (int i = 0; i < path.Count - 1; i++)
-                    {
-                        if (DistanceToSegment(pt, path[i], path[i + 1]) < 90.0f)
-                            return true;
-                    }
-                }
-                for (int i = 0; i < exclusionPolygons.Count; i++)
-                {
-                    var excl = exclusionPolygons[i];
-                    if (pt.X >= excl.MinX - 50f && pt.X <= excl.MaxX + 50f && pt.Y >= excl.MinY - 50f && pt.Y <= excl.MaxY + 50f)
-                    {
-                        if (PointInPolygon(pt, excl.Polygon)) return true;
-                    }
-                }
-                return false;
-            };
+            Func<Vector2, bool> isPointInMainCourse = (pt) => IsPointInMainCourse(pt, boundaryInfo, lineOfPlayPaths, exclusionPolygons);
 
             // Build individual tree nodes list from nodeTags and ways
             var treeNodeIds = new List<long>();
@@ -1526,51 +1401,7 @@ public partial class OsmMapLoader : Node
             // Pre-process hole ways to assign consecutive unique hole keys ("Hole 01", "Hole 02", ...)
             // and support multi-course / sub-course layouts (e.g. golf:course:name="Red", "White", "Blue").
             // When course boundary polygons are identified, strictly filter hole ways so neighboring courses' holes are excluded.
-            Func<OsmWay, bool> isHoleBelongingToCourse = (hw) => {
-                if (coursePolygons.Count == 0) return true;
-
-                // If hole explicitly names a course or subcourse, check if it matches the target course name
-                string holeCourse = ExtractSubCourseName(hw.Tags);
-                if (!string.IsNullOrEmpty(targetCourseName) && !string.IsNullOrEmpty(holeCourse))
-                {
-                    if (holeCourse.Equals(targetCourseName, StringComparison.OrdinalIgnoreCase) ||
-                        targetCourseName.Contains(holeCourse, StringComparison.OrdinalIgnoreCase) ||
-                        holeCourse.Contains(targetCourseName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-                }
-
-                // Verify that hole endpoints (tee or green/pin) or way center lie within the course polygons
-                var hPts = hw.NodeIds
-                    .Where(nodes.ContainsKey)
-                    .Select(id => nodes[id])
-                    .Select(coord => new Vector2(
-                        (float)((coord.Lon - refLon) * metersPerLon),
-                        -(float)((coord.Lat - refLat) * metersPerLat)
-                    ))
-                    .ToList();
-
-                if (hPts.Count < 2) return false;
-
-                Vector2 tee = hPts.First();
-                Vector2 pin = hPts.Last();
-                Vector2 center = new Vector2(hPts.Average(p => p.X), hPts.Average(p => p.Y));
-
-                foreach (var poly in coursePolygons)
-                {
-                    if (PointInPolygon(tee, poly) || PointInPolygon(pin, poly) || PointInPolygon(center, poly))
-                        return true;
-
-                    foreach (var v in poly)
-                    {
-                        if (tee.DistanceTo(v) < 30f || pin.DistanceTo(v) < 30f || center.DistanceTo(v) < 30f)
-                            return true;
-                    }
-                }
-
-                return false;
-            };
+            Func<OsmWay, bool> isHoleBelongingToCourse = (hw) => IsHoleBelongingToCourse(hw, nodes, refLat, refLon, metersPerLat, metersPerLon, boundaryInfo);
 
             var holeWays = ways
                 .Where(w => w.Tags.TryGetValue("golf", out var g) && g == "hole" && w.NodeIds.Count(nodes.ContainsKey) >= 2)
@@ -1666,9 +1497,12 @@ public partial class OsmMapLoader : Node
                 if (points.Count < 2) continue;
 
                 way.Tags.TryGetValue("golf", out string? golfType);
-                bool isCartPath = golfType != null
+                bool isCartPath = (golfType != null
                     && (golfType.Equals("cartpath", StringComparison.OrdinalIgnoreCase)
-                        || golfType.Equals("cart_path", StringComparison.OrdinalIgnoreCase));
+                        || golfType.Equals("cart_path", StringComparison.OrdinalIgnoreCase)))
+                    || (way.Tags.TryGetValue("highway", out var hWayTag)
+                        && (hWayTag.Equals("path", StringComparison.OrdinalIgnoreCase)
+                            || hWayTag.Equals("footway", StringComparison.OrdinalIgnoreCase)));
 
                 // Check if the way belongs to the main course
                 var wayCenter = new Vector2(points.Average(p => p.X), points.Average(p => p.Y));
@@ -1678,7 +1512,16 @@ public partial class OsmMapLoader : Node
                     if (!holeWays.Any(hw => hw.Id == way.Id))
                         continue;
                 }
-                else if (!isCartPath && !isPointInMainCourse(wayCenter))
+                else if (isCartPath)
+                {
+                    if (otherCoursePolygons.Count > 0 &&
+                        otherCoursePolygons.Any(p => PointInPolygon(wayCenter, p)) &&
+                        !coursePolygons.Any(p => PointInPolygon(wayCenter, p)))
+                    {
+                        continue;
+                    }
+                }
+                else if (!isPointInMainCourse(wayCenter))
                 {
                     // Do not skip the main golf course boundary ways/relations themselves
                     bool isMainBoundary = way.Tags.TryGetValue("leisure", out var l) && l == "golf_course";
@@ -2562,6 +2405,12 @@ public partial class OsmMapLoader : Node
                 }
                 return false;
             };
+
+            Func<Vector2, float, bool> isTooCloseToCartPath = (pt, minDist) =>
+            {
+                if (cartPaths == null || cartPaths.Count == 0) return false;
+                return IsTreeTooCloseToCartPath(pt, cartPaths, minDist);
+            };
             if (fairwayPolys.Count > 0)
             {
                 foreach (var kp in holeInfo)
@@ -2673,7 +2522,8 @@ public partial class OsmMapLoader : Node
                     float tz = -(float)((coord.Lat - refLat) * metersPerLat);
                     var pt = new Vector2(tx, tz);
 
-                    // Trees must never generate inside or too close to sand traps (< 5.0m) or greens (< 8.0m)
+                    // Trees must never generate inside or too close to sand traps (< 5.0m), greens (< 8.0m), or cart paths (< 2.2m)
+                    if (isTooCloseToCartPath(pt, 2.2f)) continue;
                     if (isTooCloseToBunker(pt, 5.0f)) continue;
                     if (isTooCloseToGreen(pt, 8.0f)) continue;
 
@@ -2696,6 +2546,7 @@ public partial class OsmMapLoader : Node
 
             foreach (var pt in additionalTreePositions)
             {
+                if (isTooCloseToCartPath(pt, 2.2f)) continue;
                 if (isTooCloseToBunker(pt, 5.0f)) continue;
                 if (isTooCloseToGreen(pt, 8.0f)) continue;
 
@@ -2862,6 +2713,9 @@ public partial class OsmMapLoader : Node
                             }
                         }
                         if (insideExclusion) return;
+
+                        // Strictly no generated trees on or close to cart paths (< 2.2m)
+                        if (isTooCloseToCartPath(pt, 2.2f)) return;
 
                         // Strictly no generated trees inside or close to bunker (< 5.0m)
                         if (isTooCloseToBunker(pt, 5.0f)) return;
@@ -3096,6 +2950,9 @@ public partial class OsmMapLoader : Node
                             }
                             if (insideExclusion) continue;
 
+                            // Strictly no generated trees on or close to cart paths (< 2.2m)
+                            if (isTooCloseToCartPath(rp, 2.2f)) continue;
+
                             // Strictly no generated trees inside or close to bunker (< 5.0m)
                             if (isTooCloseToBunker(rp, 5.0f)) continue;
 
@@ -3164,6 +3021,9 @@ public partial class OsmMapLoader : Node
                                 return false;
                         }
                     }
+
+                    // Strictly no generated trees on or close to cart paths (< 2.2m)
+                    if (isTooCloseToCartPath(pt, 2.2f)) return false;
 
                     // Strictly no generated trees inside or close to bunker (< 5.0m)
                     if (isTooCloseToBunker(pt, 5.0f)) return false;
@@ -3504,6 +3364,7 @@ public partial class OsmMapLoader : Node
                             }
                         }
                         if (insideExclusion) continue;
+                        if (isTooCloseToCartPath(pt, 2.2f)) continue;
                         if (isTooCloseToBunker(pt, 3.5f)) continue;
                         if (isTooCloseToGreen(pt, 5.0f)) continue;
 
@@ -6793,8 +6654,15 @@ public partial class OsmMapLoader : Node
         return distance;
     }
 
-    private record OsmWay(long Id, List<long> NodeIds, Dictionary<string, string> Tags);
-    private record OsmRelation(long Id, List<(string Type, long Ref, string Role)> Members, Dictionary<string, string> Tags);
+    public record OsmWay(long Id, List<long> NodeIds, Dictionary<string, string> Tags);
+    public record OsmRelation(long Id, List<(string Type, long Ref, string Role)> Members, Dictionary<string, string> Tags);
+
+    public sealed record CourseBoundaryInfo(
+        string TargetCourseName,
+        List<Vector2[]> CoursePolygons,
+        List<Vector2[]> OtherCoursePolygons,
+        HashSet<string> OtherCourseNames
+    );
     
     private class CourseJsonConfig
     {
@@ -6935,7 +6803,7 @@ public partial class OsmMapLoader : Node
         public Vector2[]? Polygon { get; set; }
     }
 
-    private class ExclusionPolygon
+    public class ExclusionPolygon
     {
         public Vector2[] Polygon;
         public float MinX;
@@ -7448,7 +7316,7 @@ public partial class OsmMapLoader : Node
         public double MetersPerLon { get; set; }
     }
 
-    private BBox? CalculateBBoxFromOsmJson(string jsonString, double lat, double lon)
+    private BBox? CalculateBBoxFromOsmJson(string jsonString, double lat, double lon, string courseName = "")
     {
         try
         {
@@ -7585,189 +7453,17 @@ public partial class OsmMapLoader : Node
                 }
             }
 
-            // Find the main course boundary to filter out other golf courses in the radius
-            double closestDist = double.MaxValue;
-            OsmWay closestWay = null;
-            OsmRelation closestRel = null;
-
-            foreach (var way in ways)
-            {
-                if (way.Tags.TryGetValue("leisure", out var leisure) && leisure == "golf_course")
-                {
-                    var wayNodes = way.NodeIds.Where(nodes.ContainsKey).Select(id => nodes[id]).ToList();
-                    if (wayNodes.Count > 0)
-                    {
-                        double avgLat = wayNodes.Average(n => n.Lat);
-                        double avgLon = wayNodes.Average(n => n.Lon);
-                        double dLat = avgLat - lat;
-                        double dLon = avgLon - lon;
-                        double dist = dLat * dLat + dLon * dLon;
-                        if (dist < closestDist)
-                        {
-                            closestDist = dist;
-                            closestWay = way;
-                            closestRel = null;
-                        }
-                    }
-                }
-            }
-
-            foreach (var rel in relations)
-            {
-                if (rel.Tags.TryGetValue("leisure", out var leisure) && leisure == "golf_course")
-                {
-                    var memberWays = rel.Members
-                        .Where(m => m.Type == "way")
-                        .Select(m => ways.FirstOrDefault(w => w.Id == m.Ref))
-                        .Where(w => w != null)
-                        .ToList();
-
-                    var allNodeCoords = memberWays
-                        .SelectMany(w => w.NodeIds)
-                        .Where(nodes.ContainsKey)
-                        .Select(id => nodes[id])
-                        .ToList();
-
-                    if (allNodeCoords.Count > 0)
-                    {
-                        double avgLat = allNodeCoords.Average(n => n.Lat);
-                        double avgLon = allNodeCoords.Average(n => n.Lon);
-                        double dLat = avgLat - lat;
-                        double dLon = avgLon - lon;
-                        double dist = dLat * dLat + dLon * dLon;
-                        if (dist < closestDist)
-                        {
-                            closestDist = dist;
-                            closestRel = rel;
-                            closestWay = null;
-                        }
-                    }
-                }
-            }
-
-            string targetCourseName = "";
-            if (closestRel != null && closestRel.Tags.TryGetValue("name", out var relName))
-            {
-                targetCourseName = relName;
-            }
-            else if (closestWay != null && closestWay.Tags.TryGetValue("name", out var wayName))
-            {
-                targetCourseName = wayName;
-            }
-
-            // Gather all boundary polygons for golf courses with the same name, or just the closest one if nameless
-            var coursePolygons = new List<Vector2[]>();
-            
-            var matchingWays = ways.Where(w => 
-                w.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
-                (string.IsNullOrEmpty(targetCourseName) ? w == closestWay : (w.Tags.TryGetValue("name", out var n) && n == targetCourseName))
-            ).ToList();
-
-            foreach (var w in matchingWays)
-            {
-                var pts = w.NodeIds
-                    .Where(nodes.ContainsKey)
-                    .Select(id => nodes[id])
-                    .Select(coord => new Vector2(
-                        (float)((coord.Lon - refLon) * metersPerLon),
-                        -(float)((coord.Lat - refLat) * metersPerLat)
-                    ))
-                    .ToArray();
-                if (pts.Length >= 3)
-                {
-                    coursePolygons.Add(pts);
-                }
-            }
-
-            var matchingRels = relations.Where(r => 
-                r.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
-                (string.IsNullOrEmpty(targetCourseName) ? r == closestRel : (r.Tags.TryGetValue("name", out var n) && n == targetCourseName))
-            ).ToList();
-
-            foreach (var r in matchingRels)
-            {
-                var assembled = AssembleRelationPolygons(r, ways, nodes, refLat, refLon, metersPerLat, metersPerLon);
-                coursePolygons.AddRange(assembled);
-            }
+            var boundaryInfo = IdentifyCourseBoundaries(ways, relations, nodes, lat, lon, courseName, refLat, refLon, metersPerLat, metersPerLon);
+            string targetCourseName = boundaryInfo.TargetCourseName;
+            var coursePolygons = boundaryInfo.CoursePolygons;
+            var otherCoursePolygons = boundaryInfo.OtherCoursePolygons;
+            var otherCourseNames = boundaryInfo.OtherCourseNames;
 
             var lineOfPlayPaths = new List<List<Vector2>>();
             var exclusionPolygons = new List<ExclusionPolygon>();
 
-            Func<Vector2, bool> isPointInMainCourse = (pt) => {
-                if (coursePolygons.Count == 0) return true;
-                foreach (var poly in coursePolygons)
-                {
-                    if (Geometry2D.IsPointInPolygon(pt, poly))
-                        return true;
-                    foreach (var vertex in poly)
-                    {
-                        if (pt.DistanceTo(vertex) < 60f)
-                            return true;
-                    }
-                }
-                for (int pIdx = 0; pIdx < lineOfPlayPaths.Count; pIdx++)
-                {
-                    var path = lineOfPlayPaths[pIdx];
-                    for (int i = 0; i < path.Count - 1; i++)
-                    {
-                        if (DistanceToSegment(pt, path[i], path[i + 1]) < 90.0f)
-                            return true;
-                    }
-                }
-                for (int i = 0; i < exclusionPolygons.Count; i++)
-                {
-                    var excl = exclusionPolygons[i];
-                    if (pt.X >= excl.MinX - 50f && pt.X <= excl.MaxX + 50f && pt.Y >= excl.MinY - 50f && pt.Y <= excl.MaxY + 50f)
-                    {
-                        if (PointInPolygon(pt, excl.Polygon)) return true;
-                    }
-                }
-                return false;
-            };
-
-            Func<OsmWay, bool> isHoleBelongingToCourse = (hw) => {
-                if (coursePolygons.Count == 0) return true;
-
-                string holeCourse = ExtractSubCourseName(hw.Tags);
-                if (!string.IsNullOrEmpty(targetCourseName) && !string.IsNullOrEmpty(holeCourse))
-                {
-                    if (holeCourse.Equals(targetCourseName, StringComparison.OrdinalIgnoreCase) ||
-                        targetCourseName.Contains(holeCourse, StringComparison.OrdinalIgnoreCase) ||
-                        holeCourse.Contains(targetCourseName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-                }
-
-                var hPts = hw.NodeIds
-                    .Where(nodes.ContainsKey)
-                    .Select(id => nodes[id])
-                    .Select(coord => new Vector2(
-                        (float)((coord.Lon - refLon) * metersPerLon),
-                        -(float)((coord.Lat - refLat) * metersPerLat)
-                    ))
-                    .ToList();
-
-                if (hPts.Count < 2) return false;
-
-                Vector2 tee = hPts.First();
-                Vector2 pin = hPts.Last();
-                Vector2 center = new Vector2(hPts.Average(p => p.X), hPts.Average(p => p.Y));
-
-                foreach (var poly in coursePolygons)
-                {
-                    if (Geometry2D.IsPointInPolygon(tee, poly) || Geometry2D.IsPointInPolygon(pin, poly) || Geometry2D.IsPointInPolygon(center, poly))
-                        return true;
-
-                    foreach (var v in poly)
-                    {
-                        if (tee.DistanceTo(v) < 30f || pin.DistanceTo(v) < 30f || center.DistanceTo(v) < 30f)
-                            return true;
-                    }
-                }
-
-                return false;
-            };
+            Func<Vector2, bool> isPointInMainCourse = (pt) => IsPointInMainCourse(pt, boundaryInfo, lineOfPlayPaths, exclusionPolygons);
+            Func<OsmWay, bool> isHoleBelongingToCourse = (hw) => IsHoleBelongingToCourse(hw, nodes, refLat, refLon, metersPerLat, metersPerLon, boundaryInfo);
 
             foreach (var way in ways)
             {
@@ -8965,6 +8661,411 @@ public partial class OsmMapLoader : Node
         return minD;
     }
 
+    public static float DistancePointToPolygonWithInterior(Vector2 p, Vector2[] poly)
+    {
+        if (poly == null || poly.Length < 3) return float.MaxValue;
+        if (PointInPolygon(p, poly)) return 0f;
+        return DistanceToPolygon(p, poly);
+    }
+
+    public static float DistancePointToPolygonList(Vector2 p, List<Vector2[]> polys)
+    {
+        if (polys == null || polys.Count == 0) return float.MaxValue;
+        float minD = float.MaxValue;
+        for (int i = 0; i < polys.Count; i++)
+        {
+            var poly = polys[i];
+            if (poly == null || poly.Length < 3) continue;
+            float d = DistancePointToPolygonWithInterior(p, poly);
+            if (d < minD)
+            {
+                minD = d;
+                if (minD == 0f) return 0f;
+            }
+        }
+        return minD;
+    }
+
+    public static bool CourseNameMatches(string? osmName, string? targetName)
+    {
+        if (string.IsNullOrWhiteSpace(osmName) || string.IsNullOrWhiteSpace(targetName)) return false;
+        string s1 = osmName.Trim();
+        string s2 = targetName.Trim();
+        if (s1.Equals(s2, StringComparison.OrdinalIgnoreCase)) return true;
+        if (s1.Contains(s2, StringComparison.OrdinalIgnoreCase) || s2.Contains(s1, StringComparison.OrdinalIgnoreCase)) return true;
+
+        string Clean(string s) => s.Replace("Golf Course", "", StringComparison.OrdinalIgnoreCase)
+                                   .Replace("Golf Club", "", StringComparison.OrdinalIgnoreCase)
+                                   .Replace("Golf Links", "", StringComparison.OrdinalIgnoreCase)
+                                   .Replace("Country Club", "", StringComparison.OrdinalIgnoreCase)
+                                   .Replace("Golf", "", StringComparison.OrdinalIgnoreCase)
+                                   .Trim();
+        string c1 = Clean(s1);
+        string c2 = Clean(s2);
+        if (!string.IsNullOrWhiteSpace(c1) && !string.IsNullOrWhiteSpace(c2))
+        {
+            if (c1.Equals(c2, StringComparison.OrdinalIgnoreCase) || c1.Contains(c2, StringComparison.OrdinalIgnoreCase) || c2.Contains(c1, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    public static CourseBoundaryInfo IdentifyCourseBoundaries(
+        List<OsmWay> ways,
+        List<OsmRelation> relations,
+        Dictionary<long, (double Lat, double Lon)> nodes,
+        double lat,
+        double lon,
+        string preferredCourseName,
+        double refLat,
+        double refLon,
+        double metersPerLat,
+        double metersPerLon)
+    {
+        OsmWay? targetWay = null;
+        OsmRelation? targetRel = null;
+
+        // 1. Try to find a way or relation matching preferredCourseName
+        if (!string.IsNullOrWhiteSpace(preferredCourseName))
+        {
+            double bestNamedDist = double.MaxValue;
+            foreach (var way in ways)
+            {
+                if (way.Tags.TryGetValue("leisure", out var leisure) && leisure == "golf_course" &&
+                    way.Tags.TryGetValue("name", out var wayName) && CourseNameMatches(wayName, preferredCourseName))
+                {
+                    var wayNodes = way.NodeIds.Where(nodes.ContainsKey).Select(id => nodes[id]).ToList();
+                    if (wayNodes.Count > 0)
+                    {
+                        double avgLat = wayNodes.Average(n => n.Lat);
+                        double avgLon = wayNodes.Average(n => n.Lon);
+                        double dLat = avgLat - lat;
+                        double dLon = avgLon - lon;
+                        double dist = dLat * dLat + dLon * dLon;
+                        if (dist < bestNamedDist)
+                        {
+                            bestNamedDist = dist;
+                            targetWay = way;
+                            targetRel = null;
+                        }
+                    }
+                }
+            }
+
+            foreach (var rel in relations)
+            {
+                if (rel.Tags.TryGetValue("leisure", out var leisure) && leisure == "golf_course" &&
+                    rel.Tags.TryGetValue("name", out var relName) && CourseNameMatches(relName, preferredCourseName))
+                {
+                    var memberWays = rel.Members
+                        .Where(m => m.Type == "way")
+                        .Select(m => ways.FirstOrDefault(w => w.Id == m.Ref))
+                        .Where(w => w != null)
+                        .ToList();
+
+                    var allNodeCoords = memberWays
+                        .SelectMany(w => w.NodeIds)
+                        .Where(nodes.ContainsKey)
+                        .Select(id => nodes[id])
+                        .ToList();
+
+                    if (allNodeCoords.Count > 0)
+                    {
+                        double avgLat = allNodeCoords.Average(n => n.Lat);
+                        double avgLon = allNodeCoords.Average(n => n.Lon);
+                        double dLat = avgLat - lat;
+                        double dLon = avgLon - lon;
+                        double dist = dLat * dLat + dLon * dLon;
+                        if (dist < bestNamedDist)
+                        {
+                            bestNamedDist = dist;
+                            targetRel = rel;
+                            targetWay = null;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. If no name match, fallback to closest by coordinates
+        if (targetWay == null && targetRel == null)
+        {
+            double closestDist = double.MaxValue;
+            foreach (var way in ways)
+            {
+                if (way.Tags.TryGetValue("leisure", out var leisure) && leisure == "golf_course")
+                {
+                    var wayNodes = way.NodeIds.Where(nodes.ContainsKey).Select(id => nodes[id]).ToList();
+                    if (wayNodes.Count > 0)
+                    {
+                        double avgLat = wayNodes.Average(n => n.Lat);
+                        double avgLon = wayNodes.Average(n => n.Lon);
+                        double dLat = avgLat - lat;
+                        double dLon = avgLon - lon;
+                        double dist = dLat * dLat + dLon * dLon;
+                        if (dist < closestDist)
+                        {
+                            closestDist = dist;
+                            targetWay = way;
+                            targetRel = null;
+                        }
+                    }
+                }
+            }
+
+            foreach (var rel in relations)
+            {
+                if (rel.Tags.TryGetValue("leisure", out var leisure) && leisure == "golf_course")
+                {
+                    var memberWays = rel.Members
+                        .Where(m => m.Type == "way")
+                        .Select(m => ways.FirstOrDefault(w => w.Id == m.Ref))
+                        .Where(w => w != null)
+                        .ToList();
+
+                    var allNodeCoords = memberWays
+                        .SelectMany(w => w.NodeIds)
+                        .Where(nodes.ContainsKey)
+                        .Select(id => nodes[id])
+                        .ToList();
+
+                    if (allNodeCoords.Count > 0)
+                    {
+                        double avgLat = allNodeCoords.Average(n => n.Lat);
+                        double avgLon = allNodeCoords.Average(n => n.Lon);
+                        double dLat = avgLat - lat;
+                        double dLon = avgLon - lon;
+                        double dist = dLat * dLat + dLon * dLon;
+                        if (dist < closestDist)
+                        {
+                            closestDist = dist;
+                            targetRel = rel;
+                            targetWay = null;
+                        }
+                    }
+                }
+            }
+        }
+
+        string targetCourseName = "";
+        if (targetRel != null && targetRel.Tags.TryGetValue("name", out var rName))
+        {
+            targetCourseName = rName;
+        }
+        else if (targetWay != null && targetWay.Tags.TryGetValue("name", out var wName))
+        {
+            targetCourseName = wName;
+        }
+        else if (!string.IsNullOrWhiteSpace(preferredCourseName))
+        {
+            targetCourseName = preferredCourseName;
+        }
+
+        var coursePolygons = new List<Vector2[]>();
+        var otherCoursePolygons = new List<Vector2[]>();
+        var otherCourseNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var matchingWays = ways.Where(w =>
+            w.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
+            (string.IsNullOrEmpty(targetCourseName) ? w == targetWay : CourseNameMatches(w.Tags.GetValueOrDefault("name"), targetCourseName))
+        ).ToList();
+
+        foreach (var w in matchingWays)
+        {
+            var pts = w.NodeIds
+                .Where(nodes.ContainsKey)
+                .Select(id => nodes[id])
+                .Select(coord => new Vector2(
+                    (float)((coord.Lon - refLon) * metersPerLon),
+                    -(float)((coord.Lat - refLat) * metersPerLat)
+                ))
+                .ToArray();
+            if (pts.Length >= 3)
+            {
+                coursePolygons.Add(pts);
+            }
+        }
+
+        var matchingRels = relations.Where(r =>
+            r.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
+            (string.IsNullOrEmpty(targetCourseName) ? r == targetRel : CourseNameMatches(r.Tags.GetValueOrDefault("name"), targetCourseName))
+        ).ToList();
+
+        foreach (var r in matchingRels)
+        {
+            var assembled = AssembleRelationPolygons(r, ways, nodes, refLat, refLon, metersPerLat, metersPerLon);
+            coursePolygons.AddRange(assembled);
+        }
+
+        var otherWays = ways.Where(w =>
+            w.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
+            !matchingWays.Contains(w)
+        ).ToList();
+
+        foreach (var w in otherWays)
+        {
+            if (w.Tags.TryGetValue("name", out var on) && !string.IsNullOrWhiteSpace(on))
+            {
+                otherCourseNames.Add(on);
+            }
+            var pts = w.NodeIds
+                .Where(nodes.ContainsKey)
+                .Select(id => nodes[id])
+                .Select(coord => new Vector2(
+                    (float)((coord.Lon - refLon) * metersPerLon),
+                    -(float)((coord.Lat - refLat) * metersPerLat)
+                ))
+                .ToArray();
+            if (pts.Length >= 3)
+            {
+                otherCoursePolygons.Add(pts);
+            }
+        }
+
+        var otherRels = relations.Where(r =>
+            r.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
+            !matchingRels.Contains(r)
+        ).ToList();
+
+        foreach (var r in otherRels)
+        {
+            if (r.Tags.TryGetValue("name", out var on) && !string.IsNullOrWhiteSpace(on))
+            {
+                otherCourseNames.Add(on);
+            }
+            var assembled = AssembleRelationPolygons(r, ways, nodes, refLat, refLon, metersPerLat, metersPerLon);
+            otherCoursePolygons.AddRange(assembled);
+        }
+
+        return new CourseBoundaryInfo(targetCourseName, coursePolygons, otherCoursePolygons, otherCourseNames);
+    }
+
+    public static bool IsHoleBelongingToCourse(
+        OsmWay hw,
+        Dictionary<long, (double Lat, double Lon)> nodes,
+        double refLat,
+        double refLon,
+        double metersPerLat,
+        double metersPerLon,
+        CourseBoundaryInfo boundaryInfo)
+    {
+        var hPts = hw.NodeIds
+            .Where(nodes.ContainsKey)
+            .Select(id => nodes[id])
+            .Select(coord => new Vector2(
+                (float)((coord.Lon - refLon) * metersPerLon),
+                -(float)((coord.Lat - refLat) * metersPerLat)
+            ))
+            .ToList();
+
+        if (hPts.Count < 2) return false;
+
+        Vector2 tee = hPts.First();
+        Vector2 pin = hPts.Last();
+
+        string holeCourse = ExtractSubCourseName(hw.Tags);
+        if (!string.IsNullOrEmpty(holeCourse))
+        {
+            if (!string.IsNullOrEmpty(boundaryInfo.TargetCourseName) && CourseNameMatches(holeCourse, boundaryInfo.TargetCourseName))
+            {
+                return true;
+            }
+            if (boundaryInfo.OtherCourseNames.Any(ocn => CourseNameMatches(holeCourse, ocn)))
+            {
+                return false;
+            }
+        }
+
+        if (boundaryInfo.CoursePolygons.Count == 0)
+        {
+            if (boundaryInfo.OtherCoursePolygons.Count > 0)
+            {
+                bool teeInOther = boundaryInfo.OtherCoursePolygons.Any(p => PointInPolygon(tee, p));
+                bool pinInOther = boundaryInfo.OtherCoursePolygons.Any(p => PointInPolygon(pin, p));
+                if (teeInOther && pinInOther) return false;
+            }
+            return true;
+        }
+
+        if (boundaryInfo.OtherCoursePolygons.Count > 0)
+        {
+            bool teeInOther = boundaryInfo.OtherCoursePolygons.Any(p => PointInPolygon(tee, p));
+            bool pinInOther = boundaryInfo.OtherCoursePolygons.Any(p => PointInPolygon(pin, p));
+            bool teeInTarget = boundaryInfo.CoursePolygons.Any(p => PointInPolygon(tee, p));
+            bool pinInTarget = boundaryInfo.CoursePolygons.Any(p => PointInPolygon(pin, p));
+
+            if ((teeInOther && !teeInTarget) && (pinInOther && !pinInTarget))
+                return false;
+
+            if ((teeInOther && !teeInTarget) || (pinInOther && !pinInTarget))
+            {
+                float dTargetMin = Math.Min(DistancePointToPolygonList(tee, boundaryInfo.CoursePolygons), DistancePointToPolygonList(pin, boundaryInfo.CoursePolygons));
+                float dOtherMin = Math.Min(DistancePointToPolygonList(tee, boundaryInfo.OtherCoursePolygons), DistancePointToPolygonList(pin, boundaryInfo.OtherCoursePolygons));
+                if (dOtherMin < dTargetMin)
+                    return false;
+            }
+        }
+
+        float teeDist = DistancePointToPolygonList(tee, boundaryInfo.CoursePolygons);
+        float pinDist = DistancePointToPolygonList(pin, boundaryInfo.CoursePolygons);
+
+        // Both endpoints strictly inside
+        if (teeDist == 0f && pinDist == 0f) return true;
+
+        // One inside, other close to boundary (within 35m tolerance for mapper drawing inaccuracy)
+        if (teeDist == 0f && pinDist <= 35f) return true;
+        if (pinDist == 0f && teeDist <= 35f) return true;
+
+        // Both slightly outside near boundary (within 25m tolerance)
+        if (teeDist <= 25f && pinDist <= 25f) return true;
+
+        return false;
+    }
+
+    public static bool IsPointInMainCourse(
+        Vector2 pt,
+        CourseBoundaryInfo boundaryInfo,
+        List<List<Vector2>> lineOfPlayPaths,
+        List<ExclusionPolygon> exclusionPolygons)
+    {
+        if (boundaryInfo.CoursePolygons.Count == 0) return true;
+
+        // If point is strictly inside an other course's boundary and not in target course, exclude it
+        if (boundaryInfo.OtherCoursePolygons.Count > 0 &&
+            boundaryInfo.OtherCoursePolygons.Any(p => PointInPolygon(pt, p)) &&
+            !boundaryInfo.CoursePolygons.Any(p => PointInPolygon(pt, p)))
+        {
+            return false;
+        }
+
+        foreach (var poly in boundaryInfo.CoursePolygons)
+        {
+            if (PointInPolygon(pt, poly)) return true;
+            if (DistancePointToPolygonWithInterior(pt, poly) < 35f) return true;
+        }
+
+        for (int pIdx = 0; pIdx < lineOfPlayPaths.Count; pIdx++)
+        {
+            var path = lineOfPlayPaths[pIdx];
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                if (DistanceToSegment(pt, path[i], path[i + 1]) < 90.0f)
+                    return true;
+            }
+        }
+
+        for (int i = 0; i < exclusionPolygons.Count; i++)
+        {
+            var excl = exclusionPolygons[i];
+            if (pt.X >= excl.MinX - 50f && pt.X <= excl.MaxX + 50f && pt.Y >= excl.MinY - 50f && pt.Y <= excl.MaxY + 50f)
+            {
+                if (PointInPolygon(pt, excl.Polygon)) return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Checks whether a tree position is too close to any fairway polygon (closer than minDistance meters).
     /// </summary>
@@ -9026,6 +9127,44 @@ public partial class OsmMapLoader : Node
     }
 
     /// <summary>
+    /// Checks whether a tree position is inside or too close to any cart path line/polyline.
+    /// Default minDistance is 2.2m (cart path half-width ~1.25m + clearance ~0.95m).
+    /// </summary>
+    public static bool IsTreeTooCloseToCartPath(Vector2 pt, IEnumerable<IEnumerable<Vector2>>? cartPaths, float minDistance = 2.2f)
+    {
+        if (cartPaths == null) return false;
+        float minDstSq = minDistance * minDistance;
+        foreach (var path in cartPaths)
+        {
+            if (path == null) continue;
+            Vector2? prev = null;
+            foreach (var curr in path)
+            {
+                if (prev.HasValue)
+                {
+                    Vector2 a = prev.Value;
+                    Vector2 b = curr;
+                    float minX = Math.Min(a.X, b.X) - minDistance;
+                    float maxX = Math.Max(a.X, b.X) + minDistance;
+                    float minY = Math.Min(a.Y, b.Y) - minDistance;
+                    float maxY = Math.Max(a.Y, b.Y) + minDistance;
+
+                    if (pt.X >= minX && pt.X <= maxX && pt.Y >= minY && pt.Y <= maxY)
+                    {
+                        float d = DistanceToSegment(pt, a, b);
+                        if (d < minDistance)
+                        {
+                            return true;
+                        }
+                    }
+                }
+                prev = curr;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Checks whether a tree position is inside or too close to any bunker / sand trap polygon.
     /// </summary>
     public static bool IsTreeTooCloseToBunker(Vector2 pt, IEnumerable<Vector2[]> bunkerPolygons, float minDistance = 5.0f)
@@ -9079,27 +9218,35 @@ public partial class OsmMapLoader : Node
         IEnumerable<Vector2[]>? bunkerPolygons = null,
         float minBunkerDist = 5.0f,
         IEnumerable<Vector2[]>? greenPolygons = null,
-        float minGreenDist = 10.0f)
+        float minGreenDist = 10.0f,
+        IEnumerable<IEnumerable<Vector2>>? cartPaths = null,
+        float minCartPathDist = 2.2f)
     {
-        // 1. Ensure no trees inside or too close to bunker (< 5.0m)
+        // 1. Ensure no trees inside or too close to cart paths (< 2.2m)
+        if (cartPaths != null && IsTreeTooCloseToCartPath(pt, cartPaths, minCartPathDist))
+        {
+            return false;
+        }
+
+        // 2. Ensure no trees inside or too close to bunker (< 5.0m)
         if (bunkerPolygons != null && IsTreeTooCloseToBunker(pt, bunkerPolygons, minBunkerDist))
         {
             return false;
         }
 
-        // 2. Ensure no trees inside or too close to green (< 10.0m)
+        // 3. Ensure no trees inside or too close to green (< 10.0m)
         if (greenPolygons != null && IsTreeTooCloseToGreen(pt, greenPolygons, minGreenDist))
         {
             return false;
         }
 
-        // 3. Ensure no trees too close to fairway
+        // 4. Ensure no trees too close to fairway
         if (IsTreeTooCloseToFairway(pt, fairwayPolygons, minFairwayDist))
         {
             return false;
         }
 
-        // 4. Ensure no trees between any tee box and fairway
+        // 5. Ensure no trees between any tee box and fairway
         if (holeData != null)
         {
             foreach (var kvp in holeData)
@@ -9199,6 +9346,50 @@ public partial class OsmMapLoader : Node
     public bool CheckTreeBetweenTeeAndFairway(Vector2 pt, Vector2 teePos, Vector2 fairwayTarget, float corridorHalfWidth = 18.0f, float minTeeFrontDist = 35.0f)
     {
         return IsTreeBetweenTeeAndFairway(pt, teePos, fairwayTarget, corridorHalfWidth, minTeeFrontDist);
+    }
+
+    public bool CheckTreeTooCloseToCartPath(Vector2 pt, Godot.Collections.Array cartPaths, float minDistance = 2.2f)
+    {
+        var list = new List<List<Vector2>>();
+        if (cartPaths != null)
+        {
+            foreach (var item in cartPaths)
+            {
+                if (item.VariantType == Variant.Type.PackedVector2Array)
+                {
+                    list.Add(new List<Vector2>(item.AsVector2Array()));
+                }
+                else if (item.Obj is Vector2[] vArr)
+                {
+                    list.Add(new List<Vector2>(vArr));
+                }
+                else if (item.Obj is List<Vector2> vList)
+                {
+                    list.Add(vList);
+                }
+                else if (item.Obj is IEnumerable<Vector2> vEnum)
+                {
+                    list.Add(new List<Vector2>(vEnum));
+                }
+                else if (item.VariantType == Variant.Type.Array)
+                {
+                    var innerArr = item.AsGodotArray();
+                    var pList = new List<Vector2>();
+                    foreach (var p in innerArr)
+                    {
+                        if (p.VariantType == Variant.Type.Vector2)
+                        {
+                            pList.Add(p.AsVector2());
+                        }
+                    }
+                    if (pList.Count > 0)
+                    {
+                        list.Add(pList);
+                    }
+                }
+            }
+        }
+        return IsTreeTooCloseToCartPath(pt, list, minDistance);
     }
 
     private StandardMaterial3D? _rockMaterial;

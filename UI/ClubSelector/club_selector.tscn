@@ -3,7 +3,6 @@
 [ext_resource type="Script" uid="uid://7qixaoi6dbvj" path="res://UI/ClubSelector/club_selector.gd" id="1_bim0c"]
 
 [node name="ClubSelector" type="PanelContainer"]
-z_index = 1000
 custom_minimum_size = Vector2(256, 56)
 script = ExtResource("1_bim0c")
 

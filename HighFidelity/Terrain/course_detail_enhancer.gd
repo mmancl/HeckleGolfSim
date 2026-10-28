@@ -1099,6 +1099,13 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 	mmi.visibility_range_end = 700.0
 	mmi.visibility_range_end_margin = 60.0
 	mmi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+	var is_low := false
+	var main_loop = Engine.get_main_loop()
+	if main_loop is SceneTree and (main_loop as SceneTree).root != null:
+		var gs = (main_loop as SceneTree).root.get_node_or_null("GlobalSettings")
+		if gs != null and gs.has_method("get_graphics_quality"):
+			is_low = (gs.get_graphics_quality() == "Low")
+	mmi.visible = not is_low
 	scene_root.add_child(mmi)
 	if persist_for_save:
 		mmi.owner = scene_root
@@ -1481,7 +1488,10 @@ static func ensure_deep_rough_map(scene_root: Node, terrain_node: MeshInstance3D
 		return null
 	var terrain := terrain_node
 	if terrain == null:
-		terrain = scene_root.find_child("UnifiedTerrain", true, false) as MeshInstance3D
+		for tname in ["UnifiedTerrain", "DynamicGround", "RoughGround", "Terrain", "TerrainMesh"]:
+			terrain = scene_root.find_child(tname, true, false) as MeshInstance3D
+			if terrain != null and terrain.mesh != null and terrain.mesh.get_surface_count() > 0:
+				break
 	if terrain == null or terrain.mesh == null or terrain.mesh.get_surface_count() == 0:
 		return null
 
@@ -1521,10 +1531,12 @@ static func ensure_deep_rough_map(scene_root: Node, terrain_node: MeshInstance3D
 
 static func _build_deep_rough_map(scene_root: Node, terrain: MeshInstance3D) -> ImageTexture:
 	var aabb := terrain.mesh.get_aabb()
-	var min_x: float = aabb.position.x
-	var max_x: float = aabb.position.x + aabb.size.x
-	var min_z: float = aabb.position.z
-	var max_z: float = aabb.position.z + aabb.size.z
+	var t_gx: float = terrain.global_position.x if terrain.is_inside_tree() else terrain.position.x
+	var t_gz: float = terrain.global_position.z if terrain.is_inside_tree() else terrain.position.z
+	var min_x: float = t_gx + aabb.position.x
+	var max_x: float = t_gx + aabb.position.x + aabb.size.x
+	var min_z: float = t_gz + aabb.position.z
+	var max_z: float = t_gz + aabb.position.z + aabb.size.z
 	var width: float = maxf(max_x - min_x, 1.0)
 	var depth: float = maxf(max_z - min_z, 1.0)
 
@@ -1562,16 +1574,17 @@ static func _build_deep_rough_map(scene_root: Node, terrain: MeshInstance3D) -> 
 				simg.decompress()
 			var sw := simg.get_width()
 			var sh := simg.get_height()
-			for gz in range(tex_size):
-				var sy := clampi(int(round(float(gz) / float(tex_size - 1) * float(sh - 1))), 0, sh - 1)
-				for gx in range(tex_size):
-					var sx := clampi(int(round(float(gx) / float(tex_size - 1) * float(sw - 1))), 0, sw - 1)
+			for gz_idx in range(tex_size):
+				var sy := clampi(int(round(float(gz_idx) / float(tex_size - 1) * float(sh - 1))), 0, sh - 1)
+				for gx_idx in range(tex_size):
+					var sx := clampi(int(round(float(gx_idx) / float(tex_size - 1) * float(sw - 1))), 0, sw - 1)
 					var c := simg.get_pixel(sx, sy)
 					if c.r > 0.40 or c.g > 0.40:
-						dist_grid[gz * tex_size + gx] = 0.0
+						dist_grid[gz_idx * tex_size + gx_idx] = 0.0
 						seeded_any = true
 
-	# 2. Mark tee boxes into tee_mask (and fallback to static bodies if no splat_map was present)
+	# 2. Mark tee boxes into tee_mask AND seed fairway/green static collision bodies
+	# (Seeding static bodies guarantees distance grid matches physical ball lie calculation)
 	for child in scene_root.find_children("*", "CollisionObject3D", true, false):
 		var cname := child.name.to_lower()
 		var st: int = int(child.get_meta("surface_type", -1))
@@ -1585,11 +1598,8 @@ static func _build_deep_rough_map(scene_root: Node, terrain: MeshInstance3D) -> 
 		var is_fairway: bool = (cname.begins_with("fairway_static") or cname.contains("fairway") or (st == 0 and not is_tee)) and not is_green and not is_tee
 		if not is_green and not is_fairway and not is_tee:
 			continue
-		# If already seeded from splat map, we only need tee bodies for tee_mask
-		if seeded_any and not is_tee:
-			continue
 
-		var child_xform: Transform3D = (child as Node3D).transform
+		var child_xform: Transform3D = child.global_transform if child.is_inside_tree() else (child as Node3D).transform
 		var has_concave := false
 
 		for sub in child.get_children():

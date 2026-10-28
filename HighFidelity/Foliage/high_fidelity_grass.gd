@@ -84,6 +84,26 @@ func _process(_delta: float) -> void:
 	var p := _get_player_node()
 	var cur_lie := str(p.get("current_lie_type")).to_lower() if p != null else ""
 	var cur_red := float(p.get("current_shot_reduction")) if p != null else 0.0
+	if cur_red <= 0.0 and p != null:
+		cur_red = float(p.get("last_shot_reduction"))
+	var b_node := _find_ball()
+	if b_node != null and (cur_lie.is_empty() or cur_lie in ["teebox", "fairway"]):
+		var b_lie = str(b_node.get("lie_type")).to_lower()
+		if b_lie in ["rough", "deep_rough", "heavy_rough"]:
+			cur_lie = b_lie
+	if is_inside_tree():
+		var mp_mgr = get_tree().root.get_node_or_null("MultiplayerManager")
+		if mp_mgr != null and not mp_mgr.players.is_empty():
+			var ap = mp_mgr.get_active_player()
+			if not ap.is_empty():
+				if cur_red <= 0.0:
+					cur_red = float(ap.get("shot_reduction", 0.0))
+				if cur_red <= 0.0:
+					cur_red = float(ap.get("last_shot_reduction", 0.0))
+				if cur_lie.is_empty() or cur_lie in ["teebox", "fairway"]:
+					var ap_lie = str(ap.get("lie_type", "")).to_lower()
+					if not ap_lie.is_empty():
+						cur_lie = ap_lie
 	var lie_changed := (cur_lie != _last_lie_type or absf(cur_red - _last_shot_reduction) > 0.01)
 	if lie_changed:
 		_refresh_anchor(true)
@@ -381,12 +401,17 @@ func _get_course_node() -> Node:
 		for child in _scene_root.get_children():
 			if child.has_method("get_distance_to_nearest_fairway"):
 				return child
+		var cp = _scene_root.get_node_or_null("CoursePlay") if _scene_root.name != "CoursePlay" else _scene_root
+		if cp != null and cp.get("course_instance") != null and cp.course_instance.has_method("get_distance_to_nearest_fairway"):
+			return cp.course_instance
 	if is_inside_tree():
-		var cm = get_tree().root.get_node_or_null("CourseManager")
-		if cm != null:
-			for child in cm.get_children():
-				if child.has_method("get_distance_to_nearest_fairway"):
-					return child
+		var root = get_tree().root
+		var cp = root.find_child("CoursePlay", true, false)
+		if cp != null and cp.get("course_instance") != null and cp.course_instance.has_method("get_distance_to_nearest_fairway"):
+			return cp.course_instance
+		for candidate in root.find_children("*", "", true, false):
+			if candidate.has_method("get_distance_to_nearest_fairway"):
+				return candidate
 	return null
 
 
@@ -416,6 +441,35 @@ func _refresh_anchor(force: bool) -> void:
 	var p := _get_player_node()
 	var cur_lie := str(p.get("current_lie_type")).to_lower() if p != null else ""
 	var cur_red := float(p.get("current_shot_reduction")) if p != null else 0.0
+	if cur_red <= 0.0 and p != null:
+		cur_red = float(p.get("last_shot_reduction"))
+	if ball != null and (cur_lie.is_empty() or cur_lie in ["teebox", "fairway"]):
+		var b_lie = str(ball.get("lie_type")).to_lower()
+		if b_lie in ["rough", "deep_rough", "heavy_rough"]:
+			cur_lie = b_lie
+	if is_inside_tree():
+		var mp_mgr = get_tree().root.get_node_or_null("MultiplayerManager")
+		if mp_mgr != null and not mp_mgr.players.is_empty():
+			var ap = mp_mgr.get_active_player()
+			if not ap.is_empty():
+				if cur_red <= 0.0:
+					cur_red = float(ap.get("shot_reduction", 0.0))
+				if cur_red <= 0.0:
+					cur_red = float(ap.get("last_shot_reduction", 0.0))
+				if cur_lie.is_empty() or cur_lie in ["teebox", "fairway"]:
+					var ap_lie = str(ap.get("lie_type", "")).to_lower()
+					if not ap_lie.is_empty():
+						cur_lie = ap_lie
+	if cur_red <= 0.0 and (cur_lie in ["rough", "deep_rough", "heavy_rough"] or cur_lie.is_empty()):
+		var cnode = _get_course_node()
+		if cnode != null and cnode.has_method("get_distance_to_nearest_fairway") and cnode.has_method("get_distance_to_nearest_green"):
+			var df = cnode.get_distance_to_nearest_fairway(anchor)
+			var dg = cnode.get_distance_to_nearest_green(anchor)
+			var d = minf(df, dg)
+			if d >= 36.0:
+				cur_red = 0.10 + 0.20 * clampf(d / 50.0, 0.0, 1.0)
+				if cur_lie.is_empty() or cur_lie in ["teebox", "fairway"]:
+					cur_lie = "rough"
 	var lie_changed := (cur_lie != _last_lie_type or absf(cur_red - _last_shot_reduction) > 0.01)
 
 	if not force and not lie_changed and anchor.distance_squared_to(_last_anchor_pos) < 4.0:
@@ -599,37 +653,68 @@ func _is_in_bunker_or_hazard(wx: float, wz: float, nearby_bunkers = null, nearby
 
 
 func _is_anchor_in_deep_rough(anchor: Vector3) -> bool:
-	# 1. Immediate exclusion if anchor is on cart path, inside a bunker, or green
+	# 1. Immediate exclusion if anchor is on cart path, inside a bunker, or hazard
 	if _is_on_cart_path(anchor.x, anchor.z) or _is_in_bunker_or_hazard(anchor.x, anchor.z):
 		return false
 
-	var p := _get_player_node()
-	if p != null:
-		var lie: String = str(p.get("current_lie_type")).to_lower()
-		# Never treat sand, bunker, fairway, green, or tee as rough
-		if lie in ["sand", "bunker", "fairway", "green", "fringe", "teebox", "tee", "water", "penalty"]:
+	var ball := _find_ball()
+	if ball != null:
+		var b_lie := str(ball.get("lie_type")).to_lower()
+		if b_lie in ["sand", "bunker", "green", "fringe", "water", "penalty"]:
 			return false
-		var red: float = float(p.get("current_shot_reduction"))
-		if (lie == "rough" or lie == "deep_rough" or lie == "heavy_rough") and red >= 0.245:
-			return true
+
+	var p := _get_player_node()
+	var lie: String = ""
+	var red: float = 0.0
+
+	if p != null:
+		lie = str(p.get("current_lie_type")).to_lower()
+		red = float(p.get("current_shot_reduction"))
+		if red <= 0.0:
+			red = float(p.get("last_shot_reduction"))
 
 	if is_inside_tree():
 		var mp_mgr = get_tree().root.get_node_or_null("MultiplayerManager")
 		if mp_mgr != null and not mp_mgr.players.is_empty():
 			var ap = mp_mgr.get_active_player()
 			if not ap.is_empty():
-				var lie: String = str(ap.get("lie_type", "")).to_lower()
-				if lie in ["sand", "bunker", "fairway", "green", "fringe", "teebox", "tee", "water", "penalty"]:
-					return false
-				var red: float = float(ap.get("shot_reduction", 0.0))
-				if (lie == "rough" or lie == "deep_rough" or lie == "heavy_rough") and red >= 0.245:
-					return true
+				if red <= 0.0:
+					red = float(ap.get("shot_reduction", 0.0))
+				if red <= 0.0:
+					red = float(ap.get("last_shot_reduction", 0.0))
+				if lie.is_empty() or lie in ["teebox", "fairway"]:
+					var ap_lie = str(ap.get("lie_type", "")).to_lower()
+					if not ap_lie.is_empty():
+						lie = ap_lie
 
+	if ball != null and (lie.is_empty() or lie in ["teebox", "fairway"]):
+		var b_lie = str(ball.get("lie_type")).to_lower()
+		if not b_lie.is_empty():
+			lie = b_lie
+
+	# Immediate exclusion if current surface is specifically sand, bunker, green, fringe, or penalty
+	if lie in ["sand", "bunker", "green", "fringe", "water", "penalty"]:
+		return false
+
+	# If resistance is >= 24.5% in rough, this is definitely deep rough
+	if (lie == "rough" or lie == "deep_rough" or lie == "heavy_rough") and red >= 0.245:
+		return true
+
+	# Check course node geometry and distances
 	var course_node = _get_course_node()
 	if course_node != null and course_node.has_method("get_distance_to_nearest_fairway") and course_node.has_method("get_distance_to_nearest_green"):
 		var df: float = course_node.get_distance_to_nearest_fairway(anchor)
 		var dg: float = course_node.get_distance_to_nearest_green(anchor)
-		if minf(df, dg) >= 36.0:
+		# Never activate if strictly inside fairway (<= 0.5m) or green (<= 0.001m)
+		if df <= 0.5 or dg <= 0.001:
+			return false
+		if course_node.has_method("get_distance_to_nearest_teebox") and course_node.get_distance_to_nearest_teebox(anchor) <= 1.5:
+			return false
+		var d := minf(df, dg)
+		if d >= 36.0:
+			return true
+		var calc_red = 0.10 + 0.20 * clampf(d / 50.0, 0.0, 1.0)
+		if calc_red >= 0.245 and (lie == "rough" or lie == "deep_rough" or lie == "heavy_rough" or lie.is_empty()):
 			return true
 
 	if _deep_img != null and _terrain_size_xz.x > 1.0 and _terrain_size_xz.y > 1.0:
@@ -729,7 +814,14 @@ func _update_deep_rough_blades(anchor: Vector3 = Vector3.ZERO, prefiltered_bunke
 						if _deep_img.get_pixel(px, pz).r <= 0.15:
 							ok = false
 					else:
-						ok = false
+						var cnode = _get_course_node()
+						if cnode != null and cnode.has_method("get_distance_to_nearest_fairway") and cnode.has_method("get_distance_to_nearest_green"):
+							var df = cnode.get_distance_to_nearest_fairway(Vector3(wx, 0.0, wz))
+							var dg = cnode.get_distance_to_nearest_green(Vector3(wx, 0.0, wz))
+							if minf(df, dg) < 36.0:
+								ok = false
+						else:
+							ok = false
 				else:
 					# Ball is resting in deep rough. Suppress if cell is strictly inside core fairway (splat green channel > 0.60)
 					if _splat_img != null and _terrain_size_xz.x > 1.0 and _terrain_size_xz.y > 1.0:

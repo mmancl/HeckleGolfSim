@@ -45,6 +45,7 @@ func _get_grid_height() -> float:
 	return float(rows * CLUB_BUTTON_SIZE.y + (rows - 1) * GRID_V_SEPARATION)
 
 func _ready() -> void:
+	z_index = 0
 	grid_container = $MarginContainer/VBoxContainer/DropdownWrapper/GridContainer
 	
 	# Hide title label and strip margins
@@ -345,6 +346,8 @@ func _toggle_grid_visibility() -> void:
 
 	if wrapper != null:
 		if grid_container.visible:
+			z_index = 20
+			grid_container.set_meta("on_focus_lock_popped", Callable(self, "_on_focus_lock_popped"))
 			wrapper.custom_minimum_size = Vector2(grid_w, grid_h)
 			custom_minimum_size.x = grid_w
 			if anchor_left == 1.0 and anchor_right == 1.0:
@@ -358,6 +361,7 @@ func _toggle_grid_visibility() -> void:
 				if first_child != null:
 					first_child.call_deferred("grab_focus")
 		else:
+			z_index = 0
 			var current_right = offset_right
 			wrapper.custom_minimum_size = Vector2(DEFAULT_TOGGLE_WIDTH, 0)
 			custom_minimum_size.x = DEFAULT_TOGGLE_WIDTH
@@ -376,6 +380,11 @@ func _toggle_grid_visibility() -> void:
 				var vp = get_viewport()
 				if vp != null:
 					vp.gui_release_focus()
+
+
+func close_grid() -> void:
+	if grid_container != null and grid_container.visible:
+		_toggle_grid_visibility()
 
 
 func _on_focus_lock_popped() -> void:

@@ -179,6 +179,40 @@ func _initialize():
 
 	print("  PASS: All green avoidance checks passed.")
 
+	# ---------------------------------------------------------
+	# Test 6: Verify Tree Cart Path Avoidance
+	# Ensures no trees are generated directly on or too close to cart paths (< 2.2m threshold)
+	# ---------------------------------------------------------
+	print("\n--- Test 6: Tree Cart Path Avoidance Validation ---")
+	var cart_path_polyline = PackedVector2Array([
+		Vector2(10, 0),
+		Vector2(10, 50),
+		Vector2(30, 80)
+	])
+	var cart_path_list: Array = [cart_path_polyline]
+
+	# Point directly on cart path: must be rejected
+	var on_cart_path = Vector2(10, 25)
+	assert(loader.CheckTreeTooCloseToCartPath(on_cart_path, cart_path_list, 2.2) == true,
+		"Tree directly on cart path must be flagged as too close")
+
+	# Point 1.2m from cart path centerline (within ~1.25m half-width): must be rejected
+	var inside_cart_path_width = Vector2(11.2, 25)
+	assert(loader.CheckTreeTooCloseToCartPath(inside_cart_path_width, cart_path_list, 2.2) == true,
+		"Tree within cart path edge must be flagged as too close")
+
+	# Point 1.8m from cart path centerline (< 2.2m clearance buffer): must be rejected
+	var near_cart_path = Vector2(8.2, 25)
+	assert(loader.CheckTreeTooCloseToCartPath(near_cart_path, cart_path_list, 2.2) == true,
+		"Tree within 2.2m clearance of cart path must be flagged as too close")
+
+	# Point 5.0m from cart path: safe distance, permitted
+	var safe_cart_path = Vector2(15.0, 25)
+	assert(loader.CheckTreeTooCloseToCartPath(safe_cart_path, cart_path_list, 2.2) == false,
+		"Tree 5m away from cart path must be permitted")
+
+	print("  PASS: All cart path avoidance checks passed.")
+
 	loader.free()
 	print("\n=======================================================")
 	print("ALL TREE FAIRWAY PROXIMITY AND CLEARANCE TESTS PASSED!")

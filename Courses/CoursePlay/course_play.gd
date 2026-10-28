@@ -236,6 +236,7 @@ func _setup_hud() -> void:
 	mulligan_confirm_dialog = PanelContainer.new()
 	mulligan_confirm_dialog.name = "MulliganConfirmDialog"
 	mulligan_confirm_dialog.visible = false
+	mulligan_confirm_dialog.z_index = 500
 	
 	mulligan_confirm_dialog.anchor_left = 0.5
 	mulligan_confirm_dialog.anchor_right = 0.5
@@ -327,6 +328,7 @@ func _setup_hud() -> void:
 	forfeit_confirm_dialog = PanelContainer.new()
 	forfeit_confirm_dialog.name = "ForfeitConfirmDialog"
 	forfeit_confirm_dialog.visible = false
+	forfeit_confirm_dialog.z_index = 500
 	forfeit_confirm_dialog.anchor_left = 0.5
 	forfeit_confirm_dialog.anchor_right = 0.5
 	forfeit_confirm_dialog.anchor_top = 0.5
@@ -362,6 +364,7 @@ func _setup_hud() -> void:
 	exit_confirm_dialog = Control.new()
 	exit_confirm_dialog.name = "ExitConfirmDialog"
 	exit_confirm_dialog.visible = false
+	exit_confirm_dialog.z_index = 500
 	exit_confirm_dialog.set_anchors_preset(Control.PRESET_FULL_RECT)
 	exit_confirm_dialog.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	exit_confirm_dialog.grow_vertical = Control.GROW_DIRECTION_BOTH
@@ -763,6 +766,7 @@ func _setup_hud() -> void:
 	add_player_prompt_dialog = PanelContainer.new()
 	add_player_prompt_dialog.name = "AddPlayerPromptDialog"
 	add_player_prompt_dialog.visible = false
+	add_player_prompt_dialog.z_index = 500
 	add_player_prompt_dialog.anchor_left = 0.5
 	add_player_prompt_dialog.anchor_right = 0.5
 	add_player_prompt_dialog.anchor_top = 0.5
@@ -798,6 +802,7 @@ func _setup_hud() -> void:
 	resume_player_prompt_dialog = PanelContainer.new()
 	resume_player_prompt_dialog.name = "ResumePlayerPromptDialog"
 	resume_player_prompt_dialog.visible = false
+	resume_player_prompt_dialog.z_index = 500
 	resume_player_prompt_dialog.anchor_left = 0.5
 	resume_player_prompt_dialog.anchor_right = 0.5
 	resume_player_prompt_dialog.anchor_top = 0.5
@@ -2255,6 +2260,7 @@ func _setup_hud() -> void:
 	# Manage Players Panel
 	hud_manage_players.name = "ManagePlayersPanel"
 	hud_manage_players.visible = false
+	hud_manage_players.z_index = 500
 	hud_manage_players.anchor_left = 0.5
 	hud_manage_players.anchor_right = 0.5
 	hud_manage_players.anchor_top = 0.5
@@ -3343,7 +3349,11 @@ func _get_current_green_vertices() -> PackedVector3Array:
 	var stack = [course_instance]
 	while not stack.is_empty():
 		var node = stack.pop_back()
-		if node is StaticBody3D and node.name.begins_with("green_Static_"):
+		var n_lower: String = node.name.to_lower()
+		var is_green_node: bool = (node is StaticBody3D) and (
+			n_lower.begins_with("green_static") or n_lower.contains("green") or (node.has_meta("surface_type") and int(node.get_meta("surface_type")) == 4)
+		)
+		if is_green_node:
 			var centroid = Vector3.ZERO
 			var vertex_count = 0
 			for child in node.get_children():

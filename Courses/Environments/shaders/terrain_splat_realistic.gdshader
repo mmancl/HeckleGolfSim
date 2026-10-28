@@ -263,7 +263,7 @@ void fragment() {
 				// Feathered grassy cut-edge border between <25% intermediate rough and >=25% deep rough
 				float edge_tuft = gnoise(v_world_pos.xz * 2.8) * 0.5 + gnoise(v_world_pos.xz * 7.5) * 0.5;
 				float deep_rough_w = smoothstep(0.28, 0.72, raw_dr + edge_tuft * 0.22 * raw_dr * (1.0 - raw_dr));
-				deep_rough_w *= smoothstep(0.15, 0.65, rough_w);
+				deep_rough_w *= smoothstep(0.04, 0.28, rough_w);
 
 				// 3-layer parallax/relief thick grass blade canopy
 				vec2 para_step = (view_dir.xz / max(abs(view_dir.y), 0.28)) * 0.018;

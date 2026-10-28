@@ -136,6 +136,7 @@ func _process(_delta: float) -> bool:
 	assert(not realistic_shader_code.contains("golden_straw_tint"), "terrain_splat_realistic.gdshader must not contain golden_straw_tint yellow discoloration")
 	assert(not realistic_shader_code.contains("dry_patch"), "terrain_splat_realistic.gdshader must not contain dry_patch yellow discoloration")
 	assert(realistic_shader_code.contains("deep_rough_map"), "terrain_splat_realistic.gdshader must sample deep_rough_map for >=25% lie resistance")
+	assert(not realistic_shader_code.contains("smoothstep(0.15, 0.65, rough_w)"), "terrain_splat_realistic.gdshader must not over-attenuate deep rough with high rough weight threshold")
 
 	# Test concave bunker manifold extraction (ensures concave shapes are preserved and not flattened into convex hulls)
 	var l_faces := PackedVector3Array([
@@ -214,6 +215,27 @@ func _process(_delta: float) -> bool:
 			dummy_p.set("current_lie_type", "rough")
 			dummy_p.set("current_shot_reduction", 0.26)
 			assert(grass_node.call("_is_anchor_in_deep_rough", Vector3(10, 0, 10)) == true, "Deep rough must activate in >= 25% rough")
+			# Verify fallback to last_shot_reduction when current_shot_reduction was reset upon ball landing
+			dummy_p.set("current_shot_reduction", 0.0)
+			dummy_p.set("last_shot_reduction", 0.28)
+			assert(grass_node.call("_is_anchor_in_deep_rough", Vector3(10, 0, 10)) == true, "Deep rough must activate from last_shot_reduction when current_shot_reduction was reset")
+			# Verify distance check at world (60, 0) which is 50m from fairway (> 36m, 30% resistance >= 25%)
+			dummy_p.set("last_shot_reduction", 0.0)
+			assert(grass_node.call("_is_anchor_in_deep_rough", Vector3(60, 0, 0)) == true, "Deep rough must activate at 50m rough (30% resistance >= 25%)")
+
+		# Verify ensure_deep_rough_map supports alternate terrain node names (e.g. TerrainMesh)
+		var alt_scene := Node3D.new()
+		var alt_terrain := MeshInstance3D.new()
+		alt_terrain.name = "TerrainMesh"
+		var alt_pm := PlaneMesh.new()
+		alt_pm.size = Vector2(100.0, 100.0)
+		var alt_am := ArrayMesh.new()
+		alt_am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, alt_pm.get_mesh_arrays())
+		alt_terrain.mesh = alt_am
+		alt_scene.add_child(alt_terrain)
+		var alt_tex := CourseDetailEnhancer.ensure_deep_rough_map(alt_scene)
+		assert(alt_tex != null, "ensure_deep_rough_map must find terrain named TerrainMesh")
+		alt_scene.free()
 
 		var dense_clump: ArrayMesh = grass_node.call("_create_dense_deep_rough_mesh", 0.28, 0.028, 0.05)
 		assert(dense_clump != null and dense_clump.get_surface_count() > 0, "Dense turf mesh must generate successfully")

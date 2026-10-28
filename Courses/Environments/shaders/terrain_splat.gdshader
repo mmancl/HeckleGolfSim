@@ -171,7 +171,7 @@ void fragment() {
 		float luma_r = dot(col_rough, vec3(0.299, 0.587, 0.114));
 		float ao_r = clamp(0.84 + luma_r * 0.35, 0.75, 1.0);
 		if (has_deep_rough_map) {
-			float dr = smoothstep(0.25, 0.75, texture(deep_rough_map, UV2).r) * smoothstep(0.15, 0.65, rough_w);
+			float dr = smoothstep(0.25, 0.75, texture(deep_rough_map, UV2).r) * smoothstep(0.04, 0.28, rough_w);
 			if (dr > 0.01) {
 				vec3 r_layer2 = texture(tex_rough, uv_rough * 1.9 + vec2(0.27, 0.43)).rgb;
 				float tuft = sin(v_world_pos.x * 11.0 + v_world_pos.z * 7.0) * cos(v_world_pos.x * 8.0 - v_world_pos.z * 13.0) * 0.5 + 0.5;

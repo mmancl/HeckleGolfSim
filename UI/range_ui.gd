@@ -21,6 +21,7 @@ var _avg_spin: Label
 var _avg_offline: Label
 var _avg_target_diff: Label
 var _prev_shot_popup: Panel
+var _session_pop_up: Control = null
 var _prev_shot_data_label: Label
 var _last_shot_data: Dictionary = {}
 var _averages_panel: PanelContainer = null
@@ -199,7 +200,12 @@ func _ready() -> void:
 		if bridge.has_signal("desktop_cameras_updated") and not bridge.desktop_cameras_updated.is_connected(_on_desktop_cameras_updated):
 			bridge.desktop_cameras_updated.connect(_on_desktop_cameras_updated)
 
-	$SessionPopUp.cancelled.connect(_on_session_pop_up_cancelled)
+	_session_pop_up = get_node_or_null("SessionPopUp")
+	if _session_pop_up != null:
+		if has_node("OverlayLayer"):
+			_session_pop_up.reparent($OverlayLayer)
+			_session_pop_up.z_index = 500
+		_session_pop_up.cancelled.connect(_on_session_pop_up_cancelled)
 
 	var range_settings = get_node_or_null("SettingsLayer/Container/RangeSettings")
 	if range_settings != null:
@@ -1209,6 +1215,10 @@ func trigger_swing_replay_modal(data: Dictionary) -> void:
 			modal.setup_modal(modal_data, recorded_frames, is_suggestions_only)
 			_detach_swing_replay_modal(modal)
 		else:
+			var club_sel = find_child("ClubSelector", true, false)
+			if club_sel != null and club_sel.has_method("close_grid"):
+				club_sel.close_grid()
+			modal.z_index = 500
 			$OverlayLayer.add_child(modal)
 			modal.setup_modal(modal_data, recorded_frames, is_suggestions_only)
 
@@ -1311,7 +1321,11 @@ func _attach_swing_replay_modal(modal: Control) -> void:
 
 	_detached_modal = null
 	modal.is_detached = false
+	modal.z_index = 500
 	if not modal.is_inside_tree():
+		var club_sel = find_child("ClubSelector", true, false)
+		if club_sel != null and club_sel.has_method("close_grid"):
+			club_sel.close_grid()
 		$OverlayLayer.add_child(modal)
 
 	modal._recenter_modal()
@@ -1378,7 +1392,8 @@ func _on_session_recorder_recording_state(value: bool) -> void:
 			rec_btn.text = "🔴 REC: On"
 			apply_material_button_style(rec_btn, Color(0.6, 0.15, 0.15, 0.85))
 			rec_btn.tooltip_text = "Stop Recording Range Session"
-		$SessionPopUp.open()
+		if _session_pop_up != null:
+			_session_pop_up.open()
 	else:
 		if rec_btn != null:
 			rec_btn.text = "REC: Off"
@@ -1532,7 +1547,8 @@ func _on_session_pop_up_cancelled() -> void:
 
 func _on_session_recorder_set_session(user: String, dir: String) -> void:
 	set_selected_player_name(user)
-	$SessionPopUp.set_session_data(user, dir)
+	if _session_pop_up != null:
+		_session_pop_up.set_session_data(user, dir)
 
 
 func _on_shot_injector_inject(data: Variant) -> void:
@@ -1743,8 +1759,17 @@ func _setup_prev_shot_ui() -> void:
 	_prev_shot_popup.name = "PrevShotPopup"
 	_prev_shot_popup.visible = false
 	_prev_shot_popup.custom_minimum_size = Vector2(460, 420)
-	_prev_shot_popup.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_prev_shot_popup.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_prev_shot_popup.anchor_left = 0.5
+	_prev_shot_popup.anchor_right = 0.5
+	_prev_shot_popup.anchor_top = 0.5
+	_prev_shot_popup.anchor_bottom = 0.5
+	_prev_shot_popup.offset_left = -230
+	_prev_shot_popup.offset_right = 230
+	_prev_shot_popup.offset_top = -210
+	_prev_shot_popup.offset_bottom = 210
+	_prev_shot_popup.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_prev_shot_popup.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_prev_shot_popup.z_index = 500
 	ThemeManager.apply_modal_style(_prev_shot_popup, 12)
 	
 	var vbox = VBoxContainer.new()
@@ -1793,7 +1818,10 @@ func _setup_prev_shot_ui() -> void:
 		_prev_shot_popup.visible = false
 	)
 	_prev_shot_popup.add_child(vbox)
-	add_child(_prev_shot_popup)
+	if has_node("OverlayLayer"):
+		$OverlayLayer.add_child(_prev_shot_popup)
+	else:
+		add_child(_prev_shot_popup)
 
 
 func _update_prev_shot_analysis_visibility() -> void:
@@ -1990,6 +2018,10 @@ func _show_exit_confirm_dialog() -> void:
 	if has_node("/root/AnnouncerEngine"):
 		get_node("/root/AnnouncerEngine").call("SpeakHomeButtonHeckle", {"game_mode": "range"})
 
+	var club_sel = find_child("ClubSelector", true, false)
+	if club_sel != null and club_sel.has_method("close_grid"):
+		club_sel.close_grid()
+
 	if _exit_confirm_dialog != null:
 		_exit_confirm_dialog.visible = true
 		var no_b = _exit_confirm_dialog.find_child("NoButton", true, false) as Button
@@ -2003,6 +2035,7 @@ func _show_exit_confirm_dialog() -> void:
 	_exit_confirm_dialog.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_exit_confirm_dialog.grow_vertical = Control.GROW_DIRECTION_BOTH
 	_exit_confirm_dialog.mouse_filter = Control.MOUSE_FILTER_STOP
+	_exit_confirm_dialog.z_index = 500
 
 	var exit_backdrop = ColorRect.new()
 	exit_backdrop.name = "Backdrop"

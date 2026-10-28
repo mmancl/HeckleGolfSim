@@ -111,6 +111,7 @@ func _init():
 		"menu_music_enabled": menu_music_enabled,
 		"minigame_music_enabled": minigame_music_enabled,
 		"green_speed": green_speed,
+		"random_pin_enabled": random_pin_enabled,
 		"phone_cam_url": phone_cam_url,
 		"use_phone_stream": use_phone_stream,
 		"tension_effects_enabled": tension_effects_enabled,

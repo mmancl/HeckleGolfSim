@@ -554,7 +554,7 @@ static func _extract_hole_geometry(
 
 	# Find the base terrain elevation at the source tee so the hole is anchored at Y=0 at tee
 	var src_tee_base_y = _find_closest_source_height(source_terrain_verts, Vector2(src_tee_vec.x, src_tee_vec.z))
-	var src_tee_3d = Vector3(src_tee_vec.x, src_tee_base_y, src_tee_vec.z)
+	var src_tee_3d: Vector3 = Vector3(src_tee_vec.x, src_tee_base_y, src_tee_vec.z)
 
 	# Build spatial height grid for the hole in custom coordinates
 	if not source_terrain_verts.is_empty():
@@ -586,9 +586,9 @@ static func _extract_hole_geometry(
 			var pos := Vector3(float(rec[0]), float(rec[1]), float(rec[2]))
 			var dist := _get_distance_to_hole_info(pos, source_hole_data)
 			if dist <= 70.0 and _is_closest_to_hole(pos, source_hole_key, all_source_holes, dist):
-				var rel_vec := pos - src_tee_3d
-				var rot_vec := rel_vec.rotated(Vector3.UP, angle)
-				var target_pos := target_tee_pos + rot_vec
+				var rel_vec: Vector3 = pos - src_tee_3d
+				var rot_vec: Vector3 = rel_vec.rotated(Vector3.UP, angle)
+				var target_pos: Vector3 = target_tee_pos + rot_vec
 				tree_positions.append(Vector2(target_pos.x, target_pos.z))
 
 				var mesh_idx := int(rec[7])

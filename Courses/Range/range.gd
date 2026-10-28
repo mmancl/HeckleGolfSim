@@ -3973,7 +3973,7 @@ func _add_green_edge_to_map(edge_map: Dictionary, p1: Vector2, p2: Vector2) -> v
 		edge_map[key] = { "count": 1, "a": p1, "b": p2 }
 
 
-func _get_green_boundary_segments(pin_pos: Vector3) -> Array:
+func _get_green_entry(pin_pos: Vector3) -> Dictionary:
 	_init_cached_surface_bodies()
 	if _cached_green_bodies.is_empty():
 		_cached_surface_nodes_initialized = false
@@ -4035,7 +4035,12 @@ func _get_green_boundary_segments(pin_pos: Vector3) -> Array:
 							"radius": 50.0
 						}
 
-	if target_entry == null:
+	return target_entry if target_entry != null else {}
+
+
+func _get_green_boundary_segments(pin_pos: Vector3) -> Array:
+	var target_entry = _get_green_entry(pin_pos)
+	if target_entry.is_empty():
 		return []
 
 	# Check for CylinderShape3D (island greens)
@@ -4112,17 +4117,29 @@ func get_hole_location_for(hole_loc: Array) -> Vector3:
 		return base
 	var segments: Array = _get_green_boundary_segments(base)
 	var triangles: Array = _get_green_triangles(base)
-	if segments.is_empty() or triangles.is_empty():
+	if triangles.is_empty():
 		return base
 	var min_pt := Vector2(INF, INF)
 	var max_pt := Vector2(-INF, -INF)
-	for seg in segments:
-		for p in seg:
-			min_pt.x = minf(min_pt.x, p.x)
-			min_pt.y = minf(min_pt.y, p.y)
-			max_pt.x = maxf(max_pt.x, p.x)
-			max_pt.y = maxf(max_pt.y, p.y)
-	for _attempt in range(300):
+	if not segments.is_empty():
+		for seg in segments:
+			for p in seg:
+				min_pt.x = minf(min_pt.x, p.x)
+				min_pt.y = minf(min_pt.y, p.y)
+				max_pt.x = maxf(max_pt.x, p.x)
+				max_pt.y = maxf(max_pt.y, p.y)
+	else:
+		for tri in triangles:
+			for p in tri:
+				min_pt.x = minf(min_pt.x, p.x)
+				min_pt.y = minf(min_pt.y, p.y)
+				max_pt.x = maxf(max_pt.x, p.x)
+				max_pt.y = maxf(max_pt.y, p.y)
+
+	var best_cand: Vector2 = Vector2.ZERO
+	var best_edge: float = -INF
+
+	for _attempt in range(500):
 		var cand := Vector2(randf_range(min_pt.x, max_pt.x), randf_range(min_pt.y, max_pt.y))
 		var inside := false
 		for tri in triangles:
@@ -4132,11 +4149,23 @@ func get_hole_location_for(hole_loc: Array) -> Vector3:
 		if not inside:
 			continue
 		var min_edge := INF
-		for seg in segments:
-			var closest: Vector2 = Geometry2D.get_closest_point_to_segment(cand, seg[0], seg[1])
-			min_edge = minf(min_edge, cand.distance_to(closest))
+		if not segments.is_empty():
+			for seg in segments:
+				var closest: Vector2 = Geometry2D.get_closest_point_to_segment(cand, seg[0], seg[1])
+				min_edge = minf(min_edge, cand.distance_to(closest))
+		else:
+			min_edge = RANDOM_PIN_MIN_EDGE_METERS
+
+		if min_edge > best_edge:
+			best_edge = min_edge
+			best_cand = cand
+
 		if min_edge >= RANDOM_PIN_MIN_EDGE_METERS:
 			return Vector3(cand.x, get_height(cand.x, cand.y), cand.y)
+
+	if best_edge > 0.5:
+		return Vector3(best_cand.x, get_height(best_cand.x, best_cand.y), best_cand.y)
+
 	return base
 
 
@@ -4159,10 +4188,9 @@ func _create_gimme_ring_mesh(pin_pos: Vector3, dist_meters: float, line_width: f
 		var u = Vector2(cos(angle), sin(angle))
 		
 		var edge_dist = _get_green_edge_distance(pin_2d, u, boundary_segments)
-		var fringe_extension: float = 2.2 # Extends ring across green collar/fringe while keeping it strictly inside fringe (<= 2.5m) and out of rough
-		var max_allowed = edge_dist + fringe_extension if edge_dist < INF else INF
+		var max_allowed = edge_dist if edge_dist < INF else INF
 		
-		# Clamp radius so it covers green and fringe collar, but never extends into rough
+		# Clamp radius so it strictly conforms to the green boundary and never extends beyond the green
 		var r_outer = minf(dist_meters, max_allowed)
 		r_outer = maxf(r_outer, min_r + line_width)
 		var r_inner = maxf(r_outer - line_width, min_r)
@@ -4239,7 +4267,11 @@ func update_gimme_circles() -> void:
 	if pin == null:
 		return
 		
-	var boundary_segments = _get_green_boundary_segments(pin.global_position)
+	var pin_pos = pin.global_position
+	if pin_pos.is_zero_approx() and not current_hole_location.is_zero_approx():
+		pin_pos = current_hole_location
+		
+	var boundary_segments = _get_green_boundary_segments(pin_pos)
 	var height_cache := {}
 	
 	# Gimme +1 Stroke Circle (Cyan)
@@ -4252,7 +4284,7 @@ func update_gimme_circles() -> void:
 		mesh_1 = null
 		
 	if enabled_1:
-		var ring_mesh_1 = _create_gimme_ring_mesh(pin.global_position, dist_1_meters, 0.08, 0.06, boundary_segments, height_cache)
+		var ring_mesh_1 = _create_gimme_ring_mesh(pin_pos, dist_1_meters, 0.08, 0.06, boundary_segments, height_cache)
 		if mesh_1 == null:
 			mesh_1 = MeshInstance3D.new()
 			mesh_1.name = "GimmeCircle1"
@@ -4280,7 +4312,7 @@ func update_gimme_circles() -> void:
 		mesh_2 = null
 		
 	if enabled_2:
-		var ring_mesh_2 = _create_gimme_ring_mesh(pin.global_position, dist_2_meters, 0.08, 0.065, boundary_segments, height_cache)
+		var ring_mesh_2 = _create_gimme_ring_mesh(pin_pos, dist_2_meters, 0.08, 0.065, boundary_segments, height_cache)
 		if mesh_2 == null:
 			mesh_2 = MeshInstance3D.new()
 			mesh_2.name = "GimmeCircle2"
@@ -4308,7 +4340,7 @@ func update_gimme_circles() -> void:
 		mesh_3 = null
 		
 	if enabled_3:
-		var ring_mesh_3 = _create_gimme_ring_mesh(pin.global_position, dist_3_meters, 0.08, 0.07, boundary_segments, height_cache)
+		var ring_mesh_3 = _create_gimme_ring_mesh(pin_pos, dist_3_meters, 0.08, 0.07, boundary_segments, height_cache)
 		if mesh_3 == null:
 			mesh_3 = MeshInstance3D.new()
 			mesh_3.name = "GimmeCircle3"
@@ -4506,6 +4538,8 @@ func _spawn_driving_range_elements() -> void:
 		$MountainBackdrop.queue_free()
 	if has_node("DrivingRangeBaySetup"):
 		$DrivingRangeBaySetup.queue_free()
+	if has_node("ThickRoughBushes"):
+		$ThickRoughBushes.queue_free()
 
 	_spawn_hitting_bays()
 	_spawn_boundary_walls()
@@ -4754,20 +4788,16 @@ func _spawn_range_trees() -> void:
 	var tree_paths: Array[String] = [
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-1-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-2-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-3-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-01-4-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-1-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-2-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-3-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-02-4-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-1-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-2-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-3-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-03-4-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-autumn-gold-1-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-autumn-gold-2-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-autumn-red-1-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-birch-1-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-birch-2-staticbody.tscn",
 		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-pine-1-staticbody.tscn",
-		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-pine-2-staticbody.tscn",
+		"res://addons/shapespark-low-poly-exterior-plants/bodies/tree-willow-2-staticbody.tscn",
 	]
 
 	var tree_scenes: Array[PackedScene] = []
@@ -6533,7 +6563,11 @@ func get_current_green_vertices() -> PackedVector3Array:
 	var stack = [self]
 	while not stack.is_empty():
 		var node = stack.pop_back()
-		if node is StaticBody3D and node.name.begins_with("green_Static_"):
+		var n_lower: String = node.name.to_lower()
+		var is_green_node: bool = (node is StaticBody3D) and (
+			n_lower.begins_with("green_static") or n_lower.contains("green") or (node.has_meta("surface_type") and int(node.get_meta("surface_type")) == 4)
+		)
+		if is_green_node:
 			var centroid = Vector3.ZERO
 			var vertex_count = 0
 			for child in node.get_children():
@@ -6671,13 +6705,52 @@ func _on_hole_completed(_scores: Array = []) -> void:
 # ==========================================
 
 func _get_green_triangles(pin_pos: Vector3) -> Array:
+	var target_entry = _get_green_entry(pin_pos)
+	if not target_entry.is_empty():
+		# Check for CylinderShape3D (island greens)
+		if target_entry.has("body") and target_entry.body != null:
+			for child in target_entry.body.find_children("*", "CollisionShape3D"):
+				if child is CollisionShape3D and child.shape is CylinderShape3D:
+					var cyl_radius: float = child.shape.radius
+					var center = Vector2(target_entry.body.global_position.x, target_entry.body.global_position.z)
+					var cyl_tris: Array = []
+					var steps = 48
+					for s in range(steps):
+						var a1 = s * TAU / steps
+						var a2 = (s + 1) * TAU / steps
+						var p1 = center + Vector2(cos(a1), sin(a1)) * cyl_radius
+						var p2 = center + Vector2(cos(a2), sin(a2)) * cyl_radius
+						cyl_tris.append([center, p1, p2])
+					return cyl_tris
+
+		if target_entry.has("shapes") and not target_entry.shapes.is_empty():
+			var triangles = []
+			var trans: Transform3D = target_entry.transform
+			for shape_faces in target_entry.shapes:
+				for i in range(0, shape_faces.size(), 3):
+					if i + 2 < shape_faces.size():
+						var a_3d = trans * shape_faces[i]
+						var b_3d = trans * shape_faces[i+1]
+						var c_3d = trans * shape_faces[i+2]
+						triangles.append([
+							Vector2(a_3d.x, a_3d.z),
+							Vector2(b_3d.x, b_3d.z),
+							Vector2(c_3d.x, c_3d.z)
+						])
+			if not triangles.is_empty():
+				return triangles
+
 	var closest_green: StaticBody3D = null
 	var min_dist_to_pin = 999999.0
 	
 	var stack = [self]
 	while not stack.is_empty():
 		var node = stack.pop_back()
-		if node is StaticBody3D and node.name.begins_with("green_Static_"):
+		var n_lower: String = node.name.to_lower()
+		var is_green_node: bool = (node is StaticBody3D) and (
+			n_lower.begins_with("green_static") or n_lower.contains("green") or (node.has_meta("surface_type") and int(node.get_meta("surface_type")) == 4)
+		)
+		if is_green_node:
 			var centroid = Vector3.ZERO
 			var vertex_count = 0
 			for child in node.get_children():
