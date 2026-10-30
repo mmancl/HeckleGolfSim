@@ -28,6 +28,11 @@ var hole_ids: Array = []
 var hole_info: Dictionary = {}
 var par_scores: Dictionary = {} # par per hole
 var practice_mode_active: bool = false
+var current_pin_position: Vector3 = Vector3.ZERO
+
+
+func set_current_pin_position(pos: Vector3) -> void:
+	current_pin_position = pos
 var selected_course_length: String = "Full 18"
 var game_mode: String = "Standard" # Standard, Scramble, 2v2 Scramble, Skins, Closest to Pin
 var team_assignments: Dictionary = {} # Team name -> Array of player names
@@ -109,6 +114,7 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 	hole_ctp_results.clear()
 	scramble_best_pos = Vector3.ZERO
 	team_best_pos.clear()
+	current_pin_position = Vector3.ZERO
 	clear_last_shot()
 	practice_mode_active = false
 
@@ -402,6 +408,7 @@ func start_hole() -> void:
 
 	scramble_best_pos = Vector3.ZERO
 	team_best_pos.clear()
+	current_pin_position = Vector3.ZERO
 	clear_last_shot()
 
 	# Determine honors (Tee-off order)
@@ -444,13 +451,14 @@ func start_hole() -> void:
 		current_mode = gs.range_settings.turn_order_mode.value
 	if current_mode == "Classic" and game_mode not in ["Scramble", "2v2 Scramble", "Closest to Pin"]:
 		var target_pin = _get_target_pin_position()
+		var flat_pin = Vector3(target_pin.x, 0.0, target_pin.z)
 		var max_dist := -1.0
 		var furthest_idx = active_player_index
 		for i in range(players.size()):
 			var p = players[i]
 			if p.get("active", true) and not p.get("paused", false):
 				var flat_pos = Vector3(p["position"].x, 0.0, p["position"].z)
-				var d = flat_pos.distance_to(target_pin)
+				var d = flat_pos.distance_to(flat_pin)
 				if d > max_dist:
 					max_dist = d
 					furthest_idx = i
@@ -669,7 +677,9 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 	var prev_reduction = float(raw_shot_data.get("shot_reduction", active_player.get("last_shot_reduction", active_player.get("shot_reduction", 0.0))))
 	var holed_out_before = active_player.get("holed_out", false)
 
-	var player_node = get_tree().root.find_child("Player", true, false)
+	var player_node = null
+	if is_inside_tree() and get_tree() != null and get_tree().root != null:
+		player_node = get_tree().root.find_child("Player", true, false)
 	var start_pos: Vector3 = active_player.get("position", final_position)
 	if player_node != null and player_node.get("_last_starting_pos") != null:
 		var last_start = player_node.get("_last_starting_pos")
@@ -806,8 +816,8 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 	# Check for holing out/clap triggers
 	if not practice_mode_active:
 		var current_hole = hole_info[hole_ids[current_hole_index]]
-		var hole_loc = current_hole.get("Hole Location", [0.0, 0.0])
-		var target_pin = Vector3(hole_loc[0], final_position.y, hole_loc[1])
+		var actual_pin = _get_target_pin_position()
+		var target_pin = Vector3(actual_pin.x, final_position.y, actual_pin.z)
 		var par = int(round(float(current_hole.get("Par", 4))))
 		
 		var dist_to_pin = final_position.distance_to(target_pin)
@@ -910,8 +920,12 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 			active_gimmes.sort_custom(func(a, b): return a["dist_feet"] < b["dist_feet"])
 			for gimme in active_gimmes:
 				if dist_to_pin_feet <= gimme["dist_feet"]:
-					_apply_gimme(active_player, gimme["strokes"], hole_ids[current_hole_index])
-					break
+					var within_clamped_ring = true
+					if course_node != null and course_node.has_method("is_point_within_gimme_ring"):
+						within_clamped_ring = course_node.is_point_within_gimme_ring(final_position, actual_pin, gimme["dist_feet"] / 3.28084)
+					if within_clamped_ring:
+						_apply_gimme(active_player, gimme["strokes"], hole_ids[current_hole_index])
+						break
 
 	# Mode-specific shot handling (Scramble / 2v2 Scramble)
 	if game_mode == "Scramble" and not hole_ids.is_empty():
@@ -949,8 +963,8 @@ func _handle_scramble_shot(active_player: Dictionary) -> void:
 		
 	var hole_id = hole_ids[current_hole_index]
 	var current_hole = hole_info.get(hole_id, {})
-	var hole_loc = current_hole.get("Hole Location", [0.0, 0.0])
-	var target_pin = Vector3(hole_loc[0], 0.0, hole_loc[1])
+	var actual_pin = _get_target_pin_position()
+	var target_pin = Vector3(actual_pin.x, 0.0, actual_pin.z)
 	
 	if active_player["holed_out"]:
 		var group_score = active_player["strokes"]
@@ -1006,8 +1020,8 @@ func _handle_2v2_scramble_shot(active_player: Dictionary) -> void:
 		
 	var hole_id = hole_ids[current_hole_index]
 	var current_hole = hole_info.get(hole_id, {})
-	var hole_loc = current_hole.get("Hole Location", [0.0, 0.0])
-	var target_pin = Vector3(hole_loc[0], 0.0, hole_loc[1])
+	var actual_pin = _get_target_pin_position()
+	var target_pin = Vector3(actual_pin.x, 0.0, actual_pin.z)
 	
 	if active_player["holed_out"]:
 		var team_score = active_player["strokes"]
@@ -1180,11 +1194,12 @@ func _determine_next_player_index() -> int:
 
 		"Classic":
 			var target_pin := _get_target_pin_position()
+			var flat_pin := Vector3(target_pin.x, 0.0, target_pin.z)
 			var furthest_player = null
 			var max_dist := -1.0
 			for p in remaining_players:
 				var flat_pos := Vector3(p["position"].x, 0.0, p["position"].z)
-				var dist = flat_pos.distance_to(target_pin)
+				var dist = flat_pos.distance_to(flat_pin)
 				if dist > max_dist:
 					max_dist = dist
 					furthest_player = p
@@ -1202,11 +1217,12 @@ func _determine_next_player_index() -> int:
 
 			# 2. Furthest from hole hits
 			var target_pin := _get_target_pin_position()
+			var flat_pin := Vector3(target_pin.x, 0.0, target_pin.z)
 			var furthest_player = null
 			var max_dist := -1.0
 			for p in remaining_players:
 				var flat_pos := Vector3(p["position"].x, 0.0, p["position"].z)
-				var dist = flat_pos.distance_to(target_pin)
+				var dist = flat_pos.distance_to(flat_pin)
 				if dist > max_dist:
 					max_dist = dist
 					furthest_player = p
@@ -1216,6 +1232,19 @@ func _determine_next_player_index() -> int:
 
 
 func _get_target_pin_position() -> Vector3:
+	if not current_pin_position.is_zero_approx():
+		return current_pin_position
+	if is_inside_tree() and get_tree() != null:
+		var curr_scene = get_tree().current_scene
+		if curr_scene != null:
+			var c_inst = curr_scene.get("course_instance")
+			if c_inst != null and c_inst.get("current_hole_location") is Vector3 and not c_inst.current_hole_location.is_zero_approx():
+				return c_inst.current_hole_location
+			if curr_scene.get("current_hole_location") is Vector3 and not curr_scene.current_hole_location.is_zero_approx():
+				return curr_scene.current_hole_location
+			var flag_pin = curr_scene.find_child("FlagPin", true, false)
+			if flag_pin != null and flag_pin is Node3D and not flag_pin.global_position.is_zero_approx():
+				return flag_pin.global_position
 	var target_pin := Vector3.ZERO
 	if not hole_ids.is_empty() and current_hole_index < hole_ids.size():
 		var hole_id: String = hole_ids[current_hole_index]
@@ -1282,12 +1311,13 @@ func _select_next_player_stay_up(remaining_players: Array) -> void:
 
 	# Furthest away from the hole hits
 	var target_pin := _get_target_pin_position()
+	var flat_pin := Vector3(target_pin.x, 0.0, target_pin.z)
 	var furthest_player = null
 	var max_dist := -1.0
 
 	for p in remaining_players:
 		var flat_pos := Vector3(p["position"].x, 0.0, p["position"].z)
-		var dist = flat_pos.distance_to(target_pin)
+		var dist = flat_pos.distance_to(flat_pin)
 		if dist > max_dist:
 			max_dist = dist
 			furthest_player = p
@@ -1301,12 +1331,13 @@ func _select_next_player_stay_up(remaining_players: Array) -> void:
 func _select_next_player_classic(remaining_players: Array) -> void:
 	# Classic: always whoever is furthest from the pin hits next
 	var target_pin := _get_target_pin_position()
+	var flat_pin := Vector3(target_pin.x, 0.0, target_pin.z)
 	var furthest_player = null
 	var max_dist := -1.0
 
 	for p in remaining_players:
 		var flat_pos := Vector3(p["position"].x, 0.0, p["position"].z)
-		var dist = flat_pos.distance_to(target_pin)
+		var dist = flat_pos.distance_to(flat_pin)
 		if dist > max_dist:
 			max_dist = dist
 			furthest_player = p
@@ -1438,8 +1469,8 @@ func _evaluate_closest_to_pin_for_hole(hole_id: String) -> void:
 		return
 
 	var current_hole = hole_info.get(hole_id, {})
-	var hole_loc = current_hole.get("Hole Location", [0.0, 0.0])
-	var target_pin = Vector3(hole_loc[0], 0.0, hole_loc[1])
+	var actual_pin = _get_target_pin_position()
+	var target_pin = Vector3(actual_pin.x, 0.0, actual_pin.z)
 
 	var min_dist: float = INF
 	var player_dists: Dictionary = {}

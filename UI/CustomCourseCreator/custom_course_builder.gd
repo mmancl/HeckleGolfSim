@@ -1,6 +1,8 @@
 class_name CustomCourseBuilder
 extends RefCounted
 
+const CourseGraphicsUpgraderScript = preload("res://Utils/CourseGraphicsUpgrader.gd")
+
 const HOLE_PERIMETER_M: float = 46.0 # 50 yards in meters
 const HOLE_SEPARATION_GAP_M: float = 100.0 # Gap between adjacent hole perimeters to prevent overlap
 
@@ -108,7 +110,7 @@ static func build_custom_course(
 
 	# 2. Serialize course.json
 	var course_json_dict = {
-		"graphics_version": 13,
+		"graphics_version": CourseGraphicsUpgraderScript.CURRENT_COURSE_GRAPHICS_VERSION,
 		"scene_path": "course.tscn",
 		"Title": title.strip_edges(),
 		"is_custom": true,
@@ -232,6 +234,7 @@ static func _build_and_save_course_scene(
 	var skydome_script = load("res://addons/sky_3d/src/Skydome.gd")
 	if skydome_script != null:
 		skydome.set_script(skydome_script)
+		skydome.set("fog_visible", false)
 		skydome.set("clouds_speed", 0.005)
 		skydome.set("clouds_cumulus_speed", 0.003)
 	sky_env.add_child(skydome)

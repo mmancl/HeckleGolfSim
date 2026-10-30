@@ -175,6 +175,40 @@ func get_bytes_written() -> int:
 	return _bytes_written
 
 
+func get_recent_entries() -> Array[String]:
+	return _recent_entries.duplicate()
+
+
+func get_all_logs_text(max_chars: int = 100000) -> String:
+	# First try reading the custom/default debug log file if it exists and has content
+	var effective_path := get_effective_log_path()
+	var resolved := ProjectSettings.globalize_path(effective_path)
+	var content := ""
+	if FileAccess.file_exists(resolved):
+		var f := FileAccess.open(resolved, FileAccess.READ)
+		if f != null:
+			content = f.get_as_text()
+			f.close()
+
+	# If debug log was empty or not active, try the standard engine log
+	if content.strip_edges().is_empty():
+		var engine_resolved := ProjectSettings.globalize_path(ENGINE_LOG_PATH)
+		if FileAccess.file_exists(engine_resolved):
+			var ef := FileAccess.open(engine_resolved, FileAccess.READ)
+			if ef != null:
+				content = ef.get_as_text()
+				ef.close()
+
+	# If files are still empty, fall back to in-memory recent entries buffer
+	if content.strip_edges().is_empty() and not _recent_entries.is_empty():
+		content = "\n".join(_recent_entries)
+
+	if content.length() > max_chars:
+		content = "... [truncated] ...\n" + content.substr(content.length() - max_chars)
+
+	return content
+
+
 func start_logging(target_path: String = "") -> void:
 	if target_path.strip_edges().is_empty():
 		target_path = get_effective_log_path()

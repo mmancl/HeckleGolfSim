@@ -636,7 +636,7 @@ func _create_arrow_mesh() -> Mesh:
 	
 	var half_w = 0.028
 	var half_l = 0.036
-	var h = 0.003
+	var h = 0.001
 	
 	var t_tip = Vector3(0.0, h, half_l)
 	var t_left = Vector3(-half_w, h, -half_l)
@@ -719,9 +719,9 @@ func _generate_green_grid_and_heatmap() -> void:
 	var st_grid = SurfaceTool.new()
 	st_grid.begin(Mesh.PRIMITIVE_LINES)
 	
-	var heatmap_y_offset = 0.005
-	var grid_y_offset = 0.012
-	var dot_y_offset = 0.022
+	var heatmap_y_offset = 0.002
+	var grid_y_offset = 0.004
+	var dot_y_offset = 0.006
 	
 	var height_cache = {}
 	var get_cached_height = func(gx: float, gz: float) -> float:
@@ -773,22 +773,7 @@ func _generate_green_grid_and_heatmap() -> void:
 			st_heatmap.set_color(col01)
 			st_heatmap.add_vertex(h01)
 			
-			# Grid Lines
-			var g00 = Vector3(x0, y00 + grid_y_offset, z0)
-			var g10 = Vector3(x1, y10 + grid_y_offset, z0)
-			var g11 = Vector3(x1, y11 + grid_y_offset, z1)
-			var g01 = Vector3(x0, y01 + grid_y_offset, z1)
-			
-			st_grid.add_vertex(g00)
-			st_grid.add_vertex(g10)
-			st_grid.add_vertex(g10)
-			st_grid.add_vertex(g11)
-			st_grid.add_vertex(g11)
-			st_grid.add_vertex(g01)
-			st_grid.add_vertex(g01)
-			st_grid.add_vertex(g00)
-			
-	# Collect edges for slope flow arrows
+	# Collect edges for slope flow arrows and grid lines
 	var h_edges = {}
 	var v_edges = {}
 	for iz in range(iz_start, iz_end + 1):
@@ -798,6 +783,30 @@ func _generate_green_grid_and_heatmap() -> void:
 				h_edges[Vector2i(ix, iz + 1)] = true
 				v_edges[Vector2i(ix, iz)] = true
 				v_edges[Vector2i(ix + 1, iz)] = true
+
+	# Subdivide grid lines so they tightly conform to green terrain curvature instead of floating
+	var edge_subdiv = 4
+	for edge in h_edges.keys():
+		var x_start = edge.x * spacing
+		var z_val = edge.y * spacing
+		var prev_pt = Vector3(x_start, get_cached_height.call(x_start, z_val) + grid_y_offset, z_val)
+		for s in range(1, edge_subdiv + 1):
+			var cur_x = x_start + (float(s) / float(edge_subdiv)) * spacing
+			var cur_pt = Vector3(cur_x, get_cached_height.call(cur_x, z_val) + grid_y_offset, z_val)
+			st_grid.add_vertex(prev_pt)
+			st_grid.add_vertex(cur_pt)
+			prev_pt = cur_pt
+
+	for edge in v_edges.keys():
+		var x_val = edge.x * spacing
+		var z_start = edge.y * spacing
+		var prev_pt = Vector3(x_val, get_cached_height.call(x_val, z_start) + grid_y_offset, z_start)
+		for s in range(1, edge_subdiv + 1):
+			var cur_z = z_start + (float(s) / float(edge_subdiv)) * spacing
+			var cur_pt = Vector3(x_val, get_cached_height.call(x_val, cur_z) + grid_y_offset, cur_z)
+			st_grid.add_vertex(prev_pt)
+			st_grid.add_vertex(cur_pt)
+			prev_pt = cur_pt
 			
 	var dots_data = []
 	
@@ -877,6 +886,8 @@ func _generate_green_grid_and_heatmap() -> void:
 	mat_hm.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 	mat_hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat_hm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat_hm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mat_hm.render_priority = 0
 	heatmap_mi.material_override = mat_hm
 	heatmap_mi.layers = 2
 	heatmap_mi.visible = false
@@ -891,6 +902,8 @@ func _generate_green_grid_and_heatmap() -> void:
 	mat_g.albedo_color = Color(1.0, 1.0, 1.0, 0.35)
 	mat_g.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 	mat_g.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat_g.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mat_g.render_priority = 1
 	grid_mi.material_override = mat_g
 	grid_mi.layers = 4
 	grid_mi.visible = show_green_grid
@@ -965,6 +978,7 @@ void fragment() {
 	
 	var mat_dots = ShaderMaterial.new()
 	mat_dots.shader = shader
+	mat_dots.render_priority = 2
 	dots_mi.material_override = mat_dots
 	dots_mi.layers = 4
 	dots_mi.visible = show_green_grid

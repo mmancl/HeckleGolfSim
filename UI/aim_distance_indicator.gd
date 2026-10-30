@@ -214,12 +214,16 @@ func _process(delta: float) -> void:
 			_ground_reticle_3d.visible = false
 		return
 
-	# Update 3D ground reticle position and alpha
+	# Update 3D ground reticle position and alpha — hidden on the green
+	var _on_green_now := _is_on_green()
 	if _ground_reticle_3d != null and is_instance_valid(_ground_reticle_3d) and _ground_reticle_3d.is_inside_tree():
-		_ground_reticle_3d.global_position = aim_target_pos + Vector3(0, 0.04, 0)
-		_ground_reticle_3d.visible = true
-		if _ground_reticle_material != null:
-			_ground_reticle_material.albedo_color = Color(0.2, 0.85, 1.0, _alpha * 0.75)
+		if _on_green_now:
+			_ground_reticle_3d.visible = false
+		else:
+			_ground_reticle_3d.global_position = aim_target_pos + Vector3(0, 0.04, 0)
+			_ground_reticle_3d.visible = true
+			if _ground_reticle_material != null:
+				_ground_reticle_material.albedo_color = Color(0.2, 0.85, 1.0, _alpha * 0.75)
 
 	# Get active 3D camera
 	var vp = get_viewport()
@@ -274,11 +278,7 @@ func _process(delta: float) -> void:
 
 
 func _update_card_content(ball_pos: Vector3, aim_target_pos: Vector3, dist_m: float) -> void:
-	var on_green = false
-	if _course.has_method("is_ball_on_green"):
-		on_green = _course.call("is_ball_on_green")
-	elif _course.has_method("is_putting_view"):
-		on_green = _course.call("is_putting_view")
+	var on_green := _is_on_green()
 
 	var is_imperial := true
 	if is_inside_tree() and has_node("/root/GlobalSettings"):
@@ -345,19 +345,31 @@ func _on_overlay_draw() -> void:
 	# 3. Bright core guideline
 	_overlay_control.draw_line(p_ground, p_card_bottom, Color(1.0, 1.0, 1.0, _alpha * 0.95), 1.8, true)
 
-	# 4. Ground reticle shadow
-	_overlay_control.draw_arc(p_ground + Vector2(0, 1), 13.0, 0.0, TAU, 24, Color(0.0, 0.0, 0.0, _alpha * 0.40), 3.0)
-	# 5. Ground reticle outer ring
-	_overlay_control.draw_arc(p_ground, 13.0, 0.0, TAU, 24, Color(0.2, 0.82, 1.0, _alpha * 0.85), 2.0)
-	# 6. Ground reticle center pip
-	_overlay_control.draw_circle(p_ground, 3.5, Color(1.0, 1.0, 1.0, _alpha * 0.95))
+	# Aim circle and crosshairs are hidden on the green (reticle is not useful for putting)
+	if not _is_on_green():
+		# 4. Ground reticle shadow
+		_overlay_control.draw_arc(p_ground + Vector2(0, 1), 13.0, 0.0, TAU, 24, Color(0.0, 0.0, 0.0, _alpha * 0.40), 3.0)
+		# 5. Ground reticle outer ring
+		_overlay_control.draw_arc(p_ground, 13.0, 0.0, TAU, 24, Color(0.2, 0.82, 1.0, _alpha * 0.85), 2.0)
+		# 6. Ground reticle center pip
+		_overlay_control.draw_circle(p_ground, 3.5, Color(1.0, 1.0, 1.0, _alpha * 0.95))
 
-	# 7. Ground reticle 4 crosshair tick marks
-	var tick_color = Color(0.2, 0.85, 1.0, _alpha * 0.85)
-	_overlay_control.draw_line(p_ground + Vector2(-18, 0), p_ground + Vector2(-10, 0), tick_color, 1.5)
-	_overlay_control.draw_line(p_ground + Vector2(10, 0), p_ground + Vector2(18, 0), tick_color, 1.5)
-	_overlay_control.draw_line(p_ground + Vector2(0, -18), p_ground + Vector2(0, -10), tick_color, 1.5)
-	_overlay_control.draw_line(p_ground + Vector2(0, 10), p_ground + Vector2(0, 18), tick_color, 1.5)
+		# 7. Ground reticle 4 crosshair tick marks
+		var tick_color = Color(0.2, 0.85, 1.0, _alpha * 0.85)
+		_overlay_control.draw_line(p_ground + Vector2(-18, 0), p_ground + Vector2(-10, 0), tick_color, 1.5)
+		_overlay_control.draw_line(p_ground + Vector2(10, 0), p_ground + Vector2(18, 0), tick_color, 1.5)
+		_overlay_control.draw_line(p_ground + Vector2(0, -18), p_ground + Vector2(0, -10), tick_color, 1.5)
+		_overlay_control.draw_line(p_ground + Vector2(0, 10), p_ground + Vector2(0, 18), tick_color, 1.5)
+
+
+func _is_on_green() -> bool:
+	if _course == null:
+		return false
+	if _course.has_method("is_ball_on_green"):
+		return bool(_course.call("is_ball_on_green"))
+	if _course.has_method("is_putting_view"):
+		return bool(_course.call("is_putting_view"))
+	return false
 
 
 func _should_suppress_indicator() -> bool:

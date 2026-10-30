@@ -528,6 +528,10 @@ func _refresh_anchor(force: bool) -> void:
 	if _rough_mmi != null and _rough_mmi.multimesh != null:
 		var mm := _rough_mmi.multimesh
 		for i in range(ROUGH_CLUMP_COUNT):
+			if _is_driving_range:
+				# No long grass or rough clumps on driving range
+				mm.set_instance_transform(i, hidden)
+				continue
 			var r := 2.2 + sqrt(rng.randf()) * 48.0
 			var theta := rng.randf_range(0.0, TAU)
 			var wx := grid_center.x + cos(theta) * r
@@ -535,9 +539,6 @@ func _refresh_anchor(force: bool) -> void:
 			if _is_in_bunker_or_hazard(wx, wz, nearby_bunkers, nearby_paths, nearby_water):
 				mm.set_instance_transform(i, hidden)
 				continue
-			if _is_driving_range and absf(wz) < 25.5 and wx > -10.0:
-				# On driving range, push tall rough outside the fairway corridor or behind tee
-				wz = (26.0 + rng.randf_range(0.5, 22.0)) * (1.0 if rng.randf() > 0.5 else -1.0)
 			var wy := _sample_ground_y(wx, wz, anchor.y)
 			var rot_y := rng.randf_range(0.0, TAU)
 			var s := rng.randf_range(0.80, 1.38)

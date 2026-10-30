@@ -238,6 +238,10 @@ jobs:
             /usr/libexec/PlistBuddy -c "Set :NSBluetoothAlwaysUsageDescription Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || true
             /usr/libexec/PlistBuddy -c "Add :NSBluetoothPeripheralUsageDescription string Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || \
             /usr/libexec/PlistBuddy -c "Set :NSBluetoothPeripheralUsageDescription Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled bool true" "$plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace bool true" "$plist" 2>/dev/null || true
           done
 
           SCHEME_NAME=$(xcodebuild -list -project "$XCODEPROJ" | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' | head -n 1 | xargs)
@@ -536,7 +540,6 @@ jobs:
           packageName: com.hecklegolf.simulator
           releaseFiles: dist/HeckleGolfSim.aab
           track: beta
-          userFraction: 0.99
           status: draft
           whatsNewDirectory: distribution/whatsnew
 

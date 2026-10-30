@@ -3363,6 +3363,8 @@ func _setup_developer_debugging_section() -> void:
 
 	log_vbox.add_child(path_row)
 
+	var is_mobile_platform := MobilePerformance.is_mobile() or OS.get_name() in ["iOS", "Android"]
+
 	# Action Buttons Row
 	var actions_row := HBoxContainer.new()
 	actions_row.add_theme_constant_override("separation", 8)
@@ -3373,11 +3375,19 @@ func _setup_developer_debugging_section() -> void:
 	ThemeManager.apply_secondary_button_style(copy_path_btn, 8)
 	actions_row.add_child(copy_path_btn)
 
+	var copy_log_content_btn := Button.new()
+	copy_log_content_btn.text = "📋 Copy Full Log"
+	copy_log_content_btn.tooltip_text = "Copies full diagnostics and engine logs directly to your clipboard"
+	copy_log_content_btn.custom_minimum_size = Vector2(150, 38)
+	ThemeManager.apply_secondary_button_style(copy_log_content_btn, 8)
+	actions_row.add_child(copy_log_content_btn)
+
 	var open_folder_btn := Button.new()
 	open_folder_btn.text = "📁 Open Folder"
 	open_folder_btn.custom_minimum_size = Vector2(130, 38)
 	ThemeManager.apply_secondary_button_style(open_folder_btn, 8)
-	actions_row.add_child(open_folder_btn)
+	if not is_mobile_platform:
+		actions_row.add_child(open_folder_btn)
 
 	var flush_btn := Button.new()
 	flush_btn.text = "⚡ Write Diagnostics Now"
@@ -3396,6 +3406,14 @@ func _setup_developer_debugging_section() -> void:
 	resolved_path_label.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
 	resolved_path_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	log_vbox.add_child(resolved_path_label)
+
+	if is_mobile_platform:
+		var mobile_log_hint := Label.new()
+		mobile_log_hint.text = "Tip: Tap 'Copy Full Log' above to copy all logs to your clipboard, or browse logs in the iOS Files app under 'On My iPhone / iPad' -> 'Heckle Golf Simulator'."
+		mobile_log_hint.add_theme_font_size_override("font_size", 13)
+		mobile_log_hint.add_theme_color_override("font_color", ThemeManager.COLOR_PRIMARY_NORMAL)
+		mobile_log_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		log_vbox.add_child(mobile_log_hint)
 
 	# Status Label
 	var status_label := Label.new()
@@ -3451,16 +3469,33 @@ func _setup_developer_debugging_section() -> void:
 		)
 	)
 
-	open_folder_btn.pressed.connect(func():
-		var target := path_input.text.strip_edges()
-		if target.is_empty():
-			target = "user://debug.log"
-		var full := ProjectSettings.globalize_path(target)
-		var folder := full.get_base_dir()
-		if not DirAccess.dir_exists_absolute(folder):
-			DirAccess.make_dir_recursive_absolute(folder)
-		OS.shell_open(folder)
+	copy_log_content_btn.pressed.connect(func():
+		var log_text := ""
+		if has_node("/root/DebugLogger"):
+			var dl = get_node("/root/DebugLogger")
+			log_text = dl.get_all_logs_text()
+		if log_text.strip_edges().is_empty():
+			log_text = "[No logs recorded yet]"
+		DisplayServer.clipboard_set(log_text)
+		copy_log_content_btn.text = "✓ Copied Log!"
+		var t := get_tree().create_timer(1.5)
+		t.timeout.connect(func():
+			if is_instance_valid(copy_log_content_btn):
+				copy_log_content_btn.text = "📋 Copy Full Log"
+		)
 	)
+
+	if not is_mobile_platform:
+		open_folder_btn.pressed.connect(func():
+			var target := path_input.text.strip_edges()
+			if target.is_empty():
+				target = "user://debug.log"
+			var full := ProjectSettings.globalize_path(target)
+			var folder := full.get_base_dir()
+			if not DirAccess.dir_exists_absolute(folder):
+				DirAccess.make_dir_recursive_absolute(folder)
+			OS.shell_open(folder)
+		)
 
 	flush_btn.pressed.connect(func():
 		if has_node("/root/DebugLogger"):
@@ -3476,23 +3511,28 @@ func _setup_developer_debugging_section() -> void:
 			)
 	)
 
-	# FileDialog for Browse button
-	var file_dialog := FileDialog.new()
-	file_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
-	file_dialog.access = FileDialog.ACCESS_FILESYSTEM
-	file_dialog.use_native_dialog = true
-	file_dialog.filters = PackedStringArray(["*.log ; Log Files", "*.txt ; Text Files", "* ; All Files"])
-	file_dialog.current_file = "debug.log"
-	file_dialog.file_selected.connect(func(selected_path: String):
-		path_input.text = selected_path
-		GlobalSettings.range_settings.debug_log_path.set_value(selected_path)
-		resolved_path_label.text = "System path: %s" % ProjectSettings.globalize_path(selected_path)
-	)
-	add_child(file_dialog)
+	# FileDialog for Browse button - only created on supported desktop platforms
+	# Note: use_native_dialog crashes on iOS and mobile platforms where native dialog hooks are not implemented.
+	if is_mobile_platform:
+		browse_btn.visible = false
+	else:
+		var file_dialog := FileDialog.new()
+		file_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+		file_dialog.access = FileDialog.ACCESS_FILESYSTEM
+		var supports_native: bool = DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG) if OS.get_name() not in ["iOS", "Android"] else false
+		file_dialog.use_native_dialog = supports_native
+		file_dialog.filters = PackedStringArray(["*.log ; Log Files", "*.txt ; Text Files", "* ; All Files"])
+		file_dialog.current_file = "debug.log"
+		file_dialog.file_selected.connect(func(selected_path: String):
+			path_input.text = selected_path
+			GlobalSettings.range_settings.debug_log_path.set_value(selected_path)
+			resolved_path_label.text = "System path: %s" % ProjectSettings.globalize_path(selected_path)
+		)
+		add_child(file_dialog)
 
-	browse_btn.pressed.connect(func():
-		file_dialog.popup_centered(Vector2i(700, 500))
-	)
+		browse_btn.pressed.connect(func():
+			file_dialog.popup_centered(Vector2i(700, 500))
+		)
 
 	if has_node("/root/DebugLogger"):
 		var dl = get_node("/root/DebugLogger")

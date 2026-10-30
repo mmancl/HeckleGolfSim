@@ -23,9 +23,10 @@ CATALOG_PATH = os.path.join(PROJECT_ROOT, "Courses", "Catalog", "golf_courses.js
 CACHE_DIR = os.path.join(PROJECT_ROOT, "Courses", "CachedGeometry")
 
 OVERPASS_ENDPOINTS = [
-    "https://lz4.overpass-api.de/api/interpreter",
     "https://overpass-api.de/api/interpreter",
-    "https://z.overpass-api.de/api/interpreter"
+    "https://overpass.openstreetmap.fr/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter"
 ]
 
 

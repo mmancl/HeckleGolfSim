@@ -855,6 +855,34 @@ func _on_club_selected(club_name: String) -> void:
 	_update_tee_elevation()
 
 
+func can_tee_up() -> bool:
+	# Driving range always allows teeing up
+	var player_parent = get_parent()
+	var parent_scene = player_parent.get_parent() if player_parent != null else null
+	if parent_scene != null:
+		if ("is_driving_range" in parent_scene and bool(parent_scene.get("is_driving_range"))) or (parent_scene.has_meta("is_driving_range") and bool(parent_scene.get_meta("is_driving_range"))):
+			return true
+	var cur_scene = get_tree().current_scene if is_inside_tree() else null
+	if cur_scene != null:
+		if ("is_driving_range" in cur_scene and bool(cur_scene.get("is_driving_range"))) or (cur_scene.has_meta("is_driving_range") and bool(cur_scene.get_meta("is_driving_range"))):
+			return true
+		if "practice_mode_active" in cur_scene and bool(cur_scene.practice_mode_active):
+			return true
+
+	# On a course, only the first shot for a player on a hole (0 strokes taken) can be teed up.
+	# Never tee up on second or subsequent shots even if the ball lands or stops in a tee box.
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	if mp_mgr != null and not mp_mgr.players.is_empty():
+		var ap = mp_mgr.get_active_player()
+		if ap != null and not ap.is_empty():
+			return int(ap.get("strokes", 0)) == 0
+
+	if cur_scene != null and "shot_count" in cur_scene:
+		return int(cur_scene.shot_count) == 0
+
+	return false
+
+
 func _update_tee_elevation() -> void:
 	if _tee_mesh == null:
 		return
@@ -863,7 +891,7 @@ func _update_tee_elevation() -> void:
 		return
 
 	var is_teebox := (lie_type == "teebox")
-	if not is_teebox:
+	if not is_teebox or not can_tee_up():
 		_tee_mesh.visible = false
 		return
 
@@ -2269,6 +2297,12 @@ func _calc_is_position_on_fringe(pos: Vector3) -> bool:
 
 
 func _check_is_on_teebox() -> bool:
+	var player_parent = get_parent()
+	var parent_scene = player_parent.get_parent() if player_parent != null else null
+	if parent_scene != null:
+		if ("is_driving_range" in parent_scene and bool(parent_scene.get("is_driving_range"))) or (parent_scene.has_meta("is_driving_range") and bool(parent_scene.get_meta("is_driving_range"))):
+			return true
+
 	if lie_type == "teebox":
 		return true
 	var p_node = get_parent()
@@ -2280,8 +2314,10 @@ func _check_is_on_teebox() -> bool:
 		if ap != null:
 			if ap.get("lie_type") == "teebox" or ap.get("strokes", 0) == 0:
 				return true
-	var course = get_tree().current_scene
+	var course = get_tree().current_scene if is_inside_tree() else null
 	if course != null:
+		if ("is_driving_range" in course and bool(course.get("is_driving_range"))) or (course.has_meta("is_driving_range") and bool(course.get_meta("is_driving_range"))):
+			return true
 		if course.has_method("get_distance_to_nearest_teebox"):
 			if course.call("get_distance_to_nearest_teebox", global_position) <= 2.0:
 				return true
@@ -2567,7 +2603,7 @@ func hit_from_data(data: Dictionary) -> void:
 			var hit_pos: Vector3 = probe.get("position", global_position)
 			var nys := maxf(floor_normal.y, MIN_GROUND_NORMAL)
 			var target_launch_y: float
-			if is_teebox:
+			if is_teebox and can_tee_up():
 				# Teebox shot: Driver is teed up 1.5 inches above ground; other clubs rest right on grass
 				target_launch_y = hit_pos.y + (TEED_CENTER_HEIGHT if is_driver else GROUND_CENTER_HEIGHT)
 			else:
@@ -2852,6 +2888,28 @@ func _update_surface_from_collider(collider: Object) -> void:
 			_apply_surface_params()
 
 func _update_surface_from_underneath() -> void:
+	var player_parent = get_parent()
+	var parent_scene = player_parent.get_parent() if player_parent != null else null
+	var is_range := false
+	if parent_scene != null:
+		if ("is_driving_range" in parent_scene and bool(parent_scene.get("is_driving_range"))) or (parent_scene.has_meta("is_driving_range") and bool(parent_scene.get_meta("is_driving_range"))):
+			is_range = true
+	var cur_scene = get_tree().current_scene if is_inside_tree() else null
+	if cur_scene != null:
+		if ("is_driving_range" in cur_scene and bool(cur_scene.get("is_driving_range"))) or (cur_scene.has_meta("is_driving_range") and bool(cur_scene.get_meta("is_driving_range"))):
+			is_range = true
+
+	if is_range:
+		is_in_water = false
+		water_collider = null
+		var changed_sand = is_in_sand
+		is_in_sand = false
+		set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+		lie_type = "teebox"
+		if changed_sand:
+			_apply_surface_params()
+		return
+
 	var world := get_world_3d()
 	if world == null:
 		return

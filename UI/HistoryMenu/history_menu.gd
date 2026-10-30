@@ -1,12 +1,20 @@
 extends Control
 
 const ScorecardBadge = preload("res://UI/scorecard_badge.gd")
+const HoleShotPathDiagram = preload("res://UI/hole_shot_path_diagram.gd")
 
 @onready var matches_list_vbox = VBoxContainer.new()
 @onready var delete_confirm_dialog = ConfirmationDialog.new()
 
 var selected_match_to_delete: Dictionary = {}
 var scorecard_overlay: ColorRect
+
+# Shot Review state for the history scorecard overlay
+var _shot_review_container: VBoxContainer = null
+var _shot_review_selected_hole: String = ""
+var _shot_review_match_data: Dictionary = {}
+var _shot_review_cards_container: VBoxContainer = null
+var _shot_review_hole_btns: Array = []
 
 func _ready() -> void:
 	name = "HistoryMenu"
@@ -321,6 +329,13 @@ func _confirm_delete_match() -> void:
 	_render_history_list()
 
 func _show_scorecard(match_data: Dictionary) -> void:
+	# Reset shot review state
+	_shot_review_container = null
+	_shot_review_selected_hole = ""
+	_shot_review_match_data = match_data.duplicate()
+	_shot_review_cards_container = null
+	_shot_review_hole_btns.clear()
+
 	# Clear scorecard panel container children except background/structure
 	var card_panel = scorecard_overlay.get_node_or_null("CardPanel") as PanelContainer
 	if card_panel == null and scorecard_overlay.get_child_count() > 0:
@@ -358,7 +373,7 @@ func _show_scorecard(match_data: Dictionary) -> void:
 	date_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	head_hbox.add_child(date_lbl)
 	
-	# Grid scorecard container
+	# Combined scroll area: grid scorecard + shot review
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -367,15 +382,40 @@ func _show_scorecard(match_data: Dictionary) -> void:
 	ThemeManager.apply_scroll_container_style(scroll, 28)
 	card_vbox.add_child(scroll)
 	
+	# Scrollable content vbox (grid + shot review stacked vertically)
+	var scroll_content = VBoxContainer.new()
+	scroll_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll_content.add_theme_constant_override("separation", 20)
+	scroll.add_child(scroll_content)
+	
 	var grid = GridContainer.new()
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	grid.add_theme_constant_override("h_separation", 2)
 	grid.add_theme_constant_override("v_separation", 2)
-	scroll.add_child(grid)
+	scroll_content.add_child(grid)
 	
 	# Populate Grid
 	_populate_grid_scorecard(grid, match_data)
+	
+	# Shot Review section separator
+	var sep_lbl = Label.new()
+	sep_lbl.text = "📍 Shot Review"
+	sep_lbl.add_theme_font_size_override("font_size", 20)
+	sep_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.38))
+	sep_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	sep_lbl.add_theme_constant_override("outline_size", 3)
+	sep_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	scroll_content.add_child(sep_lbl)
+	
+	# Shot Review VBox
+	_shot_review_container = VBoxContainer.new()
+	_shot_review_container.name = "ShotReviewContainer"
+	_shot_review_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_shot_review_container.add_theme_constant_override("separation", 12)
+	scroll_content.add_child(_shot_review_container)
+	
+	_populate_shot_review_hole_selector(match_data)
 	
 	# Actions row
 	var action_hbox = HBoxContainer.new()
@@ -862,6 +902,346 @@ func _email_player_stats(player: Dictionary, match_data: Dictionary) -> void:
 
 	GolfDataExporter.export_and_email(to_email, subject, body, attachment_basename, csv_content)
 	print("[HistoryMenu] Opened email client with attached CSV for %s" % player_name)
+
+# ── Shot Review helpers ────────────────────────────────────────────────────────
+
+func _populate_shot_review_hole_selector(match_data: Dictionary) -> void:
+	if _shot_review_container == null:
+		return
+
+	# Build ordered hole list (mirrors _populate_grid_scorecard logic)
+	var hole_pars: Dictionary = {}
+	var config_path: String = match_data.get("config_path", "")
+	if not config_path.is_empty() and FileAccess.file_exists(config_path):
+		var f = FileAccess.open(config_path, FileAccess.READ)
+		if f != null:
+			var parsed = JSON.parse_string(f.get_as_text())
+			if typeof(parsed) == TYPE_DICTIONARY:
+				for h_id in parsed.get("Hole Info", {}).keys():
+					hole_pars[h_id] = int(round(float(parsed["Hole Info"][h_id].get("Par", 4))))
+	if hole_pars.is_empty() and match_data.has("hole_pars"):
+		var saved_pars = match_data.get("hole_pars", {})
+		if typeof(saved_pars) == TYPE_DICTIONARY:
+			for h_id in saved_pars:
+				hole_pars[h_id] = int(round(float(saved_pars[h_id])))
+
+	var hole_ids: Array = []
+	if match_data.has("hole_ids") and not match_data["hole_ids"].is_empty():
+		hole_ids = match_data["hole_ids"].duplicate()
+	else:
+		hole_ids = hole_pars.keys()
+		hole_ids.sort_custom(func(a, b):
+			return MultiplayerManager.get_hole_number_from_id(a) < MultiplayerManager.get_hole_number_from_id(b)
+		)
+		var course_len = match_data.get("selected_course_length", "Full 18")
+		if course_len == "Back 9":
+			hole_ids = hole_ids.filter(func(h_id): return MultiplayerManager.get_hole_number_from_id(h_id) >= 10)
+		elif course_len == "Front 9":
+			hole_ids = hole_ids.filter(func(h_id): return MultiplayerManager.get_hole_number_from_id(h_id) <= 9)
+
+	if hole_ids.is_empty():
+		var no_data_lbl = Label.new()
+		no_data_lbl.text = "No shot data available for this match."
+		no_data_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		no_data_lbl.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+		no_data_lbl.add_theme_font_size_override("font_size", 15)
+		_shot_review_container.add_child(no_data_lbl)
+		return
+
+	# Hint label
+	var hint_lbl = Label.new()
+	hint_lbl.text = "Select a hole to view the shot path diagram:"
+	hint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint_lbl.add_theme_font_size_override("font_size", 14)
+	hint_lbl.add_theme_color_override("font_color", Color(0.70, 0.75, 0.85))
+	_shot_review_container.add_child(hint_lbl)
+
+	# Hole selector buttons (scrollable row)
+	var btn_scroll = ScrollContainer.new()
+	btn_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	btn_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	btn_scroll.custom_minimum_size = Vector2(0, 52)
+	_shot_review_container.add_child(btn_scroll)
+
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.add_theme_constant_override("separation", 6)
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_scroll.add_child(btn_hbox)
+
+	_shot_review_hole_btns.clear()
+	for h_id in hole_ids:
+		var h_num = MultiplayerManager.get_hole_number_from_id(h_id)
+		var par_val = hole_pars.get(h_id, 4)
+		var btn = Button.new()
+		btn.text = str(h_num)
+		btn.tooltip_text = "Hole %d (Par %d)" % [h_num, par_val]
+		btn.custom_minimum_size = Vector2(44, 44)
+		apply_button_style(btn, Color(0.15, 0.20, 0.28, 0.90))
+		btn.pressed.connect(func():
+			_on_shot_review_hole_selected(h_id, hole_ids, match_data)
+		)
+		btn_hbox.add_child(btn)
+		_shot_review_hole_btns.append({"btn": btn, "hole_id": h_id})
+
+	# Cards area (replaced each time a hole is selected)
+	_shot_review_cards_container = VBoxContainer.new()
+	_shot_review_cards_container.name = "ShotReviewCards"
+	_shot_review_cards_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_shot_review_cards_container.add_theme_constant_override("separation", 12)
+	_shot_review_container.add_child(_shot_review_cards_container)
+
+	# Auto-select first hole that has shot data
+	for h_id in hole_ids:
+		if _history_hole_has_shot_data(match_data, h_id):
+			_on_shot_review_hole_selected(h_id, hole_ids, match_data)
+			return
+	# No shot data at all - show placeholder
+	_on_shot_review_hole_selected(hole_ids[0], hole_ids, match_data)
+
+
+func _history_hole_has_shot_data(match_data: Dictionary, hole_id: String) -> bool:
+	var players_list: Array = match_data.get("players", [])
+	for p in players_list:
+		var player_stats = p.get("shot_stats", {})
+		if typeof(player_stats) == TYPE_DICTIONARY and player_stats.has(hole_id):
+			var shots = player_stats[hole_id]
+			if typeof(shots) == TYPE_ARRAY and not shots.is_empty():
+				return true
+	return false
+
+
+func _on_shot_review_hole_selected(hole_id: String, hole_ids: Array, match_data: Dictionary) -> void:
+	_shot_review_selected_hole = hole_id
+
+	# Update button styles to highlight selected hole
+	for entry in _shot_review_hole_btns:
+		var is_selected = (entry["hole_id"] == hole_id)
+		var color = Color(0.24, 0.50, 0.82, 0.95) if is_selected else Color(0.15, 0.20, 0.28, 0.90)
+		apply_button_style(entry["btn"], color)
+
+	# Clear previous cards
+	if _shot_review_cards_container == null:
+		return
+	for child in _shot_review_cards_container.get_children():
+		child.queue_free()
+
+	_build_shot_review_for_hole(hole_id, match_data)
+
+
+func _build_shot_review_for_hole(hole_id: String, match_data: Dictionary) -> void:
+	if _shot_review_cards_container == null:
+		return
+
+	var h_num = MultiplayerManager.get_hole_number_from_id(hole_id)
+	var players_list: Array = match_data.get("players", [])
+
+	# Load course config for green positions, tee boxes, satellite, cart paths
+	var config_path: String = match_data.get("config_path", "")
+	var hole_info: Dictionary = {}
+	var satellite_texture: Texture2D = null
+	var satellite_bounds: Array = []
+	var cart_paths: Array[PackedVector2Array] = []
+
+	if not config_path.is_empty() and FileAccess.file_exists(config_path):
+		var f = FileAccess.open(config_path, FileAccess.READ)
+		if f != null:
+			var parsed = JSON.parse_string(f.get_as_text())
+			if typeof(parsed) == TYPE_DICTIONARY:
+				hole_info = parsed.get("Hole Info", {})
+				# Satellite image
+				var sat_path = config_path.get_base_dir().path_join("satellite.png")
+				if FileAccess.file_exists(sat_path):
+					var img = Image.load_from_file(sat_path)
+					if img != null and not img.is_empty():
+						satellite_texture = ImageTexture.create_from_image(img)
+				# Satellite bounds from course_info if available
+				var course_info_val = parsed.get("Course Info", {})
+				if typeof(course_info_val) == TYPE_DICTIONARY:
+					var bounds_version := int(course_info_val.get("Satellite Image Bounds Version", 0))
+					if bounds_version == 5:
+						var saved_bounds = course_info_val.get("Satellite Image Bounds", [])
+						if typeof(saved_bounds) == TYPE_ARRAY:
+							satellite_bounds = saved_bounds
+				# Cart paths
+				var saved_cart_paths = parsed.get("Cart Paths", [])
+				if typeof(saved_cart_paths) != TYPE_ARRAY:
+					saved_cart_paths = parsed.get("Course Info", {}).get("Cart Paths", [])
+				if typeof(saved_cart_paths) == TYPE_ARRAY:
+					for saved_path in saved_cart_paths:
+						if typeof(saved_path) != TYPE_ARRAY:
+							continue
+						var cart_path := PackedVector2Array()
+						for saved_point in saved_path:
+							if typeof(saved_point) == TYPE_ARRAY and saved_point.size() >= 2:
+								cart_path.append(Vector2(float(saved_point[0]), float(saved_point[1])))
+						if cart_path.size() >= 2:
+							cart_paths.append(cart_path)
+
+	var current_hole_info: Dictionary = hole_info.get(hole_id, {})
+	var hole_location: Array = current_hole_info.get("Hole Location", [0.0, 0.0])
+	var green_position := Vector3.ZERO
+	if hole_location.size() >= 2:
+		green_position = Vector3(float(hole_location[0]), 0.0, float(hole_location[1]))
+
+	var tee_boxes: Dictionary = current_hole_info.get("Tee Boxes", {})
+	var hole_tee_positions: Array[Vector3] = []
+	for tee_val in tee_boxes.values():
+		if typeof(tee_val) == TYPE_ARRAY and tee_val.size() >= 2:
+			hole_tee_positions.append(Vector3(float(tee_val[0]), 0.0, float(tee_val[1])))
+
+	var hole_par = int(round(float(current_hole_info.get("Par", 4))))
+
+	# Hole header
+	var hole_title = Label.new()
+	hole_title.text = "Hole %d Shot Review (Par %d)" % [h_num, hole_par]
+	hole_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hole_title.add_theme_font_size_override("font_size", 17)
+	hole_title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.38))
+	hole_title.add_theme_color_override("font_outline_color", Color.BLACK)
+	hole_title.add_theme_constant_override("outline_size", 3)
+	_shot_review_cards_container.add_child(hole_title)
+
+	# Collect all player positions for shared context (so the diagram sizes correctly)
+	var shared_shot_positions: Array[Vector3] = []
+	for p in players_list:
+		var p_positions := _get_history_hole_shot_positions(p, hole_id, tee_boxes)
+		shared_shot_positions.append_array(p_positions)
+
+	# Player cards grid
+	var cards_wrapper = HBoxContainer.new()
+	cards_wrapper.alignment = BoxContainer.ALIGNMENT_CENTER
+	cards_wrapper.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_shot_review_cards_container.add_child(cards_wrapper)
+
+	var player_cards = GridContainer.new()
+	player_cards.name = "ShotReviewPlayerCards"
+	player_cards.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	player_cards.add_theme_constant_override("h_separation", 16)
+	player_cards.add_theme_constant_override("v_separation", 16)
+	cards_wrapper.add_child(player_cards)
+
+	var max_cols = mini(players_list.size(), maxi(1, int(floor(1200.0 / 260.0))))
+	player_cards.columns = max(1, max_cols)
+
+	var image_size := Vector2(220.0, 220.0)
+
+	for p_idx in range(players_list.size()):
+		var p: Dictionary = players_list[p_idx]
+		var p_name: String = p.get("name", "Player")
+		var hole_scores: Dictionary = p.get("hole_scores", {})
+		var score_val = hole_scores.get(hole_id)
+
+		var positions := _get_history_hole_shot_positions(p, hole_id, tee_boxes)
+		var shot_distances: Array[int] = []
+		for i in range(maxi(0, positions.size() - 1)):
+			var dist_yds = Vector2(positions[i].x, positions[i].z).distance_to(Vector2(positions[i + 1].x, positions[i + 1].z)) * 1.09361
+			shot_distances.append(int(round(dist_yds)))
+
+		# Player card panel
+		var player_card = PanelContainer.new()
+		player_card.custom_minimum_size = Vector2(image_size.x + 24.0, 0)
+		player_card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		var card_style = StyleBoxFlat.new()
+		card_style.bg_color = Color(0.08, 0.12, 0.18, 0.95)
+		card_style.border_width_left = 2
+		card_style.border_width_top = 2
+		card_style.border_width_right = 2
+		card_style.border_width_bottom = 2
+		card_style.corner_radius_top_left = 16
+		card_style.corner_radius_top_right = 16
+		card_style.corner_radius_bottom_left = 16
+		card_style.corner_radius_bottom_right = 16
+		var player_color := Color(0.35, 0.65, 0.9)
+		var color_value = p.get("color")
+		if typeof(color_value) == TYPE_COLOR:
+			player_color = color_value
+		card_style.border_color = player_color
+		card_style.content_margin_left = 12
+		card_style.content_margin_right = 12
+		card_style.content_margin_top = 10
+		card_style.content_margin_bottom = 12
+		player_card.add_theme_stylebox_override("panel", card_style)
+		player_cards.add_child(player_card)
+
+		var player_row = VBoxContainer.new()
+		player_row.add_theme_constant_override("separation", 6)
+		player_card.add_child(player_row)
+
+		# Score header label
+		var score_text: String
+		if score_val == null:
+			score_text = "No score"
+		else:
+			score_text = "%d strokes" % int(round(float(score_val)))
+		var score_label = Label.new()
+		score_label.text = "%s — %s · %d shots" % [p_name, score_text, shot_distances.size()]
+		score_label.add_theme_font_size_override("font_size", 15)
+		score_label.add_theme_color_override("font_color", Color.WHITE)
+		score_label.clip_text = true
+		player_row.add_child(score_label)
+
+		if shot_distances.is_empty():
+			var no_shots_lbl = Label.new()
+			no_shots_lbl.text = "No shots recorded for Hole %d" % h_num
+			no_shots_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			no_shots_lbl.add_theme_font_size_override("font_size", 13)
+			no_shots_lbl.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
+			no_shots_lbl.custom_minimum_size = Vector2(image_size.x, 80)
+			no_shots_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			player_row.add_child(no_shots_lbl)
+		else:
+			var diagram_frame = PanelContainer.new()
+			diagram_frame.name = "DiagramFrame"
+			diagram_frame.clip_contents = true
+			var frame_style = StyleBoxFlat.new()
+			frame_style.bg_color = Color(0.04, 0.07, 0.10, 0.95)
+			frame_style.border_width_left = 1
+			frame_style.border_width_top = 1
+			frame_style.border_width_right = 1
+			frame_style.border_width_bottom = 1
+			frame_style.border_color = Color(0.35, 0.45, 0.60, 0.5)
+			frame_style.corner_radius_top_left = 12
+			frame_style.corner_radius_top_right = 12
+			frame_style.corner_radius_bottom_left = 12
+			frame_style.corner_radius_bottom_right = 12
+			diagram_frame.add_theme_stylebox_override("panel", frame_style)
+
+			var shot_path = HoleShotPathDiagram.new()
+			shot_path.name = "HoleShotPathDiagram"
+			shot_path.custom_minimum_size = image_size
+			shot_path.set_shot_path(
+				positions,
+				shot_distances,
+				green_position,
+				satellite_texture,
+				satellite_bounds,
+				hole_tee_positions,
+				shared_shot_positions,
+				cart_paths
+			)
+			diagram_frame.add_child(shot_path)
+			player_row.add_child(diagram_frame)
+
+
+func _get_history_hole_shot_positions(player: Dictionary, hole_id: String, tee_boxes: Dictionary) -> Array[Vector3]:
+	# Pull shot_stats for the given hole (restored from JSON - positions are Vector3 after deserialization)
+	var shot_stats: Array = []
+	var player_stats = player.get("shot_stats", {})
+	if typeof(player_stats) == TYPE_DICTIONARY and player_stats.has(hole_id):
+		var raw = player_stats[hole_id]
+		if typeof(raw) == TYPE_ARRAY:
+			shot_stats = raw
+
+	# Build fallback from tee box position
+	var fallback_positions: Array[Vector3] = []
+	var tee_color: String = player.get("tee", "Blue")
+	var tee_position: Array = MultiplayerManager.get_tee_position_from_boxes(tee_boxes, tee_color)
+	if tee_position.size() >= 2:
+		fallback_positions.append(Vector3(float(tee_position[0]), 0.0, float(tee_position[1])))
+
+	return HoleShotPathDiagram.get_positions_from_shot_stats(shot_stats, fallback_positions)
+
 
 func apply_button_style(btn: Button, bg_color: Color) -> void:
 	var style_normal = StyleBoxFlat.new()

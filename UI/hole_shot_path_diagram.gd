@@ -71,13 +71,16 @@ func _draw() -> void:
 	for position in path_positions:
 		mapped_positions.append(_map_position(position))
 
+	const MIN_DISPLAY_YARDS := 20
 	for i in range(mapped_positions.size() - 1):
 		var start := mapped_positions[i]
 		var finish := mapped_positions[i + 1]
+		var segment_yards := _distances[i] if i < _distances.size() else MIN_DISPLAY_YARDS
+		if segment_yards < MIN_DISPLAY_YARDS:
+			continue
 		draw_line(start, finish, Color(0.02, 0.03, 0.03, 0.95), 7.0, true)
 		draw_line(start, finish, Color.WHITE, 4.0, true)
-		if i < _distances.size():
-			_draw_distance_label(start, finish, _distances[i], i)
+		_draw_distance_label(start, finish, segment_yards, i)
 		draw_circle(finish, 5.0, Color(0.02, 0.03, 0.03, 0.95))
 		draw_circle(finish, 3.2, Color(1.0, 0.85, 0.38))
 	draw_circle(mapped_positions[0], 5.0, Color(0.02, 0.03, 0.03, 0.95))

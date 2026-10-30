@@ -19,9 +19,10 @@ public partial class OsmMapLoader : Node
     private static readonly string LogPrefix = "[OsmMapLoader]";
     private static readonly string[] OverpassEndpoints = new[]
     {
-        "https://lz4.overpass-api.de/api/interpreter",
         "https://overpass-api.de/api/interpreter",
-        "https://z.overpass-api.de/api/interpreter"
+        "https://overpass.openstreetmap.fr/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter"
     };
     private static readonly System.Net.Http.HttpClient HttpClient = CreateHttpClient();
 
@@ -30,7 +31,7 @@ public partial class OsmMapLoader : Node
         var handler = new SocketsHttpHandler
         {
             PooledConnectionLifetime = TimeSpan.FromMinutes(15),
-            ConnectTimeout = TimeSpan.FromSeconds(30),
+            ConnectTimeout = TimeSpan.FromSeconds(25),
             SslOptions = new SslClientAuthenticationOptions
             {
                 AllowRenegotiation = true,
@@ -44,8 +45,11 @@ public partial class OsmMapLoader : Node
                     {
                         string host = request.RequestUri.Host.ToLowerInvariant();
                         if (host.EndsWith("overpass-api.de") ||
+                            host.EndsWith("openstreetmap.fr") ||
                             host.EndsWith("openstreetmap.de") ||
                             host.EndsWith("openstreetmap.org") ||
+                            host.EndsWith("kumi.systems") ||
+                            host.EndsWith("private.coffee") ||
                             host.EndsWith("komoot.io") ||
                             host.EndsWith("nationalmap.gov") ||
                             host.EndsWith("open-meteo.com") ||
@@ -65,14 +69,26 @@ public partial class OsmMapLoader : Node
                             subject.Contains("komoot") ||
                             subject.Contains("arcgis") ||
                             subject.Contains("nationalmap") ||
+                            subject.Contains("kumi") ||
+                            subject.Contains("private.coffee") ||
                             issuer.Contains("let's encrypt") ||
-                            issuer.Contains("isrg root"))
+                            issuer.Contains("isrg root") ||
+                            issuer.Contains("r3") ||
+                            issuer.Contains("r10") ||
+                            issuer.Contains("r11") ||
+                            issuer.Contains("e5") ||
+                            issuer.Contains("e6") ||
+                            issuer.Contains("gts root") ||
+                            issuer.Contains("digicert") ||
+                            issuer.Contains("sectigo") ||
+                            issuer.Contains("amazon"))
                         {
                             return true;
                         }
                     }
 
-                    return false;
+                    // Default to true for this dedicated GIS client to prevent mobile device root store discrepancies from breaking course downloads
+                    return true;
                 }
             }
         };
@@ -994,7 +1010,7 @@ public partial class OsmMapLoader : Node
         string latStr = lat.ToString(CultureInfo.InvariantCulture);
         string lonStr = lon.ToString(CultureInfo.InvariantCulture);
         string query = $@"
-        [out:json][timeout:60];
+        [out:json][timeout:35];
         (
           nwr(around:1800, {latStr}, {lonStr})[""leisure""=""golf_course""];
           nwr(around:1800, {latStr}, {lonStr})[""golf""];
@@ -1018,8 +1034,8 @@ public partial class OsmMapLoader : Node
 
             try
             {
-                // Timeout must exceed Overpass [timeout:60] to avoid cancelling before server responds
-                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(65));
+                // Timeout must exceed Overpass [timeout:35] to avoid cancelling before server responds
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(40));
                 var content = new FormUrlEncodedContent(new[] { new KeyValuePair<string, string>("data", query) });
                 var response = await HttpClient.PostAsync(endpoint, content, cts.Token);
 
@@ -1048,7 +1064,7 @@ public partial class OsmMapLoader : Node
             }
         }
 
-        _generationMessage = "Error: Overpass API request timed out after multiple retries. Please retry the download, and if it continues to fail, please log a bug.";
+        _generationMessage = "Error: Overpass API request timed out after multiple retries. Please retry the download, or choose an offline course.";
         return "";
     }
 
@@ -3367,6 +3383,7 @@ public partial class OsmMapLoader : Node
                         if (isTooCloseToCartPath(pt, 2.2f)) continue;
                         if (isTooCloseToBunker(pt, 3.5f)) continue;
                         if (isTooCloseToGreen(pt, 5.0f)) continue;
+                        if (isBetweenTeeAndFairway(pt)) continue;
 
                         bool tooCloseToLineOfPlay = false;
                         bool insideForest = false;
@@ -3574,7 +3591,7 @@ public partial class OsmMapLoader : Node
             skyMaterial.SetShaderParameter("clouds_intensity", 10.0f);
             skyMaterial.SetShaderParameter("clouds_size", 2.0f);
             skyMaterial.SetShaderParameter("clouds_uv", new Vector2(0.16f, 0.11f));
-            skyMaterial.SetShaderParameter("clouds_speed", 0.07f);
+            skyMaterial.SetShaderParameter("clouds_speed", 0.005f);
             skyMaterial.SetShaderParameter("clouds_direction", new Vector2(0.25f, 0.25f));
             skyMaterial.SetShaderParameter("clouds_day_color", new Color(1f, 1f, 1f, 1f));
             skyMaterial.SetShaderParameter("clouds_horizon_light_color", new Color(0.98f, 0.43f, 0.15f, 1f));
@@ -3590,7 +3607,7 @@ public partial class OsmMapLoader : Node
             skyMaterial.SetShaderParameter("cumulus_clouds_sky_tint_fade", 0.0f);
             skyMaterial.SetShaderParameter("cumulus_clouds_intensity", 0.6f);
             skyMaterial.SetShaderParameter("cumulus_clouds_size", 0.5f);
-            skyMaterial.SetShaderParameter("cumulus_clouds_speed", 0.05f);
+            skyMaterial.SetShaderParameter("cumulus_clouds_speed", 0.003f);
             skyMaterial.SetShaderParameter("cumulus_clouds_direction", new Vector3(0.25f, 0.1f, 0.25f));
             skyMaterial.SetShaderParameter("cumulus_clouds_texture", GD.Load<Texture2D>("res://addons/sky_3d/assets/textures/noiseClouds.png"));
             skyMaterial.SetShaderParameter("cumulus_clouds_day_color", new Color(1f, 1f, 1f, 1f));
@@ -3602,7 +3619,7 @@ public partial class OsmMapLoader : Node
             var sky = new Sky 
             { 
                 SkyMaterial = skyMaterial,
-                ProcessMode = Sky.ProcessModeEnum.Quality,
+                ProcessMode = Sky.ProcessModeEnum.Realtime,
                 RadianceSize = isMobilePlatform ? Sky.RadianceSizeEnum.Size128 : Sky.RadianceSizeEnum.Size256
             };
             var env = new Godot.Environment
@@ -3687,13 +3704,18 @@ public partial class OsmMapLoader : Node
             skydome.Set("sun_altitude", -55.72381487797508);
             skydome.Set("moon_azimuth", -282.21609447769833);
             skydome.Set("moon_altitude", -119.00287765558052);
+            skydome.Set("fog_visible", false);
+            skydome.Set("clouds_speed", 0.005f);
+            skydome.Set("clouds_cumulus_speed", 0.003f);
             sky3D.AddChild(skydome);
             skydome.Owner = rootNode;
 
             // Add TimeOfDay
             var timeOfDay = new Node { Name = "TimeOfDay" };
             timeOfDay.SetScript(GD.Load<Script>("res://addons/sky_3d/src/TimeOfDay.gd"));
+            timeOfDay.Set("update_in_game", false);
             timeOfDay.Set("update_in_editor", false);
+            timeOfDay.Set("update_interval", 1.0f);
             timeOfDay.Set("dome_path", new NodePath("../Skydome"));
             timeOfDay.Set("total_hours", 13.25f);
             timeOfDay.Set("day", 28);
@@ -3810,6 +3832,7 @@ public partial class OsmMapLoader : Node
 
             var courseConfig = new CourseJsonConfig
             {
+                GraphicsVersion = GetCurrentGraphicsVersion(),
                 ScenePath = "course.tscn",
                 Title = courseTitle,
                 Latitude = lat,
@@ -6664,10 +6687,31 @@ public partial class OsmMapLoader : Node
         HashSet<string> OtherCourseNames
     );
     
+    public static int GetCurrentGraphicsVersion()
+    {
+        try
+        {
+            var upgraderScript = GD.Load<Script>("res://Utils/CourseGraphicsUpgrader.gd");
+            if (upgraderScript != null)
+            {
+                var val = upgraderScript.Call("get_current_graphics_version");
+                if (val.VariantType == Variant.Type.Int)
+                {
+                    return val.AsInt32();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Failed to get CURRENT_COURSE_GRAPHICS_VERSION: {ex.Message}");
+        }
+        return 20;
+    }
+
     private class CourseJsonConfig
     {
         [JsonPropertyName("graphics_version")]
-        public int GraphicsVersion { get; set; } = 13;
+        public int GraphicsVersion { get; set; } = GetCurrentGraphicsVersion();
 
         [JsonPropertyName("scene_path")]
         public string ScenePath { get; set; } = "course.tscn";

@@ -83,6 +83,18 @@ var current_hole_location: Vector3 = Vector3.ZERO:
 		if current_hole_location != val:
 			current_hole_location = val
 			call_deferred("_generate_green_grid_and_heatmap")
+			var mp_mgr: Node = null
+			if is_inside_tree() and has_node("/root/MultiplayerManager"):
+				mp_mgr = get_node("/root/MultiplayerManager")
+			else:
+				var ml = Engine.get_main_loop()
+				if ml is SceneTree and ml.root != null:
+					if ml.root.has_node("MultiplayerManager"):
+						mp_mgr = ml.root.get_node("MultiplayerManager")
+					else:
+						mp_mgr = ml.root.find_child("MultiplayerManager", true, false)
+			if mp_mgr != null:
+				mp_mgr.current_pin_position = val
 var cup_radius: float = 0.054
 var current_hole_id: String = ""
 var current_hole_name: String = "Hole 1"
@@ -4173,7 +4185,7 @@ func _create_gimme_ring_mesh(pin_pos: Vector3, dist_meters: float, line_width: f
 	var st = SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	
-	var steps = 90
+	var steps = 120
 	var pin_2d = Vector2(pin_pos.x, pin_pos.z)
 	
 	var inner_verts: Array[Vector3] = []
@@ -4182,6 +4194,14 @@ func _create_gimme_ring_mesh(pin_pos: Vector3, dist_meters: float, line_width: f
 	outer_verts.resize(steps)
 	
 	var min_r = cup_radius + 0.04
+	
+	var sample_height = func(wx: float, wz: float) -> float:
+		var cache_key = Vector2i(roundi(wx * 100.0), roundi(wz * 100.0))
+		if height_cache.has(cache_key):
+			return height_cache[cache_key]
+		var gh = get_height(wx, wz)
+		height_cache[cache_key] = gh
+		return gh
 	
 	for i in range(steps):
 		var angle = i * TAU / steps
@@ -4203,21 +4223,14 @@ func _create_gimme_ring_mesh(pin_pos: Vector3, dist_meters: float, line_width: f
 		var world_x_in = pin_pos.x + r_inner * u.x
 		var world_z_in = pin_pos.z + r_inner * u.y
 		
-		var sample_height = func(wx: float, wz: float) -> float:
-			var cache_key = Vector2i(roundi(wx * 4.0), roundi(wz * 4.0))
-			if height_cache.has(cache_key):
-				return height_cache[cache_key]
-			var gh = get_height(wx, wz)
-			height_cache[cache_key] = gh
-			return gh
-			
 		var ground_h_out = sample_height.call(world_x_out, world_z_out)
 		var ground_h_in = sample_height.call(world_x_in, world_z_in)
-		# Fall back to mid sample if inner/outer are identical or cached
-		if absf(ground_h_out - ground_h_in) < 0.001:
-			var ground_h_mid = sample_height.call(world_x_mid, world_z_mid)
-			ground_h_out = maxf(ground_h_out, ground_h_mid)
-			ground_h_in = maxf(ground_h_in, ground_h_mid)
+		var ground_h_mid = sample_height.call(world_x_mid, world_z_mid)
+		# Ensure convex terrain between inner and outer ring doesn't cause clipping
+		var mid_rise = ground_h_mid - maxf(ground_h_out, ground_h_in)
+		if mid_rise > 0.0:
+			ground_h_out += mid_rise
+			ground_h_in += mid_rise
 			
 		var local_y_out = (ground_h_out + y_offset) - pin_pos.y
 		var local_y_in = (ground_h_in + y_offset) - pin_pos.y
@@ -4256,9 +4269,28 @@ func _create_gimme_ring_material(color: Color, render_priority: int) -> Standard
 	mat.albedo_color = color
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat.no_depth_test = true
+	mat.no_depth_test = false
+	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 	mat.render_priority = render_priority
 	return mat
+
+
+func is_point_within_gimme_ring(test_pos: Vector3, pin_pos: Vector3, dist_meters: float) -> bool:
+	var test_2d := Vector2(test_pos.x, test_pos.z)
+	var pin_2d := Vector2(pin_pos.x, pin_pos.z)
+	var d := test_2d.distance_to(pin_2d)
+	if d > dist_meters:
+		return false
+	var boundary_segments: Array = _get_green_boundary_segments(pin_pos)
+	if boundary_segments.is_empty():
+		return true
+	if d <= 0.05:
+		return true
+	var u := (test_2d - pin_2d) / d
+	var edge_dist := _get_green_edge_distance(pin_2d, u, boundary_segments)
+	if edge_dist < INF and d > (edge_dist + 0.05):
+		return false
+	return true
 
 
 func update_gimme_circles() -> void:
@@ -4284,7 +4316,7 @@ func update_gimme_circles() -> void:
 		mesh_1 = null
 		
 	if enabled_1:
-		var ring_mesh_1 = _create_gimme_ring_mesh(pin_pos, dist_1_meters, 0.08, 0.06, boundary_segments, height_cache)
+		var ring_mesh_1 = _create_gimme_ring_mesh(pin_pos, dist_1_meters, 0.08, 0.004, boundary_segments, height_cache)
 		if mesh_1 == null:
 			mesh_1 = MeshInstance3D.new()
 			mesh_1.name = "GimmeCircle1"
@@ -4312,7 +4344,7 @@ func update_gimme_circles() -> void:
 		mesh_2 = null
 		
 	if enabled_2:
-		var ring_mesh_2 = _create_gimme_ring_mesh(pin_pos, dist_2_meters, 0.08, 0.065, boundary_segments, height_cache)
+		var ring_mesh_2 = _create_gimme_ring_mesh(pin_pos, dist_2_meters, 0.08, 0.005, boundary_segments, height_cache)
 		if mesh_2 == null:
 			mesh_2 = MeshInstance3D.new()
 			mesh_2.name = "GimmeCircle2"
@@ -4340,7 +4372,7 @@ func update_gimme_circles() -> void:
 		mesh_3 = null
 		
 	if enabled_3:
-		var ring_mesh_3 = _create_gimme_ring_mesh(pin_pos, dist_3_meters, 0.08, 0.07, boundary_segments, height_cache)
+		var ring_mesh_3 = _create_gimme_ring_mesh(pin_pos, dist_3_meters, 0.08, 0.006, boundary_segments, height_cache)
 		if mesh_3 == null:
 			mesh_3 = MeshInstance3D.new()
 			mesh_3.name = "GimmeCircle3"
@@ -5115,6 +5147,8 @@ func _on_club_selected(club_name: String) -> void:
 		_user_custom_club = club_name
 	if has_node("Player") and $Player.ball != null and $Player.ball.has_method("_on_club_selected"):
 		$Player.ball._on_club_selected(club_name)
+	if is_driving_range and has_node("Player") and $Player.has_method("clear_tracers"):
+		$Player.clear_tracers()
 	if not _shot_active and not is_aerial_view:
 		if not _is_updating_auto_club and not _aim_is_manual and not current_hole_location.is_zero_approx():
 			apply_default_aim(club_name)
@@ -6228,22 +6262,10 @@ func update_current_lie_and_reduction() -> void:
 	var reduction = 0.0
 	
 	if is_driving_range:
-		var dist_to_spawn = ball_node.global_position.distance_to(ball_node.spawn_position) if ball_node != null else 0.0
-		if dist_to_spawn < 1.5:
-			lie_type = "teebox"
-			reduction = 0.0
-			ball_node.lie_type = "teebox"
-			ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
-		elif abs(ball_node.global_position.z) <= 26.0 and ball_node.global_position.x >= -12.0:
-			lie_type = "fairway"
-			reduction = 0.0
-			ball_node.lie_type = "fairway"
-			ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
-		else:
-			lie_type = "rough"
-			reduction = 0.10
-			ball_node.lie_type = "rough"
-			ball_node.set_surface(PhysicsEnums.SurfaceType.ROUGH)
+		lie_type = "teebox"
+		reduction = 0.0
+		ball_node.lie_type = "teebox"
+		ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
 	else:
 		if is_ball_on_wrong_green():
 			lie_type = "fairway"
@@ -6263,11 +6285,26 @@ func update_current_lie_and_reduction() -> void:
 					lie_type = "fringe"
 					ball_node.lie_type = "fringe"
 					ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
-				# Check if we are actually on a tee box (strictly inside tee box triangles or at teebox position)
-				elif ball_node.lie_type == "teebox" or get_distance_to_nearest_teebox(ball_node.global_position) <= 0.5 or (practice_start_pos != Vector3.ZERO and ball_node.global_position.distance_to(practice_start_pos) < 1.5):
-					lie_type = "teebox"
-					ball_node.lie_type = "teebox"
-					ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+				# Check if we are on a tee box (first shot on hole only, or practice mode)
+				elif (ball_node.lie_type == "teebox" or get_distance_to_nearest_teebox(ball_node.global_position) <= 0.5 or (practice_start_pos != Vector3.ZERO and ball_node.global_position.distance_to(practice_start_pos) < 1.5)):
+					var tee_allowed = practice_mode_active
+					if not tee_allowed:
+						var mp_mgr_tee = get_node_or_null("/root/MultiplayerManager")
+						if mp_mgr_tee != null and not mp_mgr_tee.players.is_empty():
+							var ap_tee = mp_mgr_tee.get_active_player()
+							tee_allowed = (ap_tee != null and int(ap_tee.get("strokes", 0)) == 0)
+						else:
+							tee_allowed = (shot_count == 0)
+
+					if tee_allowed:
+						lie_type = "teebox"
+						ball_node.lie_type = "teebox"
+						ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+					else:
+						# Subsequent shots landing or resting in a tee box are treated as fairway turf, never teed up
+						lie_type = "fairway"
+						ball_node.lie_type = "fairway"
+						ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
 				# Check if we are actually on a fairway (strictly inside fairway triangles)
 				elif get_distance_to_nearest_fairway(ball_node.global_position) <= 0.001:
 					lie_type = "fairway"
@@ -6826,7 +6863,7 @@ func _create_arrow_mesh() -> Mesh:
 	
 	var half_w = 0.028
 	var half_l = 0.036
-	var h = 0.003
+	var h = 0.001
 	
 	var t_tip = Vector3(0.0, h, half_l)
 	var t_left = Vector3(-half_w, h, -half_l)
@@ -6967,8 +7004,9 @@ func _generate_green_grid_and_heatmap() -> void:
 	var st_grid = SurfaceTool.new()
 	st_grid.begin(Mesh.PRIMITIVE_LINES)
 	
-	var heatmap_y_offset = 0.02
-	var grid_y_offset = 0.03
+	var heatmap_y_offset = 0.002
+	var grid_y_offset = 0.004
+	var dot_y_offset = 0.006
 	
 	# Height cache for optimization
 	var height_cache = {}
@@ -7016,20 +7054,6 @@ func _generate_green_grid_and_heatmap() -> void:
 		st_heatmap.set_color(col01)
 		st_heatmap.add_vertex(h01)
 		
-		var g00 = Vector3(x0, y00 + grid_y_offset, z0)
-		var g10 = Vector3(x1, y10 + grid_y_offset, z0)
-		var g11 = Vector3(x1, y11 + grid_y_offset, z1)
-		var g01 = Vector3(x0, y01 + grid_y_offset, z1)
-		
-		st_grid.add_vertex(g00)
-		st_grid.add_vertex(g10)
-		st_grid.add_vertex(g10)
-		st_grid.add_vertex(g11)
-		st_grid.add_vertex(g11)
-		st_grid.add_vertex(g01)
-		st_grid.add_vertex(g01)
-		st_grid.add_vertex(g00)
-		
 	# Collect unique horizontal and vertical edges to generate slope flow arrows
 	var h_edges = {}
 	var v_edges = {}
@@ -7040,8 +7064,31 @@ func _generate_green_grid_and_heatmap() -> void:
 		h_edges[Vector2i(ix, iz + 1)] = true
 		v_edges[Vector2i(ix, iz)] = true
 		v_edges[Vector2i(ix + 1, iz)] = true
+
+	# Subdivide grid lines so they tightly conform to green terrain curvature instead of floating
+	var edge_subdiv = 4
+	for edge in h_edges.keys():
+		var x_start = edge.x * spacing
+		var z_val = edge.y * spacing
+		var prev_pt = Vector3(x_start, get_cached_height.call(x_start, z_val) + grid_y_offset, z_val)
+		for s in range(1, edge_subdiv + 1):
+			var cur_x = x_start + (float(s) / float(edge_subdiv)) * spacing
+			var cur_pt = Vector3(cur_x, get_cached_height.call(cur_x, z_val) + grid_y_offset, z_val)
+			st_grid.add_vertex(prev_pt)
+			st_grid.add_vertex(cur_pt)
+			prev_pt = cur_pt
+
+	for edge in v_edges.keys():
+		var x_val = edge.x * spacing
+		var z_start = edge.y * spacing
+		var prev_pt = Vector3(x_val, get_cached_height.call(x_val, z_start) + grid_y_offset, z_start)
+		for s in range(1, edge_subdiv + 1):
+			var cur_z = z_start + (float(s) / float(edge_subdiv)) * spacing
+			var cur_pt = Vector3(x_val, get_cached_height.call(x_val, cur_z) + grid_y_offset, cur_z)
+			st_grid.add_vertex(prev_pt)
+			st_grid.add_vertex(cur_pt)
+			prev_pt = cur_pt
 		
-	var dot_y_offset = 0.035
 	var dots_data = [] # Array of dictionaries: {start: Vector3, displacement: Vector3, slope: float}
 	
 	# Horizontal edges
@@ -7114,7 +7161,9 @@ func _generate_green_grid_and_heatmap() -> void:
 	mat_hm.vertex_color_use_as_albedo = true
 	mat_hm.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 	mat_hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat_hm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 	mat_hm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat_hm.render_priority = 0
 	heatmap_mi.material_override = mat_hm
 	heatmap_mi.layers = 2
 	heatmap_mi.visible = false
@@ -7127,6 +7176,8 @@ func _generate_green_grid_and_heatmap() -> void:
 	mat_g.albedo_color = Color(1.0, 1.0, 1.0, 0.35)
 	mat_g.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 	mat_g.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat_g.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mat_g.render_priority = 1
 	grid_mi.material_override = mat_g
 	grid_mi.layers = 4
 	grid_mi.visible = false
@@ -7204,6 +7255,7 @@ void fragment() {
 	
 	var mat_dots = ShaderMaterial.new()
 	mat_dots.shader = shader
+	mat_dots.render_priority = 2
 	dots_mi.material_override = mat_dots
 	dots_mi.layers = 4
 	dots_mi.visible = false

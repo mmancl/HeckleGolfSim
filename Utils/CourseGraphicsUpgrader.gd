@@ -17,6 +17,26 @@ const ProceduralTreeGeneratorScript = preload("res://HighFidelity/Foliage/proced
 const CourseDetailEnhancerScript = preload("res://HighFidelity/Terrain/course_detail_enhancer.gd")
 
 
+static func get_current_graphics_version() -> int:
+	return CURRENT_COURSE_GRAPHICS_VERSION
+
+
+static func is_course_scene_already_upgraded(scene_path: String) -> bool:
+	if not FileAccess.file_exists(scene_path):
+		return false
+	var file := FileAccess.open(scene_path, FileAccess.READ)
+	if file == null:
+		return false
+	var has_multimesh := false
+	while not file.eof_reached():
+		var line := file.get_line()
+		if "MultiMeshFoliageContainer" in line:
+			has_multimesh = true
+			break
+	file.close()
+	return has_multimesh
+
+
 static func get_courses_needing_upgrade(base_dir: String = "user://courses") -> Array[Dictionary]:
 	var pending: Array[Dictionary] = []
 	var dir := DirAccess.open(base_dir)
@@ -41,6 +61,13 @@ static func get_courses_needing_upgrade(base_dir: String = "user://courses") -> 
 						var rel_scene := str(data.get("scene_path", "course.tscn"))
 						var scene_path := course_dir.path_join(rel_scene) if not rel_scene.begins_with("user://") and not rel_scene.begins_with("res://") else rel_scene
 						if version < CURRENT_COURSE_GRAPHICS_VERSION and FileAccess.file_exists(scene_path):
+							if is_course_scene_already_upgraded(scene_path):
+								data["graphics_version"] = CURRENT_COURSE_GRAPHICS_VERSION
+								var wfile := FileAccess.open(config_path, FileAccess.WRITE)
+								if wfile != null:
+									wfile.store_string(JSON.stringify(data, "\t"))
+									wfile.close()
+								continue
 							pending.append({
 								"dir_path": course_dir,
 								"config_path": config_path,

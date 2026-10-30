@@ -3783,6 +3783,7 @@ func _on_active_player_changed(player: Dictionary) -> void:
 					course_instance.current_hole_location = course_instance.get_hole_location_for(hole_loc)
 				else:
 					course_instance.current_hole_location = Vector3(hole_loc[0], course_instance.get_height(hole_loc[0], hole_loc[1]), hole_loc[1])
+				MultiplayerManager.current_pin_position = course_instance.current_hole_location
 				course_instance.aim_target_pos = Vector3.ZERO
 				
 				if course_instance.has_node("PinMarker"):

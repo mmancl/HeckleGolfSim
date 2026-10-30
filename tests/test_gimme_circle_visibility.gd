@@ -17,13 +17,14 @@ func _initialize() -> void:
 	assert(mat != null, "Material must not be null")
 	assert(mat.render_priority == 2, "render_priority must be set")
 	assert(mat.cull_mode == BaseMaterial3D.CULL_DISABLED, "cull_mode must be CULL_DISABLED")
-	assert(mat.no_depth_test == true, "no_depth_test must be true so gimme rings never render hidden under ground")
+	assert(mat.no_depth_test == false, "no_depth_test must be false so gimme rings lie flat on the green surface with depth testing")
+	assert(mat.depth_draw_mode == BaseMaterial3D.DEPTH_DRAW_DISABLED, "depth_draw_mode must be DEPTH_DRAW_DISABLED")
 	print("Test 1 PASS: Gimme ring material offset and render properties verified")
 	
 	# Verify _create_gimme_ring_mesh generates valid geometry conforming to elevation
 	assert(range_instance.has_method("_create_gimme_ring_mesh"), "_create_gimme_ring_mesh must exist")
 	var pin_pos = Vector3(10.0, 5.0, 10.0)
-	var mesh = range_instance._create_gimme_ring_mesh(pin_pos, 1.0, 0.08, 0.035, [])
+	var mesh = range_instance._create_gimme_ring_mesh(pin_pos, 1.0, 0.08, 0.004, [])
 	assert(mesh != null, "Mesh should not be null")
 	assert(mesh.get_surface_count() > 0, "Mesh should have surfaces")
 	var arrays = mesh.surface_get_arrays(0)

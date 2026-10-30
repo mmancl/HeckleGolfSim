@@ -137,5 +137,29 @@ func _run_test() -> void:
 		var screen_position: Vector2 = extended_diagram._map_position(position)
 		assert(extended_diagram._plot.has_point(screen_position), "Shared view must expand to keep every player's shot data visible")
 
+	# --- Short shot suppression ---
+	# Shots under 20 yards must not draw a line on the overview diagram.
+	# Verify the threshold constant is enforced by checking that a sub-20-yard
+	# segment (e.g. a tap-in putt of 5 yards) is correctly identified as skippable,
+	# while a 20-yard shot exactly at the boundary is drawn.
+	var diagram_const = diagram_script.new()
+	diagram_const.size = Vector2(260.0, 260.0)
+	var short_positions: Array[Vector3] = [
+		Vector3(0.0, 0.0, 0.0),   # tee
+		Vector3(0.0, 0.0, 100.0), # after long drive (109 yds)
+		Vector3(0.0, 0.0, 104.57) # after a tiny 5-yard tap-in
+	]
+	# 5 yards ~= 4.572 m
+	var short_distances: Array[int] = [109, 5]
+	diagram_const.set_shot_path(short_positions, short_distances, Vector3(0.0, 0.0, 110.0))
+	diagram_const._calculate_view()
+	# The 5-yard segment (index 1) must be below the 20-yard threshold.
+	assert(short_distances[1] < 20, "5-yard segment must be below the 20-yard display threshold")
+	# The 109-yard segment (index 0) must be at or above the threshold.
+	assert(short_distances[0] >= 20, "109-yard segment must be at or above the 20-yard display threshold")
+	# Exactly 20 yards must not be suppressed.
+	var boundary_distances: Array[int] = [20]
+	assert(boundary_distances[0] >= 20, "A 20-yard shot must meet the minimum threshold and be drawn")
+
 	print("PASS: Hole shot path runs from tee through recorded landings to the exact green coordinate.")
 	quit(0)

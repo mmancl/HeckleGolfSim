@@ -1875,42 +1875,31 @@ static func _build_thick_rough_bushes(scene_root: Node, height_info: Dictionary,
 	rng.seed = 882244
 
 	var tree_positions: Array = features.get("tree_positions", [])
-	var step := 12.0
-	var z := min_z
-	while z <= max_z:
-		var x := min_x
-		while x <= max_x:
-			var jx := x + rng.randf_range(-3.5, 3.5)
-			var jz := z + rng.randf_range(-3.5, 3.5)
-			var pt := Vector2(jx, jz)
+	var min_bush_dist_sq := 1.5 * 1.5
 
-			# Sporadic probability in thick rough
-			if rng.randf() < 0.38 and _is_point_in_thick_rough(pt, features, height_info, 18.0, 15.0):
-				# Don't place on top of tree trunks
-				var near_tree := false
-				for tp in tree_positions:
-					if (tp as Vector2).distance_squared_to(pt) < 9.0:
-						near_tree = true
+	# Cluster bushes around trees (1 to 3 bushes per tree) in thick rough
+	for tree_pos_val in tree_positions:
+		var tp: Vector2 = tree_pos_val if tree_pos_val is Vector2 else Vector2(tree_pos_val[0], tree_pos_val[1])
+		var num_bushes := rng.randi_range(1, 3)
+		for _b in range(num_bushes):
+			var dist := rng.randf_range(1.6, 3.5)
+			var angle := rng.randf_range(0.0, TAU)
+			var pt := tp + Vector2(cos(angle), sin(angle)) * dist
+
+			if _is_point_in_thick_rough(pt, features, height_info, 12.0, 10.0) and not _is_point_between_tee_and_fairway(pt, features):
+				var too_close := false
+				for pb in placed_bushes:
+					if pb.distance_squared_to(pt) < min_bush_dist_sq:
+						too_close = true
 						break
-
-				# Keep spacing between bushes
-				var near_other_bush := false
-				if not near_tree:
-					for pb in placed_bushes:
-						if pb.distance_squared_to(pt) < 100.0: # 10m minimum spacing
-							near_other_bush = true
-							break
-
-				if not near_tree and not near_other_bush:
+				if not too_close:
 					placed_bushes.append(pt)
-					var wy := _sample_height(jx, jz, height_info)
+					var wy := _sample_height(pt.x, pt.y, height_info)
 					var rot_y := rng.randf_range(0.0, TAU)
 					var s := rng.randf_range(1.15, 2.25)
-					var xf := Transform3D(Basis(Vector3.UP, rot_y).scaled(Vector3(s, s, s)), Vector3(jx, wy, jz))
+					var xf := Transform3D(Basis(Vector3.UP, rot_y).scaled(Vector3(s, s, s)), Vector3(pt.x, wy, pt.y))
 					var type_idx := rng.randi() % bush_meshes.size()
 					bush_type_xforms[type_idx].append(xf)
-			x += step
-		z += step
 
 	var total_placed := placed_bushes.size()
 	if total_placed == 0:
@@ -2257,3 +2246,65 @@ static func _distance_squared_to_segment_2d(p: Vector2, a: Vector2, b: Vector2) 
 	var t := clampf((p - a).dot(ab) / ab_len_sq, 0.0, 1.0)
 	var proj := a + ab * t
 	return p.distance_squared_to(proj)
+
+
+static func _is_point_between_tee_and_fairway(pt: Vector2, features: Dictionary, corridor_half_width: float = 18.0, min_tee_front_dist: float = 35.0) -> bool:
+	# Check against all hole lines / drive corridors
+	for hl in features.get("hole_lines", []):
+		var p0: Vector2 = hl.get("p0", Vector2.ZERO)
+		var p1: Vector2 = hl.get("p1", Vector2.ZERO)
+		if _is_point_in_drive_corridor(pt, p0, p1, corridor_half_width, min_tee_front_dist):
+			return true
+
+	# Also check hole paths segments starting from tee
+	for path in features.get("hole_paths", []):
+		if path is Array and path.size() >= 2:
+			var p0: Vector2 = path[0] if path[0] is Vector2 else Vector2(path[0][0], path[0][1])
+			var p1: Vector2 = path[1] if path[1] is Vector2 else Vector2(path[1][0], path[1][1])
+			if _is_point_in_drive_corridor(pt, p0, p1, corridor_half_width, min_tee_front_dist):
+				return true
+
+	# Also check proximity to any tee polygon boundary with a buffer
+	var tee_front_buffer := 15.0
+	for t in features.get("tees", []):
+		var aabb: Rect2 = t["aabb"]
+		if pt.x >= aabb.position.x - tee_front_buffer and pt.x <= aabb.end.x + tee_front_buffer and \
+		   pt.y >= aabb.position.y - tee_front_buffer and pt.y <= aabb.end.y + tee_front_buffer:
+			if _distance_to_polygon_2d(pt, t["poly"]) < tee_front_buffer:
+				return true
+
+	return false
+
+
+static func _is_point_in_drive_corridor(pt: Vector2, tee_pos: Vector2, fairway_target: Vector2, corridor_half_width: float = 18.0, min_tee_front_dist: float = 35.0) -> bool:
+	var to_target := fairway_target - tee_pos
+	var total_dist := to_target.length()
+	if total_dist < 0.001:
+		return false
+
+	var drive_dir := to_target / total_dist
+	var to_pt := pt - tee_pos
+	var forward_proj := to_pt.dot(drive_dir)
+
+	# If behind or at tee box, not in front flight corridor
+	if forward_proj <= 0.0:
+		return false
+
+	# If beyond fairway target
+	if forward_proj > total_dist:
+		return false
+
+	# Perpendicular distance to drive axis
+	var perp_dist := absf(to_pt.x * drive_dir.y - to_pt.y * drive_dir.x)
+	if perp_dist < corridor_half_width:
+		return true
+
+	# Direct obstruction in front cone of tee (< min_tee_front_dist, within ~70 deg forward cone)
+	var pt_dist := to_pt.length()
+	if pt_dist < min_tee_front_dist and pt_dist > 0.001:
+		var cos_angle := forward_proj / pt_dist
+		if cos_angle > 0.34:
+			return true
+
+	return false
+
