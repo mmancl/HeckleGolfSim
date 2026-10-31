@@ -164,90 +164,120 @@ jobs:
           echo "Using scheme: $SCHEME_NAME"
           echo "SCHEME_NAME=$SCHEME_NAME" >> $GITHUB_ENV
 
-      - name: Build and Package Appetize.io iOS Simulator App (.zip)
+      - name: Build iOS Application Binary via xcodebuild
         run: |
           CONFIG="${{ inputs.configuration }}"
           if [ -z "$CONFIG" ]; then
             CONFIG="Release"
           fi
 
-          mkdir -p build_output_sim/derived
-          echo "=== Building iOS Simulator Target ($CONFIG) ==="
+          mkdir -p build_output/derived
+          echo "=== Compiling Full iOS Binary ($CONFIG) ==="
           
-          xcodebuild -project "$XCODEPROJ" \
-            -scheme "$SCHEME_NAME" \
-            -configuration "$CONFIG" \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build_output_sim/derived \
-            ARCHS="arm64" \
-            ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
-
-          APP_SIM_DIR=$(find build_output_sim/derived -name "*.app" -type d | head -n 1)
-          if [ -z "$APP_SIM_DIR" ]; then
-            echo "ERROR: Compiled .app directory not found in build_output_sim/derived"
-            ls -la build_output_sim/derived/
-            exit 1
-          fi
-          echo "Found compiled iOS Simulator app at: $APP_SIM_DIR"
-
-          # Appetize requires the .app bundle to be at the root of the .zip archive
-          APP_SIM_PARENT=$(dirname "$APP_SIM_DIR")
-          APP_SIM_BASE=$(basename "$APP_SIM_DIR")
-          SIM_ZIP_PATH="$GITHUB_WORKSPACE/dist/HeckleGolfSim-v${VERSION}-Appetize-Simulator.zip"
-
-          cd "$APP_SIM_PARENT"
-          zip -qr "$SIM_ZIP_PATH" "$APP_SIM_BASE"
-          cd "$GITHUB_WORKSPACE"
-
-          echo "Appetize.io Simulator archive created: $SIM_ZIP_PATH"
-          ls -lh "$SIM_ZIP_PATH"
-
-      - name: Build and Package Device .ipa
-        if: ${{ inputs.build_ipa != false }}
-        run: |
-          CONFIG="${{ inputs.configuration }}"
-          if [ -z "$CONFIG" ]; then
-            CONFIG="Release"
-          fi
-
-          mkdir -p build_output_device/derived
-          mkdir -p build_output_device/Payload
-          echo "=== Building iOS Device Target ($CONFIG) ==="
-
           xcodebuild -project "$XCODEPROJ" \
             -scheme "$SCHEME_NAME" \
             -configuration "$CONFIG" \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            -derivedDataPath build_output_device/derived \
+            -derivedDataPath build_output/derived \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             build
 
-          APP_DEV_DIR=$(find build_output_device/derived -name "*.app" -type d | head -n 1)
-          if [ -z "$APP_DEV_DIR" ]; then
-            echo "ERROR: Device .app directory not found in build_output_device/derived"
+          APP_DIR=$(find build_output/derived -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_DIR" ]; then
+            echo "ERROR: Compiled .app directory not found in build_output/derived"
+            ls -la build_output/derived/
             exit 1
           fi
-          echo "Found compiled device app at: $APP_DEV_DIR"
+          echo "Found compiled iOS app at: $APP_DIR"
+          echo "APP_DIR=$APP_DIR" >> $GITHUB_ENV
 
-          cp -r "$APP_DEV_DIR" build_output_device/Payload/
-          cd build_output_device
+      - name: Build and Package Device .ipa
+        if: ${{ inputs.build_ipa != false }}
+        run: |
+          mkdir -p build_output/Payload
+          echo "=== Packaging Device .ipa ==="
+          cp -R "$APP_DIR" build_output/Payload/
+          cd build_output
           zip -qr "$GITHUB_WORKSPACE/dist/HeckleGolfSim-v${VERSION}.ipa" Payload
-          # Also write a standard copy for scripts expecting HeckleGolfSim.ipa
           cp "$GITHUB_WORKSPACE/dist/HeckleGolfSim-v${VERSION}.ipa" "$GITHUB_WORKSPACE/dist/HeckleGolfSim.ipa"
           cd "$GITHUB_WORKSPACE"
 
           echo "Matching IPA package created: dist/HeckleGolfSim-v${VERSION}.ipa"
           ls -lh "dist/HeckleGolfSim-v${VERSION}.ipa"
+
+      - name: Convert and Package for Appetize.io iOS Simulator (.zip)
+        run: |
+          echo "=== Preparing Appetize.io Simulator App ==="
+          mkdir -p build_output/Appetize
+          APP_NAME=$(basename "$APP_DIR")
+          APP_SIM_DIR="build_output/Appetize/$APP_NAME"
+          
+          # Copy compiled ARM64 application bundle
+          cp -R "$APP_DIR" "$APP_SIM_DIR"
+
+          # Function to transmogrify a Mach-O binary from iOS device to iOS Simulator
+          patch_binary() {
+            local target_bin="$1"
+            if [ ! -f "$target_bin" ]; then
+              return
+            fi
+            if file "$target_bin" | grep -q "Mach-O"; then
+              local build_info
+              build_info=$(xcrun vtool -show-build "$target_bin" 2>/dev/null || true)
+              local minos
+              minos=$(echo "$build_info" | awk '/minos/{print $2}' | head -n 1)
+              local sdk
+              sdk=$(echo "$build_info" | awk '/sdk/{print $2}' | head -n 1)
+              if [ -z "$minos" ]; then minos="15.0"; fi
+              if [ -z "$sdk" ]; then sdk="15.0"; fi
+              
+              echo "Patching Mach-O platform to 7 (IOSSIMULATOR) [minos: $minos, sdk: $sdk]: $target_bin"
+              xcrun vtool -arch arm64 -set-build-version 7 "$minos" "$sdk" -replace -output "${target_bin}.sim" "$target_bin" 2>/dev/null || \
+              xcrun vtool -set-build-version 7 "$minos" "$sdk" -replace -output "${target_bin}.sim" "$target_bin" 2>/dev/null || true
+              
+              if [ -f "${target_bin}.sim" ]; then
+                mv -f "${target_bin}.sim" "$target_bin"
+                chmod +x "$target_bin"
+              fi
+            fi
+          }
+
+          # 1. Patch main executable
+          EXE_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_SIM_DIR/Info.plist" 2>/dev/null || basename "$APP_SIM_DIR" .app)
+          if [ -f "$APP_SIM_DIR/$EXE_NAME" ]; then
+            patch_binary "$APP_SIM_DIR/$EXE_NAME"
+          fi
+
+          # 2. Patch all embedded frameworks and dynamic libraries
+          find "$APP_SIM_DIR" -type f \( -name "*.dylib" -o -perm +0111 \) | while read -r bin_file; do
+            if [ "$bin_file" != "$APP_SIM_DIR/$EXE_NAME" ]; then
+              patch_binary "$bin_file"
+            fi
+          done
+
+          # 3. Adjust Info.plist for iOS Simulator execution
+          echo "Setting simulator platform identifiers in Info.plist..."
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleSupportedPlatforms:0" "$APP_SIM_DIR/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleSupportedPlatforms:0 string iPhoneSimulator" "$APP_SIM_DIR/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Set :DTPlatformName iphonesimulator" "$APP_SIM_DIR/Info.plist" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Add :DTPlatformName string iphonesimulator" "$APP_SIM_DIR/Info.plist" 2>/dev/null || true
+
+          # 4. Ad-hoc codesign modified bundle
+          echo "Ad-hoc codesigning simulator bundle..."
+          codesign --force --deep --sign - "$APP_SIM_DIR"
+
+          # 5. Package into .zip with .app directly at archive root for Appetize.io
+          SIM_ZIP_PATH="$GITHUB_WORKSPACE/dist/HeckleGolfSim-v${VERSION}-Appetize-Simulator.zip"
+          cd build_output/Appetize
+          zip -qr "$SIM_ZIP_PATH" "$APP_NAME"
+          cd "$GITHUB_WORKSPACE"
+
+          echo "Appetize.io Simulator archive created: $SIM_ZIP_PATH"
+          ls -lh "$SIM_ZIP_PATH"
 
       - name: Upload to Appetize.io (Automatic if Secret Configured)
         id: appetize
