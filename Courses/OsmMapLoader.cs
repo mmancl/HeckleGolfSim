@@ -1775,14 +1775,15 @@ public partial class OsmMapLoader : Node
                 {
                     var uniquePoints = points.Take(points.Count - 1).ToArray();
                     waterPolygons.Add(uniquePoints);
-                    exclusionPolygons.Add(new ExclusionPolygon(uniquePoints, "water", this));
+                    var waterExcl = new ExclusionPolygon(uniquePoints, "water", this);
+                    exclusionPolygons.Add(waterExcl);
                     var indices = Geometry2D.TriangulatePolygon(uniquePoints);
                     if (indices.Length > 0)
                     {
-                        float heightOffset = 0.01f; // Just above rough base
+                        float heightOffset = 0.0f; // Smooth level water surface at waterExcl.WaterLevel
                         Color color = new Color(0.12f, 0.36f, 0.72f); // Deep blue pond
 
-                        var mesh = Create3DPolygonMesh(uniquePoints, indices, heightOffset, color, "water", exclusionPolygons);
+                        var mesh = Create3DPolygonMesh(uniquePoints, indices, heightOffset, color, "water", exclusionPolygons, waterExcl.WaterLevel);
                         var meshInstance = new MeshInstance3D
                         {
                             Name = $"water_{way.Id}",
@@ -4971,7 +4972,7 @@ public partial class OsmMapLoader : Node
         return results;
     }
 
-    private ArrayMesh Create3DPolygonMesh(Vector2[] points, int[] indices, float height, Color color, string? golfType = "", List<ExclusionPolygon>? exclusions = null)
+    private ArrayMesh Create3DPolygonMesh(Vector2[] points, int[] indices, float height, Color color, string? golfType = "", List<ExclusionPolygon>? exclusions = null, float? waterLevel = null)
     {
         if (points == null || points.Length < 3 || indices == null || indices.Length == 0)
         {
@@ -5048,6 +5049,8 @@ public partial class OsmMapLoader : Node
             _ => 2.0f
         };
 
+        float targetWaterY = waterLevel ?? (points.Length > 0 ? GetHeight(points[0].X, points[0].Y) : 0f);
+
         for (int i = 0; i < subdividedTriangles.Count; i++)
         {
             var tri = subdividedTriangles[i];
@@ -5058,6 +5061,18 @@ public partial class OsmMapLoader : Node
                 int idx = i * 3 + j;
                 float vx = triPts[j].X;
                 float vz = triPts[j].Y;
+
+                if (golfType == "water")
+                {
+                    // Perfectly flat, smooth, level water surface with true upward normal.
+                    // Eliminates concavity, warping, or undulating slopes across ponds and channels.
+                    vertices[idx] = new Vector3(vx, targetWaterY, vz);
+                    normals[idx] = Vector3.Up;
+                    colors[idx] = color;
+                    uvs[idx] = triPts[j] * 0.1f;
+                    newIndices[idx] = idx;
+                    continue;
+                }
 
                 // Calculate how far this vertex is from the polygon boundary
                 float distToEdge = DistanceToPolygon(new Vector2(vx, vz), points);
@@ -5155,24 +5170,30 @@ public partial class OsmMapLoader : Node
             var p_bot_i = points[i] + n_i * rampWidth;
             var p_bot_next = points[next] + n_next * rampWidth;
 
-            // Top: at rough ground level (tapered edge height is ~0 offset)
-            var v_top_i = new Vector3(p_top_i.X, GetHeight(p_top_i.X, p_top_i.Y), p_top_i.Y);
-            var v_top_next = new Vector3(p_top_next.X, GetHeight(p_top_next.X, p_top_next.Y), p_top_next.Y);
+            // Top: at rough ground level (or flat water surface)
+            float topY_i = (golfType == "water") ? targetWaterY : GetHeight(p_top_i.X, p_top_i.Y);
+            float topY_next = (golfType == "water") ? targetWaterY : GetHeight(p_top_next.X, p_top_next.Y);
+            var v_top_i = new Vector3(p_top_i.X, topY_i, p_top_i.Y);
+            var v_top_next = new Vector3(p_top_next.X, topY_next, p_top_next.Y);
 
             // Mid: slightly below rough ground
-            var v_mid_i = new Vector3(p_mid_i.X, GetHeight(p_mid_i.X, p_mid_i.Y) - bottomDrop * 0.5f, p_mid_i.Y);
-            var v_mid_next = new Vector3(p_mid_next.X, GetHeight(p_mid_next.X, p_mid_next.Y) - bottomDrop * 0.5f, p_mid_next.Y);
+            float midY_i = (golfType == "water") ? (targetWaterY - bottomDrop * 0.5f) : (GetHeight(p_mid_i.X, p_mid_i.Y) - bottomDrop * 0.5f);
+            float midY_next = (golfType == "water") ? (targetWaterY - bottomDrop * 0.5f) : (GetHeight(p_mid_next.X, p_mid_next.Y) - bottomDrop * 0.5f);
+            var v_mid_i = new Vector3(p_mid_i.X, midY_i, p_mid_i.Y);
+            var v_mid_next = new Vector3(p_mid_next.X, midY_next, p_mid_next.Y);
 
-            // Bottom: just below rough ground to hide the seam
-            var v_bot_i = new Vector3(p_bot_i.X, GetHeight(p_bot_i.X, p_bot_i.Y) - bottomDrop, p_bot_i.Y);
-            var v_bot_next = new Vector3(p_bot_next.X, GetHeight(p_bot_next.X, p_bot_next.Y) - bottomDrop, p_bot_next.Y);
+            // Bottom: drop below ground to hide the seam
+            float botY_i = (golfType == "water") ? (targetWaterY - bottomDrop) : (GetHeight(p_bot_i.X, p_bot_i.Y) - bottomDrop);
+            float botY_next = (golfType == "water") ? (targetWaterY - bottomDrop) : (GetHeight(p_bot_next.X, p_bot_next.Y) - bottomDrop);
+            var v_bot_i = new Vector3(p_bot_i.X, botY_i, p_bot_i.Y);
+            var v_bot_next = new Vector3(p_bot_next.X, botY_next, p_bot_next.Y);
 
-            var norm_top_i = GetTerrainNormal(p_top_i.X, p_top_i.Y);
-            var norm_top_next = GetTerrainNormal(p_top_next.X, p_top_next.Y);
-            var norm_mid_i = GetTerrainNormal(p_mid_i.X, p_mid_i.Y);
-            var norm_mid_next = GetTerrainNormal(p_mid_next.X, p_mid_next.Y);
-            var norm_bot_i = GetTerrainNormal(p_bot_i.X, p_bot_i.Y);
-            var norm_bot_next = GetTerrainNormal(p_bot_next.X, p_bot_next.Y);
+            var norm_top_i = (golfType == "water") ? Vector3.Up : GetTerrainNormal(p_top_i.X, p_top_i.Y);
+            var norm_top_next = (golfType == "water") ? Vector3.Up : GetTerrainNormal(p_top_next.X, p_top_next.Y);
+            var norm_mid_i = (golfType == "water") ? Vector3.Up : GetTerrainNormal(p_mid_i.X, p_mid_i.Y);
+            var norm_mid_next = (golfType == "water") ? Vector3.Up : GetTerrainNormal(p_mid_next.X, p_mid_next.Y);
+            var norm_bot_i = (golfType == "water") ? Vector3.Up : GetTerrainNormal(p_bot_i.X, p_bot_i.Y);
+            var norm_bot_next = (golfType == "water") ? Vector3.Up : GetTerrainNormal(p_bot_next.X, p_bot_next.Y);
 
             var uv_top_i = p_top_i * 0.1f;
             var uv_top_next = p_top_next * 0.1f;
@@ -6001,16 +6022,9 @@ public partial class OsmMapLoader : Node
                 float depWater = 0f;
                 if (isInsideWater)
                 {
-                    if (distToWaterBoundary < 15.0f)
-                    {
-                        float t = distToWaterBoundary / 15.0f;
-                        float smoothT = QuinticSmoothstep(t);
-                        depWater = smoothT * 2.0f;
-                    }
-                    else
-                    {
-                        depWater = 2.0f;
-                    }
+                    float t = Math.Clamp(distToWaterBoundary / 3.5f, 0f, 1f);
+                    float smoothT = t * t * (3f - 2f * t);
+                    depWater = 0.15f + 2.05f * smoothT;
                 }
                 
                 float depBunker = 0f;
@@ -6862,6 +6876,7 @@ public partial class OsmMapLoader : Node
         public float CenterHeight;
         public float SlopeX;
         public float SlopeY;
+        public float WaterLevel;
 
         public ExclusionPolygon(Vector2[] polygon, string? golfType = "", OsmMapLoader? loader = null)
         {
@@ -6887,7 +6902,26 @@ public partial class OsmMapLoader : Node
                     sum += loader.GetHeight(p.X, p.Y);
                 }
             }
-            if (loader != null && polygon.Length > 0 && (golfType == "tee" || golfType == "green"))
+            if (loader != null && polygon.Length > 0 && golfType == "water")
+            {
+                var edgeHeights = new float[polygon.Length];
+                for (int i = 0; i < polygon.Length; i++)
+                {
+                    edgeHeights[i] = loader.GetHeight(polygon[i].X, polygon[i].Y);
+                }
+                Array.Sort(edgeHeights);
+
+                // Use the 15th percentile of perimeter heights to establish the hydrostatic water surface level.
+                // This ensures the water plane cleanly sits at the lower bank of the hazard without floating
+                // above the land on any side, while safely ignoring single-point DEM pits or outliers.
+                int p15Index = Math.Clamp((int)(edgeHeights.Length * 0.15f), 0, edgeHeights.Length - 1);
+                WaterLevel = edgeHeights[p15Index];
+                AverageHeight = WaterLevel;
+                CenterX = sumX / polygon.Length;
+                CenterY = sumY / polygon.Length;
+                CenterHeight = WaterLevel;
+            }
+            else if (loader != null && polygon.Length > 0 && (golfType == "tee" || golfType == "green"))
             {
                 AverageHeight = sum / polygon.Length;
                 CenterX = sumX / polygon.Length;
@@ -8030,7 +8064,8 @@ public partial class OsmMapLoader : Node
         var point = new Vector2(x, z);
 
         float bunkerDepression = 0f;
-        float waterDepression = 0f;
+        float? waterBedHeight = null;
+        bool inWater = false;
 
         float? overrideHeight = null;
         float overrideWeight = 0f;
@@ -8048,7 +8083,48 @@ public partial class OsmMapLoader : Node
                 inPlayArea = true;
             }
 
-            if (excl.GolfType == "bunker")
+            if (excl.GolfType == "water")
+            {
+                float wLevel = excl.WaterLevel;
+                if (inside)
+                {
+                    inWater = true;
+                    float dist = DistanceToPolygon(point, excl.Polygon);
+                    // Rapid bank drop-off so water has immediate healthy depth from the shoreline
+                    // Reaches full basin depth within 3.5m of the shore, ensuring narrow channels
+                    // and inlets hold deep, beautiful water without dry terrain poking through.
+                    float bankDepth = 0.15f; // Crisp drop at waterline
+                    float maxDepth = 2.2f;   // Deep basin
+                    float transitionDist = 3.5f;
+                    float t = Math.Clamp(dist / transitionDist, 0f, 1f);
+                    float smoothT = t * t * (3f - 2f * t);
+                    float targetDepth = bankDepth + (maxDepth - bankDepth) * smoothT;
+                    float bedH = wLevel - targetDepth;
+
+                    // If natural terrain is already deeper than bedH, keep it deep.
+                    // Otherwise carve down into the earth to hold the water.
+                    float bed = Math.Min(baseHeight, bedH);
+                    waterBedHeight = waterBedHeight.HasValue ? Math.Min(waterBedHeight.Value, bed) : bed;
+                }
+                else
+                {
+                    // Outside water hazard: ensure shoreline bank is retained above the water surface
+                    // so water never floods outward onto dry turf.
+                    float dist = DistanceToPolygon(point, excl.Polygon);
+                    float shoreMargin = 2.5f;
+                    if (dist < shoreMargin)
+                    {
+                        float u = 1f - (dist / shoreMargin);
+                        float smoothU = u * u * (3f - 2f * u);
+                        float minBankH = wLevel + 0.08f;
+                        if (baseHeight < minBankH)
+                        {
+                            baseHeight = baseHeight * (1f - smoothU) + minBankH * smoothU;
+                        }
+                    }
+                }
+            }
+            else if (excl.GolfType == "bunker")
             {
                 if (inside)
                 {
@@ -8076,24 +8152,6 @@ public partial class OsmMapLoader : Node
                         float t = 1.0f - (dist / lipRadius);
                         float smoothT = QuinticSmoothstep(t);
                         bunkerDepression = Math.Max(bunkerDepression, -smoothT * 0.12f);
-                    }
-                }
-            }
-            else if (excl.GolfType == "water")
-            {
-                if (inside)
-                {
-                    float dist = DistanceToPolygon(point, excl.Polygon);
-                    float maxDepth = 2.0f;
-                    if (dist < 15.0f)
-                    {
-                        float t = dist / 15.0f;
-                        float smoothT = QuinticSmoothstep(t);
-                        waterDepression = Math.Max(waterDepression, smoothT * maxDepth);
-                    }
-                    else
-                    {
-                        waterDepression = Math.Max(waterDepression, maxDepth);
                     }
                 }
             }
@@ -8162,6 +8220,12 @@ public partial class OsmMapLoader : Node
             }
         }
 
+        if (inWater && waterBedHeight.HasValue)
+        {
+            // Inside water hazard: return the carved basin bed height beneath the water level
+            return waterBedHeight.Value;
+        }
+
         // Very subtle natural variation in the rough (at most +/- 0.08m) while keeping in-play turf smooth
         float roughMounds = 0f;
         if (!inPlayArea && !overrideHeight.HasValue)
@@ -8170,7 +8234,7 @@ public partial class OsmMapLoader : Node
         }
 
         float finalBase = (overrideHeight.HasValue ? overrideHeight.Value : baseHeight) + roughMounds;
-        return finalBase - Math.Max(bunkerDepression, waterDepression);
+        return finalBase - bunkerDepression;
     }
 
     /// <summary>

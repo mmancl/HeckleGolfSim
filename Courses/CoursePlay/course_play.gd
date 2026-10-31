@@ -1871,7 +1871,8 @@ func _setup_hud() -> void:
 	minimap_camera.size = minimap_zoom
 	minimap_camera.position = Vector3(0, 150, 0)
 	minimap_camera.rotation = Vector3(-PI/2, 0, 0) # Look straight down
-	minimap_camera.cull_mask = minimap_camera.cull_mask & ~4
+	# Strictly isolate minimap camera to Layer 1 (terrain/course) + Layer 2 (green slope heatmap)
+	minimap_camera.cull_mask = (1 << 0) | (1 << 1)
 	
 	viewport.add_child(minimap_camera)
 	minimap_container.add_child(viewport)
@@ -5319,6 +5320,9 @@ func reset_zoom_to_default() -> void:
 func _update_minimap() -> void:
 	if _minimap_camera == null or course_instance == null or _minimap_panel == null:
 		return
+		
+	if _minimap_camera.cull_mask != ((1 << 0) | (1 << 1)):
+		_minimap_camera.cull_mask = (1 << 0) | (1 << 1)
 		
 	# Check if scorecard or players HUD is open
 	if hud_scorecard.visible or hud_manage_players.visible or hud_overview.visible:

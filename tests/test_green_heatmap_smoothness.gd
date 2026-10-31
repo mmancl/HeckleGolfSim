@@ -167,6 +167,58 @@ func _run_tests() -> void:
 	assert(heatmap_node.visible == false, "Heatmap must be hidden when show_green_grid is false")
 	print("  PASS: Green heatmap visibility toggles correctly.")
 
+	# Test 6: Multi-body green aggregation (split green static bodies)
+	print("\n--- Test 6: Multi-body green aggregation ---")
+	# Add a second static body adjacent to the main green body
+	var green_part2 = StaticBody3D.new()
+	green_part2.name = "GreenStatic_Part2"
+	green_part2.set_meta("surface_type", 4)
+	green_part2.position = Vector3(15.0, 0, 100) # Centered 15m to the right
+	range_instance.add_child(green_part2)
+
+	var col_shape2 = CollisionShape3D.new()
+	var concave2 = ConcavePolygonShape3D.new()
+	var verts2 = PackedVector3Array()
+	# Add 16 triangles for part 2
+	for i in range(16):
+		var a1 = float(i) * TAU / 16.0
+		var a2 = float(i + 1) * TAU / 16.0
+		var p1 = Vector3(cos(a1) * 8.0, 1.5, sin(a1) * 8.0)
+		var p2 = Vector3(cos(a2) * 8.0, 1.5, sin(a2) * 8.0)
+		verts2.append(Vector3(0, 1.5, 0))
+		verts2.append(p1)
+		verts2.append(p2)
+	concave2.data = verts2
+	col_shape2.shape = concave2
+	green_part2.add_child(col_shape2)
+
+	range_instance._init_cached_surface_bodies(true)
+	var multi_tris = range_instance._get_green_triangles_3d(Vector3(0, 2.0, 100))
+	assert(multi_tris.size() == num_slices + 16, "Must aggregate both green static bodies (%d expected, got %d)" % [num_slices + 16, multi_tris.size()])
+	var multi_verts = range_instance.get_current_green_vertices()
+	assert(multi_verts.size() == (num_slices + 16) * 3, "get_current_green_vertices must return all vertices from multi-body green")
+	print("  PASS: Multi-body green triangles aggregated seamlessly (%d triangles across parts)." % multi_tris.size())
+
+	# Test 7: Camera cull mask isolation (strict Layer 1 + Layer 2 only)
+	print("\n--- Test 7: Camera cull mask isolation ---")
+	var expected_cull_mask = (1 << 0) | (1 << 1) # Layer 1 + Layer 2 only = 3
+	assert(expected_cull_mask == 3, "Cull mask bitmask must equal 3")
+	var aerial_cam = range_instance.get_node_or_null("AerialCamera")
+	if aerial_cam != null:
+		assert(aerial_cam.cull_mask == expected_cull_mask, "AerialCamera must only render Layer 1 & 2")
+	
+	# Verify dots and grid nodes are hidden in aerial view
+	range_instance.is_aerial_view = true
+	range_instance.show_green_grid = true
+	range_instance._update_green_grid_visibility()
+	var grid_node = range_instance.get_node_or_null("GreenGridMesh")
+	var dots_node = range_instance.get_node_or_null("GreenDotsMesh")
+	if grid_node:
+		assert(grid_node.visible == false, "GreenGridMesh must be hidden during aerial/minimap view")
+	if dots_node:
+		assert(dots_node.visible == false, "GreenDotsMesh must be hidden during aerial/minimap view")
+	print("  PASS: Camera cull masks and slope arrow suppression in aerial/minimap verified.")
+
 	print("\n==================================================================")
 	print("  ALL GREEN HEATMAP SMOOTHNESS TESTS PASSED SUCCESSFULLY!")
 	print("==================================================================")

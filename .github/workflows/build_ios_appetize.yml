@@ -256,6 +256,9 @@ jobs:
           # Function to transmogrify a Mach-O binary from iOS device to iOS Simulator
           patch_binary() {
             local target_bin="$1"
+            if [ -L "$target_bin" ]; then
+              return
+            fi
             if [ ! -f "$target_bin" ]; then
               return
             fi
@@ -286,8 +289,8 @@ jobs:
             patch_binary "$APP_SIM_DIR/$EXE_NAME"
           fi
 
-          # 2. Patch all embedded frameworks and dynamic libraries
-          find "$APP_SIM_DIR" -type f \( -name "*.dylib" -o -perm +0111 \) | while read -r bin_file; do
+          # 2. Patch all embedded frameworks, dynamic libraries, and Mach-O binaries
+          find "$APP_SIM_DIR" -type f | while read -r bin_file; do
             if [ "$bin_file" != "$APP_SIM_DIR/$EXE_NAME" ]; then
               patch_binary "$bin_file"
             fi

@@ -525,7 +525,7 @@ func _ready() -> void:
 	if has_node("PhantomCamera3D"):
 		$PhantomCamera3D.cull_mask = $PhantomCamera3D.cull_mask & ~2
 	if has_node("AerialCamera"):
-		$AerialCamera.cull_mask = $AerialCamera.cull_mask & ~4
+		$AerialCamera.cull_mask = (1 << 0) | (1 << 1)
 
 	if has_node("/root/MultiplayerManager") and not get_node("/root/MultiplayerManager").players.is_empty():
 		var play_script = load("res://Courses/CoursePlay/course_play.gd")
@@ -542,7 +542,7 @@ func _ready() -> void:
 		aerial_cam.size = aerial_zoom
 		aerial_cam.position = Vector3(0, 150, 0)
 		aerial_cam.rotation = Vector3(-PI/2, 0, 0) # Look straight down
-		aerial_cam.cull_mask = aerial_cam.cull_mask & ~4
+		aerial_cam.cull_mask = (1 << 0) | (1 << 1)
 		add_child(aerial_cam)
 
 	# Create Aim Marker flag/mesh dynamically
@@ -6651,51 +6651,12 @@ func get_current_green_vertices() -> PackedVector3Array:
 	if pin_pos.is_zero_approx():
 		return PackedVector3Array()
 		
-	var closest_green: StaticBody3D = null
-	var min_dist_to_pin = 999999.0
-	
-	var stack = [self]
-	while not stack.is_empty():
-		var node = stack.pop_back()
-		var n_lower: String = node.name.to_lower()
-		var is_green_node: bool = (node is StaticBody3D) and (
-			n_lower.begins_with("green_static") or n_lower.contains("green") or (node.has_meta("surface_type") and int(node.get_meta("surface_type")) == 4)
-		)
-		if is_green_node:
-			var centroid = Vector3.ZERO
-			var vertex_count = 0
-			for child in node.get_children():
-				if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
-					var verts = child.shape.data
-					if verts.size() > 0:
-						for v in verts:
-							centroid += node.global_transform * v
-						vertex_count += verts.size()
-			if vertex_count > 0:
-				centroid /= vertex_count
-				var dist = centroid.distance_to(pin_pos)
-				if dist < min_dist_to_pin:
-					min_dist_to_pin = dist
-					closest_green = node
-			else:
-				var dist = node.global_position.distance_to(pin_pos)
-				if dist < min_dist_to_pin:
-					min_dist_to_pin = dist
-					closest_green = node
-		
-		for child in node.get_children():
-			stack.append(child)
-			
-	if closest_green == null:
-		return PackedVector3Array()
-		
+	var tris_3d = _get_green_triangles_3d(pin_pos)
 	var global_verts = PackedVector3Array()
-	for child in closest_green.get_children():
-		if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
-			var verts = child.shape.data
-			for v in verts:
-				global_verts.append(closest_green.global_transform * v)
-				
+	for tri in tris_3d:
+		global_verts.append(tri[0])
+		global_verts.append(tri[1])
+		global_verts.append(tri[2])
 	return global_verts
 
 
@@ -6799,93 +6760,114 @@ func _on_hole_completed(_scores: Array = []) -> void:
 # ==========================================
 
 func _get_green_triangles_3d(pin_pos: Vector3) -> Array:
-	var target_entry = _get_green_entry(pin_pos)
-	if not target_entry.is_empty():
+	_init_cached_surface_bodies()
+	if _cached_green_bodies.is_empty():
+		_cached_surface_nodes_initialized = false
+		_init_cached_surface_bodies()
+		
+	var pin_2d := Vector2(pin_pos.x, pin_pos.z)
+	var primary_entry = null
+	var min_dist := INF
+	
+	for entry in _cached_green_bodies:
+		var d = pin_2d.distance_to(entry.center_2d)
+		if d - entry.radius > 60.0:
+			continue
+			
+		var trans: Transform3D = entry.transform
+		var inside_tri = false
+		for shape_faces in entry.shapes:
+			for i in range(0, shape_faces.size(), 3):
+				if i + 2 < shape_faces.size():
+					var a_3d: Vector3 = trans * shape_faces[i]
+					var b_3d: Vector3 = trans * shape_faces[i+1]
+					var c_3d: Vector3 = trans * shape_faces[i+2]
+					var a := Vector2(a_3d.x, a_3d.z)
+					var b := Vector2(b_3d.x, b_3d.z)
+					var c := Vector2(c_3d.x, c_3d.z)
+					if _is_point_in_triangle_2d(pin_2d, a, b, c):
+						inside_tri = true
+						break
+			if inside_tri:
+				break
+				
+		if inside_tri:
+			primary_entry = entry
+			min_dist = 0.0
+			break
+		elif d < min_dist:
+			min_dist = d
+			primary_entry = entry
+
+	var matching_entries: Array = []
+	if primary_entry != null:
+		matching_entries.append(primary_entry)
+		for entry in _cached_green_bodies:
+			if entry == primary_entry:
+				continue
+			var d = pin_2d.distance_to(entry.center_2d)
+			var dist_to_primary = entry.center_2d.distance_to(primary_entry.center_2d)
+			# Aggregate any green parts that belong to this green (within 45m of pin or contiguous with primary entry)
+			if d <= 45.0 or (d - entry.radius) <= 25.0 or dist_to_primary <= (primary_entry.radius + entry.radius + 5.0):
+				matching_entries.append(entry)
+	elif not _cached_green_bodies.is_empty():
+		for entry in _cached_green_bodies:
+			var d = pin_2d.distance_to(entry.center_2d)
+			if d <= 45.0 or (d - entry.radius) <= 25.0:
+				matching_entries.append(entry)
+
+	var triangles: Array = []
+	for entry in matching_entries:
 		# Check for CylinderShape3D (island greens)
-		if target_entry.has("body") and target_entry.body != null:
-			for child in target_entry.body.find_children("*", "CollisionShape3D"):
+		if entry.has("body") and entry.body != null:
+			for child in entry.body.find_children("*", "CollisionShape3D"):
 				if child is CollisionShape3D and child.shape is CylinderShape3D:
 					var cyl_radius: float = child.shape.radius
-					var center_3d: Vector3 = target_entry.body.global_position
-					var cyl_tris: Array = []
+					var center_3d: Vector3 = entry.body.global_position
 					var steps = 48
 					for s in range(steps):
 						var a1 = s * TAU / steps
 						var a2 = (s + 1) * TAU / steps
 						var p1 = center_3d + Vector3(cos(a1) * cyl_radius, 0.0, sin(a1) * cyl_radius)
 						var p2 = center_3d + Vector3(cos(a2) * cyl_radius, 0.0, sin(a2) * cyl_radius)
-						cyl_tris.append([center_3d, p1, p2])
-					return cyl_tris
+						triangles.append([center_3d, p1, p2])
 
-		if target_entry.has("shapes") and not target_entry.shapes.is_empty():
-			var triangles = []
-			var trans: Transform3D = target_entry.transform
-			for shape_faces in target_entry.shapes:
+		if entry.has("shapes") and not entry.shapes.is_empty():
+			var trans: Transform3D = entry.transform
+			for shape_faces in entry.shapes:
 				for i in range(0, shape_faces.size(), 3):
 					if i + 2 < shape_faces.size():
 						var a_3d: Vector3 = trans * shape_faces[i]
 						var b_3d: Vector3 = trans * shape_faces[i+1]
 						var c_3d: Vector3 = trans * shape_faces[i+2]
 						triangles.append([a_3d, b_3d, c_3d])
-			if not triangles.is_empty():
-				return triangles
 
-	var closest_green: StaticBody3D = null
-	var min_dist_to_pin = 999999.0
-	
-	var stack = [self]
-	while not stack.is_empty():
-		var node = stack.pop_back()
-		var n_lower: String = node.name.to_lower()
-		var is_green_node: bool = (node is StaticBody3D) and (
-			n_lower.begins_with("green_static") or n_lower.contains("green") or (node.has_meta("surface_type") and int(node.get_meta("surface_type")) == 4)
-		)
-		if is_green_node:
-			var centroid = Vector3.ZERO
-			var vertex_count = 0
-			for child in node.get_children():
-				if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
-					var verts = child.shape.data
-					if verts.size() > 0:
-						for v in verts:
-							centroid += node.global_transform * v
-						vertex_count += verts.size()
-			if vertex_count > 0:
-				centroid /= vertex_count
-				var dist = centroid.distance_to(pin_pos)
-				if dist < min_dist_to_pin:
-					min_dist_to_pin = dist
-					closest_green = node
-			else:
-				var dist = node.global_position.distance_to(pin_pos)
-				if dist < min_dist_to_pin:
-					min_dist_to_pin = dist
-					closest_green = node
-		
-		for child in node.get_children():
-			stack.append(child)
-			
-	if closest_green == null:
-		return []
-		
-	var triangles = []
-	for child in closest_green.get_children():
-		if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
-			var verts = child.shape.data
-			for i in range(0, verts.size(), 3):
-				if i + 2 < verts.size():
-					var v0: Vector3 = closest_green.global_transform * verts[i]
-					var v1: Vector3 = closest_green.global_transform * verts[i+1]
-					var v2: Vector3 = closest_green.global_transform * verts[i+2]
-					triangles.append([v0, v1, v2])
-		elif child is MeshInstance3D and child.mesh != null:
-			var faces = child.mesh.get_faces()
-			for i in range(0, faces.size(), 3):
-				if i + 2 < faces.size():
-					var v0: Vector3 = closest_green.global_transform * child.transform * faces[i]
-					var v1: Vector3 = closest_green.global_transform * child.transform * faces[i+1]
-					var v2: Vector3 = closest_green.global_transform * child.transform * faces[i+2]
-					triangles.append([v0, v1, v2])
+	if not triangles.is_empty():
+		return triangles
+
+	# Fallback search across scene tree for all green bodies within proximity of pin
+	var all_greens = _find_green_nodes(self)
+	for node in all_greens:
+		if node is StaticBody3D:
+			var dist = node.global_position.distance_to(pin_pos)
+			if dist <= 50.0:
+				for child in node.get_children():
+					if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
+						var verts = child.shape.data
+						for i in range(0, verts.size(), 3):
+							if i + 2 < verts.size():
+								var v0: Vector3 = node.global_transform * verts[i]
+								var v1: Vector3 = node.global_transform * verts[i+1]
+								var v2: Vector3 = node.global_transform * verts[i+2]
+								triangles.append([v0, v1, v2])
+					elif child is MeshInstance3D and child.mesh != null:
+						var faces = child.mesh.get_faces()
+						for i in range(0, faces.size(), 3):
+							if i + 2 < faces.size():
+								var v0: Vector3 = node.global_transform * child.transform * faces[i]
+								var v1: Vector3 = node.global_transform * child.transform * faces[i+1]
+								var v2: Vector3 = node.global_transform * child.transform * faces[i+2]
+								triangles.append([v0, v1, v2])
 	return triangles
 
 
@@ -7010,11 +6992,15 @@ func _update_green_grid_visibility() -> void:
 	heatmap_node.visible = true
 	
 	# GreenGridMesh and GreenDotsMesh are assigned to visual layer 3 (bit 4).
-	# AerialCamera and MinimapCamera have layer 3 culled (cull_mask & ~4), so aerial and minimap
-	# views only show the heatmap without grid lines or moving directional arrows.
+	# They are only visible in ground putting view, NEVER in aerial or minimap view.
 	var is_near = _is_player_near_green()
-	if grid_node: grid_node.visible = is_near
-	if dots_node: dots_node.visible = is_near
+	var ground_putting_active = is_near and not is_aerial_view
+	if grid_node:
+		grid_node.layers = 4
+		grid_node.visible = ground_putting_active
+	if dots_node:
+		dots_node.layers = 4
+		dots_node.visible = ground_putting_active
 
 
 
@@ -7097,20 +7083,14 @@ func _generate_green_grid_and_heatmap() -> void:
 		if max_d_sq > (max_edge_len * max_edge_len) and depth < max_depth:
 			if d_ab >= d_bc and d_ab >= d_ca:
 				var mid = (a + b) * 0.5
-				if _has_elevation_map:
-					mid.y = sample_elevation(mid.x, mid.z)
 				tri_queue.append({"tri": [a, mid, c], "depth": depth + 1})
 				tri_queue.append({"tri": [mid, b, c], "depth": depth + 1})
 			elif d_bc >= d_ab and d_bc >= d_ca:
 				var mid = (b + c) * 0.5
-				if _has_elevation_map:
-					mid.y = sample_elevation(mid.x, mid.z)
 				tri_queue.append({"tri": [a, b, mid], "depth": depth + 1})
 				tri_queue.append({"tri": [a, mid, c], "depth": depth + 1})
 			else:
 				var mid = (c + a) * 0.5
-				if _has_elevation_map:
-					mid.y = sample_elevation(mid.x, mid.z)
 				tri_queue.append({"tri": [a, b, mid], "depth": depth + 1})
 				tri_queue.append({"tri": [mid, b, c], "depth": depth + 1})
 		else:
