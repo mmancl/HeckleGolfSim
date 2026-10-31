@@ -104,6 +104,7 @@ jobs:
 
       - name: Export iOS Preset via Godot
         run: |
+          rm -rf ios_export
           mkdir -p ios_export
           mkdir -p dist
           "$GODOT_BIN" --headless --import || true
@@ -131,6 +132,38 @@ jobs:
           fi
           echo "Found Xcode project at: $XCODEPROJ"
           echo "XCODEPROJ=$XCODEPROJ" >> $GITHUB_ENV
+
+          TARGET_DIR=$(echo "$XCODEPROJ" | sed 's/\.xcodeproj$//')
+          echo "Target project directory: $TARGET_DIR"
+
+          # Verify and guarantee Launch Screen.storyboard exists
+          LAUNCH_STORYBOARD=$(find ios_export -name "Launch Screen.storyboard" -type f | head -n 1)
+          TEMPLATE_IOS_ZIP="$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono/ios.zip"
+
+          if [ -z "$LAUNCH_STORYBOARD" ] || [ ! -s "$LAUNCH_STORYBOARD" ]; then
+            echo "Warning: Launch Screen.storyboard missing or empty. Restoring..."
+            mkdir -p "$TARGET_DIR"
+            TMP_STORYBOARD=$(find ios_export -name "*Launch Screen*.tmp*" -type f | head -n 1)
+            if [ -n "$TMP_STORYBOARD" ] && [ -s "$TMP_STORYBOARD" ]; then
+              echo "Moving temporary storyboard $TMP_STORYBOARD -> $TARGET_DIR/Launch Screen.storyboard"
+              mv -f "$TMP_STORYBOARD" "$TARGET_DIR/Launch Screen.storyboard"
+            elif [ -f "$TEMPLATE_IOS_ZIP" ]; then
+              echo "Extracting Launch Screen.storyboard directly from Godot export template..."
+              unzip -p "$TEMPLATE_IOS_ZIP" "godot_apple_embedded/Launch Screen.storyboard" > "$TARGET_DIR/Launch Screen.storyboard" || true
+            fi
+          fi
+
+          # Double check and ensure non-empty storyboard
+          if [ ! -s "$TARGET_DIR/Launch Screen.storyboard" ] && [ -f "$TEMPLATE_IOS_ZIP" ]; then
+            unzip -p "$TEMPLATE_IOS_ZIP" "godot_apple_embedded/Launch Screen.storyboard" > "$TARGET_DIR/Launch Screen.storyboard" || true
+          fi
+
+          if [ -s "$TARGET_DIR/Launch Screen.storyboard" ]; then
+            echo "Launch Screen.storyboard successfully verified:"
+            ls -lh "$TARGET_DIR/Launch Screen.storyboard"
+          else
+            echo "ERROR: Unable to locate or restore Launch Screen.storyboard!"
+          fi
 
           # Patch project.pbxproj to guarantee manual unsigned build
           if [ -f "$XCODEPROJ/project.pbxproj" ]; then
