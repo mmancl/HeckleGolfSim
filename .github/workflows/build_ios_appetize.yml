@@ -1,0 +1,343 @@
+name: Build iOS Appetize.io Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Build version (leave empty to use project.godot version, e.g. 0.142.11)'
+        required: false
+        default: ''
+      configuration:
+        description: 'Build Configuration (Release or Debug)'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+          - Debug
+      build_ipa:
+        description: 'Also generate matching device .ipa package'
+        required: true
+        default: true
+        type: boolean
+  push:
+    tags:
+      - 'appetize-v*'
+
+jobs:
+  build-ios-appetize:
+    name: Export iOS Appetize.io Simulator & IPA
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Cache Godot & Export Templates
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Godot
+            ~/Library/Application Support/Godot/export_templates
+          key: godot-4.7-mono-macos-universal-v1
+
+      - name: Download Godot 4.7 Mono & Templates
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/Godot
+          mkdir -p "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono"
+
+          # Download Godot Mono for macOS (universal binary)
+          curl -L -o ~/Godot/godot_mono.zip "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_macos.universal.zip"
+          unzip -q ~/Godot/godot_mono.zip -d ~/Godot/
+
+          # Download Mono export templates
+          curl -L -o ~/Godot/templates.tpz "https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_export_templates.tpz"
+          unzip -q ~/Godot/templates.tpz -d ~/Godot/templates_extracted
+          cp -r ~/Godot/templates_extracted/templates/* "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono/"
+          rm -rf ~/Godot/templates_extracted ~/Godot/templates.tpz
+
+      - name: Locate Godot Executable
+        run: |
+          GODOT_BIN=$(find ~/Godot -name "Godot" -type f | head -n 1)
+          chmod +x "$GODOT_BIN"
+          echo "GODOT_BIN=$GODOT_BIN" >> $GITHUB_ENV
+          echo "Found Godot at $GODOT_BIN"
+
+      - name: Resolve and Synchronize Version
+        id: version
+        run: |
+          PROJECT_VER=$(grep 'config/version=' project.godot | cut -d'"' -f2)
+          BUILD_VER="${{ inputs.version }}"
+          if [ -z "$BUILD_VER" ]; then
+            BUILD_VER="$PROJECT_VER"
+          fi
+          echo "Resolved Version: $BUILD_VER (project.godot: $PROJECT_VER)"
+
+          if [ "$BUILD_VER" != "$PROJECT_VER" ]; then
+            echo "Updating project.godot and export_presets.cfg with requested version $BUILD_VER..."
+            sed -i '' "s/config\/version=\".*\"/config\/version=\"$BUILD_VER\"/g" project.godot
+            sed -i '' "s/application\/short_version=\".*\"/application\/short_version=\"$BUILD_VER\"/g" export_presets.cfg
+            sed -i '' "s/application\/version=\".*\"/application\/version=\"$BUILD_VER\"/g" export_presets.cfg
+            sed -i '' "s/version\/name=\".*\"/version\/name=\"$BUILD_VER\"/g" export_presets.cfg
+          fi
+
+          echo "VERSION=$BUILD_VER" >> $GITHUB_ENV
+          echo "VERSION=$BUILD_VER" >> $GITHUB_OUTPUT
+
+      - name: Build C# Solution
+        run: |
+          CONFIG="${{ inputs.configuration }}"
+          if [ -z "$CONFIG" ]; then
+            CONFIG="Release"
+          fi
+          echo "Building .NET Solution in $CONFIG mode..."
+          dotnet build HeckleGolfSim.csproj -c "$CONFIG"
+
+      - name: Export iOS Preset via Godot
+        run: |
+          mkdir -p ios_export
+          mkdir -p dist
+          "$GODOT_BIN" --headless --import || true
+          
+          CONFIG="${{ inputs.configuration }}"
+          if [ "$CONFIG" = "Debug" ]; then
+            echo "Exporting iOS Xcode project (Debug)..."
+            "$GODOT_BIN" --headless --export-debug "iOS" ios_export/HeckleGolfSim.ipa
+          else
+            echo "Exporting iOS Xcode project (Release)..."
+            "$GODOT_BIN" --headless --export-release "iOS" ios_export/HeckleGolfSim.ipa
+          fi
+
+      - name: Configure Xcode Project and Permissions
+        run: |
+          echo "=== Locating Xcode Project ==="
+          XCODEPROJ=$(find ios_export -name "*.xcodeproj" -maxdepth 2 | head -n 1)
+          if [ -z "$XCODEPROJ" ]; then
+            XCODEPROJ=$(find . -name "*.xcodeproj" -not -path "*/build_output*/*" | head -n 1)
+          fi
+          if [ -z "$XCODEPROJ" ]; then
+            echo "ERROR: Could not find any .xcodeproj directory!"
+            ls -la ios_export/
+            exit 1
+          fi
+          echo "Found Xcode project at: $XCODEPROJ"
+          echo "XCODEPROJ=$XCODEPROJ" >> $GITHUB_ENV
+
+          # Patch project.pbxproj to guarantee manual unsigned build
+          if [ -f "$XCODEPROJ/project.pbxproj" ]; then
+            echo "Patching project.pbxproj for manual unsigned build..."
+            sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' "$XCODEPROJ/project.pbxproj" || true
+            sed -i '' 's/CODE_SIGNING_ALLOWED = YES;/CODE_SIGNING_ALLOWED = NO;/g' "$XCODEPROJ/project.pbxproj" || true
+            sed -i '' 's/CODE_SIGN_IDENTITY = ".*";/CODE_SIGN_IDENTITY = "";/g' "$XCODEPROJ/project.pbxproj" || true
+          fi
+
+          # Synchronize exact version and bundle permissions in Info.plist
+          echo "Ensuring exact version $VERSION and permissions in iOS Info.plist..."
+          find ios_export -name "*-Info.plist" -o -name "Info.plist" | while read -r plist; do
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VERSION" "$plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $VERSION" "$plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :NSBluetoothAlwaysUsageDescription string Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSBluetoothAlwaysUsageDescription Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :NSBluetoothPeripheralUsageDescription string Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :NSBluetoothPeripheralUsageDescription Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled bool true" "$plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace bool true" "$plist" 2>/dev/null || true
+          done
+
+          SCHEME_NAME=$(xcodebuild -list -project "$XCODEPROJ" | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' | head -n 1 | xargs)
+          if [ -z "$SCHEME_NAME" ]; then
+            SCHEME_NAME="Heckle Golf"
+          fi
+          echo "Using scheme: $SCHEME_NAME"
+          echo "SCHEME_NAME=$SCHEME_NAME" >> $GITHUB_ENV
+
+      - name: Build and Package Appetize.io iOS Simulator App (.zip)
+        run: |
+          CONFIG="${{ inputs.configuration }}"
+          if [ -z "$CONFIG" ]; then
+            CONFIG="Release"
+          fi
+
+          mkdir -p build_output_sim/derived
+          echo "=== Building iOS Simulator Target ($CONFIG) ==="
+          
+          xcodebuild -project "$XCODEPROJ" \
+            -scheme "$SCHEME_NAME" \
+            -configuration "$CONFIG" \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build_output_sim/derived \
+            ARCHS="arm64" \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+          APP_SIM_DIR=$(find build_output_sim/derived -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_SIM_DIR" ]; then
+            echo "ERROR: Compiled .app directory not found in build_output_sim/derived"
+            ls -la build_output_sim/derived/
+            exit 1
+          fi
+          echo "Found compiled iOS Simulator app at: $APP_SIM_DIR"
+
+          # Appetize requires the .app bundle to be at the root of the .zip archive
+          APP_SIM_PARENT=$(dirname "$APP_SIM_DIR")
+          APP_SIM_BASE=$(basename "$APP_SIM_DIR")
+          SIM_ZIP_PATH="$GITHUB_WORKSPACE/dist/HeckleGolfSim-v${VERSION}-Appetize-Simulator.zip"
+
+          cd "$APP_SIM_PARENT"
+          zip -qr "$SIM_ZIP_PATH" "$APP_SIM_BASE"
+          cd "$GITHUB_WORKSPACE"
+
+          echo "Appetize.io Simulator archive created: $SIM_ZIP_PATH"
+          ls -lh "$SIM_ZIP_PATH"
+
+      - name: Build and Package Device .ipa
+        if: ${{ inputs.build_ipa != false }}
+        run: |
+          CONFIG="${{ inputs.configuration }}"
+          if [ -z "$CONFIG" ]; then
+            CONFIG="Release"
+          fi
+
+          mkdir -p build_output_device/derived
+          mkdir -p build_output_device/Payload
+          echo "=== Building iOS Device Target ($CONFIG) ==="
+
+          xcodebuild -project "$XCODEPROJ" \
+            -scheme "$SCHEME_NAME" \
+            -configuration "$CONFIG" \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build_output_device/derived \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+          APP_DEV_DIR=$(find build_output_device/derived -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_DEV_DIR" ]; then
+            echo "ERROR: Device .app directory not found in build_output_device/derived"
+            exit 1
+          fi
+          echo "Found compiled device app at: $APP_DEV_DIR"
+
+          cp -r "$APP_DEV_DIR" build_output_device/Payload/
+          cd build_output_device
+          zip -qr "$GITHUB_WORKSPACE/dist/HeckleGolfSim-v${VERSION}.ipa" Payload
+          # Also write a standard copy for scripts expecting HeckleGolfSim.ipa
+          cp "$GITHUB_WORKSPACE/dist/HeckleGolfSim-v${VERSION}.ipa" "$GITHUB_WORKSPACE/dist/HeckleGolfSim.ipa"
+          cd "$GITHUB_WORKSPACE"
+
+          echo "Matching IPA package created: dist/HeckleGolfSim-v${VERSION}.ipa"
+          ls -lh "dist/HeckleGolfSim-v${VERSION}.ipa"
+
+      - name: Upload to Appetize.io (Automatic if Secret Configured)
+        id: appetize
+        run: |
+          APPETIZE_ZIP="dist/HeckleGolfSim-v${VERSION}-Appetize-Simulator.zip"
+          if [ -n "${{ secrets.APPETIZE_API_TOKEN }}" ]; then
+            echo "APPETIZE_API_TOKEN found! Uploading simulator build to Appetize.io..."
+
+            ENDPOINT="https://api.appetize.io/v1/apps"
+            if [ -n "${{ secrets.APPETIZE_PUBLIC_KEY }}" ]; then
+              ENDPOINT="https://api.appetize.io/v1/apps/${{ secrets.APPETIZE_PUBLIC_KEY }}"
+              echo "Updating existing Appetize app public key: ${{ secrets.APPETIZE_PUBLIC_KEY }}"
+            fi
+
+            HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$ENDPOINT" \
+              -H "X-API-KEY: ${{ secrets.APPETIZE_API_TOKEN }}" \
+              -F "file=@$APPETIZE_ZIP" \
+              -F "platform=ios")
+
+            HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+            HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n 1)
+
+            if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+              PUBLIC_KEY=$(echo "$HTTP_BODY" | grep -o '"publicKey":"[^"]*' | cut -d'"' -f4)
+              APP_URL=$(echo "$HTTP_BODY" | grep -o '"appURL":"[^"]*' | cut -d'"' -f4)
+              if [ -z "$APP_URL" ] && [ -n "$PUBLIC_KEY" ]; then
+                APP_URL="https://appetize.io/app/$PUBLIC_KEY"
+              fi
+              echo "Appetize.io upload successful!"
+              echo "Public Key: $PUBLIC_KEY"
+              echo "App URL: $APP_URL"
+              echo "APP_URL=$APP_URL" >> $GITHUB_ENV
+              echo "PUBLIC_KEY=$PUBLIC_KEY" >> $GITHUB_ENV
+              echo "appetize_url=$APP_URL" >> $GITHUB_OUTPUT
+            else
+              echo "Notice: Appetize.io API upload returned status $HTTP_STATUS"
+              echo "$HTTP_BODY"
+            fi
+          else
+            echo "APPETIZE_API_TOKEN is not configured in repository secrets."
+            echo "The simulator package dist/HeckleGolfSim-v${VERSION}-Appetize-Simulator.zip is ready for manual upload to https://appetize.io/upload."
+          fi
+
+      - name: Upload Appetize.io Simulator Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeckleGolfSim-v${{ env.VERSION }}-Appetize-Simulator
+          path: dist/HeckleGolfSim-v${{ env.VERSION }}-Appetize-Simulator.zip
+
+      - name: Upload Matching Device IPA
+        if: ${{ inputs.build_ipa != false }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeckleGolfSim-v${{ env.VERSION }}-iOS-IPA
+          path: dist/HeckleGolfSim-v${{ env.VERSION }}.ipa
+
+      - name: Upload iOS Xcode Project (Backup & Symbols)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: HeckleGolfSim-v${{ env.VERSION }}-iOS-XcodeProject
+          path: ios_export/
+          if-no-files-found: ignore
+
+      - name: Workflow Summary & Appetize.io Instructions
+        if: always()
+        run: |
+          echo "## 📱 iOS Appetize.io Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **App Version:** \`v${VERSION}\` (Matched to IPA)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Configuration:** \`${{ inputs.configuration || 'Release' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Simulator Zip:** \`HeckleGolfSim-v${VERSION}-Appetize-Simulator.zip\`" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.build_ipa }}" != "false" ]; then
+            echo "- **Device IPA:** \`HeckleGolfSim-v${VERSION}.ipa\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$APP_URL" ]; then
+            echo "### 🚀 Live Appetize.io Stream" >> $GITHUB_STEP_SUMMARY
+            echo "Your iOS Simulator app was automatically uploaded to Appetize.io!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "👉 [**Click here to Launch & Test Heckle Golf Simulator on Appetize.io**]($APP_URL)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Use the Appetize debug console and network tab to watch live stdout/stderr and trace crash logs." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### 🧪 How to Test on Appetize.io" >> $GITHUB_STEP_SUMMARY
+            echo "1. Download the artifact: **\`HeckleGolfSim-v${VERSION}-Appetize-Simulator\`**." >> $GITHUB_STEP_SUMMARY
+            echo "2. Open [**Appetize.io Upload**](https://appetize.io/upload) in your browser." >> $GITHUB_STEP_SUMMARY
+            echo "3. Drag and drop \`HeckleGolfSim-v${VERSION}-Appetize-Simulator.zip\` directly into the upload area." >> $GITHUB_STEP_SUMMARY
+            echo "4. Choose your preferred device (e.g. iPhone 15 Pro, iPhone 16) and click **Play**." >> $GITHUB_STEP_SUMMARY
+            echo "5. Open Appetize's **Debug Log** tab to see live Godot engine output and inspect crash logs when reproducing the crash." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> **Tip:** Add \`APPETIZE_API_TOKEN\` (and optionally \`APPETIZE_PUBLIC_KEY\`) to your GitHub Repository Secrets to get automated one-click stream links on every build." >> $GITHUB_STEP_SUMMARY
+          fi

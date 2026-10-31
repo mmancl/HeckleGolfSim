@@ -114,6 +114,10 @@ func _initialize() -> void:
 		cp._hole_shot_summary.name = "HoleShotSummary"
 		sc_content.add_child(cp._hole_shot_summary)
 
+	if cp.hud_scorecard.get_parent() != null:
+		cp.hud_scorecard.get_parent().remove_child(cp.hud_scorecard)
+	cp.add_child(cp.hud_scorecard)
+
 	# 3. Test: Initial population defaults to Hole 2 (current hole)
 	print("\n--- Test 1: Default Selection on Hole Completion ---")
 	cp._populate_scorecard("hole_completed")
@@ -130,7 +134,13 @@ func _initialize() -> void:
 	assert(hole_1_btn.text == "1", "Hole 1 button text must be '1'")
 	assert(hole_2_btn.text == "2", "Hole 2 button text must be '2'")
 	assert(hole_1_btn.mouse_default_cursor_shape == Control.CURSOR_POINTING_HAND, "Hole buttons must have pointing hand cursor")
-	print("  PASS: Header cells for holes are interactive Buttons with pointing hand cursor.")
+	assert(hole_1_btn.focus_mode == Control.FOCUS_ALL, "Hole 1 button must have focus_mode = FOCUS_ALL for controller navigation")
+	assert(hole_2_btn.focus_mode == Control.FOCUS_ALL, "Hole 2 button must have focus_mode = FOCUS_ALL for controller navigation")
+	assert(hole_1_btn.has_theme_stylebox_override("focus"), "Hole 1 button must have focus stylebox override")
+	if hole_1_btn.is_inside_tree() and hole_2_btn.is_inside_tree():
+		assert(hole_1_btn.focus_neighbor_right == hole_2_btn.get_path(), "Hole 1 right neighbor must point to Hole 2")
+		assert(hole_2_btn.focus_neighbor_left == hole_1_btn.get_path(), "Hole 2 left neighbor must point to Hole 1")
+	print("  PASS: Header cells for holes are interactive Buttons with pointing hand cursor and FOCUS_ALL controller support.")
 
 	# Verify Hole 2 is highlighted by default
 	var style_h2 = hole_2_btn.get_theme_stylebox("normal") as StyleBoxFlat
@@ -240,6 +250,34 @@ func _initialize() -> void:
 	assert(p4_diagram.custom_minimum_size.y <= 460.0, "Diagram height must scale to fit without overflow (got %f)" % p4_diagram.custom_minimum_size.y)
 	print("  PASS: 4-player scorecard populated successfully with dynamic card sizing (%s)." % p4_diagram.custom_minimum_size)
 	cp_hud.queue_free()
+
+	# 8. Test: Controller Selection & Bumper Hole Cycling
+	print("\n--- Test 6: Controller Navigation & Bumper Hole Cycling ---")
+	cp.hud_scorecard.visible = true
+	cp._scorecard_selected_hole_index = 1
+	cp._populate_scorecard("toggle")
+
+	# Simulate RB (next hole)
+	var joy_rb = InputEventJoypadButton.new()
+	joy_rb.button_index = JOY_BUTTON_RIGHT_SHOULDER
+	joy_rb.pressed = true
+	var handled_rb = cp._handle_scorecard_input(joy_rb)
+	assert(handled_rb, "_handle_scorecard_input must handle RB")
+	assert(cp._scorecard_selected_hole_index == 2, "RB must cycle to Hole 3 (index 2)")
+
+	# Simulate LB (previous hole)
+	var joy_lb = InputEventJoypadButton.new()
+	joy_lb.button_index = JOY_BUTTON_LEFT_SHOULDER
+	joy_lb.pressed = true
+	var handled_lb = cp._handle_scorecard_input(joy_lb)
+	assert(handled_lb, "_handle_scorecard_input must handle LB")
+	assert(cp._scorecard_selected_hole_index == 1, "LB must cycle back to Hole 2 (index 1)")
+
+	# Test _select_scorecard_hole directly
+	cp._select_scorecard_hole(0)
+	assert(cp._scorecard_selected_hole_index == 0, "_select_scorecard_hole must set selected index to 0")
+
+	print("  PASS: Controller focus mode, neighbors, and bumper hole cycling verified successfully.")
 
 	print("\n=======================================================")
 	print("ALL TESTS PASSED: Scorecard Hole Shot Review Selection")

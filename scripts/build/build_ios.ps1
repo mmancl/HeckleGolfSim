@@ -21,8 +21,14 @@
 param(
     [string]$OutputDir = "dist",
     [switch]$AutoPush = $true,
-    [string]$CustomGodotPath = ""
+    [string]$CustomGodotPath = "",
+    [switch]$Appetize
 )
+
+if ($Appetize) {
+    & (Join-Path $PSScriptRoot "build_appetize_ios.ps1") -OutputDir $OutputDir -AutoPush:$AutoPush
+    return
+}
 
 $ErrorActionPreference = "Stop"
 

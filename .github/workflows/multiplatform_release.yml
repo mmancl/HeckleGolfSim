@@ -496,13 +496,24 @@ jobs:
 
           # Prepare Google Play release notes (max 500 characters)
           os.makedirs("distribution/whatsnew", exist_ok=True)
-          play_text = release_notes.strip()
-          if len(play_text) > 500:
-              play_text = play_text[:497] + "..."
-          with open("distribution/whatsnew/whatsnew-en-US", "w", encoding="utf-8") as f:
-              f.write(play_text + "\n")
+          play_text = release_notes.strip().replace("\r\n", "\n")
 
-          print("=== Prepared Release Notes ===")
+          # Google Play strictly limits release notes to 500 characters (UTF-16 code units).
+          # Ellipsis occupies 3 characters. Ensure no trailing newline is written to avoid +1 character length.
+          max_len = 500
+          def utf16_len(text: str) -> int:
+              return len(text.encode("utf-16-le")) // 2
+
+          if utf16_len(play_text) > max_len:
+              target_len = max_len - 3
+              while utf16_len(play_text) > target_len:
+                  play_text = play_text[:-1]
+              play_text = play_text.rstrip() + "..."
+
+          with open("distribution/whatsnew/whatsnew-en-US", "w", encoding="utf-8", newline="\n") as f:
+              f.write(play_text)
+
+          print(f"=== Prepared Release Notes (Play Store length: {utf16_len(play_text)} chars) ===")
           print(release_notes)
           EOF
 
@@ -539,7 +550,7 @@ jobs:
           serviceAccountJson: service_account.json
           packageName: com.hecklegolf.simulator
           releaseFiles: dist/HeckleGolfSim.aab
-          track: beta
+          tracks: beta
           status: draft
           whatsNewDirectory: distribution/whatsnew
 

@@ -363,6 +363,23 @@ func get_heard_heckles_count(player_name: String) -> int:
 	var heard = p_data.get("heard_heckles", {})
 	return heard.size() if typeof(heard) == TYPE_DICTIONARY else 0
 
+func get_heard_heckles(player_name: String) -> Dictionary:
+	if player_name.is_empty():
+		player_name = "Player 1"
+	if not _player_data.has(player_name):
+		return {}
+	var p_data = _player_data.get(player_name, {})
+	var heard = p_data.get("heard_heckles", {})
+	return heard if typeof(heard) == TYPE_DICTIONARY else {}
+
+func is_heckle_heard(player_name: String, filepath: String) -> bool:
+	if player_name.is_empty():
+		player_name = "Player 1"
+	if not _player_data.has(player_name):
+		return false
+	var heard = _player_data[player_name].get("heard_heckles", {})
+	return typeof(heard) == TYPE_DICTIONARY and heard.has(filepath)
+
 func get_total_heckles_count() -> int:
 	if _total_heckles_count <= 0:
 		_load_heckle_definitions()

@@ -43,7 +43,7 @@ func setup(scene_root: Node) -> void:
 	if _scene_root == null:
 		return
 
-	_is_driving_range = MobilePerformance.is_driving_range_node(_scene_root)
+	_is_driving_range = _check_is_driving_range()
 	_discover_terrain()
 	if not _is_driving_range:
 		_build_deep_rough_multimesh()
@@ -51,6 +51,19 @@ func setup(scene_root: Node) -> void:
 		_refresh_anchor(true)
 	else:
 		_deep_rough_generated = true
+
+
+func _check_is_driving_range() -> bool:
+	if _scene_root != null and MobilePerformance.is_driving_range_node(_scene_root):
+		return true
+	if is_inside_tree():
+		var cur_scene = get_tree().current_scene
+		if cur_scene != null and MobilePerformance.is_driving_range_node(cur_scene):
+			return true
+		var root = get_tree().root
+		if root != null and MobilePerformance.is_driving_range_node(root):
+			return true
+	return false
 
 
 func _ready() -> void:
@@ -83,9 +96,15 @@ func _process(_delta: float) -> void:
 
 	var p := _get_player_node()
 	var cur_lie := str(p.get("current_lie_type")).to_lower() if p != null else ""
-	var cur_red := float(p.get("current_shot_reduction")) if p != null else 0.0
-	if cur_red <= 0.0 and p != null:
-		cur_red = float(p.get("last_shot_reduction"))
+	var cur_red := 0.0
+	if p != null:
+		var v_red = p.get("current_shot_reduction")
+		if v_red != null:
+			cur_red = float(v_red)
+		if cur_red <= 0.0:
+			var v_last = p.get("last_shot_reduction")
+			if v_last != null:
+				cur_red = float(v_last)
 	var b_node := _find_ball()
 	if b_node != null and (cur_lie.is_empty() or cur_lie in ["teebox", "fairway"]):
 		var b_lie = str(b_node.get("lie_type")).to_lower()
@@ -423,6 +442,15 @@ func _refresh_anchor(force: bool) -> void:
 	if _scene_root == null or not is_inside_tree():
 		return
 
+	_is_driving_range = _check_is_driving_range()
+	if _is_driving_range:
+		if _address_mmi != null:
+			_address_mmi.visible = false
+		if _rough_mmi != null:
+			_rough_mmi.visible = false
+		if _deep_mmi != null:
+			_deep_mmi.visible = false
+
 	var anchor := Vector3.ZERO
 	var ball := _find_ball()
 	if ball != null:
@@ -440,9 +468,15 @@ func _refresh_anchor(force: bool) -> void:
 
 	var p := _get_player_node()
 	var cur_lie := str(p.get("current_lie_type")).to_lower() if p != null else ""
-	var cur_red := float(p.get("current_shot_reduction")) if p != null else 0.0
-	if cur_red <= 0.0 and p != null:
-		cur_red = float(p.get("last_shot_reduction"))
+	var cur_red := 0.0
+	if p != null:
+		var v_red = p.get("current_shot_reduction")
+		if v_red != null:
+			cur_red = float(v_red)
+		if cur_red <= 0.0:
+			var v_last = p.get("last_shot_reduction")
+			if v_last != null:
+				cur_red = float(v_last)
 	if ball != null and (cur_lie.is_empty() or cur_lie in ["teebox", "fairway"]):
 		var b_lie = str(ball.get("lie_type")).to_lower()
 		if b_lie in ["rough", "deep_rough", "heavy_rough"]:
@@ -510,6 +544,10 @@ func _refresh_anchor(force: bool) -> void:
 	if _address_mmi != null and _address_mmi.multimesh != null:
 		var mm := _address_mmi.multimesh
 		for i in range(ADDRESS_CLUSTER_COUNT):
+			if _is_driving_range:
+				# No 3D grass blade clusters on driving range; turf is rendered cleanly by the range turf shader
+				mm.set_instance_transform(i, hidden)
+				continue
 			var r := sqrt(rng.randf()) * 14.5
 			var theta := rng.randf_range(0.0, TAU)
 			var wx := grid_center.x + cos(theta) * r

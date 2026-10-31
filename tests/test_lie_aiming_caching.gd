@@ -6,6 +6,9 @@ func _initialize() -> void:
 	test_ball_green_caching()
 	test_course_play_lie_caching()
 	test_player_tree_occlusion_skip_on_aim()
+	test_player_tree_occlusion_skip_on_club_switch()
+	test_multiplayer_manager_stats_caching()
+	test_range_default_aim_caching()
 	print("=======================================================")
 	print("  ALL LIE AIMING & DISTANCE CACHING TESTS PASSED! 🎉")
 	print("=======================================================")
@@ -119,3 +122,66 @@ func is_actively_aiming() -> bool:
 	player.free()
 	mock_course.free()
 	print("  PASS: player.gd tree occlusion immediately skips while course is actively aiming.")
+
+func test_player_tree_occlusion_skip_on_club_switch() -> void:
+	print("\n--- Test 5: Player Tree Occlusion Skips After Club Switch ---")
+	var PlayerScript = load("res://Player/player.gd")
+	var player = Node3D.new()
+	player.set_script(PlayerScript)
+	
+	player._on_club_selected("7i")
+	player._handle_tree_occlusion()
+	assert(not player._has_scanned_trees, "Tree scanning / occlusion must be skipped immediately after switching clubs")
+	
+	player.free()
+	print("  PASS: player.gd tree occlusion skips immediately after switching clubs.")
+
+func test_multiplayer_manager_stats_caching() -> void:
+	print("\n--- Test 6: MultiplayerManager Club Stats In-Memory Caching ---")
+	var mp = root.get_node_or_null("MultiplayerManager")
+	if mp == null:
+		var MpScript = load("res://Utils/MultiplayerManager.gd")
+		mp = Node.new()
+		mp.set_script(MpScript)
+		root.add_child(mp)
+	
+	var stats1 = mp.load_global_club_stats()
+	assert(mp._cached_global_club_stats != null, "Global club stats cache should be populated")
+	
+	# Mutate cache to verify subsequent call returns memory cache without disk reload
+	mp._cached_global_club_stats["__TestCachedKey__"] = true
+	var stats2 = mp.load_global_club_stats()
+	assert(stats2.has("__TestCachedKey__"), "load_global_club_stats must return in-memory cached dictionary")
+	
+	mp.invalidate_global_club_stats_cache()
+	assert(mp._cached_global_club_stats.is_empty(), "invalidate_global_club_stats_cache must clear cache")
+	print("  PASS: MultiplayerManager caches player_club_stats in memory across club switches.")
+
+func test_range_default_aim_caching() -> void:
+	print("\n--- Test 7: Range Default Aim Target Caching ---")
+	var RangeScript = load("res://Courses/Range/range.gd")
+	var range_instance = Node3D.new()
+	range_instance.set_script(RangeScript)
+	root.add_child(range_instance)
+	
+	range_instance.current_hole_location = Vector3(0.0, 0.0, 300.0)
+	var ball_pos = Vector3(0.0, 0.0, 0.0)
+	
+	# Initial call populates cache
+	var t1 = range_instance.get_default_aim_target(ball_pos, "Dr")
+	assert(range_instance._cached_default_aim_ball_pos.is_equal_approx(ball_pos), "Default aim cache ball pos must match")
+	assert(range_instance._cached_default_aim_targets.has("Dr"), "Default aim target for Dr must be cached")
+	
+	# Mutate cache to prove subsequent call returns cached target
+	var sentinel = Vector3(99.0, 88.0, 77.0)
+	range_instance._cached_default_aim_targets["Dr"] = sentinel
+	var t2 = range_instance.get_default_aim_target(ball_pos, "Dr")
+	assert(t2 == sentinel, "Subsequent get_default_aim_target call must return cached target")
+	
+	# Ball move clears cache
+	var moved_ball_pos = Vector3(10.0, 0.0, 0.0)
+	var t3 = range_instance.get_default_aim_target(moved_ball_pos, "Dr")
+	assert(t3 != sentinel, "Moving ball position must recompute and invalidate previous cache")
+	
+	range_instance.queue_free()
+	print("  PASS: range.gd caches default aim target by ball position and club.")

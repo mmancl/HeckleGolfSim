@@ -396,12 +396,14 @@ func _generate_ground_terrain() -> void:
 func _enter_tree() -> void:
 	var p_path = scene_file_path.to_lower()
 	is_driving_range = (p_path.ends_with("range/range.tscn") or p_path.ends_with("range.tscn") or p_path.ends_with("range.scn") or (name.to_lower() == "range" and not p_path.contains("course")))
+	set_meta("is_driving_range", is_driving_range)
 
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
 	var p_path = scene_file_path.to_lower()
 	is_driving_range = (p_path.ends_with("range/range.tscn") or p_path.ends_with("range.tscn") or p_path.ends_with("range.scn") or (name.to_lower() == "range" and not p_path.contains("course")))
+	set_meta("is_driving_range", is_driving_range)
 	if is_driving_range:
 		var mp_mgr = get_node_or_null("/root/MultiplayerManager")
 		if mp_mgr != null:
@@ -2553,7 +2555,9 @@ func _update_averages(target_club: String = "") -> void:
 	var shots = mp.filter_valid_club_shots(raw_shots, club_code) if (mp != null and mp.has_method("filter_valid_club_shots")) else raw_shots
 	if shots.is_empty():
 		if has_node("RangeUI"):
-			$RangeUI.call("reset_average_stats")
+			var r_ui = get_node("RangeUI")
+			if r_ui != null and r_ui.has_method("reset_average_stats"):
+				r_ui.call("reset_average_stats")
 		return
 		
 	var sum_carry := 0.0
@@ -2589,7 +2593,9 @@ func _update_averages(target_club: String = "") -> void:
 	}
 	
 	if has_node("RangeUI"):
-		$RangeUI.call("update_average_stats", avg_data)
+		var r_ui = get_node("RangeUI")
+		if r_ui != null and r_ui.has_method("update_average_stats"):
+			r_ui.call("update_average_stats", avg_data)
 
 	# No auto reset: leave final numbers visible
 
@@ -3397,7 +3403,7 @@ func get_path_buffer_polygon(path_list: Array, radius: float) -> Array[Vector3]:
 
 
 func get_all_holes_config() -> Dictionary:
-	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager") if is_inside_tree() else null
 	if mp_mgr != null and not mp_mgr.hole_info.is_empty():
 		return mp_mgr.hole_info
 	if not course_data_dict.is_empty() and course_data_dict.has("Hole Info"):
@@ -3415,7 +3421,7 @@ func get_active_hole_config() -> Dictionary:
 		return all_holes[current_hole_id]
 
 	# 2. Authoritative for Match Play: Match by MultiplayerManager current hole ID
-	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+	var mp_mgr = get_node_or_null("/root/MultiplayerManager") if is_inside_tree() else null
 	if mp_mgr != null and not mp_mgr.players.is_empty() and not mp_mgr.hole_ids.is_empty():
 		var hole_idx = clamp(mp_mgr.current_hole_index, 0, mp_mgr.hole_ids.size() - 1)
 		var hole_id = mp_mgr.hole_ids[hole_idx]
@@ -3476,6 +3482,8 @@ func clear_surface_distance_caches() -> void:
 	_cached_dist_any_green_pos = Vector3.INF
 	_cached_dist_fairway_pos = Vector3.INF
 	_cached_dist_teebox_pos = Vector3.INF
+	_cached_default_aim_ball_pos = Vector3.INF
+	_cached_default_aim_targets.clear()
 
 var _cached_on_green_ball_pos: Vector3 = Vector3.INF
 var _cached_on_green_result: bool = false
@@ -3742,7 +3750,7 @@ func update_camera_offset(_val = null) -> void:
 	if has_node("Player") and $Player.ball != null:
 		if has_node("PhantomCamera3D") and $PhantomCamera3D.follow_mode == PhantomCamera3D.FollowMode.NONE:
 			var yaw_rad = deg_to_rad($Player.ball.aim_yaw_offset_deg)
-			var cam_pos = get_address_camera_position($Player.ball.global_position, yaw_rad)
+			var cam_pos = get_address_camera_position($Player.ball.global_position, yaw_rad, null, is_actively_aiming())
 			$PhantomCamera3D.global_position = cam_pos
 			var target_look = get_camera_target_look(aim_target_pos, $Player.ball.global_position)
 			$PhantomCamera3D.look_at(target_look)
@@ -5321,6 +5329,7 @@ func _init_cached_surface_bodies(force: bool = false) -> void:
 			continue
 			
 		var shapes_data: Array = []
+		var triangles_2d: Array = []
 		var min_x := 999999.0
 		var max_x := -999999.0
 		var min_z := 999999.0
@@ -5332,11 +5341,28 @@ func _init_cached_surface_bodies(force: bool = false) -> void:
 				var shape_faces = child.shape.data
 				shapes_data.append(shape_faces)
 				for i in range(0, shape_faces.size(), 3):
-					var a_3d = trans * shape_faces[i]
-					min_x = minf(min_x, a_3d.x)
-					max_x = maxf(max_x, a_3d.x)
-					min_z = minf(min_z, a_3d.z)
-					max_z = maxf(max_z, a_3d.z)
+					if i + 2 < shape_faces.size():
+						var a_3d = trans * shape_faces[i]
+						var b_3d = trans * shape_faces[i+1]
+						var c_3d = trans * shape_faces[i+2]
+						min_x = minf(min_x, minf(a_3d.x, minf(b_3d.x, c_3d.x)))
+						max_x = maxf(max_x, maxf(a_3d.x, maxf(b_3d.x, c_3d.x)))
+						min_z = minf(min_z, minf(a_3d.z, minf(b_3d.z, c_3d.z)))
+						max_z = maxf(max_z, maxf(a_3d.z, maxf(b_3d.z, c_3d.z)))
+						if is_fairway:
+							var a2 = Vector2(a_3d.x, a_3d.z)
+							var b2 = Vector2(b_3d.x, b_3d.z)
+							var c2 = Vector2(c_3d.x, c_3d.z)
+							var t_min_x = minf(a2.x, minf(b2.x, c2.x))
+							var t_max_x = maxf(a2.x, maxf(b2.x, c2.x))
+							var t_min_y = minf(a2.y, minf(b2.y, c2.y))
+							var t_max_y = maxf(a2.y, maxf(b2.y, c2.y))
+							triangles_2d.append({
+								"a": a2,
+								"b": b2,
+								"c": c2,
+								"rect": Rect2(t_min_x, t_min_y, t_max_x - t_min_x, t_max_y - t_min_y)
+							})
 					
 		if shapes_data.is_empty():
 			continue
@@ -5349,6 +5375,7 @@ func _init_cached_surface_bodies(force: bool = false) -> void:
 			"body": body,
 			"transform": trans,
 			"shapes": shapes_data,
+			"triangles_2d": triangles_2d,
 			"center_2d": center_2d,
 			"radius": radius
 		}
@@ -5408,20 +5435,31 @@ func is_point_in_fairway(pos_2d: Vector2) -> bool:
 		if dist_to_center > entry.radius + 0.5:
 			continue # Bounding circle early-out
 			
-		var trans: Transform3D = entry.transform
-		for faces in entry.shapes:
-			for i in range(0, faces.size(), 3):
-				if i + 2 < faces.size():
-					var a_3d = trans * faces[i]
-					var b_3d = trans * faces[i+1]
-					var c_3d = trans * faces[i+2]
-					var a = Vector2(a_3d.x, a_3d.z)
-					var b = Vector2(b_3d.x, b_3d.z)
-					var c = Vector2(c_3d.x, c_3d.z)
-					if Geometry2D.point_is_inside_triangle(pos_2d, a, b, c):
-						return true
-					if _distance_to_triangle_2d(pos_2d, a, b, c) <= 0.5:
-						return true
+		var tris: Array = entry.get("triangles_2d", [])
+		if not tris.is_empty():
+			for tri in tris:
+				var rect: Rect2 = tri.rect
+				if not rect.grow(0.5).has_point(pos_2d):
+					continue
+				if Geometry2D.point_is_inside_triangle(pos_2d, tri.a, tri.b, tri.c):
+					return true
+				if _distance_to_triangle_2d(pos_2d, tri.a, tri.b, tri.c) <= 0.5:
+					return true
+		else:
+			var trans: Transform3D = entry.transform
+			for faces in entry.shapes:
+				for i in range(0, faces.size(), 3):
+					if i + 2 < faces.size():
+						var a_3d = trans * faces[i]
+						var b_3d = trans * faces[i+1]
+						var c_3d = trans * faces[i+2]
+						var a = Vector2(a_3d.x, a_3d.z)
+						var b = Vector2(b_3d.x, b_3d.z)
+						var c = Vector2(c_3d.x, c_3d.z)
+						if Geometry2D.point_is_inside_triangle(pos_2d, a, b, c):
+							return true
+						if _distance_to_triangle_2d(pos_2d, a, b, c) <= 0.5:
+							return true
 	return false
 
 
@@ -5762,6 +5800,10 @@ func _is_point_in_current_hole_corridor(pt_2d: Vector2, active_hole: Dictionary,
 	if dist_cur > 45.0:
 		return false
 
+	# If safely within the main fairway corridor (<= 18m), avoid scanning other holes
+	if dist_cur <= 18.0:
+		return true
+
 	# If multiple holes exist, verify the candidate point is closer to the current hole than other holes
 	if all_holes.size() > 1:
 		for k in all_holes.keys():
@@ -5789,7 +5831,7 @@ func _find_fairway_midpoint_at_radius(ball_2d: Vector2, ref_dir: Vector2, radius
 		hole_2d = Vector2(current_hole_location.x, current_hole_location.z)
 
 	var scan_max_deg := 35.0
-	var step_deg := 1.0
+	var step_deg := 2.5
 	var inside_intervals: Array[Dictionary] = []
 	var cur_start := -999.0
 	var cur_end := -999.0
@@ -5835,6 +5877,9 @@ func _find_fairway_midpoint_at_radius(ball_2d: Vector2, ref_dir: Vector2, radius
 	return ball_2d + final_dir * radius_m
 
 
+var _cached_default_aim_ball_pos: Vector3 = Vector3.INF
+var _cached_default_aim_targets: Dictionary = {}
+
 func get_default_aim_target(ball_pos: Vector3, club_name: String = "") -> Vector3:
 	if current_hole_location.is_zero_approx():
 		return aim_target_pos
@@ -5852,6 +5897,18 @@ func get_default_aim_target(ball_pos: Vector3, club_name: String = "") -> Vector
 		if club_sel != null and club_sel.has_method("get_current_club_name"):
 			active_club = club_sel.get_current_club_name()
 
+	if not ball_pos.is_equal_approx(_cached_default_aim_ball_pos):
+		_cached_default_aim_ball_pos = ball_pos
+		_cached_default_aim_targets.clear()
+	elif _cached_default_aim_targets.has(active_club):
+		return _cached_default_aim_targets[active_club]
+
+	var target = _calc_default_aim_target(ball_pos, active_club)
+	_cached_default_aim_targets[active_club] = target
+	return target
+
+
+func _calc_default_aim_target(ball_pos: Vector3, active_club: String) -> Vector3:
 	var hole_dist_m = ball_pos.distance_to(current_hole_location)
 	var hole_dist_yards = hole_dist_m * 1.09361
 
@@ -5952,7 +6009,7 @@ func apply_default_aim(club_name: String = "") -> Vector3:
 	set_aim_distance(dist_yards)
 
 	var yaw_rad = -angle_rad
-	var cam_pos = get_address_camera_position(ball_pos, yaw_rad)
+	var cam_pos = get_address_camera_position(ball_pos, yaw_rad, null, is_actively_aiming())
 	var target_look = get_camera_target_look(aim_target_pos, ball_pos)
 
 	if has_node("PhantomCamera3D"):

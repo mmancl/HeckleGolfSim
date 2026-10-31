@@ -9,12 +9,12 @@ const HoleShotPathDiagram = preload("res://UI/hole_shot_path_diagram.gd")
 var selected_match_to_delete: Dictionary = {}
 var scorecard_overlay: ColorRect
 
-# Shot Review state for the history scorecard overlay
+# Scorecard and Shot Review state for the history scorecard overlay
+var _scorecard_selected_hole_index: int = 0
+var _current_scorecard_match_data: Dictionary = {}
+var _scorecard_grid: GridContainer = null
 var _shot_review_container: VBoxContainer = null
-var _shot_review_selected_hole: String = ""
-var _shot_review_match_data: Dictionary = {}
-var _shot_review_cards_container: VBoxContainer = null
-var _shot_review_hole_btns: Array = []
+var _scorecard_scroll: ScrollContainer = null
 
 func _ready() -> void:
 	name = "HistoryMenu"
@@ -181,6 +181,8 @@ func _load_history() -> Array:
 			if f != null:
 				var json = JSON.parse_string(f.get_as_text())
 				if typeof(json) == TYPE_DICTIONARY:
+					if json.has("players") and typeof(json["players"]) == TYPE_ARRAY:
+						json["players"] = MultiplayerManager.deserialize_players(json["players"])
 					matches.append(json)
 		file_name = dir.get_next()
 	dir.list_dir_end()
@@ -329,12 +331,18 @@ func _confirm_delete_match() -> void:
 	_render_history_list()
 
 func _show_scorecard(match_data: Dictionary) -> void:
-	# Reset shot review state
-	_shot_review_container = null
-	_shot_review_selected_hole = ""
-	_shot_review_match_data = match_data.duplicate()
-	_shot_review_cards_container = null
-	_shot_review_hole_btns.clear()
+	# Ensure player data is deserialized (positions, shot_stats, etc. converted back to Vector3)
+	if match_data.has("players") and typeof(match_data["players"]) == TYPE_ARRAY:
+		match_data["players"] = MultiplayerManager.deserialize_players(match_data["players"])
+	_current_scorecard_match_data = match_data
+
+	# Select default hole: first hole that has shot data, or hole 0
+	var hole_ids = _get_match_hole_ids(_current_scorecard_match_data)
+	_scorecard_selected_hole_index = 0
+	for idx in range(hole_ids.size()):
+		if _history_hole_has_shot_data(_current_scorecard_match_data, hole_ids[idx]):
+			_scorecard_selected_hole_index = idx
+			break
 
 	# Clear scorecard panel container children except background/structure
 	var card_panel = scorecard_overlay.get_node_or_null("CardPanel") as PanelContainer
@@ -374,48 +382,35 @@ func _show_scorecard(match_data: Dictionary) -> void:
 	head_hbox.add_child(date_lbl)
 	
 	# Combined scroll area: grid scorecard + shot review
-	var scroll = ScrollContainer.new()
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	ThemeManager.apply_scroll_container_style(scroll, 28)
-	card_vbox.add_child(scroll)
+	_scorecard_scroll = ScrollContainer.new()
+	_scorecard_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scorecard_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scorecard_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_scorecard_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	ThemeManager.apply_scroll_container_style(_scorecard_scroll, 28)
+	card_vbox.add_child(_scorecard_scroll)
 	
 	# Scrollable content vbox (grid + shot review stacked vertically)
 	var scroll_content = VBoxContainer.new()
 	scroll_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll_content.add_theme_constant_override("separation", 20)
-	scroll.add_child(scroll_content)
+	_scorecard_scroll.add_child(scroll_content)
 	
-	var grid = GridContainer.new()
-	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	grid.add_theme_constant_override("h_separation", 2)
-	grid.add_theme_constant_override("v_separation", 2)
-	scroll_content.add_child(grid)
+	_scorecard_grid = GridContainer.new()
+	_scorecard_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scorecard_grid.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_scorecard_grid.add_theme_constant_override("h_separation", 2)
+	_scorecard_grid.add_theme_constant_override("v_separation", 2)
+	scroll_content.add_child(_scorecard_grid)
 	
-	# Populate Grid
-	_populate_grid_scorecard(grid, match_data)
-	
-	# Shot Review section separator
-	var sep_lbl = Label.new()
-	sep_lbl.text = "📍 Shot Review"
-	sep_lbl.add_theme_font_size_override("font_size", 20)
-	sep_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.38))
-	sep_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
-	sep_lbl.add_theme_constant_override("outline_size", 3)
-	sep_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	scroll_content.add_child(sep_lbl)
-	
-	# Shot Review VBox
+	# Shot Review VBox (populated below the scorecard)
 	_shot_review_container = VBoxContainer.new()
 	_shot_review_container.name = "ShotReviewContainer"
 	_shot_review_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_shot_review_container.add_theme_constant_override("separation", 12)
 	scroll_content.add_child(_shot_review_container)
 	
-	_populate_shot_review_hole_selector(match_data)
+	_refresh_scorecard_view()
 	
 	# Actions row
 	var action_hbox = HBoxContainer.new()
@@ -430,6 +425,68 @@ func _show_scorecard(match_data: Dictionary) -> void:
 	action_hbox.add_child(close_btn)
 	
 	scorecard_overlay.visible = true
+
+
+func _refresh_scorecard_view() -> void:
+	if _scorecard_grid == null or _shot_review_container == null:
+		return
+	var prev_v = _scorecard_scroll.scroll_vertical if _scorecard_scroll != null else 0
+	var prev_h = _scorecard_scroll.scroll_horizontal if _scorecard_scroll != null else 0
+
+	for child in _scorecard_grid.get_children():
+		_scorecard_grid.remove_child(child)
+		child.queue_free()
+	_populate_grid_scorecard(_scorecard_grid, _current_scorecard_match_data)
+
+	for child in _shot_review_container.get_children():
+		_shot_review_container.remove_child(child)
+		child.queue_free()
+	var hole_ids = _get_match_hole_ids(_current_scorecard_match_data)
+	var active_hole_id = hole_ids[_scorecard_selected_hole_index] if (_scorecard_selected_hole_index >= 0 and _scorecard_selected_hole_index < hole_ids.size()) else (hole_ids[0] if not hole_ids.is_empty() else "")
+	if not active_hole_id.is_empty():
+		_populate_history_shot_review(_shot_review_container, active_hole_id, _current_scorecard_match_data)
+
+	if _scorecard_scroll != null:
+		_scorecard_scroll.set_deferred("scroll_vertical", prev_v)
+		_scorecard_scroll.set_deferred("scroll_horizontal", prev_h)
+
+
+func _on_scorecard_hole_selected(target_hole_idx: int) -> void:
+	_scorecard_selected_hole_index = target_hole_idx
+	_refresh_scorecard_view()
+
+
+func _get_match_hole_ids(match_data: Dictionary) -> Array:
+	if match_data.has("hole_ids") and not match_data["hole_ids"].is_empty():
+		return match_data["hole_ids"].duplicate()
+	var config_path: String = match_data.get("config_path", "")
+	var hole_pars = {}
+	if not config_path.is_empty() and FileAccess.file_exists(config_path):
+		var f = FileAccess.open(config_path, FileAccess.READ)
+		if f != null:
+			var parsed = JSON.parse_string(f.get_as_text())
+			if typeof(parsed) == TYPE_DICTIONARY:
+				for h_id in parsed.get("Hole Info", {}).keys():
+					hole_pars[h_id] = int(round(float(parsed["Hole Info"][h_id].get("Par", 4))))
+	if hole_pars.is_empty() and match_data.has("hole_pars"):
+		var saved_pars = match_data.get("hole_pars", {})
+		if typeof(saved_pars) == TYPE_DICTIONARY:
+			for h_id in saved_pars:
+				hole_pars[h_id] = int(round(float(saved_pars[h_id])))
+	var h_ids = hole_pars.keys()
+	h_ids.sort_custom(func(a, b):
+		return MultiplayerManager.get_hole_number_from_id(a) < MultiplayerManager.get_hole_number_from_id(b)
+	)
+	var course_len = match_data.get("selected_course_length", "Full 18")
+	if course_len == "Back 9":
+		h_ids = h_ids.filter(func(h_id): return MultiplayerManager.get_hole_number_from_id(h_id) >= 10)
+	elif course_len == "Front 9":
+		h_ids = h_ids.filter(func(h_id): return MultiplayerManager.get_hole_number_from_id(h_id) <= 9)
+	if h_ids.is_empty():
+		for i in range(18):
+			h_ids.append("Hole " + str(i + 1))
+	return h_ids
+
 
 func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> void:
 	var g_mode = match_data.get("game_mode", "Standard")
@@ -500,20 +557,26 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 	var has_both_nines = not front_holes.is_empty() and not back_holes.is_empty()
 
 	# Columns: Player | front holes | [OUT/TOT] | back holes | [IN] | [TOT if both]
-	var columns = ["Player"]
+	var columns: Array[String] = ["Player"]
+	var column_hole_indices: Array[int] = [-1]
 	if not front_holes.is_empty():
 		for h_id in front_holes:
 			columns.append(str(MultiplayerManager.get_hole_number_from_id(h_id)))
+			column_hole_indices.append(hole_ids.find(h_id))
 		if not back_holes.is_empty():
 			columns.append("OUT")
 		else:
 			columns.append("TOT")
+		column_hole_indices.append(-1)
 	if not back_holes.is_empty():
 		for h_id in back_holes:
 			columns.append(str(MultiplayerManager.get_hole_number_from_id(h_id)))
+			column_hole_indices.append(hole_ids.find(h_id))
 		columns.append("IN")
+		column_hole_indices.append(-1)
 	if has_both_nines:
 		columns.append("TOT")
+		column_hole_indices.append(-1)
 	
 	grid.columns = columns.size()
 	
@@ -522,16 +585,24 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 	var dist_bg = Color(0.13, 0.18, 0.28, 0.88)
 	
 	# Cell addition helper
-	var add_cell = func(parent_grid: GridContainer, text: String, bg: Color, is_header: bool = false, fg: Color = Color.WHITE, font_size: int = 16):
+	var add_cell = func(parent_grid: GridContainer, text: String, bg: Color, is_header: bool = false, fg: Color = Color.WHITE, font_size: int = 16, is_active: bool = false, min_width: float = 48.0):
 		var cell = PanelContainer.new()
-		cell.custom_minimum_size = Vector2(48, 38)
+		cell.custom_minimum_size = Vector2(min_width, 38)
 		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cell.size_flags_vertical = Control.SIZE_FILL
 		var style = StyleBoxFlat.new()
-		style.bg_color = bg
-		style.border_width_right = 1
-		style.border_width_bottom = 1
-		style.border_color = Color(0.3, 0.35, 0.45, 0.35)
+		if is_active:
+			style.bg_color = bg.lerp(Color(0.20, 0.42, 0.68, 0.95), 0.35)
+			style.border_width_left = 1
+			style.border_width_top = 1
+			style.border_width_right = 1
+			style.border_width_bottom = 1
+			style.border_color = Color(0.35, 0.72, 1.0, 0.85)
+		else:
+			style.bg_color = bg
+			style.border_width_right = 1
+			style.border_width_bottom = 1
+			style.border_color = Color(0.3, 0.35, 0.45, 0.35)
 		style.content_margin_left = 6
 		style.content_margin_right = 6
 		style.content_margin_top = 4
@@ -544,7 +615,7 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		label.add_theme_color_override("font_color", fg)
 		label.add_theme_font_size_override("font_size", font_size)
-		if is_header:
+		if is_header or is_active:
 			label.add_theme_color_override("font_outline_color", Color.BLACK)
 			label.add_theme_constant_override("outline_size", 3)
 		cell.add_child(label)
@@ -552,16 +623,24 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		return cell
 
 	# Score cell addition helper with golfer lingo badges
-	var add_score_cell = func(parent_grid: GridContainer, text: String, par: int, bg: Color, is_ctp: bool = false, font_size: int = 16):
+	var add_score_cell = func(parent_grid: GridContainer, text: String, par: int, bg: Color, is_active: bool = false, is_ctp: bool = false, font_size: int = 16):
 		var cell = PanelContainer.new()
 		cell.custom_minimum_size = Vector2(48, 38)
 		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cell.size_flags_vertical = Control.SIZE_FILL
 		var style = StyleBoxFlat.new()
-		style.bg_color = bg
-		style.border_width_right = 1
-		style.border_width_bottom = 1
-		style.border_color = Color(0.3, 0.35, 0.45, 0.35)
+		if is_active:
+			style.bg_color = bg.lerp(Color(0.20, 0.42, 0.68, 0.95), 0.35)
+			style.border_width_left = 1
+			style.border_width_top = 1
+			style.border_width_right = 1
+			style.border_width_bottom = 1
+			style.border_color = Color(0.35, 0.72, 1.0, 0.85)
+		else:
+			style.bg_color = bg
+			style.border_width_right = 1
+			style.border_width_bottom = 1
+			style.border_color = Color(0.3, 0.35, 0.45, 0.35)
 		style.content_margin_left = 6
 		style.content_margin_right = 6
 		style.content_margin_top = 4
@@ -573,48 +652,106 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		parent_grid.add_child(cell)
 		return cell
 
-	# 1. HEADER ROW
-	for col in columns:
-		add_cell.call(grid, col, header_bg, true, Color.WHITE, 16)
+	# 1. HEADER ROW (Clickable hole buttons matching CoursePlay)
+	for c_idx in range(columns.size()):
+		var col = columns[c_idx]
+		var h_idx = column_hole_indices[c_idx]
+		var is_hole_col = (h_idx >= 0)
+		var is_act = (is_hole_col and h_idx == _scorecard_selected_hole_index)
+		
+		if is_hole_col:
+			var btn = Button.new()
+			btn.custom_minimum_size = Vector2(48, 38)
+			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			btn.size_flags_vertical = Control.SIZE_FILL
+			btn.text = col
+			btn.focus_mode = Control.FOCUS_NONE
+			btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+			btn.add_theme_font_size_override("font_size", 16)
+			btn.tooltip_text = "View Hole %s shot history" % col
+			
+			var style_norm = StyleBoxFlat.new()
+			if is_act:
+				style_norm.bg_color = header_bg.lerp(Color(0.20, 0.42, 0.68, 0.95), 0.35)
+				style_norm.border_width_left = 1
+				style_norm.border_width_top = 1
+				style_norm.border_width_right = 1
+				style_norm.border_width_bottom = 1
+				style_norm.border_color = Color(0.35, 0.72, 1.0, 0.85)
+			else:
+				style_norm.bg_color = header_bg
+				style_norm.border_width_right = 1
+				style_norm.border_width_bottom = 1
+				style_norm.border_color = Color(0.3, 0.35, 0.45, 0.35)
+			style_norm.content_margin_left = 6
+			style_norm.content_margin_right = 6
+			style_norm.content_margin_top = 4
+			style_norm.content_margin_bottom = 4
+			
+			var style_hover = style_norm.duplicate()
+			style_hover.bg_color = header_bg.lerp(Color(0.25, 0.50, 0.80, 0.95), 0.5)
+			style_hover.border_color = Color(0.50, 0.82, 1.0, 1.0)
+			
+			var style_pressed = style_hover.duplicate()
+			style_pressed.bg_color = header_bg.lerp(Color(0.15, 0.35, 0.60, 0.95), 0.6)
+			
+			btn.add_theme_stylebox_override("normal", style_norm)
+			btn.add_theme_stylebox_override("hover", style_hover)
+			btn.add_theme_stylebox_override("pressed", style_pressed)
+			btn.add_theme_color_override("font_color", Color.WHITE)
+			btn.add_theme_color_override("font_outline_color", Color.BLACK)
+			btn.add_theme_constant_override("outline_size", 3)
+			
+			var target_hole_idx = h_idx
+			btn.pressed.connect(func():
+				_on_scorecard_hole_selected(target_hole_idx)
+			)
+			grid.add_child(btn)
+		else:
+			add_cell.call(grid, col, header_bg, true, Color.WHITE, 16, false, 180.0 if col == "Player" else 48.0)
 		
 	# 2. DISTANCE ROW (Yards)
-	add_cell.call(grid, "Yds (%s)" % tee_color, dist_bg, false, Color(0.8, 0.8, 0.8), 15)
+	add_cell.call(grid, "Yds (%s)" % tee_color, dist_bg, false, Color(0.8, 0.8, 0.8), 15, false, 180.0)
 	var front_dist_sum = 0
 	for h_id in front_holes:
 		var d = hole_dists.get(h_id, 0)
 		front_dist_sum += d
-		add_cell.call(grid, str(d) if d > 0 else "-", dist_bg, false, Color(0.8, 0.8, 0.8), 15)
+		var is_act = (hole_ids.find(h_id) == _scorecard_selected_hole_index)
+		add_cell.call(grid, str(d) if d > 0 else "-", dist_bg, false, Color(0.8, 0.8, 0.8), 15, is_act)
 	if not front_holes.is_empty():
-		add_cell.call(grid, str(front_dist_sum), dist_bg, false, Color(0.9, 0.9, 0.9), 15)
+		add_cell.call(grid, str(front_dist_sum), dist_bg, false, Color(0.9, 0.9, 0.9), 15, false)
 	var back_dist_sum = 0
 	for h_id in back_holes:
 		var d = hole_dists.get(h_id, 0)
 		back_dist_sum += d
-		add_cell.call(grid, str(d) if d > 0 else "-", dist_bg, false, Color(0.8, 0.8, 0.8), 15)
+		var is_act = (hole_ids.find(h_id) == _scorecard_selected_hole_index)
+		add_cell.call(grid, str(d) if d > 0 else "-", dist_bg, false, Color(0.8, 0.8, 0.8), 15, is_act)
 	if not back_holes.is_empty():
-		add_cell.call(grid, str(back_dist_sum), dist_bg, false, Color(0.9, 0.9, 0.9), 15)
+		add_cell.call(grid, str(back_dist_sum), dist_bg, false, Color(0.9, 0.9, 0.9), 15, false)
 	if has_both_nines:
-		add_cell.call(grid, str(front_dist_sum + back_dist_sum), dist_bg, false, Color(1.0, 0.85, 0.38), 15)
+		add_cell.call(grid, str(front_dist_sum + back_dist_sum), dist_bg, false, Color(1.0, 0.85, 0.38), 15, false)
 
 	# 3. PAR ROW
-	add_cell.call(grid, "Par", par_bg, false, Color(0.8, 0.8, 0.8), 15)
+	add_cell.call(grid, "Par", par_bg, false, Color(0.8, 0.8, 0.8), 15, false, 180.0)
 	var front_par_sum: int = 0
 	for h_id in front_holes:
 		var p_val: int = int(round(float(hole_pars.get(h_id, 4))))
 		front_par_sum += p_val
-		add_cell.call(grid, str(p_val), par_bg, false, Color(0.8, 0.8, 0.8), 15)
+		var is_act = (hole_ids.find(h_id) == _scorecard_selected_hole_index)
+		add_cell.call(grid, str(p_val), par_bg, false, Color(0.8, 0.8, 0.8), 15, is_act)
 	if not front_holes.is_empty():
-		add_cell.call(grid, str(front_par_sum), par_bg, false, Color(0.9, 0.9, 0.9), 15)
+		add_cell.call(grid, str(front_par_sum), par_bg, false, Color(0.9, 0.9, 0.9), 15, false)
 	var back_par_sum: int = 0
 	for h_id in back_holes:
 		var p_val: int = int(round(float(hole_pars.get(h_id, 4))))
 		back_par_sum += p_val
-		add_cell.call(grid, str(p_val), par_bg, false, Color(0.8, 0.8, 0.8), 15)
+		var is_act = (hole_ids.find(h_id) == _scorecard_selected_hole_index)
+		add_cell.call(grid, str(p_val), par_bg, false, Color(0.8, 0.8, 0.8), 15, is_act)
 	if not back_holes.is_empty():
-		add_cell.call(grid, str(back_par_sum), par_bg, false, Color(0.9, 0.9, 0.9), 15)
+		add_cell.call(grid, str(back_par_sum), par_bg, false, Color(0.9, 0.9, 0.9), 15, false)
 	if has_both_nines:
 		var total_par: int = front_par_sum + back_par_sum
-		add_cell.call(grid, str(total_par), par_bg, false, Color(1.0, 0.85, 0.38), 15)
+		add_cell.call(grid, str(total_par), par_bg, false, Color(1.0, 0.85, 0.38), 15, false)
 
 	# 4. PLAYER ROWS
 	for p_idx in range(players_list.size()):
@@ -728,10 +865,11 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 				var s_num = int(round(float(s)))
 				display_s = str(s_num)
 				front_sum += s_num
-			add_score_cell.call(grid, display_s, par, row_bg, is_ctp_mode, 16)
+			var is_act = (hole_ids.find(h_id) == _scorecard_selected_hole_index)
+			add_score_cell.call(grid, display_s, par, row_bg, is_act, is_ctp_mode, 16)
 			
 		if not front_holes.is_empty():
-			add_cell.call(grid, str(front_sum) if front_sum > 0 else "-", row_bg, false, Color(0.9, 0.9, 0.9))
+			add_cell.call(grid, str(front_sum) if front_sum > 0 else "-", row_bg, false, Color(0.9, 0.9, 0.9), 16, false)
 			
 		# Back scores
 		var back_sum = 0
@@ -743,17 +881,18 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 				var s_num = int(round(float(s)))
 				display_s = str(s_num)
 				back_sum += s_num
-			add_score_cell.call(grid, display_s, par, row_bg, is_ctp_mode, 16)
+			var is_act = (hole_ids.find(h_id) == _scorecard_selected_hole_index)
+			add_score_cell.call(grid, display_s, par, row_bg, is_act, is_ctp_mode, 16)
 			
 		if not back_holes.is_empty():
-			add_cell.call(grid, str(back_sum) if back_sum > 0 else "-", row_bg, false, Color(0.9, 0.9, 0.9))
+			add_cell.call(grid, str(back_sum) if back_sum > 0 else "-", row_bg, false, Color(0.9, 0.9, 0.9), 16, false)
 			
 		if has_both_nines:
 			var total = front_sum + back_sum
 			var tot_str = str(total) if total > 0 else "-"
 			if is_ctp_mode:
 				tot_str = "%d pts" % total
-			add_cell.call(grid, tot_str, row_bg, false, Color(1.0, 0.85, 0.38))
+			add_cell.call(grid, tot_str, row_bg, false, Color(1.0, 0.85, 0.38), 16, false)
 
 func _email_player_stats(player: Dictionary, match_data: Dictionary) -> void:
 	var course_title = match_data.get("course_title", "Unknown Course")
@@ -905,101 +1044,6 @@ func _email_player_stats(player: Dictionary, match_data: Dictionary) -> void:
 
 # ── Shot Review helpers ────────────────────────────────────────────────────────
 
-func _populate_shot_review_hole_selector(match_data: Dictionary) -> void:
-	if _shot_review_container == null:
-		return
-
-	# Build ordered hole list (mirrors _populate_grid_scorecard logic)
-	var hole_pars: Dictionary = {}
-	var config_path: String = match_data.get("config_path", "")
-	if not config_path.is_empty() and FileAccess.file_exists(config_path):
-		var f = FileAccess.open(config_path, FileAccess.READ)
-		if f != null:
-			var parsed = JSON.parse_string(f.get_as_text())
-			if typeof(parsed) == TYPE_DICTIONARY:
-				for h_id in parsed.get("Hole Info", {}).keys():
-					hole_pars[h_id] = int(round(float(parsed["Hole Info"][h_id].get("Par", 4))))
-	if hole_pars.is_empty() and match_data.has("hole_pars"):
-		var saved_pars = match_data.get("hole_pars", {})
-		if typeof(saved_pars) == TYPE_DICTIONARY:
-			for h_id in saved_pars:
-				hole_pars[h_id] = int(round(float(saved_pars[h_id])))
-
-	var hole_ids: Array = []
-	if match_data.has("hole_ids") and not match_data["hole_ids"].is_empty():
-		hole_ids = match_data["hole_ids"].duplicate()
-	else:
-		hole_ids = hole_pars.keys()
-		hole_ids.sort_custom(func(a, b):
-			return MultiplayerManager.get_hole_number_from_id(a) < MultiplayerManager.get_hole_number_from_id(b)
-		)
-		var course_len = match_data.get("selected_course_length", "Full 18")
-		if course_len == "Back 9":
-			hole_ids = hole_ids.filter(func(h_id): return MultiplayerManager.get_hole_number_from_id(h_id) >= 10)
-		elif course_len == "Front 9":
-			hole_ids = hole_ids.filter(func(h_id): return MultiplayerManager.get_hole_number_from_id(h_id) <= 9)
-
-	if hole_ids.is_empty():
-		var no_data_lbl = Label.new()
-		no_data_lbl.text = "No shot data available for this match."
-		no_data_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		no_data_lbl.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
-		no_data_lbl.add_theme_font_size_override("font_size", 15)
-		_shot_review_container.add_child(no_data_lbl)
-		return
-
-	# Hint label
-	var hint_lbl = Label.new()
-	hint_lbl.text = "Select a hole to view the shot path diagram:"
-	hint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint_lbl.add_theme_font_size_override("font_size", 14)
-	hint_lbl.add_theme_color_override("font_color", Color(0.70, 0.75, 0.85))
-	_shot_review_container.add_child(hint_lbl)
-
-	# Hole selector buttons (scrollable row)
-	var btn_scroll = ScrollContainer.new()
-	btn_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	btn_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	btn_scroll.custom_minimum_size = Vector2(0, 52)
-	_shot_review_container.add_child(btn_scroll)
-
-	var btn_hbox = HBoxContainer.new()
-	btn_hbox.add_theme_constant_override("separation", 6)
-	btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	btn_scroll.add_child(btn_hbox)
-
-	_shot_review_hole_btns.clear()
-	for h_id in hole_ids:
-		var h_num = MultiplayerManager.get_hole_number_from_id(h_id)
-		var par_val = hole_pars.get(h_id, 4)
-		var btn = Button.new()
-		btn.text = str(h_num)
-		btn.tooltip_text = "Hole %d (Par %d)" % [h_num, par_val]
-		btn.custom_minimum_size = Vector2(44, 44)
-		apply_button_style(btn, Color(0.15, 0.20, 0.28, 0.90))
-		btn.pressed.connect(func():
-			_on_shot_review_hole_selected(h_id, hole_ids, match_data)
-		)
-		btn_hbox.add_child(btn)
-		_shot_review_hole_btns.append({"btn": btn, "hole_id": h_id})
-
-	# Cards area (replaced each time a hole is selected)
-	_shot_review_cards_container = VBoxContainer.new()
-	_shot_review_cards_container.name = "ShotReviewCards"
-	_shot_review_cards_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_shot_review_cards_container.add_theme_constant_override("separation", 12)
-	_shot_review_container.add_child(_shot_review_cards_container)
-
-	# Auto-select first hole that has shot data
-	for h_id in hole_ids:
-		if _history_hole_has_shot_data(match_data, h_id):
-			_on_shot_review_hole_selected(h_id, hole_ids, match_data)
-			return
-	# No shot data at all - show placeholder
-	_on_shot_review_hole_selected(hole_ids[0], hole_ids, match_data)
-
-
 func _history_hole_has_shot_data(match_data: Dictionary, hole_id: String) -> bool:
 	var players_list: Array = match_data.get("players", [])
 	for p in players_list:
@@ -1008,31 +1052,13 @@ func _history_hole_has_shot_data(match_data: Dictionary, hole_id: String) -> boo
 			var shots = player_stats[hole_id]
 			if typeof(shots) == TYPE_ARRAY and not shots.is_empty():
 				return true
+		var shot_history = p.get("shot_history", [])
+		if typeof(shot_history) == TYPE_ARRAY and not shot_history.is_empty():
+			return true
 	return false
 
 
-func _on_shot_review_hole_selected(hole_id: String, hole_ids: Array, match_data: Dictionary) -> void:
-	_shot_review_selected_hole = hole_id
-
-	# Update button styles to highlight selected hole
-	for entry in _shot_review_hole_btns:
-		var is_selected = (entry["hole_id"] == hole_id)
-		var color = Color(0.24, 0.50, 0.82, 0.95) if is_selected else Color(0.15, 0.20, 0.28, 0.90)
-		apply_button_style(entry["btn"], color)
-
-	# Clear previous cards
-	if _shot_review_cards_container == null:
-		return
-	for child in _shot_review_cards_container.get_children():
-		child.queue_free()
-
-	_build_shot_review_for_hole(hole_id, match_data)
-
-
-func _build_shot_review_for_hole(hole_id: String, match_data: Dictionary) -> void:
-	if _shot_review_cards_container == null:
-		return
-
+func _populate_history_shot_review(container: VBoxContainer, hole_id: String, match_data: Dictionary) -> void:
 	var h_num = MultiplayerManager.get_hole_number_from_id(hole_id)
 	var players_list: Array = match_data.get("players", [])
 
@@ -1042,6 +1068,7 @@ func _build_shot_review_for_hole(hole_id: String, match_data: Dictionary) -> voi
 	var satellite_texture: Texture2D = null
 	var satellite_bounds: Array = []
 	var cart_paths: Array[PackedVector2Array] = []
+	var course_info_val: Dictionary = {}
 
 	if not config_path.is_empty() and FileAccess.file_exists(config_path):
 		var f = FileAccess.open(config_path, FileAccess.READ)
@@ -1056,17 +1083,18 @@ func _build_shot_review_for_hole(hole_id: String, match_data: Dictionary) -> voi
 					if img != null and not img.is_empty():
 						satellite_texture = ImageTexture.create_from_image(img)
 				# Satellite bounds from course_info if available
-				var course_info_val = parsed.get("Course Info", {})
-				if typeof(course_info_val) == TYPE_DICTIONARY:
-					var bounds_version := int(course_info_val.get("Satellite Image Bounds Version", 0))
+				var raw_ci = parsed.get("Course Info", {})
+				if typeof(raw_ci) == TYPE_DICTIONARY:
+					course_info_val = raw_ci
+					var bounds_version := int(round(float(course_info_val.get("Satellite Image Bounds Version", 0))))
 					if bounds_version == 5:
 						var saved_bounds = course_info_val.get("Satellite Image Bounds", [])
 						if typeof(saved_bounds) == TYPE_ARRAY:
 							satellite_bounds = saved_bounds
 				# Cart paths
 				var saved_cart_paths = parsed.get("Cart Paths", [])
-				if typeof(saved_cart_paths) != TYPE_ARRAY:
-					saved_cart_paths = parsed.get("Course Info", {}).get("Cart Paths", [])
+				if typeof(saved_cart_paths) != TYPE_ARRAY and course_info_val.has("Cart Paths"):
+					saved_cart_paths = course_info_val.get("Cart Paths", [])
 				if typeof(saved_cart_paths) == TYPE_ARRAY:
 					for saved_path in saved_cart_paths:
 						if typeof(saved_path) != TYPE_ARRAY:
@@ -1090,57 +1118,91 @@ func _build_shot_review_for_hole(hole_id: String, match_data: Dictionary) -> voi
 		if typeof(tee_val) == TYPE_ARRAY and tee_val.size() >= 2:
 			hole_tee_positions.append(Vector3(float(tee_val[0]), 0.0, float(tee_val[1])))
 
-	var hole_par = int(round(float(current_hole_info.get("Par", 4))))
+	var saved_pars = match_data.get("hole_pars", {})
+	var fallback_par = int(round(float(saved_pars.get(hole_id, 4)))) if typeof(saved_pars) == TYPE_DICTIONARY else 4
+	var hole_par = int(round(float(current_hole_info.get("Par", fallback_par))))
 
-	# Hole header
-	var hole_title = Label.new()
-	hole_title.text = "Hole %d Shot Review (Par %d)" % [h_num, hole_par]
-	hole_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hole_title.add_theme_font_size_override("font_size", 17)
-	hole_title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.38))
-	hole_title.add_theme_color_override("font_outline_color", Color.BLACK)
-	hole_title.add_theme_constant_override("outline_size", 3)
-	_shot_review_cards_container.add_child(hole_title)
+	# Player order sorted by score on this hole (matching CoursePlay)
+	var player_order: Array[Dictionary] = []
+	for player_index in range(players_list.size()):
+		var player: Dictionary = players_list[player_index]
+		var hole_scores: Dictionary = player.get("hole_scores", {})
+		var score = hole_scores.get(hole_id)
+		player_order.append({
+			"player": player,
+			"score": int(round(float(score))) if score != null else 2147483647,
+			"player_index": player_index
+		})
+	player_order.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if a["score"] != b["score"]:
+			return a["score"] < b["score"]
+		return a["player_index"] < b["player_index"]
+	)
 
-	# Collect all player positions for shared context (so the diagram sizes correctly)
+	# Shared shot positions across all players
 	var shared_shot_positions: Array[Vector3] = []
-	for p in players_list:
-		var p_positions := _get_history_hole_shot_positions(p, hole_id, tee_boxes)
-		shared_shot_positions.append_array(p_positions)
+	for p_entry in player_order:
+		shared_shot_positions.append_array(_get_history_hole_shot_positions(p_entry["player"], hole_id, tee_boxes))
 
-	# Player cards grid
+	# Section Header for Shot Review (matching CoursePlay exactly)
+	var header_box = VBoxContainer.new()
+	header_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	header_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_box.add_theme_constant_override("separation", 2)
+	container.add_child(header_box)
+
+	var title_lbl = Label.new()
+	title_lbl.name = "HoleShotTitleLabel"
+	title_lbl.text = "Hole %s Shot Review (Par %d)" % [h_num, hole_par]
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 20)
+	title_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.38))
+	title_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	title_lbl.add_theme_constant_override("outline_size", 3)
+	header_box.add_child(title_lbl)
+
+	var hint_lbl = Label.new()
+	hint_lbl.name = "HoleShotHintLabel"
+	hint_lbl.text = "Select any hole number above to view shot history"
+	hint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint_lbl.add_theme_font_size_override("font_size", 13)
+	hint_lbl.add_theme_color_override("font_color", Color(0.68, 0.74, 0.84))
+	header_box.add_child(hint_lbl)
+
+	# Centering wrapper for cards
 	var cards_wrapper = HBoxContainer.new()
+	cards_wrapper.name = "HoleShotCardsWrapper"
 	cards_wrapper.alignment = BoxContainer.ALIGNMENT_CENTER
 	cards_wrapper.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_shot_review_cards_container.add_child(cards_wrapper)
+	container.add_child(cards_wrapper)
 
 	var player_cards = GridContainer.new()
-	player_cards.name = "ShotReviewPlayerCards"
+	player_cards.name = "HoleShotPlayerCards"
 	player_cards.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	player_cards.add_theme_constant_override("h_separation", 16)
 	player_cards.add_theme_constant_override("v_separation", 16)
 	cards_wrapper.add_child(player_cards)
 
-	var max_cols = mini(players_list.size(), maxi(1, int(floor(1200.0 / 260.0))))
+	var max_cols = mini(player_order.size(), maxi(1, int(floor(1200.0 / 340.0))))
 	player_cards.columns = max(1, max_cols)
 
-	var image_size := Vector2(220.0, 220.0)
+	var card_width = 340.0
+	var image_width = card_width - 24.0 # 316.0
+	var image_height = 340.0
 
-	for p_idx in range(players_list.size()):
-		var p: Dictionary = players_list[p_idx]
-		var p_name: String = p.get("name", "Player")
-		var hole_scores: Dictionary = p.get("hole_scores", {})
-		var score_val = hole_scores.get(hole_id)
+	for rank in range(player_order.size()):
+		var player: Dictionary = player_order[rank]["player"]
+		var positions := _get_history_hole_shot_positions(player, hole_id, tee_boxes)
 
-		var positions := _get_history_hole_shot_positions(p, hole_id, tee_boxes)
 		var shot_distances: Array[int] = []
-		for i in range(maxi(0, positions.size() - 1)):
-			var dist_yds = Vector2(positions[i].x, positions[i].z).distance_to(Vector2(positions[i + 1].x, positions[i + 1].z)) * 1.09361
+		for shot_index in range(maxi(0, positions.size() - 1)):
+			var start_pos = positions[shot_index]
+			var end_pos = positions[shot_index + 1]
+			var dist_yds = Vector2(start_pos.x, start_pos.z).distance_to(Vector2(end_pos.x, end_pos.z)) * 1.09361
 			shot_distances.append(int(round(dist_yds)))
 
-		# Player card panel
 		var player_card = PanelContainer.new()
-		player_card.custom_minimum_size = Vector2(image_size.x + 24.0, 0)
+		player_card.custom_minimum_size = Vector2(card_width, 0)
 		player_card.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		var card_style = StyleBoxFlat.new()
 		card_style.bg_color = Color(0.08, 0.12, 0.18, 0.95)
@@ -1153,43 +1215,52 @@ func _build_shot_review_for_hole(hole_id: String, match_data: Dictionary) -> voi
 		card_style.corner_radius_bottom_left = 16
 		card_style.corner_radius_bottom_right = 16
 		var player_color := Color(0.35, 0.65, 0.9)
-		var color_value = p.get("color")
+		var color_value = player.get("color")
 		if typeof(color_value) == TYPE_COLOR:
 			player_color = color_value
-		card_style.border_color = player_color
+		var is_hole_winner = player_order[rank]["score"] == player_order[0]["score"] and player_order[rank]["score"] < 2147483647
+		card_style.border_color = Color(0.72, 0.56, 0.24, 0.85) if is_hole_winner else player_color
 		card_style.content_margin_left = 12
 		card_style.content_margin_right = 12
 		card_style.content_margin_top = 10
 		card_style.content_margin_bottom = 12
 		player_card.add_theme_stylebox_override("panel", card_style)
-		player_cards.add_child(player_card)
 
 		var player_row = VBoxContainer.new()
 		player_row.add_theme_constant_override("separation", 6)
 		player_card.add_child(player_row)
 
-		# Score header label
-		var score_text: String
-		if score_val == null:
-			score_text = "No score"
-		else:
-			score_text = "%d strokes" % int(round(float(score_val)))
 		var score_label = Label.new()
-		score_label.text = "%s — %s · %d shots" % [p_name, score_text, shot_distances.size()]
-		score_label.add_theme_font_size_override("font_size", 15)
+		var score_text = "No score" if player_order[rank]["score"] == 2147483647 else "%d strokes" % player_order[rank]["score"]
+		score_label.text = "%d. %s — %s · %d shots" % [rank + 1, player.get("name", "Player"), score_text, shot_distances.size()]
+		score_label.add_theme_font_size_override("font_size", 17)
 		score_label.add_theme_color_override("font_color", Color.WHITE)
-		score_label.clip_text = true
 		player_row.add_child(score_label)
 
 		if shot_distances.is_empty():
-			var no_shots_lbl = Label.new()
-			no_shots_lbl.text = "No shots recorded for Hole %d" % h_num
-			no_shots_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			no_shots_lbl.add_theme_font_size_override("font_size", 13)
-			no_shots_lbl.add_theme_color_override("font_color", Color(0.65, 0.68, 0.75))
-			no_shots_lbl.custom_minimum_size = Vector2(image_size.x, 80)
-			no_shots_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-			player_row.add_child(no_shots_lbl)
+			var no_shots_panel = PanelContainer.new()
+			no_shots_panel.custom_minimum_size = Vector2(image_width, minf(160.0, image_height))
+			var no_shots_style = StyleBoxFlat.new()
+			no_shots_style.bg_color = Color(0.06, 0.08, 0.12, 0.6)
+			no_shots_style.border_width_left = 1
+			no_shots_style.border_width_top = 1
+			no_shots_style.border_width_right = 1
+			no_shots_style.border_width_bottom = 1
+			no_shots_style.border_color = Color(0.25, 0.3, 0.4, 0.4)
+			no_shots_style.corner_radius_top_left = 12
+			no_shots_style.corner_radius_top_right = 12
+			no_shots_style.corner_radius_bottom_left = 12
+			no_shots_style.corner_radius_bottom_right = 12
+			no_shots_panel.add_theme_stylebox_override("panel", no_shots_style)
+
+			var no_shots_label = Label.new()
+			no_shots_label.text = "No shots recorded for Hole %s" % h_num
+			no_shots_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			no_shots_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			no_shots_label.add_theme_color_override("font_color", Color(0.70, 0.75, 0.85))
+			no_shots_label.add_theme_font_size_override("font_size", 14)
+			no_shots_panel.add_child(no_shots_label)
+			player_row.add_child(no_shots_panel)
 		else:
 			var diagram_frame = PanelContainer.new()
 			diagram_frame.name = "DiagramFrame"
@@ -1209,7 +1280,7 @@ func _build_shot_review_for_hole(hole_id: String, match_data: Dictionary) -> voi
 
 			var shot_path = HoleShotPathDiagram.new()
 			shot_path.name = "HoleShotPathDiagram"
-			shot_path.custom_minimum_size = image_size
+			shot_path.custom_minimum_size = Vector2(image_width, image_height)
 			shot_path.set_shot_path(
 				positions,
 				shot_distances,
@@ -1222,6 +1293,7 @@ func _build_shot_review_for_hole(hole_id: String, match_data: Dictionary) -> voi
 			)
 			diagram_frame.add_child(shot_path)
 			player_row.add_child(diagram_frame)
+		player_cards.add_child(player_card)
 
 
 func _get_history_hole_shot_positions(player: Dictionary, hole_id: String, tee_boxes: Dictionary) -> Array[Vector3]:
@@ -1239,6 +1311,16 @@ func _get_history_hole_shot_positions(player: Dictionary, hole_id: String, tee_b
 	var tee_position: Array = MultiplayerManager.get_tee_position_from_boxes(tee_boxes, tee_color)
 	if tee_position.size() >= 2:
 		fallback_positions.append(Vector3(float(tee_position[0]), 0.0, float(tee_position[1])))
+
+	# Also check shot_history if shot_stats is empty
+	if shot_stats.is_empty():
+		var shot_history = player.get("shot_history", [])
+		if typeof(shot_history) == TYPE_ARRAY:
+			for pos in shot_history:
+				if typeof(pos) == TYPE_VECTOR3:
+					fallback_positions.append(pos)
+				elif typeof(pos) == TYPE_ARRAY and pos.size() >= 3:
+					fallback_positions.append(Vector3(float(pos[0]), float(pos[1]), float(pos[2])))
 
 	return HoleShotPathDiagram.get_positions_from_shot_stats(shot_stats, fallback_positions)
 

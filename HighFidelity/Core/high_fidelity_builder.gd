@@ -61,11 +61,18 @@ func setup(scene_root: Node) -> void:
 	_set_detail_nodes_visible(scene_root, true)
 
 	# 3. Spawn GPU MultiMesh 3D Grass System (Golfer Address Turf + Clumped Rough/Fescue)
-	if grass_node == null:
-		grass_node = HighFidelityGrassScript.new()
-		grass_node.name = "HighFidelityGrass"
-		add_child(grass_node)
-		grass_node.setup(scene_root)
+	# On the driving range, no 3D grass blade meshes are spawned; range turf is manicured via shader
+	var is_range := MobilePerformance.is_driving_range_node(scene_root)
+	if not is_range:
+		if grass_node == null:
+			grass_node = HighFidelityGrassScript.new()
+			grass_node.name = "HighFidelityGrass"
+			add_child(grass_node)
+			grass_node.setup(scene_root)
+	else:
+		if grass_node != null:
+			grass_node.queue_free()
+			grass_node = null
 
 	# 4. Add Diagnostic Telemetry HUD (toggleable with F3)
 	if overlay_node == null:
@@ -77,7 +84,12 @@ func refresh(scene_root: Node) -> void:
 	HighFidelityLightingScript.apply(scene_root)
 	CourseDetailEnhancerScript.enhance_course_scene(scene_root, false)
 	_set_detail_nodes_visible(scene_root, true)
-	if grass_node != null and grass_node.has_method("_refresh_anchor"):
+	var is_range := MobilePerformance.is_driving_range_node(scene_root)
+	if is_range:
+		if grass_node != null:
+			grass_node.queue_free()
+			grass_node = null
+	elif grass_node != null and grass_node.has_method("_refresh_anchor"):
 		grass_node.call("_refresh_anchor", true)
 
 

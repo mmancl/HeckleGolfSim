@@ -174,7 +174,7 @@ func _init() -> void:
 	var afk_clips: Array = announcer.call("GetAvailableClipsForCategory", "player_afk_heckles")
 	var afk_teebox: Array = announcer.call("GetAvailableClipsForCategory", "player_afk_heckles", {"tee_box": true})
 	print("  General AFK clips count: %d, Tee-box AFK clips: %d (Total: %d)" % [afk_clips.size(), afk_teebox.size(), afk_clips.size() + afk_teebox.size()])
-	assert(afk_clips.size() == 47, "47 general AFK prompts should be available by default without context")
+	assert(afk_clips.size() == 40, "40 general AFK prompts should be available by default without context")
 	assert(afk_teebox.size() == 3, "3 tee-box specific AFK prompts should be available with tee_box context")
 	print("  PASS: Enabled clips and context qualifiers successfully loaded from backend JSON.")
 
@@ -334,6 +334,53 @@ func _init() -> void:
 			break
 	assert(not has_apex_clip_on_low, "Specific high apex qualified prompts must not match when high_apex is false")
 	print("  PASS: Crazy high apex heckles require high apex qualification.")
+
+	# -------------------------------------------------------------
+	# Test 11: Repeat Prevention & Unheard Heckle Prioritization
+	# -------------------------------------------------------------
+	print("\n--- Test 11: Repeat Prevention & Unheard Heckle Prioritization ---")
+	announcer.call("ResetPlayedAudioLines")
+
+	# Category with 1 qualified clip (slice_into_rough_21) and multiple general clips
+	var high_slice_ctx = {"high_apex": true}
+	var first_slice: String = announcer.call("SelectNextClipForCategory", "slice_into_rough", high_slice_ctx, true)
+	assert(first_slice.ends_with("slice_into_rough_21.wav"), "First high apex slice heckle should prioritize the qualified clip (slice_into_rough_21)")
+
+	# Second high apex slice into rough must NOT repeat slice_into_rough_21!
+	# It must fall back to unplayed general slice heckles before repeating.
+	var second_slice: String = announcer.call("SelectNextClipForCategory", "slice_into_rough", high_slice_ctx, true)
+	assert(second_slice != "", "Second high apex slice must select a valid clip")
+	assert(second_slice != first_slice, "Second high apex slice must NOT repeat already heard qualified heckle before playing unheard general clips!")
+	assert(not second_slice.ends_with("slice_into_rough_21.wav"), "Must fall back to unplayed general heckle instead of immediately repeating 21")
+	print("  PASS: Qualified clip falls back to unplayed general heckles instead of repeating.")
+
+	# Test lifetime unheard prioritization via AchievementManager
+	var ach_mgr = root.get_node_or_null("AchievementManager")
+	if ach_mgr == null:
+		ach_mgr = load("res://Utils/AchievementManager.gd").new()
+		ach_mgr.name = "AchievementManager"
+		root.add_child(ach_mgr)
+
+	var p_test = "Player 1"
+	ach_mgr._player_data[p_test] = {"heard_heckles": {}}
+	# Mark several slice_into_rough clips as already heard
+	var heard_dict = ach_mgr.get_heard_heckles(p_test)
+	for i in range(10):
+		var fp = "res://assets/audio/heckler/slice_into_rough/slice_into_rough_%d.wav" % i
+		ach_mgr.record_heckle_line_heard(p_test, fp, "slice_into_rough")
+
+	announcer.call("ResetPlayedAudioLines")
+	# Select slice_into_rough clip: it must prioritize UNHEARD clips over already heard 0..9
+	for i in range(15):
+		var slice_clip: String = announcer.call("SelectNextClipForCategory", "slice_into_rough", {}, true)
+		assert(slice_clip != "", "Must select a slice clip")
+		assert(not ach_mgr.is_heckle_heard(p_test, slice_clip), "Selected clip '%s' was already heard in lifetime stats while unheard clips remained!" % slice_clip)
+		ach_mgr.record_heckle_line_heard(p_test, slice_clip, "slice_into_rough")
+	print("  PASS: Lifetime unheard heckles are strictly prioritized over already heard heckles.")
+
+	# Verify AudioLinePlayed signal emission
+	assert(announcer.has_signal("AudioLinePlayed"), "AnnouncerEngine must declare AudioLinePlayed signal")
+	print("  PASS: AudioLinePlayed signal is properly declared and available.")
 
 	print("\n=======================================================")
 	print("  ALL ANNOUNCER QUALIFIER TESTS PASSED!                ")

@@ -127,6 +127,23 @@ static func is_driving_range_node(node: Node) -> bool:
 	if n_name == "range" or f_path.ends_with("range/range.tscn") or f_path.ends_with("range.tscn") or f_path.ends_with("range.scn"):
 		if not node.has_node("CoursePlay"):
 			return true
+
+	# Check children or active scene tree if node is /root or Window
+	if node is Window or n_name == "root":
+		var tree := node.get_tree() if node.is_inside_tree() else null
+		if tree != null and tree.current_scene != null and tree.current_scene != node:
+			if is_driving_range_node(tree.current_scene):
+				return true
+		var range_child := node.find_child("Range", true, false)
+		if range_child != null and is_driving_range_node(range_child):
+			return true
+
+	var ml = Engine.get_main_loop()
+	if ml is SceneTree:
+		var gs = ml.root.get_node_or_null("GlobalSettings")
+		if gs != null and gs.has_method("is_driving_range_scene") and gs.is_driving_range_scene():
+			return true
+
 	return false
 
 ## Applies chosen graphics quality ("Low", "Medium", or "High") dynamically to any loaded 3D scene.

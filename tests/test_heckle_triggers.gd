@@ -154,8 +154,8 @@ func _init() -> void:
 	var general_afk_clips: Array = announcer.call("GetAvailableClipsForCategory", "player_afk_heckles")
 	print("  Tee-box AFK clips: %d, General AFK clips: %d" % [teebox_afk_clips.size(), general_afk_clips.size()])
 	assert(teebox_afk_clips.size() == 3, "Tee-box context must return the 3 tee-box specific clips")
-	assert(general_afk_clips.size() == 47, "General context must return the 47 general AFK clips")
-	print("  PASS: AFK clips pool properly categorized (3 tee-box, 47 general, 50 total).")
+	assert(general_afk_clips.size() == 40, "General context must return the 40 enabled general AFK clips")
+	print("  PASS: AFK clips pool properly categorized (3 tee-box, 40 general, 43 total enabled).")
 
 	print("\n=======================================================")
 	print("  ALL HECKLE TRIGGER TESTS PASSED!                     ")

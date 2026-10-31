@@ -135,8 +135,11 @@ func _apply_profile_to_ball(player_name: String) -> void:
 		p_color = mp_mgr.get_player_color(reg) if mp_mgr.has_method("get_player_color") else p_color
 	ball.apply_ball_graphic(graphic_id, avatar_path, player_name, p_color)
 
+var _last_club_selected_time: float = -999.0
+
 func _on_club_selected(club_name: String) -> void:
 	_cached_selected_club = club_name
+	_last_club_selected_time = Time.get_ticks_msec() / 1000.0
 
 func _on_tracer_count_changed(value) -> void:
 	max_tracers = value
@@ -584,7 +587,10 @@ func _handle_tree_occlusion() -> void:
 
 	_trees_restored_for_flight = false
 
-	# Skip heavy occlusion re-evaluations while player is actively aiming the camera
+	# Skip heavy occlusion re-evaluations while player is actively aiming the camera or just switched clubs
+	var time_now = Time.get_ticks_msec() / 1000.0
+	if (time_now - _last_club_selected_time) < 0.5:
+		return
 	if Input.is_action_pressed("aim_left") or Input.is_action_pressed("aim_right") or \
 	   Input.is_action_pressed("aim_forward") or Input.is_action_pressed("aim_backward"):
 		return
@@ -615,7 +621,6 @@ func _handle_tree_occlusion() -> void:
 	var ball_pos = ball.global_position
 
 	# Only recheck occlusion if camera or ball moved or at low frequency (1 Hz)
-	var time_now = Time.get_ticks_msec() / 1000.0
 	var pos_changed = camera_pos.distance_squared_to(_last_camera_pos) > 0.05 or ball_pos.distance_squared_to(_last_ball_pos) > 0.05
 	if not pos_changed and (time_now - _tree_occlusion_timer) < 1.0:
 		return

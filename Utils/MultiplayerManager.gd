@@ -2237,6 +2237,9 @@ func _serialize_players(players_array: Array[Dictionary]) -> Array:
 	return serialized
 
 func _deserialize_players(serialized_array: Array) -> Array[Dictionary]:
+	return deserialize_players(serialized_array)
+
+func deserialize_players(serialized_array: Array) -> Array[Dictionary]:
 	var deserialized: Array[Dictionary] = []
 	for p in serialized_array:
 		var dup: Dictionary = p.duplicate(true)
@@ -2511,7 +2514,7 @@ func set_player_tee_by_name(p_name: String, new_tee: String) -> void:
 			set_player_tee(i, new_tee)
 			return
 
-func get_registered_players() -> Array[Dictionary]:
+static func get_registered_players() -> Array[Dictionary]:
 	if not FileAccess.file_exists(REGISTRY_PATH):
 		return []
 	var file = FileAccess.open(REGISTRY_PATH, FileAccess.READ)
@@ -2603,7 +2606,7 @@ func get_default_player_name() -> String:
 		
 	return best_player
 
-func get_registered_player(player_name: String) -> Dictionary:
+static func get_registered_player(player_name: String) -> Dictionary:
 	var registered = get_registered_players()
 	for p in registered:
 		if p.get("name", "").to_lower() == player_name.to_lower():
@@ -2803,13 +2806,19 @@ func clear_player_ball_history(player_name: String) -> void:
 
 # --- Global Club Stats Persistence ---
 
-func load_global_club_stats() -> Dictionary:
+var _cached_global_club_stats: Dictionary = {}
+
+func load_global_club_stats(force_reload: bool = false) -> Dictionary:
+	if not force_reload and not _cached_global_club_stats.is_empty():
+		return _cached_global_club_stats
 	var path = "user://player_club_stats.json"
 	if not FileAccess.file_exists(path):
-		return {}
+		_cached_global_club_stats = {}
+		return _cached_global_club_stats
 	var file = FileAccess.open(path, FileAccess.READ)
 	if file == null:
-		return {}
+		_cached_global_club_stats = {}
+		return _cached_global_club_stats
 	var json = JSON.new()
 	var err = json.parse(file.get_as_text())
 	if err == OK:
@@ -2834,14 +2843,21 @@ func load_global_club_stats() -> Dictionary:
 			if modified:
 				save_global_club_stats(stats)
 				print("[MultiplayerManager] Repaired legacy corrupted SideDistance entries in player_club_stats.json")
-			return stats
-	return {}
+			_cached_global_club_stats = stats
+			return _cached_global_club_stats
+	_cached_global_club_stats = {}
+	return _cached_global_club_stats
+
+func invalidate_global_club_stats_cache() -> void:
+	_cached_global_club_stats.clear()
 
 func save_global_club_stats(stats: Dictionary) -> void:
+	_cached_global_club_stats = stats
 	var path = "user://player_club_stats.json"
 	var file = FileAccess.open(path, FileAccess.WRITE)
 	if file != null:
 		file.store_string(JSON.stringify(stats, "\t"))
+		file.close()
 
 static func normalize_club_code(club_name: String) -> String:
 	var c = club_name.strip_edges()

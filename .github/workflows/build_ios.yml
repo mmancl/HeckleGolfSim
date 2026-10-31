@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Build version (e.g. 0.35.0)'
+        description: 'Build version (leave empty to use project.godot version, e.g. 0.142.11)'
         required: false
-        default: '0.35.2'
+        default: ''
   push:
     tags:
       - 'ios-v*'
@@ -59,6 +59,27 @@ jobs:
           echo "GODOT_BIN=$GODOT_BIN" >> $GITHUB_ENV
           echo "Found Godot at $GODOT_BIN"
 
+      - name: Resolve and Synchronize Version
+        id: version
+        run: |
+          PROJECT_VER=$(grep 'config/version=' project.godot | cut -d'"' -f2)
+          BUILD_VER="${{ inputs.version }}"
+          if [ -z "$BUILD_VER" ]; then
+            BUILD_VER="$PROJECT_VER"
+          fi
+          echo "Resolved Version: $BUILD_VER (project.godot: $PROJECT_VER)"
+
+          if [ "$BUILD_VER" != "$PROJECT_VER" ]; then
+            echo "Updating project.godot and export_presets.cfg with requested version $BUILD_VER..."
+            sed -i '' "s/config\/version=\".*\"/config\/version=\"$BUILD_VER\"/g" project.godot
+            sed -i '' "s/application\/short_version=\".*\"/application\/short_version=\"$BUILD_VER\"/g" export_presets.cfg
+            sed -i '' "s/application\/version=\".*\"/application\/version=\"$BUILD_VER\"/g" export_presets.cfg
+            sed -i '' "s/version\/name=\".*\"/version\/name=\"$BUILD_VER\"/g" export_presets.cfg
+          fi
+
+          echo "VERSION=$BUILD_VER" >> $GITHUB_ENV
+          echo "VERSION=$BUILD_VER" >> $GITHUB_OUTPUT
+
       - name: Build C# Solution
         run: |
           dotnet build HeckleGolfSim.csproj -c Release
@@ -93,9 +114,13 @@ jobs:
             sed -i '' 's/CODE_SIGN_IDENTITY = ".*";/CODE_SIGN_IDENTITY = "";/g' "$XCODEPROJ/project.pbxproj" || true
           fi
 
-          # Ensure Bluetooth permissions and File Sharing exist in Info.plist
-          echo "Ensuring Bluetooth usage descriptions and File Sharing in iOS Info.plist..."
+          # Ensure exact version, Bluetooth permissions and File Sharing exist in Info.plist
+          echo "Ensuring exact version $VERSION, Bluetooth usage descriptions and File Sharing in iOS Info.plist..."
           find ios_export -name "*-Info.plist" -o -name "Info.plist" | while read -r plist; do
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VERSION" "$plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $VERSION" "$plist" 2>/dev/null || true
             /usr/libexec/PlistBuddy -c "Add :NSBluetoothAlwaysUsageDescription string Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || \
             /usr/libexec/PlistBuddy -c "Set :NSBluetoothAlwaysUsageDescription Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || true
             /usr/libexec/PlistBuddy -c "Add :NSBluetoothPeripheralUsageDescription string Heckle Golf Simulator requires Bluetooth to connect to launch monitors like the Square Golf Launch Monitor." "$plist" 2>/dev/null || \
@@ -137,9 +162,10 @@ jobs:
           cp -r "$APP_DIR" build_output/Payload/
           cd build_output
           zip -qr ../dist/HeckleGolfSim.ipa Payload
+          cp ../dist/HeckleGolfSim.ipa "../dist/HeckleGolfSim-v${VERSION}.ipa"
           cd ..
-          echo "IPA successfully created at dist/HeckleGolfSim.ipa"
-          ls -lh dist/HeckleGolfSim.ipa
+          echo "IPA successfully created at dist/HeckleGolfSim.ipa and dist/HeckleGolfSim-v${VERSION}.ipa"
+          ls -lh dist/*.ipa
 
       - name: Upload Finished HeckleGolfSim.ipa
         uses: actions/upload-artifact@v4

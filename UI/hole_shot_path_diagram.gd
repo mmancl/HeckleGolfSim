@@ -102,14 +102,28 @@ func _get_path_positions() -> Array[Vector3]:
 	return path_positions
 
 
+static func _to_vector3(val: Variant) -> Variant:
+	if typeof(val) == TYPE_VECTOR3:
+		return val
+	if typeof(val) == TYPE_ARRAY and val.size() >= 3:
+		return Vector3(float(val[0]), float(val[1]), float(val[2]))
+	return null
+
+
 static func get_positions_from_shot_stats(shot_stats: Array, fallback_positions: Array[Vector3], world_to_local: Transform3D = Transform3D.IDENTITY) -> Array[Vector3]:
-	if shot_stats.is_empty() or typeof(shot_stats[0]) != TYPE_DICTIONARY or typeof(shot_stats[0].get("start_pos")) != TYPE_VECTOR3:
+	if shot_stats.is_empty() or typeof(shot_stats[0]) != TYPE_DICTIONARY:
 		return fallback_positions.duplicate()
-	var positions: Array[Vector3] = [world_to_local * shot_stats[0]["start_pos"]]
+	var first_start = _to_vector3(shot_stats[0].get("start_pos"))
+	if first_start == null:
+		return fallback_positions.duplicate()
+	var positions: Array[Vector3] = [world_to_local * first_start]
 	for shot in shot_stats:
-		if typeof(shot) != TYPE_DICTIONARY or typeof(shot.get("end_pos")) != TYPE_VECTOR3:
+		if typeof(shot) != TYPE_DICTIONARY:
 			return fallback_positions.duplicate()
-		positions.append(world_to_local * shot["end_pos"])
+		var end_p = _to_vector3(shot.get("end_pos"))
+		if end_p == null:
+			return fallback_positions.duplicate()
+		positions.append(world_to_local * end_p)
 	return positions
 
 

@@ -11,6 +11,9 @@ public partial class AnnouncerEngine : Node
 {
     private static readonly string LogPrefix = "[AnnouncerEngine]";
 
+    [Signal]
+    public delegate void AudioLinePlayedEventHandler(string category, string filepath);
+
     [Export] public bool AnnouncerCoursePlay { get; set; } = true;
     [Export] public bool HeckleCoursePlay { get; set; } = true;
     [Export] public bool AnnouncerRange { get; set; } = false;
@@ -228,14 +231,11 @@ public partial class AnnouncerEngine : Node
         }
     }
 
-    public Array<string> GetAvailableClipsForCategory(string categoryName)
+    private void GetCandidateClipsForCategory(string categoryName, Dictionary? context, out List<string> qualified, out List<string> general)
     {
-        return GetAvailableClipsForCategory(categoryName, null);
-    }
+        qualified = new List<string>();
+        general = new List<string>();
 
-    public Array<string> GetAvailableClipsForCategory(string categoryName, Dictionary? context)
-    {
-        var result = new Array<string>();
         if (_promptDefinitions.TryGetValue(categoryName, out var defs) && defs.Count > 0)
         {
             // 1. Filter out prompts disabled via audio JSON flag
@@ -243,7 +243,7 @@ public partial class AnnouncerEngine : Node
             if (enabledDefs.Count == 0)
             {
                 GD.Print($"{LogPrefix} All clips for category '{categoryName}' are disabled in JSON.");
-                return result;
+                return;
             }
 
             // 2. If no context provided, return general clips (or all enabled if none are purely general)
@@ -257,57 +257,81 @@ public partial class AnnouncerEngine : Node
 
                 if (generalClips.Count > 0)
                 {
-                    foreach (var c in generalClips) result.Add(c);
-                    return result;
+                    general.AddRange(generalClips);
                 }
-
-                foreach (var d in enabledDefs)
+                else
                 {
-                    if (!string.IsNullOrEmpty(d.Filepath)) result.Add(d.Filepath);
+                    general.AddRange(enabledDefs.Select(d => d.Filepath).Where(fp => !string.IsNullOrEmpty(fp)));
                 }
-                return result;
+                return;
             }
 
             // 3. Match against context qualifiers
-            var qualifiedMatches = new List<string>();
-            var generalMatches = new List<string>();
-
             foreach (var def in enabledDefs)
             {
                 if (string.IsNullOrEmpty(def.Filepath)) continue;
 
                 if (def.Qualifiers.Count == 0)
                 {
-                    generalMatches.Add(def.Filepath);
+                    general.Add(def.Filepath);
                     continue;
                 }
 
                 if (MatchesQualifiers(def.Qualifiers, context))
                 {
-                    qualifiedMatches.Add(def.Filepath);
+                    qualified.Add(def.Filepath);
                 }
             }
-
-            // Prioritize specific contextual matches when available; fall back to general
-            if (qualifiedMatches.Count > 0)
-            {
-                foreach (var c in qualifiedMatches) result.Add(c);
-                return result;
-            }
-
-            foreach (var c in generalMatches) result.Add(c);
-            return result;
+            return;
         }
 
         // Fallback to legacy filesystem audio cache if category not defined in JSON
         if (_audioCache.TryGetValue(categoryName, out var cached) && cached.Count > 0)
         {
-            foreach (var c in cached) result.Add(c);
-            return result;
+            general.AddRange(cached);
+            return;
         }
 
         var scanned = ScanFolderClips(categoryName);
-        foreach (var c in scanned) result.Add(c);
+        general.AddRange(scanned);
+    }
+
+    public Array<string> GetAvailableClipsForCategory(string categoryName)
+    {
+        return GetAvailableClipsForCategory(categoryName, null, false);
+    }
+
+    public Array<string> GetAvailableClipsForCategory(string categoryName, Dictionary? context)
+    {
+        return GetAvailableClipsForCategory(categoryName, context, false);
+    }
+
+    public Array<string> GetAvailableClipsForCategory(string categoryName, Dictionary? context, bool includeGeneral)
+    {
+        GetCandidateClipsForCategory(categoryName, context, out var qualified, out var general);
+        var result = new Array<string>();
+
+        if (includeGeneral)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in qualified)
+            {
+                if (!string.IsNullOrEmpty(c) && seen.Add(c)) result.Add(c);
+            }
+            foreach (var c in general)
+            {
+                if (!string.IsNullOrEmpty(c) && seen.Add(c)) result.Add(c);
+            }
+            return result;
+        }
+
+        if (qualified.Count > 0)
+        {
+            foreach (var c in qualified) result.Add(c);
+            return result;
+        }
+
+        foreach (var c in general) result.Add(c);
         return result;
     }
 
@@ -451,6 +475,52 @@ public partial class AnnouncerEngine : Node
         };
     }
 
+    private HashSet<string>? GetLifetimeHeardHeckles()
+    {
+        try
+        {
+            var achMgr = GetTree()?.Root?.GetNodeOrNull("AchievementManager");
+            if (achMgr == null) return null;
+
+            string playerName = "";
+            var mpMgr = GetTree()?.Root?.GetNodeOrNull("MultiplayerManager");
+            if (mpMgr != null && mpMgr.HasMethod("get_active_player"))
+            {
+                var activeP = mpMgr.Call("get_active_player");
+                if (activeP.VariantType == Variant.Type.Dictionary)
+                {
+                    playerName = GetStringSafe((Dictionary)activeP, "name");
+                }
+            }
+
+            if (string.IsNullOrEmpty(playerName))
+            {
+                playerName = "Player 1";
+            }
+
+            if (achMgr.HasMethod("get_heard_heckles"))
+            {
+                var heardVar = achMgr.Call("get_heard_heckles", playerName);
+                if (heardVar.VariantType == Variant.Type.Dictionary)
+                {
+                    var dict = (Dictionary)heardVar;
+                    var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var key in dict.Keys)
+                    {
+                        string s = key.AsString();
+                        if (!string.IsNullOrEmpty(s)) set.Add(s);
+                    }
+                    return set;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.Print($"{LogPrefix} Exception getting lifetime heard heckles: {ex.Message}");
+        }
+        return null;
+    }
+
     public string SelectNextClipForCategory(string categoryName)
     {
         return SelectNextClipForCategory(categoryName, null, false);
@@ -463,64 +533,96 @@ public partial class AnnouncerEngine : Node
 
     public string SelectNextClipForCategory(string categoryName, Dictionary? context, bool markAsPlayed)
     {
-        var clips = GetAvailableClipsForCategory(categoryName, context);
-        if (clips == null || clips.Count == 0)
+        GetCandidateClipsForCategory(categoryName, context, out var qualified, out var general);
+
+        var distinctQualified = new List<string>();
+        var seenQ = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var clip in qualified)
+        {
+            if (!string.IsNullOrEmpty(clip) && seenQ.Add(clip))
+            {
+                distinctQualified.Add(clip);
+            }
+        }
+
+        var distinctGeneral = new List<string>();
+        var seenG = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var clip in general)
+        {
+            if (!string.IsNullOrEmpty(clip) && !seenQ.Contains(clip) && seenG.Add(clip))
+            {
+                distinctGeneral.Add(clip);
+            }
+        }
+
+        var allEligible = new List<string>(distinctQualified.Count + distinctGeneral.Count);
+        allEligible.AddRange(distinctQualified);
+        allEligible.AddRange(distinctGeneral);
+
+        if (allEligible.Count == 0)
         {
             return "";
         }
 
-        var distinctClips = new List<string>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var clip in clips)
-        {
-            if (!string.IsNullOrEmpty(clip) && seen.Add(clip))
-            {
-                distinctClips.Add(clip);
-            }
-        }
+        // Unplayed clips in the current playback cycle
+        var unplayedQualified = distinctQualified.Where(clip => !_playedAudioLines.Contains(clip)).ToList();
+        var unplayedGeneral = distinctGeneral.Where(clip => !_playedAudioLines.Contains(clip)).ToList();
 
-        if (distinctClips.Count == 0)
+        // If ALL clips meeting the criteria (both specific and general fallback) have been played,
+        // reset played status for this entire criteria set before repeating.
+        if (unplayedQualified.Count == 0 && unplayedGeneral.Count == 0)
         {
-            return "";
-        }
-
-        var unplayedClips = new List<string>();
-        foreach (var clip in distinctClips)
-        {
-            if (!_playedAudioLines.Contains(clip))
-            {
-                unplayedClips.Add(clip);
-            }
-        }
-
-        // If all clips meeting the criteria for this hit have been played,
-        // reset played status for this criteria set before repeating.
-        if (unplayedClips.Count == 0)
-        {
-            GD.Print($"{LogPrefix} All {distinctClips.Count} clips for '{categoryName}' criteria set have been played. Resetting played tracking for these clips.");
+            GD.Print($"{LogPrefix} All {allEligible.Count} clips for '{categoryName}' criteria set have been played in this cycle. Resetting played tracking for these clips.");
             if (markAsPlayed)
             {
-                foreach (var clip in distinctClips)
+                foreach (var clip in allEligible)
                 {
                     _playedAudioLines.Remove(clip);
                 }
             }
-            unplayedClips.AddRange(distinctClips);
+            unplayedQualified.AddRange(distinctQualified);
+            unplayedGeneral.AddRange(distinctGeneral);
         }
 
-        string chosenPath;
-        if (unplayedClips.Count == 1)
+        // Candidate pool prioritizing specific contextual matches, falling back to general matches
+        List<string> candidatePool;
+        if (unplayedQualified.Count > 0)
         {
-            chosenPath = unplayedClips[0];
+            candidatePool = unplayedQualified;
+        }
+        else if (unplayedGeneral.Count > 0)
+        {
+            candidatePool = unplayedGeneral;
         }
         else
         {
-            int idx = _random.Next(unplayedClips.Count);
-            if (unplayedClips[idx] == _lastPlayedPath)
+            candidatePool = allEligible;
+        }
+
+        // Prioritize unheard heckles over already-heard heckles from player lifetime stats
+        var lifetimeHeard = GetLifetimeHeardHeckles();
+        if (lifetimeHeard != null && lifetimeHeard.Count > 0)
+        {
+            var unheard = candidatePool.Where(c => !lifetimeHeard.Contains(c)).ToList();
+            if (unheard.Count > 0)
             {
-                idx = (idx + 1) % unplayedClips.Count;
+                candidatePool = unheard;
             }
-            chosenPath = unplayedClips[idx];
+        }
+
+        string chosenPath;
+        if (candidatePool.Count == 1)
+        {
+            chosenPath = candidatePool[0];
+        }
+        else
+        {
+            int idx = _random.Next(candidatePool.Count);
+            if (candidatePool[idx] == _lastPlayedPath)
+            {
+                idx = (idx + 1) % candidatePool.Count;
+            }
+            chosenPath = candidatePool[idx];
         }
 
         if (markAsPlayed && !string.IsNullOrEmpty(chosenPath))
@@ -554,6 +656,7 @@ public partial class AnnouncerEngine : Node
                 _audioPlayer.Stream = stream;
                 _audioPlayer.Play();
                 GD.Print($"{LogPrefix} Playing category '{categoryName}': {chosenPath} (Played total: {_playedAudioLines.Count})");
+                EmitSignal(SignalName.AudioLinePlayed, categoryName, chosenPath);
                 return true;
             }
             else
