@@ -218,7 +218,11 @@ try {
     if ($BuildIpa) {
         $ipaArtifactName = "HeckleGolfSim-v$Version-iOS-IPA"
         Write-Host "Downloading matching device IPA ($ipaArtifactName)..." -ForegroundColor Yellow
-        & gh run download $runId --repo $repoSlug -n $ipaArtifactName -D $tempDownload -ErrorAction SilentlyContinue 2>$null
+        try {
+            & gh run download $runId --repo $repoSlug -n $ipaArtifactName -D $tempDownload 2>$null
+        } catch {
+            Write-Host "Notice: IPA artifact could not be downloaded." -ForegroundColor Yellow
+        }
         
         $downloadedIpa = Get-ChildItem -Path $tempDownload -Filter "*.ipa" -Recurse | Select-Object -First 1
         if ($downloadedIpa) {
