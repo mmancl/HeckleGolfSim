@@ -15,6 +15,8 @@ var _current_scorecard_match_data: Dictionary = {}
 var _scorecard_grid: GridContainer = null
 var _shot_review_container: VBoxContainer = null
 var _scorecard_scroll: ScrollContainer = null
+var _scorecard_close_btn: Button = null
+var _is_refreshing_scorecard: bool = false
 
 func _ready() -> void:
 	name = "HistoryMenu"
@@ -112,7 +114,7 @@ func _ready() -> void:
 func _grab_initial_focus() -> void:
 	if not is_visible_in_tree():
 		return
-	if has_node("/root/KeybindingManager"):
+	if is_inside_tree() and has_node("/root/KeybindingManager"):
 		var km = get_node("/root/KeybindingManager")
 		km.focus_first_control(self)
 
@@ -120,7 +122,11 @@ func _grab_initial_focus() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_visible_in_tree():
 		return
-	if has_node("/root/UIFocusGuard"):
+	if scorecard_overlay != null and scorecard_overlay.visible:
+		if _handle_scorecard_input(event):
+			get_viewport().set_input_as_handled()
+			return
+	if is_inside_tree() and has_node("/root/UIFocusGuard"):
 		var ufg = get_node("/root/UIFocusGuard")
 		if ufg.is_modal_active():
 			return
@@ -130,11 +136,51 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if scorecard_overlay != null and scorecard_overlay.visible:
-			scorecard_overlay.visible = false
+			_close_scorecard()
 			get_viewport().set_input_as_handled()
 			return
 		SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")
 		get_viewport().set_input_as_handled()
+
+
+func _handle_scorecard_input(event: InputEvent) -> bool:
+	if scorecard_overlay == null or not scorecard_overlay.visible:
+		return false
+
+	var is_cancel = event.is_action_pressed("ui_cancel") or \
+		(event is InputEventJoypadButton and event.button_index == JOY_BUTTON_B and event.pressed) or \
+		(event is InputEventKey and event.keycode == KEY_ESCAPE and event.pressed)
+	if is_cancel:
+		_close_scorecard()
+		return true
+
+	var hole_ids = _get_match_hole_ids(_current_scorecard_match_data)
+	var num_holes = hole_ids.size()
+	if num_holes == 0:
+		return false
+
+	var is_lb = (InputMap.has_action("suspense_toggle") and event.is_action_pressed("suspense_toggle")) or \
+		(InputMap.has_action("prev_club") and event.is_action_pressed("prev_club")) or \
+		(event is InputEventJoypadButton and event.button_index == JOY_BUTTON_LEFT_SHOULDER and event.pressed) or \
+		(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_PAGEUP)
+	var is_rb = (InputMap.has_action("announcer_toggle") and event.is_action_pressed("announcer_toggle")) or \
+		(InputMap.has_action("next_club") and event.is_action_pressed("next_club")) or \
+		(event is InputEventJoypadButton and event.button_index == JOY_BUTTON_RIGHT_SHOULDER and event.pressed) or \
+		(event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_PAGEDOWN)
+
+	if is_lb:
+		var cur = _scorecard_selected_hole_index
+		var prev_idx = clampi(cur - 1, 0, num_holes - 1)
+		_select_scorecard_hole(prev_idx)
+		return true
+
+	if is_rb:
+		var cur = _scorecard_selected_hole_index
+		var next_idx = clampi(cur + 1, 0, num_holes - 1)
+		_select_scorecard_hole(next_idx)
+		return true
+
+	return false
 
 
 func _setup_scorecard_overlay() -> void:
@@ -179,11 +225,13 @@ func _load_history() -> Array:
 			var full_path = dir_path.path_join(file_name)
 			var f = FileAccess.open(full_path, FileAccess.READ)
 			if f != null:
-				var json = JSON.parse_string(f.get_as_text())
-				if typeof(json) == TYPE_DICTIONARY:
-					if json.has("players") and typeof(json["players"]) == TYPE_ARRAY:
-						json["players"] = MultiplayerManager.deserialize_players(json["players"])
-					matches.append(json)
+				var text = f.get_as_text().strip_edges()
+				if not text.is_empty():
+					var json = JSON.parse_string(text)
+					if typeof(json) == TYPE_DICTIONARY:
+						if json.has("players") and typeof(json["players"]) == TYPE_ARRAY:
+							json["players"] = MultiplayerManager.deserialize_players(json["players"])
+						matches.append(json)
 		file_name = dir.get_next()
 	dir.list_dir_end()
 	
@@ -387,6 +435,7 @@ func _show_scorecard(match_data: Dictionary) -> void:
 	_scorecard_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_scorecard_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_scorecard_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_scorecard_scroll.follow_focus = true
 	ThemeManager.apply_scroll_container_style(_scorecard_scroll, 28)
 	card_vbox.add_child(_scorecard_scroll)
 	
@@ -410,26 +459,75 @@ func _show_scorecard(match_data: Dictionary) -> void:
 	_shot_review_container.add_theme_constant_override("separation", 12)
 	scroll_content.add_child(_shot_review_container)
 	
-	_refresh_scorecard_view()
-	
 	# Actions row
 	var action_hbox = HBoxContainer.new()
 	action_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	card_vbox.add_child(action_hbox)
 	
-	var close_btn = Button.new()
-	close_btn.text = "Close"
-	close_btn.custom_minimum_size = Vector2(160, 48)
-	apply_button_style(close_btn, Color(0.3, 0.35, 0.4, 0.9))
-	close_btn.pressed.connect(func(): scorecard_overlay.visible = false)
-	action_hbox.add_child(close_btn)
+	_scorecard_close_btn = Button.new()
+	_scorecard_close_btn.name = "ScorecardCloseBtn"
+	_scorecard_close_btn.text = "Close"
+	_scorecard_close_btn.custom_minimum_size = Vector2(160, 48)
+	apply_button_style(_scorecard_close_btn, Color(0.3, 0.35, 0.4, 0.9))
+	_scorecard_close_btn.pressed.connect(_close_scorecard)
+	action_hbox.add_child(_scorecard_close_btn)
+	
+	_refresh_scorecard_view()
 	
 	scorecard_overlay.visible = true
+	if is_inside_tree() and has_node("/root/UIFocusGuard"):
+		var ufg = get_node("/root/UIFocusGuard")
+		ufg.push_lock(scorecard_overlay)
+	_focus_selected_hole_button()
+
+
+func _close_scorecard() -> void:
+	if scorecard_overlay == null or not scorecard_overlay.visible:
+		return
+	if is_inside_tree() and has_node("/root/UIFocusGuard"):
+		var ufg = get_node("/root/UIFocusGuard")
+		if ufg.is_locked() and ufg.current_lock_root() == scorecard_overlay:
+			ufg.pop_lock(scorecard_overlay, true)
+	scorecard_overlay.visible = false
+	call_deferred("_grab_initial_focus")
+
+
+func _focus_selected_hole_button() -> void:
+	if _scorecard_grid == null or not is_instance_valid(_scorecard_grid) or not is_inside_tree():
+		return
+	var target_btn = _scorecard_grid.find_child("HoleBtn_%d" % _scorecard_selected_hole_index, true, false) as Button
+	if target_btn != null and target_btn.is_inside_tree() and target_btn.is_visible_in_tree():
+		target_btn.call_deferred("grab_focus")
+		if _scorecard_scroll != null and is_instance_valid(_scorecard_scroll):
+			_scorecard_scroll.call_deferred("ensure_control_visible", target_btn)
+	elif _scorecard_grid.get_child_count() > 0:
+		for child in _scorecard_grid.get_children():
+			if child is Button and child.name.begins_with("HoleBtn_") and child.is_inside_tree() and child.is_visible_in_tree():
+				child.call_deferred("grab_focus")
+				if _scorecard_scroll != null and is_instance_valid(_scorecard_scroll):
+					_scorecard_scroll.call_deferred("ensure_control_visible", child)
+				break
+
+
+func _select_scorecard_hole(hole_idx: int) -> void:
+	var hole_ids = _get_match_hole_ids(_current_scorecard_match_data)
+	if hole_ids.is_empty():
+		return
+	var clamped_idx = clampi(hole_idx, 0, hole_ids.size() - 1)
+	if _scorecard_selected_hole_index != clamped_idx:
+		_scorecard_selected_hole_index = clamped_idx
+		_refresh_scorecard_view()
+	_focus_selected_hole_button()
+
+
+func _on_scorecard_hole_selected(target_hole_idx: int) -> void:
+	_select_scorecard_hole(target_hole_idx)
 
 
 func _refresh_scorecard_view() -> void:
 	if _scorecard_grid == null or _shot_review_container == null:
 		return
+	_is_refreshing_scorecard = true
 	var prev_v = _scorecard_scroll.scroll_vertical if _scorecard_scroll != null else 0
 	var prev_h = _scorecard_scroll.scroll_horizontal if _scorecard_scroll != null else 0
 
@@ -449,11 +547,7 @@ func _refresh_scorecard_view() -> void:
 	if _scorecard_scroll != null:
 		_scorecard_scroll.set_deferred("scroll_vertical", prev_v)
 		_scorecard_scroll.set_deferred("scroll_horizontal", prev_h)
-
-
-func _on_scorecard_hole_selected(target_hole_idx: int) -> void:
-	_scorecard_selected_hole_index = target_hole_idx
-	_refresh_scorecard_view()
+	_is_refreshing_scorecard = false
 
 
 func _get_match_hole_ids(match_data: Dictionary) -> Array:
@@ -653,6 +747,7 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		return cell
 
 	# 1. HEADER ROW (Clickable hole buttons matching CoursePlay)
+	var hole_buttons: Array[Button] = []
 	for c_idx in range(columns.size()):
 		var col = columns[c_idx]
 		var h_idx = column_hole_indices[c_idx]
@@ -661,14 +756,15 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 		
 		if is_hole_col:
 			var btn = Button.new()
+			btn.name = "HoleBtn_%d" % h_idx
 			btn.custom_minimum_size = Vector2(48, 38)
 			btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			btn.size_flags_vertical = Control.SIZE_FILL
 			btn.text = col
-			btn.focus_mode = Control.FOCUS_NONE
+			btn.focus_mode = Control.FOCUS_ALL
 			btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 			btn.add_theme_font_size_override("font_size", 16)
-			btn.tooltip_text = "View Hole %s shot history" % col
+			btn.tooltip_text = "View Hole %s shot history [LB/RB to cycle]" % col
 			
 			var style_norm = StyleBoxFlat.new()
 			if is_act:
@@ -694,21 +790,56 @@ func _populate_grid_scorecard(grid: GridContainer, match_data: Dictionary) -> vo
 			
 			var style_pressed = style_hover.duplicate()
 			style_pressed.bg_color = header_bg.lerp(Color(0.15, 0.35, 0.60, 0.95), 0.6)
+
+			var style_focus = style_hover.duplicate()
+			style_focus.border_color = Color(1.0, 0.85, 0.38, 1.0)
+			style_focus.border_width_left = 3
+			style_focus.border_width_top = 3
+			style_focus.border_width_right = 3
+			style_focus.border_width_bottom = 3
 			
 			btn.add_theme_stylebox_override("normal", style_norm)
 			btn.add_theme_stylebox_override("hover", style_hover)
 			btn.add_theme_stylebox_override("pressed", style_pressed)
+			btn.add_theme_stylebox_override("focus", style_focus)
 			btn.add_theme_color_override("font_color", Color.WHITE)
 			btn.add_theme_color_override("font_outline_color", Color.BLACK)
 			btn.add_theme_constant_override("outline_size", 3)
 			
 			var target_hole_idx = h_idx
 			btn.pressed.connect(func():
-				_on_scorecard_hole_selected(target_hole_idx)
+				_select_scorecard_hole(target_hole_idx)
+			)
+			btn.focus_entered.connect(func():
+				if not _is_refreshing_scorecard and _scorecard_selected_hole_index != target_hole_idx:
+					_select_scorecard_hole(target_hole_idx)
 			)
 			grid.add_child(btn)
+			hole_buttons.append(btn)
 		else:
 			add_cell.call(grid, col, header_bg, true, Color.WHITE, 16, false, 180.0 if col == "Player" else 48.0)
+
+	# Wire focus neighbors for hole buttons
+	for i in range(hole_buttons.size()):
+		var h_btn = hole_buttons[i]
+		if i > 0:
+			h_btn.focus_neighbor_left = hole_buttons[i - 1].get_path() if hole_buttons[i - 1].is_inside_tree() else h_btn.get_path_to(hole_buttons[i - 1])
+		if i < hole_buttons.size() - 1:
+			h_btn.focus_neighbor_right = hole_buttons[i + 1].get_path() if hole_buttons[i + 1].is_inside_tree() else h_btn.get_path_to(hole_buttons[i + 1])
+		if _scorecard_close_btn != null and is_instance_valid(_scorecard_close_btn):
+			h_btn.focus_neighbor_bottom = _scorecard_close_btn.get_path() if _scorecard_close_btn.is_inside_tree() else h_btn.get_path_to(_scorecard_close_btn)
+
+	if _scorecard_close_btn != null and is_instance_valid(_scorecard_close_btn):
+		_scorecard_close_btn.focus_mode = Control.FOCUS_ALL
+		var sel_h_btn: Button = null
+		for h_b in hole_buttons:
+			if h_b.name == "HoleBtn_%d" % _scorecard_selected_hole_index:
+				sel_h_btn = h_b
+				break
+		if sel_h_btn == null and not hole_buttons.is_empty():
+			sel_h_btn = hole_buttons[0]
+		if sel_h_btn != null:
+			_scorecard_close_btn.focus_neighbor_top = sel_h_btn.get_path() if sel_h_btn.is_inside_tree() else _scorecard_close_btn.get_path_to(sel_h_btn)
 		
 	# 2. DISTANCE ROW (Yards)
 	add_cell.call(grid, "Yds (%s)" % tee_color, dist_bg, false, Color(0.8, 0.8, 0.8), 15, false, 180.0)
@@ -1163,7 +1294,7 @@ func _populate_history_shot_review(container: VBoxContainer, hole_id: String, ma
 
 	var hint_lbl = Label.new()
 	hint_lbl.name = "HoleShotHintLabel"
-	hint_lbl.text = "Select any hole number above to view shot history"
+	hint_lbl.text = "Select any hole number above or use LB/RB bumpers to view shot history"
 	hint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint_lbl.add_theme_font_size_override("font_size", 13)
 	hint_lbl.add_theme_color_override("font_color", Color(0.68, 0.74, 0.84))
@@ -1341,9 +1472,17 @@ func apply_button_style(btn: Button, bg_color: Color) -> void:
 	var style_pressed = style_normal.duplicate()
 	style_pressed.bg_color = bg_color.darkened(0.12)
 	
+	var style_focus = style_hover.duplicate()
+	style_focus.border_color = Color(1.0, 0.85, 0.38, 1.0)
+	style_focus.border_width_left = 3
+	style_focus.border_width_top = 3
+	style_focus.border_width_right = 3
+	style_focus.border_width_bottom = 3
+	
 	btn.add_theme_stylebox_override("normal", style_normal)
 	btn.add_theme_stylebox_override("hover", style_hover)
 	btn.add_theme_stylebox_override("pressed", style_pressed)
+	btn.add_theme_stylebox_override("focus", style_focus)
 	
 	btn.add_theme_color_override("font_color", Color.WHITE)
 	btn.add_theme_color_override("font_hover_color", Color(0.9, 0.9, 0.9))

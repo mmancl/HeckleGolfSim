@@ -39,14 +39,12 @@ static func is_course_scene_already_upgraded(scene_path: String) -> bool:
 
 static func get_courses_needing_upgrade(base_dir: String = "user://courses") -> Array[Dictionary]:
 	var pending: Array[Dictionary] = []
-	var dir := DirAccess.open(base_dir)
-	if dir == null:
+	if not DirAccess.dir_exists_absolute(base_dir):
 		return pending
 
-	dir.list_dir_begin()
-	var folder := dir.get_next()
-	while folder != "":
-		if dir.current_is_dir() and not folder.begins_with("."):
+	var folders := DirAccess.get_directories_at(base_dir)
+	for folder in folders:
+		if not folder.begins_with("."):
 			var course_dir := base_dir.path_join(folder)
 			var config_path := course_dir.path_join("course.json")
 			if FileAccess.file_exists(config_path):
@@ -74,8 +72,6 @@ static func get_courses_needing_upgrade(base_dir: String = "user://courses") -> 
 								"scene_path": scene_path,
 								"title": str(data.get("Title", folder))
 							})
-		folder = dir.get_next()
-	dir.list_dir_end()
 	return pending
 
 

@@ -2077,6 +2077,7 @@ func _setup_hud() -> void:
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	scroll.follow_focus = true
 	ThemeManager.apply_scroll_container_style(scroll, 28)
 	vbox.add_child(scroll)
 	
@@ -2181,6 +2182,7 @@ func _setup_hud() -> void:
 					if sc_tee_opt.get_item_text(t_i).to_lower() == pref_tee.to_lower():
 						sc_tee_opt.selected = t_i
 						break
+		_update_scorecard_focus_neighbors()
 	)
 	
 	sc_add_btn.pressed.connect(func():
@@ -2202,9 +2204,8 @@ func _setup_hud() -> void:
 		else:
 			MultiplayerManager.add_new_player_with_mode(p_name, tee_color, "current_hole")
 			_refresh_scorecard_add_player_section()
-			_populate_scorecard(_last_scorecard_action_type)
+			_populate_scorecard(_last_scorecard_action_type, "PlayerSelectOpt")
 			_update_distance_queue()
-			sc_player_select_opt.call_deferred("grab_focus")
 	)
 	
 	_scorecard_content.add_child(_scorecard_add_player_section)
@@ -2858,6 +2859,8 @@ func _handle_scorecard_input(event: InputEvent) -> bool:
 			return true
 
 	var num_holes = MultiplayerManager.hole_ids.size()
+	var cur_f = get_viewport().gui_get_focus_owner()
+	var is_typing = (cur_f is LineEdit or cur_f is TextEdit)
 
 	# Bumper hole cycling (LB / RB)
 	var is_lb = (InputMap.has_action("suspense_toggle") and event.is_action_pressed("suspense_toggle")) or \
@@ -2865,38 +2868,39 @@ func _handle_scorecard_input(event: InputEvent) -> bool:
 	var is_rb = (InputMap.has_action("announcer_toggle") and event.is_action_pressed("announcer_toggle")) or \
 		(event is InputEventJoypadButton and event.button_index == JOY_BUTTON_RIGHT_SHOULDER and event.pressed)
 
-	if is_lb and num_holes > 0:
-		var cur = _scorecard_selected_hole_index
-		if cur < 0:
-			cur = MultiplayerManager.current_hole_index
-		var prev_idx = clampi(cur - 1, 0, num_holes - 1)
-		_select_scorecard_hole(prev_idx)
-		return true
-
-	if is_rb and num_holes > 0:
-		var cur = _scorecard_selected_hole_index
-		if cur < 0:
-			cur = MultiplayerManager.current_hole_index
-		var next_idx = clampi(cur + 1, 0, num_holes - 1)
-		_select_scorecard_hole(next_idx)
-		return true
-
-	# Trigger tab cycling (LT / RT for 18-hole courses)
-	if num_holes > 9:
-		var is_lt = (InputMap.has_action("prev_club") and event.is_action_pressed("prev_club")) or \
-			(event is InputEventJoypadMotion and event.axis == JOY_AXIS_TRIGGER_LEFT and event.axis_value >= 0.5)
-		var is_rt = (InputMap.has_action("next_club") and event.is_action_pressed("next_club")) or \
-			(event is InputEventJoypadMotion and event.axis == JOY_AXIS_TRIGGER_RIGHT and event.axis_value >= 0.5)
-		if is_lt or is_rt:
-			var tabs = ["All", "Front 9", "Back 9"]
-			var cur_tab_idx = tabs.find(_scorecard_view_tab)
-			if cur_tab_idx == -1:
-				cur_tab_idx = 0
-			var next_tab_idx = (cur_tab_idx + (1 if is_rt else -1) + tabs.size()) % tabs.size()
-			_scorecard_view_tab = tabs[next_tab_idx]
-			_populate_scorecard(_last_scorecard_action_type)
-			_focus_selected_hole_button()
+	if not is_typing:
+		if is_lb and num_holes > 0:
+			var cur = _scorecard_selected_hole_index
+			if cur < 0:
+				cur = MultiplayerManager.current_hole_index
+			var prev_idx = clampi(cur - 1, 0, num_holes - 1)
+			_select_scorecard_hole(prev_idx)
 			return true
+
+		if is_rb and num_holes > 0:
+			var cur = _scorecard_selected_hole_index
+			if cur < 0:
+				cur = MultiplayerManager.current_hole_index
+			var next_idx = clampi(cur + 1, 0, num_holes - 1)
+			_select_scorecard_hole(next_idx)
+			return true
+
+		# Trigger tab cycling (LT / RT for 18-hole courses)
+		if num_holes > 9:
+			var is_lt = (InputMap.has_action("prev_club") and event.is_action_pressed("prev_club")) or \
+				(event is InputEventJoypadMotion and event.axis == JOY_AXIS_TRIGGER_LEFT and event.axis_value >= 0.5)
+			var is_rt = (InputMap.has_action("next_club") and event.is_action_pressed("next_club")) or \
+				(event is InputEventJoypadMotion and event.axis == JOY_AXIS_TRIGGER_RIGHT and event.axis_value >= 0.5)
+			if is_lt or is_rt:
+				var tabs = ["All", "Front 9", "Back 9"]
+				var cur_tab_idx = tabs.find(_scorecard_view_tab)
+				if cur_tab_idx == -1:
+					cur_tab_idx = 0
+				var next_tab_idx = (cur_tab_idx + (1 if is_rt else -1) + tabs.size()) % tabs.size()
+				_scorecard_view_tab = tabs[next_tab_idx]
+				_populate_scorecard(_last_scorecard_action_type)
+				_focus_selected_hole_button()
+				return true
 
 	# Directional stick or D-pad when focus is outside the scorecard
 	var is_dir = event.is_action_pressed("ui_left") or event.is_action_pressed("ui_right") or \
@@ -2906,7 +2910,16 @@ func _handle_scorecard_input(event: InputEvent) -> bool:
 	if is_dir:
 		var cur_focus = get_viewport().gui_get_focus_owner()
 		if cur_focus == null or not hud_scorecard.is_ancestor_of(cur_focus):
-			_focus_selected_hole_button()
+			if _scorecard_settings_mode:
+				var sel_opt = _scorecard_add_player_section.get_node_or_null("AddRow/PlayerSelectOpt") as Control if _scorecard_add_player_section != null else null
+				if sel_opt != null and is_instance_valid(sel_opt) and sel_opt.is_visible_in_tree():
+					sel_opt.grab_focus()
+				elif _scorecard_settings_btn != null and is_instance_valid(_scorecard_settings_btn) and _scorecard_settings_btn.is_visible_in_tree():
+					_scorecard_settings_btn.grab_focus()
+				else:
+					_focus_selected_hole_button()
+			else:
+				_focus_selected_hole_button()
 			return true
 
 	# Accept / Enter when focus is outside the scorecard
@@ -2916,7 +2929,16 @@ func _handle_scorecard_input(event: InputEvent) -> bool:
 	if is_enter:
 		var cur_focus = get_viewport().gui_get_focus_owner()
 		if cur_focus == null or not hud_scorecard.is_ancestor_of(cur_focus):
-			_focus_selected_hole_button()
+			if _scorecard_settings_mode:
+				var sel_opt = _scorecard_add_player_section.get_node_or_null("AddRow/PlayerSelectOpt") as Control if _scorecard_add_player_section != null else null
+				if sel_opt != null and is_instance_valid(sel_opt) and sel_opt.is_visible_in_tree():
+					sel_opt.grab_focus()
+				elif _scorecard_settings_btn != null and is_instance_valid(_scorecard_settings_btn) and _scorecard_settings_btn.is_visible_in_tree():
+					_scorecard_settings_btn.grab_focus()
+				else:
+					_focus_selected_hole_button()
+			else:
+				_focus_selected_hole_button()
 			return true
 
 	return true
@@ -6464,14 +6486,26 @@ func _refresh_scorecard_add_player_section() -> void:
 	select_opt.selected = 0
 	name_input.visible = true
 	
+	var prev_tee = tee_opt.get_item_text(tee_opt.selected) if tee_opt.selected >= 0 and tee_opt.item_count > 0 else ""
 	tee_opt.clear()
 	var course_tees = MultiplayerManager.get_course_tees()
 	if course_tees.is_empty():
 		course_tees = ["Blue", "Red", "White", "Black", "Gold"]
+	var selected_tee_idx = 0
 	for t_idx in range(course_tees.size()):
 		var t_name = course_tees[t_idx]
 		var t_icon = _get_tee_icon(t_name, 14)
 		tee_opt.add_icon_item(t_icon, t_name, t_idx)
+		if not prev_tee.is_empty() and t_name.to_lower() == prev_tee.to_lower():
+			selected_tee_idx = t_idx
+	if tee_opt.item_count > 0:
+		tee_opt.selected = selected_tee_idx
+
+	if has_node("/root/UIFocusGuard"):
+		var guard = get_node("/root/UIFocusGuard")
+		if guard.has_method("hook_option_button"):
+			guard.hook_option_button(select_opt)
+			guard.hook_option_button(tee_opt)
 
 
 func _update_scorecard_settings_button_style() -> void:
@@ -6491,6 +6525,11 @@ func _on_scorecard_settings_toggled() -> void:
 	_scorecard_settings_mode = not _scorecard_settings_mode
 	_update_scorecard_settings_button_style()
 	_populate_scorecard(_last_scorecard_action_type)
+	if _scorecard_settings_mode:
+		if _scorecard_settings_btn != null and is_instance_valid(_scorecard_settings_btn):
+			_scorecard_settings_btn.call_deferred("grab_focus")
+	else:
+		_focus_selected_hole_button()
 
 
 func _select_scorecard_hole(hole_idx: int) -> void:
@@ -6523,7 +6562,7 @@ func _focus_selected_hole_button() -> void:
 				break
 
 
-func _populate_scorecard(action_type: String) -> void:
+func _populate_scorecard(action_type: String, focus_target_name: String = "") -> void:
 	_last_scorecard_action_type = action_type
 	_refresh_scorecard_add_player_section()
 	_populate_hole_shot_summary(action_type)
@@ -7032,8 +7071,12 @@ func _populate_scorecard(action_type: String) -> void:
 			tee_opt.item_selected.connect(func(sel_idx):
 				var chosen_tee = tee_opt.get_item_text(sel_idx)
 				MultiplayerManager.set_player_tee(current_p_idx, chosen_tee)
-				_populate_scorecard(_last_scorecard_action_type)
+				_populate_scorecard(_last_scorecard_action_type, "TeeOpt:%d" % current_p_idx)
 			)
+			if has_node("/root/UIFocusGuard"):
+				var guard = get_node("/root/UIFocusGuard")
+				if guard.has_method("hook_option_button"):
+					guard.hook_option_button(tee_opt)
 			hbox.add_child(tee_opt)
 			
 			# Pause / Resume Button
@@ -7056,7 +7099,7 @@ func _populate_scorecard(action_type: String) -> void:
 						var paused_hole_idx = saved.get("hole_index", MultiplayerManager.current_hole_index)
 						if paused_hole_idx == MultiplayerManager.current_hole_index:
 							MultiplayerManager.resume_player(cur_idx, "same_hole")
-							_populate_scorecard(_last_scorecard_action_type)
+							_populate_scorecard(_last_scorecard_action_type, "PauseBtn_%d" % cur_idx)
 						else:
 							_show_resume_player_dialog(cur_idx, p, paused_hole_idx)
 					)
@@ -7069,7 +7112,7 @@ func _populate_scorecard(action_type: String) -> void:
 						if _scorecard_countdown_active and not _scorecard_countdown_paused:
 							_on_scorecard_pause_toggled()
 						MultiplayerManager.pause_player(cur_idx)
-						_populate_scorecard(_last_scorecard_action_type)
+						_populate_scorecard(_last_scorecard_action_type, "PauseBtn_%d" % cur_idx)
 					)
 				hbox.add_child(pause_btn)
 
@@ -7090,7 +7133,7 @@ func _populate_scorecard(action_type: String) -> void:
 					if _scorecard_countdown_active and not _scorecard_countdown_paused:
 						_on_scorecard_pause_toggled()
 					MultiplayerManager.toggle_player_active(t_idx, false)
-					_populate_scorecard(_last_scorecard_action_type)
+					_populate_scorecard(_last_scorecard_action_type, "ToggleBtn_%d" % t_idx)
 				)
 			else:
 				toggle_btn.text = "Add Back"
@@ -7100,7 +7143,7 @@ func _populate_scorecard(action_type: String) -> void:
 					if _scorecard_countdown_active and not _scorecard_countdown_paused:
 						_on_scorecard_pause_toggled()
 					MultiplayerManager.toggle_player_active(t_idx, true)
-					_populate_scorecard(_last_scorecard_action_type)
+					_populate_scorecard(_last_scorecard_action_type, "ToggleBtn_%d" % t_idx)
 					_update_distance_queue()
 				)
 			hbox.add_child(toggle_btn)
@@ -7311,62 +7354,254 @@ func _populate_scorecard(action_type: String) -> void:
 			)
 
 	# --- 6. FOCUS NEIGHBORS CONFIGURATION ---
-	if not hole_buttons.is_empty() and is_inside_tree():
-		for i in range(hole_buttons.size()):
-			var h_btn = hole_buttons[i]
-			if not h_btn.is_inside_tree():
-				continue
-			if i > 0 and hole_buttons[i - 1].is_inside_tree():
-				h_btn.focus_neighbor_left = hole_buttons[i - 1].get_path()
-			if i < hole_buttons.size() - 1 and hole_buttons[i + 1].is_inside_tree():
-				h_btn.focus_neighbor_right = hole_buttons[i + 1].get_path()
-			if action_btn != null and is_instance_valid(action_btn) and action_btn.is_inside_tree():
-				h_btn.focus_neighbor_bottom = action_btn.get_path()
+	_update_scorecard_focus_neighbors(focus_target_name)
 
-		var sel_btn: Button = null
-		for h_b in hole_buttons:
-			if h_b.name == "HoleBtn_%d" % _scorecard_selected_hole_index:
-				sel_btn = h_b
-				break
-		if sel_btn == null:
-			sel_btn = hole_buttons[0]
 
-		if action_btn != null and is_instance_valid(action_btn):
-			action_btn.focus_mode = Control.FOCUS_ALL
-			if sel_btn != null and sel_btn.is_inside_tree():
-				action_btn.focus_neighbor_top = sel_btn.get_path()
-			if _scorecard_pause_btn != null and is_instance_valid(_scorecard_pause_btn) and _scorecard_pause_btn.is_visible_in_tree():
-				_scorecard_pause_btn.focus_mode = Control.FOCUS_ALL
-				if _scorecard_pause_btn.is_inside_tree() and action_btn.is_inside_tree():
-					action_btn.focus_neighbor_right = _scorecard_pause_btn.get_path()
-					_scorecard_pause_btn.focus_neighbor_left = action_btn.get_path()
-				if sel_btn != null and sel_btn.is_inside_tree():
-					_scorecard_pause_btn.focus_neighbor_top = sel_btn.get_path()
+func _update_scorecard_focus_neighbors(focus_target_name: String = "") -> void:
+	if hud_scorecard == null or not is_instance_valid(hud_scorecard):
+		return
 
-		if vbox != null:
-			var filter_tabs = vbox.get_node_or_null("FilterTabs") as HBoxContainer
-			if filter_tabs != null and filter_tabs.visible and filter_tabs.get_child_count() > 0:
-				var active_tab_btn = filter_tabs.get_child(0) as Control
-				for c in filter_tabs.get_children():
-					if c is Button and c.text == _scorecard_view_tab:
-						active_tab_btn = c
-						break
-				if active_tab_btn != null and active_tab_btn.is_inside_tree():
-					for h_btn in hole_buttons:
-						if h_btn.is_inside_tree():
-							h_btn.focus_neighbor_top = active_tab_btn.get_path()
-				if sel_btn != null and sel_btn.is_inside_tree():
-					for t_btn in filter_tabs.get_children():
-						if t_btn is Button and t_btn.is_inside_tree():
-							t_btn.focus_neighbor_bottom = sel_btn.get_path()
+	var vbox = hud_scorecard.get_node_or_null("VBoxContainer") as VBoxContainer
+	if vbox == null:
+		return
 
-		if _scorecard_settings_btn != null and is_instance_valid(_scorecard_settings_btn) and _scorecard_settings_btn.is_inside_tree():
+	var filter_tabs = vbox.get_node_or_null("FilterTabs") as HBoxContainer
+	var active_tab_btn: Control = null
+	if filter_tabs != null and filter_tabs.visible and filter_tabs.get_child_count() > 0:
+		for c in filter_tabs.get_children():
+			if c is Button:
+				c.focus_mode = Control.FOCUS_ALL
+				if c.text == _scorecard_view_tab:
+					active_tab_btn = c
+		if active_tab_btn == null:
+			active_tab_btn = filter_tabs.get_child(0) as Control
+
+	# Collect hole buttons from scorecard_grid
+	var hole_buttons: Array[Button] = []
+	if scorecard_grid != null and is_instance_valid(scorecard_grid):
+		for child in scorecard_grid.get_children():
+			if child is Button and child.name.begins_with("HoleBtn_"):
+				child.focus_mode = Control.FOCUS_ALL
+				hole_buttons.append(child)
+
+	var sel_btn: Button = null
+	for h_b in hole_buttons:
+		if h_b.name == "HoleBtn_%d" % _scorecard_selected_hole_index:
+			sel_btn = h_b
+			break
+	if sel_btn == null and not hole_buttons.is_empty():
+		sel_btn = hole_buttons[0]
+
+	# Hole buttons horizontal wiring
+	for i in range(hole_buttons.size()):
+		var h_btn = hole_buttons[i]
+		if i > 0 and hole_buttons[i - 1].is_inside_tree():
+			h_btn.focus_neighbor_left = hole_buttons[i - 1].get_path()
+		if i < hole_buttons.size() - 1 and hole_buttons[i + 1].is_inside_tree():
+			h_btn.focus_neighbor_right = hole_buttons[i + 1].get_path()
+
+	# Scorecard settings cog button
+	if _scorecard_settings_btn != null and is_instance_valid(_scorecard_settings_btn) and _scorecard_settings_btn.is_inside_tree():
+		_scorecard_settings_btn.focus_mode = Control.FOCUS_ALL
+		if not hole_buttons.is_empty():
 			var last_hole_btn = hole_buttons[hole_buttons.size() - 1]
 			if last_hole_btn.is_inside_tree():
 				_scorecard_settings_btn.focus_neighbor_left = last_hole_btn.get_path()
+				last_hole_btn.focus_neighbor_right = _scorecard_settings_btn.get_path()
 				last_hole_btn.focus_neighbor_top = _scorecard_settings_btn.get_path()
 
-	if hud_scorecard != null and hud_scorecard.visible and not _scorecard_settings_mode:
+	# Filter tabs vertical wiring
+	if filter_tabs != null and filter_tabs.visible and filter_tabs.get_child_count() > 0:
+		if active_tab_btn != null and active_tab_btn.is_inside_tree():
+			for h_btn in hole_buttons:
+				if h_btn.is_inside_tree():
+					h_btn.focus_neighbor_top = active_tab_btn.get_path()
+		if sel_btn != null and sel_btn.is_inside_tree():
+			for t_btn in filter_tabs.get_children():
+				if t_btn is Button and t_btn.is_inside_tree():
+					t_btn.focus_neighbor_bottom = sel_btn.get_path()
+
+	# Action button and countdown pause button
+	var action_btn = _scorecard_action_btn
+	if action_btn != null and is_instance_valid(action_btn):
+		action_btn.focus_mode = Control.FOCUS_ALL
+	var pause_btn_cd = _scorecard_pause_btn
+	var has_pause_cd = pause_btn_cd != null and is_instance_valid(pause_btn_cd) and pause_btn_cd.is_visible_in_tree()
+	if has_pause_cd:
+		pause_btn_cd.focus_mode = Control.FOCUS_ALL
+		if action_btn != null and action_btn.is_inside_tree() and pause_btn_cd.is_inside_tree():
+			action_btn.focus_neighbor_right = pause_btn_cd.get_path()
+			pause_btn_cd.focus_neighbor_left = action_btn.get_path()
+
+	# Player rows in scorecard_grid (only present when _scorecard_settings_mode is true)
+	var player_rows: Array[Array] = []
+	if _scorecard_settings_mode and scorecard_grid != null and is_instance_valid(scorecard_grid):
+		for col_cell in scorecard_grid.get_children():
+			var hbox = col_cell.get_node_or_null("HBox") as HBoxContainer
+			if hbox == null:
+				for ch in col_cell.get_children():
+					if ch is HBoxContainer:
+						hbox = ch
+						break
+			if hbox != null:
+				var row_ctrls: Array[Control] = []
+				for ctrl in hbox.get_children():
+					if (ctrl is Button or ctrl is OptionButton) and ctrl.focus_mode != Control.FOCUS_NONE and not (ctrl is BaseButton and ctrl.disabled):
+						ctrl.focus_mode = Control.FOCUS_ALL
+						row_ctrls.append(ctrl)
+				if not row_ctrls.is_empty():
+					player_rows.append(row_ctrls)
+
+	# Wire horizontal neighbors for each player row
+	for row_ctrls in player_rows:
+		for j in range(row_ctrls.size()):
+			var ctrl = row_ctrls[j]
+			var left_ctrl = row_ctrls[maxi(0, j - 1)]
+			var right_ctrl = row_ctrls[mini(row_ctrls.size() - 1, j + 1)]
+			if left_ctrl.is_inside_tree():
+				ctrl.focus_neighbor_left = ctrl.get_path_to(left_ctrl)
+			if right_ctrl.is_inside_tree():
+				ctrl.focus_neighbor_right = ctrl.get_path_to(right_ctrl)
+
+	# Add player section controls
+	var add_controls: Array[Control] = []
+	if _scorecard_settings_mode and _scorecard_add_player_section != null and is_instance_valid(_scorecard_add_player_section) and _scorecard_add_player_section.visible:
+		var sel_opt = _scorecard_add_player_section.get_node_or_null("AddRow/PlayerSelectOpt") as OptionButton
+		var name_inp = _scorecard_add_player_section.get_node_or_null("AddRow/NameInput") as LineEdit
+		var t_opt = _scorecard_add_player_section.get_node_or_null("AddRow/TeeOpt") as OptionButton
+		var a_btn = _scorecard_add_player_section.get_node_or_null("AddRow/AddBtn") as Button
+
+		if sel_opt != null and sel_opt.is_inside_tree():
+			sel_opt.focus_mode = Control.FOCUS_ALL
+			add_controls.append(sel_opt)
+		if name_inp != null and name_inp.is_inside_tree() and name_inp.visible:
+			name_inp.focus_mode = Control.FOCUS_ALL
+			add_controls.append(name_inp)
+		if t_opt != null and t_opt.is_inside_tree():
+			t_opt.focus_mode = Control.FOCUS_ALL
+			add_controls.append(t_opt)
+		if a_btn != null and a_btn.is_inside_tree():
+			a_btn.focus_mode = Control.FOCUS_ALL
+			add_controls.append(a_btn)
+
+		for j in range(add_controls.size()):
+			var ctrl = add_controls[j]
+			var left_ctrl = add_controls[(j - 1 + add_controls.size()) % add_controls.size()]
+			var right_ctrl = add_controls[(j + 1) % add_controls.size()]
+			if left_ctrl.is_inside_tree():
+				ctrl.focus_neighbor_left = ctrl.get_path_to(left_ctrl)
+			if right_ctrl.is_inside_tree():
+				ctrl.focus_neighbor_right = ctrl.get_path_to(right_ctrl)
+
+	# Vertical wiring
+	if not _scorecard_settings_mode:
+		# Standard mode: Hole buttons link down to action_btn
+		if action_btn != null and action_btn.is_inside_tree():
+			for h_btn in hole_buttons:
+				if h_btn.is_inside_tree():
+					h_btn.focus_neighbor_bottom = action_btn.get_path()
+			if _scorecard_settings_btn != null and _scorecard_settings_btn.is_inside_tree():
+				_scorecard_settings_btn.focus_neighbor_bottom = action_btn.get_path()
+			if sel_btn != null and sel_btn.is_inside_tree():
+				action_btn.focus_neighbor_top = sel_btn.get_path()
+				action_btn.focus_neighbor_bottom = sel_btn.get_path()
+				if has_pause_cd and pause_btn_cd.is_inside_tree():
+					pause_btn_cd.focus_neighbor_top = sel_btn.get_path()
+					pause_btn_cd.focus_neighbor_bottom = sel_btn.get_path()
+	else:
+		# Settings mode: Hole buttons / settings cog link down to player rows or add section
+		var top_dest: Control = null
+		if not player_rows.is_empty():
+			top_dest = player_rows[0][0]
+		elif not add_controls.is_empty():
+			top_dest = add_controls[0]
+		elif action_btn != null:
+			top_dest = action_btn
+
+		if top_dest != null and top_dest.is_inside_tree():
+			for h_btn in hole_buttons:
+				if h_btn.is_inside_tree():
+					h_btn.focus_neighbor_bottom = top_dest.get_path()
+			if _scorecard_settings_btn != null and _scorecard_settings_btn.is_inside_tree():
+				var rightmost_top = player_rows[0][mini(1, player_rows[0].size() - 1)] if not player_rows.is_empty() else (add_controls[mini(2, add_controls.size() - 1)] if not add_controls.is_empty() else top_dest)
+				if rightmost_top != null and rightmost_top.is_inside_tree():
+					_scorecard_settings_btn.focus_neighbor_bottom = rightmost_top.get_path()
+
+		# Player rows vertical links
+		var top_up_target = sel_btn if (sel_btn != null and sel_btn.is_inside_tree()) else _scorecard_settings_btn
+		if not player_rows.is_empty():
+			for j in range(player_rows[0].size()):
+				var ctrl = player_rows[0][j]
+				if top_up_target != null and top_up_target.is_inside_tree():
+					ctrl.focus_neighbor_top = top_up_target.get_path()
+
+			for r in range(1, player_rows.size()):
+				var cur_row = player_rows[r]
+				var prev_row = player_rows[r - 1]
+				for j in range(cur_row.size()):
+					var prev_target = prev_row[mini(j, prev_row.size() - 1)]
+					if prev_target.is_inside_tree():
+						cur_row[j].focus_neighbor_top = prev_target.get_path()
+				for j in range(prev_row.size()):
+					var next_target = cur_row[mini(j, cur_row.size() - 1)]
+					if next_target.is_inside_tree():
+						prev_row[j].focus_neighbor_bottom = next_target.get_path()
+
+		# Between last player row and add_controls
+		if not player_rows.is_empty() and not add_controls.is_empty():
+			var last_row = player_rows[player_rows.size() - 1]
+			for j in range(last_row.size()):
+				var add_target = add_controls[mini(j, add_controls.size() - 1)]
+				if add_target.is_inside_tree():
+					last_row[j].focus_neighbor_bottom = add_target.get_path()
+			for j in range(add_controls.size()):
+				var last_row_target = last_row[mini(j, last_row.size() - 1)]
+				if last_row_target.is_inside_tree():
+					add_controls[j].focus_neighbor_top = last_row_target.get_path()
+		elif player_rows.is_empty() and not add_controls.is_empty():
+			for ctrl in add_controls:
+				if top_up_target != null and top_up_target.is_inside_tree():
+					ctrl.focus_neighbor_top = top_up_target.get_path()
+
+		# Between add_controls (or last player row) and action_btn
+		var bottom_source_ctrl = add_controls[mini(2, add_controls.size() - 1)] if not add_controls.is_empty() else (player_rows[player_rows.size() - 1][0] if not player_rows.is_empty() else null)
+		if not add_controls.is_empty():
+			for ctrl in add_controls:
+				if action_btn != null and action_btn.is_inside_tree():
+					ctrl.focus_neighbor_bottom = action_btn.get_path()
+		elif not player_rows.is_empty():
+			for ctrl in player_rows[player_rows.size() - 1]:
+				if action_btn != null and action_btn.is_inside_tree():
+					ctrl.focus_neighbor_bottom = action_btn.get_path()
+
+		if action_btn != null and action_btn.is_inside_tree():
+			if bottom_source_ctrl != null and bottom_source_ctrl.is_inside_tree():
+				action_btn.focus_neighbor_top = bottom_source_ctrl.get_path()
+				if has_pause_cd and pause_btn_cd.is_inside_tree():
+					pause_btn_cd.focus_neighbor_top = bottom_source_ctrl.get_path()
+			if sel_btn != null and sel_btn.is_inside_tree():
+				action_btn.focus_neighbor_bottom = sel_btn.get_path()
+				if has_pause_cd and pause_btn_cd.is_inside_tree():
+					pause_btn_cd.focus_neighbor_bottom = sel_btn.get_path()
+
+	# Focus restoration / targeting
+	if not focus_target_name.is_empty():
+		var target_ctrl: Control = null
+		if focus_target_name.begins_with("TeeOpt:"):
+			var p_target_idx = focus_target_name.trim_prefix("TeeOpt:").to_int()
+			if p_target_idx >= 0 and p_target_idx < player_rows.size():
+				for c in player_rows[p_target_idx]:
+					if c is OptionButton:
+						target_ctrl = c
+						break
+		else:
+			target_ctrl = hud_scorecard.find_child(focus_target_name, true, false) as Control
+
+		if target_ctrl != null and is_instance_valid(target_ctrl) and target_ctrl.is_inside_tree() and target_ctrl.is_visible_in_tree():
+			target_ctrl.call_deferred("grab_focus")
+			return
+
+	if not _scorecard_settings_mode:
 		_focus_selected_hole_button()
 
 
@@ -7810,13 +8045,13 @@ func _show_add_player_dialog(p_name: String, tee_color: String) -> void:
 		_refresh_manage_players_dropdown()
 		_populate_manage_players()
 		_refresh_scorecard_add_player_section()
-		_populate_scorecard("toggle")
+		_populate_scorecard("toggle", "PlayerSelectOpt")
 		_update_distance_queue()
 		hud_scorecard.visible = true
 		_set_other_elements_visible(false)
-		var sc_btn = find_child("ScorecardToggleButton", true, false) as Control
-		if sc_btn != null and is_instance_valid(sc_btn) and sc_btn.is_visible_in_tree():
-			sc_btn.call_deferred("grab_focus")
+		if has_node("/root/UIFocusGuard"):
+			var guard = get_node("/root/UIFocusGuard")
+			guard.push_lock(hud_scorecard)
 	)
 	vbox.add_child(join_cur_btn)
 	
@@ -7876,19 +8111,22 @@ func _dismiss_add_player_dialog() -> void:
 	if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == add_player_prompt_dialog:
 		UIFocusGuard.pop_lock(false)
 	add_player_prompt_dialog.visible = false
-	_populate_scorecard(_last_scorecard_action_type)
+	_populate_scorecard(_last_scorecard_action_type, "PlayerSelectOpt")
 	hud_scorecard.visible = true
 	_set_other_elements_visible(false)
-	if hud_manage_players != null and hud_manage_players.get_parent() != null:
-		hud_manage_players.visible = true
-		UIFocusGuard.push_lock(hud_manage_players)
+	if has_node("/root/UIFocusGuard"):
+		var guard = get_node("/root/UIFocusGuard")
+		guard.push_lock(hud_scorecard)
 
 
 func _on_add_player_lock_popped() -> void:
 	add_player_prompt_dialog.visible = false
-	_populate_scorecard(_last_scorecard_action_type)
+	_populate_scorecard(_last_scorecard_action_type, "PlayerSelectOpt")
 	hud_scorecard.visible = true
 	_set_other_elements_visible(false)
+	if has_node("/root/UIFocusGuard"):
+		var guard = get_node("/root/UIFocusGuard")
+		guard.push_lock(hud_scorecard)
 
 
 func _show_resume_player_dialog(idx: int, p: Dictionary, paused_hole_idx: int) -> void:
@@ -7958,12 +8196,12 @@ func _show_resume_player_dialog(idx: int, p: Dictionary, paused_hole_idx: int) -
 		hud_manage_players.visible = false
 		MultiplayerManager.resume_player(idx, "current_hole")
 		_populate_manage_players()
-		_populate_scorecard("toggle")
+		_populate_scorecard("toggle", "PauseBtn_%d" % idx)
 		hud_scorecard.visible = true
 		_set_other_elements_visible(false)
-		var sc_btn = find_child("ScorecardToggleButton", true, false) as Control
-		if sc_btn != null and is_instance_valid(sc_btn) and sc_btn.is_visible_in_tree():
-			sc_btn.call_deferred("grab_focus")
+		if has_node("/root/UIFocusGuard"):
+			var guard = get_node("/root/UIFocusGuard")
+			guard.push_lock(hud_scorecard)
 	)
 	vbox.add_child(skip_btn)
 	
@@ -8000,9 +8238,9 @@ func _dismiss_resume_player_dialog() -> void:
 	_populate_scorecard(_last_scorecard_action_type)
 	hud_scorecard.visible = true
 	_set_other_elements_visible(false)
-	if hud_manage_players != null and hud_manage_players.get_parent() != null:
-		hud_manage_players.visible = true
-		UIFocusGuard.push_lock(hud_manage_players)
+	if has_node("/root/UIFocusGuard"):
+		var guard = get_node("/root/UIFocusGuard")
+		guard.push_lock(hud_scorecard)
 
 
 func _on_resume_player_lock_popped() -> void:
@@ -8010,6 +8248,9 @@ func _on_resume_player_lock_popped() -> void:
 	_populate_scorecard(_last_scorecard_action_type)
 	hud_scorecard.visible = true
 	_set_other_elements_visible(false)
+	if has_node("/root/UIFocusGuard"):
+		var guard = get_node("/root/UIFocusGuard")
+		guard.push_lock(hud_scorecard)
 
 
 var _last_dialog_nav_time: float = 0.0

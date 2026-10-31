@@ -73,7 +73,7 @@ var debug_bypass_osm_limit := Setting.new(false)
 var screen_offset_enabled := Setting.new(false)
 var screen_offset_value := Setting.new(0.0, -1.0, 1.0)
 var screen_offset_putter_value := Setting.new(0.0, -1.0, 1.0)
-var debug_logging_enabled := Setting.new(false)
+var debug_logging_enabled := Setting.new(OS.get_name() in ["iOS", "Android"])
 var debug_log_path := Setting.new("user://debug.log")
 var track_club_averages := Setting.new(true)
 

@@ -21,7 +21,12 @@ var wind_initialized_for_round: bool = false
 var _loaded_announcer_settings := {}
 
 func _ready() -> void:
-	PhysicsLogger.SetLevel(OPENFAIRWAY_LOG_LEVEL_INFO)
+	var physics_logger_script = load("res://addons/openfairway/physics/PhysicsLogger.cs")
+	if physics_logger_script != null:
+		if physics_logger_script.has_method("SetLevel"):
+			physics_logger_script.call("SetLevel", OPENFAIRWAY_LOG_LEVEL_INFO)
+		elif physics_logger_script.has_method("set_level"):
+			physics_logger_script.call("set_level", OPENFAIRWAY_LOG_LEVEL_INFO)
 	load_settings()
 	_setup_audio_players()
 	

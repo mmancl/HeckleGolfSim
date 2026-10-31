@@ -208,6 +208,102 @@ func _initialize() -> void:
 	assert(alice_hbox.get_node_or_null("TeeBadge") != null, "Static TeeBadge must be restored when settings toggled off")
 	print("  PASS: Toggling settings cog OFF successfully restores default clean view.")
 
+	# --- Test 9: Controller Focus Navigation in Settings Mode ---
+	print("\n--- Test 9: Controller Focus Navigation in Settings Mode ---")
+	cp_instance.hud_scorecard.visible = true
+	var scroll_node = cp_instance.hud_scorecard.find_child("ScorecardScroll", true, false) as ScrollContainer
+	assert(scroll_node != null and scroll_node.follow_focus == true, "ScorecardScroll must have follow_focus enabled for controller scrolling")
+
+	# Toggle settings ON again
+	settings_btn.emit_signal("pressed")
+	assert(cp_instance._scorecard_settings_mode == true, "Settings mode must be active")
+	assert(add_section.visible == true, "Add section must be visible")
+
+	# Verify settings cog and hole buttons link DOWN into the player rows
+	assert(not settings_btn.focus_neighbor_bottom.is_empty(), "Settings button must have focus_neighbor_bottom set")
+	var h0_btn = grid.find_child("HoleBtn_0", true, false) as Button
+	assert(h0_btn != null and not h0_btn.focus_neighbor_bottom.is_empty(), "Hole button 0 must have focus_neighbor_bottom set")
+	var top_row_ctrl = cp_instance.get_node_or_null(h0_btn.focus_neighbor_bottom) as Control
+	assert(top_row_ctrl != null and top_row_ctrl.is_visible_in_tree(), "Hole button bottom target must be an active control in the scorecard (was: " + str(h0_btn.focus_neighbor_bottom) + ")")
+
+	# Verify player row controls horizontal wiring
+	grid = cp_instance.scorecard_grid
+	alice_cell = grid.get_child(col_count * 3)
+	alice_hbox = alice_cell.get_child(0) as HBoxContainer
+	var a_tee = alice_hbox.get_node_or_null("TeeOpt") as OptionButton
+	var a_pause = alice_hbox.get_node_or_null("PauseBtn_0") as Button
+	var a_toggle = alice_hbox.get_node_or_null("ToggleBtn_0") as Button
+	assert(a_tee != null and a_pause != null and a_toggle != null, "Alice row must have TeeOpt, PauseBtn_0, ToggleBtn_0")
+	assert(a_tee.focus_neighbor_right == a_tee.get_path_to(a_pause), "TeeOpt right neighbor must point to PauseBtn")
+	assert(a_pause.focus_neighbor_left == a_pause.get_path_to(a_tee), "PauseBtn left neighbor must point to TeeOpt")
+	assert(a_pause.focus_neighbor_right == a_pause.get_path_to(a_toggle), "PauseBtn right neighbor must point to ToggleBtn")
+	assert(a_toggle.focus_neighbor_left == a_toggle.get_path_to(a_pause), "ToggleBtn left neighbor must point to PauseBtn")
+
+	# Verify Add Player section horizontal wiring when NameInput is visible
+	sel_opt = add_section.get_node_or_null("AddRow/PlayerSelectOpt") as OptionButton
+	name_inp = add_section.get_node_or_null("AddRow/NameInput") as LineEdit
+	tee_opt = add_section.get_node_or_null("AddRow/TeeOpt") as OptionButton
+	add_btn = add_section.get_node_or_null("AddRow/AddBtn") as Button
+	assert(sel_opt.selected == 0 and name_inp.visible, "New Golfer mode should show NameInput")
+	assert(sel_opt.focus_neighbor_right == sel_opt.get_path_to(name_inp), "PlayerSelectOpt right neighbor must point to NameInput")
+	assert(name_inp.focus_neighbor_right == name_inp.get_path_to(tee_opt), "NameInput right neighbor must point to TeeOpt")
+	assert(tee_opt.focus_neighbor_right == tee_opt.get_path_to(add_btn), "TeeOpt right neighbor must point to AddBtn")
+	assert(add_btn.focus_neighbor_left == add_btn.get_path_to(tee_opt), "AddBtn left neighbor must point to TeeOpt")
+	assert(tee_opt.focus_neighbor_left == tee_opt.get_path_to(name_inp), "TeeOpt left neighbor must point to NameInput")
+	assert(name_inp.focus_neighbor_left == name_inp.get_path_to(sel_opt), "NameInput left neighbor must point to PlayerSelectOpt")
+
+	# Verify Add Player section vertical wiring to action button
+	var action_btn = cp_instance._scorecard_action_btn
+	assert(action_btn != null, "Scorecard action button must exist")
+	assert(tee_opt.focus_neighbor_bottom == action_btn.get_path(), "Add section controls must navigate down to action_btn")
+	assert(not action_btn.focus_neighbor_top.is_empty(), "action_btn top neighbor must be configured")
+	var action_top_target = cp_instance.get_node_or_null(action_btn.focus_neighbor_top)
+	assert(action_top_target != null and add_section.is_ancestor_of(action_top_target), "action_btn top neighbor must point back into Add Player section in settings mode")
+
+	# Verify dynamic update of horizontal neighbors when switching away from New Golfer
+	sel_opt.add_item("SavedPro", 1)
+	sel_opt.emit_signal("item_selected", 1)
+	assert(name_inp.visible == false, "Selecting saved player must hide NameInput")
+	assert(sel_opt.focus_neighbor_right == sel_opt.get_path_to(tee_opt), "PlayerSelectOpt right neighbor must bypass NameInput and point directly to TeeOpt")
+	assert(tee_opt.focus_neighbor_left == tee_opt.get_path_to(sel_opt), "TeeOpt left neighbor must point directly back to PlayerSelectOpt")
+
+	# Switch back to New Golfer
+	sel_opt.emit_signal("item_selected", 0)
+	assert(name_inp.visible == true, "Selecting New Golfer must restore NameInput")
+	assert(sel_opt.focus_neighbor_right == sel_opt.get_path_to(name_inp), "PlayerSelectOpt right neighbor must restore link to NameInput")
+
+	# Test setting new player's tee color via controller selection
+	var red_idx = -1
+	for t_i in range(tee_opt.item_count):
+		if tee_opt.get_item_text(t_i).to_lower() == "red":
+			red_idx = t_i
+			break
+	if red_idx >= 0:
+		tee_opt.selected = red_idx
+	name_inp.text = "Diana"
+	add_btn.emit_signal("pressed")
+	assert(mp_mgr.players.size() == 4, "Diana must be added")
+	assert(mp_mgr.players[3]["name"] == "Diana", "Fourth player must be Diana")
+	if red_idx >= 0:
+		assert(mp_mgr.players[3]["tee"].to_lower() == "red", "Diana must have Red tee assigned")
+
+	# Test changing an existing player's tee color in settings mode
+	grid = cp_instance.scorecard_grid
+	alice_cell = grid.get_child(col_count * 3)
+	alice_hbox = alice_cell.get_child(0) as HBoxContainer
+	a_tee = alice_hbox.get_node_or_null("TeeOpt") as OptionButton
+	assert(a_tee != null, "Alice TeeOpt must exist")
+	var white_idx = -1
+	for t_i in range(a_tee.item_count):
+		if a_tee.get_item_text(t_i).to_lower() == "white":
+			white_idx = t_i
+			break
+	if white_idx >= 0:
+		a_tee.emit_signal("item_selected", white_idx)
+		assert(mp_mgr.players[0]["tee"].to_lower() == "white", "Alice tee must be updated to White")
+
+	print("  PASS: Controller navigation, focus neighbors, and tee color selection fully verified.")
+
 	print("\n=======================================================")
 	print("ALL COMBINED SCORECARD & PLAYERS MENU TESTS PASSED! 🎉")
 	print("=======================================================\n")

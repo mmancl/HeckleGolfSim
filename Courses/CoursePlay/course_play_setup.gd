@@ -600,19 +600,13 @@ func _on_create_custom_pressed() -> void:
 func _scan_dir(dir_path: String, validated: Array[Dictionary]) -> void:
 	if not DirAccess.dir_exists_absolute(dir_path):
 		return
-	var dir := DirAccess.open(dir_path)
-	if dir == null:
-		return
-	dir.list_dir_begin()
-	var dir_name := dir.get_next()
-	while dir_name != "":
-		if dir.current_is_dir() and not dir_name.begins_with("."):
+	var dir_names := DirAccess.get_directories_at(dir_path)
+	for dir_name in dir_names:
+		if not dir_name.begins_with("."):
 			var result: Dictionary = CourseValidator.validate(dir_path, dir_name)
 			if not result.is_empty():
 				result["dir_name"] = dir_name
 				validated.append(result)
-		dir_name = dir.get_next()
-	dir.list_dir_end()
 
 
 func _on_delete_course_pressed() -> void:
@@ -652,32 +646,15 @@ func _confirm_delete_course(course_dir: String, course_title: String) -> void:
 
 
 func _delete_course_dir(dir_path: String) -> void:
-	var dir := DirAccess.open(dir_path)
-	if dir == null:
-		push_error("[CoursePlaySetup] Failed to open directory for deletion: " + dir_path)
+	if not DirAccess.dir_exists_absolute(dir_path):
 		return
-	
-	dir.list_dir_begin()
-	var file_name := dir.get_next()
-	while file_name != "":
-		var full_path := dir_path.path_join(file_name)
-		if dir.current_is_dir():
-			if not file_name.begins_with("."):
-				_delete_course_dir(full_path)
-		else:
-			var err := dir.remove(file_name)
-			if err != OK:
-				push_error("[CoursePlaySetup] Failed to delete file: " + full_path)
-		file_name = dir.get_next()
-	dir.list_dir_end()
-	
-	# Remove the now-empty directory itself
-	var parent_path := dir_path.get_base_dir()
-	var parent_dir := DirAccess.open(parent_path)
-	if parent_dir != null:
-		var err := parent_dir.remove(dir_path.get_file())
-		if err != OK:
-			push_error("[CoursePlaySetup] Failed to remove directory: " + dir_path)
+	var files := DirAccess.get_files_at(dir_path)
+	for f in files:
+		DirAccess.remove_absolute(dir_path.path_join(f))
+	var subdirs := DirAccess.get_directories_at(dir_path)
+	for d in subdirs:
+		_delete_course_dir(dir_path.path_join(d))
+	DirAccess.remove_absolute(dir_path)
 
 
 func _on_start_pressed() -> void:

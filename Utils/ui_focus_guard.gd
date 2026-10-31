@@ -578,6 +578,19 @@ func _input(event: InputEvent) -> void:
 # ── OPTION BUTTON SIGNAL HOOKING ───────────────────────────────────────
 
 ## Scan the full scene tree for OptionButtons and hook popup signals.
+func scan_and_hook_option_buttons() -> void:
+	_scan_and_hook_option_buttons()
+
+
+func hook_option_button(opt: OptionButton) -> void:
+	if opt == null or not is_instance_valid(opt):
+		return
+	var iid := opt.get_instance_id()
+	if not _hooked_option_buttons.has(iid):
+		_hook_option_button(opt)
+		_hooked_option_buttons[iid] = true
+
+
 func _scan_and_hook_option_buttons() -> void:
 	var root := get_tree().root
 	if root == null:

@@ -150,6 +150,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            OTHER_LDFLAGS='$(inherited) -framework CoreBluetooth' \
             build
 
           APP_DIR=$(find build_output/derived -name "*.app" -type d | head -n 1)

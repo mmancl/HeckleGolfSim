@@ -6798,7 +6798,7 @@ func _on_hole_completed(_scores: Array = []) -> void:
 # GREEN SLOPE GRID & ELEVATION HEATMAP LOGIC
 # ==========================================
 
-func _get_green_triangles(pin_pos: Vector3) -> Array:
+func _get_green_triangles_3d(pin_pos: Vector3) -> Array:
 	var target_entry = _get_green_entry(pin_pos)
 	if not target_entry.is_empty():
 		# Check for CylinderShape3D (island greens)
@@ -6806,15 +6806,15 @@ func _get_green_triangles(pin_pos: Vector3) -> Array:
 			for child in target_entry.body.find_children("*", "CollisionShape3D"):
 				if child is CollisionShape3D and child.shape is CylinderShape3D:
 					var cyl_radius: float = child.shape.radius
-					var center = Vector2(target_entry.body.global_position.x, target_entry.body.global_position.z)
+					var center_3d: Vector3 = target_entry.body.global_position
 					var cyl_tris: Array = []
 					var steps = 48
 					for s in range(steps):
 						var a1 = s * TAU / steps
 						var a2 = (s + 1) * TAU / steps
-						var p1 = center + Vector2(cos(a1), sin(a1)) * cyl_radius
-						var p2 = center + Vector2(cos(a2), sin(a2)) * cyl_radius
-						cyl_tris.append([center, p1, p2])
+						var p1 = center_3d + Vector3(cos(a1) * cyl_radius, 0.0, sin(a1) * cyl_radius)
+						var p2 = center_3d + Vector3(cos(a2) * cyl_radius, 0.0, sin(a2) * cyl_radius)
+						cyl_tris.append([center_3d, p1, p2])
 					return cyl_tris
 
 		if target_entry.has("shapes") and not target_entry.shapes.is_empty():
@@ -6823,14 +6823,10 @@ func _get_green_triangles(pin_pos: Vector3) -> Array:
 			for shape_faces in target_entry.shapes:
 				for i in range(0, shape_faces.size(), 3):
 					if i + 2 < shape_faces.size():
-						var a_3d = trans * shape_faces[i]
-						var b_3d = trans * shape_faces[i+1]
-						var c_3d = trans * shape_faces[i+2]
-						triangles.append([
-							Vector2(a_3d.x, a_3d.z),
-							Vector2(b_3d.x, b_3d.z),
-							Vector2(c_3d.x, c_3d.z)
-						])
+						var a_3d: Vector3 = trans * shape_faces[i]
+						var b_3d: Vector3 = trans * shape_faces[i+1]
+						var c_3d: Vector3 = trans * shape_faces[i+2]
+						triangles.append([a_3d, b_3d, c_3d])
 			if not triangles.is_empty():
 				return triangles
 
@@ -6878,14 +6874,30 @@ func _get_green_triangles(pin_pos: Vector3) -> Array:
 			var verts = child.shape.data
 			for i in range(0, verts.size(), 3):
 				if i + 2 < verts.size():
-					var v0 = closest_green.global_transform * verts[i]
-					var v1 = closest_green.global_transform * verts[i+1]
-					var v2 = closest_green.global_transform * verts[i+2]
-					triangles.append([
-						Vector2(v0.x, v0.z),
-						Vector2(v1.x, v1.z),
-						Vector2(v2.x, v2.z)
-					])
+					var v0: Vector3 = closest_green.global_transform * verts[i]
+					var v1: Vector3 = closest_green.global_transform * verts[i+1]
+					var v2: Vector3 = closest_green.global_transform * verts[i+2]
+					triangles.append([v0, v1, v2])
+		elif child is MeshInstance3D and child.mesh != null:
+			var faces = child.mesh.get_faces()
+			for i in range(0, faces.size(), 3):
+				if i + 2 < faces.size():
+					var v0: Vector3 = closest_green.global_transform * child.transform * faces[i]
+					var v1: Vector3 = closest_green.global_transform * child.transform * faces[i+1]
+					var v2: Vector3 = closest_green.global_transform * child.transform * faces[i+2]
+					triangles.append([v0, v1, v2])
+	return triangles
+
+
+func _get_green_triangles(pin_pos: Vector3) -> Array:
+	var tris_3d = _get_green_triangles_3d(pin_pos)
+	var triangles = []
+	for tri in tris_3d:
+		triangles.append([
+			Vector2(tri[0].x, tri[0].z),
+			Vector2(tri[1].x, tri[1].z),
+			Vector2(tri[2].x, tri[2].z)
+		])
 	return triangles
 
 
@@ -6894,8 +6906,9 @@ func _is_point_in_triangle(p: Vector2, a: Vector2, b: Vector2, c: Vector2) -> bo
 	var d2 = (p.x - c.x) * (b.y - c.y) - (b.x - c.x) * (p.y - c.y)
 	var d3 = (p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y)
 	
-	var has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
-	var has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
+	const EPS = 0.001
+	var has_neg = (d1 < -EPS) or (d2 < -EPS) or (d3 < -EPS)
+	var has_pos = (d1 > EPS) or (d2 > EPS) or (d3 > EPS)
 	
 	return not (has_neg and has_pos)
 
@@ -6981,13 +6994,13 @@ func _update_green_grid_visibility() -> void:
 	var grid_node = get_node_or_null("GreenGridMesh")
 	var dots_node = get_node_or_null("GreenDotsMesh")
 	
-	if heatmap_node == null or grid_node == null or dots_node == null:
+	if heatmap_node == null:
 		return
 		
 	if not show_green_grid:
 		heatmap_node.visible = false
-		grid_node.visible = false
-		dots_node.visible = false
+		if grid_node: grid_node.visible = false
+		if dots_node: dots_node.visible = false
 		return
 		
 	# GreenHeatmapMesh is assigned to visual layer 2.
@@ -7000,8 +7013,8 @@ func _update_green_grid_visibility() -> void:
 	# AerialCamera and MinimapCamera have layer 3 culled (cull_mask & ~4), so aerial and minimap
 	# views only show the heatmap without grid lines or moving directional arrows.
 	var is_near = _is_player_near_green()
-	grid_node.visible = is_near
-	dots_node.visible = is_near
+	if grid_node: grid_node.visible = is_near
+	if dots_node: dots_node.visible = is_near
 
 
 
@@ -7018,13 +7031,25 @@ func _generate_green_grid_and_heatmap() -> void:
 	if pin_pos.is_zero_approx():
 		return
 		
-	var triangles = _get_green_triangles(pin_pos)
-	if triangles.is_empty():
+	var tris_3d = _get_green_triangles_3d(pin_pos)
+	if tris_3d.is_empty():
 		return
 		
-	var verts = get_current_green_vertices()
+	var triangles = []
+	for tri in tris_3d:
+		triangles.append([
+			Vector2(tri[0].x, tri[0].z),
+			Vector2(tri[1].x, tri[1].z),
+			Vector2(tri[2].x, tri[2].z)
+		])
+		
 	var min_y = 999999.0
 	var max_y = -999999.0
+	for tri in tris_3d:
+		for v in tri:
+			if v.y < min_y: min_y = v.y
+			if v.y > max_y: max_y = v.y
+	var verts = get_current_green_vertices()
 	for v in verts:
 		if v.y < min_y: min_y = v.y
 		if v.y > max_y: max_y = v.y
@@ -7032,6 +7057,105 @@ func _generate_green_grid_and_heatmap() -> void:
 	if max_y - min_y < 0.001:
 		max_y = min_y + 1.0
 		
+	var heatmap_y_offset = 0.005
+	var grid_y_offset = 0.008
+	var dot_y_offset = 0.010
+	
+	# Height cache for optimization
+	var height_cache = {}
+	var get_cached_height = func(gx: float, gz: float) -> float:
+		var key = Vector2(gx, gz)
+		if not height_cache.has(key):
+			height_cache[key] = get_height(gx, gz)
+		return height_cache[key]
+
+	# --- 1. GENERATE SMOOTH GREEN HEATMAP MESH ---
+	# Subdivide green geometry so the elevation heatmap perfectly conforms to the true
+	# green boundary and surface curvature without gaps, holes, or jagged block steps.
+	var final_heatmap_tris: Array = []
+	var tri_queue: Array = []
+	for tri in tris_3d:
+		tri_queue.append({"tri": tri, "depth": 0})
+		
+	var max_edge_len: float = 0.75 # Subdivide edges > 0.75m for ultra-smooth slope gradient
+	var max_depth: int = 5
+	
+	while not tri_queue.is_empty():
+		var item = tri_queue.pop_back()
+		var tri = item.tri
+		var depth: int = item.depth
+		
+		var a: Vector3 = tri[0]
+		var b: Vector3 = tri[1]
+		var c: Vector3 = tri[2]
+		
+		var d_ab: float = a.distance_squared_to(b)
+		var d_bc: float = b.distance_squared_to(c)
+		var d_ca: float = c.distance_squared_to(a)
+		var max_d_sq: float = maxf(d_ab, maxf(d_bc, d_ca))
+		
+		if max_d_sq > (max_edge_len * max_edge_len) and depth < max_depth:
+			if d_ab >= d_bc and d_ab >= d_ca:
+				var mid = (a + b) * 0.5
+				if _has_elevation_map:
+					mid.y = sample_elevation(mid.x, mid.z)
+				tri_queue.append({"tri": [a, mid, c], "depth": depth + 1})
+				tri_queue.append({"tri": [mid, b, c], "depth": depth + 1})
+			elif d_bc >= d_ab and d_bc >= d_ca:
+				var mid = (b + c) * 0.5
+				if _has_elevation_map:
+					mid.y = sample_elevation(mid.x, mid.z)
+				tri_queue.append({"tri": [a, b, mid], "depth": depth + 1})
+				tri_queue.append({"tri": [a, mid, c], "depth": depth + 1})
+			else:
+				var mid = (c + a) * 0.5
+				if _has_elevation_map:
+					mid.y = sample_elevation(mid.x, mid.z)
+				tri_queue.append({"tri": [a, b, mid], "depth": depth + 1})
+				tri_queue.append({"tri": [mid, b, c], "depth": depth + 1})
+		else:
+			final_heatmap_tris.append([a, b, c])
+			
+	var st_heatmap = SurfaceTool.new()
+	st_heatmap.begin(Mesh.PRIMITIVE_TRIANGLES)
+	
+	for tri in final_heatmap_tris:
+		var v0: Vector3 = tri[0]
+		var v1: Vector3 = tri[1]
+		var v2: Vector3 = tri[2]
+		
+		var col0 = _get_heatmap_color(clamp((v0.y - min_y) / (max_y - min_y), 0.0, 1.0))
+		var col1 = _get_heatmap_color(clamp((v1.y - min_y) / (max_y - min_y), 0.0, 1.0))
+		var col2 = _get_heatmap_color(clamp((v2.y - min_y) / (max_y - min_y), 0.0, 1.0))
+		
+		var h0 = Vector3(v0.x, v0.y + heatmap_y_offset, v0.z)
+		var h1 = Vector3(v1.x, v1.y + heatmap_y_offset, v1.z)
+		var h2 = Vector3(v2.x, v2.y + heatmap_y_offset, v2.z)
+		
+		st_heatmap.set_color(col0)
+		st_heatmap.add_vertex(h0)
+		st_heatmap.set_color(col1)
+		st_heatmap.add_vertex(h1)
+		st_heatmap.set_color(col2)
+		st_heatmap.add_vertex(h2)
+		
+	var heatmap_mesh = st_heatmap.commit()
+	var heatmap_mi = MeshInstance3D.new()
+	heatmap_mi.name = "GreenHeatmapMesh"
+	heatmap_mi.mesh = heatmap_mesh
+	var mat_hm = StandardMaterial3D.new()
+	mat_hm.vertex_color_use_as_albedo = true
+	mat_hm.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat_hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat_hm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mat_hm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat_hm.render_priority = 1
+	heatmap_mi.material_override = mat_hm
+	heatmap_mi.layers = 2
+	heatmap_mi.visible = false
+	add_child(heatmap_mi)
+
+	# --- 2. GENERATE PUTTING SLOPE GRID & MOVING ARROWS ---
 	var spacing = 1.0
 	var active_cells = {}
 	
@@ -7051,65 +7175,36 @@ func _generate_green_grid_and_heatmap() -> void:
 				var cell_center = Vector2((ix + 0.5) * spacing, (iz + 0.5) * spacing)
 				if _is_point_in_triangle(cell_center, tri[0], tri[1], tri[2]):
 					active_cells[Vector2i(ix, iz)] = true
-					
+				elif not active_cells.has(Vector2i(ix, iz)):
+					var c_min_x = ix * spacing
+					var c_max_x = (ix + 1) * spacing
+					var c_min_z = iz * spacing
+					var c_max_z = (iz + 1) * spacing
+					for v in tri:
+						if v.x >= c_min_x and v.x <= c_max_x and v.y >= c_min_z and v.y <= c_max_z:
+							active_cells[Vector2i(ix, iz)] = true
+							break
+
+	# Fill any isolated 1-cell gaps inside active_cells to keep the grid contiguous
+	var cells_to_fill = []
+	for cell in active_cells.keys():
+		for n in [Vector2i(cell.x + 1, cell.y), Vector2i(cell.x - 1, cell.y), Vector2i(cell.x, cell.y + 1), Vector2i(cell.x, cell.y - 1)]:
+			if not active_cells.has(n) and not cells_to_fill.has(n):
+				var count = 0
+				if active_cells.has(Vector2i(n.x + 1, n.y)): count += 1
+				if active_cells.has(Vector2i(n.x - 1, n.y)): count += 1
+				if active_cells.has(Vector2i(n.x, n.y + 1)): count += 1
+				if active_cells.has(Vector2i(n.x, n.y - 1)): count += 1
+				if count >= 3:
+					cells_to_fill.append(n)
+	for c in cells_to_fill:
+		active_cells[c] = true
+
 	if active_cells.is_empty():
 		return
-		
-	var st_heatmap = SurfaceTool.new()
-	st_heatmap.begin(Mesh.PRIMITIVE_TRIANGLES)
-	
+
 	var st_grid = SurfaceTool.new()
 	st_grid.begin(Mesh.PRIMITIVE_LINES)
-	
-	var heatmap_y_offset = 0.002
-	var grid_y_offset = 0.004
-	var dot_y_offset = 0.006
-	
-	# Height cache for optimization
-	var height_cache = {}
-	var get_cached_height = func(gx: float, gz: float) -> float:
-		var key = Vector2(gx, gz)
-		if not height_cache.has(key):
-			height_cache[key] = get_height(gx, gz)
-		return height_cache[key]
-		
-	for cell in active_cells.keys():
-		var ix = cell.x
-		var iz = cell.y
-		
-		var x0 = ix * spacing
-		var x1 = (ix + 1) * spacing
-		var z0 = iz * spacing
-		var z1 = (iz + 1) * spacing
-		
-		var y00 = get_cached_height.call(x0, z0)
-		var y10 = get_cached_height.call(x1, z0)
-		var y11 = get_cached_height.call(x1, z1)
-		var y01 = get_cached_height.call(x0, z1)
-		
-		var h00 = Vector3(x0, y00 + heatmap_y_offset, z0)
-		var h10 = Vector3(x1, y10 + heatmap_y_offset, z0)
-		var h11 = Vector3(x1, y11 + heatmap_y_offset, z1)
-		var h01 = Vector3(x0, y01 + heatmap_y_offset, z1)
-		
-		var col00 = _get_heatmap_color(clamp((y00 - min_y) / (max_y - min_y), 0.0, 1.0))
-		var col10 = _get_heatmap_color(clamp((y10 - min_y) / (max_y - min_y), 0.0, 1.0))
-		var col11 = _get_heatmap_color(clamp((y11 - min_y) / (max_y - min_y), 0.0, 1.0))
-		var col01 = _get_heatmap_color(clamp((y01 - min_y) / (max_y - min_y), 0.0, 1.0))
-		
-		st_heatmap.set_color(col00)
-		st_heatmap.add_vertex(h00)
-		st_heatmap.set_color(col10)
-		st_heatmap.add_vertex(h10)
-		st_heatmap.set_color(col11)
-		st_heatmap.add_vertex(h11)
-		
-		st_heatmap.set_color(col00)
-		st_heatmap.add_vertex(h00)
-		st_heatmap.set_color(col11)
-		st_heatmap.add_vertex(h11)
-		st_heatmap.set_color(col01)
-		st_heatmap.add_vertex(h01)
 		
 	# Collect unique horizontal and vertical edges to generate slope flow arrows
 	var h_edges = {}
@@ -7208,23 +7303,7 @@ func _generate_green_grid_and_heatmap() -> void:
 					"phase_offset": float(j) / float(dots_per_segment)
 				})
 			
-	var heatmap_mesh = st_heatmap.commit()
 	var grid_mesh = st_grid.commit()
-	
-	var heatmap_mi = MeshInstance3D.new()
-	heatmap_mi.name = "GreenHeatmapMesh"
-	heatmap_mi.mesh = heatmap_mesh
-	var mat_hm = StandardMaterial3D.new()
-	mat_hm.vertex_color_use_as_albedo = true
-	mat_hm.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat_hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat_hm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-	mat_hm.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat_hm.render_priority = 0
-	heatmap_mi.material_override = mat_hm
-	heatmap_mi.layers = 2
-	heatmap_mi.visible = false
-	add_child(heatmap_mi)
 	
 	var grid_mi = MeshInstance3D.new()
 	grid_mi.name = "GreenGridMesh"

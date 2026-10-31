@@ -245,27 +245,8 @@ func _on_delete_course_pressed() -> void:
 
 
 func _delete_course_dir(dir_path: String, course_title: String = "") -> void:
-	var global_path = ProjectSettings.globalize_path(dir_path)
-	var dir = DirAccess.open(dir_path)
-	if dir == null:
-		printerr("[CourseSelector] Failed to open directory for deletion: %s" % dir_path)
-		return
-	
-	# Delete all files in the directory
-	dir.list_dir_begin()
-	var file_name = dir.get_next()
-	while file_name != "":
-		if not dir.current_is_dir():
-			dir.remove(file_name)
-			print("[CourseSelector] Deleted file: %s/%s" % [dir_path, file_name])
-		file_name = dir.get_next()
-	dir.list_dir_end()
-	
-	# Remove the directory itself
-	var parent_dir = DirAccess.open(dir_path.get_base_dir())
-	if parent_dir != null:
-		parent_dir.remove(dir_path.get_file())
-		print("[CourseSelector] Deleted course directory: %s" % dir_path)
+	CourseValidator._delete_dir_recursive(dir_path)
+	print("[CourseSelector] Deleted course directory: %s" % dir_path)
 
 	# Clean up any corresponding geometry cache in user://cached_geometry
 	_delete_user_cached_geometry(dir_path.get_file(), course_title)

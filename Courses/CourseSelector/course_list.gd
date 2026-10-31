@@ -49,20 +49,13 @@ func set_filter_mode(mode: String) -> void:
 func _scan_dir(dir_path: String, validated: Array[Dictionary]) -> void:
 	if not DirAccess.dir_exists_absolute(dir_path):
 		return
-	var dir := DirAccess.open(dir_path)
-	if dir == null:
-		return
-
-	dir.list_dir_begin()
-	var dir_name := dir.get_next()
-	while dir_name != "":
-		if dir.current_is_dir() and not dir_name.begins_with("."):
+	var dir_names := DirAccess.get_directories_at(dir_path)
+	for dir_name in dir_names:
+		if not dir_name.begins_with("."):
 			var result: Dictionary = CourseValidator.validate(dir_path, dir_name)
 			if not result.is_empty():
 				result["dir_name"] = dir_name
 				validated.append(result)
-		dir_name = dir.get_next()
-	dir.list_dir_end()
 
 
 ## Normalize a reload request and return a status string.

@@ -55,17 +55,16 @@ func _ready() -> void:
 	_connect_settings()
 	_connect_launch_monitor()
 	_connect_event_bus()
-	_wipe_log_on_startup()
+	_rotate_log_on_startup()
 	_sync_state_from_settings()
 
 
-func _wipe_log_on_startup() -> void:
-	var path_to_wipe := get_effective_log_path()
-	var resolved := ProjectSettings.globalize_path(path_to_wipe)
+func _rotate_log_on_startup() -> void:
+	var path_to_rotate := get_effective_log_path()
+	var resolved := ProjectSettings.globalize_path(path_to_rotate)
 	if FileAccess.file_exists(resolved):
-		var f := FileAccess.open(resolved, FileAccess.WRITE)
-		if f != null:
-			f.close()
+		var prev_path := resolved + ".previous"
+		DirAccess.copy_absolute(resolved, prev_path)
 
 
 func _process(delta: float) -> void:
@@ -224,7 +223,12 @@ func start_logging(target_path: String = "") -> void:
 	if not dir_path.is_empty() and not DirAccess.dir_exists_absolute(dir_path):
 		DirAccess.make_dir_recursive_absolute(dir_path)
 
-	# Always wipe / truncate log file on fresh session to prevent it from growing unreasonably large
+	# Rotate previous session log to .previous before opening fresh file
+	if FileAccess.file_exists(resolved_path):
+		var prev_path := resolved_path + ".previous"
+		DirAccess.copy_absolute(resolved_path, prev_path)
+
+	# Open fresh session log file
 	_file = FileAccess.open(resolved_path, FileAccess.WRITE)
 
 	if _file == null:

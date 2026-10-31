@@ -28,7 +28,7 @@ static func validate(course_dir: String, dir_name: String) -> Dictionary:
 
 	var title := _extract_title(parsed, dir_name)
 	var scene_path := "%s/%s/%s" % [course_dir, dir_name, COURSE_SCENE_FILE]
-	if not FileAccess.file_exists(scene_path):
+	if not ResourceLoader.exists(scene_path) and not FileAccess.file_exists(scene_path) and not FileAccess.file_exists(scene_path + ".remap"):
 		if dir_name.begins_with("custom_") and course_dir.begins_with("user://"):
 			print("[CourseValidator] Cleaning up incomplete custom course folder: %s" % dir_name)
 			_delete_dir_recursive(course_dir.path_join(dir_name))
@@ -43,28 +43,13 @@ static func validate(course_dir: String, dir_name: String) -> Dictionary:
 static func _delete_dir_recursive(path: String) -> void:
 	if not DirAccess.dir_exists_absolute(path):
 		return
-	var dir = DirAccess.open(path)
-	if dir != null:
-		var files_to_delete: Array[String] = []
-		var subdirs_to_delete: Array[String] = []
-		dir.list_dir_begin()
-		var file_name = dir.get_next()
-		while file_name != "":
-			if not file_name.begins_with("."):
-				if dir.current_is_dir():
-					subdirs_to_delete.append(path.path_join(file_name))
-				else:
-					files_to_delete.append(path.path_join(file_name))
-			file_name = dir.get_next()
-		dir.list_dir_end()
-		dir = null
-
-		for f in files_to_delete:
-			DirAccess.remove_absolute(f)
-		for d in subdirs_to_delete:
-			_delete_dir_recursive(d)
-
-		DirAccess.remove_absolute(path)
+	var files := DirAccess.get_files_at(path)
+	for f in files:
+		DirAccess.remove_absolute(path.path_join(f))
+	var subdirs := DirAccess.get_directories_at(path)
+	for d in subdirs:
+		_delete_dir_recursive(path.path_join(d))
+	DirAccess.remove_absolute(path)
 
 
 static func _extract_title(parsed: Dictionary, dir_name: String) -> String:
