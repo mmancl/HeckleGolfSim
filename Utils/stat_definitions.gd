@@ -211,7 +211,7 @@ const STATS: Array[Dictionary] = [
 	},
 	{
 		"id": "FaceToPath",
-		"short_label": "Face-Path",
+		"short_label": "Face to Path",
 		"name": "Face to Path",
 		"category": "Club Delivery",
 		"description": "The angle difference between the club face angle and the swing path (Face Angle minus Club Path). Directly dictates ball curvature and spin axis.",
@@ -255,7 +255,7 @@ const STATS: Array[Dictionary] = [
 	},
 	{
 		"id": "SmashFactor",
-		"short_label": "Smash",
+		"short_label": "Smash Factor",
 		"name": "Smash Factor",
 		"category": "Club Delivery",
 		"description": "Energy transfer efficiency from clubhead to ball, calculated as Ball Speed divided by Clubhead Speed (1.45 - 1.50 is optimal for Driver).",

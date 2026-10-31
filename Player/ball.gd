@@ -2247,6 +2247,29 @@ func _calc_is_position_on_green(pos: Vector3) -> bool:
 				return true
 	return false
 
+var _cached_is_pos_on_fairway_pos: Vector3 = Vector3.INF
+var _cached_is_pos_on_fairway_res: bool = false
+
+func _is_position_on_fairway(pos: Vector3) -> bool:
+	if pos.is_equal_approx(_cached_is_pos_on_fairway_pos):
+		return _cached_is_pos_on_fairway_res
+	_cached_is_pos_on_fairway_pos = pos
+	_cached_is_pos_on_fairway_res = _calc_is_position_on_fairway(pos)
+	return _cached_is_pos_on_fairway_res
+
+func _calc_is_position_on_fairway(pos: Vector3) -> bool:
+	var course = null
+	var player_parent = get_parent()
+	if player_parent != null:
+		course = player_parent.get_parent()
+	if course == null or not course.has_method("is_point_in_fairway"):
+		var root = get_tree().current_scene if (is_inside_tree() and get_tree() != null) else null
+		if root != null and root.has_method("is_point_in_fairway"):
+			course = root
+	if course != null and course.has_method("is_point_in_fairway"):
+		return bool(course.call("is_point_in_fairway", Vector2(pos.x, pos.z)))
+	return false
+
 
 func _has_course_green_geometry() -> bool:
 	var course = null
@@ -2780,12 +2803,13 @@ func _update_surface_from_collider(collider: Object) -> void:
 	var name_lower = collider.name.to_lower()
 	var on_wrong_green = _is_position_on_wrong_green(global_position)
 	var on_green_geo = (not on_wrong_green) and _is_position_on_green(global_position)
+	var on_fairway_geo = (not on_wrong_green) and (not on_green_geo) and _is_position_on_fairway(global_position)
 	var is_sand = (collider.has_meta("is_sand") and bool(collider.get_meta("is_sand"))) or name_lower.contains("bunker") or name_lower.contains("sand") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.BUNKER)
 	var is_green = (not on_wrong_green) and (on_green_geo or name_lower.contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.GREEN))
 	var is_cart_path = (collider.has_meta("is_cart_path") and bool(collider.get_meta("is_cart_path"))) or name_lower.contains("cartpath")
 	var is_tee = name_lower.contains("tee")
-	var is_fairway = on_wrong_green or name_lower.contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.FAIRWAY)
-	var is_rough = (not on_wrong_green) and (not on_green_geo) and (name_lower.contains("rough") or name_lower.contains("terrain") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.ROUGH))
+	var is_fairway = on_wrong_green or on_fairway_geo or name_lower.contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.FAIRWAY)
+	var is_rough = (not on_wrong_green) and (not on_green_geo) and (not on_fairway_geo) and (name_lower.contains("rough") or name_lower.contains("terrain") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.ROUGH))
 
 	var changed_sand = (is_in_sand != is_sand)
 	is_in_sand = is_sand
@@ -2951,6 +2975,7 @@ func _update_surface_from_underneath() -> void:
 			break
 
 	var on_green_geo = _is_position_on_green(global_position)
+	var on_fairway_geo = (not _is_position_on_wrong_green(global_position)) and (not on_green_geo) and _is_position_on_fairway(global_position)
 
 	if hit_colliders.is_empty():
 		var has_green_geo := _has_course_green_geometry()
@@ -2990,6 +3015,18 @@ func _update_surface_from_underneath() -> void:
 				_apply_surface_params()
 			return
 
+		# Check if on fairway
+		if on_fairway_geo:
+			is_in_water = false
+			water_collider = null
+			var changed_sand = is_in_sand
+			is_in_sand = false
+			set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
+			lie_type = "fairway"
+			if changed_sand:
+				_apply_surface_params()
+			return
+
 		# If the ray hit nothing specific, we are on the base rough terrain!
 		is_in_water = false
 		water_collider = null
@@ -3023,10 +3060,10 @@ func _update_surface_from_underneath() -> void:
 		elif collider.name.to_lower().contains("tee"):
 			priority = 3
 		# 5. Check for fairway
-		elif _is_position_on_wrong_green(global_position) or collider.name.to_lower().contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.FAIRWAY):
+		elif _is_position_on_wrong_green(global_position) or on_fairway_geo or collider.name.to_lower().contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.FAIRWAY):
 			priority = 2
 		# 6. Check for rough
-		elif collider.name.to_lower().contains("rough") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.ROUGH):
+		elif (not on_fairway_geo) and (collider.name.to_lower().contains("rough") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.ROUGH)):
 			priority = 1
 		else:
 			# Unknown/default priority

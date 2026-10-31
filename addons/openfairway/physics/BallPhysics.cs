@@ -310,7 +310,7 @@ public partial class BallPhysics : RefCounted
         // Apply unconditionally stable analytical exponential decay for grass viscosity when on ground
         if (onGround && parameters != null && parameters.GrassViscosity > 0.0f)
         {
-            float decayRate = (6.0f * Mathf.Pi * parameters.GrassViscosity * RADIUS) / MOMENT_OF_INERTIA;
+            float decayRate = (6.0f * Mathf.Pi * parameters.GrassViscosity * RADIUS * RADIUS * RADIUS) / MOMENT_OF_INERTIA;
             if (parameters.SpinbackResponseScale > 1.0f && omega.Length() > 7000.0f * ShotSetup.RAD_PER_RPM)
             {
                 decayRate *= 0.12f;

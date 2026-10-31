@@ -124,6 +124,12 @@ public partial class BounceCalculator : RefCounted
             float impactSpeed = vel.Length();
             bool hasSpinbackSurface = parameters.SpinbackThetaBoostMax > 0.0f || parameters.SpinbackResponseScale > 1.0f;
             float effectiveCriticalAngle = GetEffectiveCriticalAngle(parameters, currentSpinRpm, impactSpeed, currentState);
+            if (parameters != null && parameters.InitialLaunchAngleDeg < 11.5f && impactSpeed > 20.0f && !hasSpinbackSurface)
+            {
+                // Low launch high speed shots (stingers, punches) skip off turf with extended critical angle up to ~35°
+                float lowLaunchAngleBoost = Mathf.DegToRad(Mathf.Lerp(20.0f, 0.0f, Mathf.Clamp(parameters.InitialLaunchAngleDeg / 11.5f, 0.0f, 1.0f)));
+                effectiveCriticalAngle += lowLaunchAngleBoost;
+            }
             float impactAngleDeg = Mathf.RadToDeg(impactAngle);
             float criticalAngleDeg = Mathf.RadToDeg(effectiveCriticalAngle);
             bool isSteepImpact = impactAngle >= effectiveCriticalAngle;
@@ -142,10 +148,11 @@ public partial class BounceCalculator : RefCounted
                         : 0.0f;
                     float baseRetention = Mathf.Lerp(bp.ShallowImpactRetentionMin, bp.ShallowImpactRetentionMax, 1.0f - angleRatio);
 
-                    if (parameters != null && parameters.InitialLaunchAngleDeg < 12.0f)
+                    if (parameters != null && parameters.InitialLaunchAngleDeg < 11.5f)
                     {
-                        float vlaFactor = Mathf.Clamp(parameters.InitialLaunchAngleDeg / 12.0f, 0.80f, 1.0f);
-                        baseRetention *= vlaFactor;
+                        // Low launch angle shots (stingers, worm burners) skip cleanly off turf with high retention
+                        float lowLaunchSkipBoost = Mathf.Lerp(1.22f, 1.0f, Mathf.Clamp(parameters.InitialLaunchAngleDeg / 11.5f, 0.0f, 1.0f));
+                        baseRetention = Mathf.Min(0.84f, baseRetention * lowLaunchSkipBoost);
                     }
 
                     newTangentSpeed = speedTangent * baseRetention * lowEnergyScale;
@@ -168,7 +175,8 @@ public partial class BounceCalculator : RefCounted
                 {
                     steepDamping = Mathf.Clamp(1.0f - (impactAngleDeg - 45.0f) * 0.015f, 0.65f, 1.0f);
                 }
-                float spinbackTerm = 2.0f * BallPhysics.RADIUS * omegaTangentMagnitude * Mathf.Max(parameters.SpinbackResponseScale, 0.0f) / 7.0f;
+                float spinbackScale = hasSpinbackSurface ? parameters.SpinbackResponseScale : (parameters.SpinbackResponseScale * 0.75f);
+                float spinbackTerm = 2.0f * BallPhysics.RADIUS * omegaTangentMagnitude * Mathf.Max(spinbackScale, 0.0f) / 7.0f;
                 float rawNewTangentSpeed = (speedTangent * bp.FlightTangentialRetentionBase * steepDamping) - spinbackTerm;
                 newTangentSpeed = rawNewTangentSpeed;
 
@@ -218,26 +226,26 @@ public partial class BounceCalculator : RefCounted
                 float spinScaleFactor;
                 if (activeBackspinRpm <= 3900.0f)
                 {
-                    spinScaleFactor = Mathf.Lerp(0.50f, 0.65f, (activeBackspinRpm - 3800.0f) / 100.0f);
+                    spinScaleFactor = Mathf.Lerp(0.06f, 0.12f, (activeBackspinRpm - 3800.0f) / 100.0f);
                 }
                 else if (activeBackspinRpm <= 4500.0f)
                 {
                     // ~9,500 - 10,500 RPM launch
-                    spinScaleFactor = Mathf.Lerp(0.65f, 0.95f, (activeBackspinRpm - 3900.0f) / 600.0f);
+                    spinScaleFactor = Mathf.Lerp(0.12f, 0.18f, (activeBackspinRpm - 3900.0f) / 600.0f);
                 }
                 else if (activeBackspinRpm <= 5200.0f)
                 {
                     // ~10,500 - 11,500 RPM launch
-                    spinScaleFactor = Mathf.Lerp(0.95f, 1.35f, (activeBackspinRpm - 4500.0f) / 700.0f);
+                    spinScaleFactor = Mathf.Lerp(0.18f, 0.24f, (activeBackspinRpm - 4500.0f) / 700.0f);
                 }
                 else
                 {
                     // >= 12,000 RPM launch
-                    spinScaleFactor = Mathf.Lerp(1.35f, 2.00f, Mathf.Clamp((activeBackspinRpm - 5200.0f) / 1000.0f, 0.0f, 1.0f));
+                    spinScaleFactor = Mathf.Lerp(0.24f, 0.30f, Mathf.Clamp((activeBackspinRpm - 5200.0f) / 1000.0f, 0.0f, 1.0f));
                 }
 
                 float maxReverseSpeed = -spinScaleFactor;
-                float rolloutSpinbackTerm = (2.0f / 7.0f) * BallPhysics.RADIUS * activeBackspinRad * 0.40f * Mathf.Max(parameters.SpinbackResponseScale, 0.5f);
+                float rolloutSpinbackTerm = (2.0f / 7.0f) * BallPhysics.RADIUS * activeBackspinRad * 0.05f * Mathf.Max(parameters.SpinbackResponseScale, 0.5f);
                 newTangentSpeed = (speedTangent * tangentialRetention) - rolloutSpinbackTerm;
                 newTangentSpeed = Mathf.Max(maxReverseSpeed, newTangentSpeed);
                 PhysicsLogger.Verbose($"  Rollout Bounce Spinback: backspin={activeBackspinRpm:F0} rpm, maxRev={maxReverseSpeed:F2}, newTangentSpeed={newTangentSpeed:F2} m/s");

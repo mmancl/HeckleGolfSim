@@ -1175,17 +1175,27 @@ func _email_player_stats(player: Dictionary, match_data: Dictionary) -> void:
 
 # ── Shot Review helpers ────────────────────────────────────────────────────────
 
+func _is_in_progress_current_hole(match_data: Dictionary, hole_id: String) -> bool:
+	if match_data.is_empty() or match_data.get("is_finished", false):
+		return false
+	var current_hole_idx: int = int(round(float(match_data.get("current_hole_index", -1))))
+	var hole_ids: Array = _get_match_hole_ids(match_data)
+	return current_hole_idx >= 0 and current_hole_idx < hole_ids.size() and hole_ids[current_hole_idx] == hole_id
+
+
 func _history_hole_has_shot_data(match_data: Dictionary, hole_id: String) -> bool:
 	var players_list: Array = match_data.get("players", [])
+	var is_current: bool = _is_in_progress_current_hole(match_data, hole_id)
 	for p in players_list:
 		var player_stats = p.get("shot_stats", {})
 		if typeof(player_stats) == TYPE_DICTIONARY and player_stats.has(hole_id):
 			var shots = player_stats[hole_id]
 			if typeof(shots) == TYPE_ARRAY and not shots.is_empty():
 				return true
-		var shot_history = p.get("shot_history", [])
-		if typeof(shot_history) == TYPE_ARRAY and not shot_history.is_empty():
-			return true
+		if is_current:
+			var shot_history = p.get("shot_history", [])
+			if typeof(shot_history) == TYPE_ARRAY and not shot_history.is_empty():
+				return true
 	return false
 
 
@@ -1273,7 +1283,7 @@ func _populate_history_shot_review(container: VBoxContainer, hole_id: String, ma
 	# Shared shot positions across all players
 	var shared_shot_positions: Array[Vector3] = []
 	for p_entry in player_order:
-		shared_shot_positions.append_array(_get_history_hole_shot_positions(p_entry["player"], hole_id, tee_boxes))
+		shared_shot_positions.append_array(_get_history_hole_shot_positions(p_entry["player"], hole_id, tee_boxes, match_data))
 
 	# Section Header for Shot Review (matching CoursePlay exactly)
 	var header_box = VBoxContainer.new()
@@ -1323,7 +1333,7 @@ func _populate_history_shot_review(container: VBoxContainer, hole_id: String, ma
 
 	for rank in range(player_order.size()):
 		var player: Dictionary = player_order[rank]["player"]
-		var positions := _get_history_hole_shot_positions(player, hole_id, tee_boxes)
+		var positions := _get_history_hole_shot_positions(player, hole_id, tee_boxes, match_data)
 
 		var shot_distances: Array[int] = []
 		for shot_index in range(maxi(0, positions.size() - 1)):
@@ -1362,8 +1372,12 @@ func _populate_history_shot_review(container: VBoxContainer, hole_id: String, ma
 		player_card.add_child(player_row)
 
 		var score_label = Label.new()
-		var score_text = "No score" if player_order[rank]["score"] == 2147483647 else "%d strokes" % player_order[rank]["score"]
-		score_label.text = "%d. %s — %s · %d shots" % [rank + 1, player.get("name", "Player"), score_text, shot_distances.size()]
+		var has_score = (player_order[rank]["score"] != 2147483647)
+		var score_text = "%d strokes" % player_order[rank]["score"] if has_score else "No score"
+		if not has_score and shot_distances.is_empty():
+			score_label.text = "%d. %s — Not played" % [rank + 1, player.get("name", "Player")]
+		else:
+			score_label.text = "%d. %s — %s · %d shots" % [rank + 1, player.get("name", "Player"), score_text, shot_distances.size()]
 		score_label.add_theme_font_size_override("font_size", 17)
 		score_label.add_theme_color_override("font_color", Color.WHITE)
 		player_row.add_child(score_label)
@@ -1385,7 +1399,10 @@ func _populate_history_shot_review(container: VBoxContainer, hole_id: String, ma
 			no_shots_panel.add_theme_stylebox_override("panel", no_shots_style)
 
 			var no_shots_label = Label.new()
-			no_shots_label.text = "No shots recorded for Hole %s" % h_num
+			if not has_score:
+				no_shots_label.text = "Hole %s has not been played" % h_num
+			else:
+				no_shots_label.text = "No shots recorded for Hole %s" % h_num
 			no_shots_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			no_shots_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 			no_shots_label.add_theme_color_override("font_color", Color(0.70, 0.75, 0.85))
@@ -1427,7 +1444,7 @@ func _populate_history_shot_review(container: VBoxContainer, hole_id: String, ma
 		player_cards.add_child(player_card)
 
 
-func _get_history_hole_shot_positions(player: Dictionary, hole_id: String, tee_boxes: Dictionary) -> Array[Vector3]:
+func _get_history_hole_shot_positions(player: Dictionary, hole_id: String, tee_boxes: Dictionary, match_data: Dictionary = {}) -> Array[Vector3]:
 	# Pull shot_stats for the given hole (restored from JSON - positions are Vector3 after deserialization)
 	var shot_stats: Array = []
 	var player_stats = player.get("shot_stats", {})
@@ -1443,8 +1460,8 @@ func _get_history_hole_shot_positions(player: Dictionary, hole_id: String, tee_b
 	if tee_position.size() >= 2:
 		fallback_positions.append(Vector3(float(tee_position[0]), 0.0, float(tee_position[1])))
 
-	# Also check shot_history if shot_stats is empty
-	if shot_stats.is_empty():
+	# Also check shot_history ONLY if shot_stats is empty AND this hole is the active in-progress hole of an unfinished match
+	if shot_stats.is_empty() and not match_data.is_empty() and _is_in_progress_current_hole(match_data, hole_id):
 		var shot_history = player.get("shot_history", [])
 		if typeof(shot_history) == TYPE_ARRAY:
 			for pos in shot_history:

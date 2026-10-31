@@ -279,6 +279,8 @@ jobs:
               if [ -f "${target_bin}.sim" ]; then
                 mv -f "${target_bin}.sim" "$target_bin"
                 chmod +x "$target_bin"
+                codesign --remove-signature "$target_bin" 2>/dev/null || true
+                codesign --force --sign - --timestamp=none "$target_bin" 2>/dev/null || true
               fi
             fi
           }
@@ -303,9 +305,24 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :DTPlatformName iphonesimulator" "$APP_SIM_DIR/Info.plist" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Add :DTPlatformName string iphonesimulator" "$APP_SIM_DIR/Info.plist" 2>/dev/null || true
 
-          # 4. Ad-hoc codesign modified bundle
-          echo "Ad-hoc codesigning simulator bundle..."
-          codesign --force --deep --sign - "$APP_SIM_DIR"
+          # 4. Inside-out ad-hoc codesigning for simulator bundle and all embedded frameworks
+          echo "Ad-hoc codesigning simulator frameworks and libraries inside-out..."
+          if [ -d "$APP_SIM_DIR/Frameworks" ]; then
+            find "$APP_SIM_DIR/Frameworks" -type d -name "*.framework" | while read -r fw; do
+              echo "Codesigning framework bundle: $fw"
+              codesign --force --sign - --timestamp=none "$fw" || true
+            done
+            find "$APP_SIM_DIR/Frameworks" -type f -name "*.dylib" | while read -r dylib; do
+              echo "Codesigning dynamic library: $dylib"
+              codesign --force --sign - --timestamp=none "$dylib" || true
+            done
+          fi
+
+          echo "Codesigning main simulator application bundle..."
+          codesign --force --sign - --timestamp=none "$APP_SIM_DIR"
+
+          echo "Verifying code signatures..."
+          codesign --verify --deep --strict --verbose=2 "$APP_SIM_DIR" || true
 
           # 5. Package into .zip with .app directly at archive root for Appetize.io
           SIM_ZIP_PATH="$GITHUB_WORKSPACE/dist/HeckleGolfSim-v${VERSION}-Appetize-Simulator.zip"

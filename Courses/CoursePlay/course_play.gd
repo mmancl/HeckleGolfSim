@@ -6395,8 +6395,12 @@ func _populate_hole_shot_summary(action_type: String) -> void:
 		player_card.add_child(player_row)
 
 		var score_label = Label.new()
-		var score_text = "No score" if player_order[rank]["score"] == 2147483647 else "%d strokes" % player_order[rank]["score"]
-		score_label.text = "%d. %s — %s · %d shots" % [rank + 1, player.get("name", "Player"), score_text, shot_distances.size()]
+		var has_score = (player_order[rank]["score"] != 2147483647)
+		var score_text = "%d strokes" % player_order[rank]["score"] if has_score else "No score"
+		if not has_score and shot_distances.is_empty():
+			score_label.text = "%d. %s — Not played" % [rank + 1, player.get("name", "Player")]
+		else:
+			score_label.text = "%d. %s — %s · %d shots" % [rank + 1, player.get("name", "Player"), score_text, shot_distances.size()]
 		score_label.add_theme_font_size_override("font_size", 17)
 		score_label.add_theme_color_override("font_color", Color.WHITE)
 		player_row.add_child(score_label)
@@ -6418,7 +6422,10 @@ func _populate_hole_shot_summary(action_type: String) -> void:
 			no_shots_panel.add_theme_stylebox_override("panel", no_shots_style)
 			
 			var no_shots_label = Label.new()
-			no_shots_label.text = "No shots recorded for Hole %s" % active_hole_num
+			if not has_score:
+				no_shots_label.text = "Hole %s has not been played" % active_hole_num
+			else:
+				no_shots_label.text = "No shots recorded for Hole %s" % active_hole_num
 			no_shots_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			no_shots_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 			no_shots_label.add_theme_color_override("font_color", Color(0.70, 0.75, 0.85))

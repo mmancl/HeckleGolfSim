@@ -11,14 +11,14 @@ public sealed class RolloutProfile
     public float ChipVelocityScaleMax { get; init; } = 0.87f;
 
     // --- Spin thresholds ---
-    public float LowSpinThreshold { get; init; } = 2175.0f;
-    public float MidSpinThreshold { get; init; } = 3125.0f;
+    public float LowSpinThreshold { get; init; } = 2500.0f;
+    public float MidSpinThreshold { get; init; } = 3600.0f;
 
     // --- Spin friction multipliers ---
     public float LowSpinMultiplierMax { get; init; } = 1.15f;
-    public float MidSpinMultiplierMax { get; init; } = 2.05f;
+    public float MidSpinMultiplierMax { get; init; } = 1.95f;
     public float HighSpinMultiplierMax { get; init; } = 2.50f;
-    public float HighSpinRampRange { get; init; } = 1500.0f;
+    public float HighSpinRampRange { get; init; } = 1800.0f;
 
     // --- Friction blending ---
     public float FrictionBlendSpeed { get; init; } = 15.0f;

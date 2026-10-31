@@ -1081,7 +1081,9 @@ func _create_telemetry_panel() -> PanelContainer:
 		var sf = float(smash_val)
 		if sf > 0.05:
 			var sf_col = Color(0.35, 0.95, 0.6) if sf >= 1.45 else (Color(1.0, 0.8, 0.3) if sf >= 1.35 else Color(1.0, 0.4, 0.4))
-			flow.add_child(_create_stat_card("SMASH", str(smash_val), sf_col))
+			var is_comp: bool = (shot_data.has("_computed_stats") and "SmashFactor" in shot_data["_computed_stats"])
+			var smash_title = "* SMASH *" if is_comp else "SMASH"
+			flow.add_child(_create_stat_card(smash_title, str(smash_val), sf_col))
 	# AoA
 	if str(aoa_val) != "" and str(aoa_val) != "---" and str(aoa_val) != "N/A":
 		var aoa_num = float(str(aoa_val).replace("+", "").replace("°", ""))

@@ -846,6 +846,14 @@ func set_data(data: Dictionary, is_final_rest: bool = false) -> void:
 				var u_str: String = str(stat_def.get("units_imperial" if is_imperial else "units_metric", ""))
 				child.call("set_units", u_str)
 
+			var base_label: String = str(stat_def.get("short_label", stat_id))
+			var is_computed: bool = false
+			if has_shot:
+				if data.has("_computed_stats") and data["_computed_stats"] is Array:
+					is_computed = stat_id in data["_computed_stats"]
+				else:
+					is_computed = _is_stat_computed_from_dict(stat_id, data)
+
 			var val = null
 			if data.has(stat_id):
 				val = data[stat_id]
@@ -863,11 +871,39 @@ func set_data(data: Dictionary, is_final_rest: bool = false) -> void:
 			if has_shot:
 				var is_dynamic: bool = StatDefinitions.is_dynamic_stat(stat_id)
 				if val == null:
+					if not is_final_rest and "data" in child and str(child.data) != "---" and str(child.data) != "":
+						continue
 					if stat_id == "SmashFactor":
 						var b_spd = _get_dict_metric_float(data, ["Speed", "BallSpeed"])
 						var c_spd = _get_dict_metric_float(data, ["ClubSpeed"])
-						if b_spd > 0.0 and c_spd > 0.0:
+						if b_spd > 0.0 and c_spd > 0.0 and _has_valid_dict_metric(data, ["ClubSpeed"]):
 							val = "%.2f" % (b_spd / c_spd)
+							is_computed = true
+						else:
+							val = "N/A"
+					elif stat_id == "FaceToPath":
+						var has_fa = _has_valid_dict_metric(data, ["FaceAngle", "ClubFaceAngle", "FaceToTarget", "RawFaceAngle"])
+						var has_cp = _has_valid_dict_metric(data, ["ClubPath", "Path", "RawClubPath"])
+						if has_fa and has_cp:
+							var fa = _get_dict_angle_float(data, ["FaceAngle", "ClubFaceAngle", "FaceToTarget", "RawFaceAngle"])
+							var cp = _get_dict_angle_float(data, ["ClubPath", "Path", "RawClubPath"])
+							var ftp = fa - cp
+							if absf(ftp) < 0.1:
+								val = "0.0 Sq"
+							elif ftp > 0.0:
+								val = "%.1f O" % ftp
+							else:
+								val = "%.1f C" % absf(ftp)
+							is_computed = true
+						else:
+							val = "N/A"
+					elif stat_id == "ClubSpeed":
+						var b_spd = _get_dict_metric_float(data, ["Speed", "BallSpeed"])
+						var sf = _get_dict_metric_float(data, ["SmashFactor"])
+						if b_spd > 0.0 and sf > 0.05 and _has_valid_dict_metric(data, ["SmashFactor"]):
+							var cs = b_spd / sf
+							val = "%.1f" % cs if is_imperial else "%.1f" % (cs * 0.44704)
+							is_computed = true
 						else:
 							val = "N/A"
 					elif not is_dynamic:
@@ -884,17 +920,44 @@ func set_data(data: Dictionary, is_final_rest: bool = false) -> void:
 						if str_v in ["0", "0.0", "0.00", "---", "N/A"]:
 							var b_spd = _get_dict_metric_float(data, ["Speed", "BallSpeed"])
 							var c_spd = _get_dict_metric_float(data, ["ClubSpeed"])
-							if b_spd > 0.0 and c_spd > 0.0:
+							if b_spd > 0.0 and c_spd > 0.0 and _has_valid_dict_metric(data, ["ClubSpeed"]):
 								val = "%.2f" % (b_spd / c_spd)
+								is_computed = true
 							else:
 								val = "N/A"
 						elif str_v.is_valid_float() and float(str_v) <= 0.05:
 							val = "N/A"
+					elif stat_id == "FaceToPath":
+						if str_v in ["---", "N/A"]:
+							var has_fa = _has_valid_dict_metric(data, ["FaceAngle", "ClubFaceAngle", "FaceToTarget", "RawFaceAngle"])
+							var has_cp = _has_valid_dict_metric(data, ["ClubPath", "Path", "RawClubPath"])
+							if has_fa and has_cp:
+								var fa = _get_dict_angle_float(data, ["FaceAngle", "ClubFaceAngle", "FaceToTarget", "RawFaceAngle"])
+								var cp = _get_dict_angle_float(data, ["ClubPath", "Path", "RawClubPath"])
+								var ftp = fa - cp
+								if absf(ftp) < 0.1:
+									val = "0.0 Sq"
+								elif ftp > 0.0:
+									val = "%.1f O" % ftp
+								else:
+									val = "%.1f C" % absf(ftp)
+								is_computed = true
+							else:
+								val = "N/A"
 					elif stat_id == "AttackAngle" or stat_id == "AngleOfAttack":
 						if str_v in ["0", "0.0", "+0.0", "-0.0", "---", "N/A"] or (str_v.is_valid_float() and absf(float(str_v)) < 0.001):
 							val = "N/A"
 					elif stat_id == "ClubSpeed":
-						if str_v in ["0", "0.0", "---", "N/A"] or (str_v.is_valid_float() and float(str_v) <= 0.01):
+						if str_v in ["0", "0.0", "---", "N/A"]:
+							var b_spd = _get_dict_metric_float(data, ["Speed", "BallSpeed"])
+							var sf = _get_dict_metric_float(data, ["SmashFactor"])
+							if b_spd > 0.0 and sf > 0.05 and _has_valid_dict_metric(data, ["SmashFactor"]):
+								var cs = b_spd / sf
+								val = "%.1f" % cs if is_imperial else "%.1f" % (cs * 0.44704)
+								is_computed = true
+							else:
+								val = "N/A"
+						elif str_v.is_valid_float() and float(str_v) <= 0.01:
 							val = "N/A"
 					elif stat_id == "DynamicLoft":
 						if str_v in ["0", "0.0", "---", "N/A"] or (str_v.is_valid_float() and float(str_v) <= 0.01):
@@ -910,8 +973,15 @@ func set_data(data: Dictionary, is_final_rest: bool = false) -> void:
 				val = _format_angle(val)
 			elif stat_id == "ClubPath":
 				val = _format_club_path(val)
+			elif stat_id == "FaceToPath":
+				val = _format_face_to_path(val)
 			if child.has_method("set_data"):
 				child.call("set_data", str(val))
+			if child.has_method("set_label"):
+				if has_shot and is_computed and str(val) != "N/A" and str(val) != "---":
+					child.call("set_label", "* %s *" % base_label)
+				else:
+					child.call("set_label", base_label)
 
 	if is_final_rest:
 		var cam_active: bool = is_golfer_camera_enabled()
@@ -1021,6 +1091,17 @@ func _prepare_modal_shot_data(data: Dictionary) -> Dictionary:
 	return modal_data
 
 
+func _has_valid_dict_metric(dict: Dictionary, keys: Array) -> bool:
+	for k in keys:
+		if dict.has(k):
+			var v = dict[k]
+			if v != null:
+				var s = str(v).strip_edges()
+				if s != "" and s != "---" and s != "N/A" and s != "n/a":
+					return true
+	return false
+
+
 func _get_dict_metric_str(dict: Dictionary, keys: Array, default_val: String = "---") -> String:
 	for k in keys:
 		if dict.has(k):
@@ -1095,13 +1176,20 @@ func _format_shot_details_text(data: Dictionary) -> String:
 	lines.append("Spin Axis: %s°" % s_axis)
 	
 	if data.has("ClubSpeed") and str(data["ClubSpeed"]) != "---" and str(data["ClubSpeed"]) != "N/A":
-		lines.append("Club Speed: %s %s" % [str(data["ClubSpeed"]), spd_u])
+		var cs_title = "* Club Speed *" if _is_stat_computed_from_dict("ClubSpeed", data) else "Club Speed"
+		lines.append("%s: %s %s" % [cs_title, str(data["ClubSpeed"]), spd_u])
 	if data.has("SmashFactor") and str(data["SmashFactor"]) != "---" and str(data["SmashFactor"]) != "N/A":
-		lines.append("Smash Factor: %s" % str(data["SmashFactor"]))
+		var sf_title = "* Smash Factor *" if _is_stat_computed_from_dict("SmashFactor", data) else "Smash Factor"
+		lines.append("%s: %s" % [sf_title, str(data["SmashFactor"])])
 	if data.has("ClubPath") and str(data["ClubPath"]) != "---" and str(data["ClubPath"]) != "N/A":
-		lines.append("Club Path: %s" % str(data["ClubPath"]))
+		var cp_title = "* Club Path *" if _is_stat_computed_from_dict("ClubPath", data) else "Club Path"
+		lines.append("%s: %s" % [cp_title, str(data["ClubPath"])])
 	if data.has("FaceAngle") and str(data["FaceAngle"]) != "---" and str(data["FaceAngle"]) != "N/A":
-		lines.append("Face Angle: %s" % str(data["FaceAngle"]))
+		var fa_title = "* Face Angle *" if _is_stat_computed_from_dict("FaceAngle", data) else "Face Angle"
+		lines.append("%s: %s" % [fa_title, str(data["FaceAngle"])])
+	if data.has("FaceToPath") and str(data["FaceToPath"]) != "---" and str(data["FaceToPath"]) != "N/A":
+		var ftp_title = "* Face to Path *" if _is_stat_computed_from_dict("FaceToPath", data) else "Face to Path"
+		lines.append("%s: %s" % [ftp_title, str(data["FaceToPath"])])
 	if (data.has("AttackAngle") or data.has("AngleOfAttack")):
 		var aoa_val = str(data.get("AttackAngle", data.get("AngleOfAttack", "")))
 		if aoa_val != "---" and aoa_val != "N/A" and aoa_val != "" and aoa_val != "0.0":
@@ -1379,6 +1467,101 @@ func _format_club_path(value) -> String:
 		var num := s.split(" ")[0]
 		return "%s O-I" % num
 	return s
+
+
+func _format_face_to_path(value) -> String:
+	if typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT:
+		var f_val := float(value)
+		if absf(f_val) < 0.1:
+			return "0.0 Sq"
+		elif f_val > 0.0:
+			return "%.1f O" % f_val
+		else:
+			return "%.1f C" % absf(f_val)
+	var s: String = str(value).strip_edges()
+	if s == "---" or s == "N/A" or s.is_empty():
+		return s
+	return s
+
+
+func _get_dict_angle_float(dict: Dictionary, keys: Array, default_val: float = 0.0) -> float:
+	var s = _get_dict_metric_str(dict, keys, "")
+	if s == "":
+		return default_val
+	var cleaned = s.replace("°", "").strip_edges()
+	var upper = cleaned.to_upper()
+	var is_neg := false
+	if "O-I" in upper or "OUT-IN" in upper or upper.ends_with(" C") or upper.ends_with("C"):
+		is_neg = true
+	cleaned = cleaned.replace("I-O", "").replace("O-I", "").replace("In-Out", "").replace("Out-In", "").replace("Str", "").replace("O", "").replace("C", "").replace("Sq", "").strip_edges()
+	if cleaned.is_valid_float():
+		var val = float(cleaned)
+		return -absf(val) if is_neg else val
+	return default_val
+
+
+func _is_stat_computed_from_dict(stat_id: String, d: Dictionary) -> bool:
+	if d.has("_computed_stats") and d["_computed_stats"] is Array:
+		return stat_id in d["_computed_stats"]
+
+	if stat_id == "SmashFactor":
+		var direct_smash: bool = d.has("SmashFactor") and str(d["SmashFactor"]) not in ["", "0", "0.0", "0.00", "---", "N/A"] and float(str(d["SmashFactor"])) > 0.05
+		if not direct_smash:
+			var b_spd = _get_dict_metric_float(d, ["Speed", "BallSpeed"])
+			var c_spd = _get_dict_metric_float(d, ["ClubSpeed"])
+			return b_spd > 0.0 and c_spd > 0.0 and _has_valid_dict_metric(d, ["ClubSpeed"])
+		return false
+	elif stat_id == "FaceToPath":
+		var direct_ftp: bool = _has_valid_dict_metric(d, ["FaceToPath", "RawFaceToPath"])
+		if not direct_ftp:
+			var has_fa = _has_valid_dict_metric(d, ["FaceAngle", "ClubFaceAngle", "FaceToTarget", "RawFaceAngle"])
+			var has_cp = _has_valid_dict_metric(d, ["ClubPath", "Path", "RawClubPath"])
+			return has_fa and has_cp
+		return false
+	elif stat_id == "ClubSpeed":
+		var direct_cs: bool = d.has("ClubSpeed") and str(d["ClubSpeed"]) not in ["", "0", "0.0", "---", "N/A"] and float(str(d["ClubSpeed"])) > 0.01
+		if not direct_cs:
+			var b_spd = _get_dict_metric_float(d, ["Speed", "BallSpeed"])
+			var sf = _get_dict_metric_float(d, ["SmashFactor"])
+			return b_spd > 0.0 and sf > 0.05 and _has_valid_dict_metric(d, ["SmashFactor"])
+		return false
+	elif stat_id == "ClubPath":
+		var direct_cp: bool = _has_valid_dict_metric(d, ["ClubPath", "Path", "RawClubPath"])
+		if not direct_cp:
+			var has_fa = _has_valid_dict_metric(d, ["FaceAngle", "ClubFaceAngle", "FaceToTarget", "RawFaceAngle"])
+			var has_ftp = _has_valid_dict_metric(d, ["FaceToPath", "RawFaceToPath"])
+			return has_fa and has_ftp
+		return false
+	elif stat_id == "FaceAngle":
+		var direct_fa: bool = _has_valid_dict_metric(d, ["FaceAngle", "ClubFaceAngle", "FaceToTarget", "RawFaceAngle"])
+		if not direct_fa:
+			var has_ftp = _has_valid_dict_metric(d, ["FaceToPath", "RawFaceToPath"])
+			var has_cp = _has_valid_dict_metric(d, ["ClubPath", "Path", "RawClubPath"])
+			return has_ftp and has_cp
+		return false
+	elif stat_id == "TotalSpin":
+		var direct_ts: bool = d.has("TotalSpin") and float(str(d["TotalSpin"])) > 0.0
+		if not direct_ts:
+			return _has_valid_dict_metric(d, ["BackSpin", "SideSpin"])
+		return false
+	elif stat_id == "SpinAxis":
+		var direct_sa: bool = _has_valid_dict_metric(d, ["SpinAxis"])
+		if not direct_sa:
+			return _has_valid_dict_metric(d, ["BackSpin"]) and _has_valid_dict_metric(d, ["SideSpin"])
+		return false
+	elif stat_id == "BackSpin":
+		var direct_bs: bool = _has_valid_dict_metric(d, ["BackSpin"])
+		if not direct_bs:
+			return _has_valid_dict_metric(d, ["TotalSpin"]) and _has_valid_dict_metric(d, ["SpinAxis"])
+		return false
+	elif stat_id == "SideSpin":
+		var direct_ss: bool = _has_valid_dict_metric(d, ["SideSpin"])
+		if not direct_ss:
+			return _has_valid_dict_metric(d, ["TotalSpin"]) and _has_valid_dict_metric(d, ["SpinAxis"])
+		return false
+		return false
+
+	return false
 
 
 func _on_rec_button_pressed() -> void:

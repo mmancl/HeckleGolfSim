@@ -193,6 +193,61 @@ func _initialize() -> void:
 	assert(not history_menu.scorecard_overlay.visible, "Scorecard overlay must be hidden after B button")
 	print("  PASS: Controller B button closes the scorecard overlay.")
 
+	# 4. Test Unplayed Hole with In-Progress Player shot_history Does NOT Show Shot View
+	print("\n--- Test 4: Unplayed Hole with Player shot_history Does NOT Show Shot View ---")
+	var in_progress_match_data: Dictionary = {
+		"match_id": "test_in_progress_456",
+		"course_title": "Westridge Golf Club",
+		"game_mode": "Standard",
+		"formatted_date": "2026-10-31",
+		"hole_ids": ["Hole 10", "Hole 11", "Hole 12", "Hole 13"],
+		"hole_pars": {"Hole 10": 3, "Hole 11": 5, "Hole 12": 4, "Hole 13": 3},
+		"current_hole_index": 0,
+		"is_finished": false,
+		"players": [
+			{
+				"name": "Practice Player",
+				"tee": "Blue",
+				"hole_scores": {"Hole 10": 3, "Hole 11": null, "Hole 12": null, "Hole 13": null},
+				"shot_stats": {
+					"Hole 10": [
+						{
+							"shot_num": 1,
+							"start_pos": Vector3(0.0, 0.0, 0.0),
+							"end_pos": Vector3(100.0, 0.0, 100.0)
+						}
+					]
+				},
+				"shot_history": [Vector3(100.0, 0.0, 100.0), Vector3(102.0, 0.0, 102.0)]
+			}
+		]
+	}
+
+	assert(history_menu._history_hole_has_shot_data(in_progress_match_data, "Hole 10") == true, "Hole 10 must have shot data")
+	assert(history_menu._history_hole_has_shot_data(in_progress_match_data, "Hole 13") == false, "Hole 13 must NOT have shot data even if player has shot_history")
+
+	history_menu._show_scorecard(in_progress_match_data)
+	assert(history_menu._scorecard_selected_hole_index == 0, "Scorecard should default to first hole with shot data (Hole 10)")
+
+	# Now explicitly select unplayed Hole 13 (index 3)
+	history_menu._select_scorecard_hole(3)
+	assert(history_menu._scorecard_selected_hole_index == 3, "Selected hole should be Hole 13")
+
+	var shot_review_h13 = history_menu._shot_review_container
+	assert(shot_review_h13 != null, "Shot review container must exist")
+	var diagram_h13 = shot_review_h13.find_child("HoleShotPathDiagram", true, false)
+	assert(diagram_h13 == null, "HoleShotPathDiagram must NOT exist for unplayed Hole 13")
+
+	var player_cards_h13 = shot_review_h13.find_child("HoleShotPlayerCards", true, false)
+	assert(player_cards_h13 != null and player_cards_h13.get_child_count() > 0, "Player card must exist")
+	var card_text = player_cards_h13.get_child(0)
+	var labels_found = []
+	for node in card_text.find_children("*", "Label", true, false):
+		labels_found.append((node as Label).text)
+	var has_unplayed_label = labels_found.any(func(t: String): return t.contains("Not played") or t.contains("not been played"))
+	assert(has_unplayed_label, "Player card must indicate hole has not been played, got: %s" % str(labels_found))
+	print("  PASS: Unplayed hole does NOT show HoleShotPathDiagram and shows 'Not played' placeholder.")
+
 	history_menu.queue_free()
 
 	print("\n=======================================================")

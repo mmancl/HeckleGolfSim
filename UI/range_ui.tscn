@@ -171,7 +171,7 @@ offset_left = 212.0
 offset_top = 625.0
 offset_right = 312.0
 offset_bottom = 689.0
-label = "Face-Path"
+label = "Face to Path"
 units = "deg"
 
 [node name="ClubSpeed" parent="GridCanvas" unique_id=1199759367 instance=ExtResource("1_q72xt")]
@@ -188,7 +188,7 @@ offset_left = 106.0
 offset_top = 695.0
 offset_right = 206.0
 offset_bottom = 759.0
-label = "Smash"
+label = "Smash Factor"
 units = "ratio"
 
 [node name="Offline" parent="GridCanvas" unique_id=2003394921 instance=ExtResource("1_q72xt")]

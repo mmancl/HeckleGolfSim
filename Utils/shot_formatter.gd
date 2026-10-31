@@ -12,23 +12,30 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 		return ball_data
 
 	var m2yd := 1.09361
-	var has_backspin := raw_ball_data.has("BackSpin")
-	var has_sidespin := raw_ball_data.has("SideSpin")
-	var has_total := raw_ball_data.has("TotalSpin")
-	var has_axis := raw_ball_data.has("SpinAxis")
+	var computed_stats: Array[String] = []
+
+	var has_backspin := raw_ball_data.has("BackSpin") and str(raw_ball_data["BackSpin"]) not in ["", "---", "N/A"]
+	var has_sidespin := raw_ball_data.has("SideSpin") and str(raw_ball_data["SideSpin"]) not in ["", "---", "N/A"]
+	var has_total := raw_ball_data.has("TotalSpin") and str(raw_ball_data["TotalSpin"]) not in ["", "---", "N/A"] and float(str(raw_ball_data["TotalSpin"])) > 0.0
+	var has_axis := raw_ball_data.has("SpinAxis") and str(raw_ball_data["SpinAxis"]) not in ["", "---", "N/A"]
 	var backspin: float = (raw_ball_data.get("BackSpin", 0.0) as float)
 	var sidespin: float = (raw_ball_data.get("SideSpin", 0.0) as float)
 	var total_spin: float = (raw_ball_data.get("TotalSpin", 0.0) as float)
 	var spin_axis: float = (raw_ball_data.get("SpinAxis", 0.0) as float)
 	if total_spin == 0.0 and (has_backspin or has_sidespin):
 		total_spin = sqrt(backspin*backspin + sidespin*sidespin)
+		if total_spin > 0.0:
+			computed_stats.append("TotalSpin")
 	if not has_axis and (has_backspin or has_sidespin):
 		spin_axis = rad_to_deg(atan2(sidespin, backspin))
+		computed_stats.append("SpinAxis")
 	if has_total and has_axis:
 		if not has_backspin:
 			backspin = total_spin * cos(deg_to_rad(spin_axis))
+			computed_stats.append("BackSpin")
 		if not has_sidespin:
 			sidespin = total_spin * sin(deg_to_rad(spin_axis))
+			computed_stats.append("SideSpin")
 	
 	var raw_speed_mph := float(raw_ball_data.get("BallSpeed", raw_ball_data.get("Speed", 0.0)))
 	var raw_vla := float(raw_ball_data.get("VLA", 0.0))
@@ -157,74 +164,112 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 
 	# --- 3. Club Delivery Metrics ---
 	# Club Face Angle
-	var has_face_angle := raw_ball_data.has("FaceAngle") or raw_ball_data.has("ClubFaceAngle") or raw_ball_data.has("FaceToTarget") or raw_ball_data.has("RawFaceAngle")
-	if has_face_angle:
-		var face_angle = float(raw_ball_data.get("FaceAngle", raw_ball_data.get("ClubFaceAngle", raw_ball_data.get("FaceToTarget", raw_ball_data.get("RawFaceAngle", 0.0)))))
-		if abs(face_angle) < 0.1:
-			ball_data["FaceAngle"] = "0.0 Sq"
-		elif face_angle > 0.0:
-			ball_data["FaceAngle"] = "%.1f O" % face_angle
+	var direct_face_angle := false
+	var face_angle_num := 0.0
+	for fa_key in ["FaceAngle", "ClubFaceAngle", "FaceToTarget", "RawFaceAngle"]:
+		if raw_ball_data.has(fa_key):
+			var fa_raw = str(raw_ball_data[fa_key]).strip_edges()
+			if fa_raw not in ["", "---", "N/A"]:
+				direct_face_angle = true
+				var clean_fa = fa_raw.replace("O", "").replace("C", "").replace("Sq", "").strip_edges()
+				var is_c = fa_raw.to_upper().ends_with("C")
+				if clean_fa.is_valid_float():
+					face_angle_num = -absf(float(clean_fa)) if is_c else float(clean_fa)
+				break
+
+	# Club Path
+	var direct_club_path := false
+	var club_path_num := 0.0
+	for cp_key in ["ClubPath", "Path", "RawClubPath"]:
+		if raw_ball_data.has(cp_key):
+			var cp_raw = str(raw_ball_data[cp_key]).strip_edges()
+			if cp_raw not in ["", "---", "N/A"]:
+				direct_club_path = true
+				var clean_cp = cp_raw.replace("I-O", "").replace("O-I", "").replace("In-Out", "").replace("Out-In", "").replace("Str", "").strip_edges()
+				var is_oi = ("O-I" in cp_raw.to_upper()) or ("OUT-IN" in cp_raw.to_upper())
+				if clean_cp.is_valid_float():
+					club_path_num = -absf(float(clean_cp)) if is_oi else float(clean_cp)
+				break
+
+	# Face to Path
+	var direct_face_to_path := false
+	var face_to_path_num := 0.0
+	for ftp_key in ["FaceToPath", "RawFaceToPath"]:
+		if raw_ball_data.has(ftp_key):
+			var ftp_raw = str(raw_ball_data[ftp_key]).strip_edges()
+			if ftp_raw not in ["", "---", "N/A"]:
+				direct_face_to_path = true
+				var clean_ftp = ftp_raw.replace("O", "").replace("C", "").replace("Sq", "").strip_edges()
+				var is_c = ftp_raw.to_upper().ends_with("C")
+				if clean_ftp.is_valid_float():
+					face_to_path_num = -absf(float(clean_ftp)) if is_c else float(clean_ftp)
+				break
+
+	# 1. Resolve Face to Path
+	if direct_face_to_path:
+		if absf(face_to_path_num) < 0.1:
+			ball_data["FaceToPath"] = "0.0 Sq"
+		elif face_to_path_num > 0.0:
+			ball_data["FaceToPath"] = "%.1f O" % face_to_path_num
 		else:
-			ball_data["FaceAngle"] = "%.1f C" % abs(face_angle)
-		ball_data["RawFaceAngle"] = face_angle
-	elif raw_speed_mph > 20.0:
-		# Fallback estimation using launch direction and spin axis
-		var est_face = raw_hla * 0.75 + (spin_axis * 0.15)
-		if abs(est_face) < 0.1:
-			ball_data["FaceAngle"] = "0.0 Sq"
-		elif est_face > 0.0:
-			ball_data["FaceAngle"] = "%.1f O" % est_face
+			ball_data["FaceToPath"] = "%.1f C" % absf(face_to_path_num)
+		ball_data["RawFaceToPath"] = face_to_path_num
+	elif direct_face_angle and direct_club_path:
+		face_to_path_num = face_angle_num - club_path_num
+		if absf(face_to_path_num) < 0.1:
+			ball_data["FaceToPath"] = "0.0 Sq"
+		elif face_to_path_num > 0.0:
+			ball_data["FaceToPath"] = "%.1f O" % face_to_path_num
 		else:
-			ball_data["FaceAngle"] = "%.1f C" % abs(est_face)
-		ball_data["RawFaceAngle"] = est_face
+			ball_data["FaceToPath"] = "%.1f C" % absf(face_to_path_num)
+		ball_data["RawFaceToPath"] = face_to_path_num
+		computed_stats.append("FaceToPath")
+	else:
+		ball_data["FaceToPath"] = "N/A"
+
+	# 2. Resolve Face Angle
+	if direct_face_angle:
+		if absf(face_angle_num) < 0.1:
+			ball_data["FaceAngle"] = "0.0 Sq"
+		elif face_angle_num > 0.0:
+			ball_data["FaceAngle"] = "%.1f O" % face_angle_num
+		else:
+			ball_data["FaceAngle"] = "%.1f C" % absf(face_angle_num)
+		ball_data["RawFaceAngle"] = face_angle_num
+	elif direct_face_to_path and direct_club_path:
+		face_angle_num = face_to_path_num + club_path_num
+		if absf(face_angle_num) < 0.1:
+			ball_data["FaceAngle"] = "0.0 Sq"
+		elif face_angle_num > 0.0:
+			ball_data["FaceAngle"] = "%.1f O" % face_angle_num
+		else:
+			ball_data["FaceAngle"] = "%.1f C" % absf(face_angle_num)
+		ball_data["RawFaceAngle"] = face_angle_num
+		computed_stats.append("FaceAngle")
 	else:
 		ball_data["FaceAngle"] = "N/A"
 
-	# Club Path
-	var has_club_path := raw_ball_data.has("ClubPath") or raw_ball_data.has("Path") or raw_ball_data.has("RawClubPath")
-	if has_club_path:
-		var club_path = float(raw_ball_data.get("ClubPath", raw_ball_data.get("Path", raw_ball_data.get("RawClubPath", 0.0))))
-		if abs(club_path) < 0.1:
+	# 3. Resolve Club Path
+	if direct_club_path:
+		if absf(club_path_num) < 0.1:
 			ball_data["ClubPath"] = "0.0 Str"
-		elif club_path > 0.0:
-			ball_data["ClubPath"] = "%.1f I-O" % club_path
+		elif club_path_num > 0.0:
+			ball_data["ClubPath"] = "%.1f I-O" % club_path_num
 		else:
-			ball_data["ClubPath"] = "%.1f O-I" % abs(club_path)
-		ball_data["RawClubPath"] = club_path
-	elif raw_speed_mph > 20.0 and ball_data.has("RawFaceAngle"):
-		var est_path = (raw_hla - float(ball_data["RawFaceAngle"]) * 0.75) / 0.25
-		if abs(est_path) < 0.1:
+			ball_data["ClubPath"] = "%.1f O-I" % absf(club_path_num)
+		ball_data["RawClubPath"] = club_path_num
+	elif direct_face_angle and direct_face_to_path:
+		club_path_num = face_angle_num - face_to_path_num
+		if absf(club_path_num) < 0.1:
 			ball_data["ClubPath"] = "0.0 Str"
-		elif est_path > 0.0:
-			ball_data["ClubPath"] = "%.1f I-O" % est_path
+		elif club_path_num > 0.0:
+			ball_data["ClubPath"] = "%.1f I-O" % club_path_num
 		else:
-			ball_data["ClubPath"] = "%.1f O-I" % abs(est_path)
-		ball_data["RawClubPath"] = est_path
+			ball_data["ClubPath"] = "%.1f O-I" % absf(club_path_num)
+		ball_data["RawClubPath"] = club_path_num
+		computed_stats.append("ClubPath")
 	else:
 		ball_data["ClubPath"] = "N/A"
-
-	# Face to Path
-	var has_face_to_path := raw_ball_data.has("FaceToPath") or raw_ball_data.has("RawFaceToPath")
-	if has_face_to_path:
-		var face_to_path = float(raw_ball_data.get("FaceToPath", raw_ball_data.get("RawFaceToPath", 0.0)))
-		if abs(face_to_path) < 0.1:
-			ball_data["FaceToPath"] = "0.0 Sq"
-		elif face_to_path > 0.0:
-			ball_data["FaceToPath"] = "%.1f O" % face_to_path
-		else:
-			ball_data["FaceToPath"] = "%.1f C" % abs(face_to_path)
-		ball_data["RawFaceToPath"] = face_to_path
-	elif ball_data.has("RawFaceAngle") and ball_data.has("RawClubPath"):
-		var face_to_path = float(ball_data["RawFaceAngle"]) - float(ball_data["RawClubPath"])
-		if abs(face_to_path) < 0.1:
-			ball_data["FaceToPath"] = "0.0 Sq"
-		elif face_to_path > 0.0:
-			ball_data["FaceToPath"] = "%.1f O" % face_to_path
-		else:
-			ball_data["FaceToPath"] = "%.1f C" % abs(face_to_path)
-		ball_data["RawFaceToPath"] = face_to_path
-	else:
-		ball_data["FaceToPath"] = "N/A"
 
 	# Attack Angle (AoA)
 	if raw_ball_data.has("AttackAngle") or raw_ball_data.has("AngleOfAttack"):
@@ -252,23 +297,42 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 		ball_data["DynamicLoft"] = "N/A"
 
 	# Clubhead Speed & Smash Factor
-	var has_club_speed := raw_ball_data.has("ClubSpeed") and float(raw_ball_data.get("ClubSpeed", 0.0)) > 0.01
-	var has_smash_factor := raw_ball_data.has("SmashFactor") and float(raw_ball_data.get("SmashFactor", 0.0)) > 0.05
-
+	var direct_club_speed := false
 	var club_speed_mph := 0.0
-	if has_club_speed:
-		club_speed_mph = float(raw_ball_data.get("ClubSpeed", 0.0))
+	if raw_ball_data.has("ClubSpeed"):
+		var cs_raw = str(raw_ball_data["ClubSpeed"]).strip_edges()
+		if cs_raw not in ["", "---", "N/A"] and cs_raw.is_valid_float() and float(cs_raw) > 0.01:
+			direct_club_speed = true
+			club_speed_mph = float(cs_raw)
+
+	var direct_smash := false
+	var smash_factor_val := 0.0
+	if raw_ball_data.has("SmashFactor"):
+		var sf_raw = str(raw_ball_data["SmashFactor"]).strip_edges()
+		if sf_raw not in ["", "---", "N/A"] and sf_raw.is_valid_float() and float(sf_raw) > 0.05:
+			direct_smash = true
+			smash_factor_val = float(sf_raw)
+
+	if direct_club_speed:
 		if units == PhysicsEnums.Units.IMPERIAL:
 			ball_data["ClubSpeed"] = "%.1f" % club_speed_mph
 		else:
 			ball_data["ClubSpeed"] = "%.1f" % (club_speed_mph * 0.44704)
+	elif direct_smash and smash_factor_val > 0.0 and raw_speed_mph > 0.0:
+		club_speed_mph = raw_speed_mph / smash_factor_val
+		if units == PhysicsEnums.Units.IMPERIAL:
+			ball_data["ClubSpeed"] = "%.1f" % club_speed_mph
+		else:
+			ball_data["ClubSpeed"] = "%.1f" % (club_speed_mph * 0.44704)
+		computed_stats.append("ClubSpeed")
 	else:
 		ball_data["ClubSpeed"] = "N/A"
 
-	if has_smash_factor:
-		ball_data["SmashFactor"] = "%.2f" % float(raw_ball_data.get("SmashFactor", 0.0))
-	elif has_club_speed and raw_speed_mph > 0.0 and club_speed_mph > 0.0:
+	if direct_smash:
+		ball_data["SmashFactor"] = "%.2f" % smash_factor_val
+	elif direct_club_speed and raw_speed_mph > 0.0 and club_speed_mph > 0.0:
 		ball_data["SmashFactor"] = "%.2f" % (raw_speed_mph / club_speed_mph)
+		computed_stats.append("SmashFactor")
 	else:
 		ball_data["SmashFactor"] = "N/A"
 
@@ -340,4 +404,5 @@ static func format_ball_display(raw_ball_data: Dictionary, player: Node, units: 
 	elif raw_ball_data.has("AngleOfAttack") and not ball_data.has("AttackAngle"):
 		ball_data["AttackAngle"] = float(raw_ball_data["AngleOfAttack"])
 
+	ball_data["_computed_stats"] = computed_stats
 	return ball_data
