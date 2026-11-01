@@ -2,29 +2,171 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Matches and game rooms
-    match /matches/{matchId} {
-      allow read, write: if request.auth != null;
-      
-      match /strokes/{strokeId} {
-        allow read, write: if request.auth != null;
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isDelegate(ownerUid) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/profiles/$(ownerUid)/delegates/$(request.auth.uid));
+    }
+
+    function isOwnerOrDelegate(ownerUid) {
+      return isOwner(ownerUid) || isDelegate(ownerUid);
+    }
+
+    function hasVerifiedEmail() {
+      return isSignedIn() &&
+        request.auth.token.email != null &&
+        request.auth.token.email_verified == true;
+    }
+
+    // Budget circuit-breaker check: returns false if system/status has paused == true
+    function isCloudActive() {
+      return !exists(/databases/$(database)/documents/system/status) ||
+        get(/databases/$(database)/documents/system/status).data.paused != true;
+    }
+
+    function validRangeOrAbsent(data, field, minVal, maxVal) {
+      return !(field in data) || (
+        data[field] is number &&
+        data[field] >= minVal &&
+        data[field] <= maxVal
+      );
+    }
+
+    // 0. Global system status / budget pause flag (world-readable, Admin SDK write-only)
+    match /system/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // 1. Private user account doc (owner only)
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create, update: if isCloudActive()
+        && isOwner(uid)
+        && request.resource.data.schema_version == 1
+        && (!('display_name' in request.resource.data) || (request.resource.data.display_name is string && request.resource.data.display_name.size() <= 40));
+      allow delete: if isOwner(uid);
+    }
+
+    // 2. Synced player profiles (owner + approved delegates)
+    match /profiles/{uid} {
+      allow read: if isOwnerOrDelegate(uid);
+      allow create, update: if isCloudActive()
+        && isOwnerOrDelegate(uid)
+        && request.resource.data.schema_version == 1
+        && request.resource.data.owner_uid == uid
+        && request.resource.data.display_name is string
+        && request.resource.data.display_name.size() >= 1
+        && request.resource.data.display_name.size() <= 40;
+      allow delete: if isOwner(uid);
+
+      // Bundled stats doc (clubs, records, achievements, swing_issues, tombstones)
+      match /sync/{docId} {
+        allow read: if isOwnerOrDelegate(uid);
+        allow create, update: if isCloudActive()
+          && isOwnerOrDelegate(uid)
+          && docId == "stats"
+          && request.resource.data.schema_version == 1;
+        allow delete: if isOwner(uid);
+      }
+
+      // Append-only match summaries
+      match /matches/{matchId} {
+        allow read: if isOwnerOrDelegate(uid);
+        allow create: if isCloudActive()
+          && isOwnerOrDelegate(uid)
+          && request.resource.data.schema_version == 1
+          && request.resource.data.match_id == matchId
+          && request.resource.data.strokes is int
+          && request.resource.data.strokes >= 1
+          && request.resource.data.holes_count is int
+          && request.resource.data.holes_count >= 1
+          && request.resource.data.holes_count <= 36;
+        allow update: if false;
+        allow delete: if isOwner(uid);
+      }
+
+      // Access grants for linked accounts
+      match /delegates/{delegateUid} {
+        allow read: if isOwner(uid) || (isSignedIn() && request.auth.uid == delegateUid);
+        allow create, update: if isCloudActive()
+          && isOwner(uid)
+          && request.resource.data.delegate_uid == delegateUid;
+        allow delete: if isOwner(uid) || (isSignedIn() && request.auth.uid == delegateUid);
       }
     }
 
-    // Matchmaking queue
-    match /matchmaking_queue/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    // 3. Account link requests (handshake between user1 and user2)
+    match /link_requests/{requestId} {
+      allow read: if isSignedIn() && (
+        resource == null ||
+        resource.data.requester_uid == request.auth.uid ||
+        resource.data.target_uid == request.auth.uid ||
+        (hasVerifiedEmail() && request.auth.token.email.lower() == resource.data.target_email_lower)
+      );
+
+      allow create: if isCloudActive()
+        && isSignedIn()
+        && request.resource.data.requester_uid == request.auth.uid
+        && request.resource.data.status == "pending"
+        && request.resource.data.target_email_lower is string
+        && request.resource.data.target_email_lower.size() >= 3
+        && request.resource.data.target_email_lower.size() <= 120;
+
+      allow update: if isCloudActive() && isSignedIn() && (
+        (
+          hasVerifiedEmail()
+          && request.auth.token.email.lower() == resource.data.target_email_lower
+          && request.resource.data.requester_uid == resource.data.requester_uid
+          && request.resource.data.target_email_lower == resource.data.target_email_lower
+          && request.resource.data.target_uid == request.auth.uid
+          && request.resource.data.status in ["approved", "denied", "revoked"]
+        )
+        ||
+        (
+          resource.data.requester_uid == request.auth.uid
+          && request.resource.data.requester_uid == request.auth.uid
+          && request.resource.data.target_email_lower == resource.data.target_email_lower
+          && request.resource.data.status in ["pending", "revoked"]
+        )
+      );
+
+      allow delete: if isSignedIn() && (
+        resource.data.requester_uid == request.auth.uid ||
+        resource.data.target_uid == request.auth.uid
+      );
     }
 
-    // Public leaderboards & player profiles
-    match /leaderboards/{entry} {
+    // 4. Public leaderboards projection (world-readable even when paused, sanity-checked writes)
+    match /public_profiles/{uid} {
       allow read: if true;
-      allow write: if request.auth != null;
-    }
-
-    match /users/{userId} {
-      allow read: if true;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if isCloudActive()
+        && isOwnerOrDelegate(uid)
+        && request.resource.data.schema_version == 1
+        && request.resource.data.uid == uid
+        && request.resource.data.display_name is string
+        && request.resource.data.display_name.size() >= 1
+        && request.resource.data.display_name.size() <= 40
+        && !('email' in request.resource.data)
+        && validRangeOrAbsent(request.resource.data, 'longest_drive_yds', 0.0, 450.0)
+        && validRangeOrAbsent(request.resource.data, 'longest_putt_ft', 0.0, 180.0)
+        && validRangeOrAbsent(request.resource.data, 'best_gross_18', 18, 250)
+        && validRangeOrAbsent(request.resource.data, 'best_to_par_18', -36, 180)
+        && validRangeOrAbsent(request.resource.data, 'best_gross_9', 9, 130)
+        && validRangeOrAbsent(request.resource.data, 'best_to_par_9', -18, 90)
+        && validRangeOrAbsent(request.resource.data, 'achievements_count', 0, 100)
+        && validRangeOrAbsent(request.resource.data, 'matches_played', 0, 100000)
+        && validRangeOrAbsent(request.resource.data, 'wins', 0, 100000)
+        && validRangeOrAbsent(request.resource.data, 'hole_in_ones', 0, 1000);
+      allow delete: if isOwner(uid);
     }
   }
 }

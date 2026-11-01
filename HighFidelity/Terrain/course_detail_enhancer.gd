@@ -374,6 +374,60 @@ static func _build_recessed_3d_bunkers(scene_root: Node, height_info: Dictionary
 								base_heights.append((child as Node3D).position.y)
 
 	if polygons.is_empty():
+		# If the course scene has no bunker static bodies mapped, synthesize realistic greenside
+		# sand traps around each green so greens are authentically defended.
+		var green_bodies: Array = []
+		for child in scene_root.find_children("*", "CollisionObject3D", true, false):
+			var cname := child.name.to_lower()
+			if (cname.begins_with("green") or int(child.get_meta("surface_type", -1)) == 4) and not cname.contains("terrain"):
+				green_bodies.append(child)
+
+		if not green_bodies.is_empty():
+			var g_idx := 0
+			for g_body in green_bodies:
+				var g_node := g_body as Node3D
+				var g_pos: Vector3 = g_node.position
+				var g_radius := 14.0
+				var g_poly := PackedVector2Array()
+				if g_body.has_meta("boundary_polygon"):
+					var bp = g_body.get_meta("boundary_polygon")
+					if bp is PackedVector2Array:
+						g_poly = bp
+					elif bp is Array:
+						for p in bp:
+							if p is Vector2:
+								g_poly.append(p)
+				if not g_poly.is_empty():
+					var max_r := 0.0
+					var g_2d := Vector2(g_pos.x, g_pos.z)
+					for pt in g_poly:
+						var d: float = g_2d.distance_to(pt)
+						if d > max_r and d < 40.0:
+							max_r = d
+					if max_r > 6.0:
+						g_radius = max_r
+
+				# Generate primary greenside bunker
+				var angle1: float = float(g_idx) * 1.35 + 0.6
+				var dist1: float = g_radius + 4.5
+				var b1_center := Vector2(g_pos.x + cos(angle1) * dist1, g_pos.z + sin(angle1) * dist1)
+				var b1_poly := _create_synthetic_bunker_polygon(b1_center, 13.0, 7.0, angle1 + 0.5, g_idx * 17)
+				if b1_poly.size() >= 3:
+					polygons.append(b1_poly)
+					base_heights.append(g_pos.y)
+
+				# Secondary greenside bunker on ~65% of greens
+				if (g_idx % 3) != 1:
+					var angle2: float = angle1 + 2.1
+					var dist2: float = g_radius + 5.0
+					var b2_center := Vector2(g_pos.x + cos(angle2) * dist2, g_pos.z + sin(angle2) * dist2)
+					var b2_poly := _create_synthetic_bunker_polygon(b2_center, 11.5, 6.5, angle2 - 0.4, g_idx * 31 + 7)
+					if b2_poly.size() >= 3:
+						polygons.append(b2_poly)
+						base_heights.append(g_pos.y)
+				g_idx += 1
+
+	if polygons.is_empty():
 		return 0
 
 	var container := Node3D.new()
@@ -422,6 +476,26 @@ static func _build_recessed_3d_bunkers(scene_root: Node, height_info: Dictionary
 
 	return built
 
+
+
+static func _create_synthetic_bunker_polygon(center: Vector2, length: float, width: float, angle_rad: float, seed_val: int) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	var num_pts := 12
+	var half_len := length * 0.5
+	var half_wid := width * 0.5
+	var cos_a := cos(angle_rad)
+	var sin_a := sin(angle_rad)
+
+	for i in range(num_pts):
+		var theta := float(i) * (TAU / float(num_pts))
+		var r_w := half_wid * (1.0 + 0.18 * sin(theta * 2.0 + float(seed_val) * 0.5) + 0.12 * cos(theta + float(seed_val) * 0.3))
+		var r_l := half_len * (1.0 + 0.10 * cos(theta * 3.0 + float(seed_val) * 0.7))
+		var lx := r_l * cos(theta)
+		var lz := r_w * sin(theta)
+		var wx := center.x + (lx * cos_a - lz * sin_a)
+		var wz := center.y + (lx * sin_a + lz * cos_a)
+		pts.append(Vector2(wx, wz))
+	return pts
 
 
 ## Extracts the outer 2D boundary polygon from a ConcavePolygonShape3D face array in world space.
@@ -985,6 +1059,71 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 	if water_polygons.is_empty():
 		return 0
 
+	# Extract cart paths and bridge geometry so shoreline reeds are strictly excluded from paths
+	var path_segments: Array = []
+	if scene_root.has_meta("cart_path_polylines"):
+		var meta_lines = scene_root.get_meta("cart_path_polylines")
+		if meta_lines is Array:
+			for raw_line in meta_lines:
+				if (raw_line is PackedVector2Array or raw_line is Array) and raw_line.size() >= 2:
+					var pts := PackedVector2Array()
+					for p in raw_line:
+						if p is Vector2:
+							pts.append(p)
+						elif p is Vector3:
+							pts.append(Vector2(p.x, p.z))
+					for i in range(pts.size() - 1):
+						var a: Vector2 = pts[i]
+						var b: Vector2 = pts[i + 1]
+						var r := 1.95 # Cart path half-width (~1.25m) + clearance (~0.70m)
+						var min_x = minf(a.x, b.x) - r
+						var max_x = maxf(a.x, b.x) + r
+						var min_y = minf(a.y, b.y) - r
+						var max_y = maxf(a.y, b.y) + r
+						path_segments.append({
+							"a": a,
+							"b": b,
+							"radius": r,
+							"aabb": Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
+						})
+
+	for child in scene_root.get_children():
+		var cname := child.name.to_lower()
+		if child is MeshInstance3D and (cname.begins_with("cartpath_") or cname == "cartpaths" or cname.begins_with("cartbridge_")):
+			var mi := child as MeshInstance3D
+			if mi.mesh is ArrayMesh and mi.mesh.get_surface_count() > 0:
+				var arrays := (mi.mesh as ArrayMesh).surface_get_arrays(0)
+				if arrays.size() > Mesh.ARRAY_VERTEX:
+					var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+					if verts.size() >= 4:
+						for i in range(0, verts.size() - 3, 2):
+							var p0 := Vector2((verts[i].x + verts[i + 1].x) * 0.5, (verts[i].z + verts[i + 1].z) * 0.5)
+							var p1 := Vector2((verts[i + 2].x + verts[i + 3].x) * 0.5, (verts[i + 2].z + verts[i + 3].z) * 0.5)
+							var hw := maxf(1.95, verts[i].distance_to(verts[i + 1]) * 0.5 + 0.65)
+							var min_x = minf(p0.x, p1.x) - hw
+							var max_x = maxf(p0.x, p1.x) + hw
+							var min_y = minf(p0.y, p1.y) - hw
+							var max_y = maxf(p0.y, p1.y) + hw
+							path_segments.append({
+								"a": p0,
+								"b": p1,
+								"radius": hw,
+								"aabb": Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
+							})
+
+	var is_pt_on_path := func(pt: Vector2) -> bool:
+		for seg in path_segments:
+			var aabb: Rect2 = seg["aabb"]
+			if pt.x >= aabb.position.x and pt.x <= aabb.end.x and \
+			   pt.y >= aabb.position.y and pt.y <= aabb.end.y:
+				var a: Vector2 = seg["a"]
+				var b: Vector2 = seg["b"]
+				var closest := Geometry2D.get_closest_point_to_segment(pt, a, b)
+				var r: float = seg["radius"]
+				if pt.distance_squared_to(closest) <= r * r:
+					return true
+		return false
+
 	var reed_xforms: Array[Transform3D] = []
 	var reed_colors: Array[Color] = []
 	var rng := RandomNumberGenerator.new()
@@ -1020,38 +1159,48 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 				var base_pt := p1.lerp(p2, t)
 				var local_water_y := lerpf(p1_3d.y, p2_3d.y, t)
 
+				# Multi-frequency spatial wave along shoreline so reed stands undulate naturally
+				# between shorter marsh sedge stretches and taller cattail/reed stands
+				var wave_macro := sin(base_pt.x * 0.11 + base_pt.y * 0.09) * 0.50 \
+					+ sin(base_pt.x * 0.27 - base_pt.y * 0.23 + 1.7) * 0.30 \
+					+ sin(base_pt.x * 0.63 + base_pt.y * 0.51 + 3.1) * 0.20
+				var patch_h_mult := clampf(0.92 + wave_macro * 0.24, 0.64, 1.20)
+
 				# Cluster 1: Shoreline margin (0.50m to 1.05m onto dry shore bank)
 				var off1 := outward * rng.randf_range(0.50, 1.05)
 				var pos1 := base_pt + off1
-				var wy1 := _sample_height(pos1.x, pos1.y, height_info, local_water_y)
-				wy1 = maxf(wy1, local_water_y - 0.12)
-				var rot_y1 := rng.randf_range(0.0, TAU)
-				var s_xz1 := rng.randf_range(0.85, 1.15)
-				var s_y1 := rng.randf_range(0.85, 1.25)
-				reed_xforms.append(Transform3D(Basis(Vector3.UP, rot_y1).scaled(Vector3(s_xz1, s_y1, s_xz1)), Vector3(pos1.x, wy1, pos1.y)))
-				reed_colors.append(Color(rng.randf_range(0.86, 1.06), rng.randf_range(0.90, 1.08), rng.randf_range(0.80, 1.02), rng.randf_range(0.05, 0.99)))
+				if not is_pt_on_path.call(pos1):
+					var wy1 := _sample_height(pos1.x, pos1.y, height_info, local_water_y)
+					wy1 = maxf(wy1, local_water_y - 0.12)
+					var rot_y1 := rng.randf_range(0.0, TAU)
+					var s_xz1 := rng.randf_range(0.82, 1.18)
+					var s_y1 := clampf(patch_h_mult * rng.randf_range(0.70, 1.18), 0.55, 1.30)
+					reed_xforms.append(Transform3D(Basis(Vector3.UP, rot_y1).scaled(Vector3(s_xz1, s_y1, s_xz1)), Vector3(pos1.x, wy1, pos1.y)))
+					reed_colors.append(Color(rng.randf_range(0.86, 1.06), rng.randf_range(0.90, 1.08), rng.randf_range(0.80, 1.02), rng.randf_range(0.05, 0.99)))
 
 				# Cluster 2: Mid bank slope (1.20m to 2.15m up the bank slope)
 				var off2 := outward * rng.randf_range(1.20, 2.15)
 				var pos2 := base_pt + off2
-				var wy2 := _sample_height(pos2.x, pos2.y, height_info, local_water_y)
-				wy2 = maxf(wy2, local_water_y - 0.12)
-				var rot_y2 := rng.randf_range(0.0, TAU)
-				var s_xz2 := rng.randf_range(0.80, 1.12)
-				var s_y2 := rng.randf_range(0.80, 1.20)
-				reed_xforms.append(Transform3D(Basis(Vector3.UP, rot_y2).scaled(Vector3(s_xz2, s_y2, s_xz2)), Vector3(pos2.x, wy2, pos2.y)))
-				reed_colors.append(Color(rng.randf_range(0.84, 1.04), rng.randf_range(0.88, 1.06), rng.randf_range(0.78, 1.00), rng.randf_range(0.05, 0.99)))
+				if not is_pt_on_path.call(pos2):
+					var wy2 := _sample_height(pos2.x, pos2.y, height_info, local_water_y)
+					wy2 = maxf(wy2, local_water_y - 0.12)
+					var rot_y2 := rng.randf_range(0.0, TAU)
+					var s_xz2 := rng.randf_range(0.78, 1.14)
+					var s_y2 := clampf(patch_h_mult * rng.randf_range(0.62, 1.10), 0.50, 1.22)
+					reed_xforms.append(Transform3D(Basis(Vector3.UP, rot_y2).scaled(Vector3(s_xz2, s_y2, s_xz2)), Vector3(pos2.x, wy2, pos2.y)))
+					reed_colors.append(Color(rng.randf_range(0.84, 1.04), rng.randf_range(0.88, 1.06), rng.randf_range(0.78, 1.00), rng.randf_range(0.05, 0.99)))
 
-				# Cluster 3: Upper bank wetland rough buffer (2.25m to 3.45m up the bank slope)
+				# Cluster 3: Upper bank wetland rough buffer (2.25m to 3.45m up the bank slope, tapering into rough)
 				var off3 := outward * rng.randf_range(2.25, 3.45)
 				var pos3 := base_pt + off3
-				var wy3 := _sample_height(pos3.x, pos3.y, height_info, local_water_y)
-				wy3 = maxf(wy3, local_water_y - 0.12)
-				var rot_y3 := rng.randf_range(0.0, TAU)
-				var s_xz3 := rng.randf_range(0.78, 1.08)
-				var s_y3 := rng.randf_range(0.75, 1.15)
-				reed_xforms.append(Transform3D(Basis(Vector3.UP, rot_y3).scaled(Vector3(s_xz3, s_y3, s_xz3)), Vector3(pos3.x, wy3, pos3.y)))
-				reed_colors.append(Color(rng.randf_range(0.82, 1.02), rng.randf_range(0.86, 1.04), rng.randf_range(0.76, 0.98), rng.randf_range(0.05, 0.99)))
+				if not is_pt_on_path.call(pos3):
+					var wy3 := _sample_height(pos3.x, pos3.y, height_info, local_water_y)
+					wy3 = maxf(wy3, local_water_y - 0.12)
+					var rot_y3 := rng.randf_range(0.0, TAU)
+					var s_xz3 := rng.randf_range(0.75, 1.10)
+					var s_y3 := clampf(patch_h_mult * rng.randf_range(0.52, 0.98), 0.44, 1.12)
+					reed_xforms.append(Transform3D(Basis(Vector3.UP, rot_y3).scaled(Vector3(s_xz3, s_y3, s_xz3)), Vector3(pos3.x, wy3, pos3.y)))
+					reed_colors.append(Color(rng.randf_range(0.82, 1.02), rng.randf_range(0.86, 1.04), rng.randf_range(0.76, 0.98), rng.randf_range(0.05, 0.99)))
 
 				d += min_step + rng.randf() * step_jitter
 
@@ -1094,6 +1243,7 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 	var mmi := MultiMeshInstance3D.new()
 	mmi.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	mmi.name = "ShorelineReedsMultiMesh"
+	mmi.set_meta("reeds_version", 3)
 	mmi.multimesh = mm
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mmi.visibility_range_end = 700.0
@@ -1319,14 +1469,14 @@ static func _build_cart_paths(scene_root: Node, height_info: Dictionary, persist
 		if pts.size() < 2:
 			continue
 
-		# Subdivide long segments tightly (1.0m) so ribbon drapes smoothly over terrain undulations without floating
+		# Subdivide long segments tightly (0.5m) so ribbon drapes smoothly over terrain undulations without floating
 		var dense := PackedVector2Array()
 		dense.append(pts[0])
 		for i in range(pts.size() - 1):
 			var a := pts[i]
 			var b := pts[i + 1]
 			var dist := a.distance_to(b)
-			var steps := maxi(1, int(ceil(dist / 1.0)))
+			var steps := maxi(1, int(ceil(dist / 0.5)))
 			for s in range(1, steps + 1):
 				dense.append(a.lerp(b, float(s) / float(steps)))
 
@@ -1354,8 +1504,8 @@ static func _build_cart_paths(scene_root: Node, height_info: Dictionary, persist
 
 			var lp2 := cur - perp * half_width
 			var rp2 := cur + perp * half_width
-			var ly := _sample_height(lp2.x, lp2.y, height_info, base_y) + 0.030
-			var ry := _sample_height(rp2.x, rp2.y, height_info, base_y) + 0.030
+			var ly := _sample_height(lp2.x, lp2.y, height_info, base_y) + 0.080
+			var ry := _sample_height(rp2.x, rp2.y, height_info, base_y) + 0.080
 			var cur_left := Vector3(lp2.x, ly, lp2.y)
 			var cur_right := Vector3(rp2.x, ry, rp2.y)
 
@@ -1978,6 +2128,9 @@ static func _extract_course_features(scene_root: Node) -> Dictionary:
 		"water": [],
 		"mapped_rough": [],
 		"cart_paths": [],
+		"roads": [],
+		"buildings": [],
+		"driving_ranges": [],
 		"hole_lines": [],
 		"hole_paths": [],
 		"tree_positions": []
@@ -1985,6 +2138,8 @@ static func _extract_course_features(scene_root: Node) -> Dictionary:
 
 	for child in scene_root.find_children("*", "CollisionObject3D", true, false):
 		var cname := child.name.to_lower()
+		if bool(child.get_meta("is_road", false)) or cname.begins_with("road_") or cname.begins_with("cartpath"):
+			continue
 		var poly := PackedVector2Array()
 
 		if child.has_meta("boundary_polygon"):
@@ -2036,8 +2191,11 @@ static func _extract_course_features(scene_root: Node) -> Dictionary:
 			var st: int = int(child.get_meta("surface_type", -1))
 			var is_sand: bool = bool(child.get_meta("is_sand", false))
 			var is_wat: bool = bool(child.get_meta("is_water", false))
+			var is_bld: bool = bool(child.get_meta("is_building", false))
 
-			if is_wat or cname.begins_with("water") or cname.contains("water"):
+			if is_bld or cname.begins_with("clubhouse_") or cname.begins_with("building_") or cname.begins_with("house_"):
+				features["buildings"].append(entry)
+			elif is_wat or cname.begins_with("water") or cname.contains("water"):
 				features["water"].append(entry)
 			elif is_sand or st == 5 or cname.begins_with("bunker") or cname.contains("bunker"):
 				features["bunkers"].append(entry)
@@ -2076,6 +2234,40 @@ static func _extract_course_features(scene_root: Node) -> Dictionary:
 		features["cart_paths"] = scene_root.get_meta("cart_path_polylines")
 	else:
 		features["cart_paths"] = _synthesize_hole_cart_paths(scene_root)
+
+	# Concrete roads, buildings/yards, and driving ranges
+	if scene_root.has_meta("road_polylines"):
+		var r_meta = scene_root.get_meta("road_polylines")
+		if r_meta is Array:
+			features["roads"] = r_meta
+
+	if scene_root.has_meta("building_polygons"):
+		var b_meta = scene_root.get_meta("building_polygons")
+		if b_meta is Array:
+			for b_poly in b_meta:
+				if b_poly is PackedVector2Array and b_poly.size() >= 3:
+					var min_p: Vector2 = b_poly[0]
+					var max_p: Vector2 = b_poly[0]
+					for p in b_poly:
+						min_p.x = minf(min_p.x, p.x)
+						min_p.y = minf(min_p.y, p.y)
+						max_p.x = maxf(max_p.x, p.x)
+						max_p.y = maxf(max_p.y, p.y)
+					features["buildings"].append({ "poly": b_poly, "aabb": Rect2(min_p, max_p - min_p) })
+
+	if scene_root.has_meta("driving_range_polygons"):
+		var dr_meta = scene_root.get_meta("driving_range_polygons")
+		if dr_meta is Array:
+			for dr_poly in dr_meta:
+				if dr_poly is PackedVector2Array and dr_poly.size() >= 3:
+					var min_p: Vector2 = dr_poly[0]
+					var max_p: Vector2 = dr_poly[0]
+					for p in dr_poly:
+						min_p.x = minf(min_p.x, p.x)
+						min_p.y = minf(min_p.y, p.y)
+						max_p.x = maxf(max_p.x, p.x)
+						max_p.y = maxf(max_p.y, p.y)
+					features["driving_ranges"].append({ "poly": dr_poly, "aabb": Rect2(min_p, max_p - min_p) })
 
 	# Hole lines and line-of-play paths
 	if scene_root.has_meta("hole_paths"):
@@ -2211,6 +2403,32 @@ static func _is_point_in_thick_rough(pt: Vector2, features: Dictionary, height_i
 		var pts: PackedVector2Array = path as PackedVector2Array
 		for i in range(pts.size() - 1):
 			if _distance_squared_to_segment_2d(pt, pts[i], pts[i + 1]) < path_buffer_sq:
+				return false
+
+	# Concrete roads
+	var road_buffer_sq := 6.5 * 6.5
+	for r_path in features.get("roads", []):
+		var r_pts: PackedVector2Array = r_path as PackedVector2Array
+		for i in range(r_pts.size() - 1):
+			if _distance_squared_to_segment_2d(pt, r_pts[i], r_pts[i + 1]) < road_buffer_sq:
+				return false
+
+	# Buildings, clubhouses, and house backyards/patios
+	var bld_buffer := 3.0
+	for bld in features.get("buildings", []):
+		var aabb: Rect2 = bld["aabb"]
+		if pt.x >= aabb.position.x - bld_buffer and pt.x <= aabb.end.x + bld_buffer and \
+		   pt.y >= aabb.position.y - bld_buffer and pt.y <= aabb.end.y + bld_buffer:
+			if _distance_to_polygon_2d(pt, bld["poly"]) < bld_buffer:
+				return false
+
+	# Driving ranges (keep as open grass, no thick rough bushes)
+	var dr_buffer := 2.0
+	for dr in features.get("driving_ranges", []):
+		var aabb: Rect2 = dr["aabb"]
+		if pt.x >= aabb.position.x - dr_buffer and pt.x <= aabb.end.x + dr_buffer and \
+		   pt.y >= aabb.position.y - dr_buffer and pt.y <= aabb.end.y + dr_buffer:
+			if _distance_to_polygon_2d(pt, dr["poly"]) < dr_buffer:
 				return false
 
 	# Fallback hole corridor check if no fairways were detected in scene

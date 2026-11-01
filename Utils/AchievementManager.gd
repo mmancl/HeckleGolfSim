@@ -350,6 +350,8 @@ func record_heckle_line_heard(player_name: String, filepath: String, category: S
 
 	p_data["heard_heckles"][filepath] = Time.get_unix_time_from_system()
 	_save_data()
+	if has_node("/root/CloudSync"):
+		get_node("/root/CloudSync").call("mark_profile_dirty", player_name)
 
 	var heard_count = p_data["heard_heckles"].size()
 	var total_target = _total_heckles_count if _total_heckles_count > 0 else 620
@@ -452,6 +454,11 @@ func is_unlocked(player_name: String, ach_id: String) -> bool:
 func unlock_achievement(player_name: String, ach_id: String) -> bool:
 	if player_name.is_empty() or not achievements_db.has(ach_id):
 		return false
+	if has_node("/root/MultiplayerManager"):
+		var mp = get_node("/root/MultiplayerManager")
+		for p in mp.players:
+			if p.get("name", "") == player_name and p.get("is_remote", false):
+				return false
 		
 	if not _player_data.has(player_name):
 		_player_data[player_name] = {}
@@ -464,6 +471,8 @@ func unlock_achievement(player_name: String, ach_id: String) -> bool:
 		"unlocked_at": Time.get_unix_time_from_system()
 	}
 	_save_data()
+	if has_node("/root/CloudSync"):
+		get_node("/root/CloudSync").call("mark_profile_dirty", player_name)
 	
 	print("[AchievementManager] Unlocked '%s' (%s) for player '%s'!" % [ach_def.title, ach_id, player_name])
 	emit_signal("achievement_unlocked", player_name, ach_def)

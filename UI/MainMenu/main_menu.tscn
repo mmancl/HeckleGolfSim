@@ -13,6 +13,8 @@
 [ext_resource type="Texture2D" uid="uid://li2ev4hci02e" path="res://UI/MainMenu/images/credits.svg" id="11_credits_icon"]
 [ext_resource type="Texture2D" uid="uid://b7kff328e3nra" path="res://UI/MainMenu/images/discord.svg" id="12_discord_icon"]
 [ext_resource type="Texture2D" uid="uid://baukk811fp3ba" path="res://UI/MainMenu/images/youtube.svg" id="13_youtube_icon"]
+[ext_resource type="Texture2D" uid="uid://b4bt3gln7pska" path="res://assets/images/menu/putting.jpg" id="14_multiplayer_img"]
+[ext_resource type="Texture2D" uid="uid://fp2c1y6hditp" path="res://assets/images/menu/closest_to_pin.jpg" id="15_leaderboards_img"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_bddxb"]
 
@@ -174,6 +176,22 @@ layout_mode = 2
 size_flags_horizontal = 3
 mouse_filter = 2
 
+[node name="AccountButton" type="Button" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=1316645987]
+custom_minimum_size = Vector2(150, 52)
+layout_mode = 2
+size_flags_vertical = 4
+tooltip_text = "Sign in or manage cloud account"
+theme_override_colors/font_color = Color(0.875, 0.875, 0.875, 1)
+theme_override_colors/font_pressed_color = Color(1, 1, 1, 1)
+theme_override_colors/font_hover_color = Color(0.95, 0.95, 0.95, 1)
+theme_override_font_sizes/font_size = 17
+theme_override_styles/normal = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_iau2q")
+theme_override_styles/hover = SubResource("StyleBoxFlat_iau2q")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_u0e1r")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_ejg71")
+text = "☁ Sign In"
+
 [node name="DiscordButton" type="Button" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=1316645988]
 custom_minimum_size = Vector2(52, 52)
 layout_mode = 2
@@ -234,7 +252,7 @@ size_flags_horizontal = 4
 size_flags_vertical = 3
 theme_override_constants/h_separation = 20
 theme_override_constants/v_separation = 20
-columns = 3
+columns = 4
 
 [node name="CoursesTile" type="PanelContainer" parent="VerticalLayout/TilesRow" unique_id=833852705]
 custom_minimum_size = Vector2(160, 160)
@@ -270,6 +288,52 @@ horizontal_alignment = 1
 vertical_alignment = 2
 
 [node name="CoursesButton" type="Button" parent="VerticalLayout/TilesRow/CoursesTile/CoursesTextBackdrop" unique_id=1072632761]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/normal = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/hover = SubResource("StyleBoxFlat_iau2q")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_bddxb")
+
+[node name="MultiplayerTile" type="PanelContainer" parent="VerticalLayout/TilesRow" unique_id=833852706]
+custom_minimum_size = Vector2(160, 160)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_iyy2y")
+
+[node name="MultiplayerImage" type="TextureRect" parent="VerticalLayout/TilesRow/MultiplayerTile" unique_id=1182025325]
+layout_mode = 2
+texture = ExtResource("14_multiplayer_img")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="MultiplayerTextBackdrop" type="ColorRect" parent="VerticalLayout/TilesRow/MultiplayerTile" unique_id=1527802555]
+layout_mode = 2
+color = Color(0, 0, 0, 0.34901962)
+
+[node name="MultiplayerLabel" type="Label" parent="VerticalLayout/TilesRow/MultiplayerTile/MultiplayerTextBackdrop" unique_id=759733966]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.7490196)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 30
+text = "MULTIPLAYER
+"
+horizontal_alignment = 1
+vertical_alignment = 2
+
+[node name="MultiplayerButton" type="Button" parent="VerticalLayout/TilesRow/MultiplayerTile/MultiplayerTextBackdrop" unique_id=1072632762]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -408,6 +472,52 @@ horizontal_alignment = 1
 vertical_alignment = 2
 
 [node name="HistoryButton" type="Button" parent="VerticalLayout/TilesRow/HistoryTile/HistoryTextBackdrop" unique_id=1767573261]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/normal = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/hover = SubResource("StyleBoxFlat_iau2q")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_bddxb")
+
+[node name="LeaderboardsTile" type="PanelContainer" parent="VerticalLayout/TilesRow" unique_id=833852707]
+custom_minimum_size = Vector2(160, 160)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_iyy2y")
+
+[node name="LeaderboardsImage" type="TextureRect" parent="VerticalLayout/TilesRow/LeaderboardsTile" unique_id=1182025326]
+layout_mode = 2
+texture = ExtResource("15_leaderboards_img")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="LeaderboardsTextBackdrop" type="ColorRect" parent="VerticalLayout/TilesRow/LeaderboardsTile" unique_id=1527802556]
+layout_mode = 2
+color = Color(0, 0, 0, 0.34901962)
+
+[node name="LeaderboardsLabel" type="Label" parent="VerticalLayout/TilesRow/LeaderboardsTile/LeaderboardsTextBackdrop" unique_id=759733967]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.7490196)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 30
+text = "LEADERBOARDS
+"
+horizontal_alignment = 1
+vertical_alignment = 2
+
+[node name="LeaderboardsButton" type="Button" parent="VerticalLayout/TilesRow/LeaderboardsTile/LeaderboardsTextBackdrop" unique_id=1072632763]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0

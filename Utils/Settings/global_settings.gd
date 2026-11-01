@@ -76,6 +76,14 @@ func get_graphics_quality() -> String:
 	return MobilePerformance.get_default_graphics_quality()
 
 
+## Roads, clubhouses, houses, and other surrounding buildings are only shown on
+## High graphics quality (never on mobile).
+func is_surrounding_features_enabled() -> bool:
+	if MobilePerformance.is_mobile():
+		return false
+	return get_graphics_quality() == "High"
+
+
 func _on_root_child_entered_tree(node: Node) -> void:
 	if node.name == "AnnouncerEngine":
 		_apply_announcer_settings(node)
@@ -384,6 +392,7 @@ var _audio_check_timer: float = 0.0
 var _ambient_nature_stream: AudioStream = null
 var _ambient_rain_stream: AudioStream = null
 var _is_rain_ambient: bool = false
+var _is_rain_mode: bool = false
 
 func _process(delta: float) -> void:
 	_audio_check_timer += delta
@@ -634,8 +643,18 @@ func update_audio_state() -> void:
 				_ambient_player.stop()
 
 
+func set_rain_mode(is_rain: bool) -> void:
+	_is_rain_mode = is_rain
+	set_rain_ambient(is_rain)
+
+
+func is_rain_mode() -> bool:
+	return _is_rain_mode
+
+
 func set_rain_ambient(is_rain: bool) -> void:
 	_is_rain_ambient = is_rain
+	_is_rain_mode = is_rain
 	if _ambient_player == null:
 		return
 	var target_stream = _ambient_rain_stream if (is_rain and _ambient_rain_stream != null) else _ambient_nature_stream
@@ -725,6 +744,8 @@ func set_wind_speed_mph(speed: float) -> void:
 
 
 func start_round_wind(force_new: bool = true) -> void:
+	if has_node("/root/OnlineSession") and get_node("/root/OnlineSession").is_online_match:
+		return
 	if is_wind_enabled():
 		if force_new or not wind_initialized_for_round or current_wind_speed_mph <= 0.0:
 			generate_new_wind()

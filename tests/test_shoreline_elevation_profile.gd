@@ -97,6 +97,46 @@ func _init() -> void:
 	assert(grass.call("_is_in_bunker_or_hazard", -10.0, -10.0) == false, "Dry land (-10, -10) must not be hazard")
 	print("  PASS: HighFidelityGrass accurately detects water hazards and excludes grass in ponds.")
 
+	# 3. Test cart path and bridge exclusion for shoreline reeds
+	var bridge_scene := Node3D.new()
+	bridge_scene.name = "TestBridgeShorelineScene"
+	root.add_child(bridge_scene)
+
+	var bridge_water := StaticBody3D.new()
+	bridge_water.name = "water_Static_bridge_test"
+	bridge_water.set_meta("is_water", true)
+	bridge_water.set_meta("water_points", water_pts)
+	var b_col := CollisionShape3D.new()
+	var b_concave := ConcavePolygonShape3D.new()
+	b_concave.set_faces(faces)
+	b_col.shape = b_concave
+	bridge_water.add_child(b_col)
+	bridge_scene.add_child(bridge_water)
+
+	# Add a cart path polyline cutting across the shoreline at x=20, running from y=-10 to y=50
+	var path_line := PackedVector2Array([
+		Vector2(20.0, -10.0),
+		Vector2(20.0, 50.0)
+	])
+	bridge_scene.set_meta("cart_path_polylines", [path_line])
+
+	var bridge_reeds_count := CourseDetailEnhancerScript._build_shoreline_reeds(bridge_scene, height_info, false)
+	assert(bridge_reeds_count > 0, "Shoreline reeds must generate on bridge scene")
+	assert(bridge_reeds_count < reed_count, "Reeds intersecting the cart path must be excluded (count with path %d < count without %d)" % [bridge_reeds_count, reed_count])
+
+	var bridge_mmi := bridge_scene.get_node("ShorelineReedsMultiMesh") as MultiMeshInstance3D
+	var b_mm := bridge_mmi.multimesh
+	var b_has_buf := b_mm.buffer.size() >= b_mm.instance_count * 16
+	for i in range(b_mm.instance_count):
+		var rx: float = b_mm.buffer[i * 16 + 3] if b_has_buf else b_mm.get_instance_transform(i).origin.x
+		var rz: float = b_mm.buffer[i * 16 + 11] if b_has_buf else b_mm.get_instance_transform(i).origin.z
+		# Path is at X=20 with 1.95m buffer
+		var dist_to_path := absf(rx - 20.0)
+		assert(dist_to_path >= 1.95, "Reed %d at (%.2f, %.2f) is within %.2fm of path line (must be >= 1.95m clearance)" % [i, rx, rz, dist_to_path])
+
+	print("  PASS: Shoreline reeds strictly excluded from cart paths and bridge crossings (all %d reeds >= 1.95m clearance)." % bridge_reeds_count)
+	bridge_scene.queue_free()
+
 	scene_root.queue_free()
 	print("=======================================================")
 	print("ALL SHORELINE PROFILE & WATER EXCLUSION TESTS PASSED! 🎉")

@@ -30,11 +30,16 @@ uniform float wave_speed : hint_range(0.0, 0.2) = 0.012;
 
 void vertex() {
 	uv_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	wave_height = texture(wave_texture, uv_world_pos.xz / wave_scale + TIME * wave_speed).r;
-	VERTEX.y += (wave_height - 0.5) * height_scale;
+	if (abs(PROJECTION_MATRIX[3][3]) <= 0.5) {
+		wave_height = texture(wave_texture, uv_world_pos.xz / wave_scale + TIME * wave_speed).r;
+		VERTEX.y += (wave_height - 0.5) * height_scale;
+	} else {
+		wave_height = 0.5;
+	}
 }
 
 void fragment() {
+	bool is_ortho = abs(PROJECTION_MATRIX[3][3]) > 0.5;
 	float depth = texture(DEPTH_TEXTURE, SCREEN_UV, 0.0).r;
 	vec3 ndc = vec3(SCREEN_UV * 2.0 - 1.0, depth);
 	vec4 world = INV_VIEW_MATRIX * INV_PROJECTION_MATRIX * vec4(ndc, 1.0);
@@ -59,13 +64,13 @@ void fragment() {
 	vec3 n2 = texture(normal2, (uv_world_pos.xz / (wave_scale * 0.63)) + normal_offset2).rgb * 2.0 - 1.0;
 	vec3 ripple_n = normalize(vec3((n1.xy + n2.xy) * 0.28, 1.0));
 
-	// Subtle broken shoreline meniscus only where actual water depth exists
+	// Subtle broken shoreline meniscus only where actual water depth exists (suppressed on orthogonal minimap to prevent shoreline sparkle)
 	float ripple_noise = sin(uv_world_pos.x * 3.7 + TIME * 1.4) * cos(uv_world_pos.z * 3.9 - TIME * 1.1) * 0.5 + 0.5;
-	float shore_edge = smoothstep(max(foam_amount, 0.02), 0.0, vertical_depth) * smoothstep(0.35, 0.85, ripple_noise) * water_presence;
+	float shore_edge = is_ortho ? 0.0 : (smoothstep(max(foam_amount, 0.02), 0.0, vertical_depth) * smoothstep(0.35, 0.85, ripple_noise) * water_presence);
 
 	// Schlick Fresnel sky reflection boost at grazing angles (modulated by water depth so dry shoreline doesn't glow)
 	float ndotv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
-	float fresnel = pow(1.0 - ndotv, 4.0) * water_presence;
+	float fresnel = is_ortho ? 0.0 : (pow(1.0 - ndotv, 4.0) * water_presence);
 
 	vec3 base_water = mix(deep_color, shallow_color, depth_fade_blend);
 	// Darken neon legacy overrides if saved in older .tscn files
@@ -78,9 +83,9 @@ void fragment() {
 
 	ALBEDO = color_out;
 	ALPHA = clamp(max(alpha_blend, fresnel * 0.85) * water_presence, 0.0, 1.0);
-	METALLIC = mix(0.15, 0.65, fresnel);
-	SPECULAR = 0.75;
-	ROUGHNESS = clamp(roughness + shore_edge * 0.25, 0.02, 0.40);
+	METALLIC = is_ortho ? 0.05 : mix(0.15, 0.65, fresnel);
+	SPECULAR = is_ortho ? 0.05 : 0.75;
+	ROUGHNESS = is_ortho ? 0.65 : clamp(roughness + shore_edge * 0.25, 0.02, 0.40);
 	NORMAL_MAP = ripple_n * 0.5 + 0.5;
-	NORMAL_MAP_DEPTH = 0.55;
+	NORMAL_MAP_DEPTH = is_ortho ? 0.0 : 0.55;
 }

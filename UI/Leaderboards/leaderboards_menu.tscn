@@ -1,0 +1,242 @@
+[gd_scene format=3 uid="uid://dfqm7r04leadv"]
+
+[ext_resource type="Script" path="res://UI/Leaderboards/leaderboards_menu.gd" id="1_ldb46"]
+[ext_resource type="Texture2D" uid="uid://de6jxkjax3ee5" path="res://assets/images/menu/cabo_openfairway_bnw.png" id="2_h8rmy"]
+[ext_resource type="Script" path="res://UI/Account/budget_paused_banner.gd" id="3_bgp46"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_bddxb"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_iau2q"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_iau2q"]
+content_margin_left = 4.0
+content_margin_top = 4.0
+content_margin_right = 4.0
+content_margin_bottom = 4.0
+bg_color = Color(0.225, 0.225, 0.225, 0.6)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+corner_detail = 5
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_u0e1r"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_ejg71"]
+
+[node name="LeaderboardsMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("1_ldb46")
+
+[node name="Background" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("2_h8rmy")
+expand_mode = 1
+
+[node name="DimOverlay" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.04, 0.07, 0.11, 0.88)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+
+[node name="HeaderBar" type="ColorRect" parent="VBoxContainer"]
+custom_minimum_size = Vector2(0, 76)
+layout_mode = 2
+size_flags_vertical = 0
+color = Color(0.0431373, 0.180392, 0.309804, 0.921569)
+
+[node name="MarginContainer" type="MarginContainer" parent="VBoxContainer/HeaderBar"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_right = 18
+
+[node name="HBoxContainer" type="HBoxContainer" parent="VBoxContainer/HeaderBar/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="BackButton" type="Button" parent="VBoxContainer/HeaderBar/MarginContainer/HBoxContainer"]
+custom_minimum_size = Vector2(140, 48)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 16
+text = "← Main Menu"
+
+[node name="TitleLabel" type="Label" parent="VBoxContainer/HeaderBar/MarginContainer/HBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "Global Leaderboards"
+vertical_alignment = 1
+
+[node name="Spacer" type="Control" parent="VBoxContainer/HeaderBar/MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="RightHBox" type="HBoxContainer" parent="VBoxContainer/HeaderBar/MarginContainer/HBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="StatusLabel" type="Label" parent="VBoxContainer/HeaderBar/MarginContainer/HBoxContainer/RightHBox"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.7, 0.78, 0.88, 0.9)
+theme_override_font_sizes/font_size = 14
+vertical_alignment = 1
+
+[node name="RefreshButton" type="Button" parent="VBoxContainer/HeaderBar/MarginContainer/HBoxContainer/RightHBox"]
+custom_minimum_size = Vector2(110, 44)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 15
+text = "↻ Refresh"
+
+[node name="AccountButton" type="Button" parent="VBoxContainer/HeaderBar/MarginContainer/HBoxContainer/RightHBox"]
+custom_minimum_size = Vector2(110, 44)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 15
+text = "☁ Account"
+
+[node name="BudgetPausedBanner" type="PanelContainer" parent="VBoxContainer"]
+visible = false
+layout_mode = 2
+script = ExtResource("3_bgp46")
+
+[node name="OfflineBanner" type="PanelContainer" parent="VBoxContainer"]
+visible = false
+layout_mode = 2
+
+[node name="OfflineLabel" type="Label" parent="VBoxContainer/OfflineBanner"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.85, 1, 1)
+theme_override_font_sizes/font_size = 14
+text = "Offline — showing cached rankings"
+horizontal_alignment = 1
+
+[node name="TabsBar" type="MarginContainer" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_right = 24
+
+[node name="ScrollContainer" type="ScrollContainer" parent="VBoxContainer/TabsBar"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+vertical_scroll_mode = 0
+
+[node name="TabsContainer" type="HBoxContainer" parent="VBoxContainer/TabsBar/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="TableArea" type="MarginContainer" parent="VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_right = 24
+
+[node name="ScrollContainer" type="ScrollContainer" parent="VBoxContainer/TableArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+follow_focus = true
+
+[node name="RowsContainer" type="VBoxContainer" parent="VBoxContainer/TableArea/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 6
+
+[node name="EmptyLabel" type="Label" parent="VBoxContainer/TableArea"]
+visible = false
+layout_mode = 2
+size_flags_vertical = 1
+theme_override_colors/font_color = Color(0.65, 0.72, 0.8, 1)
+theme_override_font_sizes/font_size = 18
+text = "No scores posted yet in this category."
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="LoadingLabel" type="Label" parent="VBoxContainer/TableArea"]
+visible = false
+layout_mode = 2
+size_flags_vertical = 1
+theme_override_colors/font_color = Color(0.4, 0.85, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "Loading leaderboards..."
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="BottomStripContainer" type="MarginContainer" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 14
+
+[node name="PersonalBestStrip" type="PanelContainer" parent="VBoxContainer/BottomStripContainer"]
+custom_minimum_size = Vector2(0, 54)
+layout_mode = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="VBoxContainer/BottomStripContainer/PersonalBestStrip"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 8
+
+[node name="HBoxContainer" type="HBoxContainer" parent="VBoxContainer/BottomStripContainer/PersonalBestStrip/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="PlayerNameLabel" type="Label" parent="VBoxContainer/BottomStripContainer/PersonalBestStrip/MarginContainer/HBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.9, 0.95, 1)
+theme_override_font_sizes/font_size = 14
+text = "YOUR RECORD (Local Golfer):"
+vertical_alignment = 1
+
+[node name="StatValueLabel" type="Label" parent="VBoxContainer/BottomStripContainer/PersonalBestStrip/MarginContainer/HBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.88, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "--"
+vertical_alignment = 1
+
+[node name="Spacer" type="Control" parent="VBoxContainer/BottomStripContainer/PersonalBestStrip/MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SyncStatusLabel" type="Label" parent="VBoxContainer/BottomStripContainer/PersonalBestStrip/MarginContainer/HBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.75, 0.4, 0.9)
+theme_override_font_sizes/font_size = 13
+text = "Sign in on the Players page or tap Account above to post your stats to global leaderboards"
+vertical_alignment = 1

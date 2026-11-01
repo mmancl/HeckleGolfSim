@@ -1,0 +1,758 @@
+extends Node
+
+## OnlineMatchController — Autoload orchestrating turn sync, sequential event buffering,
+## shooter-authoritative state application, remote shot replay, AFK detection, and crash rejoin.
+## See docs/multiplayer/09_ONLINE_MATCH_RUNTIME.md.
+
+signal event_applied(event: Dictionary)
+signal remote_turn_started(player: Dictionary)
+signal waiting_banner_status_changed(is_waiting: bool, player_name: String, is_afk: bool)
+signal rejoin_dialog_requested(match_id: String, course_title: String)
+signal match_ended(reason: String)
+
+const RemoteShotReplayer = preload("res://Player/remote_shot_replayer.gd")
+const RtdbClient = preload("res://Utils/Cloud/rtdb_client.gd")
+
+const ACTIVE_MATCH_FILE := "user://active_online_match.json"
+const HEARTBEAT_INTERVAL_SEC := 30.0
+const POLL_FALLBACK_INTERVAL_SEC := 2.5
+const AFK_HEARTBEAT_THRESHOLD_SEC := 180.0
+const AFK_TURN_THRESHOLD_SEC := 240.0
+
+var _last_applied_seq: int = 0
+var _event_buffer: Dictionary = {} # seq (int) -> event (Dictionary)
+var _is_replaying: bool = false
+var _replayer: RemoteShotReplayer = null
+
+var _match_id: String = ""
+var _match_meta: Dictionary = {}
+var _golfers: Array[Dictionary] = []
+
+var _heartbeat_timer: Timer = null
+var _poll_timer: Timer = null
+var _afk_timer: Timer = null
+
+
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+
+	_replayer = RemoteShotReplayer.new()
+	_replayer.name = "RemoteShotReplayer"
+	_replayer.replay_started.connect(_on_replay_started)
+	_replayer.replay_finished.connect(_on_replay_finished)
+	add_child(_replayer)
+
+	var sess := _get_online_session()
+	if sess != null:
+		if sess.has_signal("match_started") and not sess.match_started.is_connected(start_online_match):
+			sess.match_started.connect(start_online_match)
+		if sess.has_signal("event_received") and not sess.event_received.is_connected(on_event_received):
+			sess.event_received.connect(on_event_received)
+		if sess.has_signal("turn_updated") and not sess.turn_updated.is_connected(_on_turn_updated):
+			sess.turn_updated.connect(_on_turn_updated)
+
+	var mp := _get_mp_manager()
+	if mp != null and mp.has_signal("active_player_changed"):
+		mp.active_player_changed.connect(_on_active_player_changed)
+
+	_setup_timers()
+
+
+func _setup_timers() -> void:
+	if _heartbeat_timer == null:
+		_heartbeat_timer = Timer.new()
+		_heartbeat_timer.name = "MatchHeartbeatTimer"
+		_heartbeat_timer.wait_time = HEARTBEAT_INTERVAL_SEC
+		_heartbeat_timer.one_shot = false
+		_heartbeat_timer.timeout.connect(_on_heartbeat_timeout)
+		add_child(_heartbeat_timer)
+
+	if _poll_timer == null:
+		_poll_timer = Timer.new()
+		_poll_timer.name = "PollFallbackTimer"
+		_poll_timer.wait_time = POLL_FALLBACK_INTERVAL_SEC
+		_poll_timer.one_shot = false
+		_poll_timer.timeout.connect(_on_poll_fallback_timeout)
+		add_child(_poll_timer)
+
+	if _afk_timer == null:
+		_afk_timer = Timer.new()
+		_afk_timer.name = "AfkCheckTimer"
+		_afk_timer.wait_time = 3.0
+		_afk_timer.one_shot = false
+		_afk_timer.timeout.connect(_check_afk_state)
+		add_child(_afk_timer)
+
+
+func _get_online_session() -> Node:
+	if has_node("/root/OnlineSession"):
+		return get_node("/root/OnlineSession")
+	var loop = Engine.get_main_loop()
+	if loop is SceneTree and loop.root != null and loop.root.has_node("OnlineSession"):
+		return loop.root.get_node("OnlineSession")
+	return null
+
+
+func _get_mp_manager() -> Node:
+	if has_node("/root/MultiplayerManager"):
+		return get_node("/root/MultiplayerManager")
+	var loop = Engine.get_main_loop()
+	if loop is SceneTree and loop.root != null and loop.root.has_node("MultiplayerManager"):
+		return loop.root.get_node("MultiplayerManager")
+	return null
+
+
+func _get_cloud_auth() -> Node:
+	if has_node("/root/CloudAuth"):
+		return get_node("/root/CloudAuth")
+	var loop = Engine.get_main_loop()
+	if loop is SceneTree and loop.root != null and loop.root.has_node("CloudAuth"):
+		return loop.root.get_node("CloudAuth")
+	return null
+
+
+func _get_my_uid() -> String:
+	var auth := _get_cloud_auth()
+	if auth != null and auth.has_method("get_uid"):
+		return str(auth.call("get_uid"))
+	return ""
+
+
+func is_replaying() -> bool:
+	return _is_replaying or (_replayer != null and _replayer.is_replaying())
+
+
+func get_last_applied_seq() -> int:
+	return _last_applied_seq
+
+
+func get_next_seq() -> int:
+	return _last_applied_seq + 1
+
+
+# ── MATCH START & TRANSITION ──────────────────────────────────────────
+
+func start_online_match(match_id: String, meta: Dictionary, golfers: Array[Dictionary]) -> void:
+	_match_id = match_id
+	_match_meta = meta
+	_golfers = golfers
+	_last_applied_seq = 0
+	_event_buffer.clear()
+	_is_replaying = false
+
+	var sess := _get_online_session()
+	if sess != null:
+		sess.is_online_match = true
+		sess.match_meta = meta
+		if sess.has_method("snapshot_and_apply_match_settings"):
+			sess.snapshot_and_apply_match_settings()
+
+	var course_title: String = str(meta.get("course_title", "Online Course"))
+	save_active_match_file(match_id, str(meta.get("course_key", "")), course_title)
+
+	var my_uid := _get_my_uid()
+	var player_configs: Array[Dictionary] = []
+	for g in golfers:
+		var owner_uid: String = str(g.get("owner_uid", ""))
+		var is_remote: bool = (not owner_uid.is_empty() and not my_uid.is_empty() and owner_uid != my_uid)
+		if g.has("is_remote"):
+			is_remote = bool(g["is_remote"])
+
+		var cfg := {
+			"name": g.get("name", "Player"),
+			"tee": g.get("tee", "Blue"),
+			"handicap": g.get("handicap", 0),
+			"skill_level": g.get("skill_level", "mid_handicap"),
+			"handedness": g.get("handedness", 0),
+			"ball_graphic": g.get("ball_graphic", "single_line"),
+			"bag": g.get("bag", []),
+			"slot_id": g.get("slot_id", ""),
+			"owner_uid": owner_uid,
+			"cloud_uid": str(g.get("cloud_uid", "")),
+			"is_remote": is_remote
+		}
+		player_configs.append(cfg)
+
+	var scene_path := ""
+	var config_path := ""
+	if sess != null:
+		scene_path = sess.local_scene_path
+		config_path = sess.local_config_path
+
+	var course_dict: Dictionary = {}
+	if not config_path.is_empty() and FileAccess.file_exists(config_path):
+		var f := FileAccess.open(config_path, FileAccess.READ)
+		if f != null:
+			var txt := f.get_as_text()
+			var parser := JSON.new()
+			if parser.parse(txt) == OK and parser.data is Dictionary:
+				course_dict = parser.data
+
+	var course_length: String = str(meta.get("course_length", "All"))
+	var game_mode: String = str(meta.get("game_mode", "Standard"))
+	var turn_order: String = str(meta.get("turn_order", "furthest_away"))
+	var teams: Dictionary = {}
+
+	var mp := _get_mp_manager()
+	if mp != null:
+		mp.setup_game(player_configs, course_dict, scene_path, config_path, course_length, game_mode, teams, turn_order)
+		mp.start_hole()
+
+	_heartbeat_timer.start()
+	_poll_timer.start()
+	_afk_timer.start()
+
+	if has_node("/root/SceneManager") and not scene_path.is_empty():
+		get_node("/root/SceneManager").load_course(scene_path, config_path)
+	elif not scene_path.is_empty():
+		var tree := get_tree()
+		if tree != null:
+			tree.change_scene_to_file(scene_path)
+
+	_check_afk_state()
+
+
+# ── EVENT RECEIPT & SEQUENTIAL DRAIN ────────────────────────────────────
+
+func on_event_received(seq_key: String, event: Dictionary) -> void:
+	if event.is_empty():
+		return
+	var seq: int = int(event.get("seq", 0))
+	if seq <= 0:
+		seq = seq_key.trim_prefix("seq_").trim_prefix("event_").to_int()
+
+	if seq <= _last_applied_seq:
+		return
+
+	_event_buffer[seq] = event
+	_drain_event_queue()
+
+
+func _drain_event_queue() -> void:
+	if _is_replaying:
+		return
+
+	var next_seq := _last_applied_seq + 1
+	while _event_buffer.has(next_seq):
+		var evt: Dictionary = _event_buffer[next_seq]
+		_apply_event(evt)
+		if _is_replaying:
+			break
+		next_seq = _last_applied_seq + 1
+
+
+func _apply_event(evt: Dictionary) -> void:
+	var seq: int = int(evt.get("seq", _last_applied_seq + 1))
+	_last_applied_seq = seq
+	_event_buffer.erase(seq)
+
+	var evt_type := str(evt.get("type", "shot"))
+	match evt_type:
+		"shot":
+			_apply_shot_event(evt)
+		"leave":
+			_apply_leave_event(evt)
+		"concede_hole":
+			_apply_concede_hole_event(evt)
+		_:
+			event_applied.emit(evt)
+
+
+func _apply_shot_event(evt: Dictionary) -> void:
+	var mp := _get_mp_manager()
+	var slot_id := str(evt.get("slot_id", ""))
+	var shooter_is_remote := false
+	if mp != null:
+		for p in mp.players:
+			if p.get("slot_id", "") == slot_id:
+				shooter_is_remote = bool(p.get("is_remote", false))
+				break
+
+	if shooter_is_remote:
+		var ball_node := _find_ball_node()
+		var tracer_node := _find_tracer_node()
+
+		if ball_node != null and _replayer != null:
+			_is_replaying = true
+			var sess := _get_online_session()
+			if sess != null:
+				sess.set_replaying_remote_turn(true)
+
+			_replayer.play_remote_shot(ball_node, evt, tracer_node)
+		else:
+			# Headless or scene-less test execution
+			if mp != null:
+				mp.record_remote_shot(evt)
+			event_applied.emit(evt)
+			_check_afk_state()
+			_drain_event_queue()
+	else:
+		# Local device already hit and resolved shot
+		event_applied.emit(evt)
+		_check_afk_state()
+		_drain_event_queue()
+
+
+func _on_replay_started(shot_event: Dictionary) -> void:
+	_is_replaying = true
+	var sess := _get_online_session()
+	if sess != null:
+		sess.set_replaying_remote_turn(true)
+
+
+func _on_replay_finished(shot_event: Dictionary) -> void:
+	_is_replaying = false
+	var sess := _get_online_session()
+	if sess != null:
+		sess.set_replaying_remote_turn(false)
+
+	var mp := _get_mp_manager()
+	if mp != null:
+		mp.record_remote_shot(shot_event)
+
+	event_applied.emit(shot_event)
+	_check_afk_state()
+	_drain_event_queue()
+
+
+func _apply_leave_event(evt: Dictionary) -> void:
+	var slot_id := str(evt.get("slot_id", ""))
+	var mp := _get_mp_manager()
+	if mp != null:
+		for idx in range(mp.players.size()):
+			var p: Dictionary = mp.players[idx]
+			if p.get("slot_id", "") == slot_id or p.get("name", "") == evt.get("name", ""):
+				p["active"] = false
+				print("[OnlineMatchController] Player %s (%s) left the match." % [p.get("name", "Unknown"), slot_id])
+				if mp.active_player_index == idx:
+					mp.select_next_player()
+				break
+
+	event_applied.emit(evt)
+	_check_afk_state()
+	_drain_event_queue()
+
+
+func _apply_concede_hole_event(evt: Dictionary) -> void:
+	var slot_id := str(evt.get("slot_id", ""))
+	var mp := _get_mp_manager()
+	if mp != null:
+		var active_p: Dictionary = mp.get_active_player()
+		if active_p.get("slot_id", "") == slot_id:
+			mp.concede_hole()
+		else:
+			for p in mp.players:
+				if p.get("slot_id", "") == slot_id:
+					p["holed_out"] = true
+					var h_id := str(evt.get("hole_id", mp.get_current_hole_id()))
+					if not h_id.is_empty():
+						p["hole_scores"][h_id] = p.get("strokes", 0)
+					break
+
+	event_applied.emit(evt)
+	_check_afk_state()
+	_drain_event_queue()
+
+
+# ── PUBLISHING LOCAL SHOTS & ACTIONS ────────────────────────────────────
+
+func publish_local_shot(
+	start_pos: Vector3,
+	end_pos: Vector3,
+	club: String,
+	lie_end: String,
+	penalty: int,
+	gimme_strokes: int,
+	holed_out: bool,
+	target_pin: Vector3
+) -> Dictionary:
+	var mp := _get_mp_manager()
+	if mp == null or _match_id.is_empty():
+		return {}
+
+	var active_p: Dictionary = mp.get_active_player()
+	var slot_id := str(active_p.get("slot_id", "slot_0"))
+	var my_uid := _get_my_uid()
+
+	var scores_snapshot: Dictionary = {}
+	for p in mp.players:
+		scores_snapshot[p.get("slot_id", "")] = {
+			"hole_strokes": p.get("strokes", 0),
+			"total_strokes": p.get("total_strokes", 0),
+			"holed_out": p.get("holed_out", false)
+		}
+
+	var hole_complete: bool = mp.is_current_hole_completed()
+	var next_slot := ""
+	var next_owner_uid := ""
+	if not hole_complete:
+		var next_p: Dictionary = mp.get_active_player()
+		next_slot = str(next_p.get("slot_id", ""))
+		next_owner_uid = str(next_p.get("owner_uid", ""))
+
+	var seq := _last_applied_seq + 1
+	var now := Time.get_unix_time_from_system()
+
+	var event_data := {
+		"seq": seq,
+		"by_uid": my_uid,
+		"type": "shot",
+		"slot_id": slot_id,
+		"start": [start_pos.x, start_pos.y, start_pos.z],
+		"end": [end_pos.x, end_pos.y, end_pos.z],
+		"club": club,
+		"lie_end": lie_end,
+		"penalty": penalty,
+		"gimme_strokes": gimme_strokes,
+		"holed_out": holed_out,
+		"hole_id": mp.get_current_hole_id(),
+		"hole_index": mp.current_hole_index,
+		"pin": [target_pin.x, target_pin.y, target_pin.z],
+		"scores": scores_snapshot,
+		"hole_complete": hole_complete,
+		"next_slot": next_slot,
+		"created_at": now
+	}
+
+	_last_applied_seq = seq
+
+	var sess := _get_online_session()
+	if sess != null and sess.rtdb != null:
+		var seq_key := "seq_%06d" % seq
+		sess.rtdb.put_path("matches/%s/events/%s" % [_match_id, seq_key], event_data)
+
+		var turn_patch := {
+			"hole_index": mp.current_hole_index,
+			"active_slot": next_slot,
+			"active_owner_uid": next_owner_uid,
+			"next_seq": seq + 1,
+			"updated_at": now
+		}
+		sess.rtdb.patch_path("matches/%s/meta/turn" % _match_id, turn_patch)
+
+	_check_afk_state()
+	return event_data
+
+
+func concede_active_player() -> void:
+	var mp := _get_mp_manager()
+	if mp == null or _match_id.is_empty():
+		return
+	var active_p: Dictionary = mp.get_active_player()
+	var slot_id := str(active_p.get("slot_id", ""))
+	var seq := _last_applied_seq + 1
+	var now := Time.get_unix_time_from_system()
+	var my_uid := _get_my_uid()
+
+	var evt := {
+		"seq": seq,
+		"by_uid": my_uid,
+		"type": "concede_hole",
+		"slot_id": slot_id,
+		"hole_id": mp.get_current_hole_id(),
+		"created_at": now
+	}
+	_last_applied_seq = seq
+
+	var sess := _get_online_session()
+	if sess != null and sess.rtdb != null:
+		var seq_key := "seq_%06d" % seq
+		sess.rtdb.put_path("matches/%s/events/%s" % [_match_id, seq_key], evt)
+
+	_apply_concede_hole_event(evt)
+
+
+func remove_active_player() -> void:
+	var mp := _get_mp_manager()
+	if mp == null or _match_id.is_empty():
+		return
+	var active_p: Dictionary = mp.get_active_player()
+	var slot_id := str(active_p.get("slot_id", ""))
+	var seq := _last_applied_seq + 1
+	var now := Time.get_unix_time_from_system()
+	var my_uid := _get_my_uid()
+
+	var evt := {
+		"seq": seq,
+		"by_uid": my_uid,
+		"type": "leave",
+		"slot_id": slot_id,
+		"name": active_p.get("name", ""),
+		"created_at": now
+	}
+	_last_applied_seq = seq
+
+	var sess := _get_online_session()
+	if sess != null and sess.rtdb != null:
+		var seq_key := "seq_%06d" % seq
+		sess.rtdb.put_path("matches/%s/events/%s" % [_match_id, seq_key], evt)
+
+	_apply_leave_event(evt)
+
+
+func leave_online_match() -> void:
+	if not _match_id.is_empty():
+		var my_uid := _get_my_uid()
+		var mp := _get_mp_manager()
+		var my_slot := ""
+		if mp != null:
+			for p in mp.players:
+				if p.get("owner_uid", "") == my_uid:
+					my_slot = str(p.get("slot_id", ""))
+					break
+		var seq := _last_applied_seq + 1
+		var now := Time.get_unix_time_from_system()
+
+		var evt := {
+			"seq": seq,
+			"by_uid": my_uid,
+			"type": "leave",
+			"slot_id": my_slot,
+			"created_at": now
+		}
+		var sess := _get_online_session()
+		if sess != null and sess.rtdb != null:
+			var seq_key := "seq_%06d" % seq
+			sess.rtdb.put_path("matches/%s/events/%s" % [_match_id, seq_key], evt)
+
+	end_match_and_return_to_menu("Left online match")
+
+
+func end_match_and_return_to_menu(reason: String = "") -> void:
+	_heartbeat_timer.stop()
+	_poll_timer.stop()
+	_afk_timer.stop()
+
+	clear_active_match_file()
+
+	var sess := _get_online_session()
+	if sess != null and sess.has_method("end_online_match"):
+		sess.end_online_match()
+
+	_match_id = ""
+	_match_meta = {}
+	_golfers = []
+	_last_applied_seq = 0
+	_event_buffer.clear()
+	_is_replaying = false
+
+	match_ended.emit(reason)
+
+	var sm = get_node_or_null("/root/SceneManager")
+	if sm != null and sm.has_method("load_main_menu"):
+		sm.load_main_menu()
+	else:
+		var tree := get_tree()
+		if tree != null:
+			tree.change_scene_to_file("res://UI/MainMenu/main_menu.tscn")
+
+
+# ── AFK & HEARTBEAT ─────────────────────────────────────────────────────
+
+func _on_heartbeat_timeout() -> void:
+	if _match_id.is_empty():
+		return
+	var my_uid := _get_my_uid()
+	if my_uid.is_empty():
+		return
+	var sess := _get_online_session()
+	if sess != null and sess.rtdb != null:
+		var now := Time.get_unix_time_from_system()
+		sess.rtdb.put_path("matches/%s/devices/%s/last_seen" % [_match_id, my_uid], now)
+
+
+func _on_turn_updated(turn_data: Dictionary) -> void:
+	_match_meta["turn"] = turn_data
+	_check_afk_state()
+
+
+func _on_active_player_changed(_player: Dictionary) -> void:
+	_check_afk_state()
+
+
+func _check_afk_state() -> void:
+	var mp := _get_mp_manager()
+	if mp == null or _match_id.is_empty():
+		waiting_banner_status_changed.emit(false, "", false)
+		return
+
+	var active_p: Dictionary = mp.get_active_player()
+	if active_p.is_empty():
+		waiting_banner_status_changed.emit(false, "", false)
+		return
+
+	var is_remote: bool = bool(active_p.get("is_remote", false))
+	if not is_remote:
+		waiting_banner_status_changed.emit(false, "", false)
+		return
+
+	var p_name: String = str(active_p.get("name", "Opponent"))
+	var owner_uid: String = str(active_p.get("owner_uid", ""))
+	var now := Time.get_unix_time_from_system()
+
+	var is_afk := false
+	var sess := _get_online_session()
+	if sess != null:
+		var dev: Dictionary = sess.match_devices.get(owner_uid, {})
+		var last_seen: float = float(dev.get("last_seen", 0.0))
+		if last_seen > 0.0 and (now - last_seen) > AFK_HEARTBEAT_THRESHOLD_SEC:
+			is_afk = true
+
+	var turn_data: Dictionary = _match_meta.get("turn", {})
+	var turn_updated_at: float = float(turn_data.get("updated_at", 0.0))
+	if turn_updated_at > 0.0 and (now - turn_updated_at) > AFK_TURN_THRESHOLD_SEC:
+		is_afk = true
+
+	waiting_banner_status_changed.emit(true, p_name, is_afk)
+
+
+func _on_poll_fallback_timeout() -> void:
+	if _match_id.is_empty():
+		return
+	var sess := _get_online_session()
+	if sess == null or sess.rtdb == null:
+		return
+
+	# Fetch missed events
+	var res = await sess.rtdb.get_path("matches/%s/events" % _match_id)
+	if res.get("ok", false) and res.get("data") is Dictionary:
+		var events_dict: Dictionary = res["data"]
+		for k in events_dict:
+			if events_dict[k] is Dictionary:
+				on_event_received(str(k), events_dict[k])
+
+
+# ── FAST-FORWARD REJOIN ─────────────────────────────────────────────────
+
+func save_active_match_file(match_id: String, course_key: String, course_title: String) -> void:
+	var data := {
+		"match_id": match_id,
+		"course_key": course_key,
+		"course_title": course_title,
+		"joined_at": Time.get_unix_time_from_system()
+	}
+	var f := FileAccess.open(ACTIVE_MATCH_FILE, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(data))
+		f.close()
+
+
+func clear_active_match_file() -> void:
+	if FileAccess.file_exists(ACTIVE_MATCH_FILE):
+		DirAccess.remove_absolute(ACTIVE_MATCH_FILE)
+
+
+func has_active_match_file() -> bool:
+	return FileAccess.file_exists(ACTIVE_MATCH_FILE)
+
+
+func read_active_match_file() -> Dictionary:
+	if not FileAccess.file_exists(ACTIVE_MATCH_FILE):
+		return {}
+	var f := FileAccess.open(ACTIVE_MATCH_FILE, FileAccess.READ)
+	if f == null:
+		return {}
+	var txt := f.get_as_text()
+	f.close()
+	var parser := JSON.new()
+	if parser.parse(txt) == OK and parser.data is Dictionary:
+		return parser.data
+	return {}
+
+
+func check_and_prompt_rejoin() -> void:
+	if not has_active_match_file():
+		return
+	var active_match := read_active_match_file()
+	var m_id: String = str(active_match.get("match_id", ""))
+	if m_id.is_empty():
+		return
+
+	var sess := _get_online_session()
+	if sess == null or sess.rtdb == null:
+		return
+
+	var meta_res = await sess.rtdb.get_path("matches/%s/meta" % m_id)
+	if not meta_res.get("ok", false) or not (meta_res.get("data") is Dictionary):
+		clear_active_match_file()
+		return
+
+	var meta: Dictionary = meta_res["data"]
+	if meta.get("status", "") != "active":
+		clear_active_match_file()
+		return
+
+	var course_title: String = str(meta.get("course_title", active_match.get("course_title", "Course")))
+	rejoin_dialog_requested.emit(m_id, course_title)
+
+
+func rejoin_active_match(match_id: String) -> void:
+	var sess := _get_online_session()
+	if sess == null or sess.rtdb == null:
+		return
+
+	var snap_res = await sess.rtdb.get_path("matches/%s" % match_id)
+	if not snap_res.get("ok", false) or not (snap_res.get("data") is Dictionary):
+		clear_active_match_file()
+		return
+
+	var match_data: Dictionary = snap_res["data"]
+	var meta: Dictionary = match_data.get("meta", {})
+	var golfers_dict: Dictionary = match_data.get("golfers", {})
+	var events_dict: Dictionary = match_data.get("events", {})
+
+	var sorted_golfers: Array[Dictionary] = []
+	for g in golfers_dict.values():
+		sorted_golfers.append(g)
+	sorted_golfers.sort_custom(func(a, b): return int(a.get("order", 0)) < int(b.get("order", 0)))
+
+	start_online_match(match_id, meta, sorted_golfers)
+
+	# Fast-forward events 1..N-1 without animation
+	var sorted_seqs: Array[int] = []
+	var seq_map: Dictionary = {}
+	for k in events_dict:
+		var evt = events_dict[k]
+		if evt is Dictionary:
+			var s: int = int(evt.get("seq", str(k).trim_prefix("seq_").to_int()))
+			sorted_seqs.append(s)
+			seq_map[s] = evt
+	sorted_seqs.sort()
+
+	var mp := _get_mp_manager()
+	for i in range(sorted_seqs.size()):
+		var s = sorted_seqs[i]
+		var evt = seq_map[s]
+		_last_applied_seq = s
+		if i < sorted_seqs.size() - 1:
+			# Apply instantaneously
+			if mp != null and evt.get("type", "shot") == "shot":
+				mp.record_remote_shot(evt)
+		else:
+			# Animate / apply latest event
+			_apply_event(evt)
+
+
+# ── NODE FINDERS ────────────────────────────────────────────────────────
+
+func _find_ball_node() -> Node3D:
+	var tree := get_tree()
+	if tree == null:
+		return null
+	var player = tree.root.find_child("Player", true, false)
+	if player != null and "ball" in player and player.ball is Node3D:
+		return player.ball
+	return tree.root.find_child("GolfBall", true, false) as Node3D
+
+
+func _find_tracer_node() -> Node:
+	var tree := get_tree()
+	if tree == null:
+		return null
+	var tracer = tree.root.find_child("ShotTracer", true, false)
+	if tracer != null:
+		return tracer
+	var player = tree.root.find_child("Player", true, false)
+	if player != null and "ball_tracer" in player and player.ball_tracer != null:
+		return player.ball_tracer
+	return null

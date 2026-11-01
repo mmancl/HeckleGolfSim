@@ -1,6 +1,11 @@
 extends Control
 
 const ClubDeliveryVisuals = preload("res://UI/GolferCamera/club_delivery_visuals.gd")
+const BudgetPausedBanner = preload("res://UI/Account/budget_paused_banner.gd")
+const AccountModalScene = preload("res://UI/Account/account_modal.tscn")
+const LinkServiceClass = preload("res://Utils/Cloud/link_service.gd")
+const LinkGuestModalClass = preload("res://UI/PlayersMenu/link_guest_modal.gd")
+const ApprovalsModalClass = preload("res://UI/PlayersMenu/approvals_modal.gd")
 
 const CLUB_CATEGORIES = [
 	{
@@ -66,6 +71,7 @@ const STANDARD_14_BAG: Array[String] = [
 
 @onready var avatar_picker_dialog = ConfirmationDialog.new()
 @onready var edit_profile_dialog = ConfirmationDialog.new()
+@onready var create_profile_dialog = ConfirmationDialog.new()
 
 var selected_player_name: String = ""
 var pending_club_to_clear: String = ""
@@ -84,6 +90,11 @@ var avatar_picker_buttons: Array = []
 
 var new_player_ball_opt: OptionButton = OptionButton.new()
 var new_player_ball_preview_container: Control = null
+var create_profile_content: VBoxContainer = VBoxContainer.new()
+var create_profile_avatar_preview_container: Control = null
+var create_profile_ball_preview_container: Control = null
+var open_create_profile_btn: Button = null
+
 var edit_profile_player_name: String = ""
 var edit_profile_email_input: LineEdit = LineEdit.new()
 var edit_profile_avatar_path: String = ""
@@ -96,6 +107,15 @@ var edit_profile_content: VBoxContainer = VBoxContainer.new()
 var edit_profile_avatar_preview_container: Control = null
 var edit_profile_ball_preview_container: Control = null
 var back_btn: Button = null
+
+var cloud_bar_container: VBoxContainer = null
+var budget_paused_banner: BudgetPausedBanner = null
+var cloud_status_label: Label = null
+var cloud_account_btn: Button = null
+var cloud_approvals_btn: Button = null
+var cloud_sync_now_btn: Button = null
+var cloud_sign_in_btn: Button = null
+var primary_confirm_dialog: ConfirmationDialog = ConfirmationDialog.new()
 var register_btn: Button = null
 
 func _ball_graphic_id_to_name(graphic_id: String) -> String:
@@ -288,8 +308,9 @@ func _ready() -> void:
 	main_vbox.add_theme_constant_override("separation", 24)
 	main_margin.add_child(main_vbox)
 	
-	# Header with Title & Back Button
+	# Header with Title, Cloud Account Bar & Back Button
 	var header_hbox = HBoxContainer.new()
+	header_hbox.add_theme_constant_override("separation", 16)
 	main_vbox.add_child(header_hbox)
 	
 	var title_lbl = Label.new()
@@ -301,6 +322,9 @@ func _ready() -> void:
 	var spacer = Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header_hbox.add_child(spacer)
+
+	# Top Cloud Account Bar integrated between Player Profiles header and Main Menu button
+	_setup_cloud_account_bar(header_hbox)
 	
 	back_btn = Button.new()
 	back_btn.name = "BackBtn"
@@ -310,7 +334,12 @@ func _ready() -> void:
 	back_btn.custom_minimum_size = Vector2(160, 48)
 	back_btn.add_theme_font_size_override("font_size", 18)
 	ThemeManager.apply_nav_button_style(back_btn)
-	back_btn.pressed.connect(func(): SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn"))
+	back_btn.pressed.connect(func():
+		if has_node("/root/SceneManager"):
+			get_node("/root/SceneManager").call("change_scene", "res://UI/MainMenu/main_menu.tscn")
+		elif get_tree() != null:
+			get_tree().change_scene_to_file("res://UI/MainMenu/main_menu.tscn")
+	)
 	header_hbox.add_child(back_btn)
 	
 	# Horizontal Split for Left (List) and Right (Stats)
@@ -341,17 +370,21 @@ func _ready() -> void:
 	players_list_vbox.add_theme_constant_override("separation", 10)
 	scroll.add_child(players_list_vbox)
 	
-	# Registration HBox at the bottom of the left column
+	# Create Profile Button at the bottom of the left column
 	var reg_section = VBoxContainer.new()
 	reg_section.add_theme_constant_override("separation", 8)
 	left_vbox.add_child(reg_section)
-	
-	var reg_lbl = Label.new()
-	reg_lbl.text = "Create New Profile"
-	reg_lbl.add_theme_font_size_override("font_size", 16)
-	reg_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
-	reg_section.add_child(reg_lbl)
-	
+
+	open_create_profile_btn = Button.new()
+	open_create_profile_btn.name = "OpenCreateProfileBtn"
+	open_create_profile_btn.text = "➕ Create New Profile"
+	open_create_profile_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	open_create_profile_btn.custom_minimum_size = Vector2(0, 50)
+	open_create_profile_btn.add_theme_font_size_override("font_size", 18)
+	ThemeManager.apply_primary_button_style(open_create_profile_btn, 6)
+	open_create_profile_btn.pressed.connect(_open_create_profile_dialog)
+	reg_section.add_child(open_create_profile_btn)
+
 	new_player_input.name = "NewPlayerInput"
 	new_player_input.placeholder_text = "New Player Name"
 	new_player_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -367,7 +400,6 @@ func _ready() -> void:
 					vkm.open_for(new_player_input, true)
 					get_viewport().set_input_as_handled()
 	)
-	reg_section.add_child(new_player_input)
 
 	new_player_email_input.name = "NewPlayerEmailInput"
 	new_player_email_input.placeholder_text = "Optional Email Address"
@@ -384,7 +416,6 @@ func _ready() -> void:
 					vkm.open_for(new_player_email_input, true)
 					get_viewport().set_input_as_handled()
 	)
-	reg_section.add_child(new_player_email_input)
 
 	new_player_tee_opt.name = "NewPlayerTeeOpt"
 	new_player_tee_opt.clear()
@@ -397,7 +428,6 @@ func _ready() -> void:
 	new_player_tee_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	new_player_tee_opt.custom_minimum_size = Vector2(0, 50)
 	ThemeManager.apply_option_button_style(new_player_tee_opt, 17, Vector2(0, 50))
-	reg_section.add_child(new_player_tee_opt)
 
 	new_player_skill_opt.name = "NewPlayerSkillOpt"
 	new_player_skill_opt.clear()
@@ -409,7 +439,6 @@ func _ready() -> void:
 	new_player_skill_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	new_player_skill_opt.custom_minimum_size = Vector2(0, 50)
 	ThemeManager.apply_option_button_style(new_player_skill_opt, 17, Vector2(0, 50))
-	reg_section.add_child(new_player_skill_opt)
 
 	new_player_handedness_opt.name = "NewPlayerHandednessOpt"
 	new_player_handedness_opt.clear()
@@ -419,14 +448,8 @@ func _ready() -> void:
 	new_player_handedness_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	new_player_handedness_opt.custom_minimum_size = Vector2(0, 50)
 	ThemeManager.apply_option_button_style(new_player_handedness_opt, 17, Vector2(0, 50))
-	reg_section.add_child(new_player_handedness_opt)
-
-	var ball_reg_hbox = HBoxContainer.new()
-	ball_reg_hbox.add_theme_constant_override("separation", 10)
-	reg_section.add_child(ball_reg_hbox)
 
 	new_player_ball_preview_container = HBoxContainer.new()
-	ball_reg_hbox.add_child(new_player_ball_preview_container)
 
 	new_player_ball_opt.name = "NewPlayerBallOpt"
 	new_player_ball_opt.clear()
@@ -437,12 +460,6 @@ func _ready() -> void:
 	new_player_ball_opt.custom_minimum_size = Vector2(0, 50)
 	ThemeManager.apply_option_button_style(new_player_ball_opt, 17, Vector2(0, 50))
 	new_player_ball_opt.item_selected.connect(func(_idx: int): _update_new_player_ball_preview())
-	ball_reg_hbox.add_child(new_player_ball_opt)
-	_update_new_player_ball_preview()
-
-	var reg_btn_hbox = HBoxContainer.new()
-	reg_btn_hbox.add_theme_constant_override("separation", 10)
-	reg_section.add_child(reg_btn_hbox)
 
 	avatar_preview_btn.name = "AvatarPreviewBtn"
 	avatar_preview_btn.text = "Avatar: None"
@@ -456,8 +473,7 @@ func _ready() -> void:
 			_update_new_player_avatar_preview()
 		)
 	)
-	reg_btn_hbox.add_child(avatar_preview_btn)
-	
+
 	register_btn = Button.new()
 	register_btn.name = "RegisterBtn"
 	register_btn.text = "Register"
@@ -465,7 +481,6 @@ func _ready() -> void:
 	register_btn.add_theme_font_size_override("font_size", 18)
 	ThemeManager.apply_primary_button_style(register_btn)
 	register_btn.pressed.connect(_on_register_pressed)
-	reg_btn_hbox.add_child(register_btn)
 	
 	# --- RIGHT COLUMN: Stats & Profile Details ---
 	stats_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -493,6 +508,11 @@ func _ready() -> void:
 	ThemeManager.apply_dialog_style(clear_club_confirm_dialog)
 	clear_club_confirm_dialog.confirmed.connect(_confirm_clear_club_shot_data)
 	add_child(clear_club_confirm_dialog)
+
+	primary_confirm_dialog.title = "Set Primary Cloud Profile"
+	primary_confirm_dialog.min_size = Vector2(500, 180)
+	ThemeManager.apply_dialog_style(primary_confirm_dialog)
+	add_child(primary_confirm_dialog)
 	
 	alert_dialog.title = "Alert"
 	alert_dialog.min_size = Vector2(380, 160)
@@ -520,6 +540,17 @@ func _ready() -> void:
 	edit_profile_content.add_theme_constant_override("separation", 14)
 	edit_profile_dialog.add_child(edit_profile_content)
 	add_child(edit_profile_dialog)
+
+	# Create Profile Dialog
+	create_profile_dialog.title = "Create Player Profile"
+	create_profile_dialog.min_size = Vector2(580, 500)
+	ThemeManager.apply_dialog_style(create_profile_dialog, Vector2(160, 52), 18)
+	create_profile_dialog.confirmed.connect(_on_register_pressed)
+	create_profile_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	create_profile_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	create_profile_content.add_theme_constant_override("separation", 14)
+	create_profile_dialog.add_child(create_profile_content)
+	add_child(create_profile_dialog)
 	
 	# Load and render registered list
 	_refresh_players_list()
@@ -535,7 +566,10 @@ func _grab_initial_focus() -> void:
 		if vkm.is_controller_mode_active():
 			var registered = MultiplayerManager.get_registered_players()
 			if registered.is_empty():
-				new_player_input.call_deferred("grab_focus")
+				if open_create_profile_btn != null and is_instance_valid(open_create_profile_btn):
+					open_create_profile_btn.call_deferred("grab_focus")
+				else:
+					new_player_input.call_deferred("grab_focus")
 				return
 	if has_node("/root/KeybindingManager"):
 		var km = get_node("/root/KeybindingManager")
@@ -545,6 +579,23 @@ func _grab_initial_focus() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_visible_in_tree():
 		return
+	if event.is_action_pressed("ui_cancel"):
+		var guest_modal = get_node_or_null("LinkGuestModal")
+		if guest_modal != null and is_instance_valid(guest_modal):
+			if guest_modal.has_method("close"):
+				guest_modal.close()
+			else:
+				guest_modal.queue_free()
+			get_viewport().set_input_as_handled()
+			return
+		var app_modal = get_node_or_null("ApprovalsModal")
+		if app_modal != null and is_instance_valid(app_modal):
+			if app_modal.has_method("close"):
+				app_modal.close()
+			else:
+				app_modal.queue_free()
+			get_viewport().set_input_as_handled()
+			return
 	if has_node("/root/UIFocusGuard"):
 		var ufg = get_node("/root/UIFocusGuard")
 		if ufg.is_modal_active():
@@ -580,6 +631,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if edit_profile_dialog != null and edit_profile_dialog.visible:
 			edit_profile_dialog.visible = false
+			get_viewport().set_input_as_handled()
+			return
+		if create_profile_dialog != null and create_profile_dialog.visible:
+			create_profile_dialog.visible = false
 			get_viewport().set_input_as_handled()
 			return
 		SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")
@@ -675,39 +730,61 @@ func _update_controller_focus_navigation() -> void:
 		if child is Button and child.is_visible_in_tree() and not child.is_queued_for_deletion():
 			player_buttons.append(child)
 
+	# Setup Cloud Bar buttons focus
+	var active_cloud_btn: Button = null
+	if is_instance_valid(cloud_sign_in_btn) and cloud_sign_in_btn.is_visible_in_tree():
+		active_cloud_btn = cloud_sign_in_btn
+		cloud_sign_in_btn.focus_mode = Control.FOCUS_ALL
+		cloud_sign_in_btn.focus_neighbor_left = back_btn.get_path()
+		back_btn.focus_neighbor_right = cloud_sign_in_btn.get_path()
+	elif is_instance_valid(cloud_sync_now_btn) and cloud_sync_now_btn.is_visible_in_tree():
+		active_cloud_btn = cloud_sync_now_btn
+		cloud_sync_now_btn.focus_mode = Control.FOCUS_ALL
+		var right_cursor: Button = cloud_sync_now_btn
+		if is_instance_valid(cloud_approvals_btn) and cloud_approvals_btn.is_visible_in_tree():
+			cloud_approvals_btn.focus_mode = Control.FOCUS_ALL
+			cloud_sync_now_btn.focus_neighbor_right = cloud_approvals_btn.get_path()
+			cloud_approvals_btn.focus_neighbor_left = cloud_sync_now_btn.get_path()
+			right_cursor = cloud_approvals_btn
+		if is_instance_valid(cloud_account_btn) and cloud_account_btn.is_visible_in_tree():
+			cloud_account_btn.focus_mode = Control.FOCUS_ALL
+			right_cursor.focus_neighbor_right = cloud_account_btn.get_path()
+			cloud_account_btn.focus_neighbor_left = right_cursor.get_path()
+		back_btn.focus_neighbor_right = cloud_sync_now_btn.get_path()
+		cloud_sync_now_btn.focus_neighbor_left = back_btn.get_path()
+
 	if player_buttons.is_empty():
-		back_btn.focus_neighbor_bottom = new_player_input.get_path()
-		back_btn.focus_neighbor_left = new_player_input.get_path()
-		new_player_input.focus_neighbor_top = back_btn.get_path()
+		back_btn.focus_neighbor_bottom = open_create_profile_btn.get_path()
+		back_btn.focus_neighbor_left = open_create_profile_btn.get_path()
+		open_create_profile_btn.focus_neighbor_top = back_btn.get_path()
+		if active_cloud_btn != null:
+			active_cloud_btn.focus_neighbor_bottom = open_create_profile_btn.get_path()
+		if is_instance_valid(cloud_approvals_btn) and cloud_approvals_btn.is_visible_in_tree():
+			cloud_approvals_btn.focus_neighbor_bottom = open_create_profile_btn.get_path()
+		if is_instance_valid(cloud_account_btn) and cloud_account_btn.is_visible_in_tree():
+			cloud_account_btn.focus_neighbor_bottom = open_create_profile_btn.get_path()
 	else:
 		back_btn.focus_neighbor_bottom = player_buttons[0].get_path()
 		back_btn.focus_neighbor_left = player_buttons[0].get_path()
 		player_buttons[0].focus_neighbor_top = back_btn.get_path()
+		if active_cloud_btn != null:
+			active_cloud_btn.focus_neighbor_bottom = player_buttons[0].get_path()
+		if is_instance_valid(cloud_approvals_btn) and cloud_approvals_btn.is_visible_in_tree():
+			cloud_approvals_btn.focus_neighbor_bottom = player_buttons[0].get_path()
+		if is_instance_valid(cloud_account_btn) and cloud_account_btn.is_visible_in_tree():
+			cloud_account_btn.focus_neighbor_bottom = player_buttons[0].get_path()
 		for i in range(player_buttons.size() - 1):
 			player_buttons[i].focus_neighbor_bottom = player_buttons[i + 1].get_path()
 			player_buttons[i + 1].focus_neighbor_top = player_buttons[i].get_path()
-		player_buttons.back().focus_neighbor_bottom = new_player_input.get_path()
-		new_player_input.focus_neighbor_top = player_buttons.back().get_path()
+		player_buttons.back().focus_neighbor_bottom = open_create_profile_btn.get_path()
+		open_create_profile_btn.focus_neighbor_top = player_buttons.back().get_path()
 
-	new_player_input.focus_neighbor_bottom = new_player_email_input.get_path()
-	new_player_email_input.focus_neighbor_top = new_player_input.get_path()
-	new_player_email_input.focus_neighbor_bottom = new_player_tee_opt.get_path()
-	new_player_tee_opt.focus_neighbor_top = new_player_email_input.get_path()
-	new_player_tee_opt.focus_neighbor_bottom = new_player_skill_opt.get_path()
-	new_player_skill_opt.focus_neighbor_top = new_player_tee_opt.get_path()
-	new_player_skill_opt.focus_neighbor_bottom = new_player_handedness_opt.get_path()
-	new_player_handedness_opt.focus_neighbor_top = new_player_skill_opt.get_path()
-	new_player_handedness_opt.focus_neighbor_bottom = new_player_ball_opt.get_path()
-	new_player_ball_opt.focus_neighbor_top = new_player_handedness_opt.get_path()
-	new_player_ball_opt.focus_neighbor_bottom = avatar_preview_btn.get_path()
-	avatar_preview_btn.focus_neighbor_top = new_player_ball_opt.get_path()
-	avatar_preview_btn.focus_neighbor_right = register_btn.get_path()
-	register_btn.focus_neighbor_left = avatar_preview_btn.get_path()
-	register_btn.focus_neighbor_top = new_player_ball_opt.get_path()
-	register_btn.focus_neighbor_bottom = back_btn.get_path()
+	open_create_profile_btn.focus_neighbor_bottom = back_btn.get_path()
 
 	# Wire cross-navigation between player list and profile view
 	if stats_panel != null and is_instance_valid(stats_panel):
+		var primary_btn = stats_panel.find_child("PrimaryProfileBtn", true, false) as Button
+		var cloud_link_sec = stats_panel.find_child("CloudLinkSection", true, false) as Control
 		var edit_profile_btn = stats_panel.find_child("EditProfileBtn", true, false) as Button
 		var build_bag_btn = stats_panel.find_child("BuildBagBtn", true, false) as Button
 		var tabs = stats_panel.find_child("TabContainer", true, false) as TabContainer
@@ -716,18 +793,60 @@ func _update_controller_focus_navigation() -> void:
 		var clear_btn = stats_panel.find_child("ClearBallHistoryBtn", true, false) as Button
 		var delete_btn = stats_panel.find_child("DeleteProfileBtn", true, false) as Button
 
-		var right_target: Control = edit_profile_btn if (edit_profile_btn != null and is_instance_valid(edit_profile_btn)) else (tab_bar if (tab_bar != null and is_instance_valid(tab_bar)) else null)
+		if primary_btn != null and is_instance_valid(primary_btn):
+			primary_btn.focus_mode = Control.FOCUS_ALL
+
+		var right_target: Control = primary_btn if (primary_btn != null and is_instance_valid(primary_btn)) else (edit_profile_btn if (edit_profile_btn != null and is_instance_valid(edit_profile_btn)) else (tab_bar if (tab_bar != null and is_instance_valid(tab_bar)) else null))
 		if right_target != null and not player_buttons.is_empty():
 			for p_btn in player_buttons:
 				p_btn.focus_neighbor_right = p_btn.get_path_to(right_target)
-			new_player_input.focus_neighbor_right = new_player_input.get_path_to(right_target)
-			new_player_email_input.focus_neighbor_right = new_player_email_input.get_path_to(right_target)
-			new_player_tee_opt.focus_neighbor_right = new_player_tee_opt.get_path_to(right_target)
-			new_player_skill_opt.focus_neighbor_right = new_player_skill_opt.get_path_to(right_target)
+			open_create_profile_btn.focus_neighbor_right = open_create_profile_btn.get_path_to(right_target)
+
+		if primary_btn != null and is_instance_valid(primary_btn):
+			if not player_buttons.is_empty():
+				primary_btn.focus_neighbor_left = primary_btn.get_path_to(player_buttons[0])
+			else:
+				primary_btn.focus_neighbor_left = primary_btn.get_path_to(open_create_profile_btn)
+			if edit_profile_btn != null and is_instance_valid(edit_profile_btn):
+				primary_btn.focus_neighbor_right = primary_btn.get_path_to(edit_profile_btn)
+				edit_profile_btn.focus_neighbor_left = edit_profile_btn.get_path_to(primary_btn)
+			if tab_bar != null and is_instance_valid(tab_bar):
+				primary_btn.focus_neighbor_bottom = primary_btn.get_path_to(tab_bar)
+				tab_bar.focus_neighbor_top = tab_bar.get_path_to(primary_btn)
+
+		var cloud_link_buttons: Array[Button] = []
+		if cloud_link_sec != null and is_instance_valid(cloud_link_sec):
+			for child in cloud_link_sec.get_children():
+				if child is Button and child.is_visible_in_tree() and not child.is_queued_for_deletion():
+					child.focus_mode = Control.FOCUS_ALL
+					cloud_link_buttons.append(child)
+
+		if not cloud_link_buttons.is_empty():
+			if primary_btn != null and is_instance_valid(primary_btn):
+				primary_btn.focus_neighbor_right = primary_btn.get_path_to(cloud_link_buttons[0])
+				cloud_link_buttons[0].focus_neighbor_left = cloud_link_buttons[0].get_path_to(primary_btn)
+			elif not player_buttons.is_empty():
+				cloud_link_buttons[0].focus_neighbor_left = cloud_link_buttons[0].get_path_to(player_buttons[0])
+
+			for k in range(cloud_link_buttons.size() - 1):
+				cloud_link_buttons[k].focus_neighbor_right = cloud_link_buttons[k].get_path_to(cloud_link_buttons[k + 1])
+				cloud_link_buttons[k + 1].focus_neighbor_left = cloud_link_buttons[k + 1].get_path_to(cloud_link_buttons[k])
+				if tab_bar != null and is_instance_valid(tab_bar):
+					cloud_link_buttons[k].focus_neighbor_bottom = cloud_link_buttons[k].get_path_to(tab_bar)
+
+			if edit_profile_btn != null and is_instance_valid(edit_profile_btn):
+				cloud_link_buttons.back().focus_neighbor_right = cloud_link_buttons.back().get_path_to(edit_profile_btn)
+				edit_profile_btn.focus_neighbor_left = edit_profile_btn.get_path_to(cloud_link_buttons.back())
+			if tab_bar != null and is_instance_valid(tab_bar):
+				cloud_link_buttons.back().focus_neighbor_bottom = cloud_link_buttons.back().get_path_to(tab_bar)
+		elif primary_btn != null and is_instance_valid(primary_btn) and edit_profile_btn != null and is_instance_valid(edit_profile_btn):
+			primary_btn.focus_neighbor_right = primary_btn.get_path_to(edit_profile_btn)
+			edit_profile_btn.focus_neighbor_left = edit_profile_btn.get_path_to(primary_btn)
 
 		if edit_profile_btn != null and is_instance_valid(edit_profile_btn):
-			if not player_buttons.is_empty():
-				edit_profile_btn.focus_neighbor_left = edit_profile_btn.get_path_to(player_buttons[0])
+			if (primary_btn == null or not is_instance_valid(primary_btn)) and cloud_link_buttons.is_empty():
+				if not player_buttons.is_empty():
+					edit_profile_btn.focus_neighbor_left = edit_profile_btn.get_path_to(player_buttons[0])
 			if build_bag_btn != null and is_instance_valid(build_bag_btn):
 				edit_profile_btn.focus_neighbor_right = edit_profile_btn.get_path_to(build_bag_btn)
 				build_bag_btn.focus_neighbor_left = build_bag_btn.get_path_to(edit_profile_btn)
@@ -735,7 +854,8 @@ func _update_controller_focus_navigation() -> void:
 					build_bag_btn.focus_neighbor_bottom = build_bag_btn.get_path_to(tab_bar)
 			if tab_bar != null and is_instance_valid(tab_bar):
 				edit_profile_btn.focus_neighbor_bottom = edit_profile_btn.get_path_to(tab_bar)
-				tab_bar.focus_neighbor_top = tab_bar.get_path_to(edit_profile_btn)
+				if primary_btn == null or not is_instance_valid(primary_btn):
+					tab_bar.focus_neighbor_top = tab_bar.get_path_to(edit_profile_btn)
 				if not player_buttons.is_empty():
 					tab_bar.focus_neighbor_left = tab_bar.get_path_to(player_buttons[0])
 
@@ -748,6 +868,727 @@ func _update_controller_focus_navigation() -> void:
 			else:
 				delete_btn.focus_neighbor_left = delete_btn.get_path_to(email_report_btn)
 			delete_btn.focus_neighbor_bottom = delete_btn.get_path_to(back_btn)
+
+
+func _setup_cloud_account_bar(parent: Container) -> void:
+	cloud_bar_container = VBoxContainer.new()
+	cloud_bar_container.name = "CloudAccountBarContainer"
+	cloud_bar_container.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	cloud_bar_container.add_theme_constant_override("separation", 4)
+	parent.add_child(cloud_bar_container)
+
+	# Budget paused banner (hidden unless paused, 0px height when hidden)
+	budget_paused_banner = BudgetPausedBanner.new()
+	budget_paused_banner.name = "BudgetPausedBanner"
+	cloud_bar_container.add_child(budget_paused_banner)
+
+	# Bar panel container
+	var panel = PanelContainer.new()
+	panel.name = "CloudBarPanel"
+	var panel_sb = StyleBoxFlat.new()
+	panel_sb.bg_color = Color(0.08, 0.14, 0.10, 0.90)
+	panel_sb.border_color = Color(0.25, 0.45, 0.30, 0.8)
+	panel_sb.set_border_width_all(1)
+	panel_sb.set_corner_radius_all(6)
+	panel_sb.content_margin_left = 12.0
+	panel_sb.content_margin_right = 12.0
+	panel_sb.content_margin_top = 5.0
+	panel_sb.content_margin_bottom = 5.0
+	panel.add_theme_stylebox_override("panel", panel_sb)
+	cloud_bar_container.add_child(panel)
+
+	var hbox = HBoxContainer.new()
+	hbox.name = "CloudBarHBox"
+	hbox.add_theme_constant_override("separation", 10)
+	panel.add_child(hbox)
+
+	cloud_status_label = Label.new()
+	cloud_status_label.name = "CloudStatusLabel"
+	cloud_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	cloud_status_label.add_theme_font_size_override("font_size", 14)
+	hbox.add_child(cloud_status_label)
+
+	cloud_sign_in_btn = Button.new()
+	cloud_sign_in_btn.name = "CloudSignInBtn"
+	cloud_sign_in_btn.text = "☁ Sign In to Sync Stats"
+	cloud_sign_in_btn.custom_minimum_size = Vector2(195, 38)
+	cloud_sign_in_btn.focus_mode = Control.FOCUS_ALL
+	ThemeManager.apply_primary_button_style(cloud_sign_in_btn, 4)
+	cloud_sign_in_btn.pressed.connect(_open_account_modal)
+	hbox.add_child(cloud_sign_in_btn)
+
+	cloud_sync_now_btn = Button.new()
+	cloud_sync_now_btn.name = "CloudSyncNowBtn"
+	cloud_sync_now_btn.text = "🔄 Sync Now"
+	cloud_sync_now_btn.custom_minimum_size = Vector2(120, 38)
+	cloud_sync_now_btn.focus_mode = Control.FOCUS_ALL
+	ThemeManager.apply_secondary_button_style(cloud_sync_now_btn, 4)
+	cloud_sync_now_btn.pressed.connect(_on_sync_now_pressed)
+	hbox.add_child(cloud_sync_now_btn)
+
+	cloud_approvals_btn = Button.new()
+	cloud_approvals_btn.name = "CloudApprovalsBtn"
+	cloud_approvals_btn.text = "🔑 Approvals & Shared Access"
+	cloud_approvals_btn.custom_minimum_size = Vector2(210, 38)
+	cloud_approvals_btn.focus_mode = Control.FOCUS_ALL
+	ThemeManager.apply_nav_button_style(cloud_approvals_btn)
+	cloud_approvals_btn.pressed.connect(_open_approvals_modal)
+	hbox.add_child(cloud_approvals_btn)
+
+	cloud_account_btn = Button.new()
+	cloud_account_btn.name = "CloudAccountBtn"
+	cloud_account_btn.text = "⚙️ Account"
+	cloud_account_btn.custom_minimum_size = Vector2(105, 38)
+	cloud_account_btn.focus_mode = Control.FOCUS_ALL
+	ThemeManager.apply_nav_button_style(cloud_account_btn)
+	cloud_account_btn.pressed.connect(_open_account_modal)
+	hbox.add_child(cloud_account_btn)
+
+	_update_cloud_account_bar()
+
+	if has_node("/root/CloudAuth"):
+		var auth = get_node("/root/CloudAuth")
+		if auth.has_signal("auth_state_changed"):
+			auth.auth_state_changed.connect(func(_signed_in, _user):
+				_update_cloud_account_bar()
+				_check_first_signin_primary_link()
+				_refresh_players_list()
+				if not selected_player_name.is_empty():
+					_render_player_profile(selected_player_name)
+			)
+	if has_node("/root/CloudSync"):
+		var cs = get_node("/root/CloudSync")
+		if cs.has_signal("sync_started"):
+			cs.sync_started.connect(func():
+				if is_instance_valid(cloud_sync_now_btn):
+					cloud_sync_now_btn.text = "⏳ Syncing..."
+					cloud_sync_now_btn.disabled = true
+			)
+		if cs.has_signal("sync_completed"):
+			cs.sync_completed.connect(func(_ok, _synced):
+				if is_instance_valid(cloud_sync_now_btn):
+					cloud_sync_now_btn.text = "🔄 Sync Now"
+					cloud_sync_now_btn.disabled = false
+				_update_cloud_account_bar()
+				if not selected_player_name.is_empty():
+					_render_player_profile(selected_player_name)
+			)
+
+
+func _update_cloud_account_bar() -> void:
+	if not is_instance_valid(cloud_status_label):
+		return
+	var auth = get_node_or_null("/root/CloudAuth")
+	var signed_in = (auth != null and auth.has_method("is_signed_in") and auth.is_signed_in())
+
+	if signed_in:
+		var email_text = auth.get_email()
+		if email_text.is_empty():
+			email_text = auth.get_display_name()
+		if email_text.is_empty():
+			email_text = auth.get_uid()
+		cloud_status_label.text = "☁ Signed in as %s" % email_text
+		cloud_status_label.add_theme_color_override("font_color", Color(0.85, 0.95, 0.88))
+		cloud_sign_in_btn.visible = false
+		cloud_sync_now_btn.visible = true
+		if is_instance_valid(cloud_approvals_btn):
+			cloud_approvals_btn.visible = true
+			_check_incoming_requests_notification_dot()
+		cloud_account_btn.visible = true
+	else:
+		cloud_status_label.text = "☁ Cloud Sync: Not Signed In"
+		cloud_status_label.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
+		cloud_sign_in_btn.visible = true
+		cloud_sync_now_btn.visible = false
+		if is_instance_valid(cloud_approvals_btn):
+			cloud_approvals_btn.visible = false
+		cloud_account_btn.visible = false
+
+	call_deferred("_update_controller_focus_navigation")
+
+
+func _check_incoming_requests_notification_dot() -> void:
+	if not is_instance_valid(cloud_approvals_btn):
+		return
+	var link_svc = LinkServiceClass.new()
+	var reqs: Array[Dictionary] = await link_svc.fetch_incoming_link_requests()
+	var pending_count := 0
+	for r in reqs:
+		if str(r.get("status", "pending")) == "pending":
+			pending_count += 1
+	if is_instance_valid(cloud_approvals_btn):
+		if pending_count > 0:
+			cloud_approvals_btn.text = "🔑 Approvals (● %d)" % pending_count
+		else:
+			cloud_approvals_btn.text = "🔑 Approvals & Shared Access"
+
+
+func _open_approvals_modal() -> void:
+	var existing = get_node_or_null("ApprovalsModal")
+	if existing != null:
+		existing.queue_free()
+	var modal = ApprovalsModalClass.new()
+	modal.setup()
+	modal.modal_closed.connect(func():
+		_update_cloud_account_bar()
+		if not selected_player_name.is_empty():
+			_render_player_profile(selected_player_name)
+		call_deferred("_update_controller_focus_navigation")
+	)
+	add_child(modal)
+	modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+
+func _open_link_guest_modal(p_name: String, email: String = "") -> void:
+	var existing = get_node_or_null("LinkGuestModal")
+	if existing != null:
+		existing.queue_free()
+	var modal = LinkGuestModalClass.new()
+	modal.setup(p_name, email)
+	modal.link_completed.connect(func(target_name, _uid):
+		_render_player_profile(target_name)
+		_update_cloud_account_bar()
+	)
+	modal.modal_closed.connect(func():
+		_render_player_profile(p_name)
+		call_deferred("_update_controller_focus_navigation")
+	)
+	add_child(modal)
+	modal.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+
+func _populate_cloud_link_section(cloud_link_section: HBoxContainer, reg_p: Dictionary, p_name: String, signed_in: bool) -> void:
+	var role := str(reg_p.get("link_role", "none"))
+	if role == "primary":
+		return
+
+	if not signed_in:
+		var link_guest_btn := Button.new()
+		link_guest_btn.name = "LinkGuestBtn"
+		link_guest_btn.text = "🔗 Link Guest Cloud Account"
+		link_guest_btn.custom_minimum_size = Vector2(230, 38)
+		link_guest_btn.focus_mode = Control.FOCUS_ALL
+		ThemeManager.apply_secondary_button_style(link_guest_btn, 6)
+		link_guest_btn.pressed.connect(_open_account_modal)
+		cloud_link_section.add_child(link_guest_btn)
+		return
+
+	match role:
+		"none":
+			var link_guest_btn := Button.new()
+			link_guest_btn.name = "LinkGuestBtn"
+			link_guest_btn.text = "🔗 Link Guest Cloud Account"
+			link_guest_btn.custom_minimum_size = Vector2(230, 38)
+			link_guest_btn.focus_mode = Control.FOCUS_ALL
+			ThemeManager.apply_secondary_button_style(link_guest_btn, 6)
+			link_guest_btn.pressed.connect(func():
+				_open_link_guest_modal(p_name, str(reg_p.get("email", "")))
+			)
+			cloud_link_section.add_child(link_guest_btn)
+
+		"pending_link":
+			var pending_email := str(reg_p.get("pending_target_email", reg_p.get("email", "")))
+			var pending_badge := PanelContainer.new()
+			pending_badge.name = "PendingLinkBadge"
+			var p_style := StyleBoxFlat.new()
+			p_style.bg_color = Color(0.35, 0.25, 0.05, 0.85)
+			p_style.border_color = Color(0.95, 0.75, 0.2, 1.0)
+			p_style.set_border_width_all(1)
+			p_style.set_corner_radius_all(6)
+			p_style.content_margin_left = 10
+			p_style.content_margin_right = 10
+			p_style.content_margin_top = 4
+			p_style.content_margin_bottom = 4
+			pending_badge.add_theme_stylebox_override("panel", p_style)
+			var lbl := Label.new()
+			lbl.text = "⏳ Cloud Link Pending (%s)" % (pending_email if not pending_email.is_empty() else "Guest")
+			lbl.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
+			lbl.add_theme_font_size_override("font_size", 13)
+			pending_badge.add_child(lbl)
+			cloud_link_section.add_child(pending_badge)
+
+			var check_btn := Button.new()
+			check_btn.name = "CheckStatusBtn"
+			check_btn.text = "🔍 Check Status"
+			check_btn.custom_minimum_size = Vector2(130, 38)
+			check_btn.focus_mode = Control.FOCUS_ALL
+			ThemeManager.apply_secondary_button_style(check_btn, 6)
+			check_btn.pressed.connect(func():
+				_check_single_pending_status(p_name)
+			)
+			cloud_link_section.add_child(check_btn)
+
+			var cancel_btn := Button.new()
+			cancel_btn.name = "CancelLinkBtn"
+			cancel_btn.text = "✕ Cancel"
+			cancel_btn.custom_minimum_size = Vector2(90, 38)
+			cancel_btn.focus_mode = Control.FOCUS_ALL
+			ThemeManager.apply_secondary_button_style(cancel_btn, 6)
+			cancel_btn.pressed.connect(func():
+				var link_svc = LinkServiceClass.new()
+				link_svc.unlink_secondary_profile_locally(p_name)
+				_render_player_profile(p_name)
+			)
+			cloud_link_section.add_child(cancel_btn)
+
+		"linked":
+			var linked_email := str(reg_p.get("email", ""))
+			var linked_badge := PanelContainer.new()
+			linked_badge.name = "LinkedBadge"
+			var l_style := StyleBoxFlat.new()
+			l_style.bg_color = Color(0.1, 0.25, 0.4, 0.85)
+			l_style.border_color = Color(0.3, 0.6, 0.95, 1.0)
+			l_style.set_border_width_all(1)
+			l_style.set_corner_radius_all(6)
+			l_style.content_margin_left = 10
+			l_style.content_margin_right = 10
+			l_style.content_margin_top = 4
+			l_style.content_margin_bottom = 4
+			linked_badge.add_theme_stylebox_override("panel", l_style)
+			var lbl := Label.new()
+			lbl.text = "🔗 Linked Cloud Account (%s)" % (linked_email if not linked_email.is_empty() else reg_p.get("cloud_uid", ""))
+			lbl.add_theme_color_override("font_color", Color(0.7, 0.88, 1.0))
+			lbl.add_theme_font_size_override("font_size", 13)
+			linked_badge.add_child(lbl)
+			cloud_link_section.add_child(linked_badge)
+
+			var sync_btn := Button.new()
+			sync_btn.name = "SyncLinkedBtn"
+			sync_btn.text = "🔄 Sync Now"
+			sync_btn.custom_minimum_size = Vector2(110, 38)
+			sync_btn.focus_mode = Control.FOCUS_ALL
+			ThemeManager.apply_secondary_button_style(sync_btn, 6)
+			sync_btn.pressed.connect(func():
+				var cs = get_node_or_null("/root/CloudSync")
+				if cs != null and cs.has_method("sync_single_profile"):
+					sync_btn.text = "⏳..."
+					sync_btn.disabled = true
+					await cs.sync_single_profile(p_name, str(reg_p.get("cloud_uid", "")))
+					_render_player_profile(p_name)
+			)
+			cloud_link_section.add_child(sync_btn)
+
+			var unlink_btn := Button.new()
+			unlink_btn.name = "UnlinkBtn"
+			unlink_btn.text = "Unlink"
+			unlink_btn.custom_minimum_size = Vector2(90, 38)
+			unlink_btn.focus_mode = Control.FOCUS_ALL
+			ThemeManager.apply_secondary_button_style(unlink_btn, 6)
+			unlink_btn.pressed.connect(func():
+				var link_svc = LinkServiceClass.new()
+				link_svc.unlink_secondary_profile_locally(p_name)
+				_render_player_profile(p_name)
+			)
+			cloud_link_section.add_child(unlink_btn)
+
+		"revoked":
+			var revoked_badge := PanelContainer.new()
+			revoked_badge.name = "RevokedBadge"
+			var r_style := StyleBoxFlat.new()
+			r_style.bg_color = Color(0.35, 0.1, 0.1, 0.85)
+			r_style.border_color = Color(0.9, 0.35, 0.35, 1.0)
+			r_style.set_border_width_all(1)
+			r_style.set_corner_radius_all(6)
+			r_style.content_margin_left = 10
+			r_style.content_margin_right = 10
+			r_style.content_margin_top = 4
+			r_style.content_margin_bottom = 4
+			revoked_badge.add_theme_stylebox_override("panel", r_style)
+			var lbl := Label.new()
+			lbl.text = "⚠️ Cloud Access Revoked"
+			lbl.add_theme_color_override("font_color", Color(1.0, 0.75, 0.75))
+			lbl.add_theme_font_size_override("font_size", 13)
+			revoked_badge.add_child(lbl)
+			cloud_link_section.add_child(revoked_badge)
+
+			var relink_btn := Button.new()
+			relink_btn.name = "RelinkBtn"
+			relink_btn.text = "🔗 Re-link Account"
+			relink_btn.custom_minimum_size = Vector2(170, 38)
+			relink_btn.focus_mode = Control.FOCUS_ALL
+			ThemeManager.apply_secondary_button_style(relink_btn, 6)
+			relink_btn.pressed.connect(func():
+				_open_link_guest_modal(p_name, str(reg_p.get("email", "")))
+			)
+			cloud_link_section.add_child(relink_btn)
+
+
+func _check_single_pending_status(p_name: String) -> void:
+	var link_svc = LinkServiceClass.new()
+	var outgoing: Array[Dictionary] = await link_svc.check_outgoing_requests()
+	for doc in outgoing:
+		if str(doc.get("local_player_name", "")).to_lower() == p_name.to_lower():
+			var status := str(doc.get("status", "pending"))
+			if status == "approved":
+				_render_player_profile(p_name)
+				return
+	_render_player_profile(p_name)
+
+
+var _pending_primary_link_player: String = ""
+
+
+func _open_account_modal() -> void:
+	var existing = get_node_or_null("AccountModal")
+	if existing != null:
+		existing.visible = true
+		return
+	var modal = AccountModalScene.instantiate()
+	modal.name = "AccountModal"
+	add_child(modal)
+	var on_closed_cb = func():
+		_update_cloud_account_bar()
+		_refresh_players_list()
+		if not selected_player_name.is_empty():
+			_render_player_profile(selected_player_name)
+	if modal.has_signal("modal_closed"):
+		modal.modal_closed.connect(on_closed_cb)
+	elif modal.has_signal("closed"):
+		modal.closed.connect(on_closed_cb)
+
+
+func _on_sync_now_pressed() -> void:
+	if has_node("/root/CloudSync"):
+		get_node("/root/CloudSync").call("sync_all_eligible_profiles", "manual")
+
+
+func _show_primary_confirm_dialog(player_name: String) -> void:
+	primary_confirm_dialog.title = "Set Primary Cloud Profile"
+	primary_confirm_dialog.dialog_text = "Associate local profile '%s' with your signed-in cloud account and sync all of its existing local stats and matches to the cloud?\n\nOnly your Primary Profile (and approved secondary/guest accounts) are synced to Firebase." % player_name
+	primary_confirm_dialog.ok_button_text = "Associate & Sync"
+	primary_confirm_dialog.cancel_button_text = "Cancel"
+
+	for conn in primary_confirm_dialog.confirmed.get_connections():
+		primary_confirm_dialog.confirmed.disconnect(conn["callable"])
+
+	primary_confirm_dialog.confirmed.connect(func():
+		var auth = get_node_or_null("/root/CloudAuth")
+		var uid = auth.get_uid() if (auth != null and auth.has_method("get_uid")) else ""
+		MultiplayerManager.set_primary_player(player_name, uid)
+		_refresh_players_list()
+		if has_node("/root/CloudSync"):
+			get_node("/root/CloudSync").call("sync_single_profile", player_name, uid)
+		_render_player_profile(player_name)
+	)
+	primary_confirm_dialog.popup_centered()
+
+
+func _check_first_signin_primary_link() -> void:
+	var auth = get_node_or_null("/root/CloudAuth")
+	if auth == null or not auth.has_method("is_signed_in") or not auth.is_signed_in():
+		return
+	var primary_name = MultiplayerManager.get_primary_player_name()
+	if not primary_name.is_empty():
+		_pending_primary_link_player = ""
+		return
+	var reg = MultiplayerManager.get_registered_players()
+	if reg.is_empty():
+		return
+	if not _pending_primary_link_player.is_empty():
+		var target_p := _pending_primary_link_player
+		_pending_primary_link_player = ""
+		call_deferred("_show_primary_confirm_dialog", target_p)
+		return
+	var email = auth.get_email().strip_edges().to_lower()
+	var email_prefix = email.split("@")[0] if email.contains("@") else email
+	var dname = auth.get_display_name().strip_edges().to_lower()
+	var matching_player = ""
+	for p in reg:
+		if not email.is_empty() and str(p.get("email", "")).strip_edges().to_lower() == email:
+			matching_player = str(p.get("name", ""))
+			break
+	if matching_player.is_empty():
+		for p in reg:
+			var p_lower = str(p.get("name", "")).strip_edges().to_lower()
+			if not p_lower.is_empty() and (p_lower == dname or p_lower == email_prefix):
+				matching_player = str(p.get("name", ""))
+				break
+	if matching_player.is_empty() and reg.size() == 1:
+		matching_player = str(reg[0].get("name", ""))
+	if not matching_player.is_empty():
+		MultiplayerManager.set_primary_player(matching_player, auth.get_uid())
+		if has_node("/root/CloudSync"):
+			get_node("/root/CloudSync").call("sync_single_profile", matching_player, auth.get_uid())
+	elif not selected_player_name.is_empty():
+		call_deferred("_show_primary_confirm_dialog", selected_player_name)
+
+
+func _open_create_profile_dialog() -> void:
+	for child in create_profile_content.get_children():
+		child.queue_free()
+
+	var title_lbl = Label.new()
+	title_lbl.text = "Create New Player Profile"
+	title_lbl.add_theme_font_size_override("font_size", 20)
+	title_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_GOLD)
+	create_profile_content.add_child(title_lbl)
+
+	# Name Section
+	var name_sec = VBoxContainer.new()
+	name_sec.add_theme_constant_override("separation", 6)
+	create_profile_content.add_child(name_sec)
+
+	var name_title = Label.new()
+	name_title.text = "Player Name:"
+	name_title.add_theme_font_size_override("font_size", 14)
+	name_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	name_sec.add_child(name_title)
+
+	if new_player_input.get_parent() != null:
+		new_player_input.get_parent().remove_child(new_player_input)
+	name_sec.add_child(new_player_input)
+	if not new_player_input.text_changed.is_connected(_on_create_profile_name_changed):
+		new_player_input.text_changed.connect(_on_create_profile_name_changed)
+
+	# Email Section
+	var email_sec = VBoxContainer.new()
+	email_sec.add_theme_constant_override("separation", 6)
+	create_profile_content.add_child(email_sec)
+
+	var email_title = Label.new()
+	email_title.text = "Email Address (auto-populates when clicking email buttons):"
+	email_title.add_theme_font_size_override("font_size", 14)
+	email_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	email_sec.add_child(email_title)
+
+	if not new_player_email_input.gui_input.is_connected(_on_new_player_email_gui_input):
+		new_player_email_input.gui_input.connect(_on_new_player_email_gui_input)
+	if new_player_email_input.get_parent() != null:
+		new_player_email_input.get_parent().remove_child(new_player_email_input)
+	email_sec.add_child(new_player_email_input)
+
+	# Avatar Section
+	var av_sec = VBoxContainer.new()
+	av_sec.add_theme_constant_override("separation", 6)
+	create_profile_content.add_child(av_sec)
+
+	var av_title = Label.new()
+	av_title.text = "In-Game Avatar (replaces colored letter circle):"
+	av_title.add_theme_font_size_override("font_size", 15)
+	av_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	av_sec.add_child(av_title)
+
+	var av_hbox = HBoxContainer.new()
+	av_hbox.add_theme_constant_override("separation", 14)
+	av_sec.add_child(av_hbox)
+
+	create_profile_avatar_preview_container = HBoxContainer.new()
+	create_profile_avatar_preview_container.add_theme_constant_override("separation", 10)
+	av_hbox.add_child(create_profile_avatar_preview_container)
+	_update_create_profile_avatar_ui()
+
+	var change_av_btn = Button.new()
+	change_av_btn.text = "Select Avatar..."
+	change_av_btn.custom_minimum_size = Vector2(160, 50)
+	change_av_btn.add_theme_font_size_override("font_size", 17)
+	ThemeManager.apply_primary_button_style(change_av_btn)
+	change_av_btn.pressed.connect(func():
+		_open_avatar_picker(new_player_avatar_path, func(chosen):
+			new_player_avatar_path = chosen
+			_update_create_profile_avatar_ui()
+		)
+	)
+	av_hbox.add_child(change_av_btn)
+
+	var remove_av_btn = Button.new()
+	remove_av_btn.text = "Remove Avatar"
+	remove_av_btn.custom_minimum_size = Vector2(150, 50)
+	remove_av_btn.add_theme_font_size_override("font_size", 17)
+	ThemeManager.apply_secondary_button_style(remove_av_btn)
+	remove_av_btn.pressed.connect(func():
+		new_player_avatar_path = ""
+		_update_create_profile_avatar_ui()
+	)
+	av_hbox.add_child(remove_av_btn)
+
+	# Preferred Tee Section
+	var tee_sec = VBoxContainer.new()
+	tee_sec.add_theme_constant_override("separation", 6)
+	create_profile_content.add_child(tee_sec)
+
+	var tee_title = Label.new()
+	tee_title.text = "Preferred Tee Box (auto-selected during match setup):"
+	tee_title.add_theme_font_size_override("font_size", 15)
+	tee_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	tee_sec.add_child(tee_title)
+
+	if new_player_tee_opt.get_parent() != null:
+		new_player_tee_opt.get_parent().remove_child(new_player_tee_opt)
+	tee_sec.add_child(new_player_tee_opt)
+
+	# Skill Level Section
+	var skill_sec = VBoxContainer.new()
+	skill_sec.add_theme_constant_override("separation", 6)
+	create_profile_content.add_child(skill_sec)
+
+	var skill_title = Label.new()
+	skill_title.text = "Player Skill Level:"
+	skill_title.add_theme_font_size_override("font_size", 15)
+	skill_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	skill_sec.add_child(skill_title)
+
+	var skill_hint = Label.new()
+	skill_hint.text = "ℹ️ Tailors your shot recommendations, launch benchmarks, and flaw analysis."
+	skill_hint.add_theme_font_size_override("font_size", 13)
+	skill_hint.add_theme_color_override("font_color", Color(0.65, 0.85, 1.0))
+	skill_sec.add_child(skill_hint)
+
+	if new_player_skill_opt.get_parent() != null:
+		new_player_skill_opt.get_parent().remove_child(new_player_skill_opt)
+	skill_sec.add_child(new_player_skill_opt)
+
+	# Dexterity / Handedness Section
+	var hand_sec = VBoxContainer.new()
+	hand_sec.add_theme_constant_override("separation", 6)
+	create_profile_content.add_child(hand_sec)
+
+	var hand_title = Label.new()
+	hand_title.text = "Player Dexterity / Handedness:"
+	hand_title.add_theme_font_size_override("font_size", 15)
+	hand_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	hand_sec.add_child(hand_title)
+
+	var hand_hint = Label.new()
+	hand_hint.text = "ℹ️ Configures launch monitors requiring handedness tracking (e.g. Square Golf)."
+	hand_hint.add_theme_font_size_override("font_size", 13)
+	hand_hint.add_theme_color_override("font_color", Color(0.65, 0.85, 1.0))
+	hand_sec.add_child(hand_hint)
+
+	if new_player_handedness_opt.get_parent() != null:
+		new_player_handedness_opt.get_parent().remove_child(new_player_handedness_opt)
+	hand_sec.add_child(new_player_handedness_opt)
+
+	# Golf Ball Graphic Section
+	var ball_sec = VBoxContainer.new()
+	ball_sec.add_theme_constant_override("separation", 6)
+	create_profile_content.add_child(ball_sec)
+
+	var ball_title = Label.new()
+	ball_title.text = "Golf Ball Graphics & Alignment Marker:"
+	ball_title.add_theme_font_size_override("font_size", 15)
+	ball_title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	ball_sec.add_child(ball_title)
+
+	var ball_hint = Label.new()
+	ball_hint.text = "ℹ️ Ball is always positioned in a canonical orientation with an alignment arrow directed at the hole."
+	ball_hint.add_theme_font_size_override("font_size", 13)
+	ball_hint.add_theme_color_override("font_color", Color(0.65, 0.85, 1.0))
+	ball_sec.add_child(ball_hint)
+
+	var ball_hbox = HBoxContainer.new()
+	ball_hbox.add_theme_constant_override("separation", 14)
+	ball_sec.add_child(ball_hbox)
+
+	create_profile_ball_preview_container = HBoxContainer.new()
+	create_profile_ball_preview_container.add_theme_constant_override("separation", 10)
+	ball_hbox.add_child(create_profile_ball_preview_container)
+
+	if new_player_ball_opt.get_parent() != null:
+		new_player_ball_opt.get_parent().remove_child(new_player_ball_opt)
+	new_player_ball_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if not new_player_ball_opt.item_selected.is_connected(_on_create_profile_ball_item_selected):
+		new_player_ball_opt.item_selected.connect(_on_create_profile_ball_item_selected)
+	ball_hbox.add_child(new_player_ball_opt)
+
+	var match_icon_btn = Button.new()
+	match_icon_btn.text = "Match Player Icon"
+	match_icon_btn.custom_minimum_size = Vector2(170, 50)
+	match_icon_btn.add_theme_font_size_override("font_size", 15)
+	ThemeManager.apply_secondary_button_style(match_icon_btn, 6)
+	match_icon_btn.pressed.connect(func():
+		new_player_ball_opt.selected = _ball_graphic_id_to_index("player_icon")
+		_update_create_profile_ball_ui()
+	)
+	ball_hbox.add_child(match_icon_btn)
+
+	_update_create_profile_ball_ui()
+
+	create_profile_dialog.popup_centered()
+	new_player_input.call_deferred("grab_focus")
+
+
+func _update_create_profile_avatar_ui() -> void:
+	if create_profile_avatar_preview_container == null:
+		return
+	for child in create_profile_avatar_preview_container.get_children():
+		child.queue_free()
+
+	if not new_player_avatar_path.is_empty() and ResourceLoader.exists(new_player_avatar_path):
+		var trect = TextureRect.new()
+		trect.texture = load(new_player_avatar_path)
+		trect.custom_minimum_size = Vector2(48, 48)
+		trect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		trect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		create_profile_avatar_preview_container.add_child(trect)
+
+		var av_name = "Custom Avatar"
+		for av in MultiplayerManager.AVAILABLE_AVATARS:
+			if av["path"] == new_player_avatar_path:
+				av_name = av["name"]
+				break
+		var name_l = Label.new()
+		name_l.text = av_name
+		name_l.add_theme_font_size_override("font_size", 16)
+		name_l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		create_profile_avatar_preview_container.add_child(name_l)
+	else:
+		var circ = PanelContainer.new()
+		circ.custom_minimum_size = Vector2(48, 48)
+		var cs = StyleBoxFlat.new()
+		cs.bg_color = Color(0.24, 0.46, 0.72)
+		cs.corner_radius_top_left = 24
+		cs.corner_radius_top_right = 24
+		cs.corner_radius_bottom_left = 24
+		cs.corner_radius_bottom_right = 24
+		circ.add_theme_stylebox_override("panel", cs)
+		var clbl = Label.new()
+		var p_initial = new_player_input.text.strip_edges().substr(0, 1).to_upper()
+		clbl.text = p_initial if not p_initial.is_empty() else "?"
+		clbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		clbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		clbl.add_theme_font_size_override("font_size", 22)
+		circ.add_child(clbl)
+		create_profile_avatar_preview_container.add_child(circ)
+
+		var name_l = Label.new()
+		name_l.text = "None (Default Initial)"
+		name_l.add_theme_font_size_override("font_size", 16)
+		name_l.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+		name_l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		create_profile_avatar_preview_container.add_child(name_l)
+
+	_update_create_profile_ball_ui()
+
+
+func _update_create_profile_ball_ui() -> void:
+	if create_profile_ball_preview_container == null:
+		return
+	for child in create_profile_ball_preview_container.get_children():
+		child.queue_free()
+
+	var bg_id = _ball_graphic_index_to_id(new_player_ball_opt.selected) if new_player_ball_opt != null else "single_line"
+	var preview = _create_ball_preview_icon(bg_id, new_player_avatar_path, new_player_input.text.strip_edges(), Vector2(48, 48))
+	create_profile_ball_preview_container.add_child(preview)
+
+
+func _on_create_profile_name_changed(_new_text: String) -> void:
+	if new_player_avatar_path.is_empty():
+		_update_create_profile_avatar_ui()
+	else:
+		_update_create_profile_ball_ui()
+
+
+func _on_create_profile_ball_item_selected(_idx: int) -> void:
+	_update_create_profile_ball_ui()
+
+
+func _on_new_player_email_gui_input(ev: InputEvent) -> void:
+	if has_node("/root/VirtualKeyboardManager"):
+		var vkm = get_node("/root/VirtualKeyboardManager")
+		if vkm.is_controller_mode_active():
+			if (ev is InputEventJoypadButton and ev.pressed and ev.button_index == JOY_BUTTON_A) or ev.is_action_pressed("ui_accept"):
+				vkm.open_for(new_player_email_input, true)
+				get_viewport().set_input_as_handled()
 
 
 func _select_player(player_name: String) -> void:
@@ -778,6 +1619,8 @@ func _on_register_pressed() -> void:
 	var handedness = new_player_handedness_opt.selected if new_player_handedness_opt != null else 0
 	var ball_graphic = _ball_graphic_index_to_id(new_player_ball_opt.selected) if new_player_ball_opt != null else "single_line"
 	MultiplayerManager.register_player(name_text, email_text, new_player_avatar_path, [], pref_tee, skill_level, handedness, ball_graphic)
+	if create_profile_dialog != null and create_profile_dialog.visible:
+		create_profile_dialog.hide()
 	new_player_input.clear()
 	new_player_email_input.clear()
 	new_player_avatar_path = ""
@@ -789,6 +1632,8 @@ func _on_register_pressed() -> void:
 		new_player_ball_opt.selected = 0
 	_update_new_player_avatar_preview()
 	_update_new_player_ball_preview()
+	_update_create_profile_avatar_ui()
+	_update_create_profile_ball_ui()
 	_select_player(name_text)
 
 func _update_new_player_avatar_preview() -> void:
@@ -1432,54 +2277,7 @@ func _render_player_profile(player_name: String) -> void:
 	name_lbl.add_theme_color_override("font_color", Color.WHITE)
 	info_vbox.add_child(name_lbl)
 
-	var email_lbl = Label.new()
-	if not p_email.is_empty():
-		email_lbl.text = "✉ " + p_email
-		email_lbl.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0))
-	else:
-		email_lbl.text = "✉ No email set (click Edit Profile to add)"
-		email_lbl.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
-	email_lbl.add_theme_font_size_override("font_size", 14)
-	info_vbox.add_child(email_lbl)
-
 	var p_tee = reg_p.get("preferred_tee", "")
-	var tee_lbl = Label.new()
-	if not p_tee.is_empty():
-		tee_lbl.text = "⛳ Preferred Tee: " + p_tee
-		var t_color = Color(0.8, 0.9, 1.0)
-		match p_tee.to_lower():
-			"blue": t_color = Color(0.4, 0.7, 1.0)
-			"red": t_color = Color(1.0, 0.45, 0.45)
-			"white": t_color = Color(0.95, 0.95, 0.95)
-			"black": t_color = Color(0.7, 0.7, 0.7)
-			"gold": t_color = Color(1.0, 0.85, 0.3)
-		tee_lbl.add_theme_color_override("font_color", t_color)
-	else:
-		tee_lbl.text = "⛳ Preferred Tee: None"
-		tee_lbl.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
-	tee_lbl.add_theme_font_size_override("font_size", 14)
-	info_vbox.add_child(tee_lbl)
-
-	var p_skill = reg_p.get("skill_level", "mid_handicap")
-	var skill_lbl = Label.new()
-	skill_lbl.text = "🎯 Skill: " + _skill_key_to_display(p_skill)
-	skill_lbl.add_theme_font_size_override("font_size", 14)
-	skill_lbl.add_theme_color_override("font_color", Color(0.4, 0.9, 0.6))
-	info_vbox.add_child(skill_lbl)
-
-	var p_hand = int(reg_p.get("handedness", 0))
-	var hand_lbl = Label.new()
-	hand_lbl.text = "🏌️ Dexterity: " + ("Left-Handed" if p_hand == 1 else "Right-Handed")
-	hand_lbl.add_theme_font_size_override("font_size", 14)
-	hand_lbl.add_theme_color_override("font_color", Color(0.95, 0.82, 0.45))
-	info_vbox.add_child(hand_lbl)
-
-	var p_ball = reg_p.get("ball_graphic", "single_line")
-	var ball_display_lbl = Label.new()
-	ball_display_lbl.text = "⚪ Ball: " + _ball_graphic_id_to_name(p_ball)
-	ball_display_lbl.add_theme_font_size_override("font_size", 14)
-	ball_display_lbl.add_theme_color_override("font_color", Color(0.85, 0.88, 1.0))
-	info_vbox.add_child(ball_display_lbl)
 
 	var edit_profile_btn = Button.new()
 	edit_profile_btn.name = "EditProfileBtn"
@@ -1497,6 +2295,69 @@ func _render_player_profile(player_name: String) -> void:
 	build_bag_btn.add_theme_font_size_override("font_size", 17)
 	ThemeManager.apply_primary_button_style(build_bag_btn, 6)
 	header_hbox.add_child(build_bag_btn)
+	
+	# Cloud Profile controls & CloudLinkSection
+	var cloud_profile_hbox = HBoxContainer.new()
+	cloud_profile_hbox.name = "CloudProfileHBox"
+	cloud_profile_hbox.add_theme_constant_override("separation", 10)
+	main_layout.add_child(cloud_profile_hbox)
+
+	var auth = get_node_or_null("/root/CloudAuth")
+	var signed_in = (auth != null and auth.has_method("is_signed_in") and auth.is_signed_in())
+	var is_primary = (str(reg_p.get("link_role", "none")) == "primary")
+
+	if signed_in:
+		if is_primary:
+			var primary_badge = Button.new()
+			primary_badge.name = "PrimaryProfileBtn"
+			primary_badge.text = "★ Primary Cloud Profile (Synced)"
+			primary_badge.custom_minimum_size = Vector2(250, 38)
+			primary_badge.focus_mode = Control.FOCUS_ALL
+			var p_style = StyleBoxFlat.new()
+			p_style.bg_color = Color(0.12, 0.35, 0.18, 0.95)
+			p_style.border_color = Color(0.35, 0.85, 0.45, 1.0)
+			p_style.set_border_width_all(2)
+			p_style.set_corner_radius_all(6)
+			p_style.content_margin_left = 12.0
+			p_style.content_margin_right = 12.0
+			primary_badge.add_theme_stylebox_override("normal", p_style)
+			primary_badge.add_theme_color_override("font_color", Color(0.9, 1.0, 0.9))
+			primary_badge.tooltip_text = "Click to unset Primary"
+			primary_badge.pressed.connect(func():
+				MultiplayerManager.set_primary_player("", "")
+				_render_player_profile(player_name)
+			)
+			cloud_profile_hbox.add_child(primary_badge)
+		else:
+			var set_primary_btn = Button.new()
+			set_primary_btn.name = "PrimaryProfileBtn"
+			set_primary_btn.text = "☆ Set as Primary Cloud Profile"
+			set_primary_btn.custom_minimum_size = Vector2(250, 38)
+			set_primary_btn.focus_mode = Control.FOCUS_ALL
+			ThemeManager.apply_secondary_button_style(set_primary_btn, 6)
+			set_primary_btn.pressed.connect(func():
+				_show_primary_confirm_dialog(player_name)
+			)
+			cloud_profile_hbox.add_child(set_primary_btn)
+	else:
+		var offline_primary_btn = Button.new()
+		offline_primary_btn.name = "PrimaryProfileBtn"
+		offline_primary_btn.text = "☁ Sign in to set as Primary Cloud Profile"
+		offline_primary_btn.custom_minimum_size = Vector2(270, 38)
+		offline_primary_btn.focus_mode = Control.FOCUS_ALL
+		ThemeManager.apply_secondary_button_style(offline_primary_btn, 6)
+		offline_primary_btn.pressed.connect(func():
+			_pending_primary_link_player = player_name
+			_open_account_modal()
+		)
+		cloud_profile_hbox.add_child(offline_primary_btn)
+
+	# CloudLinkSection container populated for Package 04
+	var cloud_link_section = HBoxContainer.new()
+	cloud_link_section.name = "CloudLinkSection"
+	cloud_link_section.add_theme_constant_override("separation", 8)
+	cloud_profile_hbox.add_child(cloud_link_section)
+	_populate_cloud_link_section(cloud_link_section, reg_p, player_name, signed_in)
 	
 	# Divider
 	var divider = ColorRect.new()
@@ -1527,6 +2388,78 @@ func _render_player_profile(player_name: String) -> void:
 	overview_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	overview_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	tabs.add_child(overview_vbox)
+
+	# Profile Info Section Card
+	var profile_panel = PanelContainer.new()
+	profile_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var prof_box = StyleBoxFlat.new()
+	prof_box.bg_color = Color(0.12, 0.16, 0.22, 0.75)
+	prof_box.border_color = Color(0.25, 0.35, 0.45, 0.7)
+	prof_box.set_border_width_all(1)
+	prof_box.set_corner_radius_all(8)
+	prof_box.content_margin_left = 16.0
+	prof_box.content_margin_right = 16.0
+	prof_box.content_margin_top = 12.0
+	prof_box.content_margin_bottom = 12.0
+	profile_panel.add_theme_stylebox_override("panel", prof_box)
+	overview_vbox.add_child(profile_panel)
+
+	var prof_vbox = VBoxContainer.new()
+	prof_vbox.add_theme_constant_override("separation", 10)
+	prof_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	profile_panel.add_child(prof_vbox)
+
+	var prof_title = Label.new()
+	prof_title.text = "Player Details"
+	prof_title.add_theme_font_size_override("font_size", 17)
+	prof_title.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_GOLD)
+	prof_vbox.add_child(prof_title)
+
+	var prof_grid = GridContainer.new()
+	prof_grid.columns = 3
+	prof_grid.add_theme_constant_override("h_separation", 32)
+	prof_grid.add_theme_constant_override("v_separation", 8)
+	prof_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	prof_vbox.add_child(prof_grid)
+
+	var add_detail_item = func(label_text: String, value_text: String, val_color: Color):
+		var item_vbox = VBoxContainer.new()
+		item_vbox.add_theme_constant_override("separation", 2)
+		var l = Label.new()
+		l.text = label_text
+		l.add_theme_font_size_override("font_size", 12)
+		l.add_theme_color_override("font_color", Color(0.65, 0.7, 0.75))
+		item_vbox.add_child(l)
+		var v = Label.new()
+		v.text = value_text
+		v.add_theme_font_size_override("font_size", 15)
+		v.add_theme_color_override("font_color", val_color)
+		item_vbox.add_child(v)
+		prof_grid.add_child(item_vbox)
+
+	var email_display = p_email if not p_email.is_empty() else "None set"
+	var email_color = Color(0.75, 0.88, 1.0) if not p_email.is_empty() else Color(0.6, 0.6, 0.6)
+	add_detail_item.call("Email", "✉ " + email_display, email_color)
+
+	var tee_color = Color(0.8, 0.9, 1.0)
+	if not p_tee.is_empty():
+		match p_tee.to_lower():
+			"blue": tee_color = Color(0.4, 0.7, 1.0)
+			"red": tee_color = Color(1.0, 0.45, 0.45)
+			"white": tee_color = Color(0.95, 0.95, 0.95)
+			"black": tee_color = Color(0.7, 0.7, 0.7)
+			"gold": tee_color = Color(1.0, 0.85, 0.3)
+	var tee_display = p_tee if not p_tee.is_empty() else "None"
+	add_detail_item.call("Preferred Tee", "⛳ " + tee_display, tee_color)
+
+	var p_skill = reg_p.get("skill_level", "mid_handicap")
+	add_detail_item.call("Skill Level", "🎯 " + _skill_key_to_display(p_skill), Color(0.4, 0.9, 0.6))
+
+	var p_hand = int(reg_p.get("handedness", 0))
+	add_detail_item.call("Dexterity", "🏌️ " + ("Left-Handed" if p_hand == 1 else "Right-Handed"), Color(0.95, 0.82, 0.45))
+
+	var p_ball = reg_p.get("ball_graphic", "single_line")
+	add_detail_item.call("Ball Alignment", "⚪ " + _ball_graphic_id_to_name(p_ball), Color(0.85, 0.88, 1.0))
 	
 	# Stats Grid Layout
 	var grid = GridContainer.new()

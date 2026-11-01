@@ -123,6 +123,12 @@ var resume_player_prompt_dialog: PanelContainer = null
 var catch_up_banner: PanelContainer = null
 var catch_up_lbl: Label = null
 var catch_up_skip_btn: Button = null
+var online_waiting_banner: PanelContainer = null
+var online_waiting_lbl: Label = null
+var online_afk_warning_lbl: Label = null
+var online_afk_btn_box: HBoxContainer = null
+var online_concede_btn: Button = null
+var online_remove_btn: Button = null
 var _hud_elements_visible: bool = true
 
 var _was_helpers_visible_before_aerial: bool = false
@@ -171,6 +177,11 @@ func _ready() -> void:
 	)
 	if has_node("/root/KeybindingManager"):
 		KeybindingManager.keybindings_changed.connect(_update_hud_tooltips)
+	
+	if has_node("/root/OnlineMatchController"):
+		var omc = get_node("/root/OnlineMatchController")
+		if not omc.waiting_banner_status_changed.is_connected(_on_online_waiting_banner_status_changed):
+			omc.waiting_banner_status_changed.connect(_on_online_waiting_banner_status_changed)
 	
 	if course_instance == null:
 		if get_parent() != null and get_parent() != get_tree().get_root() and get_parent().name != "CourseManager":
@@ -761,6 +772,96 @@ func _setup_hud() -> void:
 	)
 	cu_hbox.add_child(catch_up_skip_btn)
 	canvas.add_child(catch_up_banner)
+
+	# Online Waiting HUD Banner
+	online_waiting_banner = PanelContainer.new()
+	online_waiting_banner.name = "OnlineWaitingBanner"
+	online_waiting_banner.visible = false
+	online_waiting_banner.z_index = 450
+	online_waiting_banner.anchor_left = 0.5
+	online_waiting_banner.anchor_right = 0.5
+	online_waiting_banner.anchor_top = 0.12
+	online_waiting_banner.anchor_bottom = 0.12
+	online_waiting_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	online_waiting_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
+	online_waiting_banner.custom_minimum_size = Vector2(460, 64)
+
+	var ow_style = StyleBoxFlat.new()
+	ow_style.bg_color = Color(0.08, 0.12, 0.16, 0.94)
+	ow_style.border_width_left = 2
+	ow_style.border_width_top = 2
+	ow_style.border_width_right = 2
+	ow_style.border_width_bottom = 2
+	ow_style.border_color = Color(0.2, 0.6, 0.85, 0.9)
+	ow_style.corner_radius_top_left = 12
+	ow_style.corner_radius_top_right = 12
+	ow_style.corner_radius_bottom_left = 12
+	ow_style.corner_radius_bottom_right = 12
+	ow_style.content_margin_left = 20
+	ow_style.content_margin_right = 20
+	ow_style.content_margin_top = 10
+	ow_style.content_margin_bottom = 10
+	ow_style.shadow_color = Color(0, 0, 0, 0.7)
+	ow_style.shadow_size = 8
+	online_waiting_banner.add_theme_stylebox_override("panel", ow_style)
+
+	var ow_vbox = VBoxContainer.new()
+	ow_vbox.name = "WaitingVBox"
+	ow_vbox.add_theme_constant_override("separation", 8)
+
+	online_waiting_lbl = Label.new()
+	online_waiting_lbl.name = "WaitingLabel"
+	online_waiting_lbl.text = "Waiting for Opponent to hit…"
+	online_waiting_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	online_waiting_lbl.add_theme_font_size_override("font_size", 18)
+	online_waiting_lbl.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0))
+	ow_vbox.add_child(online_waiting_lbl)
+
+	online_afk_warning_lbl = Label.new()
+	online_afk_warning_lbl.name = "AfkWarningLabel"
+	online_afk_warning_lbl.text = "⚠️ Player appears disconnected"
+	online_afk_warning_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	online_afk_warning_lbl.add_theme_font_size_override("font_size", 14)
+	online_afk_warning_lbl.add_theme_color_override("font_color", Color(0.95, 0.75, 0.2))
+	online_afk_warning_lbl.visible = false
+	ow_vbox.add_child(online_afk_warning_lbl)
+
+	online_afk_btn_box = HBoxContainer.new()
+	online_afk_btn_box.name = "AfkButtonBox"
+	online_afk_btn_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	online_afk_btn_box.add_theme_constant_override("separation", 16)
+	online_afk_btn_box.visible = false
+
+	online_concede_btn = Button.new()
+	online_concede_btn.name = "ConcedePlayerBtn"
+	online_concede_btn.text = "Concede Hole for Player"
+	online_concede_btn.custom_minimum_size = Vector2(170, 38)
+	apply_material_button_style(online_concede_btn, Color(0.85, 0.55, 0.15, 0.9))
+	online_concede_btn.pressed.connect(func():
+		if has_node("/root/OnlineMatchController"):
+			get_node("/root/OnlineMatchController").concede_active_player()
+	)
+	online_afk_btn_box.add_child(online_concede_btn)
+
+	online_remove_btn = Button.new()
+	online_remove_btn.name = "RemovePlayerBtn"
+	online_remove_btn.text = "Remove Player from Match"
+	online_remove_btn.custom_minimum_size = Vector2(180, 38)
+	apply_material_button_style(online_remove_btn, Color(0.75, 0.22, 0.22, 0.9))
+	online_remove_btn.pressed.connect(func():
+		if has_node("/root/OnlineMatchController"):
+			get_node("/root/OnlineMatchController").remove_active_player()
+	)
+	online_afk_btn_box.add_child(online_remove_btn)
+
+	online_concede_btn.focus_neighbor_right = online_concede_btn.get_path_to(online_remove_btn)
+	online_concede_btn.focus_neighbor_left = online_concede_btn.get_path_to(online_remove_btn)
+	online_remove_btn.focus_neighbor_left = online_remove_btn.get_path_to(online_concede_btn)
+	online_remove_btn.focus_neighbor_right = online_remove_btn.get_path_to(online_concede_btn)
+
+	ow_vbox.add_child(online_afk_btn_box)
+	online_waiting_banner.add_child(ow_vbox)
+	canvas.add_child(online_waiting_banner)
 
 	# Add Player Mid-Game Prompt Dialog
 	add_player_prompt_dialog = PanelContainer.new()
@@ -1711,14 +1812,14 @@ func _setup_hud() -> void:
 	mulligan_btn.offset_right = -130 # -110 (map left) - 20px gap
 	mulligan_btn.offset_bottom = -24
 	mulligan_btn.pressed.connect(_on_mulligan_pressed)
-	mulligan_btn.visible = is_match_play
+	mulligan_btn.visible = is_match_play and not _is_online_match()
 	canvas.add_child(mulligan_btn)
 
 	# Forfeit / White Flag Button (Icon Only) - Bottom-Right next to Mulligan button
 	forfeit_btn = Button.new()
 	forfeit_btn.name = "ForfeitButton"
 	forfeit_btn.text = ""
-	forfeit_btn.tooltip_text = "White Flag (Concede Hole)"
+	forfeit_btn.tooltip_text = "Leave Online Match" if _is_online_match() else "White Flag (Concede Hole)"
 	forfeit_btn.expand_icon = true
 	if ResourceLoader.exists("res://assets/images/icons/white_flag.svg"):
 		var icon_tex = load("res://assets/images/icons/white_flag.svg")
@@ -2478,6 +2579,53 @@ func _update_hud_focus_neighbors() -> void:
 		if prev_shot_btn == null and "_prev_shot_btn" in range_ui:
 			prev_shot_btn = range_ui.get("_prev_shot_btn")
 
+	# Locate weather & lighting controls if instantiated
+	var weather_slider: Control = null
+	var weather_btn: Control = null
+	if course_instance != null and is_instance_valid(course_instance) and course_instance.has_method("get_weather_lighting_controller"):
+		var w_ctrl = course_instance.get_weather_lighting_controller()
+		if w_ctrl != null and is_instance_valid(w_ctrl):
+			if "time_slider" in w_ctrl and w_ctrl.time_slider != null and is_instance_valid(w_ctrl.time_slider) and w_ctrl.time_slider.is_visible_in_tree():
+				weather_slider = w_ctrl.time_slider
+			if "weather_toggle_btn" in w_ctrl and w_ctrl.weather_toggle_btn != null and is_instance_valid(w_ctrl.weather_toggle_btn) and w_ctrl.weather_toggle_btn.is_visible_in_tree():
+				weather_btn = w_ctrl.weather_toggle_btn
+	if weather_slider == null and get_tree() != null and get_tree().root != null:
+		var found_s = get_tree().root.find_child("TimeOfDaySlider", true, false)
+		if found_s != null and is_instance_valid(found_s) and found_s.is_visible_in_tree():
+			weather_slider = found_s as Control
+	if weather_btn == null and get_tree() != null and get_tree().root != null:
+		var found_b = get_tree().root.find_child("WeatherToggleButton", true, false)
+		if found_b != null and is_instance_valid(found_b) and found_b.is_visible_in_tree():
+			weather_btn = found_b as Control
+
+	var active_hide_helpers: Control = hide_helpers_btn
+	if (active_hide_helpers == null or not is_instance_valid(active_hide_helpers)) and range_ui != null and is_instance_valid(range_ui):
+		active_hide_helpers = range_ui.get_node_or_null("OverlayLayer/HideHelpersButton")
+		if active_hide_helpers == null:
+			active_hide_helpers = range_ui.find_child("HideHelpersButton", true, false)
+
+	var active_home: Control = home_btn
+	if (active_home == null or not is_instance_valid(active_home)) and range_ui != null and is_instance_valid(range_ui):
+		active_home = range_ui.get_node_or_null("OverlayLayer/HomeButton")
+		if active_home == null:
+			active_home = range_ui.find_child("HomeButton", true, false)
+
+	var active_settings: Control = settings_btn
+	if (active_settings == null or not is_instance_valid(active_settings)) and range_ui != null and is_instance_valid(range_ui):
+		active_settings = range_ui.get_node_or_null("OverlayLayer/SettingsButton")
+		if active_settings == null:
+			active_settings = range_ui.find_child("SettingsButton", true, false)
+
+	var club_btn: Control = null
+	if club_selector_node != null and is_instance_valid(club_selector_node) and "club_button" in club_selector_node:
+		club_btn = club_selector_node.club_button
+	elif range_ui != null and is_instance_valid(range_ui):
+		var club_sel = range_ui.get_node_or_null("OverlayLayer/ClubSelector")
+		if club_sel == null:
+			club_sel = range_ui.find_child("ClubSelector", true, false)
+		if club_sel != null and "club_button" in club_sel:
+			club_btn = club_sel.club_button
+
 	# Stats button (Bottom-Left)
 	if stats_btn != null and is_instance_valid(stats_btn):
 		if add_remove_btn != null and is_instance_valid(add_remove_btn):
@@ -2515,10 +2663,14 @@ func _update_hud_focus_neighbors() -> void:
 		if right_target != null:
 			prev_shot_btn.focus_neighbor_right = prev_shot_btn.get_path_to(right_target)
 		
-		if add_remove_btn != null and is_instance_valid(add_remove_btn):
+		if weather_slider != null:
+			prev_shot_btn.focus_neighbor_top = prev_shot_btn.get_path_to(weather_slider)
+		elif weather_btn != null:
+			prev_shot_btn.focus_neighbor_top = prev_shot_btn.get_path_to(weather_btn)
+		elif add_remove_btn != null and is_instance_valid(add_remove_btn):
 			prev_shot_btn.focus_neighbor_top = prev_shot_btn.get_path_to(add_remove_btn)
-		elif hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
-			prev_shot_btn.focus_neighbor_top = prev_shot_btn.get_path_to(hide_helpers_btn)
+		elif active_hide_helpers != null and is_instance_valid(active_hide_helpers):
+			prev_shot_btn.focus_neighbor_top = prev_shot_btn.get_path_to(active_hide_helpers)
 
 	# Add/Remove button (Left middle in RangeUI)
 	if add_remove_btn != null and is_instance_valid(add_remove_btn):
@@ -2526,12 +2678,57 @@ func _update_hud_focus_neighbors() -> void:
 			add_remove_btn.focus_neighbor_bottom = add_remove_btn.get_path_to(stats_btn)
 		elif grid_btn != null and is_instance_valid(grid_btn):
 			add_remove_btn.focus_neighbor_bottom = add_remove_btn.get_path_to(grid_btn)
-		if prev_shot_btn != null and is_instance_valid(prev_shot_btn):
+		if weather_slider != null:
+			add_remove_btn.focus_neighbor_right = add_remove_btn.get_path_to(weather_slider)
+			add_remove_btn.focus_neighbor_top = add_remove_btn.get_path_to(weather_slider)
+		elif weather_btn != null:
+			add_remove_btn.focus_neighbor_right = add_remove_btn.get_path_to(weather_btn)
+			add_remove_btn.focus_neighbor_top = add_remove_btn.get_path_to(weather_btn)
+		elif prev_shot_btn != null and is_instance_valid(prev_shot_btn):
 			add_remove_btn.focus_neighbor_right = add_remove_btn.get_path_to(prev_shot_btn)
 		elif map_btn != null and is_instance_valid(map_btn):
 			add_remove_btn.focus_neighbor_right = add_remove_btn.get_path_to(map_btn)
-		if hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
-			add_remove_btn.focus_neighbor_top = add_remove_btn.get_path_to(hide_helpers_btn)
+		if weather_slider == null and weather_btn == null:
+			if active_hide_helpers != null and is_instance_valid(active_hide_helpers):
+				add_remove_btn.focus_neighbor_top = add_remove_btn.get_path_to(active_hide_helpers)
+
+	# Weather & Lighting Controls (Top-Center)
+	if weather_slider != null:
+		if add_remove_btn != null and is_instance_valid(add_remove_btn):
+			weather_slider.focus_neighbor_left = weather_slider.get_path_to(add_remove_btn)
+			weather_slider.focus_neighbor_top = weather_slider.get_path_to(add_remove_btn)
+		elif stats_btn != null and is_instance_valid(stats_btn):
+			weather_slider.focus_neighbor_left = weather_slider.get_path_to(stats_btn)
+
+		if weather_btn != null:
+			weather_slider.focus_neighbor_right = weather_slider.get_path_to(weather_btn)
+		elif active_hide_helpers != null and is_instance_valid(active_hide_helpers):
+			weather_slider.focus_neighbor_right = weather_slider.get_path_to(active_hide_helpers)
+
+		if club_btn != null and is_instance_valid(club_btn) and club_btn.visible:
+			weather_slider.focus_neighbor_bottom = weather_slider.get_path_to(club_btn)
+		elif prev_shot_btn != null and is_instance_valid(prev_shot_btn):
+			weather_slider.focus_neighbor_bottom = weather_slider.get_path_to(prev_shot_btn)
+		elif map_btn != null and is_instance_valid(map_btn):
+			weather_slider.focus_neighbor_bottom = weather_slider.get_path_to(map_btn)
+
+	if weather_btn != null:
+		if weather_slider != null:
+			weather_btn.focus_neighbor_left = weather_btn.get_path_to(weather_slider)
+		elif add_remove_btn != null and is_instance_valid(add_remove_btn):
+			weather_btn.focus_neighbor_left = weather_btn.get_path_to(add_remove_btn)
+
+		if active_hide_helpers != null and is_instance_valid(active_hide_helpers):
+			weather_btn.focus_neighbor_right = weather_btn.get_path_to(active_hide_helpers)
+		elif active_home != null and is_instance_valid(active_home):
+			weather_btn.focus_neighbor_right = weather_btn.get_path_to(active_home)
+
+		if club_btn != null and is_instance_valid(club_btn) and club_btn.visible:
+			weather_btn.focus_neighbor_bottom = weather_btn.get_path_to(club_btn)
+		elif prev_shot_btn != null and is_instance_valid(prev_shot_btn):
+			weather_btn.focus_neighbor_bottom = weather_btn.get_path_to(prev_shot_btn)
+		elif map_btn != null and is_instance_valid(map_btn):
+			weather_btn.focus_neighbor_bottom = weather_btn.get_path_to(map_btn)
 
 	# Forfeit button (Bottom-Right)
 	if forfeit_btn != null and is_instance_valid(forfeit_btn) and forfeit_btn.visible:
@@ -2542,8 +2739,8 @@ func _update_hud_focus_neighbors() -> void:
 		var f_right: Control = mulligan_btn if (mulligan_btn != null and is_instance_valid(mulligan_btn) and mulligan_btn.visible) else map_btn
 		if f_right != null and is_instance_valid(f_right):
 			forfeit_btn.focus_neighbor_right = forfeit_btn.get_path_to(f_right)
-		if hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
-			forfeit_btn.focus_neighbor_top = forfeit_btn.get_path_to(hide_helpers_btn)
+		if active_hide_helpers != null and is_instance_valid(active_hide_helpers):
+			forfeit_btn.focus_neighbor_top = forfeit_btn.get_path_to(active_hide_helpers)
 
 	# Mulligan button (Bottom-Right)
 	if mulligan_btn != null and is_instance_valid(mulligan_btn) and mulligan_btn.visible:
@@ -2552,8 +2749,8 @@ func _update_hud_focus_neighbors() -> void:
 			mulligan_btn.focus_neighbor_left = mulligan_btn.get_path_to(m_left)
 		if map_btn != null and is_instance_valid(map_btn):
 			mulligan_btn.focus_neighbor_right = mulligan_btn.get_path_to(map_btn)
-		if hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
-			mulligan_btn.focus_neighbor_top = mulligan_btn.get_path_to(hide_helpers_btn)
+		if active_hide_helpers != null and is_instance_valid(active_hide_helpers):
+			mulligan_btn.focus_neighbor_top = mulligan_btn.get_path_to(active_hide_helpers)
 
 	# Map button (Bottom-Right)
 	if map_btn != null and is_instance_valid(map_btn):
@@ -2568,40 +2765,44 @@ func _update_hud_focus_neighbors() -> void:
 			map_btn.focus_neighbor_left = map_btn.get_path_to(map_left)
 		if stats_btn != null and is_instance_valid(stats_btn):
 			map_btn.focus_neighbor_right = map_btn.get_path_to(stats_btn) # wrap-around
-		if settings_btn != null and is_instance_valid(settings_btn):
-			map_btn.focus_neighbor_top = map_btn.get_path_to(settings_btn)
+		if active_settings != null and is_instance_valid(active_settings):
+			map_btn.focus_neighbor_top = map_btn.get_path_to(active_settings)
 
 	# Settings button (Top-Right)
-	if settings_btn != null and is_instance_valid(settings_btn):
-		if home_btn != null and is_instance_valid(home_btn):
-			settings_btn.focus_neighbor_left = settings_btn.get_path_to(home_btn)
+	if active_settings != null and is_instance_valid(active_settings):
+		if active_home != null and is_instance_valid(active_home):
+			active_settings.focus_neighbor_left = active_settings.get_path_to(active_home)
 		if map_btn != null and is_instance_valid(map_btn):
-			settings_btn.focus_neighbor_bottom = settings_btn.get_path_to(map_btn)
+			active_settings.focus_neighbor_bottom = active_settings.get_path_to(map_btn)
 
 	# Home button (Top-Right)
-	if home_btn != null and is_instance_valid(home_btn):
-		if hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
-			home_btn.focus_neighbor_left = home_btn.get_path_to(hide_helpers_btn)
-		if settings_btn != null and is_instance_valid(settings_btn):
-			home_btn.focus_neighbor_right = home_btn.get_path_to(settings_btn)
+	if active_home != null and is_instance_valid(active_home):
+		if active_hide_helpers != null and is_instance_valid(active_hide_helpers):
+			active_home.focus_neighbor_left = active_home.get_path_to(active_hide_helpers)
+		if active_settings != null and is_instance_valid(active_settings):
+			active_home.focus_neighbor_right = active_home.get_path_to(active_settings)
 		if prev_shot_btn != null and is_instance_valid(prev_shot_btn):
-			home_btn.focus_neighbor_bottom = home_btn.get_path_to(prev_shot_btn)
+			active_home.focus_neighbor_bottom = active_home.get_path_to(prev_shot_btn)
 		elif map_btn != null and is_instance_valid(map_btn):
-			home_btn.focus_neighbor_bottom = home_btn.get_path_to(map_btn)
+			active_home.focus_neighbor_bottom = active_home.get_path_to(map_btn)
 
 	# Hide Helpers button (Top-Right)
-	if hide_helpers_btn != null and is_instance_valid(hide_helpers_btn):
-		if add_remove_btn != null and is_instance_valid(add_remove_btn):
-			hide_helpers_btn.focus_neighbor_left = hide_helpers_btn.get_path_to(add_remove_btn)
-		if home_btn != null and is_instance_valid(home_btn):
-			hide_helpers_btn.focus_neighbor_right = hide_helpers_btn.get_path_to(home_btn)
+	if active_hide_helpers != null and is_instance_valid(active_hide_helpers):
+		if weather_btn != null:
+			active_hide_helpers.focus_neighbor_left = active_hide_helpers.get_path_to(weather_btn)
+		elif weather_slider != null:
+			active_hide_helpers.focus_neighbor_left = active_hide_helpers.get_path_to(weather_slider)
+		elif add_remove_btn != null and is_instance_valid(add_remove_btn):
+			active_hide_helpers.focus_neighbor_left = active_hide_helpers.get_path_to(add_remove_btn)
+		if active_home != null and is_instance_valid(active_home):
+			active_hide_helpers.focus_neighbor_right = active_hide_helpers.get_path_to(active_home)
 		
 		var helpers_open = (toggles_scroll != null and is_instance_valid(toggles_scroll) and toggles_scroll.visible)
 		var first_helper: Control = imm_menu_btn if (imm_menu_btn != null and is_instance_valid(imm_menu_btn) and imm_menu_btn.visible) else announcer_btn
 		if helpers_open and first_helper != null and is_instance_valid(first_helper):
-			hide_helpers_btn.focus_neighbor_bottom = hide_helpers_btn.get_path_to(first_helper)
+			active_hide_helpers.focus_neighbor_bottom = active_hide_helpers.get_path_to(first_helper)
 		elif add_remove_btn != null and is_instance_valid(add_remove_btn):
-			hide_helpers_btn.focus_neighbor_bottom = hide_helpers_btn.get_path_to(add_remove_btn)
+			active_hide_helpers.focus_neighbor_bottom = active_hide_helpers.get_path_to(add_remove_btn)
 
 	# Wire helper vertical list if open
 	if toggles_scroll != null and is_instance_valid(toggles_scroll) and toggles_scroll.visible:
@@ -2651,6 +2852,10 @@ func is_any_dialog_open() -> bool:
 				return true
 			if focused is Range or (focused is Control and (focused.get_parent() is SpinBox or focused is SpinBox)):
 				return true
+			var w_ctrl = course_instance.get_weather_lighting_controller() if (course_instance != null and is_instance_valid(course_instance) and course_instance.has_method("get_weather_lighting_controller")) else null
+			if w_ctrl != null and is_instance_valid(w_ctrl):
+				if focused == w_ctrl.weather_toggle_btn or focused == w_ctrl.time_slider:
+					return true
 			if _is_control_in_dialog(focused):
 				return true
 	if range_ui != null:
@@ -3928,6 +4133,8 @@ func _on_active_player_changed(player: Dictionary) -> void:
 				var flag_pin = course_instance.get_node_or_null("FlagPin")
 				if flag_pin != null and not flag_pin.is_queued_for_deletion():
 					flag_pin.global_position = course_instance.current_hole_location
+					var active_cup_r = float(course_instance.cup_radius) if "cup_radius" in course_instance else 0.054
+					FlagBuilder.sync_hole_cutout_to_terrain(course_instance, course_instance.current_hole_location, active_cup_r)
 					if course_instance.has_method("update_gimme_circles"):
 						course_instance.update_gimme_circles()
 				elif course_instance.has_method("_spawn_flag_pin"):
@@ -4816,7 +5023,6 @@ func _on_forfeit_pressed() -> void:
 	title_lbl.add_theme_color_override("font_color", Color(0.92, 0.35, 0.35, 1.0))
 	title_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
 	title_lbl.add_theme_constant_override("outline_size", 4)
-	title_lbl.text = "Concede Hole? 🏳️" if not is_multi else "Concede Hole: %s 🏳️" % p_name
 	content_vbox.add_child(title_lbl)
 	
 	var msg_lbl = Label.new()
@@ -4825,10 +5031,6 @@ func _on_forfeit_pressed() -> void:
 	msg_lbl.add_theme_color_override("font_color", Color.WHITE)
 	msg_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
 	msg_lbl.add_theme_constant_override("outline_size", 4)
-	if not is_multi:
-		msg_lbl.text = "Count this hole as in at %d strokes?\nYou will not need to hit on this hole anymore." % strokes
-	else:
-		msg_lbl.text = "Count this hole as in for %s at %d strokes?\nThey will not need to hit on this hole anymore." % [p_name, strokes]
 	content_vbox.add_child(msg_lbl)
 	
 	var btn_hbox = HBoxContainer.new()
@@ -4836,33 +5038,59 @@ func _on_forfeit_pressed() -> void:
 	btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	
 	var confirm_btn = Button.new()
-	confirm_btn.text = "Yes, Concede Hole"
 	confirm_btn.custom_minimum_size = Vector2(160, 45)
 	apply_material_button_style(confirm_btn, Color(0.68, 0.22, 0.22, 0.85))
-	confirm_btn.pressed.connect(func():
-		forfeit_confirm_dialog.visible = false
-		_on_forfeit_confirmed()
-	)
+
+	if _is_online_match():
+		title_lbl.text = "Leave Online Match 🚪"
+		msg_lbl.text = "Are you sure you want to leave this online match?\nYour remaining holes will be forfeited."
+		confirm_btn.text = "Yes, Leave Match"
+		confirm_btn.pressed.connect(func():
+			forfeit_confirm_dialog.visible = false
+			if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == forfeit_confirm_dialog:
+				UIFocusGuard.pop_lock(false)
+			if has_node("/root/OnlineMatchController"):
+				get_node("/root/OnlineMatchController").leave_online_match()
+			else:
+				_on_forfeit_confirmed()
+		)
+	else:
+		title_lbl.text = "Concede Hole? 🏳️" if not is_multi else "Concede Hole: %s 🏳️" % p_name
+		if not is_multi:
+			msg_lbl.text = "Count this hole as in at %d strokes?\nYou will not need to hit on this hole anymore." % strokes
+		else:
+			msg_lbl.text = "Count this hole as in for %s at %d strokes?\nThey will not need to hit on this hole anymore." % [p_name, strokes]
+		confirm_btn.text = "Yes, Concede Hole"
+		confirm_btn.pressed.connect(func():
+			forfeit_confirm_dialog.visible = false
+			if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == forfeit_confirm_dialog:
+				UIFocusGuard.pop_lock(false)
+			_on_forfeit_confirmed()
+		)
 	btn_hbox.add_child(confirm_btn)
 	
 	var cancel_btn = Button.new()
 	cancel_btn.text = "Cancel"
+	cancel_btn.name = "CancelBtn"
 	cancel_btn.custom_minimum_size = Vector2(140, 45)
 	apply_material_button_style(cancel_btn, Color(0.35, 0.35, 0.38, 0.85))
 	cancel_btn.pressed.connect(func():
 		forfeit_confirm_dialog.visible = false
+		if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == forfeit_confirm_dialog:
+			UIFocusGuard.pop_lock(false)
 	)
 	confirm_btn.name = "ConfirmBtn"
-	cancel_btn.name = "CancelBtn"
+
+	btn_hbox.add_child(cancel_btn)
+	content_vbox.add_child(btn_hbox)
+	forfeit_confirm_dialog.add_child(content_vbox)
+
 	confirm_btn.focus_neighbor_right = confirm_btn.get_path_to(cancel_btn)
 	confirm_btn.focus_neighbor_left = confirm_btn.get_path_to(cancel_btn)
 	cancel_btn.focus_neighbor_left = cancel_btn.get_path_to(confirm_btn)
 	cancel_btn.focus_neighbor_right = cancel_btn.get_path_to(confirm_btn)
-	btn_hbox.add_child(cancel_btn)
-	
-	content_vbox.add_child(btn_hbox)
-	forfeit_confirm_dialog.add_child(content_vbox)
 	forfeit_confirm_dialog.visible = true
+	UIFocusGuard.push_lock(forfeit_confirm_dialog)
 	cancel_btn.call_deferred("grab_focus")
 
 
@@ -4870,6 +5098,39 @@ func _on_forfeit_confirmed() -> void:
 	if course_instance != null and course_instance.has_method("cancel_pending_shot_transition"):
 		course_instance.call("cancel_pending_shot_transition")
 	MultiplayerManager.concede_hole()
+
+
+func _is_online_match() -> bool:
+	if has_node("/root/OnlineSession"):
+		return bool(get_node("/root/OnlineSession").is_online_match)
+	return false
+
+
+func _on_online_waiting_banner_status_changed(is_waiting: bool, player_name: String, is_afk: bool) -> void:
+	if online_waiting_banner == null or not is_instance_valid(online_waiting_banner):
+		return
+	online_waiting_banner.visible = is_waiting
+	if not is_waiting:
+		if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == online_waiting_banner:
+			UIFocusGuard.pop_lock(false)
+		return
+
+	if online_waiting_lbl != null:
+		online_waiting_lbl.text = "Waiting for %s to hit…" % player_name
+
+	if online_afk_warning_lbl != null:
+		online_afk_warning_lbl.visible = is_afk
+	if online_afk_btn_box != null:
+		online_afk_btn_box.visible = is_afk
+
+	if is_afk:
+		if not UIFocusGuard.is_locked() or UIFocusGuard.current_lock_root() != online_waiting_banner:
+			UIFocusGuard.push_lock(online_waiting_banner)
+		if online_concede_btn != null and is_instance_valid(online_concede_btn):
+			online_concede_btn.call_deferred("grab_focus")
+	else:
+		if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == online_waiting_banner:
+			UIFocusGuard.pop_lock(false)
 
 
 func _on_gimme_awarded(player: Dictionary, extra_strokes: int) -> void:
@@ -4976,15 +5237,18 @@ func _process(_delta: float) -> void:
 				som.call("on_ready_for_shot")
 
 	if mulligan_btn != null and mulligan_btn.visible:
-		var can_mull = MultiplayerManager.can_mulligan() and not ball_is_moving and not hud_scorecard.visible and not hud_overview.visible
-		mulligan_btn.disabled = not can_mull
+		if _is_online_match():
+			mulligan_btn.visible = false
+		else:
+			var can_mull = MultiplayerManager.can_mulligan() and not ball_is_moving and not hud_scorecard.visible and not hud_overview.visible
+			mulligan_btn.disabled = not can_mull
 
 	if forfeit_btn != null:
 		var is_match_play = not MultiplayerManager.players.is_empty() and not MultiplayerManager.practice_mode_active
 		var active_p = MultiplayerManager.get_active_player()
 		var p_strokes = active_p.get("strokes", 0) if not active_p.is_empty() else 0
 		var p_holed = active_p.get("holed_out", false) if not active_p.is_empty() else true
-		var should_show_forfeit = _hud_elements_visible and is_match_play and p_strokes >= 10 and not p_holed
+		var should_show_forfeit = _hud_elements_visible and is_match_play and (p_strokes >= 10 or _is_online_match()) and not p_holed
 		forfeit_btn.visible = should_show_forfeit
 		if should_show_forfeit:
 			forfeit_btn.disabled = ball_is_moving or hud_scorecard.visible or hud_overview.visible or (hud_manage_players != null and hud_manage_players.visible)
@@ -6470,8 +6734,8 @@ func _populate_hole_shot_summary(action_type: String) -> void:
 func _refresh_scorecard_add_player_section() -> void:
 	if _scorecard_add_player_section == null or not is_instance_valid(_scorecard_add_player_section):
 		return
-	_scorecard_add_player_section.visible = _scorecard_settings_mode
-	if not _scorecard_settings_mode:
+	_scorecard_add_player_section.visible = _scorecard_settings_mode and not _is_online_match()
+	if not _scorecard_settings_mode or _is_online_match():
 		return
 	var select_opt = _scorecard_add_player_section.get_node_or_null("AddRow/PlayerSelectOpt") as OptionButton
 	var name_input = _scorecard_add_player_section.get_node_or_null("AddRow/NameInput") as LineEdit
@@ -7725,13 +7989,13 @@ func _set_other_elements_visible(is_visible: bool) -> void:
 		map_btn.visible = is_visible
 	if mulligan_btn != null:
 		var is_match_play = not MultiplayerManager.players.is_empty() and not MultiplayerManager.practice_mode_active
-		mulligan_btn.visible = is_visible and is_match_play
+		mulligan_btn.visible = is_visible and is_match_play and not _is_online_match()
 	if forfeit_btn != null:
 		var is_match_play = not MultiplayerManager.players.is_empty() and not MultiplayerManager.practice_mode_active
 		var active_p = MultiplayerManager.get_active_player()
 		var p_strokes = active_p.get("strokes", 0) if not active_p.is_empty() else 0
 		var p_holed = active_p.get("holed_out", false) if not active_p.is_empty() else true
-		forfeit_btn.visible = is_visible and is_match_play and p_strokes >= 10 and not p_holed
+		forfeit_btn.visible = is_visible and is_match_play and (p_strokes >= 10 or _is_online_match()) and not p_holed
 	if not is_visible and forfeit_confirm_dialog != null and forfeit_confirm_dialog.visible:
 		forfeit_confirm_dialog.visible = false
 	if not is_visible and hole_intro_card != null and hole_intro_card.visible:
@@ -7799,6 +8063,9 @@ func _on_manage_players_lock_popped() -> void:
 
 
 func _refresh_manage_players_dropdown() -> void:
+	var add_sec = hud_manage_players.get_node_or_null("VBoxContainer/AddSection") as Control
+	if add_sec != null:
+		add_sec.visible = not _is_online_match()
 	var select_opt = hud_manage_players.get_node_or_null("VBoxContainer/AddSection/AddRow/PlayerSelectOpt") as OptionButton
 	var name_input = hud_manage_players.get_node_or_null("VBoxContainer/AddSection/AddRow/NameInput") as LineEdit
 	if select_opt != null and name_input != null:
@@ -7813,6 +8080,9 @@ func _refresh_manage_players_dropdown() -> void:
 
 
 func _populate_manage_players() -> void:
+	var add_sec = hud_manage_players.get_node_or_null("VBoxContainer/AddSection") as Control
+	if add_sec != null:
+		add_sec.visible = not _is_online_match()
 	var list_node = hud_manage_players.get_node_or_null("VBoxContainer/ScrollContainer/PlayerList") as VBoxContainer
 	if list_node == null:
 		return
@@ -7855,7 +8125,7 @@ func _populate_manage_players() -> void:
 		row.add_child(name_lbl)
 		
 		# Pause / Resume Button
-		if p.get("active", true):
+		if p.get("active", true) and not _is_online_match():
 			var pause_btn = Button.new()
 			pause_btn.name = "PauseBtn"
 			pause_btn.custom_minimum_size = Vector2(105, 44)
@@ -8285,6 +8555,9 @@ func _navigate_dialog_buttons(buttons: Array[Button], dir: int) -> void:
 
 func _update_catch_up_hud() -> void:
 	if catch_up_banner == null:
+		return
+	if _is_online_match():
+		catch_up_banner.visible = false
 		return
 	if MultiplayerManager.is_in_catch_up:
 		catch_up_banner.visible = _hud_elements_visible

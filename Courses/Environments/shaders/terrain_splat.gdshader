@@ -76,6 +76,8 @@ uniform float normal_depth : hint_range(0.0, 2.0) = 0.65;
 uniform vec3 sun_direction = vec3(-0.45, -0.75, -0.45);
 uniform float slope_shading_strength : hint_range(0.0, 1.0) = 0.25;
 uniform float height_blend_contrast : hint_range(0.0, 1.0) = 0.20;
+uniform vec3 active_hole_pos = vec3(0.0, -9999.0, 0.0);
+uniform float active_hole_radius = 0.054;
 
 // Base UV scale applied by the mesh generator.
 const float BASE_UV_SCALE = 0.1;
@@ -89,6 +91,12 @@ void vertex() {
 }
 
 void fragment() {
+	if (active_hole_pos.y > -1000.0) {
+		vec2 hole_delta = v_world_pos.xz - active_hole_pos.xz;
+		if (dot(hole_delta, hole_delta) < active_hole_radius * active_hole_radius) {
+			discard;
+		}
+	}
 	// -----------------------------------------------------------------------
 	// 1. Sample the splat map using UV2 (normalized [0,1] course bounds).
 	// -----------------------------------------------------------------------

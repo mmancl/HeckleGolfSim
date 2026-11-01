@@ -85,3 +85,13 @@ Courses/CachedGeometry/
 # Developer bypass code
 dev_bypass_code.txt
 *bypass_code.txt
+
+# Cloud & Firebase secrets (never commit to public repo)
+*service_account*.json
+*firebase_sa*.json
+*credentials*.json
+.env
+.env.*
+functions/.runtimeconfig.json
+functions/node_modules/
+firebase/tests/node_modules/

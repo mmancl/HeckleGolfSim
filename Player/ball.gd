@@ -1,6 +1,8 @@
 extends CharacterBody3D
 class_name GolfBall
 
+const RainPhysics = preload("res://Utils/rain_physics.gd")
+
 signal rest
 
 const BALL_RADIUS := 0.021335
@@ -74,8 +76,11 @@ var is_in_water := false
 var water_collider: Node3D = null
 var is_in_sand := false
 var lie_type: String = "fairway"
+var is_replaying_remote_shot: bool = false
 
-# Cup/hole fall animation variables
+# Cup/hole physical 3D cup parameters & state variables
+const CUP_DEPTH := 0.108        # Regulation 4.25 inch (10.8 cm) physical cup depth
+const CUP_BEVEL_WIDTH := 0.005  # 5 mm manicured turf lip bevel around cup opening
 var is_falling_in_hole := false
 var falling_target_hole := Vector3.ZERO
 var falling_time := 0.0
@@ -1079,8 +1084,13 @@ func _apply_surface_params() -> void:
 	
 	_kinetic_friction *= speed_mult * default_friction_scale
 	_rolling_friction *= speed_mult * default_friction_scale
-	
 	_grass_viscosity = float(surface_params.get("nu_g", 0.0010)) * _grass_mult
+
+	# In rain, shot rollout is reduced by 60% (2.5x friction multiplier)
+	if RainPhysics.is_rain_active():
+		_kinetic_friction *= RainPhysics.RAIN_FRICTION_MULTIPLIER
+		_rolling_friction *= RainPhysics.RAIN_FRICTION_MULTIPLIER
+		_grass_viscosity *= RainPhysics.RAIN_FRICTION_MULTIPLIER
 	_critical_angle = float(surface_params.get("theta_c", 0.25)) * _critical_mult
 	_spinback_response_scale = float(surface_params.get("spinback_response_scale", 0.69))
 	_spinback_theta_boost_max = float(surface_params.get("spinback_theta_boost_max", 0.0))
@@ -1202,12 +1212,14 @@ func _process(delta: float) -> void:
 			target_y = base_y
 
 		if not is_equal_approx(_ball_mesh.position.y, target_y):
-			# If cup rim dip is active (near hole lip), let the hole physics control the Y offset
-			if not (is_falling_in_hole or (_ball_mesh.position.y < target_y and on_green_surface)):
+			# If cup rim dip is active (near hole lip) or ball is inside the cup, let the hole physics control the Y offset
+			if not (is_falling_in_hole or holed_out_this_shot or (_ball_mesh.position.y < target_y and on_green_surface)):
 				_ball_mesh.position.y = lerpf(_ball_mesh.position.y, target_y, delta * 15.0)
 
 
 func _physics_process(delta: float) -> void:
+	if is_replaying_remote_shot:
+		return
 	if state == PhysicsEnums.BallState.REST:
 		return
 
@@ -1222,11 +1234,9 @@ func _physics_process(delta: float) -> void:
 		var is_airborne = (state == PhysicsEnums.BallState.FLIGHT)
 		TensionManager.check_ball_proximity(global_position, target_hole_live, is_putt, start_p, shot_was_in_sand, is_airborne, velocity, hit_tree_this_shot, delta)
 
-	# Check hole and rim physics interaction
+	# Check physical 3D hole cup and rim interaction
 	if not is_falling_in_hole:
-		var target_hole = _get_active_hole_position(global_position)
-		if target_hole.is_zero_approx():
-			target_hole = target_hole_live
+		var target_hole = _get_active_cup_position(global_position)
 
 		if target_hole != null and not target_hole.is_zero_approx():
 			var ball_pos = global_position
@@ -1234,64 +1244,72 @@ func _physics_process(delta: float) -> void:
 			var dist_2d = hole_diff_2d.length()
 			var vertical_diff = ball_pos.y - target_hole.y
 
-			# Elevation check: ball must be rolling near green surface
-			if vertical_diff > -0.10 and vertical_diff < 0.25:
+			# Elevation check: ball must be near the green surface around the cup mouth
+			if vertical_diff > -0.12 and vertical_diff < 0.25:
 				var scene_cup_radius = _get_cup_radius()
-				var lip_radius = scene_cup_radius + _ball_radius
+				var rim_outer_radius = scene_cup_radius + CUP_BEVEL_WIDTH
 
-				if dist_2d <= lip_radius:
+				# Strictly zero inward pull outside the 5 mm cut turf bevel (no artificial suction)
+				if dist_2d <= rim_outer_radius:
 					var speed_total = velocity.length()
+					var speed_2d = Vector2(velocity.x, velocity.z).length()
 					var is_ground_roll = on_ground or is_putt or state == PhysicsEnums.BallState.ROLLOUT or speed_total < 8.0
+					var is_air_dunk = (not on_ground) and dist_2d < (scene_cup_radius - _ball_radius * 0.35) and vertical_diff <= (_ball_radius + 0.025) and speed_total < 9.0
 
-					if is_ground_roll and dist_2d > 0.0001:
+					var can_fall = false
+					if is_air_dunk:
+						can_fall = true
+					elif is_ground_roll and dist_2d <= scene_cup_radius + 0.002:
+						# Ball center of mass is over the open cup mouth (or teetering inside the 2mm inner lip):
+						# Capture speed depends on chord length across the circular opening at impact parameter dist_2d
+						var radial_frac = clampf(dist_2d / scene_cup_radius, 0.0, 1.0)
+						var chord_factor = sqrt(maxf(0.0, 1.0 - radial_frac * radial_frac))
+						var max_capture_speed = 0.25 + 2.40 * chord_factor
+						if speed_2d <= max_capture_speed or speed_total < 0.35:
+							can_fall = true
+
+					if can_fall:
+						is_falling_in_hole = true
+						holed_out_this_shot = true
+						falling_target_hole = target_hole
+						falling_time = 0.0
+						on_ground = false
+						# Fold any current visual rim overhang dip into physical Y position seamlessly
+						if _ball_mesh != null:
+							var current_dip = get_visual_y_offset() - _ball_mesh.position.y
+							if current_dip > 0.0:
+								global_position.y -= current_dip
+							_ball_mesh.position.y = get_visual_y_offset()
+						# Preserve 3D horizontal momentum and spin as the ball tips over the rim under gravity
+						velocity.x *= 0.82
+						velocity.z *= 0.82
+						velocity.y = minf(velocity.y, -0.18)
+						if _cup_player != null and not _skipping_flight:
+							_cup_player.play()
+					elif is_ground_roll and dist_2d > 0.0001:
+						# Physical sphere-on-rim normal tilt on the 5 mm cut turf bevel / fast lip-out:
+						# As the ball overhangs the circular edge, the rim contact point shifts outward,
+						# tilting the support normal toward the hole center and curving fast grazing putts around the lip.
 						var inward_dir_2d = hole_diff_2d / dist_2d
-						var penetration = clampf((lip_radius - dist_2d) / lip_radius, 0.0, 1.0)
+						var rim_penetration = clampf((rim_outer_radius - dist_2d) / (CUP_BEVEL_WIDTH + _ball_radius * 0.65), 0.0, 1.0)
+						var inward_accel = 9.81 * clampf(rim_penetration * 0.68, 0.08, 0.68)
+						var inward_delta_v = inward_dir_2d * (inward_accel * delta)
+						velocity.x += inward_delta_v.x
+						velocity.z += inward_delta_v.y
 
-						# Sinking into cup conditions:
-						# - Center hit: falls in up to 2.8 m/s (~6.3 mph)
-						# - Inner cup (< 85% cup radius): falls in up to 2.1 m/s (~4.7 mph)
-						# - Outer lip-in: falls in up to 0.95 m/s (~2.1 mph)
-						# - Low speed anywhere on lip: drops in if speed < 0.35 m/s
-						var can_fall = false
-						if dist_2d < scene_cup_radius * 0.45 and speed_total < 2.8:
-							can_fall = true
-						elif dist_2d < scene_cup_radius * 0.85 and speed_total < 2.1:
-							can_fall = true
-						elif dist_2d <= lip_radius and speed_total < 0.95:
-							can_fall = true
-						elif speed_total < 0.35:
-							can_fall = true
+						# Rim contact friction on the turf collar edge
+						var drag_factor = 1.0 - clampf((1.4 * rim_penetration + 0.35) * delta, 0.0, 0.20)
+						velocity.x *= drag_factor
+						velocity.z *= drag_factor
+						if velocity.length_squared() > 0.0001 and _ball_radius > 0.0:
+							omega = (floor_normal.cross(velocity)) / _ball_radius
 
-						if can_fall:
-							is_falling_in_hole = true
-							holed_out_this_shot = true
-							falling_target_hole = target_hole
-							falling_time = 0.0
-							velocity = Vector3.ZERO
-							omega = Vector3.ZERO
-							if _cup_player != null and not _skipping_flight:
-								_cup_player.play()
-						else:
-							# Rim / lip interaction:
-							# Inward gravitational pull towards the cup center:
-							# - If ball is on left of hole, inward_dir_2d points right -> veers right
-							# - If ball is on right of hole, inward_dir_2d points left -> veers left
-							var inward_accel = lerpf(3.5, 9.5, penetration)
-							var inward_delta_v = inward_dir_2d * (inward_accel * delta)
-							velocity.x += inward_delta_v.x
-							velocity.z += inward_delta_v.y
-
-							# Rim drag / friction on the lip edge
-							var drag_factor = 1.0 - clampf((1.8 * penetration + 0.5) * delta, 0.0, 0.25)
-							velocity.x *= drag_factor
-							velocity.z *= drag_factor
-
-							# Visual dip into the rim depression
-							if _ball_mesh != null:
-								var dip_depth = clampf(penetration * 0.02, 0.0, 0.02)
-								_ball_mesh.position.y = get_visual_y_offset() - dip_depth
+						# Subtle geometric dip as the sphere overhangs the beveled rim
+						if _ball_mesh != null:
+							var dip_depth = clampf(rim_penetration * 0.012, 0.0, 0.012)
+							_ball_mesh.position.y = get_visual_y_offset() - dip_depth
 				else:
-					# Restore mesh Y offset when rolling away from the lip
+					# Restore mesh Y offset when rolling away from the rim
 					if _ball_mesh != null and _ball_mesh.position.y < (get_visual_y_offset() - 0.001):
 						_ball_mesh.position.y = lerpf(_ball_mesh.position.y, get_visual_y_offset(), delta * 15.0)
 			else:
@@ -1300,14 +1318,73 @@ func _physics_process(delta: float) -> void:
 
 	if is_falling_in_hole:
 		falling_time += delta
-		var target_pos = Vector3(falling_target_hole.x, falling_target_hole.y - 0.08, falling_target_hole.z)
-		global_position = global_position.lerp(target_pos, delta * 12.0)
+		var scene_cup_radius = _get_cup_radius()
+		var max_center_r = maxf(0.008, scene_cup_radius - _ball_radius)
+		var cup_floor_y = falling_target_hole.y - CUP_DEPTH + _ball_radius
+
+		# 1. Real downward gravity inside the recessed cup
+		velocity.y -= 9.81 * delta
+		global_position += velocity * delta
+
+		# 2. Visual ball rotation from angular velocity while dropping & rattling in cup
 		if _ball_mesh != null:
 			_ball_mesh.position.y = get_visual_y_offset()
+			var omega_len = omega.length()
+			if omega_len > 0.001:
+				_ball_mesh.rotate(omega / omega_len, omega_len * delta)
 
-		if global_position.distance_to(target_pos) < 0.01 or falling_time > 0.5:
-			global_position = target_pos
+		# 3. Cylindrical inner cup wall & flagstick ferrule collision
+		var offset_2d = Vector2(global_position.x - falling_target_hole.x, global_position.z - falling_target_hole.z)
+		var r = offset_2d.length()
+		if r > max_center_r:
+			var wall_n = offset_2d / r
+			global_position.x = falling_target_hole.x + wall_n.x * max_center_r
+			global_position.z = falling_target_hole.z + wall_n.y * max_center_r
+			var v_rad = velocity.x * wall_n.x + velocity.z * wall_n.y
+			if v_rad > 0.0:
+				var wall_restitution = 0.32
+				velocity.x -= (1.0 + wall_restitution) * v_rad * wall_n.x
+				velocity.z -= (1.0 + wall_restitution) * v_rad * wall_n.y
+				velocity.x *= 0.78
+				velocity.z *= 0.78
+				omega *= 0.75
+		elif _is_flagstick_in_cup():
+			var pole_min_r = 0.0065 + _ball_radius
+			if r < pole_min_r and pole_min_r < max_center_r:
+				var push_n = (offset_2d / r) if r > 0.0001 else Vector2(1.0, 0.0)
+				global_position.x = falling_target_hole.x + push_n.x * pole_min_r
+				global_position.z = falling_target_hole.z + push_n.y * pole_min_r
+				var v_in = velocity.x * push_n.x + velocity.z * push_n.y
+				if v_in < 0.0:
+					velocity.x -= 1.25 * v_in * push_n.x
+					velocity.z -= 1.25 * v_in * push_n.y
+					velocity.x *= 0.75
+					velocity.z *= 0.75
+
+		# 4. Recessed cup bottom drain plate collision & bounce
+		if global_position.y <= cup_floor_y:
+			global_position.y = cup_floor_y
+			if velocity.y < -0.25:
+				velocity.y = -velocity.y * 0.24
+				velocity.x *= 0.65
+				velocity.z *= 0.65
+				omega *= 0.6
+			else:
+				velocity.y = 0.0
+				velocity.x = move_toward(velocity.x, 0.0, 4.5 * delta)
+				velocity.z = move_toward(velocity.z, 0.0, 4.5 * delta)
+				omega = omega.move_toward(Vector3.ZERO, 12.0 * delta)
+
+		# 5. Settle at rest at the bottom of the physical cup
+		if (absf(global_position.y - cup_floor_y) <= 0.002 and velocity.length() < 0.05) or falling_time > 1.2:
+			global_position.y = cup_floor_y
+			var final_off = Vector2(global_position.x - falling_target_hole.x, global_position.z - falling_target_hole.z)
+			if final_off.length() > max_center_r:
+				var clamped_off = final_off.normalized() * max_center_r
+				global_position.x = falling_target_hole.x + clamped_off.x
+				global_position.z = falling_target_hole.z + clamped_off.y
 			is_falling_in_hole = false
+			on_ground = true
 			_enter_rest_state()
 		return
 
@@ -1699,6 +1776,12 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 					if bounce_normal_vel > 0.0:
 						velocity = velocity - bounce_normal_vel * normal + (bounce_normal_vel * bounce_mult) * normal
 
+					# In rain, wet turf dampens bounce height and tangential skip
+					if RainPhysics.is_rain_active():
+						var b_norm := velocity.dot(normal)
+						var b_tang := velocity - (normal * b_norm)
+						velocity = (normal * b_norm * RainPhysics.RAIN_BOUNCE_RETENTION) + (b_tang * RainPhysics.RAIN_BOUNCE_RETENTION)
+
 				print("  Velocity after bounce: ", velocity, " (%.2f m/s)" % velocity.length())
 				var normal_velocity := velocity.dot(normal)
 				var grounding_threshold := 1.2 if is_sand_surface else 0.5
@@ -2082,7 +2165,59 @@ func _get_active_hole_position(ball_pos: Vector3 = Vector3.ZERO) -> Vector3:
 	return Vector3.ZERO
 
 
+func _get_active_cup_position(ball_pos: Vector3 = Vector3.ZERO) -> Vector3:
+	var player_parent = get_parent()
+	if player_parent == null:
+		return Vector3.ZERO
+	var parent_scene = player_parent.get_parent()
+	if parent_scene == null:
+		return Vector3.ZERO
+
+	if ("is_driving_range" in parent_scene and bool(parent_scene.get("is_driving_range"))) or (parent_scene.has_meta("is_driving_range") and bool(parent_scene.get_meta("is_driving_range"))):
+		return Vector3.ZERO
+
+	# 1. Single-hole course play position
+	if "current_hole_location" in parent_scene and not parent_scene.current_hole_location.is_zero_approx():
+		return parent_scene.current_hole_location
+
+	# 2. Multi-hole greens (e.g. Putting Practice with 8 recessed holes)
+	if "holes" in parent_scene and not parent_scene.holes.is_empty():
+		var holes_arr: Array = parent_scene.holes
+		if not ball_pos.is_zero_approx() and holes_arr.size() > 1:
+			var closest_hole: Vector3 = Vector3.ZERO
+			var min_dist: float = 999999.0
+			for h in holes_arr:
+				if h is Vector3:
+					var d = Vector2(ball_pos.x, ball_pos.z).distance_to(Vector2(h.x, h.z))
+					if d < min_dist:
+						min_dist = d
+						closest_hole = h
+			if min_dist < 15.0:
+				return closest_hole
+
+		if "selected_hole_index" in parent_scene and parent_scene.selected_hole_index >= 0 and parent_scene.selected_hole_index < holes_arr.size():
+			return holes_arr[parent_scene.selected_hole_index]
+		return holes_arr[0]
+
+	return Vector3.ZERO
+
+
+func _is_flagstick_in_cup() -> bool:
+	var player_parent = get_parent()
+	if player_parent == null:
+		return false
+	var parent_scene = player_parent.get_parent()
+	if parent_scene == null:
+		return false
+	var col = parent_scene.get_node_or_null("FlagPin/FlagstickCollider/CollisionShape") as CollisionShape3D
+	if col != null:
+		return not col.disabled
+	return false
+
+
 func _enter_rest_state() -> void:
+	if is_replaying_remote_shot:
+		return
 	if has_node("/root/TensionManager"):
 		TensionManager.stop_tension()
 	state = PhysicsEnums.BallState.REST
@@ -2094,7 +2229,7 @@ func _enter_rest_state() -> void:
 	_shot_duration = 0.0
 	if _leaves_player and _leaves_player.playing:
 		_leaves_player.stop()
-	if not is_in_water and not is_falling_in_hole:
+	if not is_in_water and not is_falling_in_hole and not holed_out_this_shot:
 		# If the ball ended up elevated in a tree or off the ground, drop to ground level
 		var true_ground_y := _get_ground_y_at(global_position.x, global_position.z)
 		if global_position.y > (true_ground_y + 0.35) or not on_ground:
@@ -2439,6 +2574,7 @@ func hit_from_data(data: Dictionary) -> void:
 	shot_hit_other_ground = false
 	shot_was_from_teebox = _check_is_on_teebox()
 	
+	RainPhysics.apply_rain_shot_reduction(data)
 	var speed_mph: float = float(data.get("BallSpeed", data.get("Speed", 0.0)))
 	
 	# Apply lie reduction penalty if any

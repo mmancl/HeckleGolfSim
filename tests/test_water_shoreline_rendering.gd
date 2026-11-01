@@ -16,13 +16,36 @@ func _init() -> void:
 	assert(water_mat.shader != null, "ShaderMaterial with water_shader must be valid")
 	print("  PASS: Water shader loaded and compiled cleanly.")
 
-	# 2. Verify shoreline reed mesh has grounded root base
+	# 2. Verify shoreline reed mesh has grounded root base, varied blade tiers, and 3D cattail geometry
 	var reed_mesh := ProceduralTreeGeneratorScript.create_shoreline_reed_cluster_mesh()
 	assert(reed_mesh != null and reed_mesh.get_surface_count() > 0, "Reed cluster mesh must be valid")
 	var aabb := reed_mesh.get_aabb()
 	assert(aabb.size.y > 1.0, "Reed cluster mesh must have vertical stalks (height > 1.0m)")
 	assert(aabb.position.y <= -0.40, "Reed cluster mesh roots must extend into the ground (y <= -0.40) to anchor on slopes")
-	print("  PASS: Procedural shoreline reed cluster mesh verified with deep ground penetration roots (min Y: %.2fm)." % aabb.position.y)
+	var arrays := reed_mesh.surface_get_arrays(0)
+	assert(arrays.size() > Mesh.ARRAY_COLOR, "Reed cluster mesh must include vertex colors for blade height variation & cattail tagging")
+	var cols: PackedColorArray = arrays[Mesh.ARRAY_COLOR]
+	assert(not cols.is_empty(), "Reed cluster mesh vertex colors must not be empty")
+	var cattail_head_verts := 0
+	var cattail_stalk_verts := 0
+	var grass_blade_verts := 0
+	for c in cols:
+		if c.r > 0.75:
+			cattail_head_verts += 1
+		elif c.r > 0.25:
+			cattail_stalk_verts += 1
+		else:
+			grass_blade_verts += 1
+	assert(cattail_head_verts >= 60, "Reed cluster mesh must include 3D cylindrical cattail seed head geometry (got %d vertices)" % cattail_head_verts)
+	assert(cattail_stalk_verts >= 30, "Reed cluster mesh must include cattail stem & top spike geometry (got %d vertices)" % cattail_stalk_verts)
+	assert(grass_blade_verts >= 100, "Reed cluster mesh must include long grass blades (got %d vertices)" % grass_blade_verts)
+
+	var reed_mat := reed_mesh.surface_get_material(0) as ShaderMaterial
+	assert(reed_mat != null and reed_mat.shader != null, "Reed cluster mesh must have grass_blades_high ShaderMaterial")
+	assert(float(reed_mat.get_shader_parameter("head_ratio")) > 0.1, "Reed ShaderMaterial must enable head_ratio for occasional cattails")
+	assert(reed_mat.shader.code.contains("PROJECTION_MATRIX[3][3]"), "grass_blades_high.gdshader must suppress sub-pixel blades in orthogonal minimap camera")
+	assert(water_shader.code.contains("PROJECTION_MATRIX[3][3]"), "water_shader.gdshader must suppress shoreline sparkle in orthogonal minimap camera")
+	print("  PASS: Procedural shoreline reed cluster mesh verified with deep roots (min Y: %.2fm), %d cattail head vertices, and orthogonal minimap anti-sparkle." % [aabb.position.y, cattail_head_verts])
 
 	# 3. Test CourseDetailEnhancer._build_shoreline_reeds elevation clamping
 	# Create a mock scene with terrain and a water pond at Y = -2.5
@@ -73,16 +96,25 @@ func _init() -> void:
 	assert(mm != null, "MultiMesh must exist")
 	assert(mm.instance_count == reed_count, "Instance count must match generated count")
 
-	# Verify EVERY reed instance is clamped at or above the water line (-2.5)
+	# Verify EVERY reed instance is clamped at or above the water line (-2.5) and height varies significantly
 	var min_reed_y := 99999.0
+	var min_scale_y := 99999.0
+	var max_scale_y := -99999.0
+	var has_buf := mm.buffer.size() >= mm.instance_count * 16
 	for i in range(mm.instance_count):
 		var xf := mm.get_instance_transform(i)
-		var reed_y := xf.origin.y
+		var reed_y := mm.buffer[i * 16 + 7] if has_buf else xf.origin.y
+		var sy := mm.buffer[i * 16 + 5] if has_buf else xf.basis.y.length()
 		if reed_y < min_reed_y:
 			min_reed_y = reed_y
+		if sy < min_scale_y:
+			min_scale_y = sy
+		if sy > max_scale_y:
+			max_scale_y = sy
 		assert(reed_y >= -2.65, "Reed instance %d Y (%f) must be grounded within bank allowance (>= -2.65) to prevent floating/submerged stalks" % [i, reed_y])
 
-	print("  PASS: All %d shoreline reed instances properly grounded on bank (lowest Y: %f >= -2.65)." % [reed_count, min_reed_y])
+	assert(max_scale_y - min_scale_y > 0.45, "Shoreline reed instances must have realistic height variation across the bank (min scale Y: %.2f, max scale Y: %.2f)" % [min_scale_y, max_scale_y])
+	print("  PASS: All %d shoreline reed instances grounded (lowest Y: %.2f >= -2.65) with natural height variation (scale Y: %.2fx .. %.2fx)." % [reed_count, min_reed_y, min_scale_y, max_scale_y])
 
 	scene_root.queue_free()
 	print("=======================================================")

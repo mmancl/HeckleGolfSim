@@ -1,0 +1,52 @@
+{
+  "rules": {
+    "system": {
+      "status": {
+        ".read": true,
+        ".write": false
+      }
+    },
+    "auth_handoff": {
+      "$code": {
+        ".read": "root.child('system/status/paused').val() != true",
+        ".write": "auth != null && root.child('system/status/paused').val() != true"
+      }
+    },
+    "codes": {
+      "$code": {
+        ".read": "auth != null && root.child('system/status/paused').val() != true",
+        ".write": "auth != null && root.child('system/status/paused').val() != true && ((!data.exists() && newData.child('host_uid').val() == auth.uid) || (data.exists() && data.child('host_uid').val() == auth.uid) || (!newData.exists() && data.child('created_at').val() < ((now / 1000) - 3600)))"
+      }
+    },
+    "lobbies": {
+      ".read": "auth != null && root.child('system/status/paused').val() != true",
+      ".indexOn": ["last_seen", "created_at"],
+      "$matchId": {
+        ".write": "auth != null && root.child('system/status/paused').val() != true && ((!data.exists() && newData.child('host_uid').val() == auth.uid) || (data.exists() && data.child('host_uid').val() == auth.uid) || (!newData.exists() && data.child('last_seen').val() < ((now / 1000) - 45)))"
+      }
+    },
+    "matches": {
+      "$matchId": {
+        ".read": "auth != null && root.child('system/status/paused').val() != true",
+        "meta": {
+          ".write": "auth != null && root.child('system/status/paused').val() != true && ((!data.exists() && newData.child('host_uid').val() == auth.uid) || (data.exists() && data.child('host_uid').val() == auth.uid) || (data.exists() && root.child('matches/' + $matchId + '/devices/' + auth.uid).exists() && newData.child('host_uid').val() == data.child('host_uid').val()))"
+        },
+        "devices": {
+          "$deviceUid": {
+            ".write": "auth != null && root.child('system/status/paused').val() != true && ((auth.uid == $deviceUid && (data.exists() || root.child('matches/' + $matchId + '/meta/status').val() == 'lobby')) || (root.child('matches/' + $matchId + '/meta/host_uid').val() == auth.uid))"
+          }
+        },
+        "golfers": {
+          "$slotId": {
+            ".write": "auth != null && root.child('system/status/paused').val() != true && ((!data.exists() && root.child('matches/' + $matchId + '/meta/status').val() == 'lobby' && newData.child('owner_uid').val() == auth.uid) || (data.exists() && data.child('owner_uid').val() == auth.uid) || (root.child('matches/' + $matchId + '/meta/host_uid').val() == auth.uid))"
+          }
+        },
+        "events": {
+          "$seqKey": {
+            ".write": "auth != null && root.child('system/status/paused').val() != true && !data.exists() && root.child('matches/' + $matchId + '/devices/' + auth.uid).exists() && newData.child('by_uid').val() == auth.uid"
+          }
+        }
+      }
+    }
+  }
+}

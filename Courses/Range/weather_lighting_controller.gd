@@ -40,6 +40,7 @@ var _tex_sun: Texture2D = null
 var _tex_rain: Texture2D = null
 
 # Weather State
+static var _active_controller: WeatherLightingController = null
 var _current_time_ratio: float = 1.0 # 0.0 = Moon/Night, 1.0 = Sun/Day
 var _is_rain: bool = false
 
@@ -62,11 +63,18 @@ var _cached_env_settings: Dictionary = {}
 var _cached_light_settings: Dictionary = {}
 
 
+func _enter_tree() -> void:
+	_active_controller = self
+
+
 func _ready() -> void:
+	_active_controller = self
 	set_process(true)
 
 
 func _exit_tree() -> void:
+	if _active_controller == self:
+		_active_controller = null
 	if weather_bar != null and is_instance_valid(weather_bar):
 		weather_bar.queue_free()
 		weather_bar = null
@@ -93,6 +101,12 @@ func initialize(course_root: Node, canvas: CanvasLayer) -> void:
 	# Apply initial default state (Daytime Sun, Rain Off)
 	_apply_lighting_time(_current_time_ratio)
 	_apply_weather_state(_is_rain)
+	if has_node("/root/GlobalSettings"):
+		var gs = get_node("/root/GlobalSettings")
+		if gs.has_method("set_rain_mode"):
+			gs.call("set_rain_mode", _is_rain)
+		elif gs.has_method("set_rain_ambient"):
+			gs.call("set_rain_ambient", _is_rain)
 
 
 func _load_textures() -> void:
@@ -1139,11 +1153,19 @@ func set_rain_mode(enabled: bool) -> void:
 	_is_rain = enabled
 	_update_weather_pill_ui()
 
-	# Switch ambient sound between nature bird sound and soft rain sound
+	# Sync rain state to GlobalSettings and switch ambient sound
 	if has_node("/root/GlobalSettings"):
 		var gs = get_node("/root/GlobalSettings")
-		if gs.has_method("set_rain_ambient"):
+		if gs.has_method("set_rain_mode"):
+			gs.call("set_rain_mode", _is_rain)
+		elif gs.has_method("set_rain_ambient"):
 			gs.call("set_rain_ambient", _is_rain)
+
+	# If course has active ball, immediately update its surface parameters
+	if _course_root != null:
+		var ball = _course_root.find_child("Ball", true, false)
+		if ball != null and is_instance_valid(ball) and ball.has_method("_apply_surface_params"):
+			ball.call("_apply_surface_params")
 
 	_apply_weather_state(_is_rain)
 	_apply_lighting_time(_current_time_ratio)
@@ -1152,6 +1174,22 @@ func set_rain_mode(enabled: bool) -> void:
 
 func is_rain_mode() -> bool:
 	return _is_rain
+
+
+static func is_rain_active() -> bool:
+	if _active_controller != null and is_instance_valid(_active_controller):
+		return _active_controller._is_rain
+	if Engine.has_singleton("GlobalSettings"):
+		var gs = Engine.get_singleton("GlobalSettings")
+		if gs.has_method("is_rain_mode"):
+			return gs.is_rain_mode()
+	elif Engine.get_main_loop() is SceneTree:
+		var root = (Engine.get_main_loop() as SceneTree).root
+		if root != null and root.has_node("GlobalSettings"):
+			var gs = root.get_node("GlobalSettings")
+			if gs.has_method("is_rain_mode"):
+				return gs.call("is_rain_mode")
+	return false
 
 
 func _apply_lighting_time(ratio: float) -> void:

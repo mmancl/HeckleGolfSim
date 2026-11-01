@@ -164,6 +164,8 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 	var is_med = quality == "Medium"
 	var is_high = quality == "High"
 
+	_apply_surrounding_features_visibility(scene_root, is_high)
+
 	# Convert any unbatched course Tree_*, Bush_*, and Rock_* nodes into MultiMesh chunks
 	if ResourceLoader.exists("res://HighFidelity/Foliage/procedural_tree_generator.gd"):
 		var ptg = load("res://HighFidelity/Foliage/procedural_tree_generator.gd")
@@ -248,6 +250,10 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 							stipple_mat.set_shader_parameter("terrain_ao_map", ao_map)
 						if sun_dir != null:
 							stipple_mat.set_shader_parameter("sun_direction", sun_dir)
+						if n.has_meta("active_hole_pos"):
+							stipple_mat.set_shader_parameter("active_hole_pos", n.get_meta("active_hole_pos"))
+						if n.has_meta("active_hole_radius"):
+							stipple_mat.set_shader_parameter("active_hole_radius", n.get_meta("active_hole_radius"))
 						n.material_override = stipple_mat
 					_set_terrain_has_deep_rough_map(n, false)
 				elif is_med:
@@ -372,6 +378,13 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 			var m_name := mmi.name.to_lower()
 			if m_name.begins_with("shorelinereeds"):
 				mmi.visible = not is_low
+				if not is_low and mmi.multimesh != null and mmi.multimesh.mesh is ArrayMesh:
+					if not mmi.has_meta("reeds_version") or int(mmi.get_meta("reeds_version")) < 3:
+						if ResourceLoader.exists("res://HighFidelity/Foliage/procedural_tree_generator.gd"):
+							var ptg = load("res://HighFidelity/Foliage/procedural_tree_generator.gd")
+							if ptg != null and ptg.has_method("create_shoreline_reed_cluster_mesh"):
+								mmi.multimesh.mesh = ptg.create_shoreline_reed_cluster_mesh()
+								mmi.set_meta("reeds_version", 3)
 			var is_tree_chunk := m_name.begins_with("treechunk")
 			var is_bush_chunk := m_name.begins_with("bushchunk")
 			var is_rock_chunk := m_name.begins_with("rockchunk")
@@ -819,7 +832,8 @@ static func _create_realistic_terrain_material(base_m: ShaderMaterial, n: MeshIn
 			"height_rough", "height_green", "height_fairway", "height_bunker", "height_mulch",
 			"uv_scale_rough", "uv_scale_green", "uv_scale_fairway", "uv_scale_bunker", "uv_scale_mulch",
 			"roughness_rough", "roughness_green", "roughness_fairway", "roughness_bunker", "roughness_mulch",
-			"normal_depth", "sun_direction", "slope_shading_strength", "height_blend_contrast"
+			"normal_depth", "sun_direction", "slope_shading_strength", "height_blend_contrast",
+			"active_hole_pos", "active_hole_radius"
 		]
 		for p in params:
 			var val = base_m.get_shader_parameter(p)
@@ -837,6 +851,10 @@ static func _create_realistic_terrain_material(base_m: ShaderMaterial, n: MeshIn
 	if n != null and n.has_meta("deep_rough_map"):
 		mat.set_shader_parameter("deep_rough_map", n.get_meta("deep_rough_map"))
 		mat.set_shader_parameter("has_deep_rough_map", true)
+	if n != null and n.has_meta("active_hole_pos"):
+		mat.set_shader_parameter("active_hole_pos", n.get_meta("active_hole_pos"))
+	if n != null and n.has_meta("active_hole_radius"):
+		mat.set_shader_parameter("active_hole_radius", n.get_meta("active_hole_radius"))
 			
 	# Fallback texture defaults if not set
 	if mat.get_shader_parameter("tex_rough") == null and ResourceLoader.exists("res://Courses/Environments/grass-rough/albedo.png"):
@@ -1189,3 +1207,30 @@ static func apply_graphics_quality_with_spinner(tree: SceneTree, quality: String
 			overlay.queue_free()
 	
 	_is_reloading_graphics = false
+
+
+## Shows or hides generated roads, clubhouses, houses and other buildings (and their collision).
+## They only appear on High graphics quality and when "Roads & Buildings" is enabled in settings.
+static func _apply_surrounding_features_visibility(scene_root: Node, is_high_quality: bool) -> void:
+	if scene_root == null:
+		return
+	var show_features := is_high_quality and not is_mobile()
+	if show_features:
+		var tree := Engine.get_main_loop() as SceneTree
+		var gs: Node = null
+		if tree != null and tree.root != null:
+			gs = tree.root.get_node_or_null("GlobalSettings")
+			if gs == null:
+				gs = tree.root.find_child("GlobalSettings", true, false)
+		if gs != null and gs.has_method("is_surrounding_features_enabled"):
+			show_features = bool(gs.call("is_surrounding_features_enabled"))
+	for child in scene_root.get_children():
+		if not (child is StaticBody3D):
+			continue
+		if not (bool(child.get_meta("is_road", false)) or bool(child.get_meta("is_building", false))):
+			continue
+		var body := child as StaticBody3D
+		body.visible = show_features
+		for sub in body.get_children():
+			if sub is CollisionShape3D:
+				(sub as CollisionShape3D).set_deferred("disabled", not show_features)

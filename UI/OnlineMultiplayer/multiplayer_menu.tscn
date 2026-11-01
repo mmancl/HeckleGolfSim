@@ -1,0 +1,432 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://UI/OnlineMultiplayer/multiplayer_menu.gd" id="1_menu"]
+[ext_resource type="Script" path="res://UI/Account/budget_paused_banner.gd" id="2_banner"]
+[ext_resource type="Texture2D" path="res://assets/images/menu/cabo_openfairway_bnw.png" id="3_bg"]
+
+[node name="MultiplayerMenu" type="Control"]
+process_mode = 3
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_menu")
+
+[node name="BackgroundTexture" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("3_bg")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="BackgroundPanel" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.04, 0.06, 0.09, 0.92)
+
+[node name="MainMargin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 32
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 32
+theme_override_constants/margin_bottom = 24
+
+[node name="RootVBox" type="VBoxContainer" parent="MainMargin"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="TopBar" type="HBoxContainer" parent="MainMargin/RootVBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="BackButton" type="Button" parent="MainMargin/RootVBox/TopBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 44)
+layout_mode = 2
+text = "← Main Menu"
+
+[node name="TitleLabel" type="Label" parent="MainMargin/RootVBox/TopBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 24
+text = "ONLINE MULTIPLAYER"
+vertical_alignment = 1
+
+[node name="UserStatusLabel" type="Label" parent="MainMargin/RootVBox/TopBar"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Account: Anonymous"
+horizontal_alignment = 2
+vertical_alignment = 1
+
+[node name="AccountButton" type="Button" parent="MainMargin/RootVBox/TopBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(130, 40)
+layout_mode = 2
+text = "☁ Account"
+
+[node name="BudgetBanner" type="PanelContainer" parent="MainMargin/RootVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+script = ExtResource("2_banner")
+
+[node name="TabBar" type="HBoxContainer" parent="MainMargin/RootVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="TabHostButton" type="Button" parent="MainMargin/RootVBox/TabBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 44)
+layout_mode = 2
+text = "Host Match"
+
+[node name="TabJoinCodeButton" type="Button" parent="MainMargin/RootVBox/TabBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 44)
+layout_mode = 2
+text = "Join by Code"
+
+[node name="TabBrowserButton" type="Button" parent="MainMargin/RootVBox/TabBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 44)
+layout_mode = 2
+text = "Public Matches"
+
+[node name="ContentStack" type="PanelContainer" parent="MainMargin/RootVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="HostView" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="CourseSelectionSection" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack/HostView"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="CourseLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/HostView/CourseSelectionSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Select Course:"
+
+[node name="CourseDropdown" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/HostView/CourseSelectionSection"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+
+[node name="SettingsGrid" type="GridContainer" parent="MainMargin/RootVBox/ContentStack/HostView"]
+layout_mode = 2
+theme_override_constants/h_separation = 20
+theme_override_constants/v_separation = 10
+columns = 2
+
+[node name="LengthLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/HostView/SettingsGrid"]
+layout_mode = 2
+text = "Course Length:"
+
+[node name="LengthOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/HostView/SettingsGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 38)
+layout_mode = 2
+
+[node name="ModeLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/HostView/SettingsGrid"]
+layout_mode = 2
+text = "Game Mode:"
+
+[node name="ModeOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/HostView/SettingsGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 38)
+layout_mode = 2
+
+[node name="TurnOrderLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/HostView/SettingsGrid"]
+layout_mode = 2
+text = "Turn Order:"
+
+[node name="TurnOrderOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/HostView/SettingsGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 38)
+layout_mode = 2
+
+[node name="WindLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/HostView/SettingsGrid"]
+layout_mode = 2
+text = "Wind Condition:"
+
+[node name="WindOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/HostView/SettingsGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 38)
+layout_mode = 2
+
+[node name="GreenSpeedLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/HostView/SettingsGrid"]
+layout_mode = 2
+text = "Green Speed:"
+
+[node name="GreenSpeedOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/HostView/SettingsGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 38)
+layout_mode = 2
+
+[node name="VisibilityLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/HostView/SettingsGrid"]
+layout_mode = 2
+text = "Visibility:"
+
+[node name="VisibilityOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/HostView/SettingsGrid"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 38)
+layout_mode = 2
+
+[node name="HostGolferSection" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack/HostView"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="HostGolferLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/HostView/HostGolferSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "Local Golfers (This Device):"
+
+[node name="HostGolferRow" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/HostView/HostGolferSection"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="HostGolferDropdown" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/HostView/HostGolferSection/HostGolferRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 38)
+layout_mode = 2
+
+[node name="HostGolferTee" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/HostView/HostGolferSection/HostGolferRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(140, 38)
+layout_mode = 2
+
+[node name="HostCreateButton" type="Button" parent="MainMargin/RootVBox/ContentStack/HostView"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(260, 48)
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Create Lobby"
+
+[node name="HostStatusLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/HostView"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="JoinCodeView" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="JoinCodeInstructions" type="Label" parent="MainMargin/RootVBox/ContentStack/JoinCodeView"]
+layout_mode = 2
+text = "Enter the 6-character match join code provided by the host:"
+
+[node name="CodeEntryRow" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/JoinCodeView"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="JoinCodeInput" type="LineEdit" parent="MainMargin/RootVBox/ContentStack/JoinCodeView/CodeEntryRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 48)
+layout_mode = 2
+placeholder_text = "6-CHAR CODE"
+max_length = 6
+
+[node name="PasteCodeButton" type="Button" parent="MainMargin/RootVBox/ContentStack/JoinCodeView/CodeEntryRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(100, 48)
+layout_mode = 2
+text = "Paste"
+
+[node name="JoinGolferSection" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/JoinCodeView"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="JoinGolferLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/JoinCodeView/JoinGolferSection"]
+layout_mode = 2
+text = "Golfer:"
+
+[node name="JoinGolferDropdown" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/JoinCodeView/JoinGolferSection"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 38)
+layout_mode = 2
+
+[node name="JoinGolferTee" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/JoinCodeView/JoinGolferSection"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(140, 38)
+layout_mode = 2
+
+[node name="JoinCodeSubmitButton" type="Button" parent="MainMargin/RootVBox/ContentStack/JoinCodeView"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(240, 48)
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Join Match"
+
+[node name="JoinStatusLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/JoinCodeView"]
+unique_name_in_owner = true
+layout_mode = 2
+horizontal_alignment = 1
+
+[node name="BrowserView" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="BrowserHeader" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/BrowserView"]
+layout_mode = 2
+
+[node name="BrowserHeaderLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/BrowserView/BrowserHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Un-started Public Matches:"
+
+[node name="RefreshBrowserButton" type="Button" parent="MainMargin/RootVBox/ContentStack/BrowserView/BrowserHeader"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 36)
+layout_mode = 2
+text = "Refresh"
+
+[node name="BrowserScroll" type="ScrollContainer" parent="MainMargin/RootVBox/ContentStack/BrowserView"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+follow_focus = true
+
+[node name="BrowserList" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack/BrowserView/BrowserScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="NoLobbiesLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/BrowserView/BrowserScroll/BrowserList"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "No active public lobbies found. Host a match to invite other players!"
+horizontal_alignment = 1
+
+[node name="LobbyRoomView" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="RoomHeaderCard" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="RoomCodeBox" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/RoomHeaderCard"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="JoinCodeTitle" type="Label" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/RoomHeaderCard/RoomCodeBox"]
+layout_mode = 2
+text = "JOIN CODE:"
+
+[node name="RoomCodeLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/RoomHeaderCard/RoomCodeBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "ABCDEF"
+
+[node name="CopyCodeButton" type="Button" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/RoomHeaderCard/RoomCodeBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(100, 36)
+layout_mode = 2
+text = "Copy Code"
+
+[node name="RoomDetailsLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/RoomHeaderCard"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Course: Augusta | Full 18 | Standard"
+horizontal_alignment = 2
+
+[node name="CourseInstallBanner" type="PanelContainer" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+
+[node name="CourseInstallMargin" type="MarginContainer" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/CourseInstallBanner"]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 10
+
+[node name="CourseInstallHBox" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/CourseInstallBanner/CourseInstallMargin"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="CourseInstallLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/CourseInstallBanner/CourseInstallMargin/CourseInstallHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Course required: You need to install this course before you can play."
+
+[node name="DownloadCourseButton" type="Button" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/CourseInstallBanner/CourseInstallMargin/CourseInstallHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(220, 40)
+layout_mode = 2
+text = "Download & Install Course"
+
+[node name="GolfersListScroll" type="ScrollContainer" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView"]
+layout_mode = 2
+size_flags_vertical = 3
+follow_focus = true
+
+[node name="GolfersContainer" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/GolfersListScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="RoomBottomBar" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="LeaveLobbyButton" type="Button" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/RoomBottomBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 44)
+layout_mode = 2
+text = "Leave Lobby"
+
+[node name="RoomSpacer" type="Control" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/RoomBottomBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ReadyToggleButton" type="Button" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/RoomBottomBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 44)
+layout_mode = 2
+text = "Toggle Ready"
+
+[node name="StartMatchButton" type="Button" parent="MainMargin/RootVBox/ContentStack/LobbyRoomView/RoomBottomBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 44)
+layout_mode = 2
+text = "Start Match"
+
+[node name="ConfirmLeaveDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "Leave Lobby?"
+initial_position = 2
+size = Vector2i(420, 140)
+dialog_text = "Leaving as host will cancel and close the lobby for all players. Are you sure?"

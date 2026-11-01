@@ -1,5 +1,7 @@
 extends Node3D
 
+const RainPhysics = preload("res://Utils/rain_physics.gd")
+
 var track_points : bool = false
 # TODO: move trail stuff into trail script
 var trail_timer : float = 0.0
@@ -359,7 +361,10 @@ func _on_ball_rest() -> void:
 		var current_hole_loc = parent_scene.get("current_hole_location")
 		if current_hole_loc != null and not current_hole_loc.is_zero_approx():
 			if not parent_scene.get("practice_mode_active"):
-				ball.spawn_position = ball.global_position
+				var next_spawn_pos = ball.global_position
+				if ball.get("holed_out_this_shot"):
+					next_spawn_pos.y = parent_scene.get_height(next_spawn_pos.x, next_spawn_pos.z) + GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET
+				ball.spawn_position = next_spawn_pos
 				print("[player.gd] Dynamic course detected. Updated ball.spawn_position to: ", ball.spawn_position)
 
 	shot_data["TotalDistance"] = ball.get_downrange_meters() if ball != null else 0.0  # Downrange distance in meters
@@ -380,6 +385,7 @@ func get_ball_state():
 
 
 func _on_tcp_client_hit_ball(data: Dictionary) -> void:
+	RainPhysics.apply_rain_shot_reduction(data)
 	FoamBallBoost.apply_boost(data, ball.current_selected_club if ball != null else "")
 	var success : bool = validate_data(data)
 	if success:
@@ -427,6 +433,7 @@ func _on_tcp_client_hit_ball(data: Dictionary) -> void:
 
 func _on_range_ui_hit_shot(data: Variant) -> void:
 	if data is Dictionary:
+		RainPhysics.apply_rain_shot_reduction(data)
 		FoamBallBoost.apply_boost(data, ball.current_selected_club if ball != null else "")
 	var target_dist := 0.0
 	var parent_scene = get_parent()

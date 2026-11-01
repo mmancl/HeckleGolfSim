@@ -76,6 +76,8 @@ uniform float slope_shading_strength : hint_range(0.0, 1.0) = 0.22;
 uniform float height_blend_contrast : hint_range(0.0, 1.0) = 0.0;
 uniform vec2 hole_mow_direction = vec2(0.707, 0.707);
 uniform vec3 active_tee_pos = vec3(0.0, -9999.0, 0.0);
+uniform vec3 active_hole_pos = vec3(0.0, -9999.0, 0.0);
+uniform float active_hole_radius = 0.054;
 
 const float BASE_UV_SCALE = 0.1;
 
@@ -120,6 +122,12 @@ float turf_grain(vec2 wp) {
 }
 
 void fragment() {
+	if (active_hole_pos.y > -1000.0) {
+		vec2 hole_delta = v_world_pos.xz - active_hole_pos.xz;
+		if (dot(hole_delta, hole_delta) < active_hole_radius * active_hole_radius) {
+			discard;
+		}
+	}
 	float cam_dist = distance(v_world_pos, v_cam_pos);
 	float near_detail_fade = 1.0 - smoothstep(25.0, 55.0, cam_dist);
 	float close_blade_fade = 1.0 - smoothstep(8.0, 18.0, cam_dist);

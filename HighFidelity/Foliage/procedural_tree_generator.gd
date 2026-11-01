@@ -44,32 +44,54 @@ static func get_lush_summer_instance_color(world_pos: Vector3, near_water: bool 
 		return Color(pine.r, pine.g, pine.b, wind_seed)
 
 
-## Creates a procedural clumped 3D shoreline reed / tall marsh grass mesh for pond banks.
+## Creates a procedural clumped 3D shoreline reed / tall marsh grass mesh with occasional cattails for pond banks.
 static func create_shoreline_reed_cluster_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 90210
-	var num_stalks := 26
+	var num_stalks := 30
 
 	for i in range(num_stalks):
 		var angle := (float(i) / float(num_stalks)) * TAU + rng.randf_range(-0.22, 0.22)
-		var dist := sqrt(rng.randf()) * 0.32
+		var dist := sqrt(rng.randf()) * 0.34
 		var base := Vector3(cos(angle) * dist, 0.0, sin(angle) * dist)
-		var stalk_dir := angle + rng.randf_range(-0.45, 0.45)
-		var lean := rng.randf_range(0.06, 0.26)
-		var is_tall_stalk := (i % 3 == 0)
-		var h := rng.randf_range(1.25, 1.80) if is_tall_stalk else rng.randf_range(0.80, 1.30)
-		var w := rng.randf_range(0.035, 0.065)
+		var stalk_dir := angle + rng.randf_range(-0.48, 0.48)
+
+		# Three natural stature tiers within each clump so blades vary organically in height & arch:
+		# - Short outer arching sedge (0.35m - 0.65m)
+		# - Medium marsh grass blades (0.70m - 1.15m)
+		# - Standout reed stalks (1.20m - 1.55m)
+		var tier_roll := i % 5
+		var h: float
+		var lean: float
+		var w: float
+		if tier_roll == 0:
+			h = rng.randf_range(1.20, 1.55)
+			lean = rng.randf_range(0.08, 0.22)
+			w = rng.randf_range(0.030, 0.046)
+		elif tier_roll == 1 or tier_roll == 2:
+			h = rng.randf_range(0.70, 1.15)
+			lean = rng.randf_range(0.12, 0.28)
+			w = rng.randf_range(0.034, 0.055)
+		else:
+			h = rng.randf_range(0.35, 0.65)
+			lean = rng.randf_range(0.15, 0.32)
+			w = rng.randf_range(0.036, 0.058)
+
+		var blade_id := float(i) / float(num_stalks)
+		var dry_seed := rng.randf()
+		var stature_norm := clampf(h / 1.55, 0.20, 1.0)
+		var blade_col := Color(0.0, blade_id, dry_seed, stature_norm)
 
 		var fwd := Vector3(cos(stalk_dir), 0.0, sin(stalk_dir))
 		var right := Vector3(-fwd.z, 0.0, fwd.x) * (w * 0.5)
 
-		# Subterranean root vertex: extends 55cm below base into terrain so stalks firmly anchor on slopes
-		var p_sub := base - Vector3(0.0, 0.55, 0.0)
+		# Subterranean root vertex: extends 60cm below base into terrain so stalks firmly anchor on slopes
+		var p_sub := base - Vector3(0.0, 0.60, 0.0)
 		var p0 := base
-		var p1 := base + Vector3(0.0, h * 0.52, 0.0) + fwd * (lean * 0.42)
+		var p1 := base + Vector3(0.0, h * 0.50, 0.0) + fwd * (lean * 0.38)
 		var p2 := base + Vector3(0.0, h, 0.0) + fwd * lean
 
 		var n := (-fwd + Vector3(0.0, 0.68, 0.0)).normalized()
@@ -78,58 +100,229 @@ static func create_shoreline_reed_cluster_mesh() -> ArrayMesh:
 		for plane_idx in range(2):
 			var r_vec := right if plane_idx == 0 else Vector3(fwd.x, 0.0, fwd.z) * (w * 0.42)
 
-			# Subterranean / ground penetration segment (ensures stalks firmly plant 55cm into terrain with 0 hover on slopes)
+			# Subterranean / ground penetration segment
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(0.0, 1.0))
 			st.add_vertex(p_sub - r_vec)
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(1.0, 1.0))
 			st.add_vertex(p_sub + r_vec)
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(1.0, 1.0))
 			st.add_vertex(p0 + r_vec)
 
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(0.0, 1.0))
 			st.add_vertex(p_sub - r_vec)
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(1.0, 1.0))
 			st.add_vertex(p0 + r_vec)
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(0.0, 1.0))
 			st.add_vertex(p0 - r_vec)
 
 			# Lower above-ground segment
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(0.0, 1.0))
 			st.add_vertex(p0 - r_vec)
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(1.0, 1.0))
 			st.add_vertex(p0 + r_vec)
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(0.85, 0.5))
 			st.add_vertex(p1 + r_vec * 0.72)
 
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(0.0, 1.0))
 			st.add_vertex(p0 - r_vec)
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(0.85, 0.5))
 			st.add_vertex(p1 + r_vec * 0.72)
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(0.15, 0.5))
 			st.add_vertex(p1 - r_vec * 0.72)
 
-			# Upper segment tapering to feather/seedhead plume
+			# Upper segment tapering to blade tip
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(0.15, 0.5))
 			st.add_vertex(p1 - r_vec * 0.72)
+			st.set_color(blade_col)
 			st.set_normal(n)
 			st.set_uv(Vector2(0.85, 0.5))
 			st.add_vertex(p1 + r_vec * 0.72)
+			st.set_color(blade_col)
 			st.set_normal(Vector3.UP)
 			st.set_uv(Vector2(0.5, 0.0))
 			st.add_vertex(p2)
+
+	# 3 Candidate 3D Cattails (Typha) with cylindrical brown seed heads and narrow top spikes.
+	# The vertex shader selectively spawns/culls each candidate per world instance so cattails
+	# appear occasionally in natural groupings rather than uniformly in every clump.
+	var cattail_heights := [1.18, 1.32, 1.45]
+	var cattail_ids := [0.22, 0.52, 0.82]
+	for c_idx in range(3):
+		var c_angle := (float(c_idx) / 3.0) * TAU + rng.randf_range(0.15, 0.65)
+		var c_dist := rng.randf_range(0.05, 0.22)
+		var c_base := Vector3(cos(c_angle) * c_dist, 0.0, sin(c_angle) * c_dist)
+		var c_sub := c_base - Vector3(0.0, 0.60, 0.0)
+		var c_h: float = cattail_heights[c_idx]
+		var c_id: float = cattail_ids[c_idx]
+		var c_lean := rng.randf_range(0.05, 0.14)
+		var c_dir := Vector3(cos(c_angle + 0.2), 0.0, sin(c_angle + 0.2)).normalized()
+		var c_perp := Vector3(-c_dir.z, 0.0, c_dir.x)
+
+		var y_head_bot := c_h * 0.66
+		var y_head_top := c_h * 0.86
+		var p_head_bot := c_base + Vector3(0.0, y_head_bot, 0.0) + c_dir * (c_lean * 0.66)
+		var p_head_top := c_base + Vector3(0.0, y_head_top, 0.0) + c_dir * (c_lean * 0.86)
+		var p_spike_tip := c_base + Vector3(0.0, c_h, 0.0) + c_dir * c_lean
+
+		# 1. Cattail Stalk Stem (COLOR.r = 0.5, COLOR.b = 0.0)
+		var stem_col := Color(0.5, c_id, 0.0, 0.85)
+		var stem_w := 0.018
+		for sp_idx in range(2):
+			var s_r := (c_perp if sp_idx == 0 else c_dir) * (stem_w * 0.5)
+			var s_n := (-c_dir + Vector3(0.0, 0.5, 0.0)).normalized()
+			# Subterranean stem anchor
+			st.set_color(stem_col)
+			st.set_normal(s_n)
+			st.set_uv(Vector2(0.0, 1.0))
+			st.add_vertex(c_sub - s_r)
+			st.set_color(stem_col)
+			st.set_normal(s_n)
+			st.set_uv(Vector2(1.0, 1.0))
+			st.add_vertex(c_sub + s_r)
+			st.set_color(stem_col)
+			st.set_normal(s_n)
+			st.set_uv(Vector2(1.0, 1.0))
+			st.add_vertex(c_base + s_r)
+
+			st.set_color(stem_col)
+			st.set_normal(s_n)
+			st.set_uv(Vector2(0.0, 1.0))
+			st.add_vertex(c_sub - s_r)
+			st.set_color(stem_col)
+			st.set_normal(s_n)
+			st.set_uv(Vector2(1.0, 1.0))
+			st.add_vertex(c_base + s_r)
+			st.set_color(stem_col)
+			st.set_normal(s_n)
+			st.set_uv(Vector2(0.0, 1.0))
+			st.add_vertex(c_base - s_r)
+
+			# Above-ground stem up to cattail head base
+			st.set_color(stem_col)
+			st.set_normal(s_n)
+			st.set_uv(Vector2(0.0, 1.0))
+			st.add_vertex(c_base - s_r)
+			st.set_color(stem_col)
+			st.set_normal(s_n)
+			st.set_uv(Vector2(1.0, 1.0))
+			st.add_vertex(c_base + s_r)
+			st.set_color(stem_col)
+			st.set_normal(s_n)
+			st.set_uv(Vector2(1.0, 0.34))
+			st.add_vertex(p_head_bot + s_r * 0.85)
+
+			st.set_color(stem_col)
+			st.set_normal(s_n)
+			st.set_uv(Vector2(0.0, 1.0))
+			st.add_vertex(c_base - s_r)
+			st.set_color(stem_col)
+			st.set_normal(s_n)
+			st.set_uv(Vector2(1.0, 0.34))
+			st.add_vertex(p_head_bot + s_r * 0.85)
+			st.set_color(stem_col)
+			st.set_normal(s_n)
+			st.set_uv(Vector2(0.0, 0.34))
+			st.add_vertex(p_head_bot - s_r * 0.85)
+
+		# 2. 3D Cylindrical Brown Cattail Seed Head (6-sided hexagonal prism with tapered caps, COLOR.r = 1.0)
+		var head_radius := 0.024
+		var ring_t := [0.0, 0.12, 0.88, 1.0]
+		var ring_r_scale := [0.28, 1.0, 0.96, 0.25]
+		var sides := 6
+		for r_idx in range(3):
+			var t0: float = ring_t[r_idx]
+			var t1: float = ring_t[r_idx + 1]
+			var center0 := p_head_bot.lerp(p_head_top, t0)
+			var center1 := p_head_bot.lerp(p_head_top, t1)
+			var rad0: float = head_radius * float(ring_r_scale[r_idx])
+			var rad1: float = head_radius * float(ring_r_scale[r_idx + 1])
+			var uv_y0 := lerpf(0.34, 0.14, t0)
+			var uv_y1 := lerpf(0.34, 0.14, t1)
+			var col0 := Color(1.0, c_id, t0, 0.90)
+			var col1 := Color(1.0, c_id, t1, 0.90)
+
+			for s_idx in range(sides):
+				var a0 := (float(s_idx) / float(sides)) * TAU
+				var a1 := (float(s_idx + 1) / float(sides)) * TAU
+				var d0 := c_perp * cos(a0) + c_dir * sin(a0)
+				var d1 := c_perp * cos(a1) + c_dir * sin(a1)
+				var n0 := (d0 + Vector3(0.0, 0.15, 0.0)).normalized()
+				var n1 := (d1 + Vector3(0.0, 0.15, 0.0)).normalized()
+
+				var v00 := center0 + d0 * rad0
+				var v10 := center0 + d1 * rad0
+				var v01 := center1 + d0 * rad1
+				var v11 := center1 + d1 * rad1
+
+				st.set_color(col0)
+				st.set_normal(n0)
+				st.set_uv(Vector2(0.2, uv_y0))
+				st.add_vertex(v00)
+				st.set_color(col0)
+				st.set_normal(n1)
+				st.set_uv(Vector2(0.8, uv_y0))
+				st.add_vertex(v10)
+				st.set_color(col1)
+				st.set_normal(n1)
+				st.set_uv(Vector2(0.8, uv_y1))
+				st.add_vertex(v11)
+
+				st.set_color(col0)
+				st.set_normal(n0)
+				st.set_uv(Vector2(0.2, uv_y0))
+				st.add_vertex(v00)
+				st.set_color(col1)
+				st.set_normal(n1)
+				st.set_uv(Vector2(0.8, uv_y1))
+				st.add_vertex(v11)
+				st.set_color(col1)
+				st.set_normal(n0)
+				st.set_uv(Vector2(0.2, uv_y1))
+				st.add_vertex(v01)
+
+		# 3. Narrow Top Male Spike above brown cattail head (COLOR.r = 0.5, COLOR.b = 1.0)
+		var spike_col := Color(0.5, c_id, 1.0, 0.95)
+		var spike_w := 0.011
+		for sp_idx in range(2):
+			var sp_r := (c_perp if sp_idx == 0 else c_dir) * (spike_w * 0.5)
+			st.set_color(spike_col)
+			st.set_normal(Vector3.UP)
+			st.set_uv(Vector2(0.3, 0.14))
+			st.add_vertex(p_head_top - sp_r)
+			st.set_color(spike_col)
+			st.set_normal(Vector3.UP)
+			st.set_uv(Vector2(0.7, 0.14))
+			st.add_vertex(p_head_top + sp_r)
+			st.set_color(spike_col)
+			st.set_normal(Vector3.UP)
+			st.set_uv(Vector2(0.5, 0.0))
+			st.add_vertex(p_spike_tip)
 
 	# Dense ground-level undergrowth collar (12 leafy blades, 0.35m-0.60m) to form an opaque turf cushion at ground level
 	var num_undergrowth := 12
@@ -137,42 +330,52 @@ static func create_shoreline_reed_cluster_mesh() -> ArrayMesh:
 		var u_angle := (float(j) / float(num_undergrowth)) * TAU + rng.randf_range(-0.25, 0.25)
 		var u_dist := rng.randf_range(0.04, 0.28)
 		var u_base := Vector3(cos(u_angle) * u_dist, 0.0, sin(u_angle) * u_dist)
-		var u_sub := u_base - Vector3(0.0, 0.45, 0.0)
+		var u_sub := u_base - Vector3(0.0, 0.50, 0.0)
 		var u_h := rng.randf_range(0.35, 0.60)
 		var u_w := rng.randf_range(0.04, 0.07)
 		var u_dir := Vector3(cos(u_angle), 0.0, sin(u_angle))
 		var u_right := Vector3(-u_dir.z, 0.0, u_dir.x) * (u_w * 0.5)
 		var u_tip := u_base + Vector3(0.0, u_h, 0.0) + u_dir * rng.randf_range(0.10, 0.24)
 		var u_n := Vector3.UP
+		var u_col := Color(0.0, float(j) / float(num_undergrowth), rng.randf() * 0.45, 0.12)
 
 		# Subterranean anchor
+		st.set_color(u_col)
 		st.set_normal(u_n)
 		st.set_uv(Vector2(0.0, 1.0))
 		st.add_vertex(u_sub - u_right)
+		st.set_color(u_col)
 		st.set_normal(u_n)
 		st.set_uv(Vector2(1.0, 1.0))
 		st.add_vertex(u_sub + u_right)
+		st.set_color(u_col)
 		st.set_normal(u_n)
 		st.set_uv(Vector2(1.0, 1.0))
 		st.add_vertex(u_base + u_right)
 
+		st.set_color(u_col)
 		st.set_normal(u_n)
 		st.set_uv(Vector2(0.0, 1.0))
 		st.add_vertex(u_sub - u_right)
+		st.set_color(u_col)
 		st.set_normal(u_n)
 		st.set_uv(Vector2(1.0, 1.0))
 		st.add_vertex(u_base + u_right)
+		st.set_color(u_col)
 		st.set_normal(u_n)
 		st.set_uv(Vector2(0.0, 1.0))
 		st.add_vertex(u_base - u_right)
 
 		# Above-ground blade to tip
+		st.set_color(u_col)
 		st.set_normal(u_n)
 		st.set_uv(Vector2(0.0, 1.0))
 		st.add_vertex(u_base - u_right)
+		st.set_color(u_col)
 		st.set_normal(u_n)
 		st.set_uv(Vector2(1.0, 1.0))
 		st.add_vertex(u_base + u_right)
+		st.set_color(u_col)
 		st.set_normal(u_n)
 		st.set_uv(Vector2(0.5, 0.0))
 		st.add_vertex(u_tip)
@@ -185,8 +388,8 @@ static func create_shoreline_reed_cluster_mesh() -> ArrayMesh:
 		mat.set_shader_parameter("tip_color", Color(0.32, 0.56, 0.20))
 		mat.set_shader_parameter("dry_tip_color", Color(0.64, 0.56, 0.38))
 		mat.set_shader_parameter("dry_tip_ratio", 0.42)
-		mat.set_shader_parameter("head_ratio", 0.38)
-		mat.set_shader_parameter("head_color", Color(0.40, 0.27, 0.15))
+		mat.set_shader_parameter("head_ratio", 0.36)
+		mat.set_shader_parameter("head_color", Color(0.31, 0.17, 0.09))
 		mat.set_shader_parameter("wind_strength", 0.09)
 		mat.set_shader_parameter("max_render_distance", 650.0)
 		mat.set_shader_parameter("fade_start_distance", 500.0)

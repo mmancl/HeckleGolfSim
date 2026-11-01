@@ -4,6 +4,7 @@ const TeeboxMarkerBuilder = preload("res://Courses/Range/teebox_marker_builder.g
 const FlagBuilder = preload("res://Courses/Range/flag_builder.gd")
 const AimDistanceIndicator = preload("res://UI/aim_distance_indicator.gd")
 const WeatherLightingController = preload("res://Courses/Range/weather_lighting_controller.gd")
+const RainPhysics = preload("res://Utils/rain_physics.gd")
 
 var track_points : bool = false
 var trail_timer : float = 0.0
@@ -1901,12 +1902,30 @@ func _toggle_shot_traces() -> void:
 		$RangeUI.call("toggle_shot_traces")
 
 
+func _is_remote_turn_locked() -> bool:
+	if has_node("/root/OnlineSession"):
+		var sess = get_node("/root/OnlineSession")
+		if sess.is_online_match:
+			if has_node("/root/MultiplayerManager"):
+				var mp = get_node("/root/MultiplayerManager")
+				var active_p = mp.get_active_player()
+				if active_p.get("is_remote", false):
+					return true
+			if sess.has_method("is_replaying_remote_turn") and sess.is_replaying_remote_turn():
+				return true
+	return false
+
+
 func _on_tcp_client_hit_ball(data: Dictionary) -> void:
+	if _is_remote_turn_locked():
+		print("[Range] Remote turn or replay in progress — ignoring hit.")
+		return
 	var speed: float = float(data.get("BallSpeed", data.get("Speed", 0.0)))
 	var shot_type = str(data.get("ShotType", "")).to_lower()
 	if speed <= 0.1 or shot_type == "practice":
 		print("[Range] Practice swing or 0 ball speed ignored.")
 		return
+	RainPhysics.apply_rain_shot_reduction(data)
 	FoamBallBoost.apply_boost(data)
 	if has_node("Player"):
 		$Player._on_tcp_client_hit_ball(data)
@@ -2340,7 +2359,10 @@ func _on_golf_ball_rest(_ball_data) -> void:
 				active_player["last_shot_penalty"] = 0
 
 	if is_dynamic_course and not practice_mode_active:
-		$Player.ball.spawn_position = ball_pos
+		var next_spawn_pos = ball_pos
+		if ball != null and ball.get("holed_out_this_shot"):
+			next_spawn_pos.y = get_height(ball_pos.x, ball_pos.z) + GolfBall.GROUND_CENTER_HEIGHT + GolfBall.GROUND_SNAP_OFFSET
+		$Player.ball.spawn_position = next_spawn_pos
 
 	update_current_lie_and_reduction()
 
@@ -2354,7 +2376,26 @@ func _on_golf_ball_rest(_ball_data) -> void:
 
 	# Record multiplayer shot
 	if has_node("/root/MultiplayerManager") and not get_node("/root/MultiplayerManager").players.is_empty():
-		get_node("/root/MultiplayerManager").record_shot(ball_pos, raw_ball_data)
+		var mp_mgr = get_node("/root/MultiplayerManager")
+		var pre_shot_active_p: Dictionary = mp_mgr.get_active_player()
+		var pre_start_pos: Vector3 = pre_shot_active_p.get("position", Vector3.ZERO)
+		var is_local_online_turn: bool = false
+		if has_node("/root/OnlineSession") and get_node("/root/OnlineSession").is_online_match:
+			if not pre_shot_active_p.get("is_remote", false):
+				is_local_online_turn = true
+
+		mp_mgr.record_shot(ball_pos, raw_ball_data)
+
+		if is_local_online_turn and has_node("/root/OnlineMatchController"):
+			var omc = get_node("/root/OnlineMatchController")
+			var post_active_p: Dictionary = pre_shot_active_p
+			var club_str: String = str(post_active_p.get("last_shot_club", _get_current_club()))
+			var lie_str: String = str(post_active_p.get("lie_type", "fairway"))
+			var pen: int = int(post_active_p.get("last_shot_penalty", 0))
+			var gimme_strk: int = int(mp_mgr.last_gimme_strokes)
+			var holed: bool = bool(post_active_p.get("holed_out", false))
+			var pin: Vector3 = current_hole_location if is_dynamic_course else Vector3.ZERO
+			omc.publish_local_shot(pre_start_pos, ball_pos, club_str, lie_str, pen, gimme_strk, holed, pin)
 
 	if is_dynamic_course:
 		if practice_mode_active:
@@ -2750,6 +2791,9 @@ func _on_skip_flight_requested() -> void:
 
 
 func _on_range_ui_hit_shot(data: Dictionary) -> void:
+	if _is_remote_turn_locked():
+		print("[Range] Remote turn or replay in progress — ignoring range UI shot.")
+		return
 	if has_node("Player"):
 		$Player._on_range_ui_hit_shot(data)
 		
@@ -2764,6 +2808,9 @@ func _on_range_ui_hit_shot(data: Dictionary) -> void:
 
 
 func _on_player_manual_hit() -> void:
+	if _is_remote_turn_locked():
+		print("[Range] Remote turn or replay in progress — ignoring manual hit.")
+		return
 	if has_node("Player"):
 		raw_ball_data = $Player.shot_data.duplicate()
 	_update_ball_display(false)
@@ -3135,6 +3182,7 @@ func _spawn_flag_pin() -> void:
 	if gs != null and gs.has_method("get_graphics_quality"):
 		q_str = gs.get_graphics_quality()
 	FlagBuilder.build_flag_pin(pin, 3.0, Color(0.95, 0.12, 0.12), cup_radius, q_str)
+	FlagBuilder.sync_hole_cutout_to_terrain(self, current_hole_location, cup_radius)
 	
 	print("[CoursePlay] FlagPin and PinMarker spawned at: ", current_hole_location)
 	update_gimme_circles()
@@ -4188,8 +4236,21 @@ func get_hole_location_for(hole_loc: Array) -> Vector3:
 	var best_cand: Vector2 = Vector2.ZERO
 	var best_edge: float = -INF
 
+	var pin_rng: RandomNumberGenerator = null
+	if has_node("/root/OnlineSession") and get_node("/root/OnlineSession").is_online_match:
+		var sess = get_node("/root/OnlineSession")
+		var pin_seed = sess.match_meta.get("settings", {}).get("pin_seed", 0)
+		var h_id = hole_loc[0] if hole_loc.size() > 0 else 0
+		if has_node("/root/MultiplayerManager"):
+			var mp = get_node("/root/MultiplayerManager")
+			h_id = mp.get_current_hole_id()
+		pin_rng = RandomNumberGenerator.new()
+		pin_rng.seed = hash(str(pin_seed) + "_" + str(h_id))
+
 	for _attempt in range(500):
-		var cand := Vector2(randf_range(min_pt.x, max_pt.x), randf_range(min_pt.y, max_pt.y))
+		var rx = pin_rng.randf_range(min_pt.x, max_pt.x) if pin_rng != null else randf_range(min_pt.x, max_pt.x)
+		var ry = pin_rng.randf_range(min_pt.y, max_pt.y) if pin_rng != null else randf_range(min_pt.y, max_pt.y)
+		var cand := Vector2(rx, ry)
 		var inside := false
 		for tri in triangles:
 			if _is_point_in_triangle_2d(cand, tri[0], tri[1], tri[2]):

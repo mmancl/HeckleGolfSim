@@ -473,6 +473,13 @@ theme_override_font_sizes/font_size = 15
 button_pressed = true
 text = " Generate recessed 3D bunkers & sculpted sand lips"
 
+[node name="RoadsBuildingsCheck" type="CheckBox" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox/CourseGenCard/CourseGenVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+button_pressed = true
+text = " Generate roads & buildings (clubhouses, houses, commercial)"
+
 [node name="HoleCountCard" type="PanelContainer" parent="SettingsOverlay/SettingsCenter/SettingsPanel/SettingsMargin/SettingsVBox/SettingsScroll/CardsVBox"]
 unique_name_in_owner = true
 layout_mode = 2

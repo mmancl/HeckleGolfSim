@@ -264,10 +264,10 @@ func _discover_terrain() -> void:
 								"aabb": Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
 							})
 
-		# Also extract ribbon geometry from any cartpath MeshInstance3D nodes
+		# Also extract ribbon geometry from any cartpath or bridge MeshInstance3D nodes
 		for child in _scene_root.get_children():
 			var cname := child.name.to_lower()
-			if child is MeshInstance3D and (cname.begins_with("cartpath_") or cname == "cartpaths"):
+			if child is MeshInstance3D and (cname.begins_with("cartpath_") or cname == "cartpaths" or cname.begins_with("cartbridge_")):
 				var mi := child as MeshInstance3D
 				if mi.mesh is ArrayMesh and mi.mesh.get_surface_count() > 0:
 					var arrays := (mi.mesh as ArrayMesh).surface_get_arrays(0)
@@ -276,7 +276,7 @@ func _discover_terrain() -> void:
 						for i in range(0, verts.size() - 3, 2):
 							var p0 := Vector2((verts[i].x + verts[i + 1].x) * 0.5, (verts[i].z + verts[i + 1].z) * 0.5)
 							var p1 := Vector2((verts[i + 2].x + verts[i + 3].x) * 0.5, (verts[i + 2].z + verts[i + 3].z) * 0.5)
-							var hw := maxf(1.55, verts[i].distance_to(verts[i + 1]) * 0.5 + 0.30)
+							var hw := maxf(1.85, verts[i].distance_to(verts[i + 1]) * 0.5 + 0.50)
 							var min_x = minf(p0.x, p1.x) - hw
 							var max_x = maxf(p0.x, p1.x) + hw
 							var min_y = minf(p0.y, p1.y) - hw

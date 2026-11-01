@@ -58,6 +58,10 @@ func _init() -> void:
 	if dialog_scene != null:
 		var dialog = dialog_scene.instantiate()
 		root.add_child(dialog)
+		if dialog.get("_loader") == null and loader_script != null:
+			var l = loader_script.new()
+			dialog.set("_loader", l)
+			dialog.add_child(l)
 
 		var ca_dict = {
 			"name": "Westridge Golf Club",

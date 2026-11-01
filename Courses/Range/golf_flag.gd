@@ -27,6 +27,7 @@ var _top_collar_node: MeshInstance3D = null
 var _bottom_collar_node: MeshInstance3D = null
 var _shader_mat: ShaderMaterial = null
 var _simple_mat: StandardMaterial3D = null
+var _last_synced_hole_pos: Vector3 = Vector3(99999.0, 99999.0, 99999.0)
 
 
 func _init() -> void:
@@ -344,6 +345,23 @@ func update_wind(immediate: bool = false, delta: float = 0.0) -> void:
 
 	if is_realistic and material_override is ShaderMaterial:
 		_update_shader_parameters(spd)
+
+	_sync_parent_hole_cutout(immediate)
+
+
+func _sync_parent_hole_cutout(force: bool = false) -> void:
+	var parent_pin = get_parent_node_3d()
+	if parent_pin == null or not parent_pin.is_inside_tree():
+		return
+	if parent_pin.get_node_or_null("CupWhite") == null and not parent_pin.has_meta("cup_radius"):
+		return
+	var pos = parent_pin.global_position
+	if force or pos.distance_squared_to(_last_synced_hole_pos) > 0.0001:
+		_last_synced_hole_pos = pos
+		var cup_r = float(parent_pin.get_meta("cup_radius")) if parent_pin.has_meta("cup_radius") else 0.054
+		var scene_root = parent_pin.get_parent()
+		if scene_root != null:
+			FlagBuilder.sync_hole_cutout_to_terrain(scene_root, pos, cup_r)
 
 
 func _update_shader_parameters(wind_spd: float) -> void:

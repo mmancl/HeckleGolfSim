@@ -617,14 +617,41 @@ func _hook_option_button(opt: OptionButton) -> void:
 	if popup == null:
 		return
 
+	popup.hide_on_item_selection = true
+	popup.hide_on_checkable_item_selection = true
+
 	# Use a lambda that captures the OptionButton reference.
 	# visibility_changed fires when the popup shows AND hides.
 	if not popup.visibility_changed.is_connected(_on_popup_visibility_changed):
 		popup.visibility_changed.connect(_on_popup_visibility_changed.bind(opt, popup))
 
+	if not popup.index_pressed.is_connected(_on_popup_index_pressed):
+		popup.index_pressed.connect(_on_popup_index_pressed.bind(opt, popup))
+
+	if not opt.item_selected.is_connected(_on_option_item_selected):
+		opt.item_selected.connect(_on_option_item_selected.bind(opt, popup))
+
 	# Also handle the OptionButton being freed.
 	if not opt.tree_exiting.is_connected(_on_option_button_exiting):
 		opt.tree_exiting.connect(_on_option_button_exiting.bind(opt))
+
+
+func _on_popup_index_pressed(_index: int, opt: OptionButton, popup: PopupMenu) -> void:
+	if popup != null and is_instance_valid(popup) and popup.visible:
+		popup.call_deferred("hide")
+	if _active_option_button == opt:
+		_option_popup_open = false
+		_active_option_button = null
+		_last_tracked_dropdown_idx = -1
+
+
+func _on_option_item_selected(_index: int, opt: OptionButton, popup: PopupMenu) -> void:
+	if popup != null and is_instance_valid(popup) and popup.visible:
+		popup.call_deferred("hide")
+	if _active_option_button == opt:
+		_option_popup_open = false
+		_active_option_button = null
+		_last_tracked_dropdown_idx = -1
 
 
 func _on_popup_visibility_changed(opt: OptionButton, popup: PopupMenu) -> void:
@@ -635,6 +662,11 @@ func _on_popup_visibility_changed(opt: OptionButton, popup: PopupMenu) -> void:
 		return
 
 	if popup.visible:
+		# If another OptionButton popup was still open, close it first.
+		if _active_option_button != null and _active_option_button != opt and is_instance_valid(_active_option_button):
+			var prev_popup := _active_option_button.get_popup()
+			if prev_popup != null and is_instance_valid(prev_popup) and prev_popup.visible:
+				prev_popup.hide()
 		# Popup just opened.
 		_option_popup_open = true
 		_active_option_button = opt
@@ -647,9 +679,10 @@ func _on_popup_visibility_changed(opt: OptionButton, popup: PopupMenu) -> void:
 			popup.set_focused_item(init_idx)
 	else:
 		# Popup just closed — restore focus to the OptionButton.
-		_option_popup_open = false
-		_active_option_button = null
-		_last_tracked_dropdown_idx = -1
+		if _active_option_button == opt or _active_option_button == null:
+			_option_popup_open = false
+			_active_option_button = null
+			_last_tracked_dropdown_idx = -1
 		if opt != null and is_instance_valid(opt) and opt.is_inside_tree() and opt.is_visible_in_tree():
 			opt.call_deferred("grab_focus")
 

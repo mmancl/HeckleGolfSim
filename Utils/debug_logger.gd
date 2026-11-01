@@ -506,6 +506,10 @@ func _write_session_header() -> void:
 				verified_count += 1
 			else:
 				_write_raw("  [FILE] %-60s : [FOUND BUT UNREADABLE]" % file_path)
+		elif ResourceLoader.exists(file_path) or (file_path == "res://project.godot" and FileAccess.file_exists("res://project.binary")):
+			var display_name: String = file_path.replace("res://", "")
+			_write_raw("  [RES ] %-60s : [COMPILED IN PCK BUNDLE]" % display_name)
+			verified_count += 1
 		else:
 			var display_name: String = file_path.replace("res://", "")
 			# user:// config files might legitimately not exist yet before first save

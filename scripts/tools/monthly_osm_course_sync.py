@@ -904,6 +904,9 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
         is_relevant = (
             not tags or
             "golf" in tags or
+            "highway" in tags or
+            "road" in tags or
+            "building" in tags or
             tags.get("leisure") == "golf_course" or
             tags.get("natural") in ("water", "wood", "tree_row", "tree") or
             tags.get("landuse") == "forest"
@@ -963,6 +966,7 @@ class CourseFeatureExtractor(osmium.SimpleHandler):
         # Keep relevant golf and landscape relations (multipolygons, course boundaries)
         is_relevant = (
             "golf" in tags or
+            "building" in tags or
             tags.get("leisure") == "golf_course" or
             tags.get("natural") in ("water", "wood", "tree_row", "tree") or
             tags.get("landuse") == "forest"

@@ -153,6 +153,7 @@ public partial class OsmMapLoader : Node
     public bool GenerateBushes { get; set; } = true;
     public bool GenerateCartPaths { get; set; } = true;
     public bool Generate3dBunkers { get; set; } = true;
+    public bool GenerateRoadsAndBuildings { get; set; } = true;
     public bool HasCustomGenerationSettings { get; set; } = false;
 
     public void LoadCourseGenerationSettings(bool forceReload = false)
@@ -175,8 +176,9 @@ public partial class OsmMapLoader : Node
                     GenerateBushes = (bool)cfg.GetValue("course_generation", "generate_bushes", true);
                     GenerateCartPaths = (bool)cfg.GetValue("course_generation", "generate_cart_paths", true);
                     Generate3dBunkers = (bool)cfg.GetValue("course_generation", "generate_3d_bunkers", true);
+                    GenerateRoadsAndBuildings = (bool)cfg.GetValue("course_generation", "generate_roads_buildings", true);
                     HasCustomGenerationSettings = true;
-                    GD.Print($"{LogPrefix} Loaded course generation settings from user config: MaxTrees={MaxTrees}, WaterLongGrass={GenerateWaterLongGrass}, 18HolePermutations={Create18HolePermutations}, Bushes={GenerateBushes}, CartPaths={GenerateCartPaths}, 3dBunkers={Generate3dBunkers}.");
+                    GD.Print($"{LogPrefix} Loaded course generation settings from user config: MaxTrees={MaxTrees}, WaterLongGrass={GenerateWaterLongGrass}, 18HolePermutations={Create18HolePermutations}, Bushes={GenerateBushes}, CartPaths={GenerateCartPaths}, 3dBunkers={Generate3dBunkers}, RoadsBuildings={GenerateRoadsAndBuildings}.");
                 }
             }
         }
@@ -985,13 +987,169 @@ public partial class OsmMapLoader : Node
         }
     }
 
+    /// <summary>
+    /// Roads, clubhouses, houses and other surrounding buildings are only generated on High graphics (never mobile)
+    /// and only when the player has not disabled them in settings.
+    /// </summary>
+    private bool ShouldGenerateSurroundingFeatures()
+    {
+        if (!GenerateRoadsAndBuildings) return false;
+        string os = OS.GetName();
+        if (os == "Android" || os == "iOS") return false;
+        return true;
+    }
+
+    private static bool IsOverpassResultTruncated(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("remark", out var remark))
+            {
+                string r = remark.GetString() ?? "";
+                if (r.Contains("runtime error", StringComparison.OrdinalIgnoreCase) ||
+                    r.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
+                    r.Contains("out of memory", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        catch
+        {
+            return true; // Unparseable / cut-off JSON
+        }
+        return false;
+    }
+
+    private static bool HasSupplementalRoadsAndBuildings(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        if (json.Contains("\"supplemented_roads_buildings\"", StringComparison.Ordinal))
+            return true;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("elements", out var elements))
+                return false;
+
+            foreach (var el in elements.EnumerateArray())
+            {
+                if (!el.TryGetProperty("tags", out var tags))
+                    continue;
+                bool hasGolf = tags.TryGetProperty("golf", out _);
+                if (!hasGolf && (tags.TryGetProperty("building", out _) || tags.TryGetProperty("highway", out _)))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+        }
+        return false;
+    }
+
+    private async Task<string> TrySupplementOsmRoadsAndBuildingsAsync(string baseJson, double lat, double lon, string courseName)
+    {
+        if (lat == 0 && lon == 0) return baseJson;
+        if (HasSupplementalRoadsAndBuildings(baseJson)) return baseJson;
+
+        string latStr = lat.ToString(CultureInfo.InvariantCulture);
+        string lonStr = lon.ToString(CultureInfo.InvariantCulture);
+        string supplementQuery = $@"
+        [out:json][timeout:18];
+        (
+          way(around:1800, {latStr}, {lonStr})[""highway""];
+          way(around:1800, {latStr}, {lonStr})[""building""];
+          relation(around:1800, {latStr}, {lonStr})[""building""];
+        );
+        out body;
+        >;
+        out skel qt;
+        ";
+
+        for (int attempt = 1; attempt <= Math.Min(2, OverpassEndpoints.Length); attempt++)
+        {
+            string endpoint = OverpassEndpoints[(attempt - 1) % OverpassEndpoints.Length];
+            try
+            {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(20));
+                var content = new FormUrlEncodedContent(new[] { new KeyValuePair<string, string>("data", supplementQuery) });
+                var response = await HttpClient.PostAsync(endpoint, content, cts.Token);
+                if (!response.IsSuccessStatusCode)
+                    continue;
+
+                string supplementJson = await response.Content.ReadAsStringAsync(cts.Token);
+                if (string.IsNullOrWhiteSpace(supplementJson))
+                    continue;
+
+                using var baseDoc = JsonDocument.Parse(baseJson);
+                using var suppDoc = JsonDocument.Parse(supplementJson);
+                if (!baseDoc.RootElement.TryGetProperty("elements", out var baseElements) ||
+                    !suppDoc.RootElement.TryGetProperty("elements", out var suppElements))
+                {
+                    continue;
+                }
+
+                var seenIds = new HashSet<(string Type, long Id)>();
+                using var ms = new MemoryStream();
+                using (var writer = new Utf8JsonWriter(ms))
+                {
+                    writer.WriteStartObject();
+                    writer.WriteBoolean("supplemented_roads_buildings", true);
+                    writer.WritePropertyName("elements");
+                    writer.WriteStartArray();
+
+                    foreach (var el in baseElements.EnumerateArray())
+                    {
+                        string t = el.TryGetProperty("type", out var tp) ? (tp.GetString() ?? "") : "";
+                        long id = el.TryGetProperty("id", out var idp) ? idp.GetInt64() : 0;
+                        seenIds.Add((t, id));
+                        el.WriteTo(writer);
+                    }
+
+                    int addedCount = 0;
+                    foreach (var el in suppElements.EnumerateArray())
+                    {
+                        string t = el.TryGetProperty("type", out var tp) ? (tp.GetString() ?? "") : "";
+                        long id = el.TryGetProperty("id", out var idp) ? idp.GetInt64() : 0;
+                        if (seenIds.Add((t, id)))
+                        {
+                            el.WriteTo(writer);
+                            addedCount++;
+                        }
+                    }
+
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                    GD.Print($"{LogPrefix} Supplemented cached geometry for '{courseName}' with {addedCount} road/building OSM elements.");
+                }
+
+                string merged = Encoding.UTF8.GetString(ms.ToArray());
+                TrySaveUserCachedGeometry(courseName, merged);
+                return merged;
+            }
+            catch (Exception ex)
+            {
+                GD.Print($"{LogPrefix} Supplemental road/building query attempt {attempt} skipped: {ex.Message}");
+            }
+        }
+
+        return baseJson;
+    }
+
     private async Task<string> DownloadOsmDataAsync(double lat, double lon, string courseName, bool isCached = false)
     {
         // 1. Check if pre-packaged or locally cached geometry exists near requested coordinates
         string prepackaged = await TryLoadPrepackagedGeometryAsync(courseName, lat, lon);
         if (!string.IsNullOrWhiteSpace(prepackaged))
         {
-            ReportProgress($"Loaded pre-packaged map data for '{courseName}' (0 API calls)...");
+            ReportProgress($"Loaded pre-packaged map data for '{courseName}'...");
+            if (lat != 0 || lon != 0)
+            {
+                if (ShouldGenerateSurroundingFeatures())
+                    prepackaged = await TrySupplementOsmRoadsAndBuildingsAsync(prepackaged, lat, lon, courseName);
+            }
             return prepackaged;
         }
 
@@ -1005,7 +1163,7 @@ public partial class OsmMapLoader : Node
 
         ReportProgress($"Connecting to OpenStreetMap for '{courseName}'...");
         GD.Print($"{LogPrefix} No pre-packaged geometry found for '{courseName}'. Downloading from Overpass around {lat}, {lon}...");
-        // Query includes natural=tree, natural=tree_row, and golf=tree to accurately place all OSM course trees
+        // Query includes natural=tree, natural=tree_row, golf=tree, highway, and building to accurately place all course and surrounding features
         // Use FormattableString.Invariant to ensure lat/lon always use '.' as decimal separator regardless of system locale
         string latStr = lat.ToString(CultureInfo.InvariantCulture);
         string lonStr = lon.ToString(CultureInfo.InvariantCulture);
@@ -1044,8 +1202,22 @@ public partial class OsmMapLoader : Node
                     string result = await response.Content.ReadAsStringAsync();
                     if (!string.IsNullOrWhiteSpace(result))
                     {
-                        TrySaveUserCachedGeometry(courseName, result);
-                        return result;
+                        // Overpass reports timeouts / out-of-memory as a "remark" with a partial (truncated) element list.
+                        // Never accept truncated course data; fall through to the next mirror instead.
+                        if (IsOverpassResultTruncated(result))
+                        {
+                            GD.PrintErr($"{LogPrefix} Attempt {attempt} returned a truncated/partial result from {endpoint}; trying next mirror.");
+                        }
+                        else
+                        {
+                            TrySaveUserCachedGeometry(courseName, result);
+                            if (ShouldGenerateSurroundingFeatures())
+                            {
+                                ReportProgress("Fetching surrounding roads and buildings...");
+                                result = await TrySupplementOsmRoadsAndBuildingsAsync(result, lat, lon, courseName);
+                            }
+                            return result;
+                        }
                     }
                 }
 
@@ -1246,12 +1418,14 @@ public partial class OsmMapLoader : Node
             var waysToRemove = new HashSet<long>();
             var syntheticWays = new List<OsmWay>();
             long nextSyntheticWayId = -100000;
+            bool generateSurroundingsForRelations = ShouldGenerateSurroundingFeatures();
 
             foreach (var rel in relations)
             {
                 if (rel.Tags.TryGetValue("type", out var relType) && relType == "multipolygon")
                 {
                     bool isSurface = rel.Tags.ContainsKey("golf") ||
+                                     (rel.Tags.ContainsKey("building") && generateSurroundingsForRelations) ||
                                      (rel.Tags.TryGetValue("natural", out var n) && (n == "water" || n == "wood")) ||
                                      (rel.Tags.TryGetValue("landuse", out var lu) && lu == "forest");
 
@@ -1413,6 +1587,9 @@ public partial class OsmMapLoader : Node
             var waterPolygons = new List<Vector2[]>();
             var forestPolygons = new List<Vector2[]>();
             var holesWithTeePolygons = new HashSet<string>();
+            var rawDrivingRangeWays = new List<(OsmWay Way, List<Vector2> Points)>();
+            var rawBuildingWays = new List<(OsmWay Way, List<Vector2> Points, string BuildingType)>();
+            var rawRoadWays = new List<(OsmWay Way, List<Vector2> Points)>();
 
             // Pre-process hole ways to assign consecutive unique hole keys ("Hole 01", "Hole 02", ...)
             // and support multi-course / sub-course layouts (e.g. golf:course:name="Red", "White", "Blue").
@@ -1423,6 +1600,24 @@ public partial class OsmMapLoader : Node
                 .Where(w => w.Tags.TryGetValue("golf", out var g) && g == "hole" && w.NodeIds.Count(nodes.ContainsKey) >= 2)
                 .Where(isHoleBelongingToCourse)
                 .ToList();
+
+            // Pre-populate lineOfPlayPaths so spatial inclusion checks (bunkers, fairways, trees)
+            // have full knowledge of all hole lines of play from the start
+            foreach (var hw in holeWays)
+            {
+                var hPts = hw.NodeIds
+                    .Where(nodes.ContainsKey)
+                    .Select(id => nodes[id])
+                    .Select(coord => new Vector2(
+                        (float)((coord.Lon - refLon) * metersPerLon),
+                        -(float)((coord.Lat - refLat) * metersPerLat)
+                    ))
+                    .ToList();
+                if (hPts.Count >= 2)
+                {
+                    lineOfPlayPaths.Add(hPts);
+                }
+            }
 
             var holeWayMapping = new Dictionary<long, (string HoleKey, string DisplayName, string SubCourse, string OriginalRef)>();
             if (holeWays.Count > 0)
@@ -1499,6 +1694,10 @@ public partial class OsmMapLoader : Node
                 }
             }
 
+        // Roads / buildings / driving ranges are only generated on High graphics when enabled in settings.
+        // On Medium/Low (or when disabled) course generation stays exactly as it was before these features existed.
+        bool generateSurroundings = ShouldGenerateSurroundingFeatures();
+
             foreach (var way in ways)
             {
                 var points = way.NodeIds
@@ -1519,6 +1718,35 @@ public partial class OsmMapLoader : Node
                     || (way.Tags.TryGetValue("highway", out var hWayTag)
                         && (hWayTag.Equals("path", StringComparison.OrdinalIgnoreCase)
                             || hWayTag.Equals("footway", StringComparison.OrdinalIgnoreCase)));
+
+                string buildingType = generateSurroundings ? ClassifyBuildingType(way.Tags) : "";
+                bool isDrivingRange = generateSurroundings
+                    && string.IsNullOrEmpty(buildingType)
+                    && golfType != null
+                    && golfType.Equals("driving_range", StringComparison.OrdinalIgnoreCase);
+                bool isRoad = generateSurroundings
+                    && string.IsNullOrEmpty(buildingType)
+                    && !isDrivingRange
+                    && IsRoadWay(way.Tags, isCartPath);
+
+                if (isDrivingRange)
+                {
+                    rawDrivingRangeWays.Add((way, points));
+                    continue;
+                }
+                if (!string.IsNullOrEmpty(buildingType))
+                {
+                    if (points.Count >= 3)
+                    {
+                        rawBuildingWays.Add((way, points, buildingType));
+                    }
+                    continue;
+                }
+                if (isRoad)
+                {
+                    rawRoadWays.Add((way, points));
+                    continue;
+                }
 
                 // Check if the way belongs to the main course
                 var wayCenter = new Vector2(points.Average(p => p.X), points.Average(p => p.Y));
@@ -1541,7 +1769,8 @@ public partial class OsmMapLoader : Node
                 {
                     // Do not skip the main golf course boundary ways/relations themselves
                     bool isMainBoundary = way.Tags.TryGetValue("leisure", out var l) && l == "golf_course";
-                    if (!isMainBoundary)
+                    bool isBunker = golfType == "bunker";
+                    if (!isMainBoundary && !(isBunker && IsBunkerNearCourse(wayCenter, boundaryInfo, lineOfPlayPaths, exclusionPolygons)))
                         continue;
                 }
 
@@ -1664,7 +1893,10 @@ public partial class OsmMapLoader : Node
                         SubCourse = subCourse,
                         OriginalRef = origRef
                     };
-                    lineOfPlayPaths.Add(new List<Vector2>(points));
+                    if (!lineOfPlayPaths.Any(p => p.Count == points.Count && p[0].IsEqualApprox(points[0]) && p[^1].IsEqualApprox(points[^1])))
+                    {
+                        lineOfPlayPaths.Add(new List<Vector2>(points));
+                    }
                     continue;
                 }
 
@@ -2376,6 +2608,9 @@ public partial class OsmMapLoader : Node
             float courseWidth = courseMaxX - courseMinX;
             float courseDepth = courseMaxZ - courseMinZ;
 
+            // If the course has no mapped bunkers in OSM, synthesize realistic sand traps
+            GenerateSyntheticBunkersIfNoneMapped(holeInfo, exclusionPolygons, coursePolygons, rootNode);
+
             // 1. Adjust straight-line or dogleg hole paths to follow the fairway doglegs if needed
             var fairwayPolys = exclusionPolygons.Where(e => e.GolfType == "fairway").ToList();
             var bunkerPolys = exclusionPolygons.Where(e => e.GolfType == "bunker").ToList();
@@ -2528,6 +2763,70 @@ public partial class OsmMapLoader : Node
                 }
             }
 
+            // Prepare driving ranges, surrounding/internal concrete roads, and buildings (clubhouses, houses with yards, commercial buildings)
+            // before any tree placement passes so trees never spawn inside or on top of any of these features.
+            var drivingRangePolygons = FilterAndPrepareDrivingRanges(
+                rawDrivingRangeWays,
+                coursePolygons,
+                lineOfPlayPaths,
+                courseMinX,
+                courseMaxX,
+                courseMinZ,
+                courseMaxZ,
+                exclusionPolygons);
+
+            var preparedRoads = FilterAndPrepareRoads(
+                rawRoadWays,
+                coursePolygons,
+                lineOfPlayPaths,
+                courseMinX,
+                courseMaxX,
+                courseMinZ,
+                courseMaxZ);
+
+            var buildingExclusionPolygons = new List<Vector2[]>();
+            var preparedBuildings = FilterAndPrepareBuildings(
+                rawBuildingWays,
+                coursePolygons,
+                lineOfPlayPaths,
+                preparedRoads,
+                courseMinX,
+                courseMaxX,
+                courseMinZ,
+                courseMaxZ,
+                exclusionPolygons,
+                buildingExclusionPolygons);
+
+            Func<Vector2, bool> isTooCloseToRoad = (pt) =>
+            {
+                for (int rIdx = 0; rIdx < preparedRoads.Count; rIdx++)
+                {
+                    var road = preparedRoads[rIdx];
+                    float minDist = road.HalfWidth + 2.5f;
+                    if (pt.X < road.MinX - minDist || pt.X > road.MaxX + minDist ||
+                        pt.Y < road.MinY - minDist || pt.Y > road.MaxY + minDist)
+                        continue;
+
+                    var rPts = road.Points;
+                    for (int i = 0; i < rPts.Count - 1; i++)
+                    {
+                        if (DistanceToSegment(pt, rPts[i], rPts[i + 1]) < minDist)
+                            return true;
+                    }
+                }
+                return false;
+            };
+
+            Func<Vector2, float, bool> isTooCloseToBuilding = (pt, minDist) =>
+            {
+                return IsTreeTooCloseToBuilding(pt, buildingExclusionPolygons, minDist);
+            };
+
+            Func<Vector2, float, bool> isTooCloseToDrivingRange = (pt, minDist) =>
+            {
+                return IsTreeTooCloseToDrivingRange(pt, drivingRangePolygons, minDist);
+            };
+
             // 1. Gather tree positions directly from OSM course data.
             // Any tree listed in the OSM course data is placed right where it belongs (even if close to the fairway).
             var placedTreePositions = new List<Vector2>();
@@ -2539,8 +2838,11 @@ public partial class OsmMapLoader : Node
                     float tz = -(float)((coord.Lat - refLat) * metersPerLat);
                     var pt = new Vector2(tx, tz);
 
-                    // Trees must never generate inside or too close to sand traps (< 5.0m), greens (< 8.0m), or cart paths (< 2.2m)
+                    // Trees must never generate inside or too close to sand traps (< 5.0m), greens (< 8.0m), cart paths (< 2.2m), roads, buildings, or driving ranges
                     if (isTooCloseToCartPath(pt, 2.2f)) continue;
+                    if (isTooCloseToRoad(pt)) continue;
+                    if (isTooCloseToBuilding(pt, 2.5f)) continue;
+                    if (isTooCloseToDrivingRange(pt, 1.5f)) continue;
                     if (isTooCloseToBunker(pt, 5.0f)) continue;
                     if (isTooCloseToGreen(pt, 8.0f)) continue;
 
@@ -2564,6 +2866,9 @@ public partial class OsmMapLoader : Node
             foreach (var pt in additionalTreePositions)
             {
                 if (isTooCloseToCartPath(pt, 2.2f)) continue;
+                if (isTooCloseToRoad(pt)) continue;
+                if (isTooCloseToBuilding(pt, 2.5f)) continue;
+                if (isTooCloseToDrivingRange(pt, 1.5f)) continue;
                 if (isTooCloseToBunker(pt, 5.0f)) continue;
                 if (isTooCloseToGreen(pt, 8.0f)) continue;
 
@@ -2731,8 +3036,11 @@ public partial class OsmMapLoader : Node
                         }
                         if (insideExclusion) return;
 
-                        // Strictly no generated trees on or close to cart paths (< 2.2m)
+                        // Strictly no generated trees on or close to cart paths (< 2.2m), roads, buildings, or driving ranges
                         if (isTooCloseToCartPath(pt, 2.2f)) return;
+                        if (isTooCloseToRoad(pt)) return;
+                        if (isTooCloseToBuilding(pt, 3.0f)) return;
+                        if (isTooCloseToDrivingRange(pt, 2.0f)) return;
 
                         // Strictly no generated trees inside or close to bunker (< 5.0m)
                         if (isTooCloseToBunker(pt, 5.0f)) return;
@@ -2967,8 +3275,11 @@ public partial class OsmMapLoader : Node
                             }
                             if (insideExclusion) continue;
 
-                            // Strictly no generated trees on or close to cart paths (< 2.2m)
+                            // Strictly no generated trees on or close to cart paths (< 2.2m), roads, buildings, or driving ranges
                             if (isTooCloseToCartPath(rp, 2.2f)) continue;
+                            if (isTooCloseToRoad(rp)) continue;
+                            if (isTooCloseToBuilding(rp, 3.0f)) continue;
+                            if (isTooCloseToDrivingRange(rp, 2.0f)) continue;
 
                             // Strictly no generated trees inside or close to bunker (< 5.0m)
                             if (isTooCloseToBunker(rp, 5.0f)) continue;
@@ -3039,8 +3350,11 @@ public partial class OsmMapLoader : Node
                         }
                     }
 
-                    // Strictly no generated trees on or close to cart paths (< 2.2m)
+                    // Strictly no generated trees on or close to cart paths (< 2.2m), roads, buildings, or driving ranges
                     if (isTooCloseToCartPath(pt, 2.2f)) return false;
+                    if (isTooCloseToRoad(pt)) return false;
+                    if (isTooCloseToBuilding(pt, 3.0f)) return false;
+                    if (isTooCloseToDrivingRange(pt, 2.0f)) return false;
 
                     // Strictly no generated trees inside or close to bunker (< 5.0m)
                     if (isTooCloseToBunker(pt, 5.0f)) return false;
@@ -3238,10 +3552,30 @@ public partial class OsmMapLoader : Node
             if (GenerateCartPaths)
             {
                 cartPaths = MergeCartPaths(cartPaths, 2.0f);
+                // Join path pieces that end at one shore and resume on the opposite shore so a bridge can span the water.
+                cartPaths = BridgeCartPathWaterGaps(cartPaths, waterPolygons);
                 for (int pathIndex = 0; pathIndex < cartPaths.Count; pathIndex++)
                 {
                     CreateCartPath(rootNode, cartPaths[pathIndex], pathIndex, exclusionPolygons);
                 }
+            }
+
+            if (preparedRoads.Count > 0)
+            {
+                for (int roadIndex = 0; roadIndex < preparedRoads.Count; roadIndex++)
+                {
+                    CreateConcreteRoad(rootNode, preparedRoads[roadIndex], roadIndex, exclusionPolygons);
+                }
+                GD.Print($"{LogPrefix} Generated {preparedRoads.Count} gray concrete roads inside and surrounding the course.");
+            }
+
+            if (preparedBuildings.Count > 0)
+            {
+                for (int bldIndex = 0; bldIndex < preparedBuildings.Count; bldIndex++)
+                {
+                    CreateBuildingFeature(rootNode, preparedBuildings[bldIndex], bldIndex, exclusionPolygons);
+                }
+                GD.Print($"{LogPrefix} Generated {preparedBuildings.Count} 3D buildings (clubhouses, commercial buildings, and houses with yards).");
             }
 
             ReportProgress("Placing trees, greens, and course objects...");
@@ -3382,6 +3716,9 @@ public partial class OsmMapLoader : Node
                         }
                         if (insideExclusion) continue;
                         if (isTooCloseToCartPath(pt, 2.2f)) continue;
+                        if (isTooCloseToRoad(pt)) continue;
+                        if (isTooCloseToBuilding(pt, 2.5f)) continue;
+                        if (isTooCloseToDrivingRange(pt, 2.0f)) continue;
                         if (isTooCloseToBunker(pt, 3.5f)) continue;
                         if (isTooCloseToGreen(pt, 5.0f)) continue;
                         if (isBetweenTeeAndFairway(pt)) continue;
@@ -3770,6 +4107,54 @@ public partial class OsmMapLoader : Node
             if (cartPathPolylines.Count > 0)
             {
                 rootNode.SetMeta("cart_path_polylines", cartPathPolylines);
+            }
+
+            if (preparedRoads.Count > 0)
+            {
+                var roadPolylines = new Godot.Collections.Array();
+                foreach (var road in preparedRoads)
+                {
+                    if (road.Points != null && road.Points.Count >= 2)
+                    {
+                        roadPolylines.Add(road.Points.ToArray());
+                    }
+                }
+                if (roadPolylines.Count > 0)
+                {
+                    rootNode.SetMeta("road_polylines", roadPolylines);
+                }
+            }
+
+            if (buildingExclusionPolygons.Count > 0)
+            {
+                var bldPolys = new Godot.Collections.Array();
+                foreach (var bPoly in buildingExclusionPolygons)
+                {
+                    if (bPoly != null && bPoly.Length >= 3)
+                    {
+                        bldPolys.Add(bPoly);
+                    }
+                }
+                if (bldPolys.Count > 0)
+                {
+                    rootNode.SetMeta("building_polygons", bldPolys);
+                }
+            }
+
+            if (drivingRangePolygons.Count > 0)
+            {
+                var drPolys = new Godot.Collections.Array();
+                foreach (var drPoly in drivingRangePolygons)
+                {
+                    if (drPoly != null && drPoly.Length >= 3)
+                    {
+                        drPolys.Add(drPoly);
+                    }
+                }
+                if (drPolys.Count > 0)
+                {
+                    rootNode.SetMeta("driving_range_polygons", drPolys);
+                }
             }
 
             // Expose hole line of play paths so detail enhancers (thick rough fescue, bushes, cart paths)
@@ -7573,7 +7958,10 @@ public partial class OsmMapLoader : Node
 
                 if (golfType == "hole")
                 {
-                    lineOfPlayPaths.Add(new List<Vector2>(points));
+                    if (!lineOfPlayPaths.Any(p => p.Count == points.Count && p[0].IsEqualApprox(points[0]) && p[^1].IsEqualApprox(points[^1])))
+                    {
+                        lineOfPlayPaths.Add(new List<Vector2>(points));
+                    }
                     exclusionPolygons.Add(new ExclusionPolygon(points.ToArray()));
                     continue;
                 }
@@ -7803,6 +8191,328 @@ public partial class OsmMapLoader : Node
         return merged;
     }
 
+    private static bool IsPointInAnyWater(Vector2 point, List<ExclusionPolygon> exclusions, out float waterLevel)
+    {
+        waterLevel = float.MinValue;
+        bool inside = false;
+        foreach (var excl in exclusions)
+        {
+            if (excl.GolfType != "water" || excl.Polygon == null || excl.Polygon.Length < 3) continue;
+            if (point.X < excl.MinX || point.X > excl.MaxX || point.Y < excl.MinY || point.Y > excl.MaxY) continue;
+            if (Geometry2D.IsPointInPolygon(point, excl.Polygon))
+            {
+                inside = true;
+                waterLevel = Mathf.Max(waterLevel, excl.WaterLevel);
+            }
+        }
+        return inside;
+    }
+
+    /// <summary>
+    /// Finds index ranges [Start, End] of a sampled cart path that cross water. Start/End are the
+    /// last/first dry samples so the bridge deck is anchored on land at both ends.
+    /// </summary>
+    private static List<(int Start, int End)> FindCartPathBridgeRuns(List<Vector2> samples, List<ExclusionPolygon> exclusions)
+    {
+        var runs = new List<(int Start, int End)>();
+        int n = samples.Count;
+        if (n < 2 || exclusions == null) return runs;
+        var wet = new bool[n];
+        bool anyWet = false;
+        for (int i = 0; i < n; i++)
+        {
+            wet[i] = IsPointInAnyWater(samples[i], exclusions, out _);
+            anyWet |= wet[i];
+        }
+        if (!anyWet) return runs;
+
+        const int maxDryGapToJoin = 3; // tiny islands / shoreline slivers stay part of the same bridge
+        int idx = 0;
+        while (idx < n)
+        {
+            if (!wet[idx]) { idx++; continue; }
+            int first = idx;
+            int last = idx;
+            int scan = idx + 1;
+            while (scan < n && scan - last <= maxDryGapToJoin + 1)
+            {
+                if (wet[scan]) last = scan;
+                scan++;
+            }
+            int start = Mathf.Max(0, first - 1);
+            int end = Mathf.Min(n - 1, last + 1);
+            if (runs.Count > 0 && start <= runs[^1].End)
+            {
+                runs[^1] = (runs[^1].Start, Mathf.Max(runs[^1].End, end));
+            }
+            else
+            {
+                runs.Add((start, end));
+            }
+            idx = last + 1;
+        }
+        return runs;
+    }
+
+    /// <summary>
+    /// Joins cart path pieces that stop at one shoreline and resume on the opposite shoreline so
+    /// the path becomes continuous and a bridge is generated across the water.
+    /// </summary>
+    private static List<List<Vector2>> BridgeCartPathWaterGaps(List<List<Vector2>> paths, List<Vector2[]> waterPolygons)
+    {
+        var result = paths.Where(p => p.Count >= 2).Select(p => new List<Vector2>(p)).ToList();
+        if (waterPolygons == null || waterPolygons.Count == 0) return result;
+        const float maxBridgeLength = 90f;
+        const float minBridgeLength = 2.5f;
+
+        bool IsWet(Vector2 pt)
+        {
+            foreach (var poly in waterPolygons)
+            {
+                if (poly != null && poly.Length >= 3 && Geometry2D.IsPointInPolygon(pt, poly)) return true;
+            }
+            return false;
+        }
+
+        bool didJoin = true;
+        while (didJoin)
+        {
+            didJoin = false;
+            float bestDistance = float.MaxValue;
+            int bestA = -1, bestB = -1;
+            bool bestAEnd = false, bestBEnd = false;
+            for (int a = 0; a < result.Count; a++)
+            {
+                for (int b = a + 1; b < result.Count; b++)
+                {
+                    for (int endA = 0; endA < 2; endA++)
+                    {
+                        for (int endB = 0; endB < 2; endB++)
+                        {
+                            var pa = result[a];
+                            var pb = result[b];
+                            Vector2 ptA = endA == 1 ? pa[^1] : pa[0];
+                            Vector2 ptB = endB == 1 ? pb[^1] : pb[0];
+                            float dist = ptA.DistanceTo(ptB);
+                            if (dist < minBridgeLength || dist > maxBridgeLength || dist >= bestDistance) continue;
+
+                            Vector2 dirA = endA == 1 ? (pa[^1] - pa[^2]) : (pa[0] - pa[1]);
+                            Vector2 dirB = endB == 1 ? (pb[^1] - pb[^2]) : (pb[0] - pb[1]);
+                            Vector2 across = (ptB - ptA) / dist;
+                            if (dirA.LengthSquared() < 0.0001f || dirB.LengthSquared() < 0.0001f) continue;
+                            if (dirA.Normalized().Dot(across) < 0.6f || dirB.Normalized().Dot(-across) < 0.6f) continue;
+
+                            int samples = Mathf.Max(2, Mathf.CeilToInt(dist));
+                            int wetSamples = 0;
+                            for (int s = 1; s < samples; s++)
+                            {
+                                if (IsWet(ptA.Lerp(ptB, s / (float)samples))) wetSamples++;
+                            }
+                            if (wetSamples < 2 || wetSamples < (samples - 1) * 0.5f) continue;
+
+                            bestDistance = dist;
+                            bestA = a; bestB = b; bestAEnd = endA == 1; bestBEnd = endB == 1;
+                        }
+                    }
+                }
+            }
+            if (bestA < 0) break;
+
+            var first = result[bestA];
+            var second = result[bestB];
+            if (!bestAEnd) first.Reverse();
+            if (bestBEnd) second.Reverse();
+            first.AddRange(second); // straight span between the two shorelines
+            result.RemoveAt(bestB);
+            didJoin = true;
+        }
+        return result;
+    }
+
+    private static void AddOrientedBox(SurfaceTool st, Vector3 center, Vector3 forward, Vector3 sizeRightUpForward, Color color)
+    {
+        Vector3 fwd = forward.Normalized();
+        Vector3 right = fwd.Cross(Vector3.Up);
+        if (right.LengthSquared() < 0.0001f) right = Vector3.Right;
+        right = right.Normalized();
+        Vector3 up = right.Cross(fwd).Normalized();
+        var axes = new[]
+        {
+            right * (sizeRightUpForward.X * 0.5f),
+            up * (sizeRightUpForward.Y * 0.5f),
+            fwd * (sizeRightUpForward.Z * 0.5f)
+        };
+        for (int i = 0; i < 3; i++)
+        {
+            Vector3 u = axes[(i + 1) % 3];
+            Vector3 v = axes[(i + 2) % 3];
+            for (int sign = -1; sign <= 1; sign += 2)
+            {
+                Vector3 faceCenter = center + axes[i] * sign;
+                Vector3 normal = (axes[i] * sign).Normalized();
+                Vector3 c0 = faceCenter - u - v;
+                Vector3 c1 = faceCenter + u - v;
+                Vector3 c2 = faceCenter + u + v;
+                Vector3 c3 = faceCenter - u + v;
+                foreach (var corner in new[] { c0, c1, c2, c0, c2, c3 })
+                {
+                    st.SetNormal(normal);
+                    st.SetColor(color);
+                    st.AddVertex(corner);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds a wooden bridge (planked deck, side beams, railings and pilings) carrying the cart path
+    /// over water between sample indices startIndex and endIndex.
+    /// </summary>
+    private void CreateCartPathBridge(Node3D rootNode, List<Vector2> samples, int startIndex, int endIndex,
+        List<ExclusionPolygon> exclusions, string idSuffix, float pathHalfWidth, float visualHeightOffset)
+    {
+        int count = endIndex - startIndex + 1;
+        if (count < 2) return;
+
+        float waterLevel = float.MinValue;
+        for (int i = startIndex; i <= endIndex; i++)
+        {
+            if (IsPointInAnyWater(samples[i], exclusions, out float wl)) waterLevel = Mathf.Max(waterLevel, wl);
+        }
+        float yStart = GetHeightWithFeatures(samples[startIndex].X, samples[startIndex].Y, exclusions) + visualHeightOffset;
+        float yEnd = GetHeightWithFeatures(samples[endIndex].X, samples[endIndex].Y, exclusions) + visualHeightOffset;
+        if (waterLevel == float.MinValue) waterLevel = Mathf.Min(yStart, yEnd);
+
+        // Cumulative distance along the span for height interpolation
+        var cumulative = new float[count];
+        for (int i = 1; i < count; i++)
+        {
+            cumulative[i] = cumulative[i - 1] + samples[startIndex + i].DistanceTo(samples[startIndex + i - 1]);
+        }
+        float total = Mathf.Max(cumulative[count - 1], 0.001f);
+
+        var deck = new Vector3[count];
+        for (int i = 0; i < count; i++)
+        {
+            float t = cumulative[i] / total;
+            float baseY = Mathf.Lerp(yStart, yEnd, t);
+            float clearance = Mathf.Max(0f, waterLevel + 0.45f - baseY);
+            float arch = Mathf.Sin(Mathf.Pi * t) * (0.20f + clearance);
+            Vector2 p = samples[startIndex + i];
+            deck[i] = new Vector3(p.X, baseY + arch, p.Y);
+        }
+
+        const float plankThickness = 0.08f;
+        float deckHalfWidth = pathHalfWidth + 0.15f;
+        var plankColors = new[]
+        {
+            new Color(0.50f, 0.36f, 0.22f), new Color(0.44f, 0.31f, 0.19f),
+            new Color(0.56f, 0.41f, 0.26f), new Color(0.47f, 0.34f, 0.21f)
+        };
+        var railColor = new Color(0.36f, 0.25f, 0.15f);
+        var postColor = new Color(0.30f, 0.21f, 0.13f);
+
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        var collisionFaces = new List<Vector3>();
+        int plankCounter = 0;
+        float pilingDistance = 0f;
+
+        for (int i = 0; i < count - 1; i++)
+        {
+            Vector3 a = deck[i];
+            Vector3 b = deck[i + 1];
+            Vector3 segment = b - a;
+            float length = segment.Length();
+            if (length < 0.001f) continue;
+            Vector3 fwd = segment / length;
+            Vector3 rightDir = fwd.Cross(Vector3.Up);
+            if (rightDir.LengthSquared() < 0.0001f) rightDir = Vector3.Right;
+            rightDir = rightDir.Normalized();
+
+            // Deck planks (3 per metre-ish segment with thin gaps)
+            const int planksPerSegment = 3;
+            for (int m = 0; m < planksPerSegment; m++)
+            {
+                float s = (m + 0.5f) / planksPerSegment;
+                Vector3 c = a.Lerp(b, s) - Vector3.Up * (plankThickness * 0.5f);
+                var color = plankColors[(plankCounter++ * 7 + (int)(Mathf.Abs(a.X * 3.1f + a.Z * 1.7f))) % plankColors.Length];
+                AddOrientedBox(st, c, fwd, new Vector3(deckHalfWidth * 2f, plankThickness, length / planksPerSegment * 0.88f), color);
+            }
+
+            // Collision surface (slightly below visual deck, matching the ground ribbon convention)
+            Vector3 drop = Vector3.Down * 0.015f;
+            Vector3 aL = a - rightDir * pathHalfWidth + drop;
+            Vector3 aR = a + rightDir * pathHalfWidth + drop;
+            Vector3 bL = b - rightDir * pathHalfWidth + drop;
+            Vector3 bR = b + rightDir * pathHalfWidth + drop;
+            collisionFaces.AddRange(new[] { aL, bL, aR, aR, bL, bR });
+
+            Vector3 mid = (a + b) * 0.5f;
+            // Side beams
+            foreach (int side in new[] { -1, 1 })
+            {
+                Vector3 lateral = rightDir * (deckHalfWidth * side);
+                AddOrientedBox(st, mid + lateral - Vector3.Up * (plankThickness + 0.12f), fwd, new Vector3(0.12f, 0.24f, length * 1.01f), railColor);
+                // Top and mid rails
+                Vector3 railLateral = rightDir * ((deckHalfWidth - 0.05f) * side);
+                AddOrientedBox(st, mid + railLateral + Vector3.Up * 0.92f, fwd, new Vector3(0.09f, 0.08f, length * 1.02f), railColor);
+                AddOrientedBox(st, mid + railLateral + Vector3.Up * 0.50f, fwd, new Vector3(0.06f, 0.06f, length * 1.02f), railColor);
+                // Posts every other sample, including both ends
+                if (i % 2 == 0 || i == count - 2)
+                {
+                    AddOrientedBox(st, a + railLateral + Vector3.Up * 0.45f, fwd, new Vector3(0.12f, 1.0f, 0.12f), postColor);
+                    if (i == count - 2)
+                    {
+                        AddOrientedBox(st, b + railLateral + Vector3.Up * 0.45f, fwd, new Vector3(0.12f, 1.0f, 0.12f), postColor);
+                    }
+                }
+            }
+
+            // Pilings below the deck, roughly every 4 m over the water
+            pilingDistance += length;
+            if (pilingDistance >= 4f && i > 0 && i < count - 2)
+            {
+                pilingDistance = 0f;
+                float bottom = waterLevel - 0.9f;
+                float height = Mathf.Max(0.3f, a.Y - bottom);
+                foreach (int side in new[] { -1, 1 })
+                {
+                    Vector3 lateral = rightDir * ((deckHalfWidth - 0.12f) * side);
+                    AddOrientedBox(st, new Vector3(a.X, bottom + height * 0.5f - plankThickness, a.Z) + lateral, fwd, new Vector3(0.22f, height, 0.22f), postColor);
+                }
+            }
+        }
+
+        var mesh = st.Commit();
+        if (mesh == null || mesh.GetSurfaceCount() == 0) return;
+        var material = new StandardMaterial3D
+        {
+            VertexColorUseAsAlbedo = true,
+            AlbedoColor = Colors.White,
+            Roughness = 0.92f,
+            MetallicSpecular = 0.05f,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled
+        };
+        mesh.SurfaceSetMaterial(0, material);
+
+        var meshInstance = new MeshInstance3D { Name = $"cartbridge_{idSuffix}", Mesh = mesh };
+        rootNode.AddChild(meshInstance);
+        meshInstance.Owner = rootNode;
+
+        var staticBody = new StaticBody3D { Name = $"cartbridge_Static_{idSuffix}" };
+        staticBody.SetMeta("surface_type", (int)PhysicsEnums.SurfaceType.CartPath);
+        staticBody.SetMeta("is_cart_path", true);
+        staticBody.SetMeta("is_cart_bridge", true);
+        var collisionShape = new CollisionShape3D
+        {
+            Shape = new ConcavePolygonShape3D { Data = collisionFaces.ToArray(), BackfaceCollision = true }
+        };
+        staticBody.AddChild(collisionShape);
+        rootNode.AddChild(staticBody);
+        staticBody.Owner = rootNode;
+        collisionShape.Owner = rootNode;
+    }
     private void CreateCartPath(Node3D rootNode, List<Vector2> points, int pathIndex, List<ExclusionPolygon> exclusions)
     {
         if (points.Count < 2)
@@ -7811,9 +8521,9 @@ public partial class OsmMapLoader : Node
         }
 
         const float halfWidth = 1.25f;
-        const float maximumPointSpacing = 1.0f;
-        const float visualHeightOffset = 0.035f;
-        const float collisionHeightOffset = 0.020f;
+        const float maximumPointSpacing = 0.5f;
+        const float visualHeightOffset = 0.080f;
+        const float collisionHeightOffset = 0.050f;
         var cleanPoints = new List<Vector2>();
         foreach (var point in points)
         {
@@ -7867,7 +8577,16 @@ public partial class OsmMapLoader : Node
         var vertices = new Vector3[cleanPoints.Count * 2];
         var normals = new Vector3[vertices.Length];
         var uvs = new Vector2[vertices.Length];
-        var indices = new int[(cleanPoints.Count - 1) * 6];
+        var indexList = new List<int>((cleanPoints.Count - 1) * 6);
+        var bridgeRuns = FindCartPathBridgeRuns(cleanPoints, exclusions);
+        var bridgeSegments = new bool[cleanPoints.Count - 1];
+        foreach (var run in bridgeRuns)
+        {
+            for (int s = run.Start; s < run.End; s++)
+            {
+                bridgeSegments[s] = true;
+            }
+        }
         float accumulatedDistance = 0f;
         for (int pointIndex = 0; pointIndex < cleanPoints.Count; pointIndex++)
         {
@@ -7887,14 +8606,27 @@ public partial class OsmMapLoader : Node
         }
         for (int segmentIndex = 0; segmentIndex < cleanPoints.Count - 1; segmentIndex++)
         {
+            if (bridgeSegments[segmentIndex])
+            {
+                continue; // a wooden bridge replaces the ground ribbon over water
+            }
             int vertex = segmentIndex * 2;
-            int index = segmentIndex * 6;
-            indices[index] = vertex;
-            indices[index + 1] = vertex + 2;
-            indices[index + 2] = vertex + 1;
-            indices[index + 3] = vertex + 1;
-            indices[index + 4] = vertex + 2;
-            indices[index + 5] = vertex + 3;
+            indexList.Add(vertex);
+            indexList.Add(vertex + 2);
+            indexList.Add(vertex + 1);
+            indexList.Add(vertex + 1);
+            indexList.Add(vertex + 2);
+            indexList.Add(vertex + 3);
+        }
+        var indices = indexList.ToArray();
+
+        foreach (var run in bridgeRuns)
+        {
+            CreateCartPathBridge(rootNode, cleanPoints, run.Start, run.End, exclusions, $"{pathIndex}_{run.Start}", halfWidth, visualHeightOffset);
+        }
+        if (indices.Length == 0)
+        {
+            return;
         }
 
         var meshArrays = new Godot.Collections.Array();
@@ -8077,7 +8809,9 @@ public partial class OsmMapLoader : Node
                 continue;
 
             bool inside = PointInPolygon(point, excl.Polygon);
-            if (inside && (excl.GolfType == "fairway" || excl.GolfType == "green" || excl.GolfType == "tee" || excl.GolfType == "bunker" || excl.GolfType == "water"))
+            if (inside && (excl.GolfType == "fairway" || excl.GolfType == "green" || excl.GolfType == "tee" ||
+                           excl.GolfType == "bunker" || excl.GolfType == "water" || excl.GolfType == "driving_range" ||
+                           excl.GolfType == "clubhouse" || excl.GolfType == "building" || excl.GolfType == "house"))
             {
                 inPlayArea = true;
             }
@@ -8972,9 +9706,18 @@ public partial class OsmMapLoader : Node
         var otherCoursePolygons = new List<Vector2[]>();
         var otherCourseNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // An "other course" boundary must have an explicit name that does NOT match targetCourseName.
+        // Unnamed leisure=golf_course boundaries or boundaries without a conflicting name
+        // are tracts/parcels of the same golf course (e.g. multi-parcel courses like Westridge).
+        var otherWays = ways.Where(w =>
+            w.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
+            w.Tags.TryGetValue("name", out var on) && !string.IsNullOrWhiteSpace(on) &&
+            !string.IsNullOrEmpty(targetCourseName) && !CourseNameMatches(on, targetCourseName)
+        ).ToList();
+
         var matchingWays = ways.Where(w =>
             w.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
-            (string.IsNullOrEmpty(targetCourseName) ? w == targetWay : CourseNameMatches(w.Tags.GetValueOrDefault("name"), targetCourseName))
+            !otherWays.Contains(w)
         ).ToList();
 
         foreach (var w in matchingWays)
@@ -8993,9 +9736,15 @@ public partial class OsmMapLoader : Node
             }
         }
 
+        var otherRels = relations.Where(r =>
+            r.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
+            r.Tags.TryGetValue("name", out var on) && !string.IsNullOrWhiteSpace(on) &&
+            !string.IsNullOrEmpty(targetCourseName) && !CourseNameMatches(on, targetCourseName)
+        ).ToList();
+
         var matchingRels = relations.Where(r =>
             r.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
-            (string.IsNullOrEmpty(targetCourseName) ? r == targetRel : CourseNameMatches(r.Tags.GetValueOrDefault("name"), targetCourseName))
+            !otherRels.Contains(r)
         ).ToList();
 
         foreach (var r in matchingRels)
@@ -9003,11 +9752,6 @@ public partial class OsmMapLoader : Node
             var assembled = AssembleRelationPolygons(r, ways, nodes, refLat, refLon, metersPerLat, metersPerLon);
             coursePolygons.AddRange(assembled);
         }
-
-        var otherWays = ways.Where(w =>
-            w.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
-            !matchingWays.Contains(w)
-        ).ToList();
 
         foreach (var w in otherWays)
         {
@@ -9028,11 +9772,6 @@ public partial class OsmMapLoader : Node
                 otherCoursePolygons.Add(pts);
             }
         }
-
-        var otherRels = relations.Where(r =>
-            r.Tags.TryGetValue("leisure", out var l) && l == "golf_course" &&
-            !matchingRels.Contains(r)
-        ).ToList();
 
         foreach (var r in otherRels)
         {
@@ -9171,6 +9910,244 @@ public partial class OsmMapLoader : Node
         }
 
         return false;
+    }
+
+    public static bool IsBunkerNearCourse(
+        Vector2 pt,
+        CourseBoundaryInfo boundaryInfo,
+        List<List<Vector2>> lineOfPlayPaths,
+        List<ExclusionPolygon> exclusionPolygons)
+    {
+        // If strictly inside an other course's named boundary, exclude
+        if (boundaryInfo.OtherCoursePolygons.Count > 0 &&
+            boundaryInfo.OtherCoursePolygons.Any(p => PointInPolygon(pt, p)) &&
+            !boundaryInfo.CoursePolygons.Any(p => PointInPolygon(pt, p)))
+        {
+            return false;
+        }
+
+        foreach (var poly in boundaryInfo.CoursePolygons)
+        {
+            if (PointInPolygon(pt, poly)) return true;
+            if (DistancePointToPolygonWithInterior(pt, poly) < 80f) return true;
+        }
+
+        for (int pIdx = 0; pIdx < lineOfPlayPaths.Count; pIdx++)
+        {
+            var path = lineOfPlayPaths[pIdx];
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                if (DistanceToSegment(pt, path[i], path[i + 1]) < 130.0f)
+                    return true;
+            }
+        }
+
+        for (int i = 0; i < exclusionPolygons.Count; i++)
+        {
+            var excl = exclusionPolygons[i];
+            if (pt.X >= excl.MinX - 80f && pt.X <= excl.MaxX + 80f && pt.Y >= excl.MinY - 80f && pt.Y <= excl.MaxY + 80f)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// When an OSM course has no mapped bunkers (parsedBunkersCount == 0), generates realistic
+    /// greenside sand traps and fairway bunkers for each hole so greens and landing zones are properly bunkered.
+    /// </summary>
+    public void GenerateSyntheticBunkersIfNoneMapped(
+        Dictionary<string, HoleConfig> holeInfo,
+        List<ExclusionPolygon> exclusionPolygons,
+        List<Vector2[]> coursePolygons,
+        Node3D rootNode)
+    {
+        if (holeInfo == null || holeInfo.Count == 0) return;
+        int existingBunkers = exclusionPolygons.Count(e => e.GolfType == "bunker");
+        if (existingBunkers > 0) return;
+
+        GD.Print($"{LogPrefix} No mapped bunkers found in OSM data. Synthesizing realistic greenside and fairway sand traps for {holeInfo.Count} holes...");
+
+        int syntheticIdx = 0;
+        var greenPolys = exclusionPolygons.Where(e => e.GolfType == "green").ToList();
+        var fairwayPolys = exclusionPolygons.Where(e => e.GolfType == "fairway").ToList();
+
+        foreach (var (holeKey, hole) in holeInfo)
+        {
+            if (hole.HoleLocation == null || hole.HoleLocation.Length < 2) continue;
+
+            Vector2 pin = new Vector2(hole.HoleLocation[0], hole.HoleLocation[1]);
+            Vector2 approachFrom = pin;
+            if (hole.HolePath != null && hole.HolePath.Count >= 2)
+            {
+                var prevPt = hole.HolePath[^2];
+                if (prevPt != null && prevPt.Length >= 2)
+                {
+                    approachFrom = new Vector2(prevPt[0], prevPt[1]);
+                }
+            }
+            else if (hole.HolePath != null && hole.HolePath.Count >= 1)
+            {
+                var firstPt = hole.HolePath[0];
+                if (firstPt != null && firstPt.Length >= 2)
+                {
+                    approachFrom = new Vector2(firstPt[0], firstPt[1]);
+                }
+            }
+
+            Vector2 approachDir = (pin - approachFrom).Normalized();
+            if (approachDir.LengthSquared() < 0.001f) approachDir = new Vector2(0, 1);
+            Vector2 sideDir = new Vector2(-approachDir.Y, approachDir.X);
+
+            // Determine green radius around pin (default ~14m)
+            float greenRadius = 14.0f;
+            var matchingGreen = greenPolys.FirstOrDefault(g => PointInPolygon(pin, g.Polygon));
+            if (matchingGreen != null)
+            {
+                float maxR = 0f;
+                foreach (var pt in matchingGreen.Polygon)
+                {
+                    float d = pin.DistanceTo(pt);
+                    if (d > maxR && d < 40f) maxR = d;
+                }
+                if (maxR > 6f) greenRadius = maxR;
+            }
+
+            // Pseudo-random deterministic hash from holeKey
+            int hHash = Math.Abs(holeKey.GetHashCode());
+
+            // 1. Primary Greenside Bunker (left or right, offset slightly toward approach)
+            bool leftSide = (hHash % 2) == 0;
+            float sideOffset = (greenRadius + 3.5f) * (leftSide ? 1f : -1f);
+            float forwardOffset = -greenRadius * 0.35f + ((hHash % 5) - 2) * 1.5f;
+            Vector2 bunker1Center = pin + sideDir * sideOffset + approachDir * forwardOffset;
+
+            // Generate organic rounded bunker polygon
+            float b1Length = 13.0f + (hHash % 5);
+            float b1Width = 7.0f + (hHash % 3);
+            float b1Angle = MathF.Atan2(approachDir.Y, approachDir.X) + (leftSide ? 0.35f : -0.35f);
+            var b1Pts = CreateOrganicBunkerPolygon(bunker1Center, b1Length, b1Width, b1Angle, hHash);
+
+            if (b1Pts.Length >= 3 && (matchingGreen == null || !PointInPolygon(bunker1Center, matchingGreen.Polygon)))
+            {
+                AddSyntheticBunker(b1Pts, holeKey, syntheticIdx++, exclusionPolygons, rootNode);
+            }
+
+            // 2. Secondary Greenside Bunker (opposite side or back corner) on ~70% of holes
+            if ((hHash % 10) >= 3)
+            {
+                float side2Offset = (greenRadius + 4.0f) * (leftSide ? -1f : 1f);
+                float forward2Offset = greenRadius * 0.25f + ((hHash % 3) - 1) * 2.0f;
+                Vector2 bunker2Center = pin + sideDir * side2Offset + approachDir * forward2Offset;
+
+                float b2Length = 11.0f + ((hHash >> 2) % 4);
+                float b2Width = 6.0f + ((hHash >> 2) % 3);
+                float b2Angle = MathF.Atan2(approachDir.Y, approachDir.X) + (leftSide ? -0.4f : 0.4f);
+                var b2Pts = CreateOrganicBunkerPolygon(bunker2Center, b2Length, b2Width, b2Angle, hHash + 17);
+
+                if (b2Pts.Length >= 3 && (matchingGreen == null || !PointInPolygon(bunker2Center, matchingGreen.Polygon)))
+                {
+                    AddSyntheticBunker(b2Pts, holeKey, syntheticIdx++, exclusionPolygons, rootNode);
+                }
+            }
+
+            // 3. Fairway Bunker for Par 4 and Par 5 holes
+            if (hole.Par >= 4 && hole.HolePath != null && hole.HolePath.Count >= 3)
+            {
+                var teePt = hole.HolePath[0];
+                if (teePt != null && teePt.Length >= 2)
+                {
+                    Vector2 tee = new Vector2(teePt[0], teePt[1]);
+                    // Landing zone ~ 180 - 210 meters from tee
+                    float targetDist = Math.Min(200f, hole.Distance * 0.9144f * 0.55f);
+                    Vector2? landingPt = null;
+                    Vector2 landingDir = approachDir;
+
+                    float accum = 0f;
+                    for (int i = 0; i < hole.HolePath.Count - 1; i++)
+                    {
+                        var segA = hole.HolePath[i];
+                        var segB = hole.HolePath[i + 1];
+                        if (segA == null || segA.Length < 2 || segB == null || segB.Length < 2) continue;
+                        Vector2 pA = new Vector2(segA[0], segA[1]);
+                        Vector2 pB = new Vector2(segB[0], segB[1]);
+                        float segLen = pA.DistanceTo(pB);
+                        if (accum + segLen >= targetDist)
+                        {
+                            float t = (targetDist - accum) / (segLen > 0.001f ? segLen : 1f);
+                            landingPt = pA.Lerp(pB, t);
+                            landingDir = (pB - pA).Normalized();
+                            break;
+                        }
+                        accum += segLen;
+                    }
+
+                    if (landingPt.HasValue)
+                    {
+                        Vector2 fSide = new Vector2(-landingDir.Y, landingDir.X);
+                        bool fLeft = ((hHash >> 3) % 2) == 0;
+                        float fOffset = 18.0f * (fLeft ? 1f : -1f);
+                        Vector2 fwbCenter = landingPt.Value + fSide * fOffset;
+
+                        float fwLen = 16.0f + (hHash % 6);
+                        float fwWid = 7.5f + (hHash % 3);
+                        float fwAngle = MathF.Atan2(landingDir.Y, landingDir.X);
+                        var fwPts = CreateOrganicBunkerPolygon(fwbCenter, fwLen, fwWid, fwAngle, hHash + 31);
+
+                        if (fwPts.Length >= 3)
+                        {
+                            AddSyntheticBunker(fwPts, holeKey, syntheticIdx++, exclusionPolygons, rootNode);
+                        }
+                    }
+                }
+            }
+        }
+        GD.Print($"{LogPrefix} Successfully generated {syntheticIdx} synthetic sand traps.");
+    }
+
+    private void AddSyntheticBunker(
+        Vector2[] bunkerPts,
+        string holeKey,
+        int index,
+        List<ExclusionPolygon> exclusionPolygons,
+        Node3D rootNode)
+    {
+        var excl = new ExclusionPolygon(bunkerPts, "bunker", this);
+        exclusionPolygons.Add(excl);
+
+        var staticBody = new StaticBody3D { Name = $"bunker_Static_synthetic_{holeKey}_{index}" };
+        staticBody.SetMeta("surface_type", 5);
+        staticBody.SetMeta("is_sand", true);
+        staticBody.SetMeta("boundary_polygon", bunkerPts);
+        staticBody.AddToGroup("bunkers");
+        CreateCollisionForPolygon(staticBody, bunkerPts, rootNode, exclusionPolygons);
+    }
+
+    private static Vector2[] CreateOrganicBunkerPolygon(Vector2 center, float length, float width, float angleRad, int seed)
+    {
+        int numPoints = 12;
+        var pts = new Vector2[numPoints];
+        float halfLen = length * 0.5f;
+        float halfWid = width * 0.5f;
+        float cosA = MathF.Cos(angleRad);
+        float sinA = MathF.Sin(angleRad);
+
+        for (int i = 0; i < numPoints; i++)
+        {
+            float theta = i * (MathF.Tau / numPoints);
+            // Kidney-shaped indentation on one side
+            float rW = halfWid * (1.0f + 0.18f * MathF.Sin(theta * 2f + seed * 0.5f) + 0.12f * MathF.Cos(theta + seed * 0.3f));
+            float rL = halfLen * (1.0f + 0.10f * MathF.Cos(theta * 3f + seed * 0.7f));
+            float lx = rL * MathF.Cos(theta);
+            float lz = rW * MathF.Sin(theta);
+
+            float wx = center.X + (lx * cosA - lz * sinA);
+            float wz = center.Y + (lx * sinA + lz * cosA);
+            pts[i] = new Vector2(wx, wz);
+        }
+        return pts;
     }
 
     /// <summary>
@@ -9327,7 +10304,13 @@ public partial class OsmMapLoader : Node
         IEnumerable<Vector2[]>? greenPolygons = null,
         float minGreenDist = 10.0f,
         IEnumerable<IEnumerable<Vector2>>? cartPaths = null,
-        float minCartPathDist = 2.2f)
+        float minCartPathDist = 2.2f,
+        IEnumerable<IEnumerable<Vector2>>? roads = null,
+        float minRoadDist = 5.5f,
+        IEnumerable<Vector2[]>? buildingPolygons = null,
+        float minBuildingDist = 3.0f,
+        IEnumerable<Vector2[]>? drivingRangePolygons = null,
+        float minDrivingRangeDist = 2.0f)
     {
         // 1. Ensure no trees inside or too close to cart paths (< 2.2m)
         if (cartPaths != null && IsTreeTooCloseToCartPath(pt, cartPaths, minCartPathDist))
@@ -9353,7 +10336,21 @@ public partial class OsmMapLoader : Node
             return false;
         }
 
-        // 5. Ensure no trees between any tee box and fairway
+        // 5. Ensure no trees inside or too close to roads, buildings, or driving ranges
+        if (roads != null && IsTreeTooCloseToRoad(pt, roads, minRoadDist))
+        {
+            return false;
+        }
+        if (buildingPolygons != null && IsTreeTooCloseToBuilding(pt, buildingPolygons, minBuildingDist))
+        {
+            return false;
+        }
+        if (drivingRangePolygons != null && IsTreeTooCloseToDrivingRange(pt, drivingRangePolygons, minDrivingRangeDist))
+        {
+            return false;
+        }
+
+        // 6. Ensure no trees between any tee box and fairway
         if (holeData != null)
         {
             foreach (var kvp in holeData)
@@ -9497,6 +10494,1880 @@ public partial class OsmMapLoader : Node
             }
         }
         return IsTreeTooCloseToCartPath(pt, list, minDistance);
+    }
+
+    public static bool IsTreeTooCloseToRoad(Vector2 pt, IEnumerable<IEnumerable<Vector2>>? roads, float minDistance = 5.5f)
+    {
+        if (roads == null) return false;
+        foreach (var road in roads)
+        {
+            if (road == null) continue;
+            Vector2? prev = null;
+            foreach (var p in road)
+            {
+                if (prev.HasValue)
+                {
+                    if (DistanceToSegment(pt, prev.Value, p) < minDistance)
+                    {
+                        return true;
+                    }
+                }
+                else
+                {
+                    if (pt.DistanceTo(p) < minDistance)
+                    {
+                        return true;
+                    }
+                }
+                prev = p;
+            }
+        }
+        return false;
+    }
+
+    public static bool IsTreeTooCloseToBuilding(Vector2 pt, IEnumerable<Vector2[]>? buildingPolygons, float minDistance = 3.0f)
+    {
+        if (buildingPolygons == null) return false;
+        foreach (var bld in buildingPolygons)
+        {
+            if (bld == null || bld.Length < 3) continue;
+            if (PointInPolygon(pt, bld))
+            {
+                return true;
+            }
+            if (DistanceToPolygon(pt, bld) < minDistance)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static bool IsTreeTooCloseToDrivingRange(Vector2 pt, IEnumerable<Vector2[]>? drivingRangePolygons, float minDistance = 2.0f)
+    {
+        if (drivingRangePolygons == null) return false;
+        foreach (var dr in drivingRangePolygons)
+        {
+            if (dr == null || dr.Length < 3) continue;
+            if (PointInPolygon(pt, dr))
+            {
+                return true;
+            }
+            if (DistanceToPolygon(pt, dr) < minDistance)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public bool CheckTreeTooCloseToRoad(Vector2 pt, Godot.Collections.Array roads, float minDistance = 5.5f)
+    {
+        var list = new List<List<Vector2>>();
+        if (roads != null)
+        {
+            foreach (var item in roads)
+            {
+                if (item.VariantType == Variant.Type.PackedVector2Array)
+                {
+                    list.Add(new List<Vector2>(item.AsVector2Array()));
+                }
+                else if (item.Obj is Vector2[] vArr)
+                {
+                    list.Add(new List<Vector2>(vArr));
+                }
+                else if (item.Obj is List<Vector2> vList)
+                {
+                    list.Add(vList);
+                }
+                else if (item.Obj is IEnumerable<Vector2> vEnum)
+                {
+                    list.Add(new List<Vector2>(vEnum));
+                }
+                else if (item.VariantType == Variant.Type.Array)
+                {
+                    var innerArr = item.AsGodotArray();
+                    var pList = new List<Vector2>();
+                    foreach (var p in innerArr)
+                    {
+                        if (p.VariantType == Variant.Type.Vector2)
+                        {
+                            pList.Add(p.AsVector2());
+                        }
+                    }
+                    if (pList.Count > 0)
+                    {
+                        list.Add(pList);
+                    }
+                }
+            }
+        }
+        return IsTreeTooCloseToRoad(pt, list, minDistance);
+    }
+
+    public bool CheckTreeTooCloseToBuilding(Vector2 pt, Godot.Collections.Array buildingPolygons, float minDistance = 3.0f)
+    {
+        var list = new List<Vector2[]>();
+        if (buildingPolygons != null)
+        {
+            foreach (var item in buildingPolygons)
+            {
+                if (item.VariantType == Variant.Type.PackedVector2Array)
+                {
+                    list.Add(item.AsVector2Array());
+                }
+                else if (item.Obj is Vector2[] vArr)
+                {
+                    list.Add(vArr);
+                }
+            }
+        }
+        return IsTreeTooCloseToBuilding(pt, list, minDistance);
+    }
+
+    public bool CheckTreeTooCloseToDrivingRange(Vector2 pt, Godot.Collections.Array drivingRangePolygons, float minDistance = 2.0f)
+    {
+        var list = new List<Vector2[]>();
+        if (drivingRangePolygons != null)
+        {
+            foreach (var item in drivingRangePolygons)
+            {
+                if (item.VariantType == Variant.Type.PackedVector2Array)
+                {
+                    list.Add(item.AsVector2Array());
+                }
+                else if (item.Obj is Vector2[] vArr)
+                {
+                    list.Add(vArr);
+                }
+            }
+        }
+        return IsTreeTooCloseToDrivingRange(pt, list, minDistance);
+    }
+
+    /// <summary>
+    /// Classifies an OSM element's tags into "clubhouse", "house", "building" (generic commercial/business), or "" if not a building.
+    /// </summary>
+    public static string ClassifyBuildingType(Dictionary<string, string>? tags)
+    {
+        if (tags == null || tags.Count == 0) return "";
+
+        bool hasGolfClubhouse = tags.TryGetValue("golf", out var golfVal) &&
+                                string.Equals(golfVal?.Trim(), "clubhouse", StringComparison.OrdinalIgnoreCase);
+        bool hasAmenityClubhouse = tags.TryGetValue("amenity", out var amenityVal) &&
+                                   string.Equals(amenityVal?.Trim(), "clubhouse", StringComparison.OrdinalIgnoreCase);
+        bool hasBuildingTag = tags.TryGetValue("building", out var buildingVal) && !string.IsNullOrWhiteSpace(buildingVal);
+        string bVal = hasBuildingTag ? buildingVal!.Trim().ToLowerInvariant() : "";
+
+        if (hasGolfClubhouse || hasAmenityClubhouse || bVal == "clubhouse" || bVal == "country_club")
+        {
+            return "clubhouse";
+        }
+
+        if (!hasBuildingTag || bVal == "no" || bVal == "none" || bVal == "ruins" || bVal == "construction" || bVal == "proposed")
+        {
+            return "";
+        }
+
+        if (bVal == "detached" || bVal == "house" || bVal == "residential" ||
+            bVal == "semidetached_house" || bVal == "terrace" || bVal == "bungalow" ||
+            bVal == "villa" || bVal == "cabin" || bVal == "farm" || bVal == "cottage" ||
+            bVal == "single_family" || bVal == "duplex")
+        {
+            return "house";
+        }
+
+        return "building";
+    }
+
+    public string ClassifyBuildingTags(Godot.Collections.Dictionary tags)
+    {
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (tags != null)
+        {
+            foreach (var key in tags.Keys)
+            {
+                dict[key.ToString()] = tags[key].ToString();
+            }
+        }
+        return ClassifyBuildingType(dict);
+    }
+
+    /// <summary>
+    /// Determines whether an OSM way represents a vehicular/concrete road (excluding golf cart paths and pedestrian footways).
+    /// </summary>
+    public static bool IsRoadWay(Dictionary<string, string>? tags, bool isCartPath = false)
+    {
+        if (isCartPath || tags == null || tags.Count == 0) return false;
+
+        if (tags.TryGetValue("golf", out var gVal))
+        {
+            string g = gVal.Trim().ToLowerInvariant();
+            if (g == "cartpath" || g == "cart_path" || g == "path" || g == "hole" ||
+                g == "fairway" || g == "green" || g == "tee" || g == "bunker" ||
+                g == "water_hazard" || g == "lateral_water_hazard" || g == "driving_range" || g == "rough")
+            {
+                return false;
+            }
+        }
+
+        if (tags.TryGetValue("highway", out var hVal) && !string.IsNullOrWhiteSpace(hVal))
+        {
+            string h = hVal.Trim().ToLowerInvariant();
+            if (h == "path" || h == "footway" || h == "steps" || h == "bridleway" ||
+                h == "cycleway" || h == "pedestrian" || h == "corridor" || h == "proposed" ||
+                h == "construction" || h == "abandoned" || h == "razed" || h == "platform" ||
+                h == "elevator" || h == "crossing" || h == "street_lamp" || h == "stop" || h == "give_way")
+            {
+                return false;
+            }
+            return true;
+        }
+
+        if (tags.TryGetValue("road", out var rVal) && !string.IsNullOrWhiteSpace(rVal))
+        {
+            string r = rVal.Trim().ToLowerInvariant();
+            if (r != "no" && r != "none")
+                return true;
+        }
+
+        if (tags.TryGetValue("area:highway", out var ahVal) && !string.IsNullOrWhiteSpace(ahVal))
+        {
+            string ah = ahVal.Trim().ToLowerInvariant();
+            if (ah != "footway" && ah != "path" && ah != "steps" && ah != "pedestrian")
+                return true;
+        }
+
+        if (tags.TryGetValue("route", out var routeVal) &&
+            string.Equals(routeVal?.Trim(), "road", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool CheckIsRoadTags(Godot.Collections.Dictionary tags)
+    {
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (tags != null)
+        {
+            foreach (var key in tags.Keys)
+            {
+                dict[key.ToString()] = tags[key].ToString();
+            }
+        }
+        bool isCartPath = (dict.TryGetValue("golf", out var gTag) && (gTag == "cartpath" || gTag == "cart_path")) ||
+                          (dict.TryGetValue("highway", out var hTag) && (hTag == "path" || hTag == "footway"));
+        return IsRoadWay(dict, isCartPath);
+    }
+
+    public static float GetRoadHalfWidth(Dictionary<string, string>? tags)
+    {
+        if (tags != null)
+        {
+            if (tags.TryGetValue("width", out var widthStr) && !string.IsNullOrWhiteSpace(widthStr))
+            {
+                string cleaned = widthStr.Trim().ToLowerInvariant().Replace("m", "").Trim();
+                if (float.TryParse(cleaned, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsedW) && parsedW > 1.5f)
+                {
+                    return Math.Clamp(parsedW * 0.5f, 2.2f, 9.0f);
+                }
+            }
+            if (tags.TryGetValue("lanes", out var lanesStr) &&
+                int.TryParse(lanesStr.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int lanes) && lanes >= 1)
+            {
+                return Math.Clamp(lanes * 1.75f, 2.6f, 8.5f);
+            }
+            if (tags.TryGetValue("highway", out var hVal) && !string.IsNullOrWhiteSpace(hVal))
+            {
+                string h = hVal.Trim().ToLowerInvariant();
+                if (h == "motorway" || h == "trunk" || h == "primary") return 6.2f;
+                if (h == "secondary" || h == "tertiary") return 5.0f;
+                if (h == "residential" || h == "unclassified" || h == "living_street" || h == "road") return 4.2f;
+                if (h == "service" || h == "track" || h == "driveway" || h.EndsWith("_link")) return 3.0f;
+            }
+        }
+        return 4.0f;
+    }
+
+    private sealed class PreparedRoad
+    {
+        public List<Vector2> Points = new();
+        public float HalfWidth = 4.0f;
+        public string HighwayType = "residential";
+        public float MinX;
+        public float MaxX;
+        public float MinY;
+        public float MaxY;
+    }
+
+    private sealed class PreparedBuilding
+    {
+        public Vector2[] Footprint = Array.Empty<Vector2>();
+        public string BuildingType = "building"; // "clubhouse", "house", "building"
+        public Dictionary<string, string> Tags = new();
+        public Vector2 Centroid;
+        public Vector2 ObbCenter;
+        public Vector2 AxisU = new(1, 0);
+        public Vector2 AxisV = new(0, 1);
+        public float HalfU = 6f;
+        public float HalfV = 5f;
+        public Vector2 FrontDir = new(0, 1);
+        public Vector2 BackDir = new(0, -1);
+        public Vector2[]? BackyardPatioPolygon;
+        public Vector2[] YardExclusionPolygon = Array.Empty<Vector2>();
+    }
+
+    private static float GetDistanceToCourseBoundary(
+        Vector2 pt,
+        List<Vector2[]> courseBoundaryPolys,
+        List<List<Vector2>> lineOfPlayPaths)
+    {
+        if (courseBoundaryPolys != null && courseBoundaryPolys.Count > 0)
+        {
+            float minDist = float.MaxValue;
+            for (int i = 0; i < courseBoundaryPolys.Count; i++)
+            {
+                var poly = courseBoundaryPolys[i];
+                if (poly == null || poly.Length < 3) continue;
+                if (PointInPolygon(pt, poly)) return 0f;
+                float d = DistanceToPolygon(pt, poly);
+                if (d < minDist) minDist = d;
+            }
+            if (minDist < float.MaxValue) return minDist;
+        }
+
+        if (lineOfPlayPaths != null && lineOfPlayPaths.Count > 0)
+        {
+            float minHoleDist = float.MaxValue;
+            for (int pIdx = 0; pIdx < lineOfPlayPaths.Count; pIdx++)
+            {
+                var path = lineOfPlayPaths[pIdx];
+                for (int i = 0; i < path.Count - 1; i++)
+                {
+                    float d = DistanceToSegment(pt, path[i], path[i + 1]);
+                    if (d < minHoleDist) minHoleDist = d;
+                }
+            }
+            if (minHoleDist < float.MaxValue)
+            {
+                return Math.Max(0f, minHoleDist - 65.0f);
+            }
+        }
+
+        return 0f;
+    }
+
+    private static List<Vector2[]> FilterAndPrepareDrivingRanges(
+        List<(OsmWay Way, List<Vector2> Points)> rawDrivingRangeWays,
+        List<Vector2[]> courseBoundaryPolys,
+        List<List<Vector2>> lineOfPlayPaths,
+        float courseMinX,
+        float courseMaxX,
+        float courseMinZ,
+        float courseMaxZ,
+        List<ExclusionPolygon> exclusionPolygons)
+    {
+        var result = new List<Vector2[]>();
+        if (rawDrivingRangeWays == null || rawDrivingRangeWays.Count == 0) return result;
+
+        foreach (var rawItem in rawDrivingRangeWays)
+        {
+            var rawPoly = rawItem.Points;
+            if (rawPoly == null || rawPoly.Count < 3) continue;
+            var polyList = new List<Vector2>(rawPoly);
+            if (polyList.Count > 3 && polyList[0].DistanceSquaredTo(polyList[^1]) < 0.01f)
+            {
+                polyList.RemoveAt(polyList.Count - 1);
+            }
+            if (polyList.Count < 3) continue;
+
+            var poly = polyList.ToArray();
+            float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+            Vector2 sum = Vector2.Zero;
+            for (int i = 0; i < poly.Length; i++)
+            {
+                var p = poly[i];
+                sum += p;
+                if (p.X < minX) minX = p.X;
+                if (p.X > maxX) maxX = p.X;
+                if (p.Y < minY) minY = p.Y;
+                if (p.Y > maxY) maxY = p.Y;
+            }
+            Vector2 centroid = sum / poly.Length;
+
+            if (maxX < courseMinX + 4f || minX > courseMaxX - 4f ||
+                maxY < courseMinZ + 4f || minY > courseMaxZ - 4f)
+                continue;
+
+            float distToCourse = GetDistanceToCourseBoundary(centroid, courseBoundaryPolys, lineOfPlayPaths);
+            if (distToCourse > 220f)
+            {
+                bool anyVertexClose = false;
+                for (int i = 0; i < poly.Length; i++)
+                {
+                    if (GetDistanceToCourseBoundary(poly[i], courseBoundaryPolys, lineOfPlayPaths) <= 220f)
+                    {
+                        anyVertexClose = true;
+                        break;
+                    }
+                }
+                if (!anyVertexClose) continue;
+            }
+
+            result.Add(poly);
+            exclusionPolygons.Add(new ExclusionPolygon(poly, "driving_range"));
+        }
+
+        if (result.Count > 0)
+        {
+            GD.Print($"{LogPrefix} Preserved {result.Count} driving range grass areas with tree exclusion.");
+        }
+        return result;
+    }
+
+    private static List<PreparedRoad> FilterAndPrepareRoads(
+        List<(OsmWay Way, List<Vector2> Points)> rawRoadWays,
+        List<Vector2[]> courseBoundaryPolys,
+        List<List<Vector2>> lineOfPlayPaths,
+        float courseMinX,
+        float courseMaxX,
+        float courseMinZ,
+        float courseMaxZ)
+    {
+        var result = new List<PreparedRoad>();
+        if (rawRoadWays == null || rawRoadWays.Count == 0) return result;
+
+        float clipMinX = courseMinX + 6f;
+        float clipMaxX = courseMaxX - 6f;
+        float clipMinZ = courseMinZ + 6f;
+        float clipMaxZ = courseMaxZ - 6f;
+        const float maxRoadDistOutsideBoundary = 240f;
+
+        Func<Vector2, bool> isInsideTerrainBounds = (p) =>
+            p.X >= clipMinX && p.X <= clipMaxX && p.Y >= clipMinZ && p.Y <= clipMaxZ;
+
+        foreach (var rawRoad in rawRoadWays)
+        {
+            var pts = rawRoad.Points;
+            if (pts == null || pts.Count < 2) continue;
+
+            var roadTags = rawRoad.Way?.Tags;
+            float halfWidth = GetRoadHalfWidth(roadTags);
+            string hType = roadTags != null && roadTags.TryGetValue("highway", out var hv) ? hv : "residential";
+
+            var currentSubpath = new List<Vector2>();
+
+            for (int i = 0; i < pts.Count - 1; i++)
+            {
+                Vector2 a = pts[i];
+                Vector2 b = pts[i + 1];
+                Vector2 mid = (a + b) * 0.5f;
+
+                float dA = GetDistanceToCourseBoundary(a, courseBoundaryPolys, lineOfPlayPaths);
+                float dB = GetDistanceToCourseBoundary(b, courseBoundaryPolys, lineOfPlayPaths);
+                float dM = GetDistanceToCourseBoundary(mid, courseBoundaryPolys, lineOfPlayPaths);
+                bool nearCourse = dA <= maxRoadDistOutsideBoundary || dB <= maxRoadDistOutsideBoundary || dM <= maxRoadDistOutsideBoundary;
+
+                if (!nearCourse || (!isInsideTerrainBounds(a) && !isInsideTerrainBounds(b)))
+                {
+                    if (currentSubpath.Count >= 2)
+                    {
+                        AddPreparedRoadIfValid(result, currentSubpath, halfWidth, hType);
+                    }
+                    currentSubpath = new List<Vector2>();
+                    continue;
+                }
+
+                Vector2 clampedA = new Vector2(Math.Clamp(a.X, clipMinX, clipMaxX), Math.Clamp(a.Y, clipMinZ, clipMaxZ));
+                Vector2 clampedB = new Vector2(Math.Clamp(b.X, clipMinX, clipMaxX), Math.Clamp(b.Y, clipMinZ, clipMaxZ));
+
+                if (currentSubpath.Count == 0)
+                {
+                    currentSubpath.Add(clampedA);
+                }
+                else if (currentSubpath[^1].DistanceSquaredTo(clampedA) > 0.04f)
+                {
+                    currentSubpath.Add(clampedA);
+                }
+
+                if (currentSubpath[^1].DistanceSquaredTo(clampedB) > 0.04f)
+                {
+                    currentSubpath.Add(clampedB);
+                }
+            }
+
+            if (currentSubpath.Count >= 2)
+            {
+                AddPreparedRoadIfValid(result, currentSubpath, halfWidth, hType);
+            }
+        }
+
+        return result;
+    }
+
+    private static void AddPreparedRoadIfValid(List<PreparedRoad> list, List<Vector2> pts, float halfWidth, string hType)
+    {
+        float length = 0f;
+        float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+        for (int i = 0; i < pts.Count; i++)
+        {
+            var p = pts[i];
+            if (p.X < minX) minX = p.X;
+            if (p.X > maxX) maxX = p.X;
+            if (p.Y < minY) minY = p.Y;
+            if (p.Y > maxY) maxY = p.Y;
+            if (i > 0) length += pts[i - 1].DistanceTo(p);
+        }
+        if (length < 4.0f) return;
+
+        list.Add(new PreparedRoad
+        {
+            Points = pts,
+            HalfWidth = halfWidth,
+            HighwayType = hType,
+            MinX = minX,
+            MaxX = maxX,
+            MinY = minY,
+            MaxY = maxY
+        });
+    }
+
+    private static void ComputeMinimumAreaObb(
+        Vector2[] poly,
+        out Vector2 obbCenter,
+        out Vector2 axisU,
+        out Vector2 axisV,
+        out float halfU,
+        out float halfV)
+    {
+        obbCenter = Vector2.Zero;
+        axisU = new Vector2(1, 0);
+        axisV = new Vector2(0, 1);
+        halfU = 5f;
+        halfV = 4f;
+        if (poly == null || poly.Length < 3) return;
+
+        float bestArea = float.MaxValue;
+        int n = poly.Length;
+        for (int i = 0; i < n; i++)
+        {
+            Vector2 edge = poly[(i + 1) % n] - poly[i];
+            float len = edge.Length();
+            if (len < 0.1f) continue;
+            Vector2 u = edge / len;
+            Vector2 v = new Vector2(-u.Y, u.X);
+
+            float minU = float.MaxValue, maxU = float.MinValue;
+            float minV = float.MaxValue, maxV = float.MinValue;
+            for (int j = 0; j < n; j++)
+            {
+                float pu = poly[j].X * u.X + poly[j].Y * u.Y;
+                float pv = poly[j].X * v.X + poly[j].Y * v.Y;
+                if (pu < minU) minU = pu;
+                if (pu > maxU) maxU = pu;
+                if (pv < minV) minV = pv;
+                if (pv > maxV) maxV = pv;
+            }
+
+            float w = maxU - minU;
+            float h = maxV - minV;
+            float area = w * h;
+            if (area < bestArea)
+            {
+                bestArea = area;
+                float midU = (minU + maxU) * 0.5f;
+                float midV = (minV + maxV) * 0.5f;
+                obbCenter = u * midU + v * midV;
+                if (w >= h)
+                {
+                    axisU = u;
+                    axisV = v;
+                    halfU = Math.Max(2.0f, w * 0.5f);
+                    halfV = Math.Max(2.0f, h * 0.5f);
+                }
+                else
+                {
+                    axisU = v;
+                    axisV = -u;
+                    halfU = Math.Max(2.0f, h * 0.5f);
+                    halfV = Math.Max(2.0f, w * 0.5f);
+                }
+            }
+        }
+    }
+
+    private static List<PreparedBuilding> FilterAndPrepareBuildings(
+        List<(OsmWay Way, List<Vector2> Points, string BuildingType)> rawBuildingWays,
+        List<Vector2[]> courseBoundaryPolys,
+        List<List<Vector2>> lineOfPlayPaths,
+        List<PreparedRoad> preparedRoads,
+        float courseMinX,
+        float courseMaxX,
+        float courseMinZ,
+        float courseMaxZ,
+        List<ExclusionPolygon> exclusionPolygons,
+        List<Vector2[]> buildingExclusionPolygons)
+    {
+        var result = new List<PreparedBuilding>();
+        if (rawBuildingWays == null || rawBuildingWays.Count == 0) return result;
+
+        // Sort so clubhouses take priority over houses, which take priority over generic buildings
+        var sortedRaw = rawBuildingWays
+            .OrderBy(b => b.BuildingType == "clubhouse" ? 0 : (b.BuildingType == "house" ? 1 : 2))
+            .ToList();
+
+        Vector2 courseCenter = new Vector2((courseMinX + courseMaxX) * 0.5f, (courseMinZ + courseMaxZ) * 0.5f);
+
+        foreach (var raw in sortedRaw)
+        {
+            if (raw.Points == null || raw.Points.Count < 3) continue;
+            var polyList = new List<Vector2>();
+            for (int i = 0; i < raw.Points.Count; i++)
+            {
+                var pt = raw.Points[i];
+                if (polyList.Count == 0 || polyList[^1].DistanceSquaredTo(pt) > 0.01f)
+                {
+                    polyList.Add(pt);
+                }
+            }
+            if (polyList.Count > 2 && polyList[0].DistanceSquaredTo(polyList[^1]) < 0.02f)
+            {
+                polyList.RemoveAt(polyList.Count - 1);
+            }
+            if (polyList.Count < 3) continue;
+
+            var footprint = polyList.ToArray();
+            float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+            Vector2 sum = Vector2.Zero;
+            for (int i = 0; i < footprint.Length; i++)
+            {
+                var p = footprint[i];
+                sum += p;
+                if (p.X < minX) minX = p.X;
+                if (p.X > maxX) maxX = p.X;
+                if (p.Y < minY) minY = p.Y;
+                if (p.Y > maxY) maxY = p.Y;
+            }
+            Vector2 centroid = sum / footprint.Length;
+
+            if (minX < courseMinX + 8f || maxX > courseMaxX - 8f ||
+                minY < courseMinZ + 8f || maxY > courseMaxZ - 8f)
+                continue;
+
+            float spanX = maxX - minX;
+            float spanY = maxY - minY;
+            if (spanX < 2.5f || spanY < 2.5f || spanX > 180f || spanY > 180f)
+                continue;
+
+            float maxAllowedOutsideDist = raw.BuildingType == "clubhouse"
+                ? 240f
+                : (raw.BuildingType == "house" ? 200f : 190f);
+
+            float distToCourse = GetDistanceToCourseBoundary(centroid, courseBoundaryPolys, lineOfPlayPaths);
+            if (distToCourse > maxAllowedOutsideDist)
+                continue;
+
+            // Deduplicate overlapping footprints
+            bool duplicate = false;
+            for (int i = 0; i < result.Count; i++)
+            {
+                if (result[i].Centroid.DistanceSquaredTo(centroid) < 9.0f)
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+
+            // Buildings must never generate inside greens, fairways, tee boxes, bunkers, or water hazards
+            bool overlapsGolfFeature = false;
+            for (int eIdx = 0; eIdx < exclusionPolygons.Count; eIdx++)
+            {
+                var excl = exclusionPolygons[eIdx];
+                if (excl.Polygon == null || excl.Polygon.Length < 3) continue;
+                string? gt = excl.GolfType;
+                if (gt == "green" || gt == "fairway" || gt == "tee" || gt == "bunker" || gt == "water")
+                {
+                    if (Geometry2D.IsPointInPolygon(centroid, excl.Polygon))
+                    {
+                        overlapsGolfFeature = true;
+                        break;
+                    }
+                    for (int fIdx = 0; fIdx < footprint.Length; fIdx++)
+                    {
+                        if (Geometry2D.IsPointInPolygon(footprint[fIdx], excl.Polygon))
+                        {
+                            overlapsGolfFeature = true;
+                            break;
+                        }
+                    }
+                    if (overlapsGolfFeature) break;
+                }
+            }
+            if (overlapsGolfFeature) continue;
+
+            ComputeMinimumAreaObb(footprint, out Vector2 obbCenter, out Vector2 axisU, out Vector2 axisV, out float halfU, out float halfV);
+
+            // Find closest road point and closest golf hole/course point to orient front and rear (backyard/veranda)
+            Vector2 closestRoadPt = centroid + axisV * 20f;
+            float minRoadDist = float.MaxValue;
+            for (int rIdx = 0; rIdx < preparedRoads.Count; rIdx++)
+            {
+                var rPts = preparedRoads[rIdx].Points;
+                for (int i = 0; i < rPts.Count - 1; i++)
+                {
+                    Vector2 ab = rPts[i + 1] - rPts[i];
+                    float l2 = ab.LengthSquared();
+                    float t = l2 > 0.0001f ? Math.Clamp(((centroid.X - rPts[i].X) * ab.X + (centroid.Y - rPts[i].Y) * ab.Y) / l2, 0f, 1f) : 0f;
+                    Vector2 proj = rPts[i] + ab * t;
+                    float d = centroid.DistanceTo(proj);
+                    if (d < minRoadDist)
+                    {
+                        minRoadDist = d;
+                        closestRoadPt = proj;
+                    }
+                }
+            }
+
+            Vector2 closestGolfPt = courseCenter;
+            float minGolfDist = float.MaxValue;
+            for (int pIdx = 0; pIdx < lineOfPlayPaths.Count; pIdx++)
+            {
+                var path = lineOfPlayPaths[pIdx];
+                for (int i = 0; i < path.Count - 1; i++)
+                {
+                    Vector2 ab = path[i + 1] - path[i];
+                    float l2 = ab.LengthSquared();
+                    float t = l2 > 0.0001f ? Math.Clamp(((centroid.X - path[i].X) * ab.X + (centroid.Y - path[i].Y) * ab.Y) / l2, 0f, 1f) : 0f;
+                    Vector2 proj = path[i] + ab * t;
+                    float d = centroid.DistanceTo(proj);
+                    if (d < minGolfDist)
+                    {
+                        minGolfDist = d;
+                        closestGolfPt = proj;
+                    }
+                }
+            }
+
+            Vector2 desiredBackDir;
+            if (raw.BuildingType == "clubhouse")
+            {
+                // Clubhouse veranda terrace faces toward the golf course
+                desiredBackDir = (closestGolfPt - centroid).LengthSquared() > 0.1f
+                    ? (closestGolfPt - centroid).Normalized()
+                    : axisV;
+            }
+            else if (raw.BuildingType == "house")
+            {
+                // House front faces the road (so backyard faces away from road, or toward the golf course)
+                if (minRoadDist < 95f && (centroid - closestRoadPt).LengthSquared() > 0.1f)
+                {
+                    desiredBackDir = (centroid - closestRoadPt).Normalized();
+                }
+                else if ((closestGolfPt - centroid).LengthSquared() > 0.1f)
+                {
+                    desiredBackDir = (closestGolfPt - centroid).Normalized();
+                }
+                else
+                {
+                    desiredBackDir = axisV;
+                }
+            }
+            else
+            {
+                // Generic business building entrance faces the road or course
+                Vector2 desiredFront = minRoadDist < 120f && (closestRoadPt - centroid).LengthSquared() > 0.1f
+                    ? (closestRoadPt - centroid).Normalized()
+                    : ((closestGolfPt - centroid).LengthSquared() > 0.1f ? (closestGolfPt - centroid).Normalized() : axisV);
+                desiredBackDir = -desiredFront;
+            }
+
+            // Snap BackDir to the best-matching OBB face normal (preferring axisV faces as the longer facade, or whichever matches best)
+            Vector2[] candidateDirs = new[] { axisV, -axisV, axisU, -axisU };
+            float[] candidateWeights = new[] { 1.15f, 1.15f, 1.0f, 1.0f };
+            Vector2 bestBack = axisV;
+            float bestScore = float.MinValue;
+            for (int c = 0; c < 4; c++)
+            {
+                float score = (candidateDirs[c].X * desiredBackDir.X + candidateDirs[c].Y * desiredBackDir.Y) * candidateWeights[c];
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestBack = candidateDirs[c];
+                }
+            }
+
+            // Reorient AxisU and AxisV so AxisV is aligned with BackDir (BackDir = +AxisV, FrontDir = -AxisV)
+            if (Math.Abs(bestBack.X * axisU.X + bestBack.Y * axisU.Y) > 0.7f)
+            {
+                // Swap U and V
+                float tmpH = halfU;
+                halfU = halfV;
+                halfV = tmpH;
+            }
+            axisV = bestBack.Normalized();
+            axisU = new Vector2(axisV.Y, -axisV.X);
+
+            Vector2[]? patioPoly = null;
+            Vector2[] yardExclPoly;
+
+            if (raw.BuildingType == "house")
+            {
+                float patioHalfWidth = Math.Clamp(halfU * 0.65f, 2.4f, 5.8f);
+                float patioDepth = Math.Clamp(halfV * 0.58f, 3.2f, 5.2f);
+                Vector2 backEdgeCenter = obbCenter + axisV * halfV;
+                patioPoly = new Vector2[]
+                {
+                    backEdgeCenter - axisU * patioHalfWidth,
+                    backEdgeCenter + axisU * patioHalfWidth,
+                    backEdgeCenter + axisU * patioHalfWidth + axisV * patioDepth,
+                    backEdgeCenter - axisU * patioHalfWidth + axisV * patioDepth
+                };
+
+                float padU = halfU + 2.8f;
+                float padFront = halfV + 2.5f;
+                float padBack = halfV + patioDepth + 3.2f;
+                yardExclPoly = new Vector2[]
+                {
+                    obbCenter - axisU * padU - axisV * padFront,
+                    obbCenter + axisU * padU - axisV * padFront,
+                    obbCenter + axisU * padU + axisV * padBack,
+                    obbCenter - axisU * padU + axisV * padBack
+                };
+            }
+            else if (raw.BuildingType == "clubhouse")
+            {
+                float verandaHalfWidth = Math.Clamp(halfU * 0.78f, 4.5f, 14.0f);
+                float verandaDepth = Math.Clamp(halfV * 0.48f, 4.0f, 7.5f);
+                Vector2 backEdgeCenter = obbCenter + axisV * halfV;
+                patioPoly = new Vector2[]
+                {
+                    backEdgeCenter - axisU * verandaHalfWidth,
+                    backEdgeCenter + axisU * verandaHalfWidth,
+                    backEdgeCenter + axisU * verandaHalfWidth + axisV * verandaDepth,
+                    backEdgeCenter - axisU * verandaHalfWidth + axisV * verandaDepth
+                };
+
+                float padU = halfU + 3.5f;
+                float padFront = halfV + 3.5f;
+                float padBack = halfV + verandaDepth + 4.0f;
+                yardExclPoly = new Vector2[]
+                {
+                    obbCenter - axisU * padU - axisV * padFront,
+                    obbCenter + axisU * padU - axisV * padFront,
+                    obbCenter + axisU * padU + axisV * padBack,
+                    obbCenter - axisU * padU + axisV * padBack
+                };
+            }
+            else
+            {
+                float padU = halfU + 2.5f;
+                float padV = halfV + 2.5f;
+                yardExclPoly = new Vector2[]
+                {
+                    obbCenter - axisU * padU - axisV * padV,
+                    obbCenter + axisU * padU - axisV * padV,
+                    obbCenter + axisU * padU + axisV * padV,
+                    obbCenter - axisU * padU + axisV * padV
+                };
+            }
+
+            var prep = new PreparedBuilding
+            {
+                Footprint = footprint,
+                BuildingType = raw.BuildingType,
+                Tags = raw.Way?.Tags ?? new Dictionary<string, string>(),
+                Centroid = centroid,
+                ObbCenter = obbCenter,
+                AxisU = axisU,
+                AxisV = axisV,
+                HalfU = halfU,
+                HalfV = halfV,
+                FrontDir = -axisV,
+                BackDir = axisV,
+                BackyardPatioPolygon = patioPoly,
+                YardExclusionPolygon = yardExclPoly
+            };
+            result.Add(prep);
+
+            buildingExclusionPolygons.Add(footprint);
+            buildingExclusionPolygons.Add(yardExclPoly);
+            if (patioPoly != null)
+            {
+                buildingExclusionPolygons.Add(patioPoly);
+            }
+
+            exclusionPolygons.Add(new ExclusionPolygon(yardExclPoly, raw.BuildingType));
+        }
+
+        return result;
+    }
+
+    private StandardMaterial3D? _concreteRoadMaterial;
+    private StandardMaterial3D GetConcreteRoadMaterial()
+    {
+        if (_concreteRoadMaterial != null) return _concreteRoadMaterial;
+        _concreteRoadMaterial = new StandardMaterial3D
+        {
+            VertexColorUseAsAlbedo = true,
+            AlbedoColor = new Color(1.0f, 1.0f, 1.0f),
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            Roughness = 0.88f,
+            Metallic = 0.02f,
+            SpecularMode = BaseMaterial3D.SpecularModeEnum.SchlickGgx
+        };
+        return _concreteRoadMaterial;
+    }
+
+    private void CreateConcreteRoad(Node3D rootNode, PreparedRoad road, int index, List<ExclusionPolygon> exclusions)
+    {
+        var points = road.Points;
+        if (points == null || points.Count < 2) return;
+
+        var cleanPts = new List<Vector2> { points[0] };
+        for (int i = 1; i < points.Count; i++)
+        {
+            if (points[i].DistanceTo(cleanPts[^1]) >= 0.5f)
+            {
+                cleanPts.Add(points[i]);
+            }
+        }
+        if (cleanPts.Count < 2) return;
+
+        var smoothPts = new List<Vector2> { cleanPts[0] };
+        const float maxRoadPointSpacing = 0.75f;
+        for (int i = 1; i < cleanPts.Count; i++)
+        {
+            Vector2 start = cleanPts[i - 1];
+            Vector2 end = cleanPts[i];
+            int subdivisions = Mathf.Max(1, Mathf.CeilToInt(start.DistanceTo(end) / maxRoadPointSpacing));
+            for (int sub = 1; sub <= subdivisions; sub++)
+            {
+                smoothPts.Add(start.Lerp(end, sub / (float)subdivisions));
+            }
+        }
+        if (smoothPts.Count < 2) return;
+
+        float halfW = road.HalfWidth;
+        float curbWidth = 0.28f;
+        float skirtWidth = 0.45f;
+        float crownLift = 0.120f;
+        float edgeLift = 0.090f;
+        float curbLift = 0.160f;
+        float skirtDrop = -0.10f;
+
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+
+        Color centerConcrete = new Color(0.28f, 0.29f, 0.31f);
+        Color laneConcrete = new Color(0.33f, 0.34f, 0.36f);
+        Color curbConcrete = new Color(0.42f, 0.43f, 0.44f);
+        Color skirtConcrete = new Color(0.24f, 0.25f, 0.26f);
+
+        int n = smoothPts.Count;
+        var leftSkirt = new Vector3[n];
+        var leftCurbOuter = new Vector3[n];
+        var leftCurbInner = new Vector3[n];
+        var centerVerts = new Vector3[n];
+        var rightCurbInner = new Vector3[n];
+        var rightCurbOuter = new Vector3[n];
+        var rightSkirt = new Vector3[n];
+        var arcLengths = new float[n];
+
+        float distAccum = 0f;
+        for (int i = 0; i < n; i++)
+        {
+            if (i > 0) distAccum += smoothPts[i - 1].DistanceTo(smoothPts[i]);
+            arcLengths[i] = distAccum;
+
+            Vector2 tangent;
+            if (i == 0) tangent = (smoothPts[1] - smoothPts[0]).Normalized();
+            else if (i == n - 1) tangent = (smoothPts[n - 1] - smoothPts[n - 2]).Normalized();
+            else
+            {
+                var t1 = (smoothPts[i] - smoothPts[i - 1]).Normalized();
+                var t2 = (smoothPts[i + 1] - smoothPts[i]).Normalized();
+                tangent = (t1 + t2).Normalized();
+                if (tangent.LengthSquared() < 0.001f) tangent = t1;
+            }
+            var normal2D = new Vector2(-tangent.Y, tangent.X);
+
+            Vector2 c2 = smoothPts[i];
+            Vector2 lInner2 = c2 - normal2D * halfW;
+            Vector2 rInner2 = c2 + normal2D * halfW;
+            Vector2 lOuter2 = c2 - normal2D * (halfW + curbWidth);
+            Vector2 rOuter2 = c2 + normal2D * (halfW + curbWidth);
+            Vector2 lSkirt2 = c2 - normal2D * (halfW + curbWidth + skirtWidth);
+            Vector2 rSkirt2 = c2 + normal2D * (halfW + curbWidth + skirtWidth);
+
+            float hc = GetHeightWithFeatures(c2.X, c2.Y, exclusions);
+            float hl = GetHeightWithFeatures(lInner2.X, lInner2.Y, exclusions);
+            float hr = GetHeightWithFeatures(rInner2.X, rInner2.Y, exclusions);
+            float baseH = Math.Max(hc, (hl + hr) * 0.5f);
+
+            centerVerts[i] = new Vector3(c2.X, baseH + crownLift, c2.Y);
+            leftCurbInner[i] = new Vector3(lInner2.X, baseH + edgeLift, lInner2.Y);
+            rightCurbInner[i] = new Vector3(rInner2.X, baseH + edgeLift, rInner2.Y);
+            leftCurbOuter[i] = new Vector3(lOuter2.X, baseH + curbLift, lOuter2.Y);
+            rightCurbOuter[i] = new Vector3(rOuter2.X, baseH + curbLift, rOuter2.Y);
+            leftSkirt[i] = new Vector3(lSkirt2.X, GetHeightWithFeatures(lSkirt2.X, lSkirt2.Y, exclusions) + skirtDrop, lSkirt2.Y);
+            rightSkirt[i] = new Vector3(rSkirt2.X, GetHeightWithFeatures(rSkirt2.X, rSkirt2.Y, exclusions) + skirtDrop, rSkirt2.Y);
+        }
+
+        Action<Vector3, Color, Vector2, Vector3, Color, Vector2, Vector3, Color, Vector2> addRoadTri =
+            (pA, cA, uvA, pB, cB, uvB, pC, cC, uvC) =>
+            {
+                // Godot front faces are clockwise; make every road triangle face upward regardless of path direction.
+                if ((pB - pA).Cross(pC - pA).Y > 0f)
+                {
+                    (pB, pC) = (pC, pB);
+                    (cB, cC) = (cC, cB);
+                    (uvB, uvC) = (uvC, uvB);
+                }
+                st.SetNormal(Vector3.Up); st.SetColor(cA); st.SetUV(uvA); st.AddVertex(pA);
+                st.SetNormal(Vector3.Up); st.SetColor(cB); st.SetUV(uvB); st.AddVertex(pB);
+                st.SetNormal(Vector3.Up); st.SetColor(cC); st.SetUV(uvC); st.AddVertex(pC);
+            };
+
+        Action<Vector3, Vector3, Vector3, Vector3, Color, Color, float, float> addStripQuad =
+            (a0, b0, a1, b1, colA, colB, v0, v1) =>
+            {
+                addRoadTri(a0, colA, new Vector2(0f, v0), b0, colB, new Vector2(1f, v0), a1, colA, new Vector2(0f, v1));
+                addRoadTri(b0, colB, new Vector2(1f, v0), b1, colB, new Vector2(1f, v1), a1, colA, new Vector2(0f, v1));
+            };
+
+        var collisionTriangles = new List<Vector3>((n - 1) * 24);
+        Action<Vector3, Vector3, Vector3, Vector3> addCollisionQuad = (a0, b0, a1, b1) =>
+        {
+            collisionTriangles.Add(a0); collisionTriangles.Add(b0); collisionTriangles.Add(a1);
+            collisionTriangles.Add(b0); collisionTriangles.Add(b1); collisionTriangles.Add(a1);
+        };
+
+        for (int i = 0; i < n - 1; i++)
+        {
+            float v0 = arcLengths[i] * 0.2f;
+            float v1 = arcLengths[i + 1] * 0.2f;
+
+            // Left skirt -> Left curb outer -> Left curb inner -> Center -> Right curb inner -> Right curb outer -> Right skirt
+            addStripQuad(leftSkirt[i], leftCurbOuter[i], leftSkirt[i + 1], leftCurbOuter[i + 1], skirtConcrete, curbConcrete, v0, v1);
+            addStripQuad(leftCurbOuter[i], leftCurbInner[i], leftCurbOuter[i + 1], leftCurbInner[i + 1], curbConcrete, laneConcrete, v0, v1);
+            addStripQuad(leftCurbInner[i], centerVerts[i], leftCurbInner[i + 1], centerVerts[i + 1], laneConcrete, centerConcrete, v0, v1);
+            addStripQuad(centerVerts[i], rightCurbInner[i], centerVerts[i + 1], rightCurbInner[i + 1], centerConcrete, laneConcrete, v0, v1);
+            addStripQuad(rightCurbInner[i], rightCurbOuter[i], rightCurbInner[i + 1], rightCurbOuter[i + 1], laneConcrete, curbConcrete, v0, v1);
+            addStripQuad(rightCurbOuter[i], rightSkirt[i], rightCurbOuter[i + 1], rightSkirt[i + 1], curbConcrete, skirtConcrete, v0, v1);
+
+            addCollisionQuad(leftCurbOuter[i], centerVerts[i], leftCurbOuter[i + 1], centerVerts[i + 1]);
+            addCollisionQuad(centerVerts[i], rightCurbOuter[i], centerVerts[i + 1], rightCurbOuter[i + 1]);
+        }
+
+        var mesh = st.Commit();
+        var meshInstance = new MeshInstance3D
+        {
+            Name = $"road_Mesh_{index}",
+            Mesh = mesh,
+            MaterialOverride = GetConcreteRoadMaterial(),
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
+        };
+
+        var staticBody = new StaticBody3D
+        {
+            Name = $"road_Static_{index}"
+        };
+        staticBody.SetMeta("surface_type", (int)PhysicsEnums.SurfaceType.CartPath); // Concrete road / hard path bounce & roll physics
+        staticBody.SetMeta("is_road", true);
+        staticBody.SetMeta("highway_type", road.HighwayType);
+        staticBody.AddToGroup("roads");
+
+        var concave = new ConcavePolygonShape3D
+        {
+            Data = collisionTriangles.ToArray()
+        };
+        var colShape = new CollisionShape3D
+        {
+            Name = "CollisionShape3D",
+            Shape = concave
+        };
+
+        staticBody.AddChild(meshInstance);
+        staticBody.AddChild(colShape);
+        rootNode.AddChild(staticBody);
+
+        staticBody.Owner = rootNode;
+        meshInstance.Owner = rootNode;
+        colShape.Owner = rootNode;
+    }
+
+    private StandardMaterial3D? _buildingVertexColorMaterial;
+    private StandardMaterial3D GetBuildingVertexColorMaterial()
+    {
+        if (_buildingVertexColorMaterial != null) return _buildingVertexColorMaterial;
+        _buildingVertexColorMaterial = new StandardMaterial3D
+        {
+            VertexColorUseAsAlbedo = true,
+            AlbedoTexture = CreateBuildingDetailTexture(),
+            Uv1Triplanar = true,
+            Uv1WorldTriplanar = true,
+            Uv1Scale = new Vector3(0.22f, 0.22f, 0.22f),
+            TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmapsAnisotropic,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            Roughness = 0.88f,
+            Metallic = 0.0f
+        };
+        return _buildingVertexColorMaterial;
+    }
+
+    /// <summary>
+    /// Procedural grayscale detail texture (horizontal siding/brick courses, mortar lines and grain)
+    /// tinted by the per-vertex facade colors so buildings no longer look like flat solid blocks.
+    /// </summary>
+    private static ImageTexture CreateBuildingDetailTexture()
+    {
+        const int size = 256;
+        var img = Image.CreateEmpty(size, size, true, Image.Format.Rgba8);
+        var rnd = new Random(4242);
+        const int courseH = 16; // 16 courses per tile
+        for (int y = 0; y < size; y++)
+        {
+            int course = y / courseH;
+            int inCourse = y % courseH;
+            int brickOffset = (course % 2) * 16;
+            float courseShade = 0.85f + (float)((course * 37) % 11) * 0.01f;
+            for (int x = 0; x < size; x++)
+            {
+                float v = courseShade;
+                // Horizontal shadow/mortar line at the bottom of each course
+                if (inCourse >= courseH - 2) v *= 0.72f;
+                else if (inCourse == 0) v *= 1.04f;
+                // Vertical brick joints, staggered every other course
+                if (((x + brickOffset) % 32) < 1 && inCourse < courseH - 2) v *= 0.82f;
+                // Fine grain
+                v *= 0.95f + (float)rnd.NextDouble() * 0.10f;
+                v = Math.Clamp(v, 0f, 1f);
+                img.SetPixel(x, y, new Color(v, v, v, 1f));
+            }
+        }
+        img.GenerateMipmaps();
+        return ImageTexture.CreateFromImage(img);
+    }
+
+    // Reference point inside the piece currently being emitted. Triangles are wound so that they face away from it,
+    // guaranteeing every wall/roof face is front-facing from outside regardless of how the footprint is oriented.
+    private static Vector3 _outRef = Vector3.Zero;
+    private static Vector2 _bldCenter2D = Vector2.Zero;
+
+    private static void AddTri(SurfaceTool st, List<Vector3>? colTris, Vector3 a, Vector3 b, Vector3 c, Color color)
+    {
+        Vector3 n = (b - a).Cross(c - a);
+        if (n.LengthSquared() < 0.000001f) return;
+        Vector3 centroid = (a + b + c) / 3f;
+        if (n.Dot(centroid - _outRef) < 0f)
+        {
+            // Pointing inward; swap b and c so normal and winding face outward
+            (b, c) = (c, b);
+            n = -n;
+        }
+        n = n.Normalized(); // Godot CCW winding normal (points outward)
+        st.SetColor(color);
+        st.SetNormal(n);
+        st.AddVertex(a);
+        st.SetColor(color);
+        st.SetNormal(n);
+        st.AddVertex(b);
+        st.SetColor(color);
+        st.SetNormal(n);
+        st.AddVertex(c);
+
+        if (colTris != null)
+        {
+            colTris.Add(a);
+            colTris.Add(b);
+            colTris.Add(c);
+        }
+    }
+
+    private static void AddQuad(SurfaceTool st, List<Vector3>? colTris, Vector3 bl, Vector3 br, Vector3 tr, Vector3 tl, Color color)
+    {
+        AddTri(st, colTris, bl, tl, tr, color);
+        AddTri(st, colTris, bl, tr, br, color);
+    }
+
+    private static void AddOrientedBox(
+        SurfaceTool st,
+        List<Vector3>? colTris,
+        Vector2 center2D,
+        Vector2 axisU,
+        Vector2 axisV,
+        float halfU,
+        float halfV,
+        float bottomY,
+        float topY,
+        Color wallColor,
+        Color topColor)
+    {
+        Vector2 p0 = center2D - axisU * halfU - axisV * halfV; // Front-Left
+        Vector2 p1 = center2D + axisU * halfU - axisV * halfV; // Front-Right
+        Vector2 p2 = center2D + axisU * halfU + axisV * halfV; // Back-Right
+        Vector2 p3 = center2D - axisU * halfU + axisV * halfV; // Back-Left
+
+        Vector3 b0 = new Vector3(p0.X, bottomY, p0.Y);
+        Vector3 b1 = new Vector3(p1.X, bottomY, p1.Y);
+        Vector3 b2 = new Vector3(p2.X, bottomY, p2.Y);
+        Vector3 b3 = new Vector3(p3.X, bottomY, p3.Y);
+
+        Vector3 t0 = new Vector3(p0.X, topY, p0.Y);
+        Vector3 t1 = new Vector3(p1.X, topY, p1.Y);
+        Vector3 t2 = new Vector3(p2.X, topY, p2.Y);
+        Vector3 t3 = new Vector3(p3.X, topY, p3.Y);
+
+        _outRef = new Vector3(center2D.X, (bottomY + topY) * 0.5f, center2D.Y);
+
+        // 4 side walls
+        AddQuad(st, colTris, b0, b1, t1, t0, wallColor);
+        AddQuad(st, colTris, b1, b2, t2, t1, wallColor.Darkened(0.05f));
+        AddQuad(st, colTris, b2, b3, t3, t2, wallColor);
+        AddQuad(st, colTris, b3, b0, t0, t3, wallColor.Darkened(0.05f));
+        // Top cap
+        AddQuad(st, colTris, t0, t1, t2, t3, topColor);
+    }
+
+    private static void AddPitchedGableOrHipRoof(
+        SurfaceTool st,
+        List<Vector3>? colTris,
+        Vector2 center2D,
+        Vector2 axisU,
+        Vector2 axisV,
+        float halfU,
+        float halfV,
+        float eaveY,
+        float ridgeHeight,
+        float overhang,
+        Color roofColor,
+        Color gableWallColor,
+        bool hipped)
+    {
+        float rU = halfU + overhang;
+        float rV = halfV + overhang;
+
+        Vector2 c0 = center2D - axisU * rU - axisV * rV;
+        Vector2 c1 = center2D + axisU * rU - axisV * rV;
+        Vector2 c2 = center2D + axisU * rU + axisV * rV;
+        Vector2 c3 = center2D - axisU * rU + axisV * rV;
+
+        Vector3 e0 = new Vector3(c0.X, eaveY, c0.Y);
+        Vector3 e1 = new Vector3(c1.X, eaveY, c1.Y);
+        Vector3 e2 = new Vector3(c2.X, eaveY, c2.Y);
+        Vector3 e3 = new Vector3(c3.X, eaveY, c3.Y);
+
+        float ridgeHalfU = hipped ? Math.Max(0.8f, rU - rV * 0.75f) : rU;
+        Vector2 rLeft2 = center2D - axisU * ridgeHalfU;
+        Vector2 rRight2 = center2D + axisU * ridgeHalfU;
+        Vector3 rLeft = new Vector3(rLeft2.X, eaveY + ridgeHeight, rLeft2.Y);
+        Vector3 rRight = new Vector3(rRight2.X, eaveY + ridgeHeight, rRight2.Y);
+
+        // Front slope (e0 -> e1 -> rRight -> rLeft)
+        _outRef = new Vector3(center2D.X, eaveY - 3.0f, center2D.Y);
+        AddQuad(st, colTris, e0, e1, rRight, rLeft, roofColor);
+        // Back slope (e2 -> e3 -> rLeft -> rRight)
+        AddQuad(st, colTris, e2, e3, rLeft, rRight, roofColor.Darkened(0.08f));
+
+        if (hipped)
+        {
+            // Left hip triangle (e3 -> e0 -> rLeft)
+            AddTri(st, colTris, e3, rLeft, e0, roofColor.Darkened(0.04f));
+            // Right hip triangle (e1 -> e2 -> rRight)
+            AddTri(st, colTris, e1, rRight, e2, roofColor.Darkened(0.04f));
+        }
+        else
+        {
+            // Gable end triangles + roof trim
+            Vector2 g0 = center2D - axisU * halfU - axisV * halfV;
+            Vector2 g1 = center2D + axisU * halfU - axisV * halfV;
+            Vector2 g2 = center2D + axisU * halfU + axisV * halfV;
+            Vector2 g3 = center2D - axisU * halfU + axisV * halfV;
+            Vector2 gLeftMid = center2D - axisU * halfU;
+            Vector2 gRightMid = center2D + axisU * halfU;
+
+            AddTri(st, colTris,
+                new Vector3(g3.X, eaveY, g3.Y),
+                new Vector3(gLeftMid.X, eaveY + ridgeHeight, gLeftMid.Y),
+                new Vector3(g0.X, eaveY, g0.Y),
+                gableWallColor);
+            AddTri(st, colTris,
+                new Vector3(g1.X, eaveY, g1.Y),
+                new Vector3(gRightMid.X, eaveY + ridgeHeight, gRightMid.Y),
+                new Vector3(g2.X, eaveY, g2.Y),
+                gableWallColor);
+        }
+    }
+
+    private static void AddFacadeWindows(
+        SurfaceTool st,
+        Vector2 wallStart,
+        Vector2 wallEnd,
+        float baseY,
+        float floorHeight,
+        int floors,
+        float windowWidth,
+        float windowHeight,
+        float spacing,
+        Color frameColor,
+        Color glassColor,
+        Color? shutterColor = null)
+    {
+        Vector2 dir = wallEnd - wallStart;
+        float wallLen = dir.Length();
+        if (wallLen < windowWidth + 1.4f) return;
+        Vector2 tangent = dir / wallLen;
+        Vector2 outward = new Vector2(tangent.Y, -tangent.X);
+        // Always point the window offset away from the building center so frames/glass sit proud of the wall, never inside it.
+        if (outward.Dot(((wallStart + wallEnd) * 0.5f) - _bldCenter2D) < 0f) outward = -outward;
+        _outRef = new Vector3(_bldCenter2D.X, baseY, _bldCenter2D.Y);
+
+        int count = Math.Max(1, (int)Math.Floor((wallLen - 1.2f) / spacing));
+        float totalSpan = (count - 1) * spacing;
+        float startOffset = (wallLen - totalSpan) * 0.5f;
+
+        for (int f = 0; f < floors; f++)
+        {
+            float winBottom = baseY + f * floorHeight + (floorHeight - windowHeight) * 0.52f;
+            float winTop = winBottom + windowHeight;
+
+            for (int i = 0; i < count; i++)
+            {
+                float cDist = startOffset + i * spacing;
+                Vector2 cPos = wallStart + tangent * cDist;
+
+                // Frame slightly proud of wall (0.04m)
+                float fw = windowWidth * 0.5f + 0.08f;
+                Vector2 fL = cPos - tangent * fw + outward * 0.04f;
+                Vector2 fR = cPos + tangent * fw + outward * 0.04f;
+                AddQuad(st, null,
+                    new Vector3(fL.X, winBottom - 0.07f, fL.Y),
+                    new Vector3(fR.X, winBottom - 0.07f, fR.Y),
+                    new Vector3(fR.X, winTop + 0.07f, fR.Y),
+                    new Vector3(fL.X, winTop + 0.07f, fL.Y),
+                    frameColor);
+
+                // Glass pane slightly proud of frame (0.06m)
+                float gw = windowWidth * 0.5f;
+                Vector2 gL = cPos - tangent * gw + outward * 0.06f;
+                Vector2 gR = cPos + tangent * gw + outward * 0.06f;
+                AddQuad(st, null,
+                    new Vector3(gL.X, winBottom, gL.Y),
+                    new Vector3(gR.X, winBottom, gR.Y),
+                    new Vector3(gR.X, winTop, gR.Y),
+                    new Vector3(gL.X, winTop, gL.Y),
+                    glassColor);
+
+                if (shutterColor.HasValue)
+                {
+                    float sw = 0.26f;
+                    // Left shutter
+                    Vector2 sLL = cPos - tangent * (fw + sw + 0.03f) + outward * 0.045f;
+                    Vector2 sLR = cPos - tangent * (fw + 0.03f) + outward * 0.045f;
+                    AddQuad(st, null,
+                        new Vector3(sLL.X, winBottom - 0.03f, sLL.Y),
+                        new Vector3(sLR.X, winBottom - 0.03f, sLR.Y),
+                        new Vector3(sLR.X, winTop + 0.03f, sLR.Y),
+                        new Vector3(sLL.X, winTop + 0.03f, sLL.Y),
+                        shutterColor.Value);
+
+                    // Right shutter
+                    Vector2 sRL = cPos + tangent * (fw + 0.03f) + outward * 0.045f;
+                    Vector2 sRR = cPos + tangent * (fw + sw + 0.03f) + outward * 0.045f;
+                    AddQuad(st, null,
+                        new Vector3(sRL.X, winBottom - 0.03f, sRL.Y),
+                        new Vector3(sRR.X, winBottom - 0.03f, sRR.Y),
+                        new Vector3(sRR.X, winTop + 0.03f, sRR.Y),
+                        new Vector3(sRL.X, winTop + 0.03f, sRL.Y),
+                        shutterColor.Value);
+                }
+            }
+        }
+    }
+
+    private static void AddPatioTableWithUmbrella(
+        SurfaceTool st,
+        List<Vector3>? colTris,
+        Vector2 center2D,
+        Vector2 axisU,
+        Vector2 axisV,
+        float patioSurfaceY,
+        Color umbrellaColor,
+        Color furnitureColor)
+    {
+        // Table pedestal & round/octagonal tabletop
+        AddOrientedBox(st, null, center2D, axisU, axisV, 0.08f, 0.08f, patioSurfaceY, patioSurfaceY + 0.74f, furnitureColor.Darkened(0.2f), furnitureColor);
+        AddOrientedBox(st, colTris, center2D, axisU, axisV, 0.62f, 0.62f, patioSurfaceY + 0.72f, patioSurfaceY + 0.78f, furnitureColor, furnitureColor.Lightened(0.08f));
+
+        // 4 patio chairs around the table
+        Vector2[] chairDirs = new[] { axisU, -axisU, axisV, -axisV };
+        for (int c = 0; c < 4; c++)
+        {
+            Vector2 cDir = chairDirs[c];
+            Vector2 cPerp = new Vector2(-cDir.Y, cDir.X);
+            Vector2 chairPos = center2D + cDir * 0.98f;
+            // Seat
+            AddOrientedBox(st, null, chairPos, cPerp, cDir, 0.24f, 0.24f, patioSurfaceY + 0.40f, patioSurfaceY + 0.46f, furnitureColor, furnitureColor);
+            // Chair base/legs
+            AddOrientedBox(st, null, chairPos, cPerp, cDir, 0.18f, 0.18f, patioSurfaceY, patioSurfaceY + 0.40f, furnitureColor.Darkened(0.25f), furnitureColor);
+            // Chair backrest on outer edge
+            AddOrientedBox(st, null, chairPos + cDir * 0.20f, cPerp, cDir, 0.24f, 0.04f, patioSurfaceY + 0.46f, patioSurfaceY + 0.88f, furnitureColor, furnitureColor);
+        }
+
+        // Umbrella pole & octagonal/pyramidal canopy
+        AddOrientedBox(st, null, center2D, axisU, axisV, 0.04f, 0.04f, patioSurfaceY + 0.78f, patioSurfaceY + 2.35f, new Color(0.25f, 0.25f, 0.27f), new Color(0.25f, 0.25f, 0.27f));
+        AddPitchedGableOrHipRoof(st, null, center2D, axisU, axisV, 1.15f, 1.15f, patioSurfaceY + 2.05f, 0.42f, 0.0f, umbrellaColor, umbrellaColor, hipped: true);
+    }
+
+    private void CreateBuildingFeature(Node3D rootNode, PreparedBuilding bld, int index, List<ExclusionPolygon> exclusions)
+    {
+        if (bld.Footprint == null || bld.Footprint.Length < 3) return;
+
+        Vector2 c = bld.ObbCenter;
+        _bldCenter2D = c;
+        Vector2 u = bld.AxisU;
+        Vector2 v = bld.AxisV; // +v is BackDir (patio/veranda side), -v is FrontDir (street/entrance side)
+        float hU = bld.HalfU;
+        float hV = bld.HalfV;
+
+        Vector2 pFL = c - u * hU - v * hV;
+        Vector2 pFR = c + u * hU - v * hV;
+        Vector2 pBR = c + u * hU + v * hV;
+        Vector2 pBL = c - u * hU + v * hV;
+
+        // Sample ground elevations across building footprint, OBB corners, and patio so foundations never float
+        float minGroundY = float.MaxValue;
+        float maxGroundY = float.MinValue;
+
+        for (int i = 0; i < bld.Footprint.Length; i++)
+        {
+            var p = bld.Footprint[i];
+            float h = GetHeightWithFeatures(p.X, p.Y, exclusions);
+            if (h < minGroundY) minGroundY = h;
+            if (h > maxGroundY) maxGroundY = h;
+        }
+        Vector2[] obbCorners = new[] { pFL, pFR, pBR, pBL, c };
+        for (int i = 0; i < obbCorners.Length; i++)
+        {
+            float h = GetHeightWithFeatures(obbCorners[i].X, obbCorners[i].Y, exclusions);
+            if (h < minGroundY) minGroundY = h;
+            if (h > maxGroundY) maxGroundY = h;
+        }
+        if (bld.BackyardPatioPolygon != null)
+        {
+            for (int i = 0; i < bld.BackyardPatioPolygon.Length; i++)
+            {
+                float h = GetHeightWithFeatures(bld.BackyardPatioPolygon[i].X, bld.BackyardPatioPolygon[i].Y, exclusions);
+                if (h < minGroundY) minGroundY = h;
+                if (h > maxGroundY) maxGroundY = h;
+            }
+        }
+
+        float baseFloorY = maxGroundY + 0.12f;
+        float foundationBottomY = minGroundY - 3.5f; // Generous subterranean embed so slope variations never show gaps
+
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        var colTris = new List<Vector3>();
+
+        int seed = Math.Abs((int)(bld.ObbCenter.X * 73f) ^ (int)(bld.ObbCenter.Y * 151f) ^ (index * 31));
+        var rnd = new Random(seed);
+
+        int parsedLevels = 0;
+        if (bld.Tags != null && bld.Tags.TryGetValue("building:levels", out var lvlStr))
+        {
+            int.TryParse(lvlStr.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedLevels);
+        }
+
+        if (bld.BuildingType == "clubhouse")
+        {
+            int floors = parsedLevels > 0 ? Math.Clamp(parsedLevels, 1, 3) : 2;
+            float floorHeight = 3.6f;
+            float wallHeight = floors * floorHeight;
+            float eaveY = baseFloorY + wallHeight;
+
+            Color stoneBaseColor = new Color(0.40f, 0.37f, 0.33f);
+            Color stuccoColor = new Color(0.64f, 0.59f, 0.51f);
+            Color trimColor = new Color(0.76f, 0.75f, 0.73f);
+            Color slateRoofColor = new Color(0.13f, 0.15f, 0.18f);
+            Color windowGlass = new Color(0.18f, 0.26f, 0.33f);
+            Color shutterCol = new Color(0.14f, 0.24f, 0.18f); // Classic country club hunter green shutters
+
+            // 1. Stone foundation & wainscoting base (up to baseFloorY + 1.35m)
+            AddOrientedBox(st, colTris, c, u, v, hU + 0.14f, hV + 0.14f, foundationBottomY, baseFloorY + 1.35f, stoneBaseColor, stoneBaseColor);
+
+            // 2. Main clubhouse warm stucco body
+            AddOrientedBox(st, colTris, c, u, v, hU, hV, baseFloorY + 1.35f, eaveY, stuccoColor, stuccoColor);
+
+            // 3. Frieze/cornice trim band under eaves + corner pilasters
+            AddOrientedBox(st, null, c, u, v, hU + 0.12f, hV + 0.12f, eaveY - 0.35f, eaveY + 0.05f, trimColor, trimColor);
+            Vector2[] corners = new[] { pFL, pFR, pBR, pBL };
+            for (int i = 0; i < 4; i++)
+            {
+                AddOrientedBox(st, null, corners[i], u, v, 0.28f, 0.28f, baseFloorY + 1.35f, eaveY, trimColor, trimColor);
+            }
+
+            // 4. Multi-pane clubhouse windows with hunter green shutters on all 4 facades
+            AddFacadeWindows(st, pFL, pFR, baseFloorY + 0.2f, floorHeight, floors, 1.35f, 1.75f, 3.4f, trimColor, windowGlass, shutterCol);
+            AddFacadeWindows(st, pFR, pBR, baseFloorY + 0.2f, floorHeight, floors, 1.35f, 1.75f, 3.4f, trimColor, windowGlass, shutterCol);
+            AddFacadeWindows(st, pBR, pBL, baseFloorY + 0.2f, floorHeight, floors, 1.50f, 1.85f, 3.6f, trimColor, windowGlass, shutterCol);
+            AddFacadeWindows(st, pBL, pFL, baseFloorY + 0.2f, floorHeight, floors, 1.35f, 1.75f, 3.4f, trimColor, windowGlass, shutterCol);
+
+            // 5. Pitched hipped slate roof with generous eave overhang
+            float ridgeH = Math.Clamp(Math.Min(hU, hV) * 0.52f, 2.6f, 5.2f);
+            AddPitchedGableOrHipRoof(st, colTris, c, u, v, hU, hV, eaveY, ridgeH, 0.75f, slateRoofColor, stuccoColor, hipped: true);
+
+            // 6. Signature Clubhouse Cupola / Belvedere + Spire at center of roof ridge
+            float cupolaHalf = Math.Clamp(Math.Min(hU, hV) * 0.18f, 1.1f, 2.1f);
+            float cupolaBaseY = eaveY + ridgeH - 0.45f;
+            float cupolaTopY = cupolaBaseY + 2.1f;
+            AddOrientedBox(st, colTris, c, u, v, cupolaHalf, cupolaHalf, cupolaBaseY, cupolaTopY, trimColor, trimColor);
+            AddPitchedGableOrHipRoof(st, colTris, c, u, v, cupolaHalf, cupolaHalf, cupolaTopY, 1.35f, 0.28f, new Color(0.18f, 0.28f, 0.24f), trimColor, hipped: true);
+            // Weathervane spire
+            AddOrientedBox(st, null, c, u, v, 0.06f, 0.06f, cupolaTopY + 1.30f, cupolaTopY + 2.45f, new Color(0.72f, 0.58f, 0.24f), new Color(0.72f, 0.58f, 0.24f));
+
+            // 7. Course-facing Stone Veranda Terrace + Covered Colonnade Porch + Outdoor Dining Tables
+            if (bld.BackyardPatioPolygon != null && bld.BackyardPatioPolygon.Length == 4)
+            {
+                float verandaHalfW = Math.Clamp(hU * 0.78f, 4.5f, 14.0f);
+                float verandaDepth = Math.Clamp(hV * 0.48f, 4.0f, 7.5f);
+                Vector2 verandaCenter = c + v * (hV + verandaDepth * 0.5f);
+                float verandaY = baseFloorY - 0.04f;
+
+                // Stone terrace slab & foundation
+                AddOrientedBox(st, colTris, verandaCenter, u, v, verandaHalfW, verandaDepth * 0.5f, foundationBottomY, verandaY, stoneBaseColor, new Color(0.48f, 0.45f, 0.40f));
+
+                // Covered porch roof extending over the inner half of the veranda with white columns
+                float porchDepth = verandaDepth * 0.65f;
+                Vector2 porchCenter = c + v * (hV + porchDepth * 0.5f);
+                float porchRoofY = baseFloorY + 3.35f;
+                AddOrientedBox(st, colTris, porchCenter, u, v, verandaHalfW + 0.2f, porchDepth * 0.5f + 0.2f, porchRoofY, porchRoofY + 0.28f, trimColor, slateRoofColor);
+
+                int colCount = Math.Max(3, (int)Math.Round(verandaHalfW * 2f / 3.8f) + 1);
+                for (int colIdx = 0; colIdx < colCount; colIdx++)
+                {
+                    float t = colCount == 1 ? 0f : -1f + 2f * colIdx / (colCount - 1);
+                    Vector2 colPos = c + u * (t * (verandaHalfW - 0.35f)) + v * (hV + porchDepth - 0.25f);
+                    AddOrientedBox(st, colTris, colPos, u, v, 0.16f, 0.16f, verandaY, porchRoofY, trimColor, trimColor);
+                }
+
+                // Outdoor clubhouse dining tables with country-club green & cream umbrellas
+                int tableCount = Math.Clamp((int)Math.Floor(verandaHalfW * 2f / 4.8f), 1, 4);
+                for (int tIdx = 0; tIdx < tableCount; tIdx++)
+                {
+                    float frac = tableCount == 1 ? 0f : -0.68f + 1.36f * tIdx / (tableCount - 1);
+                    Vector2 tblPos = c + u * (frac * verandaHalfW) + v * (hV + verandaDepth * 0.72f);
+                    Color umbCol = (tIdx % 2 == 0) ? new Color(0.14f, 0.36f, 0.24f) : new Color(0.92f, 0.88f, 0.78f);
+                    AddPatioTableWithUmbrella(st, colTris, tblPos, u, v, verandaY, umbCol, new Color(0.92f, 0.92f, 0.90f));
+                }
+            }
+        }
+        else if (bld.BuildingType == "house")
+        {
+            int floors = parsedLevels > 0 ? Math.Clamp(parsedLevels, 1, 2) : (rnd.NextDouble() < 0.62 ? 2 : 1);
+            float floorHeight = 2.95f;
+            float wallHeight = floors * floorHeight;
+            float eaveY = baseFloorY + wallHeight;
+
+            Color[] sidingPalette = new[]
+            {
+                new Color(0.38f, 0.29f, 0.22f), // Craftsman cedar / timber brown
+                new Color(0.24f, 0.30f, 0.38f), // Coastal navy siding
+                new Color(0.31f, 0.37f, 0.30f), // Earthy sage / olive green
+                new Color(0.44f, 0.39f, 0.34f), // Warm taupe / clay siding
+                new Color(0.28f, 0.30f, 0.32f), // Charcoal slate siding
+                new Color(0.40f, 0.22f, 0.20f), // Colonial barn red
+                new Color(0.33f, 0.39f, 0.45f), // Harbor blue siding
+                new Color(0.48f, 0.44f, 0.38f)  // Warm sandstone khaki siding
+            };
+            Color[] roofPalette = new[]
+            {
+                new Color(0.11f, 0.11f, 0.12f), // Charcoal black asphalt shingles
+                new Color(0.13f, 0.15f, 0.17f), // Dark architectural slate shingles
+                new Color(0.09f, 0.09f, 0.10f), // Deep onyx composite shingles
+                new Color(0.15f, 0.12f, 0.10f), // Dark barkwood / weathered wood shingles
+                new Color(0.13f, 0.13f, 0.14f), // Dark pewter / graphite shingles
+                new Color(0.10f, 0.11f, 0.12f)  // Dual-black shadow shingles
+            };
+            Color[] shutterPalette = new[]
+            {
+                new Color(0.14f, 0.18f, 0.24f), // Deep navy shutters
+                new Color(0.14f, 0.22f, 0.16f), // Forest green shutters
+                new Color(0.28f, 0.14f, 0.14f), // Burgundy shutters
+                new Color(0.16f, 0.16f, 0.17f)  // Classic charcoal shutters
+            };
+
+            Color sidingColor = sidingPalette[seed % sidingPalette.Length];
+            Color shingleColor = roofPalette[(seed / 7) % roofPalette.Length];
+            Color shutterColor = shutterPalette[(seed / 13) % shutterPalette.Length];
+            Color trimColor = new Color(0.74f, 0.74f, 0.72f);
+            Color foundationColor = new Color(0.36f, 0.36f, 0.35f);
+            Color windowGlass = new Color(0.18f, 0.26f, 0.33f);
+
+            // 1. Concrete foundation plinth
+            AddOrientedBox(st, colTris, c, u, v, hU + 0.08f, hV + 0.08f, foundationBottomY, baseFloorY + 0.35f, foundationColor, foundationColor);
+
+            // 2. Main house body + corner trim boards
+            AddOrientedBox(st, colTris, c, u, v, hU, hV, baseFloorY + 0.35f, eaveY, sidingColor, sidingColor);
+            Vector2[] corners = new[] { pFL, pFR, pBR, pBL };
+            for (int i = 0; i < 4; i++)
+            {
+                AddOrientedBox(st, null, corners[i], u, v, 0.16f, 0.16f, baseFloorY + 0.35f, eaveY, trimColor, trimColor);
+            }
+
+            // 3. Framed windows with shutters on front, side, and upper rear walls
+            AddFacadeWindows(st, pFL, pFR, baseFloorY + 0.2f, floorHeight, floors, 1.15f, 1.40f, 3.1f, trimColor, windowGlass, shutterColor);
+            AddFacadeWindows(st, pFR, pBR, baseFloorY + 0.2f, floorHeight, floors, 1.10f, 1.35f, 3.2f, trimColor, windowGlass, shutterColor);
+            AddFacadeWindows(st, pBL, pFL, baseFloorY + 0.2f, floorHeight, floors, 1.10f, 1.35f, 3.2f, trimColor, windowGlass, shutterColor);
+            if (floors > 1)
+            {
+                AddFacadeWindows(st, pBR, pBL, baseFloorY + floorHeight + 0.2f, floorHeight, 1, 1.20f, 1.35f, 3.2f, trimColor, windowGlass, shutterColor);
+            }
+
+            // Rear sliding glass patio door opening onto the backyard patio
+            Vector2 backWallCenter = c + v * (hV + 0.05f);
+            AddOrientedBox(st, null, backWallCenter, u, v, 1.25f, 0.05f, baseFloorY + 0.35f, baseFloorY + 2.45f, trimColor, trimColor);
+            AddOrientedBox(st, null, backWallCenter + v * 0.02f, u, v, 1.12f, 0.05f, baseFloorY + 0.42f, baseFloorY + 2.38f, windowGlass, windowGlass);
+
+            // 4. Pitched shingle roof (gable or hip) + brick chimney
+            bool hipped = (seed % 3) == 0;
+            float ridgeH = Math.Clamp(Math.Min(hU, hV) * 0.48f, 2.0f, 3.8f);
+            AddPitchedGableOrHipRoof(st, colTris, c, u, v, hU, hV, eaveY, ridgeH, 0.45f, shingleColor, sidingColor, hipped);
+
+            Vector2 chimneyPos = c + u * (hU * 0.58f) - v * (hV * 0.25f);
+            AddOrientedBox(st, colTris, chimneyPos, u, v, 0.42f, 0.42f, eaveY + 0.2f, eaveY + ridgeH + 0.85f, new Color(0.42f, 0.22f, 0.18f), new Color(0.24f, 0.24f, 0.25f));
+
+            // 5. Backyard Patio & Yard Features (concrete/stone patio slab, patio table + umbrella + chairs, BBQ grill, planter boxes)
+            if (bld.BackyardPatioPolygon != null && bld.BackyardPatioPolygon.Length == 4)
+            {
+                float patioHalfW = Math.Clamp(hU * 0.65f, 2.4f, 5.8f);
+                float patioDepth = Math.Clamp(hV * 0.58f, 3.2f, 5.2f);
+                Vector2 patioCenter = c + v * (hV + patioDepth * 0.5f);
+
+                // Sample ground under patio too so sloped yards never leave the patio floating
+                float pGroundMin = foundationBottomY;
+                for (int i = 0; i < bld.BackyardPatioPolygon.Length; i++)
+                {
+                    var pp = bld.BackyardPatioPolygon[i];
+                    float ph = GetHeightWithFeatures(pp.X, pp.Y, exclusions);
+                    if (ph - 1.0f < pGroundMin) pGroundMin = ph - 1.0f;
+                    if (ph + 0.08f > baseFloorY) baseFloorY = ph + 0.08f;
+                }
+                float patioTopY = baseFloorY + 0.10f;
+
+                Color patioSlabColor = new Color(0.46f, 0.45f, 0.43f);
+                Color patioBorderColor = new Color(0.36f, 0.35f, 0.33f);
+                AddOrientedBox(st, colTris, patioCenter, u, v, patioHalfW, patioDepth * 0.5f, pGroundMin, patioTopY, patioBorderColor, patioSlabColor);
+
+                // Backyard Patio Table + Umbrella + 4 Chairs
+                Color[] umbrellaColors = new[]
+                {
+                    new Color(0.68f, 0.22f, 0.18f), // Patio terracotta red
+                    new Color(0.16f, 0.36f, 0.54f), // Resort navy blue
+                    new Color(0.18f, 0.42f, 0.28f), // Garden forest green
+                    new Color(0.72f, 0.54f, 0.18f)  // Warm mustard gold
+                };
+                Color umbColor = umbrellaColors[(seed / 5) % umbrellaColors.Length];
+                Vector2 tableCenter = patioCenter - u * (patioHalfW * 0.18f) + v * (patioDepth * 0.06f);
+                AddPatioTableWithUmbrella(st, colTris, tableCenter, u, v, patioTopY, umbColor, new Color(0.24f, 0.25f, 0.26f));
+
+                // Backyard BBQ Grill near side of patio against house or side border
+                Vector2 bbqPos = c + u * (patioHalfW * 0.68f) + v * (hV + 0.85f);
+                // Grill cart legs/cabinet
+                AddOrientedBox(st, colTris, bbqPos, u, v, 0.58f, 0.34f, patioTopY, patioTopY + 0.82f, new Color(0.18f, 0.19f, 0.20f), new Color(0.26f, 0.27f, 0.28f));
+                // Grill hood
+                AddOrientedBox(st, colTris, bbqPos, u, v, 0.42f, 0.32f, patioTopY + 0.82f, patioTopY + 1.18f, new Color(0.12f, 0.13f, 0.14f), new Color(0.15f, 0.16f, 0.17f));
+
+                // 2 Corner Backyard Planter Boxes with ornamental greenery
+                Vector2[] planterPositions = new[]
+                {
+                    c - u * (patioHalfW - 0.45f) + v * (hV + patioDepth - 0.45f),
+                    c + u * (patioHalfW - 0.45f) + v * (hV + patioDepth - 0.45f)
+                };
+                for (int pIdx = 0; pIdx < planterPositions.Length; pIdx++)
+                {
+                    AddOrientedBox(st, colTris, planterPositions[pIdx], u, v, 0.42f, 0.42f, patioTopY, patioTopY + 0.52f, new Color(0.38f, 0.26f, 0.18f), new Color(0.20f, 0.14f, 0.10f));
+                    AddOrientedBox(st, null, planterPositions[pIdx], u, v, 0.36f, 0.36f, patioTopY + 0.50f, patioTopY + 0.86f, new Color(0.18f, 0.38f, 0.20f), new Color(0.22f, 0.44f, 0.22f));
+                }
+            }
+        }
+        else
+        {
+            // Generic Business / Commercial Building (building=yes and other non-house/non-clubhouse buildings)
+            int floors = parsedLevels > 0 ? Math.Clamp(parsedLevels, 1, 5) : ((hU * hV > 90f) ? 3 : 2);
+            float floorHeight = 3.65f;
+            float wallHeight = floors * floorHeight;
+            float roofY = baseFloorY + wallHeight;
+
+            Color[] businessFacades = new[]
+            {
+                new Color(0.35f, 0.37f, 0.39f), // Modern brushed dark steel / concrete gray
+                new Color(0.46f, 0.41f, 0.35f), // Architectural warm sandstone masonry
+                new Color(0.38f, 0.27f, 0.22f), // Commercial brick / masonry taupe
+                new Color(0.28f, 0.30f, 0.32f), // Deep slate architectural composite panels
+                new Color(0.42f, 0.41f, 0.39f)  // Precast medium gray limestone
+            };
+            Color facadeColor = businessFacades[seed % businessFacades.Length];
+            Color spandrelColor = facadeColor.Darkened(0.18f);
+            Color parapetTrim = new Color(0.28f, 0.29f, 0.31f);
+            Color flatRoofMembrane = new Color(0.14f, 0.15f, 0.16f);
+            Color ribbonGlass = new Color(0.15f, 0.23f, 0.30f);
+
+            // 1. Concrete foundation plinth
+            AddOrientedBox(st, colTris, c, u, v, hU + 0.10f, hV + 0.10f, foundationBottomY, baseFloorY + 0.40f, spandrelColor, spandrelColor);
+
+            // 2. Main commercial building mass
+            AddOrientedBox(st, colTris, c, u, v, hU, hV, baseFloorY + 0.40f, roofY, facadeColor, flatRoofMembrane);
+
+            // 3. Raised perimeter parapet walls around flat roof + metal coping cap
+            float parapetH = 0.65f;
+            float wallThick = Math.Min(0.45f, Math.Min(hU, hV) * 0.18f);
+            // Front parapet
+            AddOrientedBox(st, colTris, c - v * (hV - wallThick * 0.5f), u, v, hU + 0.06f, wallThick * 0.5f, roofY, roofY + parapetH, facadeColor, parapetTrim);
+            // Back parapet
+            AddOrientedBox(st, colTris, c + v * (hV - wallThick * 0.5f), u, v, hU + 0.06f, wallThick * 0.5f, roofY, roofY + parapetH, facadeColor, parapetTrim);
+            // Left parapet
+            AddOrientedBox(st, colTris, c - u * (hU - wallThick * 0.5f), u, v, wallThick * 0.5f, hV + 0.06f, roofY, roofY + parapetH, facadeColor, parapetTrim);
+            // Right parapet
+            AddOrientedBox(st, colTris, c + u * (hU - wallThick * 0.5f), u, v, wallThick * 0.5f, hV + 0.06f, roofY, roofY + parapetH, facadeColor, parapetTrim);
+
+            // 4. Horizontal commercial ribbon windows on all 4 sides
+            AddFacadeWindows(st, pFL, pFR, baseFloorY + 0.3f, floorHeight, floors, 2.2f, 1.65f, 2.85f, spandrelColor, ribbonGlass);
+            AddFacadeWindows(st, pFR, pBR, baseFloorY + 0.3f, floorHeight, floors, 2.2f, 1.65f, 2.85f, spandrelColor, ribbonGlass);
+            AddFacadeWindows(st, pBR, pBL, baseFloorY + 0.3f, floorHeight, floors, 2.2f, 1.65f, 2.85f, spandrelColor, ribbonGlass);
+            AddFacadeWindows(st, pBL, pFL, baseFloorY + 0.3f, floorHeight, floors, 2.2f, 1.65f, 2.85f, spandrelColor, ribbonGlass);
+
+            // 5. Front entrance cantilevered canopy + glass storefront entry
+            float canopyHalfW = Math.Clamp(hU * 0.38f, 1.8f, 4.2f);
+            Vector2 canopyCenter = c - v * (hV + 0.95f);
+            AddOrientedBox(st, colTris, canopyCenter, u, v, canopyHalfW, 0.95f, baseFloorY + 3.15f, baseFloorY + 3.42f, parapetTrim, parapetTrim);
+
+            // 6. Rooftop HVAC / Mechanical units
+            Vector2 hvac1 = c - u * (hU * 0.32f) + v * (hV * 0.22f);
+            AddOrientedBox(st, colTris, hvac1, u, v, Math.Min(1.4f, hU * 0.3f), Math.Min(1.1f, hV * 0.25f), roofY, roofY + 1.15f, new Color(0.38f, 0.39f, 0.41f), new Color(0.29f, 0.30f, 0.31f));
+            if (hU > 6.5f)
+            {
+                Vector2 hvac2 = c + u * (hU * 0.35f) - v * (hV * 0.20f);
+                AddOrientedBox(st, colTris, hvac2, u, v, 1.05f, 0.95f, roofY, roofY + 0.95f, new Color(0.38f, 0.39f, 0.41f), new Color(0.29f, 0.30f, 0.31f));
+            }
+        }
+
+        var mesh = st.Commit();
+        var meshInstance = new MeshInstance3D
+        {
+            Name = $"{bld.BuildingType}_Mesh_{index}",
+            Mesh = mesh,
+            MaterialOverride = GetBuildingVertexColorMaterial(),
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.On
+        };
+
+        var staticBody = new StaticBody3D
+        {
+            Name = $"{bld.BuildingType}_Static_{index}"
+        };
+        staticBody.SetMeta("surface_type", (int)PhysicsEnums.SurfaceType.CartPath); // Hard surface bounce
+        staticBody.SetMeta("building_type", bld.BuildingType);
+        staticBody.SetMeta("is_building", true);
+        staticBody.AddToGroup("buildings");
+        if (bld.BuildingType == "clubhouse") staticBody.AddToGroup("clubhouses");
+        else if (bld.BuildingType == "house") staticBody.AddToGroup("houses");
+        else staticBody.AddToGroup("business_buildings");
+
+        staticBody.AddChild(meshInstance);
+
+        CollisionShape3D? colShape = null;
+        if (colTris.Count >= 3)
+        {
+            var concave = new ConcavePolygonShape3D
+            {
+                Data = colTris.ToArray()
+            };
+            colShape = new CollisionShape3D
+            {
+                Name = "CollisionShape3D",
+                Shape = concave
+            };
+            staticBody.AddChild(colShape);
+        }
+
+        rootNode.AddChild(staticBody);
+        staticBody.Owner = rootNode;
+        meshInstance.Owner = rootNode;
+        if (colShape != null)
+        {
+            colShape.Owner = rootNode;
+        }
+    }
+
+    /// <summary>
+    /// Helper for tests and procedural workflows to instantiate a 3D road or building directly from local coordinates and OSM tags.
+    /// </summary>
+    public Node3D? SpawnOsmFeatureForTest(Node3D rootNode, Vector2[] points, Godot.Collections.Dictionary tags, int index = 0)
+    {
+        if (rootNode == null || points == null || points.Length < 2) return null;
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (tags != null)
+        {
+            foreach (var key in tags.Keys)
+            {
+                dict[key.ToString()] = tags[key].ToString();
+            }
+        }
+
+        var emptyExcl = new List<ExclusionPolygon>();
+        bool isCartPath = (dict.TryGetValue("golf", out var gTag) && (gTag == "cartpath" || gTag == "cart_path")) ||
+                          (dict.TryGetValue("highway", out var hTag) && (hTag == "path" || hTag == "footway"));
+
+        if (dict.TryGetValue("golf", out var g) && (g == "cartpath" || g == "cart_path"))
+        {
+            CreateCartPath(rootNode, new List<Vector2>(points), index, emptyExcl);
+            return rootNode.GetNodeOrNull<Node3D>($"cartpath_{index}");
+        }
+
+        if (IsRoadWay(dict, isCartPath))
+        {
+            var road = new PreparedRoad
+            {
+                Points = new List<Vector2>(points),
+                HalfWidth = GetRoadHalfWidth(dict),
+                HighwayType = dict.TryGetValue("highway", out var hv) ? hv : "residential"
+            };
+            CreateConcreteRoad(rootNode, road, index, emptyExcl);
+            return rootNode.GetNodeOrNull<Node3D>($"road_Static_{index}");
+        }
+
+        string bType = ClassifyBuildingType(dict);
+        if (!string.IsNullOrEmpty(bType) && points.Length >= 3)
+        {
+            float minX = points.Min(p => p.X) - 100f;
+            float maxX = points.Max(p => p.X) + 100f;
+            float minZ = points.Min(p => p.Y) - 100f;
+            float maxZ = points.Max(p => p.Y) + 100f;
+            var dummyWay = new OsmWay(index, new List<long>(), dict);
+            var rawList = new List<(OsmWay Way, List<Vector2> Points, string BuildingType)>
+            {
+                (dummyWay, new List<Vector2>(points), bType)
+            };
+            var bldExcl = new List<Vector2[]>();
+            var prepList = FilterAndPrepareBuildings(
+                rawList,
+                new List<Vector2[]>(),
+                new List<List<Vector2>>(),
+                new List<PreparedRoad>(),
+                minX, maxX, minZ, maxZ,
+                emptyExcl,
+                bldExcl);
+            if (prepList.Count > 0)
+            {
+                CreateBuildingFeature(rootNode, prepList[0], index, emptyExcl);
+                return rootNode.GetNodeOrNull<Node3D>($"{bType}_Static_{index}");
+            }
+        }
+
+        return null;
     }
 
     private StandardMaterial3D? _rockMaterial;

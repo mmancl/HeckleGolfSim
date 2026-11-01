@@ -98,6 +98,7 @@ static func is_pga_tour_course(course: Dictionary) -> bool:
 @onready var bushes_check: CheckBox = %BushesCheck
 @onready var cart_paths_check: CheckBox = %CartPathsCheck
 @onready var bunkers_3d_check: CheckBox = %Bunkers3dCheck
+@onready var roads_buildings_check: CheckBox = %RoadsBuildingsCheck
 var _current_preset: String = "medium"
 @onready var hole_count_card: PanelContainer = %HoleCountCard
 @onready var tag_filter_card: PanelContainer = %TagFilterCard
@@ -207,6 +208,8 @@ func _ready() -> void:
 		permutations_18_hole_check.toggled.connect(func(_p): _save_search_settings())
 	if bunkers_3d_check != null:
 		bunkers_3d_check.toggled.connect(func(_p): _save_search_settings())
+	if roads_buildings_check != null:
+		roads_buildings_check.toggled.connect(_on_generation_option_changed)
 
 	_load_search_settings()
 	_update_hole_buttons_visual()
@@ -814,6 +817,8 @@ func _apply_preset(preset: String) -> void:
 				bushes_check.button_pressed = false
 			if cart_paths_check != null:
 				cart_paths_check.button_pressed = false
+			if roads_buildings_check != null:
+				roads_buildings_check.button_pressed = false
 		"medium":
 			if tree_count_spin_box != null:
 				tree_count_spin_box.value = 2500.0
@@ -821,6 +826,8 @@ func _apply_preset(preset: String) -> void:
 				bushes_check.button_pressed = true
 			if cart_paths_check != null:
 				cart_paths_check.button_pressed = true
+			if roads_buildings_check != null:
+				roads_buildings_check.button_pressed = false
 		"high":
 			if tree_count_spin_box != null:
 				tree_count_spin_box.value = 6000.0
@@ -828,6 +835,8 @@ func _apply_preset(preset: String) -> void:
 				bushes_check.button_pressed = true
 			if cart_paths_check != null:
 				cart_paths_check.button_pressed = true
+			if roads_buildings_check != null:
+				roads_buildings_check.button_pressed = true
 	_update_preset_buttons_visual()
 	_save_search_settings()
 
@@ -836,11 +845,12 @@ func _detect_preset_from_values() -> String:
 	var t = int(tree_count_spin_box.value) if tree_count_spin_box != null else 2500
 	var b = bushes_check.button_pressed if bushes_check != null else true
 	var c = cart_paths_check.button_pressed if cart_paths_check != null else true
-	if t == 6000 and b == true and c == true:
+	var rb = roads_buildings_check.button_pressed if roads_buildings_check != null else true
+	if t == 6000 and b == true and c == true and rb == true:
 		return "high"
-	elif t == 2500 and b == true and c == true:
+	elif t == 2500 and b == true and c == true and rb == false:
 		return "medium"
-	elif t == 1000 and b == false and c == false:
+	elif t == 1000 and b == false and c == false and rb == false:
 		return "low"
 	return ""
 
@@ -958,6 +968,8 @@ func _load_search_settings() -> void:
 			cart_paths_check.button_pressed = bool(cfg.get_value("course_generation", "generate_cart_paths", true))
 		if bunkers_3d_check != null:
 			bunkers_3d_check.button_pressed = bool(cfg.get_value("course_generation", "generate_3d_bunkers", true))
+		if roads_buildings_check != null:
+			roads_buildings_check.button_pressed = bool(cfg.get_value("course_generation", "generate_roads_buildings", true))
 		_update_preset_buttons_visual()
 	else:
 		if btn_9_hole != null: btn_9_hole.set_pressed_no_signal(true)
@@ -974,6 +986,7 @@ func _load_search_settings() -> void:
 		if bushes_check != null: bushes_check.button_pressed = true
 		if cart_paths_check != null: cart_paths_check.button_pressed = true
 		if bunkers_3d_check != null: bunkers_3d_check.button_pressed = true
+		if roads_buildings_check != null: roads_buildings_check.button_pressed = true
 		_update_preset_buttons_visual()
 
 
@@ -1008,6 +1021,8 @@ func _save_search_settings() -> void:
 		cfg.set_value("course_generation", "generate_cart_paths", cart_paths_check.button_pressed)
 	if bunkers_3d_check != null:
 		cfg.set_value("course_generation", "generate_3d_bunkers", bunkers_3d_check.button_pressed)
+	if roads_buildings_check != null:
+		cfg.set_value("course_generation", "generate_roads_buildings", roads_buildings_check.button_pressed)
 	cfg.save(SETTINGS_FILE)
 
 
@@ -1295,6 +1310,8 @@ func _apply_course_generation_settings_to_loader() -> void:
 		_loader.set("GenerateCartPaths", cart_paths_check.button_pressed if cart_paths_check != null else true)
 	if "Generate3dBunkers" in _loader:
 		_loader.set("Generate3dBunkers", bunkers_3d_check.button_pressed if bunkers_3d_check != null else true)
+	if "GenerateRoadsAndBuildings" in _loader:
+		_loader.set("GenerateRoadsAndBuildings", roads_buildings_check.button_pressed if roads_buildings_check != null else true)
 	if "HasCustomGenerationSettings" in _loader:
 		_loader.set("HasCustomGenerationSettings", true)
 

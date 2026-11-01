@@ -60,6 +60,9 @@ func _ready() -> void:
 
 	if _is_android:
 		_init_android_plugin()
+	elif OS.get_name() == "iOS" or OS.has_feature("ios"):
+		_server_is_ready = false
+		pose_lost.emit()
 	else:
 		_init_desktop_server()
 

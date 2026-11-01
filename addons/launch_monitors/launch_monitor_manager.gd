@@ -1,5 +1,7 @@
 extends Node
 
+const RainPhysics = preload("res://Utils/rain_physics.gd")
+
 # Monitor implementations live in sibling folders (e.g. `square/`); shared transports and external receivers live under `common/`.
 
 signal hit_ball(data: Dictionary)
@@ -794,6 +796,7 @@ func _on_garmin_shot_received(data: Dictionary) -> void:
 	if status == "Connecting" or status.begins_with("Found") or status == "Disconnected":
 		_set_status("Connected")
 	_debug_log("Garmin shot received with %d fields" % data.size())
+	RainPhysics.apply_rain_shot_reduction(data)
 	FoamBallBoost.apply_boost(data, _current_club_name)
 	notify_shot_started()
 	emit_signal("hit_ball", data)
@@ -975,6 +978,7 @@ func _on_square_shot_received(data: Dictionary) -> void:
 		float(data.get("BackSpin", 0.0)),
 		float(data.get("SideSpin", 0.0))
 	])
+	RainPhysics.apply_rain_shot_reduction(data)
 	FoamBallBoost.apply_boost(data, _current_club_name)
 	notify_shot_started()
 	emit_signal("hit_ball", data)

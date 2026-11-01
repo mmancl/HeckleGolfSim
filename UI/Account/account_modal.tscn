@@ -1,0 +1,243 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://UI/Account/account_modal.gd" id="1_modal"]
+[ext_resource type="Script" path="res://UI/Account/budget_paused_banner.gd" id="2_banner"]
+
+[node name="AccountModal" type="Control"]
+process_mode = 3
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_modal")
+
+[node name="DimmerPanel" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ModalCard" type="PanelContainer" parent="CenterContainer"]
+custom_minimum_size = Vector2(520, 0)
+layout_mode = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="CenterContainer/ModalCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 20
+
+[node name="VBox" type="VBoxContainer" parent="CenterContainer/ModalCard/MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Header" type="HBoxContainer" parent="CenterContainer/ModalCard/MarginContainer/VBox"]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="CenterContainer/ModalCard/MarginContainer/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 20
+text = "Heckle Golf Simulator Cloud Account"
+
+[node name="CloseXButton" type="Button" parent="CenterContainer/ModalCard/MarginContainer/VBox/Header"]
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+focus_mode = 2
+text = "✕"
+
+[node name="BudgetPausedBanner" type="PanelContainer" parent="CenterContainer/ModalCard/MarginContainer/VBox"]
+layout_mode = 2
+script = ExtResource("2_banner")
+
+[node name="SignedOutContainer" type="VBoxContainer" parent="CenterContainer/ModalCard/MarginContainer/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="GoogleButton" type="Button" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+focus_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "Sign in with Google"
+
+[node name="GoogleDevicePanel" type="PanelContainer" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer"]
+visible = false
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/GoogleDevicePanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="InstructionLabel" type="Label" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/GoogleDevicePanel/VBox"]
+layout_mode = 2
+text = "Complete Google Sign-In in the browser window that opened (Session Code):"
+autowrap_mode = 2
+
+[node name="CodeLabel" type="Label" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/GoogleDevicePanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.76, 0.22, 1)
+theme_override_font_sizes/font_size = 28
+text = "---- ----"
+horizontal_alignment = 1
+
+[node name="CopyOpenButton" type="Button" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/GoogleDevicePanel/VBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+focus_mode = 2
+text = "Re-open Google Sign-In in Browser"
+
+[node name="CancelButton" type="Button" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/GoogleDevicePanel/VBox"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+focus_mode = 2
+text = "Cancel"
+
+[node name="StatusLabel" type="Label" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/GoogleDevicePanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Waiting for approval in browser..."
+horizontal_alignment = 1
+
+[node name="Divider" type="Label" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1)
+text = "— OR USE EMAIL —"
+horizontal_alignment = 1
+
+[node name="TabContainer" type="HBoxContainer" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SignInTabButton" type="Button" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/TabContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 2
+text = "Sign In"
+
+[node name="SignUpTabButton" type="Button" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/TabContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 2
+text = "Create Account"
+
+[node name="FormContainer" type="VBoxContainer" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="EmailInput" type="LineEdit" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/FormContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+focus_mode = 2
+placeholder_text = "Email Address"
+
+[node name="PasswordInput" type="LineEdit" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/FormContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+focus_mode = 2
+placeholder_text = "Password"
+secret = true
+
+[node name="DisplayNameContainer" type="VBoxContainer" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/FormContainer"]
+visible = false
+layout_mode = 2
+
+[node name="DisplayNameInput" type="LineEdit" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/FormContainer/DisplayNameContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+focus_mode = 2
+placeholder_text = "Display Name (Golfer Nickname)"
+
+[node name="SubmitButton" type="Button" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/FormContainer"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+focus_mode = 2
+text = "Sign In"
+
+[node name="ForgotPasswordButton" type="Button" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer/FormContainer"]
+layout_mode = 2
+focus_mode = 2
+text = "Forgot Password?"
+flat = true
+
+[node name="AuthStatusLabel" type="Label" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer"]
+layout_mode = 2
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="SignedInContainer" type="VBoxContainer" parent="CenterContainer/ModalCard/MarginContainer/VBox"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ProfileCard" type="PanelContainer" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer/ProfileCard"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="DisplayNameLabel" type="Label" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer/ProfileCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.76, 0.22, 1)
+theme_override_font_sizes/font_size = 18
+text = "Golfer"
+
+[node name="EmailLabel" type="Label" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer/ProfileCard/VBox"]
+layout_mode = 2
+text = "user@example.com"
+
+[node name="ProviderLabel" type="Label" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer/ProfileCard/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_font_sizes/font_size = 12
+text = "Provider: password"
+
+[node name="ResendVerificationButton" type="Button" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer"]
+visible = false
+layout_mode = 2
+focus_mode = 2
+text = "Resend Verification Email"
+
+[node name="LeaderboardOptInToggle" type="CheckButton" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer"]
+layout_mode = 2
+focus_mode = 2
+button_pressed = true
+text = "Show my stats on public leaderboards"
+
+[node name="SignOutButton" type="Button" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer"]
+custom_minimum_size = Vector2(0, 38)
+layout_mode = 2
+focus_mode = 2
+text = "Sign Out"
+
+[node name="DeleteAccountButton" type="Button" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+focus_mode = 2
+theme_override_colors/font_color = Color(1, 0.35, 0.35, 1)
+text = "Delete Account & Cloud Data"
+flat = true
+
+[node name="Footer" type="HBoxContainer" parent="CenterContainer/ModalCard/MarginContainer/VBox"]
+layout_mode = 2
+alignment = 2
+
+[node name="CloseButton" type="Button" parent="CenterContainer/ModalCard/MarginContainer/VBox/Footer"]
+custom_minimum_size = Vector2(100, 38)
+layout_mode = 2
+focus_mode = 2
+text = "Close"

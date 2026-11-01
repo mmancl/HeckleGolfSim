@@ -1,6 +1,15 @@
 name: Deploy Firebase & Hosting
 
 on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'web/**'
+      - 'firestore.rules'
+      - 'firestore.indexes.json'
+      - 'database.rules.json'
+      - 'functions/**'
+      - 'firebase.json'
   workflow_dispatch:
     inputs:
       targets:
@@ -13,6 +22,8 @@ on:
           - 'hosting'
           - 'firestore:rules'
           - 'firestore'
+          - 'database'
+          - 'functions'
       dry_run:
         description: 'Dry run / validation only (skips live publishing)'
         required: false
@@ -43,9 +54,38 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
+          cache-dependency-path: |
+            functions/package-lock.json
+            firebase/tests/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
 
       - name: Install Firebase Tools CLI
         run: npm install -g firebase-tools
+
+      - name: Install Functions Dependencies
+        run: |
+          if [ -f "functions/package-lock.json" ]; then
+            npm --prefix functions ci
+          else
+            npm --prefix functions install
+          fi
+
+      - name: Install Test Dependencies
+        run: |
+          if [ -f "firebase/tests/package-lock.json" ]; then
+            npm --prefix firebase/tests ci
+          else
+            npm --prefix firebase/tests install
+          fi
+
+      - name: Run Firebase Rules & Budget Function Unit Tests
+        run: npm --prefix firebase/tests test
 
       - name: Setup Firebase Authentication
         id: auth
@@ -71,6 +111,65 @@ jobs:
             exit 1
           fi
 
+      - name: Ensure GCP APIs & Pub/Sub Topic + $10 Budget Exist
+        if: ${{ env.AUTH_MODE == 'Service Account' }}
+        env:
+          GCP_BILLING_ACCOUNT_ID: ${{ secrets.GCP_BILLING_ACCOUNT_ID }}
+        run: |
+          if command -v gcloud &> /dev/null; then
+            echo "Activating GCP service account credentials..."
+            gcloud auth activate-service-account --key-file="$RUNNER_TEMP/firebase_sa.json" --project=heckle-golf-sim || true
+            echo "Ensuring pubsub topic budget-alerts exists..."
+            gcloud pubsub topics create budget-alerts --project=heckle-golf-sim || true
+            if [ -n "$GCP_BILLING_ACCOUNT_ID" ]; then
+              echo "Ensuring $10/month billing budget exists..."
+              gcloud billing budgets create \
+                --billing-account="$GCP_BILLING_ACCOUNT_ID" \
+                --display-name="HeckleGolf-10USD-Monthly-Cap" \
+                --budget-amount=10.00USD \
+                --threshold-rule=percent=0.5 \
+                --threshold-rule=percent=0.8 \
+                --threshold-rule=percent=0.95 \
+                --threshold-rule=percent=1.0 \
+                --notifications-rule-pubsub-topic="projects/heckle-golf-sim/topics/budget-alerts" || true
+            fi
+          fi
+
+      - name: Seed Initial system/status Doc (if not present)
+        if: ${{ env.AUTH_MODE == 'Service Account' && inputs.dry_run != true }}
+        run: |
+          node -e "
+            const admin = require('./functions/node_modules/firebase-admin');
+            admin.initializeApp({
+              projectId: 'heckle-golf-sim',
+              databaseURL: 'https://heckle-golf-sim-default-rtdb.firebaseio.com'
+            });
+            async function seed() {
+              const db = admin.firestore();
+              const rtdb = admin.database();
+              const statusRef = db.doc('system/status');
+              const snap = await statusRef.get();
+              if (!snap.exists) {
+                const payload = {
+                  schema_version: 1,
+                  paused: false,
+                  reason: '',
+                  paused_month: '',
+                  updated_at: Math.floor(Date.now() / 1000),
+                  message: 'Multiplayer is temporarily paused for the remainder of the month as the developer\'s monthly budget has been reached, sorry for the inconvenience.'
+                };
+                await statusRef.set(payload);
+                await rtdb.ref('system/status').set(payload);
+                console.log('Seeded initial system/status doc in Firestore and RTDB');
+              } else {
+                console.log('system/status already exists');
+              }
+            }
+            seed().catch(err => {
+              console.warn('Seeding note:', err.message);
+            });
+          " || true
+
       - name: Validate Firebase Project Config
         run: |
           echo "Checking Firebase CLI version..."
@@ -91,14 +190,21 @@ jobs:
         if: ${{ inputs.dry_run != true }}
         run: |
           DEPLOY_ARGS=(--project heckle-golf-sim)
+          TARGET="${{ inputs.targets || 'all' }}"
           
-          if [ "${{ inputs.targets }}" != "all" ]; then
-            DEPLOY_ARGS+=(--only "${{ inputs.targets }}")
+          if [ "$TARGET" != "all" ]; then
+            DEPLOY_ARGS+=(--only "$TARGET")
           fi
           
-          if [ -n "${{ inputs.message }}" ]; then
-            DEPLOY_ARGS+=(-m "${{ inputs.message }}")
+          MESSAGE="${{ inputs.message }}"
+          if [ -z "$MESSAGE" ]; then
+            if [ "${{ github.event_name }}" = "push" ]; then
+              MESSAGE="Automated deploy from commit ${{ github.sha }}"
+            else
+              MESSAGE="Manual deploy via GitHub Actions"
+            fi
           fi
+          DEPLOY_ARGS+=(-m "$MESSAGE")
           
           echo "Executing: firebase deploy ${DEPLOY_ARGS[*]}"
           firebase deploy "${DEPLOY_ARGS[@]}"
@@ -110,10 +216,11 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Status:** ${{ job.status == 'success' && 'Succeeded' || 'Failed' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Project:** \`heckle-golf-sim\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Target(s):** \`${{ inputs.targets }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Dry Run:** \`${{ inputs.dry_run }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger:** \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target(s):** \`${{ inputs.targets || 'all' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry Run:** \`${{ inputs.dry_run || false }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Auth Mode:** \`${{ env.AUTH_MODE || 'Not authenticated' }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Message:** ${{ inputs.message }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Message:** ${{ inputs.message || (github.event_name == 'push' && format('Automated deploy from commit {0}', github.sha) || 'Manual deploy via GitHub Actions') }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "#### Live Links" >> $GITHUB_STEP_SUMMARY
           echo "- [Hosting Site (web.app)](https://heckle-golf-sim.web.app)" >> $GITHUB_STEP_SUMMARY

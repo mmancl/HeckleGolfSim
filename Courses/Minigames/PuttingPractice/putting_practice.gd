@@ -1095,44 +1095,17 @@ func _setup_holes() -> void:
 		var hole_pos = Vector3(h_x, h_y, h_z)
 		holes.append(hole_pos)
 		
-		# Spawn realistic golf cup (white cup liner/rim with dark interior bottom) matching course play
+		# Spawn physical recessed 3D golf cup matching course play
 		var cup_root = Node3D.new()
 		cup_root.name = "CupMarker_%d" % i
 		cup_root.position = hole_pos
-		
-		# White cup rim/liner
-		var cup_white = MeshInstance3D.new()
-		cup_white.name = "CupWhite"
-		var white_mesh = CylinderMesh.new()
-		white_mesh.top_radius = cup_radius
-		white_mesh.bottom_radius = cup_radius
-		white_mesh.height = 0.003
-		cup_white.mesh = white_mesh
-		
-		var white_mat = StandardMaterial3D.new()
-		white_mat.albedo_color = Color(0.95, 0.95, 0.95)
-		white_mat.roughness = 0.5
-		cup_white.material_override = white_mat
-		cup_white.position = Vector3(0.0, 0.0015, 0.0)
-		cup_root.add_child(cup_white)
-		
-		# Dark inner hole depth
-		var cup_dark = MeshInstance3D.new()
-		cup_dark.name = "CupDark"
-		var dark_mesh = CylinderMesh.new()
-		dark_mesh.top_radius = 0.048
-		dark_mesh.bottom_radius = 0.048
-		dark_mesh.height = 0.0035
-		cup_dark.mesh = dark_mesh
-		
-		var dark_mat = StandardMaterial3D.new()
-		dark_mat.albedo_color = Color(0.1, 0.1, 0.1)
-		dark_mat.roughness = 1.0
-		cup_dark.material_override = dark_mat
-		cup_dark.position = Vector3(0.0, 0.002, 0.0)
-		cup_root.add_child(cup_dark)
-		
+		FlagBuilder.build_hole_cup(cup_root, cup_radius)
 		add_child(cup_root)
+
+	# Cut out circular openings in the putting green surface for all recessed cups
+	var green_mesh_inst = get_node_or_null("PuttingGreenMesh") as MeshInstance3D
+	if green_mesh_inst != null:
+		FlagBuilder.apply_green_hole_cutout_material(green_mesh_inst, holes, cup_radius)
 
 func _select_hole(index: int, reset_ball: bool = true) -> void:
 	if index < 0 or index >= holes.size():
@@ -1199,6 +1172,7 @@ func _spawn_flagpole(pos: Vector3) -> void:
 		
 	var pin = Node3D.new()
 	pin.name = "FlagPin"
+	pin.set_meta("cup_radius", cup_radius)
 	add_child(pin)
 	pin.global_position = pos
 	
@@ -1209,13 +1183,15 @@ func _spawn_flagpole(pos: Vector3) -> void:
 		q_str = gs.get_graphics_quality()
 	FlagBuilder.setup_target_flag(pin, 2.0, flag_col, 0.42, 0.30, false, q_str)
 	
-	# Glow/Selection Ring
+	# Glow/Selection Ring (hollow ring around cup so the open hole cup is unobstructed)
 	var ring = MeshInstance3D.new()
-	var ring_mesh = CylinderMesh.new()
-	ring_mesh.top_radius = 0.5
-	ring_mesh.bottom_radius = 0.5
-	ring_mesh.height = 0.001
+	var ring_mesh = TorusMesh.new()
+	ring_mesh.inner_radius = cup_radius + 0.015
+	ring_mesh.outer_radius = 0.5
+	ring_mesh.rings = 32
+	ring_mesh.ring_segments = 6
 	ring.mesh = ring_mesh
+	ring.scale = Vector3(1.0, 0.01, 1.0)
 	ring.name = "TargetRing"
 	
 	var ring_col = get_active_player_color() if pvp_mode else Color(0.0, 0.8, 1.0)
@@ -1459,7 +1435,8 @@ func _physics_process(delta: float) -> void:
 				camera_following = false
 				if has_node("/root/TensionManager"):
 					TensionManager.stop_tension()
-				_update_aim_and_camera()
+				if not (player.ball.holed_out_this_shot or player.ball.is_falling_in_hole):
+					_update_aim_and_camera()
 				_update_hole_button_labels()
 				if has_node("/root/ScreenOffsetManager"):
 					ScreenOffsetManager.on_ready_for_shot()

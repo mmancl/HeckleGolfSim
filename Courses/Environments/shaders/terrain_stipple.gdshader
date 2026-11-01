@@ -35,6 +35,8 @@ uniform float stipple_variety_strength : hint_range(0.0, 1.0) = 0.50;
 // -- Slope & Hill Relief Shading --
 uniform vec3 sun_direction = vec3(-0.45, -0.65, -0.60);
 uniform float slope_shading_strength : hint_range(0.0, 2.5) = 1.35;
+uniform vec3 active_hole_pos = vec3(0.0, -9999.0, 0.0);
+uniform float active_hole_radius = 0.054;
 
 varying vec3 v_world_normal;
 varying vec3 v_world_pos;
@@ -51,6 +53,12 @@ void vertex() {
 }
 
 void fragment() {
+	if (active_hole_pos.y > -1000.0) {
+		vec2 hole_delta = v_world_pos.xz - active_hole_pos.xz;
+		if (dot(hole_delta, hole_delta) < active_hole_radius * active_hole_radius) {
+			discard;
+		}
+	}
 	// 1. Sample Splat Map via UV2 (normalized [0, 1] course bounds)
 	vec4 splat = texture(splat_map, UV2);
 	float raw_green   = splat.r;

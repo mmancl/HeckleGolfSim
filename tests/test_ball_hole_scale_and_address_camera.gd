@@ -2,12 +2,18 @@ extends SceneTree
 
 # Targeted Unit Test: Golf Ball Size, Regulation Cup (Hole) Geometry, and Address Camera Framing
 
-func _initialize() -> void:
+var _has_run := false
+
+func _process(_delta: float) -> bool:
+	if _has_run:
+		return true
+	_has_run = true
 	print("\n=======================================================")
 	print("  Running Ball & Hole Size and Address Camera Tests")
 	print("=======================================================\n")
 
 	test_regulation_cup_geometry()
+	test_physical_recessed_cup_and_ball_physics()
 	test_address_camera_distance()
 	test_ball_visual_scale_and_offsets()
 
@@ -15,6 +21,7 @@ func _initialize() -> void:
 	print("  ALL BALL & HOLE SIZE / CAMERA TESTS PASSED! 🎉")
 	print("=======================================================\n")
 	quit(0)
+	return true
 
 
 func test_regulation_cup_geometry() -> void:
@@ -41,14 +48,21 @@ func test_regulation_cup_geometry() -> void:
 	var white_mesh = cup_white.mesh as CylinderMesh
 	assert(white_mesh != null, "CupWhite must have a CylinderMesh")
 	assert(is_equal_approx(white_mesh.top_radius, 0.054), "CupWhite top_radius must match cup_radius 0.054m, got: %f" % white_mesh.top_radius)
-	print("  PASS: CupWhite rim radius correctly matches 0.054m.")
+	assert(white_mesh.cap_top == false, "CupWhite must be a hollow open-top cylinder sleeve")
+	assert(cup_white.position.y < -0.02, "CupWhite sleeve must be recessed below green level, got y=%f" % cup_white.position.y)
+	print("  PASS: CupWhite is a recessed hollow cylindrical cup liner (radius 0.054m, y=%.3fm)." % cup_white.position.y)
 
 	var cup_dark = pin_node.get_node_or_null("Cup") as MeshInstance3D
 	assert(cup_dark != null, "Cup inner dark mesh must exist")
 	var dark_mesh = cup_dark.mesh as CylinderMesh
 	assert(dark_mesh != null, "Cup must have a CylinderMesh")
 	assert(dark_mesh.top_radius < 0.054 and dark_mesh.top_radius >= 0.045, "Cup dark interior radius must fit inside cup rim (0.048m), got: %f" % dark_mesh.top_radius)
-	print("  PASS: Cup inner dark mesh radius (%.3fm) cleanly fits within 0.054m outer liner." % dark_mesh.top_radius)
+	assert(cup_dark.position.y < -0.10, "Cup bottom drain plate must be recessed at bottom of 10.8cm cup, got y=%f" % cup_dark.position.y)
+	print("  PASS: Cup bottom plate (radius %.3fm) is recessed at bottom of physical cup (y=%.3fm)." % [dark_mesh.top_radius, cup_dark.position.y])
+
+	var cup_interior = pin_node.get_node_or_null("CupInterior") as MeshInstance3D
+	assert(cup_interior != null and cup_interior.mesh != null, "CupInterior 3D recessed cavity mesh must exist")
+	print("  PASS: CupInterior 3D recessed soil collar, inner wall, and ferrule cavity mesh exists.")
 
 	# 3. Putting Practice cup radius
 	var PuttingPracticeScript = load("res://Courses/Minigames/PuttingPractice/putting_practice.gd")
@@ -69,6 +83,106 @@ func test_regulation_cup_geometry() -> void:
 	ball.queue_free()
 	pp_instance.queue_free()
 	range_instance.queue_free()
+
+
+class MockCupCourse extends Node3D:
+	var current_hole_location := Vector3(5.0, 0.0, 0.0)
+	var cup_radius := 0.054
+	func get_height(_x: float, _z: float) -> float:
+		return 0.0
+
+
+func test_physical_recessed_cup_and_ball_physics() -> void:
+	print("\n--- Test 1B: Physical 3D Cup Cutout, Zero Outside Suction, Lip-Out & Gravity Drop ---")
+	var FlagBuilderScript = load("res://Courses/Range/flag_builder.gd")
+	var BallScript = load("res://Player/ball.gd")
+
+	var course = MockCupCourse.new()
+	root.add_child(course)
+
+	# 1. Verify terrain cutout shader parameter sync
+	var terrain = MeshInstance3D.new()
+	terrain.name = "UnifiedTerrain"
+	var sm = ShaderMaterial.new()
+	sm.shader = load("res://Courses/Environments/shaders/terrain_splat_realistic.gdshader")
+	terrain.material_override = sm
+	course.add_child(terrain)
+
+	FlagBuilderScript.sync_hole_cutout_to_terrain(course, course.current_hole_location, 0.054)
+	assert(sm.get_shader_parameter("active_hole_pos") == course.current_hole_location, "Terrain shader active_hole_pos must match current_hole_location")
+	assert(is_equal_approx(float(sm.get_shader_parameter("active_hole_radius")), 0.054), "Terrain shader active_hole_radius must be 0.054m")
+	print("  PASS: Terrain shader receives active_hole_pos and active_hole_radius cutout parameters.")
+
+	var player_node = Node3D.new()
+	player_node.name = "Player"
+	course.add_child(player_node)
+
+	var ball = BallScript.new()
+	player_node.add_child(ball)
+	ball.initialize_ball()
+	ball.set_surface(PhysicsEnums.SurfaceType.GREEN)
+
+	# 2. Verify ZERO artificial suction outside the 5mm bevel rim (e.g. 6.2 cm lateral offset)
+	ball.state = PhysicsEnums.BallState.ROLLOUT
+	ball.on_ground = true
+	ball.is_putt = true
+	ball.is_falling_in_hole = false
+	ball.holed_out_this_shot = false
+	ball.global_position = Vector3(5.0, ball._ball_radius, 0.062)
+	ball.velocity = Vector3(1.0, 0.0, 0.0)
+	ball.omega = Vector3.UP.cross(ball.velocity) / ball._ball_radius
+	ball._physics_process(0.016)
+	assert(not ball.is_falling_in_hole, "Ball outside cup rim (6.2cm) must NOT fall into hole")
+	assert(is_zero_approx(ball.velocity.z), "Ball outside 5mm rim bevel must experience ZERO artificial sideways suction, got vz=%f" % ball.velocity.z)
+	print("  PASS: Zero artificial suction outside physical cup rim bevel.")
+
+	# 3. Verify fast grazing putt on outer rim lips out instead of getting sucked in
+	ball.state = PhysicsEnums.BallState.ROLLOUT
+	ball.on_ground = true
+	ball.is_putt = true
+	ball.is_falling_in_hole = false
+	ball.holed_out_this_shot = false
+	ball.global_position = Vector3(5.0, ball._ball_radius, 0.052) # Just inside outer lip
+	ball.velocity = Vector3(2.2, 0.0, 0.0) # Too fast for outer edge capture
+	ball.omega = Vector3.UP.cross(ball.velocity) / ball._ball_radius
+	ball._physics_process(0.016)
+	assert(not ball.is_falling_in_hole, "Fast grazing putt on outer lip must lip out, not get sucked in")
+	assert(ball.velocity.z < 0.0, "Rim normal tilt must deflect grazing putt slightly toward hole (-Z)")
+	print("  PASS: Fast grazing putt on rim lips out with realistic normal deflection (vz=%.4f)." % ball.velocity.z)
+
+	# 4. Verify physical 3D gravity drop, inner wall collision, and settling at bottom of cup
+	ball.state = PhysicsEnums.BallState.ROLLOUT
+	ball.on_ground = true
+	ball.is_putt = true
+	ball.is_falling_in_hole = false
+	ball.holed_out_this_shot = false
+	ball.global_position = Vector3(4.97, ball._ball_radius, 0.0)
+	ball.velocity = Vector3(1.35, 0.0, 0.0)
+	ball.omega = Vector3(0.0, 0.0, -60.0)
+
+	# Step once to trigger tip-in over the open cup mouth
+	ball._physics_process(0.016)
+	assert(ball.is_falling_in_hole, "Ball rolling over open cup mouth at 1.35 m/s must tip into cup")
+	assert(ball.holed_out_this_shot, "holed_out_this_shot must be set true")
+	assert(ball.velocity.x > 0.5, "Horizontal momentum must be preserved on cup entry (no instant zeroing)")
+	assert(ball.velocity.y < 0.0, "Downward velocity must initiate gravity drop")
+
+	# Simulate 45 physics frames (0.72s) for gravity drop, inner wall rattle, and bottom bounce
+	for _i in range(45):
+		if ball.state == PhysicsEnums.BallState.REST:
+			break
+		ball._physics_process(0.016)
+
+	var expected_floor_y = course.current_hole_location.y - ball.CUP_DEPTH + ball._ball_radius
+	var radial_dist = Vector2(ball.global_position.x - course.current_hole_location.x, ball.global_position.z - course.current_hole_location.z).length()
+	var max_allowed_r = 0.054 - ball._ball_radius + 0.001
+
+	assert(ball.state == PhysicsEnums.BallState.REST, "Ball must settle to REST state at bottom of cup")
+	assert(is_equal_approx(ball.global_position.y, expected_floor_y), "Holed ball must rest at bottom of physical cup (expected y=%.4f, got y=%.4f)" % [expected_floor_y, ball.global_position.y])
+	assert(radial_dist <= max_allowed_r, "Holed ball center must remain inside cylindrical cup wall (r=%.4f <= %.4f)" % [radial_dist, max_allowed_r])
+	print("  PASS: Ball physically drops under gravity, bounces off cup wall/bottom, and rests at bottom of cup (y=%.4fm, r=%.4fm)." % [ball.global_position.y, radial_dist])
+
+	course.queue_free()
 
 
 func test_address_camera_distance() -> void:

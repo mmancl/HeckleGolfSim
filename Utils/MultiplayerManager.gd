@@ -156,6 +156,16 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 		var p_handedness = int(config.get("handedness", reg.get("handedness", 0)))
 		var p_ball_graphic = config.get("ball_graphic", reg.get("ball_graphic", "single_line"))
 
+		var p_owner_uid: String = str(config.get("owner_uid", ""))
+		var p_cloud_uid: String = str(config.get("cloud_uid", ""))
+		var p_slot_id: String = str(config.get("slot_id", "slot_%d" % i))
+		var my_uid: String = ""
+		if has_node("/root/CloudAuth"):
+			var ca = get_node("/root/CloudAuth")
+			if ca != null and ca.has_method("get_uid"):
+				my_uid = ca.get_uid()
+		var p_is_remote: bool = bool(config.get("is_remote", (not p_owner_uid.is_empty() and not my_uid.is_empty() and p_owner_uid != my_uid)))
+
 		var p := {
 			"name": p_name,
 			"tee": config.get("tee", "Blue"),
@@ -166,6 +176,10 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 			"bag": p_bag,
 			"skill_level": p_skill,
 			"handedness": p_handedness,
+			"slot_id": p_slot_id,
+			"owner_uid": p_owner_uid,
+			"cloud_uid": p_cloud_uid,
+			"is_remote": p_is_remote,
 			"strokes": 0,
 			"total_strokes": 0,
 			"last_hole_score": 0,
@@ -191,7 +205,8 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 			"last_starting_pos": Vector3.ZERO
 		}
 		players.append(p)
-		register_player(p_name, p_email, p_avatar, p_bag, config.get("tee", "Blue"), p_skill, p_handedness, p_ball_graphic)
+		if not p.get("is_remote", false):
+			register_player(p_name, p_email, p_avatar, p_bag, config.get("tee", "Blue"), p_skill, p_handedness, p_ball_graphic)
 		skins_won[p_name] = 0
 		
 	course_title = config_data.get("Title", "")
@@ -788,10 +803,11 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 		# Also record the shot globally
 		var p_name = active_player.get("name", "")
 		prev_longest_drive = -1.0
-		if not p_name.is_empty():
+		var is_remote: bool = bool(active_player.get("is_remote", false))
+		if not p_name.is_empty() and not is_remote:
 			prev_longest_drive = get_player_longest_drive(p_name)
 		recorded = false
-		if not p_name.is_empty() and not current_club.is_empty():
+		if not p_name.is_empty() and not current_club.is_empty() and not is_remote:
 			recorded = record_global_shot(p_name, current_club, raw_shot_data)
 
 	# Track lies and shot achievements
@@ -806,7 +822,7 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 	else:
 		active_player["last_putt_dist_yards"] = 0.0
 
-	if has_node("/root/AchievementManager") and not practice_mode_active and is_club_averages_tracking_enabled() and recorded:
+	if has_node("/root/AchievementManager") and not practice_mode_active and is_club_averages_tracking_enabled() and recorded and not active_player.get("is_remote", false):
 		var total_yds = (raw_shot_data.get("TotalDistance", 0.0) as float) * 1.09361
 		get_node("/root/AchievementManager").check_shot_achievements(active_player.get("name", ""), current_club, total_yds, prev_longest_drive)
 
@@ -827,17 +843,23 @@ func record_shot(final_position: Vector3, raw_shot_data: Dictionary = {}) -> voi
 		if player_node != null and player_node.get("ball") != null:
 			var ball_node = player_node.get("ball")
 			ball_holed = bool(ball_node.get("is_falling_in_hole")) or bool(ball_node.get("holed_out_this_shot"))
-		if active_player.get("holed_out", false) or ball_holed or dist_to_pin <= 0.12:
+		if active_player.get("holed_out", false) or ball_holed or dist_to_pin <= 0.054:
 			active_player["holed_out"] = true
 			print("[MultiplayerManager] Player %s holed out! Score: %d" % [active_player["name"], active_player["strokes"]])
+			var putt_dist = active_player.get("last_putt_dist_yards", 0.0)
+			if is_putter_club and putt_dist > 0.0 and not active_player.get("is_remote", false):
+				var putt_ft = putt_dist * 3.0
+				var p_src = raw_shot_data.get("src", "")
+				if p_src == "":
+					p_src = "lm" if (has_node("/root/LaunchMonitorManager") and get_node("/root/LaunchMonitorManager").get("status") == "Connected") else "manual"
+				record_player_longest_putt(active_player.get("name", ""), putt_ft, p_src == "lm")
 			if active_player["strokes"] <= par:
 				var gs_clap = _get_global_settings()
 				if gs_clap != null and gs_clap.has_method("play_golf_clap"):
 					gs_clap.play_golf_clap()
 			if has_node("/root/AnnouncerEngine"):
 				get_node("/root/AnnouncerEngine").call("AnnounceHoleScore", active_player["name"], active_player["strokes"], par)
-			if has_node("/root/AchievementManager"):
-				var putt_dist = active_player.get("last_putt_dist_yards", 0.0)
+			if has_node("/root/AchievementManager") and not active_player.get("is_remote", false):
 				var shot_dist = active_player.get("last_shot_distance_yards", 0.0)
 				get_node("/root/AchievementManager").check_hole_achievements(active_player.get("name", ""), par, active_player["strokes"], active_player.get("lies_in_hole", []), putt_dist, true, current_club, shot_dist)
 		else:
@@ -2148,6 +2170,18 @@ func resume_match(match_data: Dictionary) -> void:
 func _serialize_players(players_array: Array[Dictionary]) -> Array:
 	var serialized = []
 	for p in players_array:
+		if p.get("is_remote", false):
+			serialized.append({
+				"name": p.get("name", ""),
+				"is_remote": true,
+				"slot_id": p.get("slot_id", ""),
+				"owner_uid": p.get("owner_uid", ""),
+				"total_strokes": p.get("total_strokes", 0),
+				"hole_scores": p.get("hole_scores", {}).duplicate(),
+				"active": p.get("active", true)
+			})
+			continue
+
 		var dup = p.duplicate(true)
 		# Convert Vector3 position
 		if dup.has("position") and typeof(dup["position"]) == TYPE_VECTOR3:
@@ -2514,6 +2548,25 @@ func set_player_tee_by_name(p_name: String, new_tee: String) -> void:
 			set_player_tee(i, new_tee)
 			return
 
+static func generate_uuid_v4() -> String:
+	var b := PackedByteArray()
+	b.resize(16)
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	for i in range(16):
+		b[i] = rng.randi() % 256
+	# Version 4 (bits 4-7 of byte 6: 0100xxxx)
+	b[6] = (b[6] & 0x0f) | 0x40
+	# Variant 10xx (bits 6-7 of byte 8: 10xxxxxx)
+	b[8] = (b[8] & 0x3f) | 0x80
+	return "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x" % [
+		b[0], b[1], b[2], b[3],
+		b[4], b[5],
+		b[6], b[7],
+		b[8], b[9],
+		b[10], b[11], b[12], b[13], b[14], b[15]
+	]
+
 static func get_registered_players() -> Array[Dictionary]:
 	if not FileAccess.file_exists(REGISTRY_PATH):
 		return []
@@ -2522,18 +2575,307 @@ static func get_registered_players() -> Array[Dictionary]:
 		return []
 	var json = JSON.new()
 	var err = json.parse(file.get_as_text())
+	file.close()
 	if err == OK and typeof(json.data) == TYPE_ARRAY:
 		var result: Array[Dictionary] = []
+		var modified := false
+		var found_primary := false
 		for item in json.data:
 			if typeof(item) == TYPE_DICTIONARY:
-				result.append(item)
+				var entry: Dictionary = item
+				if not entry.has("profile_id") or str(entry.get("profile_id", "")).strip_edges().is_empty():
+					entry["profile_id"] = generate_uuid_v4()
+					modified = true
+				if not entry.has("cloud_uid"):
+					entry["cloud_uid"] = ""
+					modified = true
+				if not entry.has("link_role"):
+					entry["link_role"] = "none"
+					modified = true
+				elif str(entry.get("link_role")) == "primary":
+					if found_primary:
+						entry["link_role"] = "none"
+						modified = true
+					else:
+						found_primary = true
+				if not entry.has("last_synced_rev"):
+					entry["last_synced_rev"] = 0
+					modified = true
+				if not entry.has("last_synced_at"):
+					entry["last_synced_at"] = 0
+					modified = true
+				if not entry.has("cloud_lifetime_cache") or typeof(entry.get("cloud_lifetime_cache")) != TYPE_DICTIONARY:
+					entry["cloud_lifetime_cache"] = {}
+					modified = true
+				result.append(entry)
+		if DisplayServer.get_name() != "headless":
+			if _recover_orphaned_stats_profiles(result):
+				modified = true
+		if modified:
+			save_registered_players(result)
 		return result
 	return []
 
-func save_registered_players(players_list: Array) -> void:
+static func _recover_orphaned_stats_profiles(result: Array[Dictionary]) -> bool:
+	var stats_file_path := "user://player_club_stats.json"
+	if not FileAccess.file_exists(stats_file_path):
+		return false
+	var f := FileAccess.open(stats_file_path, FileAccess.READ)
+	if f == null:
+		return false
+	var parsed = JSON.parse_string(f.get_as_text())
+	f.close()
+	if not (parsed is Dictionary):
+		return false
+
+	var existing_lower := {}
+	for entry in result:
+		var n: String = str(entry.get("name", "")).strip_edges().to_lower()
+		if not n.is_empty():
+			existing_lower[n] = true
+
+	var ignored_names := {
+		"practice player": true,
+		"golfer 1": true,
+		"golfer 2": true,
+		"golfer 3": true,
+		"golfer 4": true,
+		"remoterival": true,
+		"localhost": true,
+		"host primary": true,
+		"renamedgolfer1": true,
+		"legacygolfer1": true,
+		"legacygolfer2": true
+	}
+
+	var recovered_any := false
+	for p_key in parsed.keys():
+		var p_name := str(p_key).strip_edges()
+		var p_lower := p_name.to_lower()
+		if p_name.is_empty() or existing_lower.has(p_lower) or ignored_names.has(p_lower):
+			continue
+		if p_name.begins_with("__") and p_name.ends_with("__"):
+			continue
+		var clubs_dict = parsed[p_key]
+		if not (clubs_dict is Dictionary):
+			continue
+		var total_shots := 0
+		for c_key in clubs_dict.keys():
+			var c_data = clubs_dict[c_key]
+			if c_data is Dictionary:
+				var hist = c_data.get("history", [])
+				if hist is Array:
+					total_shots += hist.size()
+				else:
+					total_shots += int(c_data.get("shots", 0))
+		if total_shots <= 0:
+			continue
+
+		var bag: Array = ["Dr", "3W", "5W", "4H", "4i", "5i", "6i", "7i", "8i", "9i", "PW", "GW", "SW", "LW", "Pt"]
+		result.append({
+			"profile_id": generate_uuid_v4(),
+			"name": p_name,
+			"preferred_tee": "Blue",
+			"avatar": "",
+			"handedness": 0,
+			"ball_graphic": "single_line",
+			"bag": bag,
+			"cloud_uid": "",
+			"link_role": "none",
+			"last_synced_rev": 0,
+			"last_synced_at": 0,
+			"cloud_lifetime_cache": {}
+		})
+		existing_lower[p_lower] = true
+		recovered_any = true
+	return recovered_any
+
+static func save_registered_players(players_list: Array) -> void:
 	var file = FileAccess.open(REGISTRY_PATH, FileAccess.WRITE)
 	if file != null:
 		file.store_string(JSON.stringify(players_list, "\t"))
+		file.close()
+
+func get_primary_player_name() -> String:
+	var registered = get_registered_players()
+	for p in registered:
+		if p.get("link_role", "") == "primary":
+			return str(p.get("name", ""))
+	return ""
+
+func set_primary_player(player_name: String, cloud_uid: String = "") -> void:
+	var registered = get_registered_players()
+	var canonical_target = player_name.strip_edges().to_lower()
+	for p in registered:
+		var p_name = str(p.get("name", "")).strip_edges().to_lower()
+		if not canonical_target.is_empty() and p_name == canonical_target:
+			p["link_role"] = "primary"
+			if not cloud_uid.is_empty():
+				p["cloud_uid"] = cloud_uid
+		else:
+			if p.get("link_role", "") == "primary":
+				p["link_role"] = "none"
+	save_registered_players(registered)
+	if has_node("/root/CloudSync"):
+		var cs = get_node("/root/CloudSync")
+		if not player_name.strip_edges().is_empty():
+			if not cloud_uid.strip_edges().is_empty() and cs.has_method("enqueue_historical_local_matches_for_profile"):
+				cs.call("enqueue_historical_local_matches_for_profile", player_name, cloud_uid)
+			cs.call("mark_profile_dirty", player_name)
+		if cs.has_signal("primary_profile_changed"):
+			cs.emit_signal("primary_profile_changed", player_name)
+
+func get_player_by_cloud_uid(cloud_uid: String) -> Dictionary:
+	if cloud_uid.strip_edges().is_empty():
+		return {}
+	var registered = get_registered_players()
+	for p in registered:
+		if str(p.get("cloud_uid", "")).strip_edges() == cloud_uid.strip_edges():
+			return p
+	return {}
+
+func rename_player_profile(old_name: String, new_name: String) -> bool:
+	var clean_old = old_name.strip_edges()
+	var clean_new = new_name.strip_edges()
+	if clean_old.is_empty() or clean_new.is_empty():
+		return false
+	if clean_old.to_lower() == clean_new.to_lower():
+		return true
+
+	# 1. Update registry
+	var registered = get_registered_players()
+	var found := false
+	for p in registered:
+		var curr_name = str(p.get("name", "")).strip_edges()
+		if curr_name.to_lower() == clean_new.to_lower() and curr_name.to_lower() != clean_old.to_lower():
+			push_error("[MultiplayerManager] rename_player_profile failed: destination name already exists")
+			return false
+		if curr_name.to_lower() == clean_old.to_lower():
+			p["name"] = clean_new
+			found = true
+	if not found:
+		return false
+	save_registered_players(registered)
+
+	# 2. Update player_club_stats.json
+	var stats = load_global_club_stats()
+	var matching_key = _find_matching_player_key_in_dict(stats, clean_old)
+	if not matching_key.is_empty() and stats.has(matching_key):
+		stats[clean_new] = stats[matching_key]
+		stats.erase(matching_key)
+		save_global_club_stats(stats)
+
+	# 3. Update player_achievements.json
+	var ach_path = "user://player_achievements.json"
+	if FileAccess.file_exists(ach_path):
+		var af = FileAccess.open(ach_path, FileAccess.READ)
+		if af != null:
+			var txt = af.get_as_text()
+			af.close()
+			var parsed = JSON.parse_string(txt)
+			if parsed is Dictionary:
+				var m_ach_key = _find_matching_player_key_in_dict(parsed, clean_old)
+				if not m_ach_key.is_empty():
+					parsed[clean_new] = parsed[m_ach_key]
+					parsed.erase(m_ach_key)
+					var out_f = FileAccess.open(ach_path, FileAccess.WRITE)
+					if out_f != null:
+						out_f.store_string(JSON.stringify(parsed, "\t"))
+						out_f.close()
+	if has_node("/root/AchievementManager"):
+		var ach_node = get_node("/root/AchievementManager")
+		if "_player_data" in ach_node and ach_node.get("_player_data") is Dictionary:
+			var pdata: Dictionary = ach_node.get("_player_data")
+			if pdata.has(clean_old):
+				pdata[clean_new] = pdata[clean_old]
+				pdata.erase(clean_old)
+
+	# 4. Update player_swing_issues.json
+	var swing_path = "user://player_swing_issues.json"
+	if FileAccess.file_exists(swing_path):
+		var sf = FileAccess.open(swing_path, FileAccess.READ)
+		if sf != null:
+			var txt = sf.get_as_text()
+			sf.close()
+			var parsed = JSON.parse_string(txt)
+			if parsed is Dictionary:
+				var m_swing_key = _find_matching_player_key_in_dict(parsed, clean_old)
+				if not m_swing_key.is_empty():
+					parsed[clean_new] = parsed[m_swing_key]
+					parsed.erase(m_swing_key)
+					var out_sf = FileAccess.open(swing_path, FileAccess.WRITE)
+					if out_sf != null:
+						out_sf.store_string(JSON.stringify(parsed, "\t"))
+						out_sf.close()
+
+	# 5. Update match history files in user://match_history/
+	var match_dir = "user://match_history"
+	if DirAccess.dir_exists_absolute(match_dir):
+		var dir = DirAccess.open(match_dir)
+		if dir != null:
+			dir.list_dir_begin()
+			var fn = dir.get_next()
+			while fn != "":
+				if not dir.current_is_dir() and fn.ends_with(".json"):
+					var m_file_path = match_dir.path_join(fn)
+					var mf = FileAccess.open(m_file_path, FileAccess.READ)
+					if mf != null:
+						var m_txt = mf.get_as_text().strip_edges()
+						mf.close()
+						if not m_txt.is_empty():
+							var m_json = JSON.parse_string(m_txt)
+							if m_json is Dictionary:
+								var modified_m := false
+								if m_json.has("players") and m_json["players"] is Array:
+									for p in m_json["players"]:
+										if p is Dictionary and str(p.get("name", "")).to_lower() == clean_old.to_lower():
+											p["name"] = clean_new
+											modified_m = true
+								for key in ["skins_won", "carryover_eligible_players", "team_assignments"]:
+									if m_json.has(key) and m_json[key] is Dictionary:
+										for k in m_json[key].keys():
+											if str(k).to_lower() == clean_old.to_lower():
+												m_json[key][clean_new] = m_json[key][k]
+												m_json[key].erase(k)
+												modified_m = true
+								if modified_m:
+									var out_mf = FileAccess.open(m_file_path, FileAccess.WRITE)
+									if out_mf != null:
+										out_mf.store_string(JSON.stringify(m_json, "\t"))
+										out_mf.close()
+				fn = dir.get_next()
+			dir.list_dir_end()
+
+	# 6. Update current in-memory active participants if playing
+	for pl in players:
+		if str(pl.get("name", "")).to_lower() == clean_old.to_lower():
+			pl["name"] = clean_new
+
+	if has_node("/root/CloudSync"):
+		get_node("/root/CloudSync").call("mark_profile_dirty", clean_new)
+
+	return true
+
+func record_player_longest_putt(player_name: String, putt_ft: float, is_lm: bool = true) -> void:
+	if not is_lm or player_name.strip_edges().is_empty() or putt_ft <= 0.0:
+		return
+	for p in players:
+		if p.get("name", "") == player_name and p.get("is_remote", false):
+			return
+	var canonical_name = get_canonical_player_name(player_name)
+	var stats = load_global_club_stats()
+	var matching_key = _find_matching_player_key_in_dict(stats, canonical_name)
+	var target_key = matching_key if not matching_key.is_empty() else canonical_name
+	if not stats.has(target_key):
+		stats[target_key] = {}
+	if not stats[target_key].has("_records") or typeof(stats[target_key]["_records"]) != TYPE_DICTIONARY:
+		stats[target_key]["_records"] = {}
+	var cur_longest = float(stats[target_key]["_records"].get("longest_putt_ft", 0.0))
+	if putt_ft > cur_longest:
+		stats[target_key]["_records"]["longest_putt_ft"] = putt_ft
+		save_global_club_stats(stats)
+		if has_node("/root/CloudSync"):
+			get_node("/root/CloudSync").call("mark_profile_dirty", target_key)
 
 func get_player_total_shots(player_name: String) -> int:
 	var global_stats = load_global_club_stats()
@@ -2636,6 +2978,8 @@ func update_player_profile(player_name: String, email: String, avatar: String, p
 			if not cur_p.is_empty() and cur_p.get("name", "").to_lower() == player_name.to_lower():
 				_sync_launch_monitor_for_player(cur_p)
 			emit_signal("player_ball_graphic_changed", player_name, p["ball_graphic"])
+			if has_node("/root/CloudSync"):
+				get_node("/root/CloudSync").call("mark_profile_dirty", player_name)
 			return true
 	return false
 
@@ -2728,6 +3072,8 @@ func set_player_bag(player_name: String, bag: Array) -> bool:
 			break
 			
 	emit_signal("player_bag_changed", player_name, clean_bag)
+	if found and has_node("/root/CloudSync"):
+		get_node("/root/CloudSync").call("mark_profile_dirty", player_name)
 	return found
 
 func register_player(player_name: String, email: String = "", avatar: String = "", bag: Array = [], preferred_tee: String = "", skill_level: String = "mid_handicap", handedness: int = 0, ball_graphic: String = "single_line") -> void:
@@ -2760,9 +3106,12 @@ func register_player(player_name: String, email: String = "", avatar: String = "
 				changed = true
 			if changed:
 				save_registered_players(registered)
+				if has_node("/root/CloudSync"):
+					get_node("/root/CloudSync").call("mark_profile_dirty", player_name)
 			return # Already exists
 	
 	var new_player = {
+		"profile_id": generate_uuid_v4(),
 		"name": player_name,
 		"email": email.strip_edges(),
 		"avatar": avatar.strip_edges(),
@@ -2771,10 +3120,17 @@ func register_player(player_name: String, email: String = "", avatar: String = "
 		"skill_level": skill_level.strip_edges() if not skill_level.is_empty() else "mid_handicap",
 		"handedness": handedness,
 		"ball_graphic": ball_graphic.strip_edges() if not ball_graphic.is_empty() else "single_line",
-		"created_at": Time.get_unix_time_from_system()
+		"created_at": Time.get_unix_time_from_system(),
+		"cloud_uid": "",
+		"link_role": "none",
+		"last_synced_rev": 0,
+		"last_synced_at": 0,
+		"cloud_lifetime_cache": {}
 	}
 	registered.append(new_player)
 	save_registered_players(registered)
+	if has_node("/root/CloudSync"):
+		get_node("/root/CloudSync").call("mark_profile_dirty", player_name)
 	print("[MultiplayerManager] Registered new player: ", player_name)
 
 func delete_player_permanently(player_name: String) -> void:
@@ -2796,12 +3152,24 @@ func delete_player_permanently(player_name: String) -> void:
 	print("[MultiplayerManager] Permanently deleted player: ", player_name)
 
 func clear_player_ball_history(player_name: String) -> void:
-	# Clear entry from club stats
+	# Clear entry from club stats and record tombstone
 	var stats = load_global_club_stats()
-	if stats.has(player_name):
-		stats[player_name] = {}
-		save_global_club_stats(stats)
-	print("[MultiplayerManager] Cleared ball history for player: ", player_name)
+	var matching_key = _find_matching_player_key_in_dict(stats, player_name)
+	var target_key = matching_key if not matching_key.is_empty() else player_name
+	if not stats.has(target_key):
+		stats[target_key] = {}
+	var tombstones = stats[target_key].get("_tombstones", {})
+	if typeof(tombstones) != TYPE_DICTIONARY:
+		tombstones = {}
+	tombstones["cleared_all_at"] = int(Time.get_unix_time_from_system())
+	stats[target_key] = {
+		"_tombstones": tombstones,
+		"_records": {}
+	}
+	save_global_club_stats(stats)
+	if has_node("/root/CloudSync"):
+		get_node("/root/CloudSync").call("mark_profile_dirty", target_key)
+	print("[MultiplayerManager] Cleared ball history for player: ", target_key)
 
 
 # --- Global Club Stats Persistence ---
@@ -2821,6 +3189,7 @@ func load_global_club_stats(force_reload: bool = false) -> Dictionary:
 		return _cached_global_club_stats
 	var json = JSON.new()
 	var err = json.parse(file.get_as_text())
+	file.close()
 	if err == OK:
 		if typeof(json.data) == TYPE_DICTIONARY:
 			var stats: Dictionary = json.data
@@ -2831,18 +3200,25 @@ func load_global_club_stats(force_reload: bool = false) -> Dictionary:
 				for clb in stats[p].keys():
 					if typeof(stats[p][clb]) != TYPE_ARRAY:
 						continue
-					# Repair legacy corrupted SideDistance
 					for entry in stats[p][clb]:
-						if typeof(entry) == TYPE_DICTIONARY and entry.has("SideDistance"):
-							var sd = absf(float(entry["SideDistance"]))
-							var td = absf(float(entry.get("TotalDistance", entry.get("CarryDistance", 0.0))))
-							# If SideDistance was poisoned by legacy world Z bug (> 100m or > TotalDistance * 1.2)
-							if sd > 100.0 or (td > 15.0 and sd > td * 1.2):
-								entry["SideDistance"] = 0.0
+						if typeof(entry) == TYPE_DICTIONARY:
+							if not entry.has("id") or str(entry.get("id", "")).strip_edges().is_empty():
+								var json_str = JSON.stringify(entry)
+								entry["id"] = json_str.sha1_text().substr(0, 12)
 								modified = true
+							if not entry.has("t"):
+								entry["t"] = 0
+								modified = true
+							if entry.has("SideDistance"):
+								var sd = absf(float(entry["SideDistance"]))
+								var td = absf(float(entry.get("TotalDistance", entry.get("CarryDistance", 0.0))))
+								# If SideDistance was poisoned by legacy world Z bug (> 100m or > TotalDistance * 1.2)
+								if sd > 100.0 or (td > 15.0 and sd > td * 1.2):
+									entry["SideDistance"] = 0.0
+									modified = true
 			if modified:
 				save_global_club_stats(stats)
-				print("[MultiplayerManager] Repaired legacy corrupted SideDistance entries in player_club_stats.json")
+				print("[MultiplayerManager] Backfilled missing shot IDs/timestamps or repaired corrupted entries in player_club_stats.json")
 			_cached_global_club_stats = stats
 			return _cached_global_club_stats
 	_cached_global_club_stats = {}
@@ -2903,16 +3279,18 @@ func _find_matching_player_key_in_dict(dict: Dictionary, player_name: String) ->
 	return ""
 
 func is_club_averages_tracking_enabled() -> bool:
-	if has_node("/root/GlobalSettings") and GlobalSettings.range_settings != null:
-		if "track_club_averages" in GlobalSettings.range_settings:
-			return bool(GlobalSettings.range_settings.track_club_averages.value)
+	var gs = _get_global_settings()
+	if gs != null and gs.range_settings != null:
+		if "track_club_averages" in gs.range_settings:
+			return bool(gs.range_settings.track_club_averages.value)
 	return true
 
 func set_club_averages_tracking_enabled(enabled: bool) -> void:
-	if has_node("/root/GlobalSettings") and GlobalSettings.range_settings != null:
-		if "track_club_averages" in GlobalSettings.range_settings:
-			GlobalSettings.range_settings.track_club_averages.value = enabled
-			GlobalSettings.save_settings()
+	var gs = _get_global_settings()
+	if gs != null and gs.range_settings != null:
+		if "track_club_averages" in gs.range_settings:
+			gs.range_settings.track_club_averages.value = enabled
+			gs.save_settings()
 	emit_signal("club_averages_tracking_toggled", enabled)
 
 func record_global_shot(player_name: String, club_name: String, raw_shot: Dictionary) -> bool:
@@ -2921,6 +3299,9 @@ func record_global_shot(player_name: String, club_name: String, raw_shot: Dictio
 		return false
 	if player_name.is_empty() or club_name.is_empty():
 		return false
+	for p in players:
+		if p.get("name", "") == player_name and p.get("is_remote", false):
+			return false
 	var canonical_name = get_canonical_player_name(player_name)
 	var club_code = normalize_club_code(club_name)
 	var stats = load_global_club_stats()
@@ -2990,7 +3371,20 @@ func record_global_shot(player_name: String, club_name: String, raw_shot: Dictio
 	if target_dist_m <= 0.0 and aim_dist_yds > 0.0:
 		target_dist_m = aim_dist_yds / 1.09361
 
+	var shot_id = "%08x%04x" % [int(Time.get_unix_time_from_system()), randi() & 0xffff]
+	var shot_t = int(Time.get_unix_time_from_system())
+	var shot_src: String = "manual"
+	if raw_shot.has("src"):
+		shot_src = str(raw_shot["src"])
+	elif raw_shot.get("is_launch_monitor", false) or raw_shot.get("from_lm", false):
+		shot_src = "lm"
+	elif has_node("/root/LaunchMonitorManager") and get_node("/root/LaunchMonitorManager").get("status") == "Connected":
+		shot_src = "lm"
+
 	var entry = {
+		"id": shot_id,
+		"t": shot_t,
+		"src": shot_src,
 		"CarryDistance": stored_carry,
 		"Speed": stored_speed,
 		"BallSpeed": stored_speed,
@@ -3033,9 +3427,10 @@ func record_global_shot(player_name: String, club_name: String, raw_shot: Dictio
 	# Track longest drive personal record unconditionally, regardless of standard deviation outlier checks
 	var shot_total_yds = float(entry.get("TotalDistance", entry.get("CarryDistance", 0.0))) * 1.09361
 	if club_code == "Dr" and shot_total_yds > 0.0:
-		var current_longest = float(stats[target_key]["_records"].get("longest_drive", 0.0))
-		if shot_total_yds > current_longest:
-			stats[target_key]["_records"]["longest_drive"] = shot_total_yds
+		if shot_src == "lm" or shot_src.is_empty():
+			var current_longest = float(stats[target_key]["_records"].get("longest_drive", 0.0))
+			if shot_total_yds > current_longest:
+				stats[target_key]["_records"]["longest_drive"] = shot_total_yds
 
 	# Exclude outlier shots (extreme duffs or sensor glitches) from standard club averages
 	if is_shot_outlier(stats[target_key][club_code], entry, club_code):
@@ -3049,6 +3444,8 @@ func record_global_shot(player_name: String, club_name: String, raw_shot: Dictio
 
 	stats[target_key][club_code].append(entry)
 	save_global_club_stats(stats)
+	if has_node("/root/CloudSync"):
+		get_node("/root/CloudSync").call("mark_profile_dirty", target_key)
 	return true
 
 func remove_last_global_shot(player_name: String, club_name: String) -> void:
@@ -3068,12 +3465,22 @@ func clear_player_club_shot_data(player_name: String, club_name: String) -> void
 	var club_code = normalize_club_code(club_name)
 	var stats = load_global_club_stats()
 	var matching_key = _find_matching_player_key_in_dict(stats, player_name)
-	if not matching_key.is_empty() and stats.has(matching_key) and stats[matching_key].has(club_code):
-		stats[matching_key].erase(club_code)
-		if club_code == "Dr" and stats[matching_key].has("_records"):
-			stats[matching_key]["_records"].erase("longest_drive")
+	var target_key = matching_key if not matching_key.is_empty() else player_name
+	if not stats.has(target_key):
+		stats[target_key] = {}
+	if stats.has(target_key):
+		stats[target_key].erase(club_code)
+		if club_code == "Dr" and stats[target_key].has("_records"):
+			stats[target_key]["_records"].erase("longest_drive")
+		if not stats[target_key].has("_tombstones") or typeof(stats[target_key]["_tombstones"]) != TYPE_DICTIONARY:
+			stats[target_key]["_tombstones"] = {}
+		if not stats[target_key]["_tombstones"].has("cleared_clubs") or typeof(stats[target_key]["_tombstones"]["cleared_clubs"]) != TYPE_DICTIONARY:
+			stats[target_key]["_tombstones"]["cleared_clubs"] = {}
+		stats[target_key]["_tombstones"]["cleared_clubs"][club_code] = int(Time.get_unix_time_from_system())
 		save_global_club_stats(stats)
-		print("[MultiplayerManager] Cleared shot data for player: %s, club: %s" % [matching_key, club_code])
+		if has_node("/root/CloudSync"):
+			get_node("/root/CloudSync").call("mark_profile_dirty", target_key)
+		print("[MultiplayerManager] Cleared shot data for player: %s, club: %s" % [target_key, club_code])
 
 # --- Dynamic Club Suggestions & Outlier Filtering ---
 
@@ -3631,7 +4038,8 @@ func calculate_player_stats(player_name: String) -> Dictionary:
 		"avg_to_par": 0.0,
 		"avg_to_par_valid": false,
 		"best_courses": {},
-		"longest_drive": 0.0
+		"longest_drive": 0.0,
+		"longest_putt_ft": 0.0
 	}
 	
 	var dir_path = "user://match_history"
@@ -3661,7 +4069,7 @@ func calculate_player_stats(player_name: String) -> Dictionary:
 									for p in players_list:
 										if typeof(p) == TYPE_DICTIONARY and p.get("active", true):
 											active_players.append(p)
-											if p.get("name", "").to_lower() == player_name.to_lower():
+											if not p.get("is_remote", false) and p.get("name", "").to_lower() == player_name.to_lower():
 												target_player = p
 												
 									if target_player != null:
@@ -3781,12 +4189,16 @@ func calculate_player_stats(player_name: String) -> Dictionary:
 	var matching_player_key = _find_matching_player_key_in_dict(global_stats, player_name)
 	var player_club_stats = global_stats.get(matching_player_key, {}) if not matching_player_key.is_empty() else {}
 	var max_drive := float(stats.get("longest_drive", 0.0))
+	var max_putt := float(stats.get("longest_putt_ft", 0.0))
 	if typeof(player_club_stats) == TYPE_DICTIONARY:
 		var records = player_club_stats.get("_records", {})
 		if typeof(records) == TYPE_DICTIONARY:
 			var rec_ld = float(records.get("longest_drive", 0.0))
 			if rec_ld > max_drive:
 				max_drive = rec_ld
+			var rec_lp = float(records.get("longest_putt_ft", 0.0))
+			if rec_lp > max_putt:
+				max_putt = rec_lp
 		for clb in player_club_stats.keys():
 			if str(clb).begins_with("_"):
 				continue
@@ -3800,7 +4212,34 @@ func calculate_player_stats(player_name: String) -> Dictionary:
 							if dist > max_drive:
 								max_drive = dist
 	stats["longest_drive"] = max_drive
-	
+	stats["longest_putt_ft"] = max_putt
+
+	var registered = get_registered_players()
+	var reg_player = null
+	for p in registered:
+		if str(p.get("name", "")).to_lower() == player_name.to_lower():
+			reg_player = p
+			break
+	if reg_player != null and reg_player.has("cloud_lifetime_cache") and typeof(reg_player["cloud_lifetime_cache"]) == TYPE_DICTIONARY:
+		var clc: Dictionary = reg_player["cloud_lifetime_cache"]
+		if not clc.is_empty():
+			stats["matches_played"] = maxi(int(stats.get("matches_played", 0)), int(clc.get("matches_played", 0)))
+			stats["wins"] = maxi(int(stats.get("wins", 0)), int(clc.get("wins", 0)))
+			stats["losses"] = maxi(int(stats.get("losses", 0)), int(clc.get("losses", 0)))
+			stats["ties"] = maxi(int(stats.get("ties", 0)), int(clc.get("ties", 0)))
+			stats["single_player_completed"] = maxi(int(stats.get("single_player_completed", 0)), int(clc.get("single_player_completed", 0)))
+			stats["longest_drive"] = maxf(float(stats.get("longest_drive", 0.0)), float(clc.get("longest_drive_yds", clc.get("longest_drive", 0.0))))
+			stats["longest_putt_ft"] = maxf(float(stats.get("longest_putt_ft", 0.0)), float(clc.get("longest_putt_ft", 0.0)))
+
+			var clc_courses = clc.get("best_courses", {})
+			if typeof(clc_courses) == TYPE_DICTIONARY:
+				for course_t in clc_courses:
+					var c_data = clc_courses[course_t]
+					if typeof(c_data) == TYPE_DICTIONARY:
+						var c_diff = int(c_data.get("diff", 999))
+						if not stats["best_courses"].has(course_t) or c_diff < int(stats["best_courses"][course_t].get("diff", 999)):
+							stats["best_courses"][course_t] = c_data
+
 	return stats
 
 func get_player_longest_drive(player_name: String) -> float:
@@ -3842,6 +4281,9 @@ func save_player_swing_issues(data: Dictionary) -> void:
 func record_player_swing_issues(player_name: String, recommendations: Array) -> void:
 	if player_name.is_empty() or recommendations.is_empty():
 		return
+	for p in players:
+		if p.get("name", "") == player_name and p.get("is_remote", false):
+			return
 	
 	var canonical_name = get_canonical_player_name(player_name)
 	var date_dict = Time.get_date_dict_from_system()
@@ -3884,6 +4326,8 @@ func record_player_swing_issues(player_name: String, recommendations: Array) -> 
 		
 	if recorded_any:
 		save_player_swing_issues(all_data)
+		if has_node("/root/CloudSync"):
+			get_node("/root/CloudSync").call("mark_profile_dirty", target_key)
 		print("[MultiplayerManager] Recorded swing recommendations for %s (%s)" % [target_key, current_month])
 
 func get_player_swing_issues(player_name: String) -> Dictionary:
@@ -3896,10 +4340,16 @@ func get_player_swing_issues(player_name: String) -> Dictionary:
 func clear_player_swing_issues(player_name: String) -> void:
 	var all_data = load_player_swing_issues()
 	var matching_key = _find_matching_player_key_in_dict(all_data, player_name)
-	if not matching_key.is_empty() and all_data.has(matching_key):
-		all_data.erase(matching_key)
-		save_player_swing_issues(all_data)
-		print("[MultiplayerManager] Cleared swing issues for player: ", matching_key)
+	var target_key = matching_key if not matching_key.is_empty() else player_name
+	all_data[target_key] = {
+		"_cleared_at": int(Time.get_unix_time_from_system()),
+		"all_time": {},
+		"monthly": {}
+	}
+	save_player_swing_issues(all_data)
+	if has_node("/root/CloudSync"):
+		get_node("/root/CloudSync").call("mark_profile_dirty", target_key)
+	print("[MultiplayerManager] Cleared swing issues for player: ", target_key)
 
 func format_player_swing_issues_summary(player_name: String) -> String:
 	var p_issues = get_player_swing_issues(player_name)
@@ -3929,3 +4379,103 @@ func format_player_swing_issues_summary(player_name: String) -> String:
 		out += "  • %s: %d\n" % [issue_name, int(all_time[issue_name])]
 		
 	return out + "\n"
+
+
+static func _vec3_from_array(val: Variant) -> Vector3:
+	if val is Vector3:
+		return val
+	if val is Array and val.size() >= 3:
+		return Vector3(float(val[0]), float(val[1]), float(val[2]))
+	return Vector3.ZERO
+
+
+func record_remote_shot(event: Dictionary) -> void:
+	var target_p: Dictionary = {}
+	var slot_id: String = str(event.get("slot_id", ""))
+	if not slot_id.is_empty():
+		for p in players:
+			if p.get("slot_id", "") == slot_id:
+				target_p = p
+				break
+	if target_p.is_empty():
+		target_p = get_active_player()
+	if target_p.is_empty():
+		return
+
+	var start_pos := _vec3_from_array(event.get("start", target_p.get("position", Vector3.ZERO)))
+	var final_position := _vec3_from_array(event.get("end", start_pos))
+
+	target_p["last_starting_pos"] = start_pos
+	target_p["position"] = final_position
+	target_p["last_shot_club"] = str(event.get("club", "Dr"))
+	target_p["lie_type"] = str(event.get("lie_end", "fairway"))
+	target_p["last_shot_penalty"] = int(event.get("penalty", 0))
+
+	var hole_idx: int = clampi(current_hole_index, 0, maxi(0, hole_ids.size() - 1)) if not hole_ids.is_empty() else 0
+	var hole_id := str(event.get("hole_id", hole_ids[hole_idx] if not hole_ids.is_empty() else ""))
+
+	var scores_map = event.get("scores", {})
+	if scores_map is Dictionary and scores_map.has(slot_id):
+		var slot_score: Dictionary = scores_map[slot_id]
+		target_p["strokes"] = int(slot_score.get("hole_strokes", target_p.get("strokes", 0)))
+		target_p["total_strokes"] = int(slot_score.get("total_strokes", target_p.get("total_strokes", 0)))
+		target_p["holed_out"] = bool(slot_score.get("holed_out", target_p.get("holed_out", false)))
+	else:
+		if event.has("strokes"):
+			target_p["strokes"] = int(event["strokes"])
+		elif event.has("penalty"):
+			target_p["strokes"] = int(target_p.get("strokes", 0)) + 1 + int(event.get("penalty", 0))
+		else:
+			target_p["strokes"] = int(target_p.get("strokes", 0)) + 1
+		if event.has("total_strokes"):
+			target_p["total_strokes"] = int(event["total_strokes"])
+		else:
+			target_p["total_strokes"] = int(target_p.get("total_strokes", 0)) + 1 + int(event.get("penalty", 0))
+		if event.has("holed_out"):
+			target_p["holed_out"] = bool(event["holed_out"])
+
+	if not target_p.has("hole_scores") or not (target_p["hole_scores"] is Dictionary):
+		target_p["hole_scores"] = {}
+	if not hole_id.is_empty():
+		target_p["hole_scores"][hole_id] = target_p["strokes"]
+
+	# Snap pin position if included and differs by > 0.05m
+	if event.has("pin"):
+		var pin_vec := _vec3_from_array(event["pin"])
+		if not pin_vec.is_zero_approx():
+			var cur_pin := _get_target_pin_position()
+			if cur_pin.distance_to(pin_vec) > 0.05:
+				set_current_pin_position(pin_vec)
+
+	var gimme_strokes := int(event.get("gimme_strokes", 0))
+	if gimme_strokes > 0:
+		last_gimme_strokes = gimme_strokes
+		emit_signal("gimme_awarded", target_p, gimme_strokes)
+
+	emit_signal("shot_recorded", target_p, {})
+	emit_signal("distance_queue_updated")
+
+	if bool(event.get("hole_complete", false)):
+		for p in players:
+			if p.get("active", true) and not p.get("paused", false):
+				p["last_hole_score"] = p["strokes"]
+				if not hole_id.is_empty():
+					p["hole_scores"][hole_id] = p["strokes"]
+			elif not p.get("active", true):
+				p["last_hole_score"] = 0
+				if not hole_id.is_empty():
+					p["hole_scores"][hole_id] = null
+
+		if game_mode == "Skins" and not hole_id.is_empty():
+			_evaluate_skins_for_hole(hole_id)
+
+		save_current_match()
+		emit_signal("hole_completed", players)
+	else:
+		var next_slot := str(event.get("next_slot", ""))
+		if not next_slot.is_empty():
+			for idx in range(players.size()):
+				if players[idx].get("slot_id", "") == next_slot:
+					active_player_index = idx
+					break
+		emit_signal("active_player_changed", get_active_player())

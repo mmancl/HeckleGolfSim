@@ -1406,6 +1406,8 @@ func _attach_swing_replay_modal(modal: Control) -> void:
 			_detached_window.remove_child(modal)
 		_detached_window.queue_free()
 		_detached_window = null
+		if get_tree() != null and get_tree().root != null:
+			get_tree().root.gui_embed_subwindows = true
 
 	_detached_modal = null
 	modal.is_detached = false
@@ -1438,6 +1440,8 @@ func _close_detached_window() -> void:
 		_detached_window.queue_free()
 		_detached_window = null
 		_detached_modal = null
+		if get_tree() != null and get_tree().root != null:
+			get_tree().root.gui_embed_subwindows = true
 
 
 func _format_angle(value) -> String:

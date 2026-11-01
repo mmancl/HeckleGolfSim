@@ -331,6 +331,33 @@ func test_weather_lighting_in_range_scene() -> void:
 			assert(hide_helpers_btn.get_node_or_null(hide_helpers_btn.focus_neighbor_left) == toggle, "HideHelpersButton left neighbor must lead to WeatherToggleButton")
 		print("  PASS: Controller focus modes, focus styling, and HUD focus graph neighbors verified.")
 
+	# Test Course Play focus neighbor wiring and dialog checks
+	var course_play_script = load("res://Courses/CoursePlay/course_play.gd")
+	var course_play = Node3D.new()
+	course_play.set_script(course_play_script)
+	course_play.course_instance = inst
+	course_play.range_ui = range_ui
+	inst.add_child(course_play)
+	course_play._update_hud_focus_neighbors()
+
+	var add_remove_btn = range_ui.get_node_or_null("GridCanvas/AddRemoveButton")
+	var hide_helpers_btn = range_ui.get_node_or_null("OverlayLayer/HideHelpersButton")
+	if add_remove_btn != null and add_remove_btn.visible:
+		assert(add_remove_btn.get_node_or_null(add_remove_btn.focus_neighbor_right) == slider, "CoursePlay: AddRemoveButton right neighbor must lead to TimeOfDaySlider")
+	assert(slider.get_node_or_null(slider.focus_neighbor_right) == toggle, "CoursePlay: TimeOfDaySlider right neighbor must lead to WeatherToggleButton")
+	assert(toggle.get_node_or_null(toggle.focus_neighbor_left) == slider, "CoursePlay: WeatherToggleButton left neighbor must lead to TimeOfDaySlider")
+	var cp_hide_helpers = course_play.hide_helpers_btn if (course_play.hide_helpers_btn != null and is_instance_valid(course_play.hide_helpers_btn)) else hide_helpers_btn
+	if cp_hide_helpers != null and cp_hide_helpers.visible:
+		assert(toggle.get_node_or_null(toggle.focus_neighbor_right) == cp_hide_helpers, "CoursePlay: WeatherToggleButton right neighbor must lead to HideHelpersButton")
+		assert(cp_hide_helpers.get_node_or_null(cp_hide_helpers.focus_neighbor_left) == toggle, "CoursePlay: HideHelpersButton left neighbor must lead to WeatherToggleButton")
+
+	# Test dialog check in CoursePlay recognizes slider and toggle
+	slider.grab_focus()
+	assert(course_play.is_any_dialog_open() == true, "CoursePlay is_any_dialog_open must be true when slider has focus")
+	toggle.grab_focus()
+	assert(course_play.is_any_dialog_open() == true, "CoursePlay is_any_dialog_open must be true when weather toggle has focus")
+	print("  PASS: CoursePlay controller focus graph and aim protection verified.")
+
 	# Test changing slider and toggling weather on active course
 	ctrl.set_lighting_time(0.0)
 	assert(is_equal_approx(ctrl.get_lighting_time(), 0.0), "Slider sets time ratio to 0.0")

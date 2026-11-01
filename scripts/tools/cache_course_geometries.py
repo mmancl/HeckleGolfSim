@@ -49,6 +49,8 @@ def fetch_course_geometry(lat: float, lon: float, course_name: str, timeout: int
       nwr(around:1000, {lat:.6f}, {lon:.6f})["natural"="tree_row"];
       nwr(around:1000, {lat:.6f}, {lon:.6f})["golf"="tree"];
       nwr(around:1000, {lat:.6f}, {lon:.6f})["landuse"="forest"];
+      nwr(around:1000, {lat:.6f}, {lon:.6f})["highway"];
+      nwr(around:1000, {lat:.6f}, {lon:.6f})["building"];
     );
     out body;
     >;
