@@ -3194,3 +3194,49 @@ func apply_ball_graphic(graphic_id: String, avatar_path: String = "", player_nam
 			icosphere.material_override = mat
 
 	_orient_ball_to_aim()
+
+
+var _is_glow_mode: bool = false
+var _glow_omni_light: OmniLight3D = null
+
+func set_glow_mode(enabled: bool) -> void:
+	if _is_glow_mode == enabled:
+		return
+	_is_glow_mode = enabled
+	_update_ball_glow_visuals()
+
+
+func is_glow_mode() -> bool:
+	return _is_glow_mode
+
+
+func _update_ball_glow_visuals() -> void:
+	if _ball_mesh == null or not is_instance_valid(_ball_mesh):
+		return
+	var icosphere = _ball_mesh.find_child("Icosphere", true, false) as MeshInstance3D
+	if icosphere == null:
+		return
+
+	if _is_glow_mode:
+		var glow_mat = StandardMaterial3D.new()
+		glow_mat.albedo_color = Color(0.32, 1.0, 0.58) # Radiant electric glow in the dark
+		glow_mat.roughness = 0.15
+		glow_mat.emission_enabled = true
+		glow_mat.emission = Color(0.32, 1.0, 0.58)
+		glow_mat.emission_energy_multiplier = 1.4 # Softened glow, less overly bright
+		icosphere.material_override = glow_mat
+
+		if _glow_omni_light == null:
+			_glow_omni_light = OmniLight3D.new()
+			_glow_omni_light.name = "BallGlowLight"
+			_glow_omni_light.light_color = Color(0.32, 1.0, 0.58)
+			_glow_omni_light.light_energy = 0.75 # Controlled illumination
+			_glow_omni_light.omni_range = 1.6
+			_glow_omni_light.omni_attenuation = 1.5
+			_glow_omni_light.shadow_enabled = false
+			add_child(_glow_omni_light)
+		_glow_omni_light.visible = true
+	else:
+		if _glow_omni_light != null:
+			_glow_omni_light.visible = false
+		apply_ball_graphic(_current_ball_graphic_id)

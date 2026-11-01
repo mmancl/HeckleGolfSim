@@ -21,15 +21,15 @@ func _init() -> void:
 	assert(airway_result.get("title") == "Airways Golf Course" or airway_result.get("title") != "", "Title must not be empty")
 	print("PASS: CourseValidator validated Airways course successfully: %s" % airway_result.get("title"))
 	
-	# Test 3: CourseList _scan_dir with DirAccess.get_directories_at
+	# Test 3: CourseList _scan_dir ignores res://Courses/UserCourses and scans user://courses
 	print("Test 3: CourseList _scan_dir...")
 	var course_list_script = load("res://Courses/CourseSelector/course_list.gd")
 	assert(course_list_script != null, "course_list.gd must load")
 	var cl_node = course_list_script.new()
-	var validated_courses: Array[Dictionary] = []
-	cl_node._scan_dir("res://Courses/UserCourses", validated_courses)
-	assert(validated_courses.size() > 0, "At least one course should be discovered via _scan_dir")
-	print("PASS: Discovered %d course(s) via DirAccess.get_directories_at in _scan_dir." % validated_courses.size())
+	var user_courses: Array[Dictionary] = []
+	cl_node._scan_dir("res://Courses/UserCourses", user_courses)
+	assert(user_courses.size() == 0, "res://Courses/UserCourses must NOT be scanned into player course lists")
+	print("PASS: res://Courses/UserCourses is strictly excluded from player course lists.")
 	
 	# Test 4: DebugLogger log rotation
 	print("Test 4: DebugLogger rotation on startup...")

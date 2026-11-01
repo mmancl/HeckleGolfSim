@@ -335,8 +335,21 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         _characteristics.Clear();
         _connectTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        Log($"Connecting to peripheral {deviceId}...");
-        ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("connectPeripheral:options:"), _activePeripheral, IntPtr.Zero);
+        // CoreBluetooth best practice: Always set the peripheral delegate BEFORE connecting or discovering services!
+        ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("setDelegate:"), _peripheralDelegate);
+
+        int state = (int)(long)ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("state"));
+        Log($"Active peripheral state: {state}");
+        if (state == 2) // CBPeripheralStateConnected
+        {
+            Log("Peripheral already connected. Directly discovering services...");
+            ObjCRuntime.objc_msgSend(_activePeripheral, ObjCRuntime.sel_registerName("discoverServices:"), IntPtr.Zero);
+        }
+        else
+        {
+            Log($"Connecting to peripheral {deviceId}...");
+            ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("connectPeripheral:options:"), _activePeripheral, IntPtr.Zero);
+        }
 
         using var reg = cancellationToken.Register(() => _connectTcs.TrySetCanceled());
         await _connectTcs.Task;
@@ -410,6 +423,14 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
     {
         if (!_characteristics.TryGetValue(characteristicUuid, out var characteristic) || _activePeripheral == IntPtr.Zero)
         {
+            return;
+        }
+
+        // If characteristic is already notifying, no need to wait for didUpdateNotificationState
+        int isNotifying = (int)(long)ObjCRuntime.objc_msgSend(characteristic, ObjCRuntime.sel_registerName("isNotifying"));
+        if (isNotifying != 0)
+        {
+            Log($"Characteristic {characteristicUuid} is already notifying.");
             return;
         }
 
@@ -855,8 +876,15 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             }
 
             IntPtr servicesArray = ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("services"));
-            int count = (int)(long)ObjCRuntime.objc_msgSend(servicesArray, ObjCRuntime.sel_registerName("count"));
+            int count = servicesArray != IntPtr.Zero ? (int)(long)ObjCRuntime.objc_msgSend(servicesArray, ObjCRuntime.sel_registerName("count")) : 0;
             Log($"Discovered {count} services. Discovering characteristics for each...");
+
+            if (count == 0)
+            {
+                LogErr("No services discovered on peripheral.");
+                client._connectTcs?.TrySetException(new InvalidOperationException("No services discovered on peripheral."));
+                return;
+            }
 
             for (int i = 0; i < count; i++)
             {

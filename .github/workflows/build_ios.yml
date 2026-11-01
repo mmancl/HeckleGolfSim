@@ -84,6 +84,25 @@ jobs:
         run: |
           dotnet build HeckleGolfSim.csproj -c Release
 
+      - name: Restore Bundled Cached Course Geometries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Restoring cached geometry files from release assets..."
+          if [ ! -d "Courses/CachedGeometry" ] || [ $(find Courses/CachedGeometry -name "*.json.gz" 2>/dev/null | wc -l) -lt 100 ]; then
+            gh release download course-cache --pattern "cached_geometry.tar" --clobber || gh release download v0.142.4 --pattern "cached_geometry.tar" --clobber || true
+            if [ -f "cached_geometry.tar" ]; then
+              echo "Extracting cached_geometry.tar..."
+              tar -xf cached_geometry.tar
+              rm -f cached_geometry.tar
+              echo "Cached geometry files restored: $(find Courses/CachedGeometry -name '*.json.gz' | wc -l)"
+            else
+              echo "Warning: cached_geometry.tar could not be downloaded."
+            fi
+          else
+            echo "Courses/CachedGeometry already populated."
+          fi
+
       - name: Export iOS Preset via Godot
         run: |
           rm -rf ios_export

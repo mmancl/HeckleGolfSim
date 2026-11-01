@@ -437,21 +437,15 @@ func _get_slug_candidates(course_name: String) -> Array:
 
 func _refresh_available_cache_slugs() -> void:
 	_available_cache_slugs.clear()
-	var cache_dirs = ["res://Courses/CachedGeometry"]
+	var cache_dirs = ["res://Courses/CachedGeometry", "user://cached_geometry"]
 	for c_dir in cache_dirs:
 		if not DirAccess.dir_exists_absolute(c_dir):
 			continue
-		var dir = DirAccess.open(c_dir)
-		if dir == null:
-			continue
-		dir.list_dir_begin()
-		var file_name = dir.get_next()
-		while file_name != "":
-			if not dir.current_is_dir() and (file_name.ends_with(".json.gz") or file_name.ends_with(".json")):
+		var files := DirAccess.get_files_at(c_dir)
+		for file_name in files:
+			if file_name.ends_with(".json.gz") or file_name.ends_with(".json"):
 				var f_slug = file_name.replace(".json.gz", "").replace(".json", "").to_lower()
 				_available_cache_slugs[f_slug] = true
-			file_name = dir.get_next()
-		dir.list_dir_end()
 
 
 func _is_slug_cached(course_name: String) -> bool:
@@ -545,21 +539,16 @@ func _load_cached_courses() -> void:
 
 
 func _scan_loose_cached_geometries() -> void:
-	var cache_dirs = ["res://Courses/CachedGeometry"]
+	var cache_dirs = ["res://Courses/CachedGeometry", "user://cached_geometry"]
 	for c_dir in cache_dirs:
 		if not DirAccess.dir_exists_absolute(c_dir):
 			continue
-		var dir = DirAccess.open(c_dir)
-		if dir == null:
-			continue
-		dir.list_dir_begin()
-		var file_name = dir.get_next()
-		while file_name != "":
-			if not dir.current_is_dir() and (file_name.ends_with(".json.gz") or file_name.ends_with(".json")):
+		var files := DirAccess.get_files_at(c_dir)
+		for file_name in files:
+			if file_name.ends_with(".json.gz") or file_name.ends_with(".json"):
 				var f_slug = file_name.replace(".json.gz", "").replace(".json", "")
 				var lower_slug = f_slug.to_lower()
 				if _cached_names_set.has(lower_slug):
-					file_name = dir.get_next()
 					continue
 				var readable_title = f_slug.replace("_", " ").capitalize()
 				var lower_title = readable_title.to_lower()
@@ -578,8 +567,6 @@ func _scan_loose_cached_geometries() -> void:
 						"is_pga_tour": is_pga_tour_course_name(readable_title)
 					}
 					_all_cached_courses.append(entry)
-			file_name = dir.get_next()
-		dir.list_dir_end()
 
 
 func _is_course_cached(course: Dictionary) -> bool:

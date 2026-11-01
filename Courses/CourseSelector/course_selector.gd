@@ -204,7 +204,7 @@ func _on_course_list_item_activated(index: int) -> void:
 
 
 func _request_course_reload() -> void:
-	_course_list.reload_courses("res://Courses/UserCourses")
+	_course_list.reload_courses("user://courses")
 	_update_play_button()
 
 

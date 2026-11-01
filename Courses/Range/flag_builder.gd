@@ -147,6 +147,45 @@ static func build_flag_pin(
 		cup_dark.material_override = cup_mat
 		cup_dark.position = Vector3(0.0, 0.0016, 0.0)
 
+		# 6. Night Golf Illuminated Cup Glow & Light
+		var cup_glow = pin.get_node_or_null("NightCupGlow") as Node3D
+		if cup_glow == null:
+			cup_glow = Node3D.new()
+			cup_glow.name = "NightCupGlow"
+			pin.add_child(cup_glow)
+
+			# Luminous neon blue cup ring
+			var ring_mesh_inst = MeshInstance3D.new()
+			ring_mesh_inst.name = "CupGlowRing"
+			var torus = TorusMesh.new()
+			torus.inner_radius = cup_radius - 0.004
+			torus.outer_radius = cup_radius + 0.008
+			torus.rings = 24
+			torus.ring_segments = 12
+			ring_mesh_inst.mesh = torus
+			var ring_mat = StandardMaterial3D.new()
+			ring_mat.albedo_color = Color(0.15, 0.82, 1.0)
+			ring_mat.emission_enabled = true
+			ring_mat.emission = Color(0.15, 0.85, 1.0)
+			ring_mat.emission_energy_multiplier = 4.0
+			ring_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+			ring_mesh_inst.material_override = ring_mat
+			ring_mesh_inst.position = Vector3(0.0, 0.004, 0.0)
+			cup_glow.add_child(ring_mesh_inst)
+
+			# Cup glow omni light illuminating the hole and green
+			var cup_light = OmniLight3D.new()
+			cup_light.name = "CupLight"
+			cup_light.light_color = Color(0.15, 0.85, 1.0)
+			cup_light.light_energy = 2.4
+			cup_light.omni_range = 3.8
+			cup_light.omni_attenuation = 1.3
+			cup_light.shadow_enabled = false
+			cup_light.position = Vector3(0.0, 0.18, 0.0)
+			cup_glow.add_child(cup_light)
+
+		cup_glow.visible = false
+
 	return pin
 
 

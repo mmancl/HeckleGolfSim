@@ -131,6 +131,7 @@ func _run_tests() -> void:
 	assert(mat.render_priority == 1, "Material render_priority must be 1 to prevent z-fighting")
 	assert(mat.depth_draw_mode == BaseMaterial3D.DEPTH_DRAW_DISABLED, "depth_draw_mode must be DISABLED")
 	assert(mat.cull_mode == BaseMaterial3D.CULL_DISABLED, "cull_mode must be DISABLED")
+	assert(mat.no_depth_test == true, "no_depth_test must be enabled to prevent surrounding terrain occlusion")
 
 	# Verify mesh face count and subdivision (subdivided for smooth elevation gradient)
 	var faces = heatmap_node.mesh.get_faces()

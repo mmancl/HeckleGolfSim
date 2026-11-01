@@ -4162,17 +4162,14 @@ public partial class OsmMapLoader : Node
             }
         }
 
-        string[] cacheDirs = new[] { "res://Courses/CachedGeometry" };
+        string[] cacheDirs = new[] { "res://Courses/CachedGeometry", "user://cached_geometry" };
         foreach (var cDir in cacheDirs)
         {
             if (!Godot.DirAccess.DirExistsAbsolute(cDir)) continue;
-            using var dir = Godot.DirAccess.Open(cDir);
-            if (dir == null) continue;
-            dir.ListDirBegin();
-            string f = dir.GetNext();
-            while (!string.IsNullOrEmpty(f))
+            var files = Godot.DirAccess.GetFilesAt(cDir);
+            foreach (var f in files)
             {
-                if (!dir.CurrentIsDir() && (f.EndsWith(".json.gz", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
+                if (f.EndsWith(".json.gz", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
                 {
                     string fSlug = f.EndsWith(".json.gz", StringComparison.OrdinalIgnoreCase)
                         ? f.Substring(0, f.Length - 8)
@@ -4194,9 +4191,7 @@ public partial class OsmMapLoader : Node
                         results.Add(dict);
                     }
                 }
-                f = dir.GetNext();
             }
-            dir.ListDirEnd();
         }
 
         return results;
@@ -4215,9 +4210,13 @@ public partial class OsmMapLoader : Node
         {
             string gzPath = $"res://Courses/CachedGeometry/{slug}.json.gz";
             string jsonPath = $"res://Courses/CachedGeometry/{slug}.json";
+            string userGzPath = $"user://cached_geometry/{slug}.json.gz";
+            string userJsonPath = $"user://cached_geometry/{slug}.json";
             string? foundPath = null;
             if (Godot.FileAccess.FileExists(gzPath)) foundPath = gzPath;
             else if (Godot.FileAccess.FileExists(jsonPath)) foundPath = jsonPath;
+            else if (Godot.FileAccess.FileExists(userGzPath)) foundPath = userGzPath;
+            else if (Godot.FileAccess.FileExists(userJsonPath)) foundPath = userJsonPath;
 
             if (foundPath == null) continue;
 

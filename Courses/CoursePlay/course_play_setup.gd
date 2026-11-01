@@ -517,7 +517,6 @@ func _scan_available_courses() -> void:
 	available_courses.clear()
 	
 	var validated: Array[Dictionary] = []
-	_scan_dir("res://Courses/UserCourses", validated)
 	_scan_dir("user://courses", validated)
 	
 	for course in validated:
@@ -603,6 +602,9 @@ func _scan_dir(dir_path: String, validated: Array[Dictionary]) -> void:
 	var dir_names := DirAccess.get_directories_at(dir_path)
 	for dir_name in dir_names:
 		if not dir_name.begins_with("."):
+			var lower_name = dir_name.to_lower()
+			if lower_name == "airways" or lower_name == "dragonfly" or lower_name == "dragon_fly":
+				continue
 			var result: Dictionary = CourseValidator.validate(dir_path, dir_name)
 			if not result.is_empty():
 				result["dir_name"] = dir_name

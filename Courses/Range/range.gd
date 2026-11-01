@@ -3,6 +3,7 @@ extends Node3D
 const TeeboxMarkerBuilder = preload("res://Courses/Range/teebox_marker_builder.gd")
 const FlagBuilder = preload("res://Courses/Range/flag_builder.gd")
 const AimDistanceIndicator = preload("res://UI/aim_distance_indicator.gd")
+const WeatherLightingController = preload("res://Courses/Range/weather_lighting_controller.gd")
 
 var track_points : bool = false
 var trail_timer : float = 0.0
@@ -120,9 +121,14 @@ var _continuous_aim_angle_rad: float = 0.0
 var _continuous_aim_angle_init: bool = false
 var _last_aim_dist_yards: int = -1
 var _aim_distance_indicator: AimDistanceIndicator = null
+var _weather_lighting_controller: WeatherLightingController = null
 
 func is_actively_aiming() -> bool:
 	return _was_keyboard_aiming or _was_screen_aiming or is_screen_aiming or (_aim_distance_indicator != null and _aim_distance_indicator.is_indicator_active())
+
+
+func get_weather_lighting_controller() -> WeatherLightingController:
+	return _weather_lighting_controller
 
 var course_data_dict: Dictionary = {}
 var _shot_active: bool = false
@@ -557,6 +563,7 @@ func _ready() -> void:
 	mat.albedo_color = Color(1.0, 0.2, 0.2) # Neon Red
 	mat.emission_enabled = true
 	mat.emission = Color(1.0, 0.2, 0.2)
+	mat.render_priority = 2
 	marker.material_override = mat
 	marker.layers = 2
 	add_child(marker)
@@ -575,6 +582,7 @@ func _ready() -> void:
 	p_mat.albedo_color = Color(0.1, 1.0, 0.1) # Neon Green
 	p_mat.emission_enabled = true
 	p_mat.emission = Color(0.1, 1.0, 0.1)
+	p_mat.render_priority = 2
 	p_marker.material_override = p_mat
 	p_marker.layers = 2
 	
@@ -584,6 +592,7 @@ func _ready() -> void:
 	p_sprite.layers = 2
 	p_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	p_sprite.no_depth_test = true
+	p_sprite.render_priority = 3
 	p_sprite.double_sided = true
 	p_sprite.pixel_size = 0.04
 	p_sprite.position = Vector3(0, 6.0, 0)
@@ -605,6 +614,7 @@ func _ready() -> void:
 	outline_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 	outline_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	outline_mat.no_depth_test = true
+	outline_mat.render_priority = 2
 	outline_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	outline_inst.material_override = outline_mat
 	outline_inst.layers = 2
@@ -621,6 +631,7 @@ func _ready() -> void:
 	minimap_outline_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 	minimap_outline_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	minimap_outline_mat.no_depth_test = true
+	minimap_outline_mat.render_priority = 2
 	minimap_outline_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	minimap_outline_inst.material_override = minimap_outline_mat
 	minimap_outline_inst.layers = 2
@@ -647,9 +658,9 @@ func _ready() -> void:
 	zoom_vbox.anchor_top = 0.0
 	zoom_vbox.anchor_bottom = 0.0
 	zoom_vbox.offset_left = -115
-	zoom_vbox.offset_top = 115
+	zoom_vbox.offset_top = 152
 	zoom_vbox.offset_right = 115
-	zoom_vbox.offset_bottom = 175
+	zoom_vbox.offset_bottom = 212
 	zoom_vbox.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	zoom_vbox.grow_vertical = Control.GROW_DIRECTION_END
 	zoom_vbox.add_theme_constant_override("separation", 12)
@@ -712,9 +723,9 @@ func _ready() -> void:
 	badge.anchor_left = 0.5
 	badge.anchor_right = 0.5
 	badge.offset_left = -260
-	badge.offset_top = 20
+	badge.offset_top = 18
 	badge.offset_right = 260
-	badge.offset_bottom = 60
+	badge.offset_bottom = 76
 	canvas.add_child(badge)
 
 	# Create AimDistanceLabel (path remains MapCanvas/AimDistanceLabel!)
@@ -724,8 +735,8 @@ func _ready() -> void:
 	aim_lbl.scroll_active = false
 	aim_lbl.autowrap_mode = TextServer.AUTOWRAP_OFF
 	aim_lbl.text = "[center]🎯 Aim: --- | ⛰️ Elevation: 0 Feet | 🟢 Fairway[/center]"
-	aim_lbl.add_theme_font_size_override("normal_font_size", 18)
-	aim_lbl.add_theme_font_size_override("bold_font_size", 22)
+	aim_lbl.add_theme_font_size_override("normal_font_size", 16)
+	aim_lbl.add_theme_font_size_override("bold_font_size", 20)
 	var bold_var = FontVariation.new()
 	bold_var.base_font = aim_lbl.get_theme_font("font")
 	bold_var.variation_embolden = 1.8
@@ -737,11 +748,17 @@ func _ready() -> void:
 	aim_lbl.anchor_left = 0.5
 	aim_lbl.anchor_right = 0.5
 	aim_lbl.offset_left = -260
-	aim_lbl.offset_top = 20
+	aim_lbl.offset_top = 18
 	aim_lbl.offset_right = 260
-	aim_lbl.offset_bottom = 60
+	aim_lbl.offset_bottom = 46
 	aim_lbl.visible = true
 	canvas.add_child(aim_lbl)
+
+	# Create Weather & Lighting Controller (Moon/Sun slider and Sun/Rain toggle)
+	_weather_lighting_controller = WeatherLightingController.new()
+	_weather_lighting_controller.name = "WeatherLightingController"
+	add_child(_weather_lighting_controller)
+	_weather_lighting_controller.initialize(self, canvas)
 
 	# Create labels inside MapCanvas
 	var hole_lbl = Label.new()
@@ -750,12 +767,12 @@ func _ready() -> void:
 	hole_lbl.text = "Hole 1 | Par 4 | --- Yards"
 	hole_lbl.add_theme_font_size_override("font_size", 20)
 	hole_lbl.add_theme_color_override("font_color", Color.WHITE)
-	# Position at top center, below the aim badge
+	# Position at top center, below the weather/aim badge
 	hole_lbl.anchor_left = 0.5
 	hole_lbl.anchor_right = 0.5
 	hole_lbl.offset_left = -200
-	hole_lbl.offset_top = 70
-	hole_lbl.offset_bottom = 110
+	hole_lbl.offset_top = 84
+	hole_lbl.offset_bottom = 120
 	hole_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	canvas.add_child(hole_lbl)
 
@@ -777,6 +794,7 @@ func _ready() -> void:
 	line_mat.albedo_color = Color(1.0, 0.2, 0.2) # Neon Red
 	line_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 	line_mat.no_depth_test = true
+	line_mat.render_priority = 2
 	line_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	aim_line.material_override = line_mat
 	aim_line.layers = 2
@@ -1009,6 +1027,9 @@ func is_any_dialog_open() -> bool:
 				return true
 			if focused is Range or (focused is Control and (focused.get_parent() != null and is_instance_valid(focused.get_parent()) and focused.get_parent() is SpinBox or focused is SpinBox)):
 				return true
+			if _weather_lighting_controller != null and is_instance_valid(_weather_lighting_controller):
+				if focused == _weather_lighting_controller.weather_toggle_btn or focused == _weather_lighting_controller.time_slider:
+					return true
 			if _is_control_in_dialog(focused):
 				return true
 	if has_node("RangeUI"):
@@ -1285,8 +1306,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			var vp := get_viewport()
 			if vp != null and vp.gui_get_focus_owner() != null:
 				var foc = vp.gui_get_focus_owner()
-				if _is_control_in_dialog(foc) or foc is LineEdit or foc is TextEdit:
+				if _is_control_in_dialog(foc) or foc is LineEdit or foc is TextEdit or foc is Range:
 					return
+				if _weather_lighting_controller != null and is_instance_valid(_weather_lighting_controller):
+					if foc == _weather_lighting_controller.weather_toggle_btn or foc == _weather_lighting_controller.time_slider:
+						return
 				vp.gui_release_focus()
 			get_viewport().set_input_as_handled()
 			return
@@ -1694,8 +1718,11 @@ func _process_keyboard_aiming(delta: float) -> void:
 	var vp := get_viewport()
 	if vp != null and vp.gui_get_focus_owner() != null:
 		var foc = vp.gui_get_focus_owner()
-		if _is_control_in_dialog(foc) or foc is LineEdit or foc is TextEdit:
+		if _is_control_in_dialog(foc) or foc is LineEdit or foc is TextEdit or foc is Range:
 			return
+		if _weather_lighting_controller != null and is_instance_valid(_weather_lighting_controller):
+			if foc == _weather_lighting_controller.weather_toggle_btn or foc == _weather_lighting_controller.time_slider:
+				return
 		vp.gui_release_focus()
 
 	var ball_pos = $Player.ball.global_position
@@ -3074,6 +3101,7 @@ func _spawn_flag_pin() -> void:
 	pin_mat.albedo_color = Color(1.0, 0.6, 0.1) # Neon Orange
 	pin_mat.emission_enabled = true
 	pin_mat.emission = Color(1.0, 0.6, 0.1)
+	pin_mat.render_priority = 2
 	pin_marker.material_override = pin_mat
 	pin_marker.layers = 2
 	
@@ -3083,6 +3111,7 @@ func _spawn_flag_pin() -> void:
 	pin_sprite.layers = 2
 	pin_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	pin_sprite.no_depth_test = true
+	pin_sprite.render_priority = 3
 	pin_sprite.double_sided = true
 	pin_sprite.pixel_size = 0.04
 	pin_sprite.position = Vector3(0, 6.0, 0)
@@ -5071,6 +5100,9 @@ func _spawn_mountain_backdrop() -> void:
 	mesh_inst.layers = 1
 	mountain_root.add_child(mesh_inst)
 
+	if _weather_lighting_controller != null and is_instance_valid(_weather_lighting_controller):
+		_weather_lighting_controller.update_backdrop_lighting()
+
 	print("[DrivingRange] Spawned seamless 2D mountain backdrop (radius=%.1fm, height=%.1fm)." % [radius, y_top - y_bottom])
 
 
@@ -5339,6 +5371,12 @@ func _init_cached_surface_bodies(force: bool = false) -> void:
 		for child in body.get_children():
 			if child is CollisionShape3D and child.shape is ConcavePolygonShape3D:
 				var shape_faces = child.shape.data
+				if child.transform != Transform3D.IDENTITY:
+					var transformed_faces = PackedVector3Array()
+					transformed_faces.resize(shape_faces.size())
+					for fi in range(shape_faces.size()):
+						transformed_faces[fi] = child.transform * shape_faces[fi]
+					shape_faces = transformed_faces
 				shapes_data.append(shape_faces)
 				for i in range(0, shape_faces.size(), 3):
 					if i + 2 < shape_faces.size():
@@ -5363,6 +5401,14 @@ func _init_cached_surface_bodies(force: bool = false) -> void:
 								"c": c2,
 								"rect": Rect2(t_min_x, t_min_y, t_max_x - t_min_x, t_max_y - t_min_y)
 							})
+			elif child is CollisionShape3D and child.shape is CylinderShape3D:
+				var cyl_radius: float = child.shape.radius
+				var center_pos: Vector3 = trans * child.position
+				min_x = minf(min_x, center_pos.x - cyl_radius)
+				max_x = maxf(max_x, center_pos.x + cyl_radius)
+				min_z = minf(min_z, center_pos.z - cyl_radius)
+				max_z = maxf(max_z, center_pos.z + cyl_radius)
+				shapes_data.append(PackedVector3Array())
 					
 		if shapes_data.is_empty():
 			continue
@@ -6601,11 +6647,14 @@ func _update_aim_distance_label_text() -> void:
 		text_w = plain_full_text.length() * 9.5
 
 	var half_w: float = ceil((text_w / 2.0) + 18.0)
+	half_w = maxf(half_w, 240.0)
 	label.offset_left = -half_w
 	label.offset_right = half_w
 	if has_node("MapCanvas/AimDistanceBadge"):
 		$MapCanvas/AimDistanceBadge.offset_left = -half_w
 		$MapCanvas/AimDistanceBadge.offset_right = half_w
+	if _weather_lighting_controller != null and is_instance_valid(_weather_lighting_controller):
+		_weather_lighting_controller.update_bar_width(half_w)
 
 
 func apply_circular_button_style(btn: Button, bg_color: Color):
@@ -7108,9 +7157,9 @@ func _generate_green_grid_and_heatmap() -> void:
 		var col1 = _get_heatmap_color(clamp((v1.y - min_y) / (max_y - min_y), 0.0, 1.0))
 		var col2 = _get_heatmap_color(clamp((v2.y - min_y) / (max_y - min_y), 0.0, 1.0))
 		
-		var h0 = Vector3(v0.x, v0.y + heatmap_y_offset, v0.z)
-		var h1 = Vector3(v1.x, v1.y + heatmap_y_offset, v1.z)
-		var h2 = Vector3(v2.x, v2.y + heatmap_y_offset, v2.z)
+		var h0 = Vector3(v0.x, maxf(v0.y, get_cached_height.call(v0.x, v0.z)) + heatmap_y_offset, v0.z)
+		var h1 = Vector3(v1.x, maxf(v1.y, get_cached_height.call(v1.x, v1.z)) + heatmap_y_offset, v1.z)
+		var h2 = Vector3(v2.x, maxf(v2.y, get_cached_height.call(v2.x, v2.z)) + heatmap_y_offset, v2.z)
 		
 		st_heatmap.set_color(col0)
 		st_heatmap.add_vertex(h0)
@@ -7128,6 +7177,7 @@ func _generate_green_grid_and_heatmap() -> void:
 	mat_hm.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 	mat_hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat_hm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mat_hm.no_depth_test = true
 	mat_hm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mat_hm.render_priority = 1
 	heatmap_mi.material_override = mat_hm

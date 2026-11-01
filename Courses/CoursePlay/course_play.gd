@@ -8473,6 +8473,7 @@ func _create_player_map_marker(player: Dictionary, letter: String, color: Color)
 	mat.albedo_color = Color.WHITE
 	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 	mat.no_depth_test = true
+	mat.render_priority = 2
 	line_mesh.material_override = mat
 	line_mesh.layers = 2
 	line_mesh.position = Vector3(0, 1.5, 0)
@@ -8493,6 +8494,7 @@ func _create_player_map_marker(player: Dictionary, letter: String, color: Color)
 		sprite.texture = _get_player_circle_texture(color)
 	sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	sprite.no_depth_test = true
+	sprite.render_priority = 3
 	sprite.double_sided = true
 	sprite.pixel_size = 0.025 # ~3.2m wide
 	sprite.position = Vector3(0, 3.0, 0)
@@ -8509,6 +8511,7 @@ func _create_player_map_marker(player: Dictionary, letter: String, color: Color)
 	label.outline_size = 14
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.no_depth_test = true
+	label.render_priority = 4
 	label.double_sided = true
 	label.position = Vector3(0, 0.0, 0.05) # avoid z-fighting
 	label.layers = 2

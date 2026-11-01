@@ -707,10 +707,15 @@ func _is_anchor_in_deep_rough(anchor: Vector3) -> bool:
 	var red: float = 0.0
 
 	if p != null:
-		lie = str(p.get("current_lie_type")).to_lower()
-		red = float(p.get("current_shot_reduction"))
+		var raw_lie = p.get("current_lie_type")
+		lie = str(raw_lie).to_lower() if raw_lie != null else ""
+		var csr = p.get("current_shot_reduction")
+		if csr != null:
+			red = float(csr)
 		if red <= 0.0:
-			red = float(p.get("last_shot_reduction"))
+			var lsr = p.get("last_shot_reduction")
+			if lsr != null:
+				red = float(lsr)
 
 	if is_inside_tree():
 		var mp_mgr = get_tree().root.get_node_or_null("MultiplayerManager")

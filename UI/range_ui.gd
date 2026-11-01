@@ -4911,6 +4911,26 @@ func _update_hud_focus_neighbors() -> void:
 	var toggles_scroll_node = _right_panel.get_node_or_null("TogglesScroll") if _right_panel != null else null
 	var helpers_open = (toggles_scroll_node != null and is_instance_valid(toggles_scroll_node) and toggles_scroll_node.visible)
 
+	# Locate weather & lighting controls if instantiated
+	var weather_slider: Control = null
+	var weather_btn: Control = null
+	var parent_range = get_parent()
+	if parent_range != null and is_instance_valid(parent_range) and parent_range.has_method("get_weather_lighting_controller"):
+		var w_ctrl = parent_range.get_weather_lighting_controller()
+		if w_ctrl != null and is_instance_valid(w_ctrl):
+			if "time_slider" in w_ctrl and w_ctrl.time_slider != null and is_instance_valid(w_ctrl.time_slider) and w_ctrl.time_slider.is_visible_in_tree():
+				weather_slider = w_ctrl.time_slider
+			if "weather_toggle_btn" in w_ctrl and w_ctrl.weather_toggle_btn != null and is_instance_valid(w_ctrl.weather_toggle_btn) and w_ctrl.weather_toggle_btn.is_visible_in_tree():
+				weather_btn = w_ctrl.weather_toggle_btn
+	if weather_slider == null and get_tree() != null and get_tree().root != null:
+		var found_s = get_tree().root.find_child("TimeOfDaySlider", true, false)
+		if found_s != null and is_instance_valid(found_s) and found_s.is_visible_in_tree():
+			weather_slider = found_s as Control
+	if weather_btn == null and get_tree() != null and get_tree().root != null:
+		var found_b = get_tree().root.find_child("WeatherToggleButton", true, false)
+		if found_b != null and is_instance_valid(found_b) and found_b.is_visible_in_tree():
+			weather_btn = found_b as Control
+
 	# 1. Stats button (Bottom-Left)
 	if _stats_btn != null and is_instance_valid(_stats_btn):
 		if add_remove_btn != null and is_instance_valid(add_remove_btn) and add_remove_btn.visible:
@@ -4930,7 +4950,11 @@ func _update_hud_focus_neighbors() -> void:
 			_prev_shot_btn.focus_neighbor_left = _prev_shot_btn.get_path_to(_stats_btn)
 		if _map_btn != null and is_instance_valid(_map_btn):
 			_prev_shot_btn.focus_neighbor_right = _prev_shot_btn.get_path_to(_map_btn)
-		if _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
+		if weather_slider != null:
+			_prev_shot_btn.focus_neighbor_top = _prev_shot_btn.get_path_to(weather_slider)
+		elif weather_btn != null:
+			_prev_shot_btn.focus_neighbor_top = _prev_shot_btn.get_path_to(weather_btn)
+		elif _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
 			_prev_shot_btn.focus_neighbor_top = _prev_shot_btn.get_path_to(_hide_helpers_btn)
 
 	# 3. Add/Remove button (Left middle)
@@ -4941,6 +4965,8 @@ func _update_hud_focus_neighbors() -> void:
 			add_remove_btn.focus_neighbor_top = add_remove_btn.get_path_to(_profile_option)
 		if _prev_shot_btn != null and is_instance_valid(_prev_shot_btn) and _prev_shot_btn.visible:
 			add_remove_btn.focus_neighbor_right = add_remove_btn.get_path_to(_prev_shot_btn)
+		elif weather_slider != null:
+			add_remove_btn.focus_neighbor_right = add_remove_btn.get_path_to(weather_slider)
 		elif _map_btn != null and is_instance_valid(_map_btn):
 			add_remove_btn.focus_neighbor_right = add_remove_btn.get_path_to(_map_btn)
 
@@ -4950,10 +4976,55 @@ func _update_hud_focus_neighbors() -> void:
 			_profile_option.focus_neighbor_bottom = _profile_option.get_path_to(add_remove_btn)
 		elif _stats_btn != null and is_instance_valid(_stats_btn):
 			_profile_option.focus_neighbor_bottom = _profile_option.get_path_to(_stats_btn)
-		if _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
+		if weather_slider != null:
+			_profile_option.focus_neighbor_right = _profile_option.get_path_to(weather_slider)
+		elif weather_btn != null:
+			_profile_option.focus_neighbor_right = _profile_option.get_path_to(weather_btn)
+		elif _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
 			_profile_option.focus_neighbor_right = _profile_option.get_path_to(_hide_helpers_btn)
 		if _settings_btn != null and is_instance_valid(_settings_btn):
 			_profile_option.focus_neighbor_left = _profile_option.get_path_to(_settings_btn)
+
+	# 4b. Weather & Lighting Controls (Top-Center)
+	if weather_slider != null:
+		if _profile_option != null and is_instance_valid(_profile_option) and _profile_option.visible:
+			weather_slider.focus_neighbor_left = weather_slider.get_path_to(_profile_option)
+		elif add_remove_btn != null and is_instance_valid(add_remove_btn) and add_remove_btn.visible:
+			weather_slider.focus_neighbor_left = weather_slider.get_path_to(add_remove_btn)
+		elif _stats_btn != null and is_instance_valid(_stats_btn):
+			weather_slider.focus_neighbor_left = weather_slider.get_path_to(_stats_btn)
+
+		if weather_btn != null:
+			weather_slider.focus_neighbor_right = weather_slider.get_path_to(weather_btn)
+		elif _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
+			weather_slider.focus_neighbor_right = weather_slider.get_path_to(_hide_helpers_btn)
+
+		if club_btn != null and is_instance_valid(club_btn) and club_btn.visible:
+			weather_slider.focus_neighbor_bottom = weather_slider.get_path_to(club_btn)
+		elif _prev_shot_btn != null and is_instance_valid(_prev_shot_btn) and _prev_shot_btn.visible:
+			weather_slider.focus_neighbor_bottom = weather_slider.get_path_to(_prev_shot_btn)
+		elif _map_btn != null and is_instance_valid(_map_btn):
+			weather_slider.focus_neighbor_bottom = weather_slider.get_path_to(_map_btn)
+
+	if weather_btn != null:
+		if weather_slider != null:
+			weather_btn.focus_neighbor_left = weather_btn.get_path_to(weather_slider)
+		elif _profile_option != null and is_instance_valid(_profile_option) and _profile_option.visible:
+			weather_btn.focus_neighbor_left = weather_btn.get_path_to(_profile_option)
+		elif add_remove_btn != null and is_instance_valid(add_remove_btn) and add_remove_btn.visible:
+			weather_btn.focus_neighbor_left = weather_btn.get_path_to(add_remove_btn)
+
+		if _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
+			weather_btn.focus_neighbor_right = weather_btn.get_path_to(_hide_helpers_btn)
+		elif _home_btn != null and is_instance_valid(_home_btn):
+			weather_btn.focus_neighbor_right = weather_btn.get_path_to(_home_btn)
+
+		if club_btn != null and is_instance_valid(club_btn) and club_btn.visible:
+			weather_btn.focus_neighbor_bottom = weather_btn.get_path_to(club_btn)
+		elif _prev_shot_btn != null and is_instance_valid(_prev_shot_btn) and _prev_shot_btn.visible:
+			weather_btn.focus_neighbor_bottom = weather_btn.get_path_to(_prev_shot_btn)
+		elif _map_btn != null and is_instance_valid(_map_btn):
+			weather_btn.focus_neighbor_bottom = weather_btn.get_path_to(_map_btn)
 
 	# 5. Map button (Bottom-Right)
 	if _map_btn != null and is_instance_valid(_map_btn):
@@ -4990,7 +5061,11 @@ func _update_hud_focus_neighbors() -> void:
 
 	# 8. Hide Helpers button (Top-Right)
 	if _hide_helpers_btn != null and is_instance_valid(_hide_helpers_btn):
-		if _profile_option != null and is_instance_valid(_profile_option) and _profile_option.visible:
+		if weather_btn != null:
+			_hide_helpers_btn.focus_neighbor_left = _hide_helpers_btn.get_path_to(weather_btn)
+		elif weather_slider != null:
+			_hide_helpers_btn.focus_neighbor_left = _hide_helpers_btn.get_path_to(weather_slider)
+		elif _profile_option != null and is_instance_valid(_profile_option) and _profile_option.visible:
 			_hide_helpers_btn.focus_neighbor_left = _hide_helpers_btn.get_path_to(_profile_option)
 		elif add_remove_btn != null and is_instance_valid(add_remove_btn) and add_remove_btn.visible:
 			_hide_helpers_btn.focus_neighbor_left = _hide_helpers_btn.get_path_to(add_remove_btn)

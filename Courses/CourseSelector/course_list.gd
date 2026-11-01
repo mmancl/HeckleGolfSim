@@ -10,19 +10,18 @@ var filter_mode: String = "Real" # "Real", "Custom", or "All"
 ## and return the count (-1 on open failure).
 func parse_directory(path: String) -> int:
 	clear()
-	if path.is_empty():
-		course_dir = ""
-		print("[CourseList] Skipped scan because course directory is empty.")
-		return 0
+	if path.is_empty() or path == "res://Courses/UserCourses":
+		path = "user://courses"
 	if path.ends_with("/"):
 		path = path.substr(0, path.length() - 1)
 	course_dir = path
-	print("[CourseList] Scanning directories: %s and user://courses" % course_dir)
+	print("[CourseList] Scanning directory: %s" % course_dir)
 
 	var validated: Array[Dictionary] = []
 
 	_scan_dir(course_dir, validated)
-	_scan_dir("user://courses", validated)
+	if course_dir != "user://courses":
+		_scan_dir("user://courses", validated)
 
 	validated.sort_custom(func(a, b): return a["dir_name"] < b["dir_name"])
 	for course in validated:
@@ -42,16 +41,19 @@ func parse_directory(path: String) -> int:
 
 func set_filter_mode(mode: String) -> void:
 	filter_mode = mode
-	var target_path = course_dir if not course_dir.is_empty() else "res://Courses/UserCourses"
+	var target_path = course_dir if not course_dir.is_empty() and course_dir != "res://Courses/UserCourses" else "user://courses"
 	parse_directory(target_path)
 
 
 func _scan_dir(dir_path: String, validated: Array[Dictionary]) -> void:
-	if not DirAccess.dir_exists_absolute(dir_path):
+	if dir_path.begins_with("res://Courses/UserCourses") or not DirAccess.dir_exists_absolute(dir_path):
 		return
 	var dir_names := DirAccess.get_directories_at(dir_path)
 	for dir_name in dir_names:
 		if not dir_name.begins_with("."):
+			var lower_name = dir_name.to_lower()
+			if lower_name == "airways" or lower_name == "dragonfly" or lower_name == "dragon_fly":
+				continue
 			var result: Dictionary = CourseValidator.validate(dir_path, dir_name)
 			if not result.is_empty():
 				result["dir_name"] = dir_name

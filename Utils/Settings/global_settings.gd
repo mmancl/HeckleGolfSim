@@ -381,6 +381,9 @@ var _ambient_player: AudioStreamPlayer = null
 var _menu_music_player: AudioStreamPlayer = null
 var _minigames_music_player: AudioStreamPlayer = null
 var _audio_check_timer: float = 0.0
+var _ambient_nature_stream: AudioStream = null
+var _ambient_rain_stream: AudioStream = null
+var _is_rain_ambient: bool = false
 
 func _process(delta: float) -> void:
 	_audio_check_timer += delta
@@ -400,16 +403,24 @@ func _setup_audio_players() -> void:
 		
 		var path = "res://assets/audio/ambient_nature.ogg"
 		if ResourceLoader.exists(path):
-			var stream = load(path)
-			if stream:
-				if "loop" in stream:
-					stream.loop = true
-				_ambient_player.stream = stream
-				_ambient_player.volume_db = -25.0
-				_ambient_player.finished.connect(func():
-					if _should_play_ambient():
-						_ambient_player.play()
-				)
+			_ambient_nature_stream = load(path)
+			if _ambient_nature_stream and "loop" in _ambient_nature_stream:
+				_ambient_nature_stream.loop = true
+
+		var rain_path = "res://assets/audio/ambient_rain.ogg"
+		if ResourceLoader.exists(rain_path):
+			_ambient_rain_stream = load(rain_path)
+			if _ambient_rain_stream and "loop" in _ambient_rain_stream:
+				_ambient_rain_stream.loop = true
+
+		var stream = _ambient_rain_stream if (_is_rain_ambient and _ambient_rain_stream != null) else _ambient_nature_stream
+		if stream:
+			_ambient_player.stream = stream
+			_ambient_player.volume_db = -18.0 if _is_rain_ambient else -25.0
+			_ambient_player.finished.connect(func():
+				if _should_play_ambient():
+					_ambient_player.play()
+			)
 				
 	if _menu_music_player == null:
 		_menu_music_player = AudioStreamPlayer.new()
@@ -621,6 +632,19 @@ func update_audio_state() -> void:
 		else:
 			if _ambient_player.playing:
 				_ambient_player.stop()
+
+
+func set_rain_ambient(is_rain: bool) -> void:
+	_is_rain_ambient = is_rain
+	if _ambient_player == null:
+		return
+	var target_stream = _ambient_rain_stream if (is_rain and _ambient_rain_stream != null) else _ambient_nature_stream
+	if target_stream != null and _ambient_player.stream != target_stream:
+		var was_playing = _ambient_player.playing
+		_ambient_player.stream = target_stream
+		_ambient_player.volume_db = -18.0 if is_rain else -25.0
+		if was_playing and _should_play_ambient():
+			_ambient_player.play()
 
 
 # -----------------------------------------------------------------------------
