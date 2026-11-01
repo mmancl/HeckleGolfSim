@@ -32,6 +32,7 @@
 - **Improved Course Download Reliability & Server Mirrors:** Updated OpenStreetMap course downloading to utilize high-speed, modern global Overpass API mirrors (including OpenStreetMap France, Kumi Systems, and Private.coffee) while removing deprecated subdomains that previously caused downloads to hang or time out.
 
 ### Bug Fixes
+- Fixed a CI build failure in the Firebase deployment workflow caused by missing `package-lock.json` dependency paths in `actions/setup-node`.
 - Fixed an issue where internal developer test courses (such as Airways and DragonFly) appeared in the course selection and custom course menus on iOS and other devices. Course lists now strictly display only verified user and downloaded courses.
 - Fixed an issue where cached course geometries failed to be detected within iOS application bundles due to virtual directory iteration limitations, preventing players from downloading cached courses.
 - Fixed an issue where Bluetooth launch monitor connections on iOS/iPadOS could get stuck indefinitely showing "Connecting" when reconnecting or discovering device GATT characteristics.
