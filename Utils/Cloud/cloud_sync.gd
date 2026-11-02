@@ -11,9 +11,14 @@ const LinkServiceClass = preload("res://Utils/Cloud/link_service.gd")
 signal sync_started()
 signal sync_completed(success: bool, synced_profiles: Array[String])
 signal primary_profile_changed(player_name: String)
+signal sync_throttled(cooldown_remaining: float)
 
 const SYNC_STATE_PATH := "user://cloud_sync_state.json"
 const PERIODIC_SYNC_INTERVAL := 1800.0 # 30 minutes in seconds
+const DEFAULT_MANUAL_SYNC_COOLDOWN := 60.0 # 60 seconds rate limit on manual button clicks
+
+var manual_sync_cooldown_seconds: float = DEFAULT_MANUAL_SYNC_COOLDOWN
+var last_manual_sync_timestamp: float = 0.0
 
 var dirty_profiles: Array[String] = []
 var pending_matches: Array[Dictionary] = []
@@ -124,18 +129,39 @@ func _load_sync_state() -> void:
 			if m is Dictionary:
 				pending_matches.append(m)
 		last_pushed_leaderboard = parsed.get("last_pushed_leaderboard", {})
+		last_manual_sync_timestamp = float(parsed.get("last_manual_sync_timestamp", 0.0))
 
 
 func _save_sync_state() -> void:
 	var state = {
 		"dirty_profiles": dirty_profiles,
 		"pending_matches": pending_matches,
-		"last_pushed_leaderboard": last_pushed_leaderboard
+		"last_pushed_leaderboard": last_pushed_leaderboard,
+		"last_manual_sync_timestamp": last_manual_sync_timestamp
 	}
 	var f = FileAccess.open(SYNC_STATE_PATH, FileAccess.WRITE)
 	if f != null:
 		f.store_string(JSON.stringify(state, "\t"))
 		f.close()
+
+
+func get_manual_sync_cooldown_remaining() -> float:
+	var now := Time.get_unix_time_from_system()
+	var elapsed := now - last_manual_sync_timestamp
+	if elapsed < 0.0:
+		return 0.0
+	return maxf(0.0, manual_sync_cooldown_seconds - elapsed)
+
+
+func can_manual_sync() -> bool:
+	if _is_syncing:
+		return false
+	return get_manual_sync_cooldown_remaining() <= 0.0
+
+
+func reset_manual_sync_cooldown() -> void:
+	last_manual_sync_timestamp = 0.0
+	_save_sync_state()
 
 
 # ── DIRTY & MATCH TRACKING ───────────────────────────────────────────────
@@ -462,6 +488,16 @@ func sync_all_eligible_profiles(reason: String = "manual") -> void:
 		print("[CloudSync] Not signed in. Skipping %s sync." % reason)
 		return
 
+	if reason == "manual":
+		var remaining := get_manual_sync_cooldown_remaining()
+		if remaining > 0.0:
+			print("[CloudSync] Manual sync throttled. Cooldown remaining: %.1fs" % remaining)
+			sync_throttled.emit(remaining)
+			_show_cooldown_toast(int(ceil(remaining)))
+			return
+		last_manual_sync_timestamp = Time.get_unix_time_from_system()
+		_save_sync_state()
+
 	_is_syncing = true
 	sync_started.emit()
 	var synced: Array[String] = []
@@ -512,7 +548,25 @@ func sync_all_eligible_profiles(reason: String = "manual") -> void:
 	print("[CloudSync] Sync pass '%s' completed. Synced profiles: %s (all_ok=%s)" % [reason, str(synced), str(all_ok)])
 
 
-func sync_single_profile(player_name: String, cloud_uid: String) -> Dictionary:
+func sync_single_profile(player_name: String, cloud_uid: String, is_manual: bool = false) -> Dictionary:
+	if is_manual:
+		if _is_syncing:
+			print("[CloudSync] Sync already in progress, skipping manual sync for %s." % player_name)
+			return {"ok": false, "error": "Sync already in progress", "is_syncing": true}
+		var remaining := get_manual_sync_cooldown_remaining()
+		if remaining > 0.0:
+			print("[CloudSync] Manual sync throttled for %s. Cooldown remaining: %.1fs" % [player_name, remaining])
+			sync_throttled.emit(remaining)
+			_show_cooldown_toast(int(ceil(remaining)))
+			return {
+				"ok": false,
+				"error": "Sync cooldown active. Please wait %d seconds." % int(ceil(remaining)),
+				"throttled": true,
+				"cooldown_remaining": remaining
+			}
+		last_manual_sync_timestamp = Time.get_unix_time_from_system()
+		_save_sync_state()
+
 	var client := _get_firestore()
 	if client == null:
 		return {"ok": false, "error": "No Firestore client"}
@@ -597,11 +651,22 @@ func sync_single_profile(player_name: String, cloud_uid: String) -> Dictionary:
 
 		# Build effective lifetime stats (merging local records and achievements into lifetime)
 		var eff_lifetime: Dictionary = cloud_prof.get("lifetime", {}).duplicate()
+		var tombstones_merged: Dictionary = merged.get("tombstones", {})
+		var eff_clear_all_ts: int = int(tombstones_merged.get("cleared_all_at", 0))
+
 		var rec_longest_dr = float(merged.get("records", {}).get("longest_drive_yds", merged.get("records", {}).get("longest_drive", 0.0)))
-		if rec_longest_dr > float(eff_lifetime.get("longest_drive_yds", 0.0)):
+		var dr_cleared = StatsMerger.get_effective_club_clear_ts(tombstones_merged.get("cleared_clubs", {}), "Dr", eff_clear_all_ts) > 0
+		if dr_cleared and rec_longest_dr == 0.0:
+			eff_lifetime["longest_drive_yds"] = 0.0
+			eff_lifetime["longest_drive"] = 0.0
+		elif rec_longest_dr > float(eff_lifetime.get("longest_drive_yds", 0.0)) or dr_cleared:
 			eff_lifetime["longest_drive_yds"] = rec_longest_dr
+
 		var rec_longest_pt = float(merged.get("records", {}).get("longest_putt_ft", 0.0))
-		if rec_longest_pt > float(eff_lifetime.get("longest_putt_ft", 0.0)):
+		var pt_cleared = StatsMerger.get_effective_club_clear_ts(tombstones_merged.get("cleared_clubs", {}), "Pt", eff_clear_all_ts) > 0
+		if pt_cleared and rec_longest_pt == 0.0:
+			eff_lifetime["longest_putt_ft"] = 0.0
+		elif rec_longest_pt > float(eff_lifetime.get("longest_putt_ft", 0.0)) or pt_cleared:
 			eff_lifetime["longest_putt_ft"] = rec_longest_pt
 		var ach_unlocked = merged.get("achievements", {}).get("unlocked", {})
 		if ach_unlocked is Dictionary and ach_unlocked.size() > int(eff_lifetime.get("achievements_count", 0)):
@@ -737,6 +802,7 @@ func _gather_local_stats_dict(player_name: String, _reg_p: Dictionary) -> Dictio
 				var p_sw = parsed_s[player_name]
 				if p_sw is Dictionary:
 					local_dict["swing_issues"] = p_sw.get("monthly", {})
+					local_dict["swing_issues_updated_at"] = int(p_sw.get("updated_at", 0))
 					if p_sw.has("_cleared_at"):
 						if not local_dict["tombstones"] is Dictionary:
 							local_dict["tombstones"] = {}
@@ -832,6 +898,13 @@ func _build_club_summary(clubs_dict: Dictionary) -> Dictionary:
 		var speed_sum := 0.0
 		var club_speed_sum := 0.0
 		var spin_sum := 0.0
+		var offline_sum := 0.0
+		var face_sum := 0.0
+		var face_count := 0
+		var path_sum := 0.0
+		var path_count := 0
+		var impact_pts: Array = []
+
 		for s in shots:
 			var c_m = float(s.get("CarryDistance", s.get("c", 0.0)))
 			var t_m = float(s.get("TotalDistance", s.get("tot", 0.0)))
@@ -840,8 +913,40 @@ func _build_club_summary(clubs_dict: Dictionary) -> Dictionary:
 			speed_sum += float(s.get("BallSpeed", s.get("Speed", s.get("bs", 0.0))))
 			club_speed_sum += float(s.get("ClubSpeed", s.get("cs", 0.0)))
 			spin_sum += float(s.get("TotalSpin", s.get("sp", 0.0)))
+			var side_d = absf(float(s.get("SideDistance", s.get("sd", 0.0))))
+			offline_sum += side_d * 1.09361
+
+			if s.has("FaceAngle"):
+				face_sum += float(s["FaceAngle"])
+				face_count += 1
+			elif s.has("ClubFaceAngle"):
+				face_sum += float(s["ClubFaceAngle"])
+				face_count += 1
+			elif s.has("fa"):
+				face_sum += float(s["fa"])
+				face_count += 1
+
+			if s.has("ClubPath"):
+				path_sum += float(s["ClubPath"])
+				path_count += 1
+			elif s.has("Path"):
+				path_sum += float(s["Path"])
+				path_count += 1
+			elif s.has("cp"):
+				path_sum += float(s["cp"])
+				path_count += 1
+
+			if s.has("HorizontalFaceImpact") or s.has("VerticalFaceImpact") or s.has("hi") or s.has("vi"):
+				impact_pts.append({
+					"h": snapped(float(s.get("HorizontalFaceImpact", s.get("hi", 0.0))), 0.1),
+					"v": snapped(float(s.get("VerticalFaceImpact", s.get("vi", 0.0))), 0.1)
+				})
+
 		var avg_cs = club_speed_sum / count
 		var avg_bs = speed_sum / count
+		if impact_pts.size() > 50:
+			impact_pts = impact_pts.slice(impact_pts.size() - 50)
+
 		summary[clb] = {
 			"count": count,
 			"carry_yds": carry_sum / count,
@@ -849,7 +954,17 @@ func _build_club_summary(clubs_dict: Dictionary) -> Dictionary:
 			"ball_speed_mph": avg_bs,
 			"club_speed_mph": avg_cs,
 			"smash": (avg_bs / avg_cs) if avg_cs > 0.0 else 0.0,
-			"spin_rpm": int(round(spin_sum / count))
+			"spin_rpm": int(round(spin_sum / count)),
+			"offline_yds": offline_sum / count,
+			"avg_offline_yds": offline_sum / count,
+			"avg_face_angle": (face_sum / face_count) if face_count > 0 else 0.0,
+			"has_face_angle": face_count > 0,
+			"face_angle_count": face_count,
+			"avg_club_path": (path_sum / path_count) if path_count > 0 else 0.0,
+			"has_club_path": path_count > 0,
+			"club_path_count": path_count,
+			"impact_points": impact_pts,
+			"has_impact_data": not impact_pts.is_empty()
 		}
 	return summary
 
@@ -1047,3 +1162,38 @@ func _show_revocation_toast(player_name: String) -> void:
 			tw.tween_interval(4.0)
 			tw.tween_property(toast, "modulate:a", 0.0, 0.6)
 			tw.tween_callback(toast.queue_free)
+
+
+func _show_cooldown_toast(remaining_sec: int) -> void:
+	var msg := "⏱️ Cloud sync is on cooldown (%ds remaining) to preserve server limits." % remaining_sec
+	print("[CloudSync] %s" % msg)
+	var loop = Engine.get_main_loop()
+	if not (loop is SceneTree and loop.root != null):
+		return
+	if loop.root.has_node("SyncCooldownToast"):
+		return
+	var toast := PanelContainer.new()
+	toast.name = "SyncCooldownToast"
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.12, 0.16, 0.14, 0.95)
+	style.border_color = Color(0.3, 0.7, 0.45, 0.9)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(6)
+	style.content_margin_left = 16
+	style.content_margin_right = 16
+	style.content_margin_top = 10
+	style.content_margin_bottom = 10
+	toast.add_theme_stylebox_override("panel", style)
+	toast.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	toast.offset_bottom = -80
+	var lbl := Label.new()
+	lbl.text = msg
+	lbl.add_theme_color_override("font_color", Color(0.9, 0.95, 0.92))
+	lbl.add_theme_font_size_override("font_size", 14)
+	toast.add_child(lbl)
+	loop.root.add_child(toast)
+	var tw = toast.create_tween()
+	if tw != null:
+		tw.tween_interval(3.0)
+		tw.tween_property(toast, "modulate:a", 0.0, 0.5)
+		tw.tween_callback(toast.queue_free)

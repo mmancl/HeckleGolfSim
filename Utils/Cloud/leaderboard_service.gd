@@ -145,8 +145,14 @@ func fetch_category(category_id: String, force_refresh: bool = false) -> Diction
 	var field: String = cat_def.get("field", "")
 	var dir: String = cat_def.get("dir", "DESCENDING")
 	var order_by := [{"field": field, "dir": dir}]
+	var where_filters: Array = []
+	var unit: String = cat_def.get("unit", "")
+	if unit in ["yds", "ft", "count", "games", "wins"]:
+		where_filters.append({"field": field, "op": "GREATER_THAN", "val": 0.0})
 
-	var resp = await client.run_query("public_profiles", [], order_by, DEFAULT_LIMIT, false)
+	var resp = await client.run_query("public_profiles", where_filters, order_by, DEFAULT_LIMIT, false)
+	if not resp.get("ok", false) and where_filters.size() > 0:
+		resp = await client.run_query("public_profiles", [], order_by, DEFAULT_LIMIT, false)
 	var is_ok: bool = resp.get("ok", false)
 
 	if is_ok:
@@ -226,8 +232,20 @@ static func sort_entries(category_def: Dictionary, entries: Array) -> Array:
 	var field: String = category_def.get("field", "")
 	var sec_field: String = category_def.get("secondary_field", "")
 	var is_desc: bool = category_def.get("dir", "DESCENDING") == "DESCENDING"
+	var unit: String = category_def.get("unit", "")
+	var filter_positive: bool = unit in ["yds", "ft", "count", "games", "wins"]
 
-	var sorted: Array = entries.duplicate()
+	var filtered: Array = []
+	for e in entries:
+		if e is Dictionary:
+			var val = e.get(field, null)
+			if val == null:
+				continue
+			if filter_positive and float(val) <= 0.0:
+				continue
+			filtered.append(e)
+
+	var sorted: Array = filtered.duplicate()
 	sorted.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		var val_a = a.get(field, null)
 		var val_b = b.get(field, null)

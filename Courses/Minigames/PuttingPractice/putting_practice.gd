@@ -1468,6 +1468,14 @@ func _on_ball_rest(_shot_data: Dictionary) -> void:
 	if ball_holed or end_dist_meters <= cup_radius or end_dist_meters_2d <= cup_radius:
 		made = true
 
+	if made:
+		var holed_player_name = get_active_player_name()
+		var holed_dist_ft = float(hole_data[selected_hole_index]["dist_ft"]) if selected_hole_index >= 0 and selected_hole_index < hole_data.size() else start_dist_feet
+		if not holed_player_name.is_empty():
+			var mp = get_node_or_null("/root/MultiplayerManager")
+			if mp != null and mp.has_method("record_player_longest_putt"):
+				mp.record_player_longest_putt(holed_player_name, holed_dist_ft)
+
 	if pvp_mode:
 		var cur_player = players_list[active_player_index % players_list.size()]
 		var cur_completed = cur_player.get("completed", [])

@@ -960,19 +960,92 @@ func _setup_cloud_account_bar(parent: Container) -> void:
 		var cs = get_node("/root/CloudSync")
 		if cs.has_signal("sync_started"):
 			cs.sync_started.connect(func():
-				if is_instance_valid(cloud_sync_now_btn):
-					cloud_sync_now_btn.text = "⏳ Syncing..."
-					cloud_sync_now_btn.disabled = true
+				_update_sync_buttons_state()
 			)
 		if cs.has_signal("sync_completed"):
 			cs.sync_completed.connect(func(_ok, _synced):
-				if is_instance_valid(cloud_sync_now_btn):
-					cloud_sync_now_btn.text = "🔄 Sync Now"
-					cloud_sync_now_btn.disabled = false
+				_update_sync_buttons_state()
 				_update_cloud_account_bar()
 				if not selected_player_name.is_empty():
 					_render_player_profile(selected_player_name)
 			)
+		if cs.has_signal("sync_throttled"):
+			cs.sync_throttled.connect(func(_rem):
+				_update_sync_buttons_state()
+			)
+
+
+func _process(_delta: float) -> void:
+	_update_sync_buttons_state()
+
+
+func _update_sync_buttons_state() -> void:
+	var cs = get_node_or_null("/root/CloudSync")
+	if cs == null:
+		return
+
+	var is_syncing: bool = bool(cs.get("_is_syncing"))
+	var rem: float = cs.get_manual_sync_cooldown_remaining() if cs.has_method("get_manual_sync_cooldown_remaining") else 0.0
+
+	# 1. Main header CloudSyncNowBtn
+	if is_instance_valid(cloud_sync_now_btn) and cloud_sync_now_btn.is_visible_in_tree():
+		if is_syncing:
+			if cloud_sync_now_btn.text != "⏳ Syncing...":
+				cloud_sync_now_btn.text = "⏳ Syncing..."
+			cloud_sync_now_btn.disabled = true
+			cloud_sync_now_btn.tooltip_text = "Syncing in progress..."
+		elif rem > 0.0:
+			var sec: int = int(ceil(rem))
+			var cd_text := "⏳ Sync (%ds)" % sec
+			if cloud_sync_now_btn.text != cd_text:
+				cloud_sync_now_btn.text = cd_text
+			cloud_sync_now_btn.disabled = true
+			cloud_sync_now_btn.tooltip_text = "Sync cooldown active (%ds remaining) to preserve cloud limits." % sec
+		else:
+			if cloud_sync_now_btn.text != "🔄 Sync Now":
+				cloud_sync_now_btn.text = "🔄 Sync Now"
+			cloud_sync_now_btn.disabled = false
+			cloud_sync_now_btn.tooltip_text = "Sync your player profiles and matches to the cloud."
+
+	# 2. Stats panel Primary and Linked sync buttons if active
+	if is_instance_valid(stats_panel) and stats_panel.is_visible_in_tree():
+		var primary_sync = stats_panel.find_child("SyncPrimaryBtn", true, false) as Button
+		if primary_sync != null and is_instance_valid(primary_sync) and primary_sync.is_visible_in_tree():
+			if is_syncing:
+				if primary_sync.text != "⏳...":
+					primary_sync.text = "⏳..."
+				primary_sync.disabled = true
+			elif rem > 0.0:
+				var sec_p: int = int(ceil(rem))
+				var p_txt := "⏳ (%ds)" % sec_p
+				if primary_sync.text != p_txt:
+					primary_sync.text = p_txt
+				primary_sync.disabled = true
+				primary_sync.tooltip_text = "Sync cooldown active (%ds remaining) to preserve cloud limits." % sec_p
+			else:
+				if primary_sync.text != "🔄 Sync Now":
+					primary_sync.text = "🔄 Sync Now"
+				primary_sync.disabled = false
+				primary_sync.tooltip_text = "Sync this primary profile to the cloud."
+
+		var linked_sync = stats_panel.find_child("SyncLinkedBtn", true, false) as Button
+		if linked_sync != null and is_instance_valid(linked_sync) and linked_sync.is_visible_in_tree():
+			if is_syncing:
+				if linked_sync.text != "⏳...":
+					linked_sync.text = "⏳..."
+				linked_sync.disabled = true
+			elif rem > 0.0:
+				var sec_l: int = int(ceil(rem))
+				var l_txt := "⏳ (%ds)" % sec_l
+				if linked_sync.text != l_txt:
+					linked_sync.text = l_txt
+				linked_sync.disabled = true
+				linked_sync.tooltip_text = "Sync cooldown active (%ds remaining) to preserve cloud limits." % sec_l
+			else:
+				if linked_sync.text != "🔄 Sync Now":
+					linked_sync.text = "🔄 Sync Now"
+				linked_sync.disabled = false
+				linked_sync.tooltip_text = "Sync this linked profile to the cloud."
 
 
 func _update_cloud_account_bar() -> void:
@@ -1161,9 +1234,11 @@ func _populate_cloud_link_section(cloud_link_section: HBoxContainer, reg_p: Dict
 			sync_btn.pressed.connect(func():
 				var cs = get_node_or_null("/root/CloudSync")
 				if cs != null and cs.has_method("sync_single_profile"):
+					if cs.has_method("can_manual_sync") and not cs.can_manual_sync():
+						return
 					sync_btn.text = "⏳..."
 					sync_btn.disabled = true
-					await cs.sync_single_profile(p_name, str(reg_p.get("cloud_uid", "")))
+					await cs.sync_single_profile(p_name, str(reg_p.get("cloud_uid", "")), true)
 					_render_player_profile(p_name)
 			)
 			cloud_link_section.add_child(sync_btn)
@@ -1248,8 +1323,18 @@ func _open_account_modal() -> void:
 
 
 func _on_sync_now_pressed() -> void:
-	if has_node("/root/CloudSync"):
-		get_node("/root/CloudSync").call("sync_all_eligible_profiles", "manual")
+	if not has_node("/root/CloudSync"):
+		return
+	var cs = get_node("/root/CloudSync")
+	if cs.has_method("can_manual_sync") and not cs.can_manual_sync():
+		var rem = cs.get_manual_sync_cooldown_remaining() if cs.has_method("get_manual_sync_cooldown_remaining") else 0.0
+		if rem > 0.0:
+			print("[PlayersMenu] Manual sync throttled. Cooldown remaining: %.1fs" % rem)
+		return
+	if is_instance_valid(cloud_sync_now_btn):
+		cloud_sync_now_btn.disabled = true
+		cloud_sync_now_btn.text = "⏳ Syncing..."
+	cs.call("sync_all_eligible_profiles", "manual")
 
 
 func _show_primary_confirm_dialog(player_name: String) -> void:
@@ -2364,12 +2449,14 @@ func _render_player_profile(player_name: String) -> void:
 			ThemeManager.apply_secondary_button_style(sync_primary_btn, 6)
 			sync_primary_btn.pressed.connect(func():
 				if cs != null and cs.has_method("sync_single_profile"):
+					if cs.has_method("can_manual_sync") and not cs.can_manual_sync():
+						return
 					sync_primary_btn.text = "⏳..."
 					sync_primary_btn.disabled = true
 					var uid_to_sync = str(reg_p.get("cloud_uid", ""))
 					if uid_to_sync.is_empty() and auth != null and auth.has_method("get_uid"):
 						uid_to_sync = auth.get_uid()
-					var sync_res = await cs.sync_single_profile(player_name, uid_to_sync)
+					var sync_res = await cs.sync_single_profile(player_name, uid_to_sync, true)
 					if not sync_res.get("ok", false):
 						print("[PlayersMenu] Primary profile sync error: %s" % sync_res.get("error", "Unknown error"))
 					_render_player_profile(player_name)
@@ -2554,6 +2641,11 @@ func _render_player_profile(player_name: String) -> void:
 	if stats["longest_drive"] > 0:
 		drive_str = "%.1f yds" % stats["longest_drive"]
 	add_stat_box.call("Longest Drive", drive_str)
+	
+	var putt_str = "---"
+	if stats.get("longest_putt_ft", 0.0) > 0:
+		putt_str = "%.1f ft" % stats["longest_putt_ft"]
+	add_stat_box.call("Longest Putt", putt_str)
 	add_stat_box.call("Preferred Tee", p_tee if not p_tee.is_empty() else "None")
 	
 	var records_lbl = Label.new()
@@ -3840,6 +3932,8 @@ func _email_player_profile_report(player_name: String) -> void:
 	body += "Single Player Completed: %d\n" % stats.get("single_player_completed", 0)
 	if stats.get("longest_drive", 0.0) > 0:
 		body += "Longest Drive: %.1f yds\n" % stats["longest_drive"]
+	if stats.get("longest_putt_ft", 0.0) > 0:
+		body += "Longest Putt: %.1f ft\n" % stats["longest_putt_ft"]
 	body += "\n"
 	
 	body += MultiplayerManager.format_player_club_stats_summary(player_name)

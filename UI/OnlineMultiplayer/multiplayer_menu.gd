@@ -62,6 +62,7 @@ var _available_courses: Array[Dictionary] = []
 var _registered_players: Array[Dictionary] = []
 var _missing_course_info: Dictionary = {}
 var _is_downloading_course: bool = false
+var _pending_spectate_match_id: String = ""
 var _session_cache: Node = null
 
 
@@ -525,32 +526,59 @@ func _add_browser_lobby_row(lobby_data: Dictionary) -> void:
 	info_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hbox.add_child(info_vbox)
 
+	var status: String = str(lobby_data.get("status", "lobby"))
+	var is_in_progress: bool = (status == "in_progress" or status == "active")
+	var status_tag: String = "[In Progress]" if is_in_progress else "[In Lobby]"
+
 	var title_lbl := Label.new()
-	title_lbl.text = "%s — %s (%s)" % [
+	title_lbl.text = "%s — %s (%s) %s" % [
 		lobby_data.get("course_title", "Unknown Course"),
 		lobby_data.get("course_length", "Full 18"),
-		lobby_data.get("game_mode", "Standard")
+		lobby_data.get("game_mode", "Standard"),
+		status_tag
 	]
 	title_lbl.add_theme_font_size_override("font_size", 15)
 	info_vbox.add_child(title_lbl)
 
 	var host_lbl := Label.new()
-	host_lbl.text = "Host: %s | Players: %s/%s" % [
+	var player_cnt: int = int(lobby_data.get("player_count", 1))
+	var max_p: int = int(lobby_data.get("max_players", 4))
+	host_lbl.text = "Host: %s | Players: %d/%d" % [
 		lobby_data.get("host_name", "Host"),
-		str(lobby_data.get("player_count", 1)),
-		str(lobby_data.get("max_players", 4))
+		player_cnt,
+		max_p
 	]
 	host_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
 	host_lbl.add_theme_font_size_override("font_size", 13)
 	info_vbox.add_child(host_lbl)
 
-	var join_btn := Button.new()
-	join_btn.text = "Join"
-	join_btn.custom_minimum_size = Vector2(100, 38)
-	ThemeManager.apply_primary_button_style(join_btn, 6)
-	var match_id: String = lobby_data.get("match_id", "")
-	join_btn.pressed.connect(func(): _on_join_browser_lobby(match_id))
-	hbox.add_child(join_btn)
+	var match_id: String = str(lobby_data.get("match_id", ""))
+
+	if is_in_progress:
+		var spectate_btn := Button.new()
+		spectate_btn.name = "SpectateBtn"
+		spectate_btn.text = "Spectate"
+		spectate_btn.custom_minimum_size = Vector2(110, 38)
+		ThemeManager.apply_primary_button_style(spectate_btn, 6)
+		spectate_btn.pressed.connect(func(): _on_spectate_browser_match(match_id, lobby_data))
+		hbox.add_child(spectate_btn)
+	else:
+		if player_cnt < max_p:
+			var join_btn := Button.new()
+			join_btn.name = "JoinBtn"
+			join_btn.text = "Join"
+			join_btn.custom_minimum_size = Vector2(90, 38)
+			ThemeManager.apply_primary_button_style(join_btn, 6)
+			join_btn.pressed.connect(func(): _on_join_browser_lobby(match_id))
+			hbox.add_child(join_btn)
+
+		var spectate_btn := Button.new()
+		spectate_btn.name = "SpectateBtn"
+		spectate_btn.text = "Spectate"
+		spectate_btn.custom_minimum_size = Vector2(90, 38)
+		ThemeManager.apply_secondary_button_style(spectate_btn, 6)
+		spectate_btn.pressed.connect(func(): _on_spectate_browser_match(match_id, lobby_data))
+		hbox.add_child(spectate_btn)
 
 	browser_list.add_child(card)
 
@@ -568,6 +596,22 @@ func _on_join_browser_lobby(match_id: String) -> void:
 		_switch_tab("room")
 	else:
 		_show_status(res.get("error", "Failed to join match."), true)
+
+
+func _on_spectate_browser_match(match_id: String, _lobby_data: Dictionary = {}) -> void:
+	_show_status("Connecting to spectate match...", false)
+	var sess := _get_session()
+	if sess == null:
+		return
+
+	var res = await sess.spectate_match(match_id)
+	if res.get("ok", false):
+		_show_status("Spectating match!", false)
+	elif res.get("need_course", false):
+		_pending_spectate_match_id = match_id
+		_show_status("Course download required to spectate.", false)
+	else:
+		_show_status(res.get("error", "Failed to spectate match."), true)
 
 
 # ── LOBBY ROOM VIEW ──────────────────────────────────────────────────────
@@ -712,6 +756,10 @@ func _on_download_course_pressed() -> void:
 						sess.set_local_course_ready(true, found.get("scene_path", ""), found.get("config_path", ""))
 					course_install_banner.visible = false
 					_show_status("Course installed and ready!", false)
+					if not _pending_spectate_match_id.is_empty():
+						var target_spec_id := _pending_spectate_match_id
+						_pending_spectate_match_id = ""
+						_on_spectate_browser_match(target_spec_id)
 				else:
 					course_install_label.text = "Installed course could not be verified."
 			else:
@@ -888,6 +936,18 @@ func _update_controller_focus_navigation() -> void:
 	elif _active_tab == "browser":
 		tab_browser_button.focus_neighbor_bottom = refresh_browser_button.get_path()
 		refresh_browser_button.focus_neighbor_top = tab_browser_button.get_path()
+		var first_btn: Button = null
+		for card in browser_list.get_children():
+			if card is PanelContainer:
+				for c in card.find_children("*", "Button", true, false):
+					if c is Button and c.is_visible_in_tree():
+						first_btn = c
+						break
+				if first_btn != null:
+					break
+		if first_btn != null:
+			refresh_browser_button.focus_neighbor_bottom = first_btn.get_path()
+			first_btn.focus_neighbor_top = refresh_browser_button.get_path()
 
 	elif _active_tab == "room":
 		copy_code_button.focus_neighbor_top = back_button.get_path()

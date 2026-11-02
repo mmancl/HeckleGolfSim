@@ -30,6 +30,8 @@ func _run_all_tests() -> void:
 	await _test_4_foreground_timer_pause_and_dirty_guard()
 	await _test_5_controller_focus_navigation()
 	await _test_6_sync_404_resilience_and_leaderboard_projection()
+	await _test_7_manual_sync_cooldown_and_rate_limiting()
+	await _test_8_web_and_cross_device_clear_tracking()
 	_restore_user_files(backup)
 
 	print("\n=======================================================")
@@ -330,34 +332,6 @@ func _test_3_tombstone_respect() -> void:
 
 # ── TEST 4: FOREGROUND TIMER, MOBILE PAUSE & DIRTY GUARD ─────────────────
 
-class MockCountingFirestoreClient extends FirestoreClient:
-	var get_doc_count: int = 0
-	var set_doc_count: int = 0
-	var commit_writes_count: int = 0
-
-	func _init() -> void:
-		project_id = "test-heckle-golf"
-		api_key = "fake_key"
-		base_url = "https://mock.firestore"
-
-	func get_doc(_doc_path: String, _require_auth: bool = true) -> Dictionary:
-		get_doc_count += 1
-		return {
-			"ok": true,
-			"status": 200,
-			"data": {"rev": 1, "lifetime": {}},
-			"error": ""
-		}
-
-	func set_doc(_doc_path: String, _fields: Dictionary, _update_mask: PackedStringArray = [], _update_time: String = "", _current_document_exists: Variant = null) -> Dictionary:
-		set_doc_count += 1
-		return {"ok": true, "status": 200, "data": {}, "error": ""}
-
-	func commit_writes(_writes: Array) -> Dictionary:
-		commit_writes_count += 1
-		return {"ok": true, "status": 200, "data": {}, "error": ""}
-
-
 func _test_4_foreground_timer_pause_and_dirty_guard() -> void:
 	print("\n--- Test 4: 30-Minute Foreground Timer, Mobile Pause & Dirty Guard ---")
 
@@ -477,35 +451,7 @@ func _test_5_controller_focus_navigation() -> void:
 
 # ── TEST 6: 404 BRAND NEW PROFILE RESILIENCE & LEADERBOARD PROJECTION ─────
 
-class Mock404NewProfileFirestoreClient extends FirestoreClient:
-	var uploaded_docs: Dictionary = {}
-
-	func _init() -> void:
-		project_id = "test-heckle-golf"
-		api_key = "fake_key"
-		base_url = "https://mock.firestore"
-
-	func get_doc(doc_path: String, _require_auth: bool = true) -> Dictionary:
-		if uploaded_docs.has(doc_path):
-			return {"ok": true, "status": 200, "data": uploaded_docs[doc_path], "error": ""}
-		return {
-			"ok": false,
-			"status": 404,
-			"data": {},
-			"error": "Document not found."
-		}
-
-	func set_doc(doc_path: String, fields: Dictionary, _update_mask: PackedStringArray = [], _update_time: String = "", _current_document_exists: Variant = null) -> Dictionary:
-		uploaded_docs[doc_path] = fields
-		return {"ok": true, "status": 200, "data": fields, "error": ""}
-
-	func commit_writes(writes: Array) -> Dictionary:
-		for w in writes:
-			if w.has("update"):
-				var name_str = str(w["update"].get("name", ""))
-				uploaded_docs[name_str] = w["update"].get("fields", {})
-		return {"ok": true, "status": 200, "data": {}, "error": ""}
-
+# ── TEST 6: 404 BRAND NEW PROFILE RESILIENCE ─────────────────────────────
 
 func _test_6_sync_404_resilience_and_leaderboard_projection() -> void:
 	print("\n--- Test 6: 404 Brand New Profile Resilience, Leaderboard Projection & Schema Version ---")
@@ -601,3 +547,314 @@ func _test_6_sync_404_resilience_and_leaderboard_projection() -> void:
 	sync_node.queue_free()
 	mock_auth.queue_free()
 	print("  PASS: 404 profile resilience, club summary upload, security-safe leaderboard projection, and match schema version verified.")
+
+
+# ── TEST 7: MANUAL SYNC COOLDOWN & RATE LIMITING PROTECTIONS ──────────────
+
+func _test_7_manual_sync_cooldown_and_rate_limiting() -> void:
+	print("\n--- Test 7: Manual Sync Cooldown & Rate Limiting Protections ---")
+
+	var sync_node = CloudSyncScript.new()
+	root.add_child(sync_node)
+
+	var mock_firestore = MockCountingFirestoreClient.new()
+	sync_node.call("set_firestore_client", mock_firestore)
+
+	var mock_auth = Node.new()
+	mock_auth.name = "MockAuth7"
+	mock_auth.set_script(load("res://Utils/Cloud/cloud_auth.gd"))
+	mock_auth.set("current_user", {"uid": "mock_uid_cooldown_test", "email": "test@heckle.golf"})
+	root.add_child(mock_auth)
+	sync_node.call("set_auth_node", mock_auth)
+
+	# 1. Initially, cooldown remaining must be 0 and can_manual_sync must be true
+	sync_node.reset_manual_sync_cooldown()
+	assert(sync_node.get_manual_sync_cooldown_remaining() == 0.0, "Initial cooldown remaining must be 0.0")
+	assert(sync_node.can_manual_sync() == true, "can_manual_sync must be true initially")
+
+	# 2. Trigger first manual sync
+	var throttled_data := {"emitted": false, "remaining": 0.0}
+	sync_node.sync_throttled.connect(func(rem: float):
+		throttled_data["emitted"] = true
+		throttled_data["remaining"] = rem
+	)
+
+	sync_node.sync_all_eligible_profiles("manual")
+	await process_frame
+	while sync_node.get("_is_syncing"):
+		await process_frame
+
+	# 3. After manual sync, cooldown must be active
+	var rem = sync_node.get_manual_sync_cooldown_remaining()
+	assert(rem > 0.0 and rem <= sync_node.manual_sync_cooldown_seconds, "Cooldown remaining must be > 0 and <= %f, got %f" % [sync_node.manual_sync_cooldown_seconds, rem])
+	assert(sync_node.can_manual_sync() == false, "can_manual_sync must be false during cooldown")
+
+	# 4. Attempting another manual sync immediately must be throttled
+	throttled_data["emitted"] = false
+	mock_firestore.get_doc_count = 0
+	sync_node.sync_all_eligible_profiles("manual")
+	await process_frame
+
+	assert(throttled_data["emitted"] == true, "sync_throttled signal must be emitted when manual sync is throttled")
+	assert(throttled_data["remaining"] > 0.0, "throttled remaining must be > 0")
+	assert(mock_firestore.get_doc_count == 0, "Throttled manual sync must make 0 Firestore calls")
+
+	# 5. Attempting manual single profile sync must return throttled
+	var single_res = await sync_node.sync_single_profile("TestPlayer", "mock_uid_cooldown_test", true)
+	assert(single_res.get("throttled", false) == true, "Manual single profile sync must be throttled")
+	assert(single_res.get("ok", true) == false, "Manual single profile sync ok must be false when throttled")
+
+	# 6. Automatic sync triggers (e.g. startup or match_finished) should not be blocked by manual cooldown
+	mock_firestore.get_doc_count = 0
+	sync_node.sync_all_eligible_profiles("startup")
+	await process_frame
+	while sync_node.get("_is_syncing"):
+		await process_frame
+
+	# 7. Reset cooldown and verify manual sync works again
+	sync_node.reset_manual_sync_cooldown()
+	assert(sync_node.get_manual_sync_cooldown_remaining() == 0.0, "Cooldown remaining after reset must be 0.0")
+	assert(sync_node.can_manual_sync() == true, "can_manual_sync must be true after cooldown reset")
+
+	# 8. Verify persistence in user://cloud_sync_state.json
+	sync_node.last_manual_sync_timestamp = 1234567.0
+	sync_node._save_sync_state()
+	var test_reload = CloudSyncScript.new()
+	test_reload._load_sync_state()
+	assert(test_reload.last_manual_sync_timestamp == 1234567.0, "last_manual_sync_timestamp must persist in cloud_sync_state.json")
+	test_reload.queue_free()
+
+	sync_node.queue_free()
+	mock_auth.queue_free()
+	print("  PASS: Manual sync cooldown, rate limiting, signal emission, and persistence verified.")
+
+
+# ── TEST 8: WEB & CROSS-DEVICE CLEAR TRACKING ────────────────────────────
+
+func _test_8_web_and_cross_device_clear_tracking() -> void:
+	print("\n--- Test 8: Web & Cross-Device Clear Tracking ---")
+
+	# Scenario A: Clearing a club from the web/Device A with legacy untimestamped shots (t=0) on Device B
+	var cloud_web_clear = {
+		"clubs": {},
+		"tombstones": {
+			"cleared_all_at": 0,
+			"cleared_clubs": {"7i": 1000}
+		},
+		"records": {}
+	}
+
+	var local_device = {
+		"clubs": {
+			"7i": [
+				{"id": "leg_shot_1", "t": 0, "CarryDistance": 140.0, "TotalDistance": 145.0},
+				{"id": "pre_clear_shot", "t": 950, "CarryDistance": 142.0, "TotalDistance": 148.0},
+				{"id": "post_clear_shot", "t": 1050, "CarryDistance": 150.0, "TotalDistance": 156.0}
+			]
+		},
+		"tombstones": {
+			"cleared_all_at": 0,
+			"cleared_clubs": {}
+		},
+		"records": {}
+	}
+
+	var merged_a = StatsMerger.merge_profile_stats(local_device, cloud_web_clear)
+	assert(merged_a["clubs"].has("7i"), "7i must have surviving post-clear shot")
+	var shots_7i: Array = merged_a["clubs"]["7i"]
+	assert(shots_7i.size() == 1, "Only the post-clear shot (t=1050) must survive, got: %d" % shots_7i.size())
+	assert(shots_7i[0]["id"] == "post_clear_shot", "Surviving shot must be post_clear_shot")
+	assert(merged_a["tombstones"]["cleared_clubs"]["7i"] == 1000, "Tombstone for 7i must be preserved")
+
+	# Scenario B: Club cleared with NO post-clear shots must be purged completely
+	var local_device_cleared = {
+		"clubs": {
+			"5i": [
+				{"id": "old_5i_1", "t": 0, "CarryDistance": 160.0},
+				{"id": "old_5i_2", "t": 800, "CarryDistance": 165.0}
+			]
+		},
+		"tombstones": {
+			"cleared_all_at": 0,
+			"cleared_clubs": {}
+		}
+	}
+	var cloud_5i_clear = {
+		"clubs": {},
+		"tombstones": {
+			"cleared_all_at": 0,
+			"cleared_clubs": {"5i": 1000}
+		}
+	}
+	var merged_b = StatsMerger.merge_profile_stats(local_device_cleared, cloud_5i_clear)
+	assert(not merged_b["clubs"].has("5i") or merged_b["clubs"]["5i"].is_empty(), "5i must be completely empty or removed when cleared without post-clear shots")
+	assert(merged_b["tombstones"]["cleared_clubs"]["5i"] == 1000, "Tombstone for 5i must be preserved")
+
+	# Scenario C: Case-insensitive club code matching (e.g. 'pw' vs 'PW')
+	var device_c1 = {
+		"clubs": {
+			"PW": [
+				{"id": "pw_old", "t": 400, "CarryDistance": 100.0},
+				{"id": "pw_new", "t": 1200, "CarryDistance": 105.0}
+			]
+		},
+		"tombstones": {
+			"cleared_all_at": 0,
+			"cleared_clubs": {}
+		}
+	}
+	var device_c2 = {
+		"clubs": {},
+		"tombstones": {
+			"cleared_all_at": 0,
+			"cleared_clubs": {"pw": 1000}
+		}
+	}
+	var merged_c = StatsMerger.merge_profile_stats(device_c1, device_c2)
+	assert(merged_c["clubs"].has("PW") or merged_c["clubs"].has("pw"), "PW/pw must be present")
+	var pw_shots: Array = merged_c["clubs"].get("PW", merged_c["clubs"].get("pw", []))
+	assert(pw_shots.size() == 1, "Only post-clear PW shot must survive case-insensitively, got: %d" % pw_shots.size())
+	assert(pw_shots[0]["id"] == "pw_new", "Surviving shot must be pw_new")
+
+	# Scenario D: Clearing Driver resets or recalculates longest drive
+	var dr_device_old = {
+		"clubs": {
+			"Dr": [
+				{"id": "dr_old_blast", "t": 300, "TotalDistance": 300.0 / 1.09361}, # 300 yds
+				{"id": "dr_new_modest", "t": 1100, "TotalDistance": 250.0 / 1.09361} # 250 yds
+			]
+		},
+		"records": {
+			"longest_drive_yds": 300.0,
+			"longest_drive": 300.0
+		},
+		"tombstones": {
+			"cleared_all_at": 0,
+			"cleared_clubs": {}
+		}
+	}
+	var dr_cloud_clear = {
+		"clubs": {},
+		"records": {},
+		"tombstones": {
+			"cleared_all_at": 0,
+			"cleared_clubs": {"Dr": 1000}
+		}
+	}
+	var merged_d = StatsMerger.merge_profile_stats(dr_device_old, dr_cloud_clear)
+	assert(is_equal_approx(merged_d["records"]["longest_drive_yds"], 250.0), "Longest drive must be recalculated from post-clear shots (250.0), got %f" % merged_d["records"]["longest_drive_yds"])
+
+	# Scenario E: Clearing all ball history purges all clubs
+	var all_hist_device = {
+		"clubs": {
+			"Dr": [{"id": "d1", "t": 200, "TotalDistance": 250.0}],
+			"7i": [{"id": "71", "t": 300, "TotalDistance": 150.0}],
+			"Pt": [{"id": "p1", "t": 400, "TotalDistance": 10.0}]
+		},
+		"records": {
+			"longest_drive_yds": 273.4,
+			"longest_putt_ft": 32.8
+		},
+		"tombstones": {
+			"cleared_all_at": 0,
+			"cleared_clubs": {}
+		}
+	}
+	var all_hist_clear = {
+		"clubs": {},
+		"records": {},
+		"tombstones": {
+			"cleared_all_at": 1000,
+			"cleared_clubs": {}
+		}
+	}
+	var merged_e = StatsMerger.merge_profile_stats(all_hist_device, all_hist_clear)
+	assert(merged_e["clubs"].get("Dr", []).is_empty(), "Dr must be cleared by cleared_all_at")
+	assert(merged_e["clubs"].get("7i", []).is_empty(), "7i must be cleared by cleared_all_at")
+	assert(merged_e["clubs"].get("Pt", []).is_empty(), "Pt must be cleared by cleared_all_at")
+	assert(merged_e["records"]["longest_drive_yds"] == 0.0, "longest_drive_yds must be 0.0")
+	assert(merged_e["records"]["longest_putt_ft"] == 0.0, "longest_putt_ft must be 0.0")
+
+	# Scenario F: Swing issues cleared
+	var swing_device = {
+		"swing_issues": {
+			"2026-10": {"Over the Top": 3},
+			"2026-11": {"Early Extension": 2}
+		},
+		"swing_issues_updated_at": 400,
+		"tombstones": {
+			"cleared_swing_issues_at": 0
+		}
+	}
+	var swing_clear = {
+		"swing_issues": {},
+		"swing_issues_updated_at": 0,
+		"tombstones": {
+			"cleared_swing_issues_at": 1000
+		}
+	}
+	var merged_f = StatsMerger.merge_profile_stats(swing_device, swing_clear)
+	assert(merged_f["swing_issues"].is_empty(), "Swing issues updated prior to cleared_swing_issues_at must be purged")
+
+	print("  PASS: Web and cross-device clear tracking, legacy shot purging, record recalculation, and swing clear verified.")
+
+
+# ── MOCK FIRESTORE CLASSES ───────────────────────────────────────────────
+
+class MockCountingFirestoreClient extends FirestoreClient:
+	var get_doc_count: int = 0
+	var set_doc_count: int = 0
+	var commit_writes_count: int = 0
+
+	func _init() -> void:
+		project_id = "test-heckle-golf"
+		api_key = "fake_key"
+		base_url = "https://mock.firestore"
+
+	func get_doc(_doc_path: String, _require_auth: bool = true) -> Dictionary:
+		get_doc_count += 1
+		return {
+			"ok": true,
+			"status": 200,
+			"data": {"rev": 1, "lifetime": {}},
+			"error": ""
+		}
+
+	func set_doc(_doc_path: String, _fields: Dictionary, _update_mask: PackedStringArray = [], _update_time: String = "", _current_document_exists: Variant = null) -> Dictionary:
+		set_doc_count += 1
+		return {"ok": true, "status": 200, "data": {}, "error": ""}
+
+	func commit_writes(_writes: Array) -> Dictionary:
+		commit_writes_count += 1
+		return {"ok": true, "status": 200, "data": {}, "error": ""}
+
+
+class Mock404NewProfileFirestoreClient extends FirestoreClient:
+	var uploaded_docs: Dictionary = {}
+
+	func _init() -> void:
+		project_id = "test-heckle-golf"
+		api_key = "fake_key"
+		base_url = "https://mock.firestore"
+
+	func get_doc(doc_path: String, _require_auth: bool = true) -> Dictionary:
+		if uploaded_docs.has(doc_path):
+			return {"ok": true, "status": 200, "data": uploaded_docs[doc_path], "error": ""}
+		return {
+			"ok": false,
+			"status": 404,
+			"data": {},
+			"error": "Document not found."
+		}
+
+	func set_doc(doc_path: String, fields: Dictionary, _update_mask: PackedStringArray = [], _update_time: String = "", _current_document_exists: Variant = null) -> Dictionary:
+		uploaded_docs[doc_path] = fields
+		return {"ok": true, "status": 200, "data": fields, "error": ""}
+
+	func commit_writes(writes: Array) -> Dictionary:
+		for w in writes:
+			if w.has("update"):
+				var name_str = str(w["update"].get("name", ""))
+				uploaded_docs[name_str] = w["update"].get("fields", {})
+		return {"ok": true, "status": 200, "data": {}, "error": ""}
+

@@ -48,6 +48,11 @@ func _ready() -> void:
 	_load_current_category(false)
 	_update_personal_best_strip()
 
+	if has_node("/root/CloudSync"):
+		var cs = get_node("/root/CloudSync")
+		if cs.has_method("sync_all_eligible_profiles"):
+			cs.sync_all_eligible_profiles("leaderboard_open")
+
 	call_deferred("_grab_initial_focus")
 
 
@@ -140,6 +145,10 @@ func _on_refresh_pressed() -> void:
 		return
 
 	_last_refresh_ticks = now_ticks
+	if has_node("/root/CloudSync"):
+		var cs = get_node("/root/CloudSync")
+		if cs.has_method("sync_all_eligible_profiles"):
+			cs.sync_all_eligible_profiles("leaderboard_refresh")
 	_load_current_category(true)
 
 
@@ -502,7 +511,7 @@ func _get_local_primary_player() -> Dictionary:
 		if mp.has_method("get_registered_players"):
 			var players = mp.get_registered_players()
 			for p in players:
-				if p.get("is_primary", false):
+				if p.get("link_role", "") == "primary" or p.get("is_primary", false):
 					return p
 			if players.size() > 0:
 				return players[0]
@@ -521,6 +530,10 @@ func _get_local_player_stat(player: Dictionary, category_id: String) -> String:
 		var mp = get_node("/root/MultiplayerManager")
 		if mp.has_method("get_player_longest_drive"):
 			stat_val = mp.get_player_longest_drive(player_name)
+	elif category_id == "longest_putt" and has_node("/root/MultiplayerManager"):
+		var mp = get_node("/root/MultiplayerManager")
+		if mp.has_method("get_player_longest_putt"):
+			stat_val = mp.get_player_longest_putt(player_name)
 
 	if stat_val == null or float(stat_val) <= 0.0:
 		var lifetime = player.get("lifetime", {})

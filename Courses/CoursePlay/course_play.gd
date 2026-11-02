@@ -1835,7 +1835,7 @@ func _setup_hud() -> void:
 	forfeit_btn = Button.new()
 	forfeit_btn.name = "ForfeitButton"
 	forfeit_btn.text = ""
-	forfeit_btn.tooltip_text = "Leave Online Match" if _is_online_match() else "White Flag (Concede Hole)"
+	forfeit_btn.tooltip_text = "Leave Spectating" if _is_spectating() else ("Leave Online Match" if _is_online_match() else "White Flag (Concede Hole)")
 	forfeit_btn.expand_icon = true
 	if ResourceLoader.exists("res://assets/images/icons/white_flag.svg"):
 		var icon_tex = load("res://assets/images/icons/white_flag.svg")
@@ -3778,7 +3778,10 @@ func _update_top_hud(player: Dictionary) -> void:
 		var p_pts = _get_player_points(player)
 		name_text += " (%d pts)" % p_pts
 
-	hud_player_name_lbl.text = name_text
+	if _is_spectating():
+		hud_player_name_lbl.text = "👁️ %s" % name_text
+	else:
+		hud_player_name_lbl.text = name_text
 	if hud_player_badge != null and hud_player_badge_lbl != null:
 		var p_name = player.get("name", "Player")
 		var avatar_path = player.get("avatar", "")
@@ -5058,9 +5061,14 @@ func _on_forfeit_pressed() -> void:
 	apply_material_button_style(confirm_btn, Color(0.68, 0.22, 0.22, 0.85))
 
 	if _is_online_match():
-		title_lbl.text = "Leave Online Match 🚪"
-		msg_lbl.text = "Are you sure you want to leave this online match?\nYour remaining holes will be forfeited."
-		confirm_btn.text = "Yes, Leave Match"
+		if _is_spectating():
+			title_lbl.text = "Leave Spectating 🚪"
+			msg_lbl.text = "Are you sure you want to stop spectating this match?"
+			confirm_btn.text = "Yes, Leave Spectating"
+		else:
+			title_lbl.text = "Leave Online Match 🚪"
+			msg_lbl.text = "Are you sure you want to leave this online match?\nYour remaining holes will be forfeited."
+			confirm_btn.text = "Yes, Leave Match"
 		confirm_btn.pressed.connect(func():
 			forfeit_confirm_dialog.visible = false
 			if UIFocusGuard.is_locked() and UIFocusGuard.current_lock_root() == forfeit_confirm_dialog:
@@ -5122,6 +5130,13 @@ func _is_online_match() -> bool:
 	return false
 
 
+func _is_spectating() -> bool:
+	if has_node("/root/OnlineSession"):
+		var sess = get_node("/root/OnlineSession")
+		return bool(sess.is_online_match) and bool(sess.get("is_spectator"))
+	return false
+
+
 func _on_online_waiting_banner_status_changed(is_waiting: bool, player_name: String, is_afk: bool) -> void:
 	if online_waiting_banner == null or not is_instance_valid(online_waiting_banner):
 		return
@@ -5132,14 +5147,18 @@ func _on_online_waiting_banner_status_changed(is_waiting: bool, player_name: Str
 		return
 
 	if online_waiting_lbl != null:
-		online_waiting_lbl.text = "Waiting for %s to hit…" % player_name
+		if _is_spectating():
+			online_waiting_lbl.text = "Spectating: %s's Turn" % player_name
+		else:
+			online_waiting_lbl.text = "Waiting for %s to hit…" % player_name
 
+	var show_afk: bool = is_afk and not _is_spectating()
 	if online_afk_warning_lbl != null:
-		online_afk_warning_lbl.visible = is_afk
+		online_afk_warning_lbl.visible = show_afk
 	if online_afk_btn_box != null:
-		online_afk_btn_box.visible = is_afk
+		online_afk_btn_box.visible = show_afk
 
-	if is_afk:
+	if show_afk:
 		if not UIFocusGuard.is_locked() or UIFocusGuard.current_lock_root() != online_waiting_banner:
 			UIFocusGuard.push_lock(online_waiting_banner)
 		if online_concede_btn != null and is_instance_valid(online_concede_btn):
@@ -5264,7 +5283,7 @@ func _process(_delta: float) -> void:
 		var active_p = MultiplayerManager.get_active_player()
 		var p_strokes = active_p.get("strokes", 0) if not active_p.is_empty() else 0
 		var p_holed = active_p.get("holed_out", false) if not active_p.is_empty() else true
-		var should_show_forfeit = _hud_elements_visible and is_match_play and (p_strokes >= 10 or _is_online_match()) and not p_holed
+		var should_show_forfeit = _hud_elements_visible and (_is_spectating() or (is_match_play and (p_strokes >= 10 or _is_online_match()) and not p_holed))
 		forfeit_btn.visible = should_show_forfeit
 		if should_show_forfeit:
 			forfeit_btn.disabled = ball_is_moving or hud_scorecard.visible or hud_overview.visible or (hud_manage_players != null and hud_manage_players.visible)
@@ -8011,7 +8030,7 @@ func _set_other_elements_visible(is_visible: bool) -> void:
 		var active_p = MultiplayerManager.get_active_player()
 		var p_strokes = active_p.get("strokes", 0) if not active_p.is_empty() else 0
 		var p_holed = active_p.get("holed_out", false) if not active_p.is_empty() else true
-		forfeit_btn.visible = is_visible and is_match_play and (p_strokes >= 10 or _is_online_match()) and not p_holed
+		forfeit_btn.visible = is_visible and (_is_spectating() or (is_match_play and (p_strokes >= 10 or _is_online_match()) and not p_holed))
 	if not is_visible and forfeit_confirm_dialog != null and forfeit_confirm_dialog.visible:
 		forfeit_confirm_dialog.visible = false
 	if not is_visible and hole_intro_card != null and hole_intro_card.visible:

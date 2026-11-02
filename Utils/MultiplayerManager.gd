@@ -2056,6 +2056,10 @@ func toggle_player_active(idx: int, active: bool) -> void:
 func save_current_match() -> void:
 	if current_match_id.is_empty():
 		return
+	if has_node("/root/OnlineSession"):
+		var sess = get_node("/root/OnlineSession")
+		if sess.is_online_match and bool(sess.get("is_spectator")):
+			return
 		
 	var save_dir = "user://match_history"
 	if not DirAccess.dir_exists_absolute(save_dir):
@@ -2856,9 +2860,11 @@ func rename_player_profile(old_name: String, new_name: String) -> bool:
 
 	return true
 
-func record_player_longest_putt(player_name: String, putt_ft: float, is_lm: bool = true) -> void:
-	if not is_lm or player_name.strip_edges().is_empty() or putt_ft <= 0.0:
+func record_player_longest_putt(player_name: String, putt_ft: float, _is_lm: bool = true) -> void:
+	if player_name.strip_edges().is_empty() or putt_ft <= 0.0:
 		return
+	if putt_ft > 180.0:
+		putt_ft = 180.0
 	for p in players:
 		if p.get("name", "") == player_name and p.get("is_remote", false):
 			return
@@ -3431,6 +3437,12 @@ func record_global_shot(player_name: String, club_name: String, raw_shot: Dictio
 			var current_longest = float(stats[target_key]["_records"].get("longest_drive", 0.0))
 			if shot_total_yds > current_longest:
 				stats[target_key]["_records"]["longest_drive"] = shot_total_yds
+	elif club_code == "Pt":
+		var shot_putt_ft = shot_total_yds * 3.0
+		if shot_putt_ft > 0.0 and shot_putt_ft <= 180.0:
+			var current_longest_putt = float(stats[target_key]["_records"].get("longest_putt_ft", 0.0))
+			if shot_putt_ft > current_longest_putt:
+				stats[target_key]["_records"]["longest_putt_ft"] = shot_putt_ft
 
 	# Exclude outlier shots (extreme duffs or sensor glitches) from standard club averages
 	if is_shot_outlier(stats[target_key][club_code], entry, club_code):
@@ -4246,6 +4258,10 @@ func get_player_longest_drive(player_name: String) -> float:
 	var stats = calculate_player_stats(player_name)
 	return float(stats.get("longest_drive", 0.0))
 
+func get_player_longest_putt(player_name: String) -> float:
+	var stats = calculate_player_stats(player_name)
+	return float(stats.get("longest_putt_ft", 0.0))
+
 
 
 # --- Video Swing Analysis Recommendation Tracking ---
@@ -4322,6 +4338,7 @@ func record_player_swing_issues(player_name: String, recommendations: Array) -> 
 		
 		var cur_mo = int(p_data["monthly"][current_month].get(issue, 0))
 		p_data["monthly"][current_month][issue] = cur_mo + 1
+		p_data["updated_at"] = int(Time.get_unix_time_from_system())
 		recorded_any = true
 		
 	if recorded_any:
@@ -4413,6 +4430,12 @@ func record_remote_shot(event: Dictionary) -> void:
 
 	var hole_idx: int = clampi(current_hole_index, 0, maxi(0, hole_ids.size() - 1)) if not hole_ids.is_empty() else 0
 	var hole_id := str(event.get("hole_id", hole_ids[hole_idx] if not hole_ids.is_empty() else ""))
+	var cur_hole_id: String = hole_ids[current_hole_index] if (current_hole_index >= 0 and current_hole_index < hole_ids.size()) else ""
+	if not hole_id.is_empty() and hole_id != cur_hole_id:
+		var target_h_idx := hole_ids.find(hole_id)
+		if target_h_idx != -1 and target_h_idx != current_hole_index:
+			current_hole_index = target_h_idx
+			start_hole()
 
 	var scores_map = event.get("scores", {})
 	if scores_map is Dictionary and scores_map.has(slot_id):

@@ -1,4 +1,4 @@
-import { db, collection, query, orderBy, limit, getDocs } from "./firebase-init.js";
+import { db, collection, query, where, orderBy, limit, getDocs, auth } from "./firebase-init.js";
 
 const LB_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes (Hole H21)
 
@@ -156,19 +156,56 @@ async function loadCategory(categoryId, forceRefresh = false) {
   }
 
   try {
-    const q = query(
-      collection(db, "public_profiles"),
-      orderBy(category.field, category.direction),
-      limit(25)
-    );
-    const snap = await getDocs(q);
+    let q;
+    const filterPositive = (category.id === "longest_drive" || category.id === "longest_putt");
+    if (filterPositive) {
+      q = query(
+        collection(db, "public_profiles"),
+        where(category.field, ">", 0),
+        orderBy(category.field, category.direction),
+        limit(25)
+      );
+    } else {
+      q = query(
+        collection(db, "public_profiles"),
+        orderBy(category.field, category.direction),
+        limit(25)
+      );
+    }
+
+    let snap;
+    try {
+      snap = await getDocs(q);
+    } catch (queryErr) {
+      if (filterPositive) {
+        // Fallback to simple orderBy if composite index/where filter rejected
+        q = query(
+          collection(db, "public_profiles"),
+          orderBy(category.field, category.direction),
+          limit(25)
+        );
+        snap = await getDocs(q);
+      } else {
+        throw queryErr;
+      }
+    }
+
     const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-    // Cache in sessionStorage only if non-empty; avoid poisoning cache with empty state
-    if (data.length > 0) {
+    const filteredRows = (data || []).filter((r) => {
+      const val = r[category.field];
+      if (val == null) return false;
+      if (filterPositive && Number(val) <= 0) {
+        return false;
+      }
+      return true;
+    });
+
+    // Cache in sessionStorage only if we have actual valid non-zero rows
+    if (filteredRows.length > 0) {
       sessionStorage.setItem(
         cacheKey,
-        JSON.stringify({ timestamp: Date.now(), data })
+        JSON.stringify({ timestamp: Date.now(), data: filteredRows })
       );
       if (cacheStatusEl) {
         cacheStatusEl.textContent = "Live data (cached for 10m)";
@@ -179,9 +216,10 @@ async function loadCategory(categoryId, forceRefresh = false) {
         cacheStatusEl.textContent = "Live data";
       }
     }
-    renderTable(contentArea, category, data);
+    renderTable(contentArea, category, filteredRows);
   } catch (err) {
     console.error(`Leaderboard error for ${categoryId}:`, err);
+    sessionStorage.removeItem(cacheKey);
     renderError(contentArea, err.message);
     if (cacheStatusEl) {
       cacheStatusEl.textContent = "Offline or unavailable";
@@ -240,11 +278,19 @@ function renderTable(container, category, rows) {
     const rawVal = row[category.field];
     const valDisplay = rawVal != null ? category.formatVal(rawVal, row) : "–";
 
+    const currentUid = auth?.currentUser?.uid;
+    const isCurrentUser = currentUid && (row.uid === currentUid || row.id === currentUid);
+    const youBadge = isCurrentUser
+      ? `<span class="badge" style="background: rgba(0, 212, 255, 0.2); color: #00d4ff; font-size: 0.72rem; font-weight: 700; margin-left: 0.5rem; padding: 2px 7px; border-radius: 4px; border: 1px solid rgba(0, 212, 255, 0.45); vertical-align: middle;">YOU</span>`
+      : "";
+    const rowClass = isCurrentUser ? "current-user-row" : "";
+    const rowStyle = isCurrentUser ? "background: rgba(0, 212, 255, 0.08); border-left: 3px solid #00d4ff;" : "";
+
     rowsHtml += `
-      <tr>
+      <tr class="${rowClass}" style="${rowStyle}">
         <td style="width: 70px;">${rankBadge}</td>
         <td>
-          <span style="font-weight: 600;">${displayName}</span>
+          <span style="font-weight: 600;">${displayName}</span>${youBadge}
         </td>
         <td style="text-align: right;">
           <span class="stat-highlight">${valDisplay}</span>

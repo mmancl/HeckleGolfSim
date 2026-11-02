@@ -405,10 +405,17 @@ func _test_4_start_match_preconditions() -> void:
 	var success_res = await session.start_online_match()
 	assert(success_res.get("ok", false) == true, "start_online_match must succeed when all devices ready.")
 	assert(mock_rtdb.deleted_paths.has("codes/STR123"), "Starting match must delete join code.")
-	assert(mock_rtdb.deleted_paths.has("lobbies/match_start_test"), "Starting match must delete public lobby.")
+	var patched_lobby := false
+	for p_call in mock_rtdb.patch_calls:
+		if p_call.get("path") == "lobbies/match_start_test":
+			patched_lobby = true
+			assert(p_call.get("data", {}).get("status") == "in_progress", "Lobby status must update to in_progress for spectators.")
+			break
+	assert(patched_lobby, "Starting match must update public lobby status to in_progress.")
 	assert(session.match_meta.get("status", "") == "active", "Match status must transition to 'active'.")
 
 	session.leave_lobby()
+	assert(mock_rtdb.deleted_paths.has("lobbies/match_start_test"), "Host leaving must delete public lobby.")
 	print("  PASS: Course readiness checks, device ready checks, and code locking verified.")
 
 

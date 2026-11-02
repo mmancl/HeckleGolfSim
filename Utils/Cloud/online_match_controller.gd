@@ -133,6 +133,11 @@ func get_next_seq() -> int:
 # ── MATCH START & TRANSITION ──────────────────────────────────────────
 
 func start_online_match(match_id: String, meta: Dictionary, golfers: Array[Dictionary]) -> void:
+	var sess := _get_online_session()
+	if sess != null and bool(sess.get("is_spectator")):
+		start_spectating_match(match_id, meta, golfers)
+		return
+
 	_match_id = match_id
 	_match_meta = meta
 	_golfers = golfers
@@ -140,7 +145,6 @@ func start_online_match(match_id: String, meta: Dictionary, golfers: Array[Dicti
 	_event_buffer.clear()
 	_is_replaying = false
 
-	var sess := _get_online_session()
 	if sess != null:
 		sess.is_online_match = true
 		sess.match_meta = meta
@@ -212,6 +216,110 @@ func start_online_match(match_id: String, meta: Dictionary, golfers: Array[Dicti
 	_check_afk_state()
 
 
+func start_spectating_match(match_id: String, meta: Dictionary, golfers: Array[Dictionary], events_dict: Dictionary = {}) -> void:
+	_match_id = match_id
+	_match_meta = meta
+	_golfers = golfers
+	_last_applied_seq = 0
+	_event_buffer.clear()
+	_is_replaying = false
+
+	var sess := _get_online_session()
+	if sess != null:
+		sess.is_online_match = true
+		sess.is_spectator = true
+		sess.match_meta = meta
+		if sess.has_method("snapshot_and_apply_match_settings"):
+			sess.snapshot_and_apply_match_settings()
+
+	var player_configs: Array[Dictionary] = []
+	for g in golfers:
+		var cfg := {
+			"name": g.get("name", "Player"),
+			"tee": g.get("tee", "Blue"),
+			"handicap": g.get("handicap", 0),
+			"skill_level": g.get("skill_level", "mid_handicap"),
+			"handedness": g.get("handedness", 0),
+			"ball_graphic": g.get("ball_graphic", "single_line"),
+			"bag": g.get("bag", []),
+			"slot_id": g.get("slot_id", ""),
+			"owner_uid": str(g.get("owner_uid", "")),
+			"cloud_uid": str(g.get("cloud_uid", "")),
+			"is_remote": true
+		}
+		player_configs.append(cfg)
+
+	var scene_path := ""
+	var config_path := ""
+	if sess != null:
+		scene_path = sess.local_scene_path
+		config_path = sess.local_config_path
+
+	var course_dict: Dictionary = {}
+	if not config_path.is_empty() and FileAccess.file_exists(config_path):
+		var f := FileAccess.open(config_path, FileAccess.READ)
+		if f != null:
+			var txt := f.get_as_text()
+			var parser := JSON.new()
+			if parser.parse(txt) == OK and parser.data is Dictionary:
+				course_dict = parser.data
+
+	var course_length: String = str(meta.get("course_length", "All"))
+	var game_mode: String = str(meta.get("game_mode", "Standard"))
+	var turn_order: String = str(meta.get("turn_order", "furthest_away"))
+	var teams: Dictionary = {}
+
+	var mp := _get_mp_manager()
+	if mp != null:
+		mp.setup_game(player_configs, course_dict, scene_path, config_path, course_length, game_mode, teams, turn_order)
+		mp.start_hole()
+
+	# Fast-forward existing events instantaneously
+	if not events_dict.is_empty():
+		var sorted_seqs: Array[int] = []
+		var seq_map: Dictionary = {}
+		for k in events_dict:
+			var evt = events_dict[k]
+			if evt is Dictionary:
+				var s: int = int(evt.get("seq", str(k).trim_prefix("seq_").to_int()))
+				sorted_seqs.append(s)
+				seq_map[s] = evt
+		sorted_seqs.sort()
+
+		for s in sorted_seqs:
+			var evt = seq_map[s]
+			_last_applied_seq = s
+			if mp != null:
+				if evt.has("hole_id"):
+					var evt_hole_id := str(evt["hole_id"])
+					if not evt_hole_id.is_empty() and evt_hole_id != mp.get_current_hole_id():
+						var h_idx: int = int(mp.hole_ids.find(evt_hole_id))
+						if h_idx != -1 and h_idx != mp.current_hole_index:
+							mp.current_hole_index = h_idx
+							mp.start_hole()
+
+				var evt_type := str(evt.get("type", "shot"))
+				match evt_type:
+					"shot":
+						mp.record_remote_shot(evt)
+					"leave":
+						_apply_leave_event(evt)
+					"concede_hole":
+						_apply_concede_hole_event(evt)
+
+	_poll_timer.start()
+	_afk_timer.start()
+
+	if has_node("/root/SceneManager") and not scene_path.is_empty():
+		get_node("/root/SceneManager").load_course(scene_path, config_path)
+	elif not scene_path.is_empty():
+		var tree := get_tree()
+		if tree != null:
+			tree.change_scene_to_file(scene_path)
+
+	_check_afk_state()
+
+
 # ── EVENT RECEIPT & SEQUENTIAL DRAIN ────────────────────────────────────
 
 func on_event_received(seq_key: String, event: Dictionary) -> void:
@@ -262,11 +370,26 @@ func _apply_shot_event(evt: Dictionary) -> void:
 	var mp := _get_mp_manager()
 	var slot_id := str(evt.get("slot_id", ""))
 	var shooter_is_remote := false
-	if mp != null:
+	var sess := _get_online_session()
+	if sess != null and bool(sess.get("is_spectator")):
+		shooter_is_remote = true
+	elif mp != null:
 		for p in mp.players:
 			if p.get("slot_id", "") == slot_id:
 				shooter_is_remote = bool(p.get("is_remote", false))
 				break
+
+	if mp != null and evt.has("hole_id"):
+		var evt_hole_id := str(evt["hole_id"])
+		if not evt_hole_id.is_empty() and evt_hole_id != mp.get_current_hole_id():
+			var h_idx: int = int(mp.hole_ids.find(evt_hole_id))
+			if h_idx != -1 and h_idx != mp.current_hole_index:
+				mp.current_hole_index = h_idx
+				mp.start_hole()
+				var tree := get_tree()
+				if tree != null and tree.current_scene != null and tree.current_scene.has_method("_on_scorecard_advance"):
+					if tree.current_scene.get("hud_scorecard") != null and tree.current_scene.hud_scorecard.visible:
+						tree.current_scene.call("_on_scorecard_advance")
 
 	if shooter_is_remote:
 		var ball_node := _find_ball_node()
@@ -274,7 +397,6 @@ func _apply_shot_event(evt: Dictionary) -> void:
 
 		if ball_node != null and _replayer != null:
 			_is_replaying = true
-			var sess := _get_online_session()
 			if sess != null:
 				sess.set_replaying_remote_turn(true)
 
@@ -366,6 +488,10 @@ func publish_local_shot(
 	holed_out: bool,
 	target_pin: Vector3
 ) -> Dictionary:
+	var sess_check := _get_online_session()
+	if sess_check != null and bool(sess_check.get("is_spectator")):
+		return {}
+
 	var mp := _get_mp_manager()
 	if mp == null or _match_id.is_empty():
 		return {}
@@ -491,6 +617,11 @@ func remove_active_player() -> void:
 
 
 func leave_online_match() -> void:
+	var sess := _get_online_session()
+	if sess != null and bool(sess.get("is_spectator")):
+		end_match_and_return_to_menu("Left spectating")
+		return
+
 	if not _match_id.is_empty():
 		var my_uid := _get_my_uid()
 		var mp := _get_mp_manager()
@@ -510,7 +641,6 @@ func leave_online_match() -> void:
 			"slot_id": my_slot,
 			"created_at": now
 		}
-		var sess := _get_online_session()
 		if sess != null and sess.rtdb != null:
 			var seq_key := "seq_%06d" % seq
 			sess.rtdb.put_path("matches/%s/events/%s" % [_match_id, seq_key], evt)
@@ -552,10 +682,12 @@ func end_match_and_return_to_menu(reason: String = "") -> void:
 func _on_heartbeat_timeout() -> void:
 	if _match_id.is_empty():
 		return
+	var sess := _get_online_session()
+	if sess != null and bool(sess.get("is_spectator")):
+		return
 	var my_uid := _get_my_uid()
 	if my_uid.is_empty():
 		return
-	var sess := _get_online_session()
 	if sess != null and sess.rtdb != null:
 		var now := Time.get_unix_time_from_system()
 		sess.rtdb.put_path("matches/%s/devices/%s/last_seen" % [_match_id, my_uid], now)
@@ -581,17 +713,22 @@ func _check_afk_state() -> void:
 		waiting_banner_status_changed.emit(false, "", false)
 		return
 
-	var is_remote: bool = bool(active_p.get("is_remote", false))
+	var sess := _get_online_session()
+	var is_spec: bool = sess != null and bool(sess.get("is_spectator"))
+	var is_remote: bool = bool(active_p.get("is_remote", false)) or is_spec
 	if not is_remote:
 		waiting_banner_status_changed.emit(false, "", false)
 		return
 
 	var p_name: String = str(active_p.get("name", "Opponent"))
+	if is_spec:
+		waiting_banner_status_changed.emit(true, p_name, false)
+		return
+
 	var owner_uid: String = str(active_p.get("owner_uid", ""))
 	var now := Time.get_unix_time_from_system()
 
 	var is_afk := false
-	var sess := _get_online_session()
 	if sess != null:
 		var dev: Dictionary = sess.match_devices.get(owner_uid, {})
 		var last_seen: float = float(dev.get("last_seen", 0.0))

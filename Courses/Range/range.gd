@@ -1906,6 +1906,8 @@ func _is_remote_turn_locked() -> bool:
 	if has_node("/root/OnlineSession"):
 		var sess = get_node("/root/OnlineSession")
 		if sess.is_online_match:
+			if bool(sess.get("is_spectator")):
+				return true
 			if has_node("/root/MultiplayerManager"):
 				var mp = get_node("/root/MultiplayerManager")
 				var active_p = mp.get_active_player()

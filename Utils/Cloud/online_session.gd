@@ -10,6 +10,7 @@ signal lobby_error(code: String, message: String)
 signal course_install_required(course_info: Dictionary, reason: String) # "missing" | "fingerprint_mismatch"
 signal match_started(match_id: String, meta: Dictionary, golfers: Array[Dictionary])
 signal lobby_closed(reason: String)
+signal match_spectated(match_id: String, meta: Dictionary, golfers: Array[Dictionary], events: Dictionary)
 signal event_received(seq_key: String, event_data: Dictionary)
 signal turn_updated(turn_data: Dictionary)
 signal device_updated(uid: String, device_data: Dictionary)
@@ -30,6 +31,7 @@ const SNAPSHOT_SETTINGS_KEYS := [
 ]
 
 var is_online_match: bool = false
+var is_spectator: bool = false
 var current_match_id: String = ""
 var is_host: bool = false
 var current_join_code: String = ""
@@ -301,6 +303,7 @@ func create_lobby(course_config_path: String, settings: Dictionary, visibility: 
 			"game_mode": initial_match["meta"]["settings"]["game_mode"],
 			"player_count": initial_match["golfers"].size(),
 			"max_players": MAX_GOLFERS,
+			"status": "lobby",
 			"created_at": now,
 			"last_seen": now
 		}
@@ -430,11 +433,15 @@ func start_online_match() -> Dictionary:
 	if not patch_res.get("ok", false):
 		return patch_res
 
-	# Atomically / immediately delete join code and public lobby so nobody else can join (G8 + H15)
+	# Atomically delete join code so nobody else can join as player (G8 + H15)
 	if not current_join_code.is_empty():
 		await client.delete_path("codes/" + current_join_code)
 	if match_meta.get("visibility", "") == "public":
-		await client.delete_path("lobbies/" + current_match_id)
+		# Update lobby entry to in_progress so spectators can discover and watch
+		await client.patch_path("lobbies/" + current_match_id, {
+			"status": "in_progress",
+			"last_seen": now
+		})
 
 	match_meta["status"] = "active"
 	match_meta["started_at"] = now
@@ -513,6 +520,86 @@ func join_by_match_id(match_id: String, local_golfers: Array) -> Dictionary:
 		return auth_check
 
 	return await _join_match_internal(match_id, local_golfers)
+
+
+func spectate_match(match_id: String) -> Dictionary:
+	var auth_check = await _ensure_auth()
+	if not auth_check.get("ok", false):
+		lobby_error.emit("AUTH_ERROR", auth_check.get("error", ""))
+		return auth_check
+
+	var client := _resolve_rtdb()
+	var m_res = await client.get_path("matches/" + match_id)
+	if not m_res.get("ok", false) or not (m_res.data is Dictionary):
+		var err := "Match not found or no longer active."
+		lobby_error.emit("MATCH_NOT_FOUND", err)
+		return {"ok": false, "error": err}
+
+	var m_data: Dictionary = m_res.data
+	var meta: Dictionary = m_data.get("meta", {})
+	var host_uid: String = meta.get("host_uid", "")
+	var devices: Dictionary = m_data.get("devices", {})
+	var host_device: Dictionary = devices.get(host_uid, {})
+	var host_last_seen := float(host_device.get("last_seen", 0.0))
+	var now := Time.get_unix_time_from_system()
+
+	if host_last_seen > 0.0 and (now - host_last_seen) > 180.0:
+		var err := "The match host appears to be disconnected."
+		lobby_error.emit("HOST_DISCONNECTED", err)
+		return {"ok": false, "error": err}
+
+	# Verify course installation and fingerprint
+	var course: Dictionary = meta.get("course", {})
+	var course_key: String = str(course.get("key", ""))
+	var lat: float = float(course.get("lat", 0.0))
+	var lon: float = float(course.get("lon", 0.0))
+	var title: String = str(course.get("title", ""))
+
+	var found: Dictionary = CourseFingerprint.find_installed_course(course_key, lat, lon, title)
+	if found.is_empty():
+		course_install_required.emit(course, "missing")
+		return {"ok": false, "error": "Course not installed.", "need_course": true, "course": course}
+
+	var expected_fingerprint: String = str(course.get("fingerprint", ""))
+	if not expected_fingerprint.is_empty() and str(found.get("fingerprint", "")) != expected_fingerprint:
+		course_install_required.emit(course, "fingerprint_mismatch")
+		return {"ok": false, "error": "Course version mismatch.", "need_course": true, "course": course}
+
+	local_scene_path = str(found.get("scene_path", ""))
+	local_config_path = str(found.get("config_path", ""))
+	is_local_course_ready = true
+
+	# Set spectator state
+	is_online_match = true
+	is_spectator = true
+	is_host = false
+	current_match_id = match_id
+	match_meta = meta
+	match_devices = devices
+	var golfers: Dictionary = m_data.get("golfers", {})
+	match_golfers = golfers
+	var events: Dictionary = m_data.get("events", {})
+
+	_start_stream(match_id)
+
+	var sorted_golfers: Array[Dictionary] = []
+	for g in golfers.values():
+		if g is Dictionary:
+			sorted_golfers.append(g)
+	sorted_golfers.sort_custom(func(a, b): return int(a.get("order", 0)) < int(b.get("order", 0)))
+
+	var loop = Engine.get_main_loop()
+	var omc: Node = null
+	if has_node("/root/OnlineMatchController"):
+		omc = get_node("/root/OnlineMatchController")
+	elif loop is SceneTree and loop.root != null and loop.root.has_node("OnlineMatchController"):
+		omc = loop.root.get_node("OnlineMatchController")
+
+	if omc != null and omc.has_method("start_spectating_match"):
+		omc.start_spectating_match(match_id, meta, sorted_golfers, events)
+
+	match_spectated.emit(match_id, meta, sorted_golfers, events)
+	return {"ok": true, "match_id": match_id}
 
 
 func _join_match_internal(match_id: String, local_golfers: Array) -> Dictionary:
@@ -718,12 +805,14 @@ func leave_lobby() -> void:
 	var m_id := current_match_id
 	var code := current_join_code
 	var was_host := is_host
+	var was_spec := is_spectator
 	var is_still_in_lobby: bool = (match_meta.get("status", "") == "lobby")
 
 	_stop_heartbeat()
 	_close_stream()
 
 	is_online_match = false
+	is_spectator = false
 	current_match_id = ""
 	is_host = false
 	current_join_code = ""
@@ -733,13 +822,18 @@ func leave_lobby() -> void:
 	is_local_course_ready = false
 	is_local_device_ready = false
 
-	# If host of un-started lobby, clean up match, code, and public lobby (H14)
-	if was_host and is_still_in_lobby:
+	if was_spec:
+		lobby_closed.emit("left")
+		return
+
+	# If host of un-started lobby or active match, clean up
+	if was_host:
 		if not code.is_empty():
 			client.delete_path("codes/" + code)
 		if not m_id.is_empty():
 			client.delete_path("lobbies/" + m_id)
-			client.delete_path("matches/" + m_id)
+			if is_still_in_lobby:
+				client.delete_path("matches/" + m_id)
 	elif not was_host and not m_id.is_empty():
 		# Remove own golfers and device
 		var my_uid := _get_my_uid()
@@ -962,7 +1056,11 @@ func _get_global_settings() -> Node:
 
 
 func end_online_match() -> void:
+	if is_host and not current_match_id.is_empty() and match_meta.get("visibility", "") == "public":
+		var client := _resolve_rtdb()
+		client.delete_path("lobbies/" + current_match_id)
 	is_online_match = false
+	is_spectator = false
 	current_match_id = ""
 	is_host = false
 	current_join_code = ""
@@ -983,7 +1081,7 @@ func _merge_dict(target: Dictionary, patch: Dictionary) -> void:
 func _check_stream_state_transition() -> void:
 	# If remote host kicked this device
 	var my_uid := _get_my_uid()
-	if not is_host and is_online_match and not my_uid.is_empty() and not match_devices.has(my_uid):
+	if not is_host and not is_spectator and is_online_match and not my_uid.is_empty() and not match_devices.has(my_uid):
 		leave_lobby()
 		lobby_closed.emit("You were removed from the lobby by the host.")
 		return

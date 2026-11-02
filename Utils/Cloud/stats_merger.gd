@@ -43,7 +43,9 @@ static func merge_profile_stats(local_data: Dictionary, cloud_data: Dictionary) 
 
 	for c in all_clear_clubs:
 		var c_str = str(c)
-		var clear_ts = maxi(eff_cleared_all, maxi(int(loc_clubs_clear.get(c_str, 0)), int(cld_clubs_clear.get(c_str, 0))))
+		var loc_ts = get_effective_club_clear_ts(loc_clubs_clear, c_str, 0)
+		var cld_ts = get_effective_club_clear_ts(cld_clubs_clear, c_str, 0)
+		var clear_ts = maxi(eff_cleared_all, maxi(loc_ts, cld_ts))
 		if clear_ts > 0:
 			eff_cleared_clubs[c_str] = clear_ts
 
@@ -72,7 +74,7 @@ static func merge_profile_stats(local_data: Dictionary, cloud_data: Dictionary) 
 
 	for club in all_clubs:
 		var club_str = str(club)
-		var club_clear_ts = eff_cleared_clubs.get(club_str, eff_cleared_all)
+		var club_clear_ts = get_effective_club_clear_ts(eff_cleared_clubs, club_str, eff_cleared_all)
 
 		var shots_by_id: Dictionary = {}
 		var l_shots = loc_clubs.get(club_str, [])
@@ -99,12 +101,15 @@ static func merge_profile_stats(local_data: Dictionary, cloud_data: Dictionary) 
 						s_copy["id"] = sid
 						shots_by_id[sid] = s_copy
 
-		# Filter out shots <= tombstone clear timestamp
+		# Filter out shots <= tombstone clear timestamp.
+		# When club_clear_ts > 0, any shot created prior to or at the clear timestamp
+		# (including legacy untimestamped shots where t <= 0) is purged. Only shots
+		# hit strictly after the clear survive.
 		var surviving_shots: Array = []
 		for sid in shots_by_id:
 			var s = shots_by_id[sid]
 			var t = int(s.get("t", 0))
-			if club_clear_ts > 0 and t > 0 and t <= club_clear_ts:
+			if club_clear_ts > 0 and t <= club_clear_ts:
 				continue
 			surviving_shots.append(s)
 
@@ -117,7 +122,8 @@ static func merge_profile_stats(local_data: Dictionary, cloud_data: Dictionary) 
 		if surviving_shots.size() > CLOUD_MAX_SHOTS_PER_CLUB:
 			surviving_shots = surviving_shots.slice(surviving_shots.size() - CLOUD_MAX_SHOTS_PER_CLUB)
 
-		result["clubs"][club_str] = surviving_shots
+		if not surviving_shots.is_empty() or club_clear_ts == 0:
+			result["clubs"][club_str] = surviving_shots
 
 	# ── 3. RECORDS ───────────────────────────────────────────────────────────
 	var loc_rec: Dictionary = local_data.get("records", local_data.get("_records", {}))
@@ -125,16 +131,36 @@ static func merge_profile_stats(local_data: Dictionary, cloud_data: Dictionary) 
 	var max_drive: float = maxf(float(loc_rec.get("longest_drive_yds", loc_rec.get("longest_drive", 0.0))), float(cld_rec.get("longest_drive_yds", cld_rec.get("longest_drive", 0.0))))
 	var max_putt: float = maxf(float(loc_rec.get("longest_putt_ft", 0.0)), float(cld_rec.get("longest_putt_ft", 0.0)))
 
-	# If cleared_all_at was set and newer than all shots, reset records or recompute from surviving Dr shots
-	if eff_cleared_all > 0:
+	# If Driver was cleared, recompute or reset longest drive
+	var dr_clear_ts = get_effective_club_clear_ts(eff_cleared_clubs, "Dr", eff_cleared_all)
+	if dr_clear_ts > 0:
 		var dr_shots = result["clubs"].get("Dr", [])
-		var has_post_clear := false
+		var best_dr := 0.0
 		for s in dr_shots:
-			if int(s.get("t", 0)) > eff_cleared_all:
-				has_post_clear = true
-				break
-		if not has_post_clear and dr_shots.is_empty():
+			var st = int(s.get("t", 0))
+			if st > dr_clear_ts:
+				var d_yds = float(s.get("TotalDistance", s.get("CarryDistance", 0.0))) * 1.09361
+				if d_yds > best_dr:
+					best_dr = d_yds
+		max_drive = best_dr
+
+	# If Putter was cleared, recompute or reset longest putt
+	var pt_clear_ts = get_effective_club_clear_ts(eff_cleared_clubs, "Pt", eff_cleared_all)
+	if pt_clear_ts > 0:
+		var pt_shots = result["clubs"].get("Pt", [])
+		var best_pt := 0.0
+		for s in pt_shots:
+			var st = int(s.get("t", 0))
+			if st > pt_clear_ts:
+				var p_ft = float(s.get("TotalDistance", 0.0)) * 3.28084
+				if p_ft > best_pt:
+					best_pt = p_ft
+		max_putt = best_pt
+
+	if eff_cleared_all > 0:
+		if dr_clear_ts == 0:
 			max_drive = 0.0
+		if pt_clear_ts == 0:
 			max_putt = 0.0
 
 	result["records"] = {
@@ -188,6 +214,16 @@ static func merge_profile_stats(local_data: Dictionary, cloud_data: Dictionary) 
 	# ── 5. SWING ISSUES ──────────────────────────────────────────────────────
 	var loc_swing: Dictionary = local_data.get("swing_issues", {})
 	var cld_swing: Dictionary = cloud_data.get("swing_issues", {})
+	var loc_swing_updated_at: int = int(local_data.get("swing_issues_updated_at", local_data.get("updated_at", 0)))
+	var cld_swing_updated_at: int = int(cloud_data.get("swing_issues_updated_at", cloud_data.get("updated_at", 0)))
+
+	# If swing issues were cleared, purge issues from sides that haven't updated since the clear
+	if eff_cleared_swing > 0:
+		if loc_swing_updated_at <= eff_cleared_swing:
+			loc_swing = {}
+		if cld_swing_updated_at <= eff_cleared_swing:
+			cld_swing = {}
+
 	var merged_swing: Dictionary = {}
 
 	var all_months: Array = []
@@ -246,3 +282,13 @@ static func _get_or_create_shot_id(shot: Dictionary) -> String:
 		return str(shot["id"])
 	var json_str = JSON.stringify(shot)
 	return json_str.sha1_text().substr(0, 12)
+
+
+static func get_effective_club_clear_ts(eff_cleared_clubs: Dictionary, club_name: String, fallback_clear_all: int = 0) -> int:
+	var ts = fallback_clear_all
+	var c_lower = club_name.to_lower()
+	for k in eff_cleared_clubs.keys():
+		if str(k).to_lower() == c_lower:
+			ts = maxi(ts, int(eff_cleared_clubs[k]))
+	return ts
+
