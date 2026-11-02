@@ -29,7 +29,7 @@ on:
         type: boolean
         default: false
       from_run_id:
-        description: 'Run ID to download artifacts from for skipped platforms (leave blank for latest release)'
+        description: 'Run ID(s) to download artifacts from for skipped platforms (can be comma-separated, e.g. 41540098265, 41532486348)'
         required: false
         default: ''
       release_tag:
@@ -109,7 +109,7 @@ jobs:
       - name: Build Windows Release Package
         shell: pwsh
         run: |
-          powershell -ExecutionPolicy Bypass -File .\scripts\build\build_windows.ps1 -CustomGodotPath "$env:GODOT_BIN" -Clean
+          pwsh -ExecutionPolicy Bypass -File .\scripts\build\build_windows.ps1 -CustomGodotPath "$env:GODOT_BIN" -Clean
           Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
       - name: Upload Windows Artifact
@@ -487,18 +487,20 @@ jobs:
         run: |
           mkdir -p previous_artifacts
           if [ -n "${{ inputs.from_run_id }}" ]; then
-            echo "Downloading artifacts from run ${{ inputs.from_run_id }}..."
-            gh run download "${{ inputs.from_run_id }}" --dir previous_artifacts || {
-              echo "Warning: gh run download failed for run ${{ inputs.from_run_id }}. Falling back to latest release assets..."
-              LATEST_TAG=$(gh release list -L 5 --json tagName -q '.[0].tagName')
-              echo "Downloading assets from release $LATEST_TAG..."
-              gh release download "$LATEST_TAG" --dir previous_artifacts
-            }
-          else
-            echo "Finding most recent release with assets..."
-            LATEST_TAG=$(gh release list -L 5 --json tagName -q '.[0].tagName')
-            echo "Downloading assets from release $LATEST_TAG..."
-            gh release download "$LATEST_TAG" --dir previous_artifacts
+            IFS=',' read -ra RUN_IDS <<< "${{ inputs.from_run_id }}"
+            for RUN_ID in "${RUN_IDS[@]}"; do
+              TRIMMED_ID=$(echo "$RUN_ID" | xargs)
+              if [ -n "$TRIMMED_ID" ]; then
+                echo "Downloading artifacts from run $TRIMMED_ID..."
+                gh run download "$TRIMMED_ID" --dir previous_artifacts || echo "Warning: gh run download failed for run $TRIMMED_ID"
+              fi
+            done
+          fi
+          # Also download latest release assets as fallback for any still-missing assets
+          LATEST_TAG=$(gh release list -L 5 --json tagName -q '.[0].tagName')
+          if [ -n "$LATEST_TAG" ]; then
+            echo "Checking/downloading latest release ($LATEST_TAG) assets as fallback..."
+            gh release download "$LATEST_TAG" --dir previous_artifacts --clobber=false || true
           fi
           echo "Previous/reusable artifacts downloaded:"
           find previous_artifacts -type f

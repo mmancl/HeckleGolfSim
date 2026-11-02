@@ -157,15 +157,28 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[2/2] Exporting macOS Universal App (.app) via Godot..." -ForegroundColor Green
-Write-Host "      Priming project import cache..." -ForegroundColor Gray
-& $GodotExe --headless --path $RepoRoot --import 2>$null
-
 Write-Host "      Compiling dual ARM64 + x86_64 binaries, packing assets, and building ZIP (takes ~45s)..." -ForegroundColor Gray
-$exportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "macOS", $ZipOutput) -NoNewWindow -PassThru
+$logFile = [System.IO.Path]::GetTempFileName()
+$exportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "macOS", $ZipOutput) -RedirectStandardOutput $logFile -RedirectStandardError $logFile -PassThru
 $timeoutSec = 600
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
+$lastLine = 0
 while (-not $exportProc.HasExited -and $sw.Elapsed.TotalSeconds -lt $timeoutSec) {
     Start-Sleep -Seconds 2
+    if (Test-Path $logFile) {
+        $lines = Get-Content $logFile -ErrorAction SilentlyContinue
+        if ($lines -and $lines.Count -gt $lastLine) {
+            $lines[$lastLine..($lines.Count - 1)] | ForEach-Object { Write-Host $_ }
+            $lastLine = $lines.Count
+        }
+    }
+}
+if (Test-Path $logFile) {
+    $lines = Get-Content $logFile -ErrorAction SilentlyContinue
+    if ($lines -and $lines.Count -gt $lastLine) {
+        $lines[$lastLine..($lines.Count - 1)] | ForEach-Object { Write-Host $_ }
+    }
+    Remove-Item $logFile -Force -ErrorAction SilentlyContinue
 }
 if (-not $exportProc.HasExited) {
     Write-Host "[ERROR] Godot export process timed out after $timeoutSec seconds. Terminating..." -ForegroundColor Red

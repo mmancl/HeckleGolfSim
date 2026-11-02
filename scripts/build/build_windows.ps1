@@ -159,16 +159,34 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[2/3] Exporting Windows Desktop release via Godot..." -ForegroundColor Green
-Write-Host "      Priming project import cache..." -ForegroundColor Gray
-& $GodotExe --headless --path $RepoRoot --import 2>$null
+$logFile = Join-Path ([System.IO.Path]::GetTempPath()) "godot_export_windows.log"
+if (Test-Path $logFile) { Remove-Item $logFile -Force -ErrorAction SilentlyContinue }
 
-Write-Host "      Running Godot export..." -ForegroundColor Gray
-$exportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "Windows Desktop", $TargetExe) -NoNewWindow -PassThru
+$exportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "Windows Desktop", $TargetExe) -RedirectStandardOutput $logFile -RedirectStandardError $logFile -PassThru
 $timeoutSec = 600
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
+$lastLine = 0
+
 while (-not $exportProc.HasExited -and $sw.Elapsed.TotalSeconds -lt $timeoutSec) {
     Start-Sleep -Seconds 2
+    if (Test-Path $logFile) {
+        $lines = Get-Content $logFile -ErrorAction SilentlyContinue
+        if ($lines -and $lines.Count -gt $lastLine) {
+            $lines[$lastLine..($lines.Count - 1)] | ForEach-Object { Write-Host $_ }
+            $lastLine = $lines.Count
+        }
+    }
 }
+
+# Flush remaining output
+if (Test-Path $logFile) {
+    $lines = Get-Content $logFile -ErrorAction SilentlyContinue
+    if ($lines -and $lines.Count -gt $lastLine) {
+        $lines[$lastLine..($lines.Count - 1)] | ForEach-Object { Write-Host $_ }
+    }
+    Remove-Item $logFile -Force -ErrorAction SilentlyContinue
+}
+
 if (-not $exportProc.HasExited) {
     Write-Host "[ERROR] Godot export process timed out after $timeoutSec seconds. Terminating..." -ForegroundColor Red
     $exportProc.Kill()

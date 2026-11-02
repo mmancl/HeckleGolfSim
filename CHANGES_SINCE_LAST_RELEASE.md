@@ -14,7 +14,7 @@
   - **Global Leaderboard Integration:** Synced longest putt personal bests to public cloud profiles and enabled full rankings on the Longest Putt global leaderboard.
 
 ### Bug Fixes
-- **Fixed Release Build Freezes on Windows:** Resolved an issue where headless Godot exports could hang indefinitely during Windows release packaging due to autoload singleton teardown order in the camera plugin. Removed redundant project setting mutations during engine exit and added automatic import cache priming and process timeout guards to ensure smooth automated builds.
+- **Fixed Release Build Freezes on Windows:** Resolved an issue where headless Godot exports hung on Windows due to an editor dock loading lock and autoload singleton teardown order in the camera plugin. Removed redundant editor import calls, streamlined headless exports with live log streaming and timeout guards, and added multi-run artifact aggregation across previous CI runs.
 - **Player Profile Preservation & Unit Test Isolation:** Restored all local player profiles (`mike`, `Sterling`, `Dave`, `sam`, `Player 1`) and club bags. Added file protection and test sandboxing so automated test suites can never overwrite active user profiles or local club stats.
 - **Fixed Longest Drive and Longest Putt Leaderboards Empty State:** Fixed an issue where the Longest Drive and Longest Putt leaderboards showed no records despite players having valid drive and putt data:
   - **Strict Positive Query & Sorting Filters:** Added filters to Firestore queries and in-memory sorting routines to ensure only positive, valid distances (`> 0.0`) are fetched and ranked, preventing zero-value profiles from displacing actual player records.
