@@ -1,4 +1,7 @@
 ### New Features
+- **Comprehensive Launch Monitor Telemetry Storage & Expanded Club Averages in Player Profile:**
+  - **Full Telemetry Retention:** Player profiles now retain and track all metrics provided by connected launch monitors (Garmin R10, Square Golf, OpenSpaceGolf, etc.) whenever shots are recorded across Driving Range and Course Play. Tracked metrics include Clubhead Speed, Smash Factor, Angle of Attack (AoA), Dynamic Loft, Launch Angle (VLA), Launch Direction (HLA), Club Path, Face Angle, Face to Path, Back Spin, Side Spin, Spin Axis, Apex Height, Rollout, Hang Time, and Descent Angle.
+  - **Unified "Expand" Club Dashboard:** The club row action in the Players Menu has been updated from `▼ Visuals` to `▼ Expand` / `▲ Collapse`. Expanding any club now reveals a dedicated **Launch Monitor Club Averages** panel displaying the player's personal averages for all launch monitor metrics alongside the 3D clubhead delivery and strike heatmap visuals.
 - **Club Delivery Averages & Strike Visuals on Web Player Portal:** Brought full club delivery analysis and strike tendency visualizations to the web portal (`/portal`), matching the simulator app's visual experience:
   - **Expandable Club Visual Drawers:** Each club row now features an interactive `▼ Visuals` / `▲ Hide` toggle that expands a delivery analysis panel with three side-by-side diagnostic visual cards:
     - **Club Face Angle:** Top-down view with realistic rotating clubhead graphics (driver/wood top and iron top), target line, square reference lines, face angle vector line, angular deviation arc, and status badge (e.g. `Avg 1.1° CLOSED` or `OPEN`).
@@ -11,6 +14,7 @@
   - **Global Leaderboard Integration:** Synced longest putt personal bests to public cloud profiles and enabled full rankings on the Longest Putt global leaderboard.
 
 ### Bug Fixes
+- **Player Profile Preservation & Unit Test Isolation:** Restored all local player profiles (`mike`, `Sterling`, `Dave`, `sam`, `Player 1`) and club bags. Added file protection and test sandboxing so automated test suites can never overwrite active user profiles or local club stats.
 - **Fixed Longest Drive and Longest Putt Leaderboards Empty State:** Fixed an issue where the Longest Drive and Longest Putt leaderboards showed no records despite players having valid drive and putt data:
   - **Strict Positive Query & Sorting Filters:** Added filters to Firestore queries and in-memory sorting routines to ensure only positive, valid distances (`> 0.0`) are fetched and ranked, preventing zero-value profiles from displacing actual player records.
   - **Leaderboard Cache Poisoning Fix:** Fixed a caching bug in the web leaderboards where empty filtered results were stored in browser session storage for 10 minutes. Empty states are now purged so live rankings appear immediately.

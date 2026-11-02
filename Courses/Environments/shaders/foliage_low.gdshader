@@ -49,7 +49,7 @@ void fragment() {
 		base_color = vec3(0.36, 0.24, 0.15);
 	} else {
 		// Stylized cartoon foliage palette
-		vec3 instance_tint = v_instance_custom.a > 0.001 ? v_instance_custom.rgb : vec3(1.0);
+		vec3 instance_tint = (v_instance_custom.a > 0.001 && v_instance_custom.a <= 1.0) ? clamp(v_instance_custom.rgb, vec3(0.0), vec3(2.0)) : vec3(1.0);
 		vec3 foliage_tint = albedo_color.rgb * instance_tint;
 
 		// Calculate perceived brightness of the leaf cluster

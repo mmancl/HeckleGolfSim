@@ -48,7 +48,9 @@ float hash21(vec2 p) {
 }
 
 void vertex() {
-	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	vec3 wn = (MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz;
+	float len = length(wn);
+	v_world_normal = len > 0.0001 ? wn / len : vec3(0.0, 1.0, 0.0);
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
@@ -137,7 +139,7 @@ void fragment() {
 	// -----------------------------------------------------------------------
 	// 4. Ultra-Clear Slope & Hill Contour Shading
 	// -----------------------------------------------------------------------
-	vec3 wn = normalize(v_world_normal);
+	vec3 wn = length(v_world_normal) > 0.0001 ? normalize(v_world_normal) : vec3(0.0, 1.0, 0.0);
 
 	// A. Horizontal slope grade (0.0 on flat, ~0.035 on 2° green slope, ~0.087 on 5° slope)
 	// Even 1°-4° putting green breaks produce clear, progressive gradient darkening!

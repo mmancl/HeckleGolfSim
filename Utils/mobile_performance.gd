@@ -58,8 +58,8 @@ static func optimize_sky3d(sky3d: Node) -> void:
 static func optimize_sun_light(sun: DirectionalLight3D) -> void:
 	if not is_mobile() or sun == null:
 		return
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
-	sun.directional_shadow_max_distance = 250.0
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	sun.directional_shadow_max_distance = 200.0
 	sun.directional_shadow_blend_splits = false
 
 ## Optimizes any 3D scene (DirectionalLights, Sky, WorldEnvironment) for mobile
@@ -401,9 +401,9 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 					var med_cnt: int = mmi.get_meta("tier_med_count") if mmi.has_meta("tier_med_count") else maxi(low_cnt, int(mmi.multimesh.instance_count * 0.70))
 
 					if is_low:
-						mmi.multimesh.visible_instance_count = low_cnt
+						mmi.multimesh.visible_instance_count = mini(low_cnt, mmi.multimesh.instance_count)
 					elif is_med:
-						mmi.multimesh.visible_instance_count = med_cnt
+						mmi.multimesh.visible_instance_count = mini(med_cnt, mmi.multimesh.instance_count)
 					else:
 						mmi.multimesh.visible_instance_count = -1
 
@@ -413,11 +413,12 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 				elif is_bush_chunk:
 					if is_low:
 						mmi.visible = false
-						mmi.multimesh.visible_instance_count = 0
+						if mmi.multimesh != null and mmi.multimesh.instance_count > 0:
+							mmi.multimesh.visible_instance_count = 0
 					elif is_med:
 						mmi.visible = true
 						var med_bush_cnt: int = mmi.get_meta("tier_med_count") if mmi.has_meta("tier_med_count") else maxi(1, int(mmi.multimesh.instance_count * 0.5))
-						mmi.multimesh.visible_instance_count = med_bush_cnt
+						mmi.multimesh.visible_instance_count = mini(med_bush_cnt, mmi.multimesh.instance_count)
 						mmi.visibility_range_end = 190.0
 						mmi.visibility_range_end_margin = 20.0
 						mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -460,9 +461,12 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 
 		elif n is DirectionalLight3D:
 			if is_low:
-				n.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+				n.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 				n.directional_shadow_max_distance = 180.0
 				n.directional_shadow_blend_splits = false
+				n.directional_shadow_split_1 = 0.15
+				n.shadow_bias = 0.04
+				n.shadow_normal_bias = 2.0
 				RenderingServer.directional_soft_shadow_filter_set_quality(RenderingServer.SHADOW_QUALITY_SOFT_LOW)
 			elif is_med:
 				n.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if is_mobile() else DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
@@ -488,7 +492,7 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 		elif n is WorldEnvironment and n.environment != null:
 			if n.environment.sky != null:
 				n.environment.sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL if is_high else Sky.PROCESS_MODE_REALTIME
-				n.environment.sky.radiance_size = Sky.RADIANCE_SIZE_128 if is_low else Sky.RADIANCE_SIZE_256
+				n.environment.sky.radiance_size = Sky.RADIANCE_SIZE_256
 			if is_low:
 				n.environment.ssao_enabled = false
 				n.environment.ssr_enabled = false
@@ -1216,7 +1220,7 @@ static func _apply_surrounding_features_visibility(scene_root: Node, is_high_qua
 		return
 	var show_features := is_high_quality and not is_mobile()
 	if show_features:
-		var tree := Engine.get_main_loop() as SceneTree
+		var tree := scene_root.get_tree() if scene_root.is_inside_tree() else Engine.get_main_loop() as SceneTree
 		var gs: Node = null
 		if tree != null and tree.root != null:
 			gs = tree.root.get_node_or_null("GlobalSettings")
@@ -1224,13 +1228,48 @@ static func _apply_surrounding_features_visibility(scene_root: Node, is_high_qua
 				gs = tree.root.find_child("GlobalSettings", true, false)
 		if gs != null and gs.has_method("is_surrounding_features_enabled"):
 			show_features = bool(gs.call("is_surrounding_features_enabled"))
-	for child in scene_root.get_children():
-		if not (child is StaticBody3D):
-			continue
-		if not (bool(child.get_meta("is_road", false)) or bool(child.get_meta("is_building", false))):
-			continue
-		var body := child as StaticBody3D
-		body.visible = show_features
-		for sub in body.get_children():
+
+	var nodes_to_toggle: Array[Node] = []
+
+	var tree := scene_root.get_tree() if scene_root.is_inside_tree() else Engine.get_main_loop() as SceneTree
+	if tree != null:
+		for g_name in ["roads", "buildings", "clubhouses", "houses", "business_buildings"]:
+			for node in tree.get_nodes_in_group(g_name):
+				if node != null and (node == scene_root or scene_root.is_ancestor_of(node) or node.is_ancestor_of(scene_root) or scene_root == tree.root):
+					if not nodes_to_toggle.has(node):
+						nodes_to_toggle.append(node)
+
+	var stack: Array[Node] = [scene_root]
+	while not stack.is_empty():
+		var curr: Node = stack.pop_back()
+		if curr != null and curr != scene_root:
+			var cname: String = String(curr.name).to_lower()
+			var is_target: bool = false
+			if curr.is_in_group("roads") or curr.is_in_group("buildings") or curr.is_in_group("clubhouses") or curr.is_in_group("houses") or curr.is_in_group("business_buildings"):
+				is_target = true
+			elif bool(curr.get_meta("is_road", false)) or bool(curr.get_meta("is_building", false)):
+				is_target = true
+			elif cname.begins_with("road_") or cname.begins_with("house_") or cname.begins_with("clubhouse_") or cname.begins_with("building_") or cname.begins_with("business_") or cname.begins_with("commercial_"):
+				is_target = true
+
+			if is_target:
+				if not nodes_to_toggle.has(curr):
+					nodes_to_toggle.append(curr)
+
+		for ch in curr.get_children():
+			stack.append(ch)
+
+	for node in nodes_to_toggle:
+		if node is Node3D:
+			(node as Node3D).visible = show_features
+		if node is CollisionShape3D:
+			var cs := node as CollisionShape3D
+			cs.disabled = not show_features
+			cs.set_deferred("disabled", not show_features)
+		for sub in node.find_children("*", "Node", true, false):
+			if sub is Node3D:
+				(sub as Node3D).visible = show_features
 			if sub is CollisionShape3D:
-				(sub as CollisionShape3D).set_deferred("disabled", not show_features)
+				var sub_cs := sub as CollisionShape3D
+				sub_cs.disabled = not show_features
+				sub_cs.set_deferred("disabled", not show_features)

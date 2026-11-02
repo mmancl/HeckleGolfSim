@@ -3387,6 +3387,11 @@ func record_global_shot(player_name: String, club_name: String, raw_shot: Dictio
 	elif has_node("/root/LaunchMonitorManager") and get_node("/root/LaunchMonitorManager").get("status") == "Connected":
 		shot_src = "lm"
 
+	var raw_cs = float(raw_shot.get("ClubSpeed", raw_shot.get("club_speed", 0.0)))
+	var raw_sf = float(raw_shot.get("SmashFactor", raw_shot.get("smash_factor", 0.0)))
+	if raw_sf <= 0.0 and raw_cs > 0.0 and stored_speed > 0.0:
+		raw_sf = stored_speed / raw_cs
+
 	var entry = {
 		"id": shot_id,
 		"t": shot_t,
@@ -3394,10 +3399,10 @@ func record_global_shot(player_name: String, club_name: String, raw_shot: Dictio
 		"CarryDistance": stored_carry,
 		"Speed": stored_speed,
 		"BallSpeed": stored_speed,
-		"ClubSpeed": raw_shot.get("ClubSpeed", 0.0),
-		"SmashFactor": stored_speed / float(raw_shot.get("ClubSpeed", 1.0)) if float(raw_shot.get("ClubSpeed", 0.0)) > 0.0 else raw_shot.get("SmashFactor", 0.0),
-		"TotalSpin": raw_shot.get("TotalSpin", 0.0),
-		"SideDistance": raw_shot.get("SideDistance", 0.0),
+		"ClubSpeed": raw_cs,
+		"SmashFactor": raw_sf,
+		"TotalSpin": float(raw_shot.get("TotalSpin", raw_shot.get("total_spin", 0.0))),
+		"SideDistance": float(raw_shot.get("SideDistance", raw_shot.get("Offline", 0.0))),
 		"TargetDistance": target_dist_m,
 		"TotalDistance": stored_total,
 		"shot_reduction": reduction,
@@ -3407,18 +3412,85 @@ func record_global_shot(player_name: String, club_name: String, raw_shot: Dictio
 	if aim_dist_yds > 0.0:
 		entry["AimDistanceYards"] = aim_dist_yds
 
-	# Record club delivery telemetry if provided by launch monitor
-	if raw_shot.has("FaceAngle"):
-		entry["FaceAngle"] = float(raw_shot["FaceAngle"])
-	elif raw_shot.has("ClubFaceAngle"):
-		entry["FaceAngle"] = float(raw_shot["ClubFaceAngle"])
-	elif raw_shot.has("FaceToTarget"):
-		entry["FaceAngle"] = float(raw_shot["FaceToTarget"])
+	# Spin components
+	if raw_shot.has("BackSpin"):
+		entry["BackSpin"] = float(raw_shot["BackSpin"])
+	elif raw_shot.has("back_spin"):
+		entry["BackSpin"] = float(raw_shot["back_spin"])
 
-	if raw_shot.has("ClubPath"):
-		entry["ClubPath"] = float(raw_shot["ClubPath"])
-	elif raw_shot.has("Path"):
-		entry["ClubPath"] = float(raw_shot["Path"])
+	if raw_shot.has("SideSpin"):
+		entry["SideSpin"] = float(raw_shot["SideSpin"])
+	elif raw_shot.has("side_spin"):
+		entry["SideSpin"] = float(raw_shot["side_spin"])
+
+	if raw_shot.has("SpinAxis"):
+		entry["SpinAxis"] = float(raw_shot["SpinAxis"])
+	elif raw_shot.has("spin_axis"):
+		entry["SpinAxis"] = float(raw_shot["spin_axis"])
+
+	# Launch Angles
+	for vla_k in ["VLA", "VerticalLaunchAngle", "LaunchAngle", "vla"]:
+		if raw_shot.has(vla_k) and str(raw_shot[vla_k]) not in ["", "---", "N/A"]:
+			entry["VLA"] = float(raw_shot[vla_k])
+			break
+
+	for hla_k in ["HLA", "HorizontalLaunchAngle", "hla"]:
+		if raw_shot.has(hla_k) and str(raw_shot[hla_k]) not in ["", "---", "N/A"]:
+			entry["HLA"] = float(raw_shot[hla_k])
+			break
+
+	# Record club delivery telemetry if provided by launch monitor
+	var has_fa := false
+	var fa_num := 0.0
+	for fa_k in ["FaceAngle", "ClubFaceAngle", "FaceToTarget", "RawFaceAngle"]:
+		if raw_shot.has(fa_k) and str(raw_shot[fa_k]) not in ["", "---", "N/A"]:
+			var fa_str = str(raw_shot[fa_k]).strip_edges()
+			var clean_fa = fa_str.replace("O", "").replace("C", "").replace("Sq", "").strip_edges()
+			if clean_fa.is_valid_float():
+				fa_num = -absf(float(clean_fa)) if fa_str.to_upper().ends_with("C") else float(clean_fa)
+				entry["FaceAngle"] = fa_num
+				has_fa = true
+				break
+
+	var has_cp := false
+	var cp_num := 0.0
+	for cp_k in ["ClubPath", "Path", "RawClubPath"]:
+		if raw_shot.has(cp_k) and str(raw_shot[cp_k]) not in ["", "---", "N/A"]:
+			var cp_str = str(raw_shot[cp_k]).strip_edges()
+			var clean_cp = cp_str.replace("I-O", "").replace("O-I", "").replace("In-Out", "").replace("Out-In", "").replace("Str", "").strip_edges()
+			if clean_cp.is_valid_float():
+				var is_oi = ("O-I" in cp_str.to_upper()) or ("OUT-IN" in cp_str.to_upper())
+				cp_num = -absf(float(clean_cp)) if is_oi else float(clean_cp)
+				entry["ClubPath"] = cp_num
+				has_cp = true
+				break
+
+	var has_ftp := false
+	for ftp_k in ["FaceToPath", "RawFaceToPath"]:
+		if raw_shot.has(ftp_k) and str(raw_shot[ftp_k]) not in ["", "---", "N/A"]:
+			var ftp_str = str(raw_shot[ftp_k]).strip_edges()
+			var clean_ftp = ftp_str.replace("O", "").replace("C", "").replace("Sq", "").strip_edges()
+			if clean_ftp.is_valid_float():
+				var ftp_num = -absf(float(clean_ftp)) if ftp_str.to_upper().ends_with("C") else float(clean_ftp)
+				entry["FaceToPath"] = ftp_num
+				has_ftp = true
+				break
+	if not has_ftp and has_fa and has_cp:
+		entry["FaceToPath"] = fa_num - cp_num
+
+	for aoa_k in ["AttackAngle", "AngleOfAttack", "attack_angle", "aoa"]:
+		if raw_shot.has(aoa_k) and str(raw_shot[aoa_k]) not in ["", "---", "N/A"]:
+			var aoa_clean = str(raw_shot[aoa_k]).strip_edges().replace("+", "").replace("°", "")
+			if aoa_clean.is_valid_float():
+				entry["AttackAngle"] = float(aoa_clean)
+				break
+
+	for dl_k in ["DynamicLoft", "dynamic_loft"]:
+		if raw_shot.has(dl_k) and str(raw_shot[dl_k]) not in ["", "---", "N/A"]:
+			var dl_clean = str(raw_shot[dl_k]).strip_edges().replace("°", "")
+			if dl_clean.is_valid_float():
+				entry["DynamicLoft"] = float(dl_clean)
+				break
 
 	if raw_shot.has("HorizontalFaceImpact"):
 		entry["HorizontalFaceImpact"] = float(raw_shot["HorizontalFaceImpact"])
@@ -3429,6 +3501,43 @@ func record_global_shot(player_name: String, club_name: String, raw_shot: Dictio
 		entry["VerticalFaceImpact"] = float(raw_shot["VerticalFaceImpact"])
 	elif raw_shot.has("impact_offset_vertical"):
 		entry["VerticalFaceImpact"] = float(raw_shot["impact_offset_vertical"])
+
+	# Trajectory metrics
+	for ap_k in ["Apex", "apex", "PeakHeight", "MaxHeight"]:
+		if raw_shot.has(ap_k) and str(raw_shot[ap_k]) not in ["", "---", "N/A"]:
+			var ap_clean = str(raw_shot[ap_k]).strip_edges().replace("m", "").replace("ft", "")
+			if ap_clean.is_valid_float():
+				entry["Apex"] = float(ap_clean)
+				break
+	if not entry.has("Apex") and raw_shot.has("apex_ft"):
+		entry["Apex"] = float(raw_shot["apex_ft"]) / 3.28084
+
+	for ht_k in ["HangTime", "hang_time", "flight_time"]:
+		if raw_shot.has(ht_k) and str(raw_shot[ht_k]) not in ["", "---", "N/A"]:
+			var ht_clean = str(raw_shot[ht_k]).strip_edges().replace("s", "")
+			if ht_clean.is_valid_float():
+				entry["HangTime"] = float(ht_clean)
+				break
+
+	for da_k in ["DescentAngle", "descent_angle", "landing_angle"]:
+		if raw_shot.has(da_k) and str(raw_shot[da_k]) not in ["", "---", "N/A"]:
+			var da_clean = str(raw_shot[da_k]).strip_edges().replace("°", "")
+			if da_clean.is_valid_float():
+				entry["DescentAngle"] = float(da_clean)
+				break
+
+	if raw_shot.has("Rollout") and str(raw_shot["Rollout"]) not in ["", "---", "N/A"]:
+		entry["Rollout"] = float(raw_shot["Rollout"])
+	elif stored_total > stored_carry and stored_carry > 0.0:
+		entry["Rollout"] = stored_total - stored_carry
+
+	# Preserve any additional scalar telemetry fields passed from launch monitor
+	for k in raw_shot.keys():
+		var k_str = str(k)
+		if k_str in ["tracer_points", "ball_node", "tree", "player_node", "course_shot_data"]:
+			continue
+		if not entry.has(k_str) and (typeof(raw_shot[k]) in [TYPE_FLOAT, TYPE_INT, TYPE_BOOL, TYPE_STRING]):
+			entry[k_str] = raw_shot[k]
 
 	# Track longest drive personal record unconditionally, regardless of standard deviation outlier checks
 	var shot_total_yds = float(entry.get("TotalDistance", entry.get("CarryDistance", 0.0))) * 1.09361
@@ -3912,6 +4021,48 @@ func calculate_player_club_averages(player_name: String) -> Dictionary:
 				"avg_club_path": 0.0,
 				"has_club_path": false,
 				"club_path_count": 0,
+				"avg_face_to_path": 0.0,
+				"has_face_to_path": false,
+				"face_to_path_count": 0,
+				"avg_club_speed_mph": 0.0,
+				"has_club_speed": false,
+				"club_speed_count": 0,
+				"avg_smash_factor": 0.0,
+				"has_smash_factor": false,
+				"smash_factor_count": 0,
+				"avg_vla_deg": 0.0,
+				"has_vla": false,
+				"vla_count": 0,
+				"avg_hla_deg": 0.0,
+				"has_hla": false,
+				"hla_count": 0,
+				"avg_back_spin_rpm": 0.0,
+				"has_back_spin": false,
+				"back_spin_count": 0,
+				"avg_side_spin_rpm": 0.0,
+				"has_side_spin": false,
+				"side_spin_count": 0,
+				"avg_spin_axis_deg": 0.0,
+				"has_spin_axis": false,
+				"spin_axis_count": 0,
+				"avg_attack_angle": 0.0,
+				"has_attack_angle": false,
+				"attack_angle_count": 0,
+				"avg_dynamic_loft": 0.0,
+				"has_dynamic_loft": false,
+				"dynamic_loft_count": 0,
+				"avg_apex_m": 0.0,
+				"has_apex": false,
+				"apex_count": 0,
+				"avg_hang_time_s": 0.0,
+				"has_hang_time": false,
+				"hang_time_count": 0,
+				"avg_descent_angle_deg": 0.0,
+				"has_descent_angle": false,
+				"descent_angle_count": 0,
+				"avg_rollout_m": 0.0,
+				"has_rollout": false,
+				"rollout_count": 0,
 				"impact_points": [],
 				"has_impact_data": false,
 				"has_data": false,
@@ -3930,6 +4081,34 @@ func calculate_player_club_averages(player_name: String) -> Dictionary:
 		var valid_face_count := 0
 		var sum_club_path := 0.0
 		var valid_path_count := 0
+		var sum_face_to_path := 0.0
+		var valid_face_to_path_count := 0
+		var sum_club_speed := 0.0
+		var valid_club_speed_count := 0
+		var sum_smash := 0.0
+		var valid_smash_count := 0
+		var sum_vla := 0.0
+		var valid_vla_count := 0
+		var sum_hla := 0.0
+		var valid_hla_count := 0
+		var sum_back_spin := 0.0
+		var valid_back_spin_count := 0
+		var sum_side_spin := 0.0
+		var valid_side_spin_count := 0
+		var sum_spin_axis := 0.0
+		var valid_spin_axis_count := 0
+		var sum_attack_angle := 0.0
+		var valid_attack_angle_count := 0
+		var sum_dynamic_loft := 0.0
+		var valid_dynamic_loft_count := 0
+		var sum_apex := 0.0
+		var valid_apex_count := 0
+		var sum_hang_time := 0.0
+		var valid_hang_time_count := 0
+		var sum_descent_angle := 0.0
+		var valid_descent_angle_count := 0
+		var sum_rollout := 0.0
+		var valid_rollout_count := 0
 		var impact_points: Array = []
 		
 		for shot in shots:
@@ -3955,19 +4134,172 @@ func calculate_player_club_averages(player_name: String) -> Dictionary:
 				sum_target_diff += (total_dist - target_dist)
 				valid_target_diff_count += 1
 
-			if shot.has("FaceAngle"):
-				sum_face_angle += float(shot["FaceAngle"])
-				valid_face_count += 1
-			elif shot.has("ClubFaceAngle"):
-				sum_face_angle += float(shot["ClubFaceAngle"])
+			# Club Delivery & Path
+			var cur_fa_found := false
+			var cur_fa := 0.0
+			for fa_k in ["FaceAngle", "ClubFaceAngle", "FaceToTarget", "RawFaceAngle"]:
+				if shot.has(fa_k) and str(shot[fa_k]) not in ["", "---", "N/A"]:
+					var fa_clean = str(shot[fa_k]).replace("O", "").replace("C", "").replace("Sq", "").strip_edges()
+					if fa_clean.is_valid_float():
+						cur_fa = -absf(float(fa_clean)) if str(shot[fa_k]).to_upper().ends_with("C") else float(fa_clean)
+						cur_fa_found = true
+						break
+			if cur_fa_found:
+				sum_face_angle += cur_fa
 				valid_face_count += 1
 
-			if shot.has("ClubPath"):
-				sum_club_path += float(shot["ClubPath"])
+			var cur_cp_found := false
+			var cur_cp := 0.0
+			for cp_k in ["ClubPath", "Path", "RawClubPath"]:
+				if shot.has(cp_k) and str(shot[cp_k]) not in ["", "---", "N/A"]:
+					var cp_clean = str(shot[cp_k]).replace("I-O", "").replace("O-I", "").replace("In-Out", "").replace("Out-In", "").replace("Str", "").strip_edges()
+					if cp_clean.is_valid_float():
+						var is_oi = ("O-I" in str(shot[cp_k]).to_upper()) or ("OUT-IN" in str(shot[cp_k]).to_upper())
+						cur_cp = -absf(float(cp_clean)) if is_oi else float(cp_clean)
+						cur_cp_found = true
+						break
+			if cur_cp_found:
+				sum_club_path += cur_cp
 				valid_path_count += 1
-			elif shot.has("Path"):
-				sum_club_path += float(shot["Path"])
-				valid_path_count += 1
+
+			var cur_ftp_found := false
+			var cur_ftp := 0.0
+			for ftp_k in ["FaceToPath", "RawFaceToPath"]:
+				if shot.has(ftp_k) and str(shot[ftp_k]) not in ["", "---", "N/A"]:
+					var ftp_clean = str(shot[ftp_k]).replace("O", "").replace("C", "").replace("Sq", "").strip_edges()
+					if ftp_clean.is_valid_float():
+						cur_ftp = -absf(float(ftp_clean)) if str(shot[ftp_k]).to_upper().ends_with("C") else float(ftp_clean)
+						cur_ftp_found = true
+						break
+			if not cur_ftp_found and cur_fa_found and cur_cp_found:
+				cur_ftp = cur_fa - cur_cp
+				cur_ftp_found = true
+			if cur_ftp_found:
+				sum_face_to_path += cur_ftp
+				valid_face_to_path_count += 1
+
+			# Clubhead speed & Smash Factor
+			var cur_cs := 0.0
+			for cs_k in ["ClubSpeed", "club_speed"]:
+				if shot.has(cs_k) and float(shot[cs_k]) > 0.01:
+					cur_cs = float(shot[cs_k])
+					break
+			if cur_cs > 0.0:
+				sum_club_speed += cur_cs
+				valid_club_speed_count += 1
+
+			var cur_sf := 0.0
+			for sf_k in ["SmashFactor", "smash_factor"]:
+				if shot.has(sf_k) and float(shot[sf_k]) > 0.05:
+					cur_sf = float(shot[sf_k])
+					break
+			if cur_sf <= 0.0 and cur_cs > 0.0 and float(shot.get("Speed", shot.get("BallSpeed", 0.0))) > 0.0:
+				cur_sf = float(shot.get("Speed", shot.get("BallSpeed", 0.0))) / cur_cs
+			if cur_sf > 0.05:
+				sum_smash += cur_sf
+				valid_smash_count += 1
+
+			# Launch Angles
+			for vla_k in ["VLA", "VerticalLaunchAngle", "LaunchAngle", "vla"]:
+				if shot.has(vla_k) and str(shot[vla_k]) not in ["", "---", "N/A"]:
+					var vla_clean = str(shot[vla_k]).strip_edges().replace("°", "")
+					if vla_clean.is_valid_float():
+						sum_vla += float(vla_clean)
+						valid_vla_count += 1
+						break
+
+			for hla_k in ["HLA", "HorizontalLaunchAngle", "hla"]:
+				if shot.has(hla_k) and str(shot[hla_k]) not in ["", "---", "N/A"]:
+					var hla_clean = str(shot[hla_k]).strip_edges().replace("°", "")
+					if hla_clean.is_valid_float():
+						sum_hla += float(hla_clean)
+						valid_hla_count += 1
+						break
+
+			# Spin breakdowns
+			for bs_k in ["BackSpin", "back_spin", "backspin"]:
+				if shot.has(bs_k) and str(shot[bs_k]) not in ["", "---", "N/A"]:
+					var bs_clean = str(shot[bs_k]).strip_edges().replace("rpm", "")
+					if bs_clean.is_valid_float() and float(bs_clean) > 0.0:
+						sum_back_spin += float(bs_clean)
+						valid_back_spin_count += 1
+						break
+
+			for ss_k in ["SideSpin", "side_spin", "sidespin"]:
+				if shot.has(ss_k) and str(shot[ss_k]) not in ["", "---", "N/A"]:
+					var ss_clean = str(shot[ss_k]).strip_edges().replace("rpm", "")
+					if ss_clean.is_valid_float():
+						sum_side_spin += float(ss_clean)
+						valid_side_spin_count += 1
+						break
+
+			for sa_k in ["SpinAxis", "spin_axis"]:
+				if shot.has(sa_k) and str(shot[sa_k]) not in ["", "---", "N/A"]:
+					var sa_clean = str(shot[sa_k]).strip_edges().replace("°", "")
+					if sa_clean.is_valid_float():
+						sum_spin_axis += float(sa_clean)
+						valid_spin_axis_count += 1
+						break
+
+			# Attack Angle & Dynamic Loft
+			for aoa_k in ["AttackAngle", "AngleOfAttack", "attack_angle", "aoa"]:
+				if shot.has(aoa_k) and str(shot[aoa_k]) not in ["", "---", "N/A"]:
+					var aoa_clean = str(shot[aoa_k]).strip_edges().replace("+", "").replace("°", "")
+					if aoa_clean.is_valid_float():
+						sum_attack_angle += float(aoa_clean)
+						valid_attack_angle_count += 1
+						break
+
+			for dl_k in ["DynamicLoft", "dynamic_loft"]:
+				if shot.has(dl_k) and str(shot[dl_k]) not in ["", "---", "N/A"]:
+					var dl_clean = str(shot[dl_k]).strip_edges().replace("°", "")
+					if dl_clean.is_valid_float() and float(dl_clean) > 0.0:
+						sum_dynamic_loft += float(dl_clean)
+						valid_dynamic_loft_count += 1
+						break
+
+			# Flight / Trajectory
+			var shot_apex_found := false
+			for ap_k in ["Apex", "apex", "PeakHeight", "MaxHeight"]:
+				if shot.has(ap_k) and str(shot[ap_k]) not in ["", "---", "N/A"]:
+					var ap_clean = str(shot[ap_k]).strip_edges().replace("m", "").replace("ft", "")
+					if ap_clean.is_valid_float() and float(ap_clean) > 0.0:
+						sum_apex += float(ap_clean)
+						valid_apex_count += 1
+						shot_apex_found = true
+						break
+			if not shot_apex_found and shot.has("apex_ft") and float(shot["apex_ft"]) > 0.0:
+				sum_apex += float(shot["apex_ft"]) / 3.28084
+				valid_apex_count += 1
+
+			for ht_k in ["HangTime", "hang_time", "flight_time"]:
+				if shot.has(ht_k) and str(shot[ht_k]) not in ["", "---", "N/A"]:
+					var ht_clean = str(shot[ht_k]).strip_edges().replace("s", "")
+					if ht_clean.is_valid_float() and float(ht_clean) > 0.0:
+						sum_hang_time += float(ht_clean)
+						valid_hang_time_count += 1
+						break
+
+			for da_k in ["DescentAngle", "descent_angle", "landing_angle"]:
+				if shot.has(da_k) and str(shot[da_k]) not in ["", "---", "N/A"]:
+					var da_clean = str(shot[da_k]).strip_edges().replace("°", "")
+					if da_clean.is_valid_float() and float(da_clean) > 0.0:
+						sum_descent_angle += float(da_clean)
+						valid_descent_angle_count += 1
+						break
+
+			var shot_ro_found := false
+			for ro_k in ["Rollout", "rollout"]:
+				if shot.has(ro_k) and str(shot[ro_k]) not in ["", "---", "N/A"]:
+					var ro_clean = str(shot[ro_k]).strip_edges().replace("yd", "").replace("m", "")
+					if ro_clean.is_valid_float() and float(ro_clean) >= 0.0:
+						sum_rollout += float(ro_clean)
+						valid_rollout_count += 1
+						shot_ro_found = true
+						break
+			if not shot_ro_found and total_dist > carry_dist and carry_dist > 0.0:
+				sum_rollout += (total_dist - carry_dist)
+				valid_rollout_count += 1
 
 			if shot.has("HorizontalFaceImpact") or shot.has("VerticalFaceImpact"):
 				impact_points.append({
@@ -3998,6 +4330,48 @@ func calculate_player_club_averages(player_name: String) -> Dictionary:
 			"avg_club_path": (sum_club_path / valid_path_count) if valid_path_count > 0 else 0.0,
 			"has_club_path": valid_path_count > 0,
 			"club_path_count": valid_path_count,
+			"avg_face_to_path": (sum_face_to_path / valid_face_to_path_count) if valid_face_to_path_count > 0 else 0.0,
+			"has_face_to_path": valid_face_to_path_count > 0,
+			"face_to_path_count": valid_face_to_path_count,
+			"avg_club_speed_mph": (sum_club_speed / valid_club_speed_count) if valid_club_speed_count > 0 else 0.0,
+			"has_club_speed": valid_club_speed_count > 0,
+			"club_speed_count": valid_club_speed_count,
+			"avg_smash_factor": (sum_smash / valid_smash_count) if valid_smash_count > 0 else 0.0,
+			"has_smash_factor": valid_smash_count > 0,
+			"smash_factor_count": valid_smash_count,
+			"avg_vla_deg": (sum_vla / valid_vla_count) if valid_vla_count > 0 else 0.0,
+			"has_vla": valid_vla_count > 0,
+			"vla_count": valid_vla_count,
+			"avg_hla_deg": (sum_hla / valid_hla_count) if valid_hla_count > 0 else 0.0,
+			"has_hla": valid_hla_count > 0,
+			"hla_count": valid_hla_count,
+			"avg_back_spin_rpm": (sum_back_spin / valid_back_spin_count) if valid_back_spin_count > 0 else 0.0,
+			"has_back_spin": valid_back_spin_count > 0,
+			"back_spin_count": valid_back_spin_count,
+			"avg_side_spin_rpm": (sum_side_spin / valid_side_spin_count) if valid_side_spin_count > 0 else 0.0,
+			"has_side_spin": valid_side_spin_count > 0,
+			"side_spin_count": valid_side_spin_count,
+			"avg_spin_axis_deg": (sum_spin_axis / valid_spin_axis_count) if valid_spin_axis_count > 0 else 0.0,
+			"has_spin_axis": valid_spin_axis_count > 0,
+			"spin_axis_count": valid_spin_axis_count,
+			"avg_attack_angle": (sum_attack_angle / valid_attack_angle_count) if valid_attack_angle_count > 0 else 0.0,
+			"has_attack_angle": valid_attack_angle_count > 0,
+			"attack_angle_count": valid_attack_angle_count,
+			"avg_dynamic_loft": (sum_dynamic_loft / valid_dynamic_loft_count) if valid_dynamic_loft_count > 0 else 0.0,
+			"has_dynamic_loft": valid_dynamic_loft_count > 0,
+			"dynamic_loft_count": valid_dynamic_loft_count,
+			"avg_apex_m": (sum_apex / valid_apex_count) if valid_apex_count > 0 else 0.0,
+			"has_apex": valid_apex_count > 0,
+			"apex_count": valid_apex_count,
+			"avg_hang_time_s": (sum_hang_time / valid_hang_time_count) if valid_hang_time_count > 0 else 0.0,
+			"has_hang_time": valid_hang_time_count > 0,
+			"hang_time_count": valid_hang_time_count,
+			"avg_descent_angle_deg": (sum_descent_angle / valid_descent_angle_count) if valid_descent_angle_count > 0 else 0.0,
+			"has_descent_angle": valid_descent_angle_count > 0,
+			"descent_angle_count": valid_descent_angle_count,
+			"avg_rollout_m": (sum_rollout / valid_rollout_count) if valid_rollout_count > 0 else 0.0,
+			"has_rollout": valid_rollout_count > 0,
+			"rollout_count": valid_rollout_count,
 			"impact_points": impact_points,
 			"has_impact_data": not impact_points.is_empty(),
 			"has_data": true,

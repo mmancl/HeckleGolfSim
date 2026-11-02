@@ -11842,6 +11842,8 @@ public partial class OsmMapLoader : Node
             MaterialOverride = GetRoadMaterial(road.HighwayType, halfW),
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
         };
+        meshInstance.SetMeta("is_road", true);
+        meshInstance.AddToGroup("roads");
 
         var staticBody = new StaticBody3D
         {
@@ -12588,6 +12590,11 @@ public partial class OsmMapLoader : Node
             MaterialOverride = GetBuildingVertexColorMaterial(),
             CastShadow = GeometryInstance3D.ShadowCastingSetting.On
         };
+        meshInstance.SetMeta("is_building", true);
+        meshInstance.AddToGroup("buildings");
+        if (bld.BuildingType == "clubhouse") meshInstance.AddToGroup("clubhouses");
+        else if (bld.BuildingType == "house") meshInstance.AddToGroup("houses");
+        else meshInstance.AddToGroup("business_buildings");
 
         var staticBody = new StaticBody3D
         {

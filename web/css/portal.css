@@ -1410,6 +1410,55 @@ input:checked + .slider:before {
   flex-direction: column;
   gap: 0.75rem;
 }
+.portal-lm-stats-panel {
+  background: rgba(14, 22, 34, 0.7);
+  border: 1px solid rgba(45, 75, 110, 0.5);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+.portal-lm-header {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #72d6ff;
+  margin-bottom: 0.65rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.portal-lm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 0.5rem;
+}
+.portal-lm-tile {
+  background: rgba(10, 16, 25, 0.85);
+  border: 1px solid rgba(35, 55, 80, 0.6);
+  border-radius: 6px;
+  padding: 0.35rem 0.45rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 48px;
+}
+.portal-lm-tile.inactive {
+  opacity: 0.45;
+  border-color: rgba(30, 42, 58, 0.4);
+}
+.portal-lm-val {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.2;
+}
+.portal-lm-lbl {
+  font-size: 0.65rem;
+  color: #8da4be;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-top: 2px;
+}
 .portal-drawer-header {
   font-size: 0.85rem;
   font-weight: 700;

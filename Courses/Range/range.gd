@@ -2180,6 +2180,14 @@ func _on_golf_ball_rest(_ball_data) -> void:
 				if p_node.has_method("get_side_distance"):
 					raw_ball_data["SideDistance"] = p_node.get_side_distance()
 
+			if not raw_ball_data.has("Apex") or float(raw_ball_data.get("Apex", 0.0)) == 0.0:
+				if "apex" in p_node and float(p_node.apex) > 0.0:
+					raw_ball_data["Apex"] = p_node.apex
+
+			if not raw_ball_data.has("HangTime") or float(raw_ball_data.get("HangTime", 0.0)) == 0.0:
+				if p_node.ball != null and "flight_time" in p_node.ball and float(p_node.ball.flight_time) > 0.0:
+					raw_ball_data["HangTime"] = p_node.ball.flight_time
+
 			if not raw_ball_data.has("shot_reduction") or float(raw_ball_data.get("shot_reduction", 0.0)) == 0.0:
 				var red = p_node.get("last_shot_reduction")
 				if red != null and float(red) > 0.0:

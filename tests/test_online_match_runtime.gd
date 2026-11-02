@@ -40,6 +40,24 @@ func _run_all_tests() -> void:
 	quit(0)
 
 
+func _write_disk_backup_files(snap: Dictionary) -> void:
+	for p in snap.keys():
+		var val = snap[p]
+		if val != null:
+			var bak_path = p + '.test_bak'
+			var f := FileAccess.open(bak_path, FileAccess.WRITE)
+			if f != null:
+				f.store_string(str(val))
+				f.close()
+
+
+func _cleanup_disk_backup_files(snap: Dictionary) -> void:
+	for p in snap.keys():
+		var bak_path = p + '.test_bak'
+		if FileAccess.file_exists(bak_path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(bak_path))
+
+
 func _backup_user_files() -> Dictionary:
 	var paths := [
 		"user://players_registry.json",
@@ -57,6 +75,7 @@ func _backup_user_files() -> Dictionary:
 				f.close()
 		else:
 			snap[p] = null
+	_write_disk_backup_files(snap)
 	return snap
 
 
@@ -71,6 +90,7 @@ func _restore_user_files(snap: Dictionary) -> void:
 			if f != null:
 				f.store_string(str(val))
 				f.close()
+	_cleanup_disk_backup_files(snap)
 
 
 func _get_session() -> Node:

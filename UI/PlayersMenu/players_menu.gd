@@ -3514,14 +3514,14 @@ func _build_club_distances_tab(player_name: String) -> VBoxContainer:
 		add_metric.call(spin_str, "Avg Spin", false, 85.0)
 		add_metric.call(off_str, "Avg Offline", false, 85.0)
 
-		# Column 4: Expand Visuals & Reset Buttons
+		# Column 4: Expand & Reset Buttons
 		var btn_hbox = HBoxContainer.new()
 		btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 		btn_hbox.add_theme_constant_override("separation", 6)
 		row_hbox.add_child(btn_hbox)
 
 		var expand_btn = Button.new()
-		expand_btn.text = "▼ Visuals"
+		expand_btn.text = "▼ Expand"
 		expand_btn.custom_minimum_size = Vector2(92, 44)
 		expand_btn.add_theme_font_size_override("font_size", 13)
 		if has_shots:
@@ -3548,31 +3548,42 @@ func _build_club_distances_tab(player_name: String) -> VBoxContainer:
 			reset_btn.modulate = Color(1, 1, 1, 0.3)
 		btn_hbox.add_child(reset_btn)
 
-		# Expandable Drawer with 3 Delivery Visuals
+		# Expandable Drawer with Launch Monitor Stats & Delivery Visuals
 		var drawer = PanelContainer.new()
 		drawer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		drawer.visible = false
 		var drawer_style = StyleBoxFlat.new()
-		drawer_style.bg_color = Color(0.04, 0.06, 0.09, 0.75)
+		drawer_style.bg_color = Color(0.04, 0.06, 0.09, 0.85)
 		drawer_style.corner_radius_top_left = 6
 		drawer_style.corner_radius_top_right = 6
 		drawer_style.corner_radius_bottom_left = 6
 		drawer_style.corner_radius_bottom_right = 6
 		drawer_style.border_width_top = 1
 		drawer_style.border_color = Color(0.2, 0.35, 0.5, 0.5)
-		drawer_style.content_margin_left = 6
-		drawer_style.content_margin_top = 6
-		drawer_style.content_margin_right = 6
-		drawer_style.content_margin_bottom = 6
+		drawer_style.content_margin_left = 8
+		drawer_style.content_margin_top = 8
+		drawer_style.content_margin_right = 8
+		drawer_style.content_margin_bottom = 8
 		drawer.add_theme_stylebox_override("panel", drawer_style)
 
+		var drawer_vbox = VBoxContainer.new()
+		drawer_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		drawer_vbox.add_theme_constant_override("separation", 10)
+		drawer.add_child(drawer_vbox)
+
+		# 1. Other Launch Monitor Club Data Panel
+		var lm_panel = _build_club_launch_monitor_panel(c_data, is_imperial, dist_mult, speed_mult, u_label, s_label)
+		drawer_vbox.add_child(lm_panel)
+
+		# 2. Club Delivery Visuals (Face Angle, Impact Location, Club Path)
 		var delivery_panel = ClubDeliveryVisuals.create_panel(c_data, true)
-		drawer.add_child(delivery_panel)
+		drawer_vbox.add_child(delivery_panel)
+
 		card_vbox.add_child(drawer)
 
 		expand_btn.pressed.connect(func():
 			drawer.visible = not drawer.visible
-			expand_btn.text = "▲ Hide" if drawer.visible else "▼ Visuals"
+			expand_btn.text = "▲ Collapse" if drawer.visible else "▼ Expand"
 		)
 
 		if show_only_active_clubs and not has_shots:
@@ -3591,6 +3602,224 @@ func _build_club_distances_tab(player_name: String) -> VBoxContainer:
 	)
 
 	return tab_vbox
+
+func _build_club_launch_monitor_panel(c_data: Dictionary, is_imperial: bool, dist_mult: float, speed_mult: float, u_label: String, s_label: String) -> PanelContainer:
+	var panel = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var panel_style = StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.06, 0.09, 0.14, 0.94)
+	panel_style.corner_radius_top_left = 8
+	panel_style.corner_radius_top_right = 8
+	panel_style.corner_radius_bottom_left = 8
+	panel_style.corner_radius_bottom_right = 8
+	panel_style.border_width_left = 1
+	panel_style.border_width_top = 1
+	panel_style.border_width_right = 1
+	panel_style.border_width_bottom = 1
+	panel_style.border_color = Color(0.2, 0.38, 0.55, 0.6)
+	panel_style.content_margin_left = 12
+	panel_style.content_margin_top = 10
+	panel_style.content_margin_right = 12
+	panel_style.content_margin_bottom = 10
+	panel.add_theme_stylebox_override("panel", panel_style)
+
+	var vbox = VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 8)
+	panel.add_child(vbox)
+
+	var title_lbl = Label.new()
+	title_lbl.text = "📡 LAUNCH MONITOR CLUB AVERAGES"
+	title_lbl.add_theme_font_size_override("font_size", 12)
+	title_lbl.add_theme_color_override("font_color", Color(0.45, 0.85, 1.0))
+	vbox.add_child(title_lbl)
+
+	var flow = HFlowContainer.new()
+	flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	flow.add_theme_constant_override("h_separation", 8)
+	flow.add_theme_constant_override("v_separation", 8)
+	vbox.add_child(flow)
+
+	var add_tile = func(title: String, val_str: String, is_active: bool, accent_color: Color = Color.WHITE):
+		var tile = PanelContainer.new()
+		tile.custom_minimum_size = Vector2(98, 48)
+		var tile_style = StyleBoxFlat.new()
+		if is_active:
+			tile_style.bg_color = Color(0.08, 0.13, 0.18, 0.85)
+			tile_style.border_color = Color(0.2, 0.35, 0.5, 0.5)
+		else:
+			tile_style.bg_color = Color(0.05, 0.07, 0.10, 0.45)
+			tile_style.border_color = Color(0.18, 0.22, 0.28, 0.3)
+		tile_style.border_width_left = 1
+		tile_style.border_width_top = 1
+		tile_style.border_width_right = 1
+		tile_style.border_width_bottom = 1
+		tile_style.corner_radius_top_left = 6
+		tile_style.corner_radius_top_right = 6
+		tile_style.corner_radius_bottom_left = 6
+		tile_style.corner_radius_bottom_right = 6
+		tile_style.content_margin_left = 8
+		tile_style.content_margin_right = 8
+		tile_style.content_margin_top = 4
+		tile_style.content_margin_bottom = 4
+		tile.add_theme_stylebox_override("panel", tile_style)
+
+		var tvb = VBoxContainer.new()
+		tvb.alignment = BoxContainer.ALIGNMENT_CENTER
+		tvb.add_theme_constant_override("separation", 1)
+
+		var val_lbl = Label.new()
+		val_lbl.text = val_str
+		val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		val_lbl.add_theme_font_size_override("font_size", 14)
+		val_lbl.add_theme_color_override("font_color", accent_color if is_active else Color(0.45, 0.45, 0.45))
+		tvb.add_child(val_lbl)
+
+		var cap_lbl = Label.new()
+		cap_lbl.text = title
+		cap_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cap_lbl.add_theme_font_size_override("font_size", 10)
+		cap_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_DIM)
+		tvb.add_child(cap_lbl)
+
+		tile.add_child(tvb)
+		flow.add_child(tile)
+
+	# 1. Club Speed
+	var has_cs: bool = c_data.get("has_club_speed", false)
+	var cs_val: float = c_data.get("avg_club_speed_mph", 0.0) * speed_mult
+	var cs_str = ("%.1f %s" % [cs_val, s_label]) if has_cs else "---"
+	add_tile.call("Club Speed", cs_str, has_cs, Color(1.0, 0.85, 0.3))
+
+	# 2. Smash Factor
+	var has_sf: bool = c_data.get("has_smash_factor", false)
+	var sf_val: float = c_data.get("avg_smash_factor", 0.0)
+	var sf_str = ("%.2f" % sf_val) if has_sf else "---"
+	var sf_col = Color(0.35, 0.95, 0.6) if sf_val >= 1.45 else Color(1.0, 0.8, 0.3)
+	add_tile.call("Smash Factor", sf_str, has_sf, sf_col)
+
+	# 3. Angle of Attack (AoA)
+	var has_aoa: bool = c_data.get("has_attack_angle", false)
+	var aoa_val: float = c_data.get("avg_attack_angle", 0.0)
+	var aoa_str = ("%+.1f°" % aoa_val) if has_aoa else "---"
+	add_tile.call("Attack Angle", aoa_str, has_aoa, Color(0.7, 0.85, 1.0))
+
+	# 4. Dynamic Loft
+	var has_dl: bool = c_data.get("has_dynamic_loft", false)
+	var dl_val: float = c_data.get("avg_dynamic_loft", 0.0)
+	var dl_str = ("%.1f°" % dl_val) if has_dl else "---"
+	add_tile.call("Dynamic Loft", dl_str, has_dl, Color(0.85, 0.75, 1.0))
+
+	# 5. Launch Angle (VLA)
+	var has_vla: bool = c_data.get("has_vla", false)
+	var vla_val: float = c_data.get("avg_vla_deg", 0.0)
+	var vla_str = ("%.1f°" % vla_val) if has_vla else "---"
+	add_tile.call("Launch (VLA)", vla_str, has_vla, Color(0.85, 0.75, 1.0))
+
+	# 6. Launch Direction (HLA)
+	var has_hla: bool = c_data.get("has_hla", false)
+	var hla_val: float = c_data.get("avg_hla_deg", 0.0)
+	var hla_str = "---"
+	if has_hla:
+		if absf(hla_val) < 0.05:
+			hla_str = "0.0°"
+		elif hla_val > 0.0:
+			hla_str = "%.1f° R" % hla_val
+		else:
+			hla_str = "%.1f° L" % absf(hla_val)
+	add_tile.call("Launch Dir", hla_str, has_hla, Color(0.7, 0.85, 1.0))
+
+	# 7. Club Path
+	var has_cp: bool = c_data.get("has_club_path", false)
+	var cp_val: float = c_data.get("avg_club_path", 0.0)
+	var cp_str = "---"
+	if has_cp:
+		if absf(cp_val) < 0.05:
+			cp_str = "0.0° Str"
+		elif cp_val > 0.0:
+			cp_str = "%.1f° I-O" % cp_val
+		else:
+			cp_str = "%.1f° O-I" % absf(cp_val)
+	add_tile.call("Club Path", cp_str, has_cp, Color(0.4, 0.9, 1.0))
+
+	# 8. Face Angle
+	var has_fa: bool = c_data.get("has_face_angle", false)
+	var fa_val: float = c_data.get("avg_face_angle", 0.0)
+	var fa_str = "---"
+	if has_fa:
+		if absf(fa_val) < 0.05:
+			fa_str = "0.0° Sq"
+		elif fa_val > 0.0:
+			fa_str = "%.1f° O" % fa_val
+		else:
+			fa_str = "%.1f° C" % absf(fa_val)
+	add_tile.call("Face Angle", fa_str, has_fa, Color(0.4, 0.9, 1.0))
+
+	# 9. Face to Path
+	var has_ftp: bool = c_data.get("has_face_to_path", false)
+	var ftp_val: float = c_data.get("avg_face_to_path", 0.0)
+	var ftp_str = "---"
+	if has_ftp:
+		if absf(ftp_val) < 0.05:
+			ftp_str = "0.0° Sq"
+		elif ftp_val > 0.0:
+			ftp_str = "%.1f° O" % ftp_val
+		else:
+			ftp_str = "%.1f° C" % absf(ftp_val)
+	add_tile.call("Face to Path", ftp_str, has_ftp, Color(0.4, 0.9, 1.0))
+
+	# 10. Back Spin
+	var has_bs: bool = c_data.get("has_back_spin", false)
+	var bs_val: float = c_data.get("avg_back_spin_rpm", 0.0)
+	var bs_str = ("%.0f rpm" % bs_val) if has_bs else "---"
+	add_tile.call("Back Spin", bs_str, has_bs, Color.WHITE)
+
+	# 11. Side Spin
+	var has_ss: bool = c_data.get("has_side_spin", false)
+	var ss_val: float = c_data.get("avg_side_spin_rpm", 0.0)
+	var ss_str = "---"
+	if has_ss:
+		if absf(ss_val) < 5.0:
+			ss_str = "0 rpm"
+		elif ss_val > 0.0:
+			ss_str = "%.0f R" % ss_val
+		else:
+			ss_str = "%.0f L" % absf(ss_val)
+	add_tile.call("Side Spin", ss_str, has_ss, Color.WHITE)
+
+	# 12. Spin Axis
+	var has_sa: bool = c_data.get("has_spin_axis", false)
+	var sa_val: float = c_data.get("avg_spin_axis_deg", 0.0)
+	var sa_str = ("%+.1f°" % sa_val) if has_sa else "---"
+	var sa_col = Color(0.4, 0.9, 1.0) if absf(sa_val) <= 4.0 else (Color(1.0, 0.7, 0.3) if absf(sa_val) <= 9.0 else Color(1.0, 0.4, 0.4))
+	add_tile.call("Spin Axis", sa_str, has_sa, sa_col)
+
+	# 13. Apex (Peak Height)
+	var has_ap: bool = c_data.get("has_apex", false)
+	var ap_val: float = c_data.get("avg_apex_m", 0.0) * (3.28084 if is_imperial else 1.0)
+	var ap_u: String = "ft" if is_imperial else "m"
+	var ap_str = ("%.1f %s" % [ap_val, ap_u]) if has_ap else "---"
+	add_tile.call("Apex Height", ap_str, has_ap, Color(0.35, 0.95, 0.6))
+
+	# 14. Rollout Distance
+	var has_ro: bool = c_data.get("has_rollout", false)
+	var ro_val: float = c_data.get("avg_rollout_m", 0.0) * dist_mult
+	var ro_str = ("%.1f %s" % [ro_val, u_label]) if has_ro else "---"
+	add_tile.call("Rollout", ro_str, has_ro, Color(0.35, 0.95, 0.6))
+
+	# 15. Hang Time
+	var has_ht: bool = c_data.get("has_hang_time", false)
+	var ht_val: float = c_data.get("avg_hang_time_s", 0.0)
+	var ht_str = ("%.1f s" % ht_val) if has_ht else "---"
+	add_tile.call("Hang Time", ht_str, has_ht, Color(0.85, 0.75, 1.0))
+
+	# 16. Descent Angle
+	var has_da: bool = c_data.get("has_descent_angle", false)
+	var da_val: float = c_data.get("avg_descent_angle_deg", 0.0)
+	var da_str = ("%.1f°" % da_val) if has_da else "---"
+	add_tile.call("Descent Ang", da_str, has_da, Color(0.85, 0.75, 1.0))
+
+	return panel
 
 func _build_bag_tab(player_name: String) -> VBoxContainer:
 	var tab_vbox = VBoxContainer.new()

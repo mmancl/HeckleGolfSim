@@ -672,8 +672,14 @@ async function loadUserData(user) {
           for (const [clb, rawShots] of Object.entries(syncStats.clubs)) {
             if (!Array.isArray(rawShots) || rawShots.length === 0) continue;
             const existing = currentProfile.club_summary[clb] || {};
-            let carrySum = 0, totalSum = 0, speedSum = 0, clubSpeedSum = 0, spinSum = 0, offlineSum = 0;
-            let faceSum = 0, faceCount = 0, pathSum = 0, pathCount = 0;
+            let carrySum = 0, totalSum = 0, speedSum = 0, clubSpeedSum = 0, clubSpeedCount = 0;
+            let smashSum = 0, smashCount = 0;
+            let spinSum = 0, offlineSum = 0;
+            let faceSum = 0, faceCount = 0, pathSum = 0, pathCount = 0, ftpSum = 0, ftpCount = 0;
+            let vlaSum = 0, vlaCount = 0, hlaSum = 0, hlaCount = 0;
+            let backSpinSum = 0, backSpinCount = 0, sideSpinSum = 0, sideSpinCount = 0, spinAxisSum = 0, spinAxisCount = 0;
+            let aoaSum = 0, aoaCount = 0, dynLoftSum = 0, dynLoftCount = 0;
+            let apexSum = 0, apexCount = 0, hangTimeSum = 0, hangTimeCount = 0, descentAngleSum = 0, descentAngleCount = 0, rolloutSum = 0, rolloutCount = 0;
             const impactPts = [];
 
             rawShots.forEach((s) => {
@@ -681,20 +687,105 @@ async function loadUserData(user) {
               const tm = Number(s.TotalDistance ?? s.tot ?? 0);
               carrySum += cm * 1.09361;
               totalSum += tm * 1.09361;
-              speedSum += Number(s.BallSpeed ?? s.Speed ?? s.bs ?? 0);
-              clubSpeedSum += Number(s.ClubSpeed ?? s.cs ?? 0);
+              const bs = Number(s.BallSpeed ?? s.Speed ?? s.bs ?? 0);
+              speedSum += bs;
+
+              const cs = Number(s.ClubSpeed ?? s.cs ?? 0);
+              if (cs > 0.01) {
+                clubSpeedSum += cs;
+                clubSpeedCount++;
+              }
+
+              let sf = Number(s.SmashFactor ?? s.sf ?? 0);
+              if (sf <= 0 && cs > 0 && bs > 0) sf = bs / cs;
+              if (sf > 0.05) {
+                smashSum += sf;
+                smashCount++;
+              }
+
               spinSum += Number(s.TotalSpin ?? s.sp ?? 0);
               const sideM = Math.abs(Number(s.SideDistance ?? s.sd ?? 0));
               offlineSum += sideM * 1.09361;
 
+              let curFa = null;
               if (s.FaceAngle != null || s.ClubFaceAngle != null || s.fa != null) {
-                faceSum += Number(s.FaceAngle ?? s.ClubFaceAngle ?? s.fa);
+                curFa = Number(s.FaceAngle ?? s.ClubFaceAngle ?? s.fa);
+                faceSum += curFa;
                 faceCount++;
               }
+              let curCp = null;
               if (s.ClubPath != null || s.Path != null || s.cp != null) {
-                pathSum += Number(s.ClubPath ?? s.Path ?? s.cp);
+                curCp = Number(s.ClubPath ?? s.Path ?? s.cp);
+                pathSum += curCp;
                 pathCount++;
               }
+              if (s.FaceToPath != null || s.ftp != null) {
+                ftpSum += Number(s.FaceToPath ?? s.ftp);
+                ftpCount++;
+              } else if (curFa != null && curCp != null) {
+                ftpSum += (curFa - curCp);
+                ftpCount++;
+              }
+
+              if (s.VLA != null || s.LaunchAngle != null || s.VerticalLaunchAngle != null || s.vla != null) {
+                vlaSum += Number(s.VLA ?? s.LaunchAngle ?? s.VerticalLaunchAngle ?? s.vla);
+                vlaCount++;
+              }
+              if (s.HLA != null || s.HorizontalLaunchAngle != null || s.hla != null) {
+                hlaSum += Number(s.HLA ?? s.HorizontalLaunchAngle ?? s.hla);
+                hlaCount++;
+              }
+
+              if (s.BackSpin != null || s.back_spin != null) {
+                const bVal = Number(s.BackSpin ?? s.back_spin);
+                if (bVal > 0) {
+                  backSpinSum += bVal;
+                  backSpinCount++;
+                }
+              }
+              if (s.SideSpin != null || s.side_spin != null) {
+                sideSpinSum += Number(s.SideSpin ?? s.side_spin);
+                sideSpinCount++;
+              }
+              if (s.SpinAxis != null || s.spin_axis != null) {
+                spinAxisSum += Number(s.SpinAxis ?? s.spin_axis);
+                spinAxisCount++;
+              }
+
+              if (s.AttackAngle != null || s.AngleOfAttack != null || s.aoa != null) {
+                aoaSum += Number(s.AttackAngle ?? s.AngleOfAttack ?? s.aoa);
+                aoaCount++;
+              }
+              if (s.DynamicLoft != null || s.dynamic_loft != null) {
+                dynLoftSum += Number(s.DynamicLoft ?? s.dynamic_loft);
+                dynLoftCount++;
+              }
+
+              if (s.Apex != null || s.apex != null || s.PeakHeight != null) {
+                apexSum += Number(s.Apex ?? s.apex ?? s.PeakHeight) * 3.28084;
+                apexCount++;
+              } else if (s.apex_ft != null) {
+                apexSum += Number(s.apex_ft);
+                apexCount++;
+              }
+
+              if (s.HangTime != null || s.hang_time != null || s.flight_time != null) {
+                hangTimeSum += Number(s.HangTime ?? s.hang_time ?? s.flight_time);
+                hangTimeCount++;
+              }
+              if (s.DescentAngle != null || s.descent_angle != null) {
+                descentAngleSum += Number(s.DescentAngle ?? s.descent_angle);
+                descentAngleCount++;
+              }
+
+              if (s.Rollout != null || s.rollout != null) {
+                rolloutSum += Number(s.Rollout ?? s.rollout) * 1.09361;
+                rolloutCount++;
+              } else if (tm > cm && cm > 0) {
+                rolloutSum += (tm - cm) * 1.09361;
+                rolloutCount++;
+              }
+
               if (s.HorizontalFaceImpact != null || s.VerticalFaceImpact != null || s.hi != null || s.vi != null) {
                 impactPts.push({
                   h: Math.round(Number(s.HorizontalFaceImpact ?? s.hi ?? 0) * 10) / 10,
@@ -704,7 +795,7 @@ async function loadUserData(user) {
             });
 
             const n = rawShots.length;
-            const avgCs = clubSpeedSum / n;
+            const avgCs = clubSpeedCount > 0 ? clubSpeedSum / clubSpeedCount : 0;
             const avgBs = speedSum / n;
             const recImpact = impactPts.slice(-50);
 
@@ -713,8 +804,10 @@ async function loadUserData(user) {
               carry_yds: existing.carry_yds ?? (carrySum / n),
               total_yds: existing.total_yds ?? (totalSum / n),
               ball_speed_mph: existing.ball_speed_mph ?? avgBs,
-              club_speed_mph: existing.club_speed_mph ?? avgCs,
-              smash: existing.smash ?? (avgCs > 0 ? avgBs / avgCs : 0),
+              club_speed_mph: existing.avg_club_speed_mph ?? existing.club_speed_mph ?? avgCs,
+              has_club_speed: existing.has_club_speed ?? (clubSpeedCount > 0 || avgCs > 0),
+              smash: existing.avg_smash_factor ?? existing.smash ?? (smashCount > 0 ? smashSum / smashCount : (avgCs > 0 ? avgBs / avgCs : 0)),
+              has_smash_factor: existing.has_smash_factor ?? (smashCount > 0 || (avgCs > 0 && avgBs > 0)),
               spin_rpm: existing.spin_rpm ?? Math.round(spinSum / n),
               avg_offline_yds: existing.avg_offline_yds ?? existing.offline_yds ?? (offlineSum / n),
               avg_face_angle: existing.avg_face_angle ?? (faceCount > 0 ? faceSum / faceCount : 0),
@@ -723,6 +816,30 @@ async function loadUserData(user) {
               avg_club_path: existing.avg_club_path ?? (pathCount > 0 ? pathSum / pathCount : 0),
               has_club_path: existing.has_club_path ?? (pathCount > 0),
               club_path_count: existing.club_path_count ?? pathCount,
+              avg_face_to_path: existing.avg_face_to_path ?? (ftpCount > 0 ? ftpSum / ftpCount : 0),
+              has_face_to_path: existing.has_face_to_path ?? (ftpCount > 0),
+              avg_vla_deg: existing.avg_vla_deg ?? (vlaCount > 0 ? vlaSum / vlaCount : 0),
+              has_vla: existing.has_vla ?? (vlaCount > 0),
+              avg_hla_deg: existing.avg_hla_deg ?? (hlaCount > 0 ? hlaSum / hlaCount : 0),
+              has_hla: existing.has_hla ?? (hlaCount > 0),
+              avg_back_spin_rpm: existing.avg_back_spin_rpm ?? (backSpinCount > 0 ? backSpinSum / backSpinCount : 0),
+              has_back_spin: existing.has_back_spin ?? (backSpinCount > 0),
+              avg_side_spin_rpm: existing.avg_side_spin_rpm ?? (sideSpinCount > 0 ? sideSpinSum / sideSpinCount : 0),
+              has_side_spin: existing.has_side_spin ?? (sideSpinCount > 0),
+              avg_spin_axis_deg: existing.avg_spin_axis_deg ?? (spinAxisCount > 0 ? spinAxisSum / spinAxisCount : 0),
+              has_spin_axis: existing.has_spin_axis ?? (spinAxisCount > 0),
+              avg_attack_angle: existing.avg_attack_angle ?? (aoaCount > 0 ? aoaSum / aoaCount : 0),
+              has_attack_angle: existing.has_attack_angle ?? (aoaCount > 0),
+              avg_dynamic_loft: existing.avg_dynamic_loft ?? (dynLoftCount > 0 ? dynLoftSum / dynLoftCount : 0),
+              has_dynamic_loft: existing.has_dynamic_loft ?? (dynLoftCount > 0),
+              avg_apex_ft: existing.avg_apex_ft ?? (existing.avg_apex_m != null ? existing.avg_apex_m * 3.28084 : (apexCount > 0 ? apexSum / apexCount : 0)),
+              has_apex: existing.has_apex ?? (apexCount > 0),
+              avg_hang_time_s: existing.avg_hang_time_s ?? (hangTimeCount > 0 ? hangTimeSum / hangTimeCount : 0),
+              has_hang_time: existing.has_hang_time ?? (hangTimeCount > 0),
+              avg_descent_angle_deg: existing.avg_descent_angle_deg ?? (descentAngleCount > 0 ? descentAngleSum / descentAngleCount : 0),
+              has_descent_angle: existing.has_descent_angle ?? (descentAngleCount > 0),
+              avg_rollout_yds: existing.avg_rollout_yds ?? (existing.avg_rollout_m != null ? existing.avg_rollout_m * 1.09361 : (rolloutCount > 0 ? rolloutSum / rolloutCount : 0)),
+              has_rollout: existing.has_rollout ?? (rolloutCount > 0),
               impact_points: existing.impact_points ?? recImpact,
               has_impact_data: existing.has_impact_data ?? (recImpact.length > 0)
             };
@@ -1487,6 +1604,125 @@ function renderClubSummary(profile) {
     const hasShots = count > 0;
     const drawerId = `drawer-${clubKey.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
 
+    const renderLmTiles = (data) => {
+      const tile = (lbl, val, isActive, col) => `
+        <div class="portal-lm-tile ${isActive ? 'active' : 'inactive'}">
+          <span class="portal-lm-val" style="${col ? 'color:' + col : ''}">${escapeHtml(val)}</span>
+          <span class="portal-lm-lbl">${escapeHtml(lbl)}</span>
+        </div>
+      `;
+
+      let html = "";
+      // 1. Club Speed
+      const hasCs = Boolean(data.has_club_speed || (data.club_speed_mph > 0));
+      html += tile("Club Speed", hasCs ? `${Number(data.club_speed_mph).toFixed(1)} mph` : "–", hasCs, "#ffd24d");
+
+      // 2. Smash Factor
+      const hasSf = Boolean(data.has_smash_factor || (data.smash > 0.05));
+      const sfVal = Number(data.smash || 0);
+      const sfCol = sfVal >= 1.45 ? "#5af296" : "#ffd24d";
+      html += tile("Smash Factor", hasSf ? sfVal.toFixed(2) : "–", hasSf, sfCol);
+
+      // 3. Attack Angle
+      const hasAoa = Boolean(data.has_attack_angle);
+      const aoaVal = Number(data.avg_attack_angle || 0);
+      html += tile("Attack Angle", hasAoa ? `${aoaVal >= 0 ? '+' : ''}${aoaVal.toFixed(1)}°` : "–", hasAoa, "#b3d9ff");
+
+      // 4. Dynamic Loft
+      const hasDl = Boolean(data.has_dynamic_loft);
+      html += tile("Dynamic Loft", hasDl ? `${Number(data.avg_dynamic_loft).toFixed(1)}°` : "–", hasDl, "#d9c2ff");
+
+      // 5. Launch (VLA)
+      const hasVla = Boolean(data.has_vla);
+      html += tile("Launch (VLA)", hasVla ? `${Number(data.avg_vla_deg).toFixed(1)}°` : "–", hasVla, "#d9c2ff");
+
+      // 6. Launch Dir (HLA)
+      const hasHla = Boolean(data.has_hla);
+      const hlaVal = Number(data.avg_hla_deg || 0);
+      let hlaStr = "–";
+      if (hasHla) {
+        if (Math.abs(hlaVal) < 0.05) hlaStr = "0.0°";
+        else if (hlaVal > 0) hlaStr = `${hlaVal.toFixed(1)}° R`;
+        else hlaStr = `${Math.abs(hlaVal).toFixed(1)}° L`;
+      }
+      html += tile("Launch Dir", hlaStr, hasHla, "#b3d9ff");
+
+      // 7. Club Path
+      const hasCp = Boolean(data.has_club_path);
+      const cpVal = Number(data.avg_club_path || 0);
+      let cpStr = "–";
+      if (hasCp) {
+        if (Math.abs(cpVal) < 0.05) cpStr = "0.0° Str";
+        else if (cpVal > 0) cpStr = `${cpVal.toFixed(1)}° I-O`;
+        else cpStr = `${Math.abs(cpVal).toFixed(1)}° O-I`;
+      }
+      html += tile("Club Path", cpStr, hasCp, "#72d6ff");
+
+      // 8. Face Angle
+      const hasFa = Boolean(data.has_face_angle);
+      const faVal = Number(data.avg_face_angle || 0);
+      let faStr = "–";
+      if (hasFa) {
+        if (Math.abs(faVal) < 0.05) faStr = "0.0° Sq";
+        else if (faVal > 0) faStr = `${faVal.toFixed(1)}° O`;
+        else faStr = `${Math.abs(faVal).toFixed(1)}° C`;
+      }
+      html += tile("Face Angle", faStr, hasFa, "#72d6ff");
+
+      // 9. Face to Path
+      const hasFtp = Boolean(data.has_face_to_path);
+      const ftpVal = Number(data.avg_face_to_path || 0);
+      let ftpStr = "–";
+      if (hasFtp) {
+        if (Math.abs(ftpVal) < 0.05) ftpStr = "0.0° Sq";
+        else if (ftpVal > 0) ftpStr = `${ftpVal.toFixed(1)}° O`;
+        else ftpStr = `${Math.abs(ftpVal).toFixed(1)}° C`;
+      }
+      html += tile("Face to Path", ftpStr, hasFtp, "#72d6ff");
+
+      // 10. Back Spin
+      const hasBs = Boolean(data.has_back_spin);
+      html += tile("Back Spin", hasBs ? `${Math.round(data.avg_back_spin_rpm)} rpm` : "–", hasBs, "#ffffff");
+
+      // 11. Side Spin
+      const hasSs = Boolean(data.has_side_spin);
+      const ssVal = Number(data.avg_side_spin_rpm || 0);
+      let ssStr = "–";
+      if (hasSs) {
+        if (Math.abs(ssVal) < 5) ssStr = "0 rpm";
+        else if (ssVal > 0) ssStr = `${Math.round(ssVal)} R`;
+        else ssStr = `${Math.round(Math.abs(ssVal))} L`;
+      }
+      html += tile("Side Spin", ssStr, hasSs, "#ffffff");
+
+      // 12. Spin Axis
+      const hasSa = Boolean(data.has_spin_axis);
+      const saVal = Number(data.avg_spin_axis_deg || 0);
+      let saCol = "#72d6ff";
+      if (Math.abs(saVal) > 9) saCol = "#ff7272";
+      else if (Math.abs(saVal) > 4) saCol = "#ffb366";
+      html += tile("Spin Axis", hasSa ? `${saVal >= 0 ? '+' : ''}${saVal.toFixed(1)}°` : "–", hasSa, saCol);
+
+      // 13. Apex Height
+      const hasApex = Boolean(data.has_apex);
+      const apexVal = Number(data.avg_apex_ft || 0);
+      html += tile("Apex Height", hasApex ? `${apexVal.toFixed(1)} ft` : "–", hasApex, "#5af296");
+
+      // 14. Rollout
+      const hasRo = Boolean(data.has_rollout);
+      html += tile("Rollout", hasRo ? `${Number(data.avg_rollout_yds).toFixed(1)} yds` : "–", hasRo, "#5af296");
+
+      // 15. Hang Time
+      const hasHt = Boolean(data.has_hang_time);
+      html += tile("Hang Time", hasHt ? `${Number(data.avg_hang_time_s).toFixed(1)} s` : "–", hasHt, "#d9c2ff");
+
+      // 16. Descent Angle
+      const hasDa = Boolean(data.has_descent_angle);
+      html += tile("Descent Ang", hasDa ? `${Number(data.avg_descent_angle_deg).toFixed(1)}°` : "–", hasDa, "#d9c2ff");
+
+      return html;
+    };
+
     cardsHtml += `
       <div class="portal-club-card ${hasShots ? 'has-shots' : ''}" data-club="${escapeHtml(clubKey)}">
         <div class="portal-club-row">
@@ -1529,7 +1765,7 @@ function renderClubSummary(profile) {
           <!-- Buttons -->
           <div class="portal-club-col-actions">
             <button class="btn-toggle-visuals" data-drawer="${drawerId}" ${!hasShots ? 'disabled' : ''}>
-              ▼ Visuals
+              ▼ Expand
             </button>
             <button class="btn-clear-club-row" data-club="${escapeHtml(clubKey)}" data-club-name="${escapeHtml(clubName)}" data-count="${count}" ${!hasShots ? 'disabled' : ''} title="Clear shot data for ${escapeHtml(clubName)}">
               🗑
@@ -1540,6 +1776,17 @@ function renderClubSummary(profile) {
         <!-- Drawer -->
         <div class="portal-club-drawer" id="${drawerId}" style="display: none;">
           <div class="portal-drawer-inner">
+            <!-- Launch Monitor Club Averages Panel -->
+            <div class="portal-lm-stats-panel">
+              <div class="portal-lm-header">
+                📡 LAUNCH MONITOR CLUB AVERAGES
+              </div>
+              <div class="portal-lm-grid">
+                ${renderLmTiles(s)}
+              </div>
+            </div>
+
+            <!-- Club Delivery Visuals Header & Grid -->
             <div class="portal-drawer-header">
               🏌 CLUB DELIVERY AVERAGES & STRIKE TENDENCIES
             </div>
@@ -1588,7 +1835,7 @@ function renderClubSummary(profile) {
 
       const isOpening = drawer.style.display === "none";
       drawer.style.display = isOpening ? "block" : "none";
-      btn.textContent = isOpening ? "▲ Hide" : "▼ Visuals";
+      btn.textContent = isOpening ? "▲ Collapse" : "▼ Expand";
 
       if (isOpening) {
         const card = btn.closest(".portal-club-card");
