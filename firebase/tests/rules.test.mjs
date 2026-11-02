@@ -300,63 +300,66 @@ describe("Firebase Backend Security Rules & Budget Guard Suite", () => {
   // 5. $10 Budget Circuit-Breaker Lock Test
   describe("5. $10 Budget Circuit-Breaker Lockout", () => {
     it("locks down writes while preserving public status and leaderboard reads when paused == true", async () => {
-      const alice = testEnv.authenticatedContext("uid_1");
+      // Seed public profile and status before trip
+      await testEnv.withSecurityRulesDisabled(async (adminCtx) => {
+        const adminFs = adminCtx.firestore();
+        const adminRtdb = adminCtx.database();
+
+        await setDoc(doc(adminFs, "public_profiles", "budget_user"), {
+          schema_version: 1,
+          uid: "budget_user",
+          display_name: "Alice",
+          longest_drive_yds: 300.0,
+        });
+        // Circuit breaker trips: system/status.paused = true in Firestore and RTDB
+        await setDoc(doc(adminFs, "system", "status"), {
+          schema_version: 1,
+          paused: true,
+          reason: "monthly_budget_reached",
+          message: "Multiplayer is temporarily paused for the remainder of the month...",
+        });
+        await rtdbSet(rtdbRef(adminRtdb, "system/status"), {
+          paused: true,
+          reason: "monthly_budget_reached",
+        });
+      });
+
+      const alice = testEnv.authenticatedContext("budget_user");
       const unauthed = testEnv.unauthenticatedContext();
       const aliceDb = alice.firestore();
       const aliceRtdb = alice.database();
       const unauthedDb = unauthed.firestore();
       const unauthedRtdb = unauthed.database();
 
-      // Seed public profile and status before trip
-      await testEnv.withSecurityRulesDisabled(async (adminCtx) => {
-        await setDoc(doc(adminCtx.firestore(), "public_profiles", "uid_1"), {
-          schema_version: 1,
-          uid: "uid_1",
-          display_name: "Alice",
-          longest_drive_yds: 300.0,
-        });
-        // Circuit breaker trips: system/status.paused = true in Firestore and RTDB
-        await setDoc(doc(adminCtx.firestore(), "system", "status"), {
-          schema_version: 1,
-          paused: true,
-          reason: "monthly_budget_reached",
-          message: "Multiplayer is temporarily paused for the remainder of the month...",
-        });
-        await rtdbSet(rtdbRef(adminCtx.database(), "system/status"), {
-          paused: true,
-          reason: "monthly_budget_reached",
-        });
-      });
-
       // 1. Reading system/status still succeeds (unauthenticated and authenticated)
       await assertSucceeds(getDoc(doc(unauthedDb, "system", "status")));
       await assertSucceeds(rtdbGet(rtdbRef(unauthedRtdb, "system/status")));
 
       // 2. Reading public_profiles still succeeds so users can view leaderboards
-      await assertSucceeds(getDoc(doc(unauthedDb, "public_profiles", "uid_1")));
+      await assertSucceeds(getDoc(doc(unauthedDb, "public_profiles", "budget_user")));
 
       // 3. All client writes to Firestore are rejected by security rules
       await assertFails(
-        setDoc(doc(aliceDb, "users", "uid_1"), {
+        setDoc(doc(aliceDb, "users", "budget_user"), {
           schema_version: 1,
           display_name: "Alice",
         })
       );
       await assertFails(
-        setDoc(doc(aliceDb, "profiles", "uid_1"), {
+        setDoc(doc(aliceDb, "profiles", "budget_user"), {
           schema_version: 1,
-          owner_uid: "uid_1",
+          owner_uid: "budget_user",
           display_name: "Alice",
         })
       );
       await assertFails(
-        setDoc(doc(aliceDb, "profiles", "uid_1", "sync", "stats"), {
+        setDoc(doc(aliceDb, "profiles", "budget_user", "sync", "stats"), {
           schema_version: 1,
           clubs: {},
         })
       );
       await assertFails(
-        setDoc(doc(aliceDb, "profiles", "uid_1", "matches", "match_new"), {
+        setDoc(doc(aliceDb, "profiles", "budget_user", "matches", "match_new"), {
           schema_version: 1,
           match_id: "match_new",
           strokes: 72,
@@ -365,15 +368,15 @@ describe("Firebase Backend Security Rules & Budget Guard Suite", () => {
       );
       await assertFails(
         setDoc(doc(aliceDb, "link_requests", "req_blocked"), {
-          requester_uid: "uid_1",
+          requester_uid: "budget_user",
           status: "pending",
           target_email_lower: "someone@example.com",
         })
       );
       await assertFails(
-        setDoc(doc(aliceDb, "public_profiles", "uid_1"), {
+        setDoc(doc(aliceDb, "public_profiles", "budget_user"), {
           schema_version: 1,
-          uid: "uid_1",
+          uid: "budget_user",
           display_name: "Alice",
         })
       );
@@ -388,18 +391,18 @@ describe("Firebase Backend Security Rules & Budget Guard Suite", () => {
       // 4. All client writes to RTDB are rejected
       await assertFails(
         rtdbSet(rtdbRef(aliceRtdb, "codes/ABC123"), {
-          host_uid: "uid_1",
+          host_uid: "budget_user",
         })
       );
       await assertFails(
         rtdbSet(rtdbRef(aliceRtdb, "lobbies/match_blocked"), {
-          host_uid: "uid_1",
+          host_uid: "budget_user",
           last_seen: Math.floor(Date.now() / 1000),
         })
       );
       await assertFails(
         rtdbSet(rtdbRef(aliceRtdb, "matches/match_blocked/meta"), {
-          host_uid: "uid_1",
+          host_uid: "budget_user",
         })
       );
       await assertFails(

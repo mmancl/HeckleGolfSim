@@ -398,18 +398,28 @@ function bindAuthForms() {
     });
   }
 
-  // Nav scroll triggers
+  // Nav scroll triggers or redirects
   const btnNavSignin = document.getElementById("nav-signin-btn");
   if (btnNavSignin) {
     btnNavSignin.addEventListener("click", () => {
-      document.getElementById("stats-signin")?.scrollIntoView({ behavior: "smooth" });
+      const statsElem = document.getElementById("stats-signin");
+      if (statsElem) {
+        statsElem.scrollIntoView({ behavior: "smooth" });
+      } else {
+        window.location.href = "portal.html";
+      }
     });
   }
   const greetingEl = document.getElementById("user-greeting");
   if (greetingEl) {
     greetingEl.addEventListener("click", (e) => {
       if (e.target.id !== "signout-btn") {
-        document.getElementById("stats-signin")?.scrollIntoView({ behavior: "smooth" });
+        const statsElem = document.getElementById("stats-signin");
+        if (statsElem) {
+          statsElem.scrollIntoView({ behavior: "smooth" });
+        } else {
+          window.location.href = "portal.html";
+        }
       }
     });
   }

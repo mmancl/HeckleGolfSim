@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Player Portal | Heckle Golf Simulator</title>
+  <meta name="description" content="Heckle Golf Simulator Player Portal: View your scorecards, round history, club averages, swing tendencies, simulator approvals, and achievements.">
+  <meta property="og:title" content="Player Portal | Heckle Golf Simulator">
+  <meta property="og:description" content="Track your stats, view rounds, and manage your account from any device.">
+  <meta property="og:image" content="images/heckle_splash_feature.png">
+  <link rel="icon" type="image/png" href="images/app_icon.png">
+  <link rel="stylesheet" href="css/portal.css">
+
+  <style>
+    /* ─── Design Tokens ─────────────────────────────────────────── */
+    :root {
+      --bg:          #0a0f1e;
+      --bg2:         #0f1829;
+      --card:        #141f35;
+      --card-border: rgba(255,255,255,0.07);
+      --green:       #22c55e;
+      --green-dim:   #16a34a;
+      --green-glow:  rgba(34,197,94,0.18);
+      --blue:        #38bdf8;
+      --text:        #f1f5f9;
+      --muted:       #94a3b8;
+      --radius:      14px;
+      --nav-h:       70px;
+    }
+
+    /* ─── Reset & Base ──────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    a { color: inherit; text-decoration: none; }
+    img { max-width: 100%; display: block; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--green-dim); border-radius: 3px; }
+
+    /* ─── NAV ───────────────────────────────────────────────────── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0;
+      height: var(--nav-h);
+      background: rgba(10,15,30,0.85);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--card-border);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 2rem; z-index: 100;
+    }
+    .nav-logo {
+      display: flex; align-items: center; gap: 0.6rem;
+      font-weight: 800; font-size: 1.2rem; letter-spacing: -0.04em;
+    }
+    .nav-logo img { width: 36px; height: 36px; border-radius: 8px; }
+    .nav-logo .logo-green { color: var(--green); }
+    .nav-links { display: flex; align-items: center; gap: 1.5rem; list-style: none; }
+    .nav-links a { color: var(--muted); font-size: 0.9rem; font-weight: 500; transition: color 0.2s; }
+    .nav-links a:hover, .nav-links a.active { color: var(--text); }
+    .nav-links a.active { color: var(--green); font-weight: 600; }
+    .nav-cta { display: flex; align-items: center; gap: 0.75rem; }
+    .btn-nav-icon {
+      display: flex; align-items: center; justify-content: center;
+      width: 36px; height: 36px; border-radius: 8px;
+      background: var(--card); border: 1px solid var(--card-border);
+      transition: border-color 0.2s, background 0.2s; color: var(--muted);
+    }
+    .btn-nav-icon:hover { border-color: var(--green); color: var(--green); background: var(--green-glow); }
+    .btn-signin {
+      padding: 0.45rem 1rem; border-radius: 8px;
+      background: var(--card); border: 1px solid var(--green);
+      color: var(--green); font-size: 0.85rem; font-weight: 600;
+      cursor: pointer; transition: background 0.2s, color 0.2s;
+    }
+    .btn-signin:hover { background: var(--green); color: #000; }
+    .hamburger { display: none; background: none; border: none; cursor: pointer; color: var(--text); }
+    .user-greeting { display: none; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--muted); cursor: pointer; }
+    .user-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--green-dim);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem; font-weight: 700; color: #000;
+    }
+
+    /* ─── MAIN CONTENT ──────────────────────────────────────────── */
+    main {
+      flex: 1;
+      padding-top: var(--nav-h);
+    }
+    #stats-signin {
+      background: transparent;
+      padding: 3rem 1.5rem 5rem;
+    }
+
+    /* ─── Signin Styles ─────────────────────────────────────────── */
+    .signin-container { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center; }
+    .signin-info h2 { font-size: clamp(1.6rem, 3.5vw, 2.4rem); font-weight: 800; letter-spacing: -0.03em; margin-bottom: 1rem; }
+    .signin-info p { color: var(--muted); font-size: 1rem; margin-bottom: 1.5rem; }
+    .signin-bullets { list-style: none; display: flex; flex-direction: column; gap: 0.65rem; margin-bottom: 2rem; }
+    .signin-bullets li { display: flex; align-items: flex-start; gap: 0.6rem; color: var(--muted); font-size: 0.95rem; }
+    .signin-bullets li::before { content: '✓'; color: var(--green); font-weight: 700; flex-shrink: 0; }
+    .signin-card { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 2.5rem 2rem; }
+    .signin-card h3 { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .signin-card > p { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.75rem; }
+    .form-group { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem; }
+    .form-group label { font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+    .form-group input {
+      padding: 0.7rem 0.9rem; background: var(--bg); border: 1px solid var(--card-border);
+      border-radius: 8px; color: var(--text); font-size: 0.95rem; outline: none; transition: border-color 0.2s;
+    }
+    .form-group input:focus { border-color: var(--green); }
+    .form-group input::placeholder { color: var(--muted); }
+    .btn-signin-form {
+      width: 100%; padding: 0.8rem; background: var(--green); color: #000;
+      font-weight: 700; font-size: 0.95rem; border: none; border-radius: 8px;
+      cursor: pointer; transition: background 0.2s; margin-top: 0.5rem;
+    }
+    .btn-signin-form:hover { background: var(--green-dim); color: #fff; }
+    .divider { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0; color: var(--muted); font-size: 0.8rem; }
+    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--card-border); }
+    .btn-google {
+      width: 100%; padding: 0.75rem; background: #fff; color: #1a1a1a;
+      font-weight: 600; font-size: 0.9rem; border: none; border-radius: 8px;
+      cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+      transition: opacity 0.2s, box-shadow 0.2s;
+    }
+    .btn-google:hover { opacity: 0.92; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+    .btn-google svg { width: 18px; height: 18px; }
+
+    /* ─── FOOTER ────────────────────────────────────────────────── */
+    footer {
+      background: var(--bg); border-top: 1px solid var(--card-border);
+      padding: 2.5rem 1.5rem; text-align: center; color: var(--muted); font-size: 0.85rem;
+      margin-top: auto;
+    }
+    footer a { color: var(--green); }
+    .footer-inner { max-width: 700px; margin: 0 auto; display: flex; flex-direction: column; gap: 0.75rem; align-items: center; }
+    .footer-links { display: flex; gap: 1.5rem; flex-wrap: wrap; justify-content: center; }
+    .footer-links a { color: var(--muted); transition: color 0.2s; }
+    .footer-links a:hover { color: var(--text); }
+
+    /* ─── RESPONSIVE ────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+      .hamburger { display: block; }
+      .nav-links.mobile-open {
+        display: flex; flex-direction: column;
+        position: fixed; top: var(--nav-h); left: 0; right: 0;
+        background: rgba(10,15,30,0.98);
+        border-bottom: 1px solid var(--card-border);
+        padding: 1.5rem 2rem; gap: 1rem;
+      }
+      .signin-container { grid-template-columns: 1fr; }
+      .signin-card { padding: 1.75rem 1.25rem; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ══ NAV ═══════════════════════════════════════════════════ -->
+  <nav>
+    <a href="index.html" class="nav-logo">
+      <img src="images/app_icon.png" alt="Heckle Golf Simulator icon">
+      Heckle <span class="logo-green">Golf</span>
+    </a>
+
+    <ul class="nav-links" id="nav-links">
+      <li><a href="index.html#video">Video</a></li>
+      <li><a href="index.html#features">Features</a></li>
+      <li><a href="index.html#screenshots">Screenshots</a></li>
+      <li><a href="index.html#download">Download</a></li>
+      <li><a href="leaderboards.html">Leaderboards</a></li>
+      <li><a href="portal.html" class="active">Player Portal</a></li>
+      <li><a href="index.html#community">Community</a></li>
+    </ul>
+
+    <div class="nav-cta">
+      <a href="https://www.youtube.com/@hecklegolfsimulator" target="_blank" rel="noopener"
+         class="btn-nav-icon" title="YouTube" aria-label="YouTube Channel">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31.3 31.3 0 0 0 0 12a31.3 31.3 0 0 0 .5 5.8A3 3 0 0 0 2.6 20c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31.3 31.3 0 0 0 24 12a31.3 31.3 0 0 0-.5-5.8zM9.8 15.6V8.4L15.8 12l-6 3.6z"/></svg>
+      </a>
+      <a href="https://discord.gg/brHATRsFKB" target="_blank" rel="noopener"
+         class="btn-nav-icon" title="Discord" aria-label="Discord Server">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3c-.2.4-.5.9-.7 1.3a18.3 18.3 0 0 0-5.4 0C9.1 3.9 8.8 3.4 8.6 3A19.7 19.7 0 0 0 3.7 4.4C.5 9.2-.3 13.8.1 18.4a20 20 0 0 0 6 3 14.8 14.8 0 0 0 1.3-2 12.8 12.8 0 0 1-2-.9l.5-.4a14.3 14.3 0 0 0 12.2 0l.5.4a12.9 12.9 0 0 1-2 1 14.8 14.8 0 0 0 1.3 2 19.9 19.9 0 0 0 6-3c.5-5.2-.9-9.8-3.6-14zM8 15.5c-1.2 0-2.2-1.1-2.2-2.5S6.8 10.5 8 10.5s2.2 1.1 2.2 2.5S9.2 15.5 8 15.5zm8 0c-1.2 0-2.2-1.1-2.2-2.5s1-2.5 2.2-2.5 2.2 1.1 2.2 2.5-1 2.5-2.2 2.5z"/></svg>
+      </a>
+      <button class="btn-signin" id="nav-signin-btn">Sign In</button>
+      <div class="user-greeting" id="user-greeting">
+        <div class="user-avatar" id="user-avatar">?</div>
+        <span id="user-name">Player</span>
+        <button id="signout-btn" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.78rem;" title="Sign out">✕</button>
+      </div>
+    </div>
+
+    <button class="hamburger" id="hamburger" aria-label="Toggle menu">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+    </button>
+  </nav>
+
+  <main>
+    <!-- ══ STATS / PLAYER PORTAL ═════════════════════════════════ -->
+    <section id="stats-signin">
+      <div class="section-inner">
+        <div class="budget-paused-banner">
+          <span class="banner-icon">⚠️</span>
+          <div class="banner-text">
+            <strong>Service Paused</strong>Multiplayer is temporarily paused for the remainder of the month as the developer's monthly budget has been reached, sorry for the inconvenience.
+          </div>
+        </div>
+
+        <!-- Approvals Banner -->
+        <div class="approvals-banner" id="approvals-banner">
+          <div class="approvals-header">
+            <span>🔔</span> Pending Simulator Link Requests
+          </div>
+          <p style="font-size:0.85rem; color:var(--muted); margin-bottom:0.5rem;">
+            Another golfer wants to select and sync your player profile on their Heckle Golf simulator.
+          </p>
+          <div id="approvals-list"></div>
+        </div>
+
+        <!-- Email Verification Banner -->
+        <div class="verification-banner" id="verification-banner">
+          <div>
+            ⚠️ <strong>Email Unverified:</strong> Please verify your email address to approve simulator link requests.
+          </div>
+          <div class="verification-actions">
+            <button class="btn-verify-action" id="btn-resend-verify">Resend Verification Email</button>
+            <button class="btn-verify-action" id="btn-check-verify">I've Verified (Refresh)</button>
+          </div>
+        </div>
+
+        <!-- Signed-Out View: Sign-In / Sign-Up / Forgot Password -->
+        <div class="signin-container">
+          <div class="signin-info">
+            <p class="section-label">Player Portal</p>
+            <h2>Track Your Stats<br>from Any Device</h2>
+            <p>Sign in with your Heckle Golf account to view your round history, scoring trends, and club performance stats directly from the web.</p>
+            <ul class="signin-bullets">
+              <li>Club distances, smash factor &amp; dispersion averages</li>
+              <li>Full round history and hole-by-hole scorecards</li>
+              <li>Course records &amp; scoring averages to par</li>
+              <li>Swing analysis tendencies &amp; monthly tracking</li>
+              <li>Manage linked simulators and delegate access</li>
+              <li>Public leaderboard ranking visibility controls</li>
+            </ul>
+          </div>
+
+          <div class="signin-card">
+            <!-- Mode Switcher -->
+            <div class="auth-modes">
+              <button class="auth-mode-btn active" id="mode-btn-signin">Sign In</button>
+              <button class="auth-mode-btn" id="mode-btn-signup">Create Account</button>
+            </div>
+
+            <div id="auth-feedback" class="auth-feedback"></div>
+
+            <button class="btn-google" id="google-signin-btn">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+              </svg>
+              Continue with Google
+            </button>
+
+            <div class="divider">or</div>
+
+            <!-- Sign In Form -->
+            <form id="signin-form" autocomplete="on">
+              <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" placeholder="you@example.com" autocomplete="email" required>
+              </div>
+              <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" required>
+              </div>
+              <button type="submit" class="btn-signin-form">Sign In</button>
+              <div class="auth-form-links">
+                <button type="button" class="auth-link" id="link-forgot-pw">Forgot password?</button>
+                <span>No account? <button type="button" class="auth-link" id="link-to-signup">Sign up</button></span>
+              </div>
+            </form>
+
+            <!-- Create Account Form (Sign Up) -->
+            <form id="signup-form" autocomplete="on" style="display:none;">
+              <div class="form-group">
+                <label for="signup-name">Display Name (In-Game Handle)</label>
+                <input type="text" id="signup-name" placeholder="e.g. Tiger" maxlength="40" required>
+              </div>
+              <div class="form-group">
+                <label for="signup-email">Email Address</label>
+                <input type="email" id="signup-email" placeholder="you@example.com" autocomplete="email" required>
+              </div>
+              <div class="form-group">
+                <label for="signup-password">Password (min. 6 characters)</label>
+                <input type="password" id="signup-password" placeholder="••••••••" autocomplete="new-password" minlength="6" required>
+              </div>
+              <button type="submit" class="btn-signin-form">Create Account</button>
+              <p style="font-size:0.75rem; color:var(--muted); margin-top:0.75rem; text-align:center;">
+                A verification link will be sent to your email to verify simulator access requests.
+              </p>
+              <div class="auth-form-links" style="justify-content:center; margin-top:1rem;">
+                <span>Already have an account? <button type="button" class="auth-link" id="link-back-to-signin">Sign In</button></span>
+              </div>
+            </form>
+
+            <!-- Forgot Password Form -->
+            <form id="forgot-form" autocomplete="on" style="display:none;">
+              <p style="font-size:0.85rem; color:var(--muted); margin-bottom:1rem;">
+                Enter your email to receive a password reset link.
+              </p>
+              <div class="form-group">
+                <label for="forgot-email">Email Address</label>
+                <input type="email" id="forgot-email" placeholder="you@example.com" autocomplete="email" required>
+              </div>
+              <button type="submit" class="btn-signin-form">Send Reset Link</button>
+              <div class="auth-form-links" style="justify-content:center; margin-top:1rem;">
+                <button type="button" class="auth-link" id="link-back-to-signin">← Back to Sign In</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Signed-In View: Player Stats Portal -->
+        <div id="player-portal">
+          <!-- Top Bar -->
+          <div class="portal-top-bar">
+            <div class="portal-user-info">
+              <div class="portal-avatar" id="portal-avatar-initial">?</div>
+              <div class="portal-user-details">
+                <h3 id="portal-user-display-name">Golfer</h3>
+                <p id="portal-user-email">golfer@example.com</p>
+              </div>
+            </div>
+            <div class="portal-top-actions">
+              <button class="btn-refresh" id="portal-signout-btn">Sign Out</button>
+            </div>
+          </div>
+
+          <!-- Portal Tabs Navigation -->
+          <div class="portal-nav-tabs">
+            <button class="portal-tab-btn active" data-tab="overview">Overview &amp; Clubs</button>
+            <button class="portal-tab-btn" data-tab="matches">Recent Matches</button>
+            <button class="portal-tab-btn" data-tab="achievements">Swing Analysis &amp; Achievements</button>
+            <button class="portal-tab-btn" data-tab="settings">Simulator Approvals &amp; Settings</button>
+          </div>
+
+          <!-- Tab 1: Overview & Clubs -->
+          <div class="portal-tab-pane active" id="portal-tab-overview">
+            <!-- Stat Cards Row -->
+            <div class="portal-stats-row">
+              <div class="portal-stat-box">
+                <div class="stat-value" id="stat-matches">-</div>
+                <div class="stat-label">Matches Played</div>
+              </div>
+              <div class="portal-stat-box">
+                <div class="stat-value" id="stat-record">-</div>
+                <div class="stat-label">Record (W-L-T)</div>
+              </div>
+              <div class="portal-stat-box">
+                <div class="stat-value" id="stat-avg-score">-</div>
+                <div class="stat-label">Avg Score to Par</div>
+              </div>
+              <div class="portal-stat-box">
+                <div class="stat-value" id="stat-best-18">-</div>
+                <div class="stat-label">Best 18-Hole</div>
+              </div>
+              <div class="portal-stat-box">
+                <div class="stat-value" id="stat-longest-drive">-</div>
+                <div class="stat-label">Longest Drive</div>
+              </div>
+              <div class="portal-stat-box">
+                <div class="stat-value" id="stat-longest-putt">-</div>
+                <div class="stat-label">Longest Putt</div>
+              </div>
+              <div class="portal-stat-box">
+                <div class="stat-value" id="stat-achievements-count">-</div>
+                <div class="stat-label">Achievements</div>
+              </div>
+            </div>
+
+            <!-- Club Summary Table -->
+            <div class="portal-card">
+              <div class="portal-card-header">
+                <h3 class="portal-card-title">🏌️ Club Distances &amp; Delivery Averages</h3>
+              </div>
+              <div id="club-summary-container">
+                <!-- Populated by portal.js -->
+              </div>
+            </div>
+
+            <!-- Best Courses Records -->
+            <div class="portal-card">
+              <div class="portal-card-header">
+                <h3 class="portal-card-title">⛳ Best Course Records</h3>
+              </div>
+              <div id="best-courses-container">
+                <!-- Populated by portal.js -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 2: Recent Matches -->
+          <div class="portal-tab-pane" id="portal-tab-matches">
+            <div class="portal-card">
+              <div class="portal-card-header">
+                <h3 class="portal-card-title">📜 Recent Matches &amp; Scorecards</h3>
+              </div>
+              <div id="recent-matches-container">
+                <!-- Lazy loaded by portal.js -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 3: Swing Analysis & Achievements -->
+          <div class="portal-tab-pane" id="portal-tab-achievements">
+            <div class="portal-card">
+              <div class="portal-card-header">
+                <h3 class="portal-card-title">📈 Swing Analysis Tendencies</h3>
+              </div>
+              <div id="swing-analysis-container">
+                <!-- Lazy loaded by portal.js -->
+              </div>
+            </div>
+
+            <div class="portal-card">
+              <div class="portal-card-header">
+                <h3 class="portal-card-title">🏆 Unlocked Achievements</h3>
+              </div>
+              <div id="achievements-container">
+                <!-- Lazy loaded by portal.js -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 4: Simulator Approvals & Settings -->
+          <div class="portal-tab-pane" id="portal-tab-settings">
+            <div class="portal-card">
+              <div class="portal-card-header">
+                <h3 class="portal-card-title">👥 Simulator Delegations &amp; Linked Devices</h3>
+              </div>
+              <p style="font-size:0.88rem; color:var(--muted); margin-bottom:1.25rem;">
+                Simulators and golfers with delegated access to your player profile. You can revoke access at any time.
+              </p>
+              <div id="delegates-container">
+                <!-- Populated by portal.js -->
+              </div>
+            </div>
+
+            <div class="portal-card">
+              <div class="portal-card-header">
+                <h3 class="portal-card-title">🔒 Privacy &amp; Leaderboard Visibility</h3>
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <h4>Show Profile on Public Leaderboards</h4>
+                  <p>When enabled, your display name and best scores appear on public global leaderboards. When disabled, your public leaderboard entry is deleted.</p>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="leaderboard-opt-in-toggle" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="danger-zone">
+              <h4>Danger Zone: Account Deletion</h4>
+              <p>Permanently remove your account and all associated cloud data including profiles, club summaries, achievements, and scorecards. This cannot be undone.</p>
+              <button class="btn-danger" id="btn-delete-account">Delete Account &amp; Cloud Data</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ══ FOOTER ════════════════════════════════════════════════ -->
+  <footer>
+    <div class="footer-inner">
+      <div style="display:flex;align-items:center;gap:0.5rem;justify-content:center;font-weight:800;font-size:1.1rem;letter-spacing:-0.03em;">
+        <img src="images/app_icon.png" alt="" style="width:26px;height:26px;border-radius:6px;">
+        Heckle <span style="color:var(--green);">Golf Simulator</span>
+      </div>
+      <div class="footer-links">
+        <a href="index.html#features">Features</a>
+        <a href="index.html#screenshots">Screenshots</a>
+        <a href="index.html#download">Download</a>
+        <a href="leaderboards.html">Leaderboards</a>
+        <a href="portal.html">Player Portal</a>
+        <a href="https://www.youtube.com/@hecklegolfsimulator" target="_blank" rel="noopener">YouTube</a>
+        <a href="https://discord.gg/brHATRsFKB" target="_blank" rel="noopener">Discord</a>
+        <a href="https://github.com/mmancl/HeckleGolfSim" target="_blank" rel="noopener">GitHub</a>
+      </div>
+      <p>© 2025 Heckle Golf Simulator. All rights reserved. Built with ❤️ using <a href="https://godotengine.org" target="_blank" rel="noopener">Godot Engine</a>.</p>
+    </div>
+  </footer>
+
+  <!-- ══ PORTAL MODULE ══════════════════════════════════════════ -->
+  <script type="module" src="js/portal-page.js"></script>
+
+  <!-- ══ UI SCRIPTS ════════════════════════════════════════════ -->
+  <script>
+    // Hamburger
+    const hamburger = document.getElementById('hamburger');
+    const navLinks  = document.getElementById('nav-links');
+    hamburger.addEventListener('click', () => navLinks.classList.toggle('mobile-open'));
+    navLinks.querySelectorAll('a').forEach(a => a.addEventListener('click', () => navLinks.classList.remove('mobile-open')));
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Global Leaderboards | Heckle Golf Simulator</title>
+  <meta name="description" content="Check out the global rankings for Heckle Golf Simulator: Longest Drive, Longest Putt, Lowest Score, and more across courses and minigames.">
+  <meta property="og:title" content="Global Leaderboards | Heckle Golf Simulator">
+  <meta property="og:description" content="Top performances across all courses, practice challenges, and multiplayer matches.">
+  <meta property="og:image" content="images/heckle_splash_feature.png">
+  <link rel="icon" type="image/png" href="images/app_icon.png">
+  <link rel="stylesheet" href="css/portal.css">
+
+  <style>
+    /* ─── Design Tokens ─────────────────────────────────────────── */
+    :root {
+      --bg:          #0a0f1e;
+      --bg2:         #0f1829;
+      --card:        #141f35;
+      --card-border: rgba(255,255,255,0.07);
+      --green:       #22c55e;
+      --green-dim:   #16a34a;
+      --green-glow:  rgba(34,197,94,0.18);
+      --blue:        #38bdf8;
+      --text:        #f1f5f9;
+      --muted:       #94a3b8;
+      --radius:      14px;
+      --nav-h:       70px;
+    }
+
+    /* ─── Reset & Base ──────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    a { color: inherit; text-decoration: none; }
+    img { max-width: 100%; display: block; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--green-dim); border-radius: 3px; }
+
+    /* ─── NAV ───────────────────────────────────────────────────── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0;
+      height: var(--nav-h);
+      background: rgba(10,15,30,0.85);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--card-border);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 2rem; z-index: 100;
+    }
+    .nav-logo {
+      display: flex; align-items: center; gap: 0.6rem;
+      font-weight: 800; font-size: 1.2rem; letter-spacing: -0.04em;
+    }
+    .nav-logo img { width: 36px; height: 36px; border-radius: 8px; }
+    .nav-logo .logo-green { color: var(--green); }
+    .nav-links { display: flex; align-items: center; gap: 1.5rem; list-style: none; }
+    .nav-links a { color: var(--muted); font-size: 0.9rem; font-weight: 500; transition: color 0.2s; }
+    .nav-links a:hover, .nav-links a.active { color: var(--text); }
+    .nav-links a.active { color: var(--green); font-weight: 600; }
+    .nav-cta { display: flex; align-items: center; gap: 0.75rem; }
+    .btn-nav-icon {
+      display: flex; align-items: center; justify-content: center;
+      width: 36px; height: 36px; border-radius: 8px;
+      background: var(--card); border: 1px solid var(--card-border);
+      transition: border-color 0.2s, background 0.2s; color: var(--muted);
+    }
+    .btn-nav-icon:hover { border-color: var(--green); color: var(--green); background: var(--green-glow); }
+    .btn-signin {
+      padding: 0.45rem 1rem; border-radius: 8px;
+      background: var(--card); border: 1px solid var(--green);
+      color: var(--green); font-size: 0.85rem; font-weight: 600;
+      cursor: pointer; transition: background 0.2s, color 0.2s;
+    }
+    .btn-signin:hover { background: var(--green); color: #000; }
+    .hamburger { display: none; background: none; border: none; cursor: pointer; color: var(--text); }
+
+    /* ─── MAIN CONTENT ──────────────────────────────────────────── */
+    main {
+      flex: 1;
+      padding-top: var(--nav-h);
+    }
+    #leaderboards {
+      background: transparent;
+      border: none;
+      padding: 3rem 1.5rem 5rem;
+    }
+
+    /* ─── FOOTER ────────────────────────────────────────────────── */
+    footer {
+      background: var(--bg); border-top: 1px solid var(--card-border);
+      padding: 2.5rem 1.5rem; text-align: center; color: var(--muted); font-size: 0.85rem;
+      margin-top: auto;
+    }
+    footer a { color: var(--green); }
+    .footer-inner { max-width: 700px; margin: 0 auto; display: flex; flex-direction: column; gap: 0.75rem; align-items: center; }
+    .footer-links { display: flex; gap: 1.5rem; flex-wrap: wrap; justify-content: center; }
+    .footer-links a { color: var(--muted); transition: color 0.2s; }
+    .footer-links a:hover { color: var(--text); }
+
+    /* ─── RESPONSIVE ────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+      .hamburger { display: block; }
+      .nav-links.mobile-open {
+        display: flex; flex-direction: column;
+        position: fixed; top: var(--nav-h); left: 0; right: 0;
+        background: rgba(10,15,30,0.98);
+        border-bottom: 1px solid var(--card-border);
+        padding: 1.5rem 2rem; gap: 1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ══ NAV ═══════════════════════════════════════════════════ -->
+  <nav>
+    <a href="index.html" class="nav-logo">
+      <img src="images/app_icon.png" alt="Heckle Golf Simulator icon">
+      Heckle <span class="logo-green">Golf</span>
+    </a>
+
+    <ul class="nav-links" id="nav-links">
+      <li><a href="index.html#video">Video</a></li>
+      <li><a href="index.html#features">Features</a></li>
+      <li><a href="index.html#screenshots">Screenshots</a></li>
+      <li><a href="index.html#download">Download</a></li>
+      <li><a href="leaderboards.html" class="active">Leaderboards</a></li>
+      <li><a href="portal.html">Player Portal</a></li>
+      <li><a href="index.html#community">Community</a></li>
+    </ul>
+
+    <div class="nav-cta">
+      <a href="https://www.youtube.com/@hecklegolfsimulator" target="_blank" rel="noopener"
+         class="btn-nav-icon" title="YouTube" aria-label="YouTube Channel">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31.3 31.3 0 0 0 0 12a31.3 31.3 0 0 0 .5 5.8A3 3 0 0 0 2.6 20c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31.3 31.3 0 0 0 24 12a31.3 31.3 0 0 0-.5-5.8zM9.8 15.6V8.4L15.8 12l-6 3.6z"/></svg>
+      </a>
+      <a href="https://discord.gg/brHATRsFKB" target="_blank" rel="noopener"
+         class="btn-nav-icon" title="Discord" aria-label="Discord Server">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3c-.2.4-.5.9-.7 1.3a18.3 18.3 0 0 0-5.4 0C9.1 3.9 8.8 3.4 8.6 3A19.7 19.7 0 0 0 3.7 4.4C.5 9.2-.3 13.8.1 18.4a20 20 0 0 0 6 3 14.8 14.8 0 0 0 1.3-2 12.8 12.8 0 0 1-2-.9l.5-.4a14.3 14.3 0 0 0 12.2 0l.5.4a12.9 12.9 0 0 1-2 1 14.8 14.8 0 0 0 1.3 2 19.9 19.9 0 0 0 6-3c.5-5.2-.9-9.8-3.6-14zM8 15.5c-1.2 0-2.2-1.1-2.2-2.5S6.8 10.5 8 10.5s2.2 1.1 2.2 2.5S9.2 15.5 8 15.5zm8 0c-1.2 0-2.2-1.1-2.2-2.5s1-2.5 2.2-2.5 2.2 1.1 2.2 2.5-1 2.5-2.2 2.5z"/></svg>
+      </a>
+      <a href="portal.html" class="btn-signin">Sign In</a>
+    </div>
+
+    <button class="hamburger" id="hamburger" aria-label="Toggle menu">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+    </button>
+  </nav>
+
+  <main>
+    <!-- ══ LEADERBOARDS ══════════════════════════════════════════ -->
+    <section id="leaderboards">
+      <div class="section-inner">
+        <div class="budget-paused-banner">
+          <span class="banner-icon">⚠️</span>
+          <div class="banner-text">
+            <strong>Service Paused</strong>Multiplayer is temporarily paused for the remainder of the month as the developer's monthly budget has been reached, sorry for the inconvenience.
+          </div>
+        </div>
+
+        <div class="section-header-row">
+          <div>
+            <p class="section-label">Public Rankings</p>
+            <h2 class="section-title">Global Leaderboards</h2>
+            <p class="section-desc">Top performances across all courses, practice challenges, and multiplayer matches.</p>
+          </div>
+          <div class="lb-toolbar">
+            <div class="lb-cache-info">
+              <span id="lb-cache-status">Cached (refreshes in 10m)</span>
+              <button class="btn-refresh" id="lb-refresh-btn" title="Refresh Leaderboard">🔄 Refresh</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="lb-tabs-wrapper">
+          <ul class="lb-tabs" id="lb-tabs">
+            <!-- Populated by leaderboards.js -->
+          </ul>
+        </div>
+
+        <div class="lb-card">
+          <div id="lb-content-area">
+            <!-- Populated by leaderboards.js -->
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ══ FOOTER ════════════════════════════════════════════════ -->
+  <footer>
+    <div class="footer-inner">
+      <div style="display:flex;align-items:center;gap:0.5rem;justify-content:center;font-weight:800;font-size:1.1rem;letter-spacing:-0.03em;">
+        <img src="images/app_icon.png" alt="" style="width:26px;height:26px;border-radius:6px;">
+        Heckle <span style="color:var(--green);">Golf Simulator</span>
+      </div>
+      <div class="footer-links">
+        <a href="index.html#features">Features</a>
+        <a href="index.html#screenshots">Screenshots</a>
+        <a href="index.html#download">Download</a>
+        <a href="leaderboards.html">Leaderboards</a>
+        <a href="portal.html">Player Portal</a>
+        <a href="https://www.youtube.com/@hecklegolfsimulator" target="_blank" rel="noopener">YouTube</a>
+        <a href="https://discord.gg/brHATRsFKB" target="_blank" rel="noopener">Discord</a>
+        <a href="https://github.com/mmancl/HeckleGolfSim" target="_blank" rel="noopener">GitHub</a>
+      </div>
+      <p>© 2025 Heckle Golf Simulator. All rights reserved. Built with ❤️ using <a href="https://godotengine.org" target="_blank" rel="noopener">Godot Engine</a>.</p>
+    </div>
+  </footer>
+
+  <!-- ══ LEADERBOARDS MODULE ════════════════════════════════════ -->
+  <script type="module" src="js/leaderboards-page.js"></script>
+
+  <!-- ══ UI SCRIPTS ════════════════════════════════════════════ -->
+  <script>
+    // Hamburger
+    const hamburger = document.getElementById('hamburger');
+    const navLinks  = document.getElementById('nav-links');
+    hamburger.addEventListener('click', () => navLinks.classList.toggle('mobile-open'));
+    navLinks.querySelectorAll('a').forEach(a => a.addEventListener('click', () => navLinks.classList.remove('mobile-open')));
+  </script>
+
+</body>
+</html>

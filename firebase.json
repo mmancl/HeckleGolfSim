@@ -6,7 +6,16 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "cleanUrls": true,
     "rewrites": [
+      {
+        "source": "/leaderboards",
+        "destination": "/leaderboards.html"
+      },
+      {
+        "source": "/portal",
+        "destination": "/portal.html"
+      },
       {
         "source": "**",
         "destination": "/index.html"

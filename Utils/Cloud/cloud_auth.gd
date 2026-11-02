@@ -380,7 +380,7 @@ func _start_web_portal_google_sign_in() -> Dictionary:
 		_google_loopback_server = null
 
 	var host_domain := ("%s.web.app" % _project_id) if not _project_id.is_empty() else "heckle-golf-sim.web.app"
-	var verification_url := "https://%s/?device_code=%s" % [host_domain, user_code]
+	var verification_url := "https://%s/portal.html?device_code=%s" % [host_domain, user_code]
 	if port > 0:
 		verification_url += "&port=%d" % port
 	verification_url += "&auto_google=1#stats-signin"

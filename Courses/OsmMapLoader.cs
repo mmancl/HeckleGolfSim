@@ -8,6 +8,7 @@ using System.Net.Security;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 using System.Threading.Tasks;
 using Godot;
 
@@ -3794,9 +3795,19 @@ public partial class OsmMapLoader : Node
             }
 
             ReportProgress("Generating aerial hole overviews...");
-            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            await WaitForFrameSafeAsync(0.5);
 
-            await GenerateAerialPreviewsAsync(rootNode, courseDir, globalCourseDir, holeInfo, isMobilePlatform);
+            using (var previewCts = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+            {
+                try
+                {
+                    await GenerateAerialPreviewsAsync(rootNode, courseDir, globalCourseDir, holeInfo, isMobilePlatform, previewCts.Token);
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"{LogPrefix} Aerial preview generation encountered an error: {ex.Message}");
+                }
+            }
 
             // Add Player Node structure & TCP Server & Range UI to scene so it's a complete course scene!
             // We can load them from their res:// paths to keep scene compatible
@@ -4263,7 +4274,35 @@ public partial class OsmMapLoader : Node
         }
     }
 
-    private async Task GenerateAerialPreviewsAsync(Node3D rootNode, string courseDir, string globalCourseDir, Dictionary<string, HoleConfig> holeInfo, bool isMobilePlatform)
+    private async Task WaitForFrameSafeAsync(double timeoutSec = 0.5)
+    {
+        if (DisplayServer.GetName() == "headless" || GetTree() == null) return;
+
+        var tcs = new TaskCompletionSource<bool>();
+        Action frameAction = () => tcs.TrySetResult(true);
+        var callable = Callable.From(frameAction);
+
+        try
+        {
+            var timer = GetTree().CreateTimer(timeoutSec, true, false, true);
+            timer.Timeout += frameAction;
+
+            GetTree().Connect(SceneTree.SignalName.ProcessFrame, callable, (uint)GodotObject.ConnectFlags.OneShot);
+
+            await tcs.Task;
+
+            if (IsInstanceValid(GetTree()) && GetTree().IsConnected(SceneTree.SignalName.ProcessFrame, callable))
+            {
+                GetTree().Disconnect(SceneTree.SignalName.ProcessFrame, callable);
+            }
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"{LogPrefix} Frame wait exception: {ex.Message}");
+        }
+    }
+
+    private async Task GenerateAerialPreviewsAsync(Node3D rootNode, string courseDir, string globalCourseDir, Dictionary<string, HoleConfig> holeInfo, bool isMobilePlatform, CancellationToken cancellationToken = default)
     {
         if (DisplayServer.GetName() == "headless")
         {
@@ -4305,12 +4344,15 @@ public partial class OsmMapLoader : Node
             subViewport.AddChild(topSun);
 
             var tempCam = new Camera3D();
+            tempCam.Current = true;
             tempCam.Projection = Camera3D.ProjectionType.Orthogonal;
             subViewport.AddChild(tempCam);
 
             // Attach rootNode directly before gameplay scripts/nodes were added to avoid scene duplication
             subViewport.AddChild(rootNode);
             AddChild(subViewport);
+
+            if (cancellationToken.IsCancellationRequested) return;
 
             // 1. Full Course Aerial View
             double minX = 99999, maxX = -99999, minZ = 99999, maxZ = -99999;
@@ -4350,13 +4392,11 @@ public partial class OsmMapLoader : Node
                 center
             );
 
-            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-            if (DisplayServer.GetName() != "headless")
-            {
-                await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-            }
-            var courseImg = subViewport.GetTexture().GetImage();
-            if (courseImg != null)
+            await WaitForFrameSafeAsync(0.3);
+            await WaitForFrameSafeAsync(0.3);
+
+            var courseImg = subViewport.GetTexture()?.GetImage();
+            if (courseImg != null && !courseImg.IsEmpty())
             {
                 string fullCourseImgPath = Path.Combine(globalCourseDir, "aerial_course.png");
                 courseImg.SavePng(fullCourseImgPath);
@@ -4376,9 +4416,17 @@ public partial class OsmMapLoader : Node
 
             for (int i = 0; i < holeKeys.Count; i++)
             {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    GD.Print($"{LogPrefix} Aerial preview generation stopped due to timeout or cancellation.");
+                    break;
+                }
+
                 var hKey = holeKeys[i];
                 var h = holeInfo[hKey];
                 if (h.HoleLocation == null || h.HoleLocation.Length < 2) continue;
+
+                ReportProgress($"Generating aerial hole overviews ({i + 1}/{holeKeys.Count})...");
 
                 Vector3 pinPos = new Vector3(h.HoleLocation[0], 0f, h.HoleLocation[1]);
                 Vector3 teePos = pinPos + new Vector3(0f, 0f, 150f);
@@ -4408,13 +4456,11 @@ public partial class OsmMapLoader : Node
                     new Vector3(basePos.X, 150f, basePos.Z)
                 );
 
-                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-                if (DisplayServer.GetName() != "headless")
-                {
-                    await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-                }
-                var holeImg = subViewport.GetTexture().GetImage();
-                if (holeImg != null)
+                await WaitForFrameSafeAsync(0.2);
+                await WaitForFrameSafeAsync(0.2);
+
+                var holeImg = subViewport.GetTexture()?.GetImage();
+                if (holeImg != null && !holeImg.IsEmpty())
                 {
                     string holeImgPath = Path.Combine(globalCourseDir, $"aerial_hole_{i + 1}.png");
                     holeImg.SavePng(holeImgPath);
@@ -12548,5 +12594,13 @@ public partial class OsmMapLoader : Node
     private float Vector2Dot(Vector2 v1, Vector2 v2)
     {
         return v1.X * v2.X + v1.Y * v2.Y;
+    }
+
+    /// <summary>
+    /// Helper for testing frame waiting resilience and timeout handling.
+    /// </summary>
+    public async void TestWaitForFrameSafe(double timeoutSec = 0.1)
+    {
+        await WaitForFrameSafeAsync(timeoutSec);
     }
 }
