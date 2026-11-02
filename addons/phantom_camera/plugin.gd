@@ -53,7 +53,8 @@ func _disable_plugin() -> void:
 
 
 func _enter_tree() -> void:
-	add_autoload_singleton(PHANTOM_CAMERA_MANAGER, "res://addons/phantom_camera/scripts/managers/phantom_camera_manager.gd")
+	if not Engine.has_singleton(PHANTOM_CAMERA_MANAGER) and not ProjectSettings.has_setting("autoload/" + PHANTOM_CAMERA_MANAGER):
+		add_autoload_singleton(PHANTOM_CAMERA_MANAGER, "res://addons/phantom_camera/scripts/managers/phantom_camera_manager.gd")
 
 	# Phantom Camera Nodes
 	add_custom_type(PCAM_2D, "Node2D", preload("res://addons/phantom_camera/scripts/phantom_camera/phantom_camera_2d.gd"), preload("res://addons/phantom_camera/icons/phantom_camera_2d.svg"))
@@ -140,9 +141,10 @@ func _exit_tree() -> void:
 	remove_custom_type(PCAM_NOISE_EMITTER_2D)
 	remove_custom_type(PCAM_NOISE_EMITTER_3D)
 
-	remove_autoload_singleton(PHANTOM_CAMERA_MANAGER)
-#	if get_tree().root.get_node_or_null(String(PHANTOM_CAMERA_MANAGER)):
-#		remove_autoload_singleton(PHANTOM_CAMERA_MANAGER)
+	# Autoload removal is handled exclusively in _disable_plugin().
+	# Calling remove_autoload_singleton here during tree exit causes Godot to trigger
+	# EditorAutoloadSettings reload during editor shutdown / headless export, which breaks
+	# autoload compilation during teardown.
 
 
 func _btn_toggled(toggled_on: bool):

@@ -14,6 +14,7 @@
   - **Global Leaderboard Integration:** Synced longest putt personal bests to public cloud profiles and enabled full rankings on the Longest Putt global leaderboard.
 
 ### Bug Fixes
+- **Fixed Release Build Freezes on Windows:** Resolved an issue where headless Godot exports could hang indefinitely during Windows release packaging due to autoload singleton teardown order in the camera plugin. Removed redundant project setting mutations during engine exit and added automatic import cache priming and process timeout guards to ensure smooth automated builds.
 - **Player Profile Preservation & Unit Test Isolation:** Restored all local player profiles (`mike`, `Sterling`, `Dave`, `sam`, `Player 1`) and club bags. Added file protection and test sandboxing so automated test suites can never overwrite active user profiles or local club stats.
 - **Fixed Longest Drive and Longest Putt Leaderboards Empty State:** Fixed an issue where the Longest Drive and Longest Putt leaderboards showed no records despite players having valid drive and putt data:
   - **Strict Positive Query & Sorting Filters:** Added filters to Firestore queries and in-memory sorting routines to ensure only positive, valid distances (`> 0.0`) are fetched and ranked, preventing zero-value profiles from displacing actual player records.
@@ -37,6 +38,8 @@
   - **Toast Notifications:** Added non-intrusive floating feedback toasts for immediate confirmation on all save, clear, and update actions.
 
 ### Improvements
+- **Granular Multiplatform Build & Release Controls:** Enhanced the release workflow to allow skipping targeted platforms (`skip_windows`, `skip_macos`, `skip_ios`, `skip_android`) and automatically reusing previously generated artifacts from a specific run ID or the latest release. Skipped builds seamlessly combine with newly built platform packages into a complete multiplatform release, avoiding unnecessary runner queue delays.
+- **Automated Runner Timeouts & Google Play Deployment Guards:** Added per-platform execution timeouts to all release build jobs to prevent runner queues from blocking indefinitely, along with safe package verification before triggering Google Play store deployment.
 - **Restructured Overview Stat Cards Grid on Web Portal:** Fixed an issue where lifetime overview statistics (Matches Played, Record W-L-T, Avg Score to Par, Best 18-Hole, Longest Drive, Longest Putt, Achievements) were displayed as an unstyled text list. Stats are now presented in an attractive, responsive grid of cards with styled metrics and clear labels.
 - **Streamlined Web Club Distances & Simplified Bag Management:** Removed redundant golf bag builder modals and in-bag filtering from the website to keep the web portal clean and focused on club averages, ball delivery metrics, and data clearing, while bag setup remains conveniently handled in the game.
 - **Completed Rounds Guard on Global Leaderboards:** Global Leaderboards for Most Games Played, win/loss records, scoring averages, and best 18-hole and 9-hole scores strictly count completed matches, preventing incomplete rounds from altering official rankings while still recording individual longest drive and putt achievements.

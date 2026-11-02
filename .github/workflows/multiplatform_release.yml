@@ -3,17 +3,37 @@ name: Multiplatform Build & Release
 on:
   workflow_dispatch:
     inputs:
+      skip_windows:
+        description: 'Skip Windows build (reuse previous artifact)'
+        required: false
+        type: boolean
+        default: false
+      skip_macos:
+        description: 'Skip macOS build (reuse previous artifact)'
+        required: false
+        type: boolean
+        default: false
+      skip_ios:
+        description: 'Skip iOS build (reuse previous artifact)'
+        required: false
+        type: boolean
+        default: false
+      skip_android:
+        description: 'Skip Android build (reuse previous artifact)'
+        required: false
+        type: boolean
+        default: false
       skip_builds:
-        description: 'Skip platform builds (use existing release or artifacts to run publish/deploy only)'
+        description: 'Skip ALL platform builds (reuse all previous artifacts for publish/deploy only)'
         required: false
         type: boolean
         default: false
       from_run_id:
-        description: 'Run ID to download artifacts from if skipping builds (leave blank for latest release)'
+        description: 'Run ID to download artifacts from for skipped platforms (leave blank for latest release)'
         required: false
         default: ''
       release_tag:
-        description: 'Release Tag (leave empty to use current project.godot version, e.g. v0.139.3)'
+        description: 'Release Tag (leave empty to use current project.godot version, e.g. v0.164.1)'
         required: false
         default: ''
       deploy_play_store:
@@ -35,8 +55,9 @@ jobs:
   # =========================================================================
   build-windows:
     name: Build Windows Desktop
-    if: ${{ !inputs.skip_builds }}
+    if: ${{ !inputs.skip_builds && !inputs.skip_windows }}
     runs-on: windows-latest
+    timeout-minutes: 25
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -102,8 +123,9 @@ jobs:
   # =========================================================================
   build-macos:
     name: Build macOS Universal
-    if: ${{ !inputs.skip_builds }}
+    if: ${{ !inputs.skip_builds && !inputs.skip_macos }}
     runs-on: macos-latest
+    timeout-minutes: 25
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -161,8 +183,9 @@ jobs:
   # =========================================================================
   build-ios:
     name: Build iOS Package
-    if: ${{ !inputs.skip_builds }}
+    if: ${{ !inputs.skip_builds && !inputs.skip_ios }}
     runs-on: macos-latest
+    timeout-minutes: 35
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -308,8 +331,9 @@ jobs:
   # =========================================================================
   build-android:
     name: Build & Sign Android AAB
-    if: ${{ !inputs.skip_builds }}
+    if: ${{ !inputs.skip_builds && !inputs.skip_android }}
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -439,8 +463,9 @@ jobs:
   release-and-deploy:
     name: Publish Release & Deploy Tracks
     needs: [build-windows, build-macos, build-ios, build-android]
-    if: always() && !cancelled() && (!needs.build-windows.result || needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped') && (!needs.build-android.result || needs.build-android.result == 'success' || needs.build-android.result == 'skipped')
+    if: always() && !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -449,35 +474,99 @@ jobs:
           fetch-depth: 0
 
       - name: Download all build artifacts from current run
-        if: ${{ !inputs.skip_builds }}
+        if: ${{ !inputs.skip_builds && (!inputs.skip_windows || !inputs.skip_macos || !inputs.skip_ios || !inputs.skip_android) }}
         uses: actions/download-artifact@v4
         with:
-          path: release_artifacts
+          path: current_run_artifacts
+        continue-on-error: true
 
       - name: Download build artifacts from previous run or latest release
-        if: ${{ inputs.skip_builds }}
+        if: ${{ inputs.skip_builds || inputs.skip_windows || inputs.skip_macos || inputs.skip_ios || inputs.skip_android }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p release_artifacts
+          mkdir -p previous_artifacts
           if [ -n "${{ inputs.from_run_id }}" ]; then
             echo "Downloading artifacts from run ${{ inputs.from_run_id }}..."
-            gh run download "${{ inputs.from_run_id }}" --dir release_artifacts
+            gh run download "${{ inputs.from_run_id }}" --dir previous_artifacts || {
+              echo "Warning: gh run download failed for run ${{ inputs.from_run_id }}. Falling back to latest release assets..."
+              LATEST_TAG=$(gh release list -L 5 --json tagName -q '.[0].tagName')
+              echo "Downloading assets from release $LATEST_TAG..."
+              gh release download "$LATEST_TAG" --dir previous_artifacts
+            }
           else
             echo "Finding most recent release with assets..."
             LATEST_TAG=$(gh release list -L 5 --json tagName -q '.[0].tagName')
             echo "Downloading assets from release $LATEST_TAG..."
-            gh release download "$LATEST_TAG" --dir release_artifacts
+            gh release download "$LATEST_TAG" --dir previous_artifacts
           fi
+          echo "Previous/reusable artifacts downloaded:"
+          find previous_artifacts -type f
 
-      - name: Organize Release Files
+      - name: Assemble Release Assets
         run: |
-          mkdir -p dist
-          find release_artifacts -type f -name "*.zip" -exec cp {} dist/ \;
-          find release_artifacts -type f -name "*.ipa" -exec cp {} dist/ \;
-          find release_artifacts -type f -name "*.aab" -exec cp {} dist/ \;
-          echo "=== Release Files Ready ==="
-          ls -lh dist/
+          python3 - << 'EOF'
+          import os
+          import shutil
+
+          os.makedirs("dist", exist_ok=True)
+
+          def find_files(base_dir, patterns):
+              matches = []
+              if not os.path.isdir(base_dir):
+                  return matches
+              for root, _, files in os.walk(base_dir):
+                  for f in sorted(files):
+                      if all(p.lower() in f.lower() for p in patterns):
+                          matches.append(os.path.join(root, f))
+              return matches
+
+          targets = [
+              ("Windows Desktop", ["windows", ".zip"]),
+              ("macOS Universal", ["macos", ".zip"]),
+              ("iOS Package",     [".ipa"]),
+              ("Android AAB",     [".aab"])
+          ]
+
+          print("=== Assembling Release Assets ===")
+          manifest = {}
+
+          for platform_name, patterns in targets:
+              # 1. Prefer current run artifacts
+              curr = find_files("current_run_artifacts", patterns)
+              if curr:
+                  src = curr[0]
+                  dst = os.path.join("dist", os.path.basename(src))
+                  shutil.copy2(src, dst)
+                  manifest[platform_name] = f"{os.path.basename(dst)} (Built in this run)"
+                  continue
+
+              # 2. Fall back to previous artifacts (from run ID or latest release)
+              prev = find_files("previous_artifacts", patterns)
+              if prev:
+                  src = prev[0]
+                  dst = os.path.join("dist", os.path.basename(src))
+                  shutil.copy2(src, dst)
+                  manifest[platform_name] = f"{os.path.basename(dst)} (Reused from previous run/release)"
+              else:
+                  manifest[platform_name] = "NOT FOUND"
+
+          # Also copy any cached geometry tar if present
+          for src in find_files("current_run_artifacts", ["cached_geometry.tar"]) + find_files("previous_artifacts", ["cached_geometry.tar"]):
+              dst = os.path.join("dist", os.path.basename(src))
+              if not os.path.exists(dst):
+                  shutil.copy2(src, dst)
+
+          print("\n=== Release Artifact Manifest ===")
+          for plat, info in manifest.items():
+              print(f"  {plat:16s}: {info}")
+
+          print("\n=== Assembled dist/ Directory Contents ===")
+          for f in sorted(os.listdir("dist")):
+              path = os.path.join("dist", f)
+              size_mb = os.path.getsize(path) / (1024 * 1024)
+              print(f"  {f} ({size_mb:.2f} MB)")
+          EOF
 
       - name: Determine Release Tag
         id: release_info
@@ -554,8 +643,19 @@ jobs:
           prerelease: false
           generate_release_notes: true
 
+      - name: Check AAB for Play Store Deploy
+        id: check_aab
+        run: |
+          if [ -f "dist/HeckleGolfSim.aab" ]; then
+            echo "has_aab=true" >> $GITHUB_OUTPUT
+            echo "AAB found: dist/HeckleGolfSim.aab is available for Google Play deployment."
+          else
+            echo "has_aab=false" >> $GITHUB_OUTPUT
+            echo "Notice: dist/HeckleGolfSim.aab not found, Google Play deployment step will be skipped."
+          fi
+
       - name: Setup Play Store Service Account
-        if: ${{ inputs.deploy_play_store && env.HAVE_PLAY_KEY == 'true' }}
+        if: ${{ inputs.deploy_play_store && env.HAVE_PLAY_KEY == 'true' && steps.check_aab.outputs.has_aab == 'true' }}
         env:
           HAVE_PLAY_KEY: ${{ secrets.PLAY_STORE_JSON_KEY != '' }}
           PLAY_KEY_DATA: ${{ secrets.PLAY_STORE_JSON_KEY }}
@@ -566,7 +666,7 @@ jobs:
 
       # Deploy draft release to Open (Beta) and Closed (Alpha) tracks simultaneously
       - name: Deploy to Google Play (Beta & Alpha Tracks - Draft)
-        if: ${{ inputs.deploy_play_store && env.HAVE_PLAY_KEY == 'true' }}
+        if: ${{ inputs.deploy_play_store && env.HAVE_PLAY_KEY == 'true' && steps.check_aab.outputs.has_aab == 'true' }}
         env:
           HAVE_PLAY_KEY: ${{ secrets.PLAY_STORE_JSON_KEY != '' }}
         uses: r0adkll/upload-google-play@v1

@@ -159,10 +159,25 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[2/3] Exporting Windows Desktop release via Godot..." -ForegroundColor Green
-& $GodotExe --headless --path $RepoRoot --export-release "Windows Desktop" $TargetExe
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path $TargetExe)) {
-    throw "Godot export failed with exit code $LASTEXITCODE. Target executable not found at $TargetExe"
+Write-Host "      Priming project import cache..." -ForegroundColor Gray
+& $GodotExe --headless --path $RepoRoot --import 2>$null
+
+Write-Host "      Running Godot export..." -ForegroundColor Gray
+$exportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "Windows Desktop", $TargetExe) -NoNewWindow -PassThru
+$timeoutSec = 600
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+while (-not $exportProc.HasExited -and $sw.Elapsed.TotalSeconds -lt $timeoutSec) {
+    Start-Sleep -Seconds 2
 }
+if (-not $exportProc.HasExited) {
+    Write-Host "[ERROR] Godot export process timed out after $timeoutSec seconds. Terminating..." -ForegroundColor Red
+    $exportProc.Kill()
+    throw "Godot export timed out after $timeoutSec seconds."
+}
+if ($exportProc.ExitCode -ne 0 -or -not (Test-Path $TargetExe)) {
+    throw "Godot export failed with exit code $($exportProc.ExitCode). Target executable not found at $TargetExe"
+}
+Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 # Ensure .NET data folder is present and accessible
 $heckleData = Join-Path $StagingRoot "data_HeckleGolfSim_windows_x86_64"

@@ -157,10 +157,23 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[2/2] Exporting macOS Universal App (.app) via Godot..." -ForegroundColor Green
+Write-Host "      Priming project import cache..." -ForegroundColor Gray
+& $GodotExe --headless --path $RepoRoot --import 2>$null
+
 Write-Host "      Compiling dual ARM64 + x86_64 binaries, packing assets, and building ZIP (takes ~45s)..." -ForegroundColor Gray
-& $GodotExe --headless --path $RepoRoot --export-release "macOS" $ZipOutput
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path $ZipOutput)) {
-    throw "Godot export failed with exit code $LASTEXITCODE. Expected output at $ZipOutput"
+$exportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "macOS", $ZipOutput) -NoNewWindow -PassThru
+$timeoutSec = 600
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+while (-not $exportProc.HasExited -and $sw.Elapsed.TotalSeconds -lt $timeoutSec) {
+    Start-Sleep -Seconds 2
+}
+if (-not $exportProc.HasExited) {
+    Write-Host "[ERROR] Godot export process timed out after $timeoutSec seconds. Terminating..." -ForegroundColor Red
+    $exportProc.Kill()
+    throw "Godot export timed out after $timeoutSec seconds."
+}
+if ($exportProc.ExitCode -ne 0 -or -not (Test-Path $ZipOutput)) {
+    throw "Godot export failed with exit code $($exportProc.ExitCode). Expected output at $ZipOutput"
 }
 
 # Verify / inject NSBluetoothAlwaysUsageDescription into Info.plist inside the zip
