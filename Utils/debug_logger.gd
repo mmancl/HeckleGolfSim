@@ -527,14 +527,30 @@ func _write_session_header() -> void:
 		var item_name := dir.get_next()
 		var count_user := 0
 		while not item_name.is_empty():
-			if not dir.current_is_dir():
-				var f_path := user_dir.path_join(item_name)
-				var f := FileAccess.open(f_path, FileAccess.READ)
-				if f != null:
-					var sz := f.get_length()
-					f.close()
-					_write_raw("    -> %-30s : %s (%d bytes)" % [item_name, _format_file_size(sz), sz])
+			if not item_name.begins_with("."):
+				if dir.current_is_dir():
+					_write_raw("    -> [DIR] %-24s" % item_name)
 					count_user += 1
+					if item_name == "courses":
+						var courses_path := user_dir.path_join("courses")
+						var c_dir := DirAccess.open(courses_path)
+						if c_dir != null:
+							c_dir.list_dir_begin()
+							var c_item := c_dir.get_next()
+							while not c_item.is_empty():
+								if not c_item.begins_with("."):
+									var c_type := "[DIR]" if c_dir.current_is_dir() else "[FILE]"
+									_write_raw("       -> %-6s %s" % [c_type, c_item])
+								c_item = c_dir.get_next()
+							c_dir.list_dir_end()
+				else:
+					var f_path := user_dir.path_join(item_name)
+					var f := FileAccess.open(f_path, FileAccess.READ)
+					if f != null:
+						var sz := f.get_length()
+						f.close()
+						_write_raw("    -> %-30s : %s (%d bytes)" % [item_name, _format_file_size(sz), sz])
+						count_user += 1
 			item_name = dir.get_next()
 		dir.list_dir_end()
 		if count_user == 0:

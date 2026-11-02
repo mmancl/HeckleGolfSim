@@ -49,6 +49,7 @@ var _sfx_water_splash = preload("res://assets/audio/sfx/water.mp3")
 var _sfx_sand_thud = preload("res://assets/audio/sfx/sand.mp3")
 var _sfx_bounce_fairway = preload("res://assets/audio/sfx/fairway_maybe.mp3")
 var _sfx_bounce_green = preload("res://assets/audio/sfx/fairway_maybe.mp3")
+var _sfx_bounce_cart_path = preload("res://assets/audio/sfx/bounce_cart_path.mp3")
 var _sfx_rough_thump = preload("res://assets/audio/sfx/rough.mp3")
 var _sfx_cup_drop = preload("res://assets/audio/sfx/cup_drop.mp3")
 
@@ -75,6 +76,7 @@ var floor_normal := Vector3.UP
 var is_in_water := false
 var water_collider: Node3D = null
 var is_in_sand := false
+var is_on_cart_path_or_road := false
 var lie_type: String = "fairway"
 var is_replaying_remote_shot: bool = false
 
@@ -1737,7 +1739,9 @@ func _handle_collision(collision: KinematicCollision3D, was_on_ground: bool, pre
 
 				if _sfx_player != null and not _skipping_flight:
 					_sfx_player.pitch_scale = randf_range(0.95, 1.05)
-					if is_in_sand:
+					if is_on_cart_path_or_road or surface_type == PhysicsEnums.SurfaceType.CART_PATH:
+						_sfx_player.stream = _sfx_bounce_cart_path
+					elif is_in_sand:
 						_sfx_player.stream = _sfx_sand_thud
 					elif lie_type == "green":
 						_sfx_player.stream = _sfx_bounce_green
@@ -2942,13 +2946,16 @@ func _update_surface_from_collider(collider: Object) -> void:
 	var on_fairway_geo = (not on_wrong_green) and (not on_green_geo) and _is_position_on_fairway(global_position)
 	var is_sand = (collider.has_meta("is_sand") and bool(collider.get_meta("is_sand"))) or name_lower.contains("bunker") or name_lower.contains("sand") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.BUNKER)
 	var is_green = (not on_wrong_green) and (on_green_geo or name_lower.contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.GREEN))
-	var is_cart_path = (collider.has_meta("is_cart_path") and bool(collider.get_meta("is_cart_path"))) or name_lower.contains("cartpath")
+	var is_cart_path = (collider.has_meta("is_cart_path") and bool(collider.get_meta("is_cart_path"))) or (collider.has_meta("is_road") and bool(collider.get_meta("is_road"))) or (collider.has_meta("is_cart_bridge") and bool(collider.get_meta("is_cart_bridge"))) or name_lower.contains("cartpath") or name_lower.contains("cartbridge") or name_lower.contains("road_static") or name_lower.contains("cart_path")
 	var is_tee = name_lower.contains("tee")
 	var is_fairway = on_wrong_green or on_fairway_geo or name_lower.contains("fairway") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.FAIRWAY)
 	var is_rough = (not on_wrong_green) and (not on_green_geo) and (not on_fairway_geo) and (name_lower.contains("rough") or name_lower.contains("terrain") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.ROUGH))
 
 	var changed_sand = (is_in_sand != is_sand)
 	is_in_sand = is_sand
+
+	var changed_cart_path = (is_on_cart_path_or_road != is_cart_path)
+	is_on_cart_path_or_road = is_cart_path
 
 	if is_sand:
 		lie_type = "sand"
@@ -2963,7 +2970,7 @@ func _update_surface_from_collider(collider: Object) -> void:
 	elif is_cart_path:
 		lie_type = "fairway"
 		set_surface(PhysicsEnums.SurfaceType.CART_PATH)
-		if changed_sand:
+		if changed_sand or changed_cart_path:
 			_apply_surface_params()
 	elif is_tee:
 		lie_type = "teebox"
@@ -3190,7 +3197,7 @@ func _update_surface_from_underneath() -> void:
 		# 3. Check for green
 		elif (not _is_position_on_wrong_green(global_position)) and (on_green_geo or collider.name.to_lower().contains("green") or (collider.has_meta("surface_type") and int(collider.get_meta("surface_type")) == PhysicsEnums.SurfaceType.GREEN)):
 			priority = 5
-		elif (collider.has_meta("is_cart_path") and bool(collider.get_meta("is_cart_path"))) or collider.name.to_lower().contains("cartpath"):
+		elif (collider.has_meta("is_cart_path") and bool(collider.get_meta("is_cart_path"))) or (collider.has_meta("is_road") and bool(collider.get_meta("is_road"))) or (collider.has_meta("is_cart_bridge") and bool(collider.get_meta("is_cart_bridge"))) or collider.name.to_lower().contains("cartpath") or collider.name.to_lower().contains("cartbridge") or collider.name.to_lower().contains("road_static") or collider.name.to_lower().contains("cart_path"):
 			priority = 4
 		# 4. Check for tee
 		elif collider.name.to_lower().contains("tee"):

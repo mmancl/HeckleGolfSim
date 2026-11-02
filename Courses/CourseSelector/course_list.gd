@@ -46,15 +46,29 @@ func set_filter_mode(mode: String) -> void:
 
 
 func _scan_dir(dir_path: String, validated: Array[Dictionary]) -> void:
-	if dir_path.begins_with("res://Courses/UserCourses") or not DirAccess.dir_exists_absolute(dir_path):
+	if dir_path.begins_with("res://Courses/UserCourses"):
 		return
-	var dir_names := DirAccess.get_directories_at(dir_path)
+	var path_to_scan = dir_path
+	if not DirAccess.dir_exists_absolute(path_to_scan):
+		var global_dir = ProjectSettings.globalize_path(dir_path)
+		if DirAccess.dir_exists_absolute(global_dir):
+			path_to_scan = global_dir
+		else:
+			return
+	var dir_names := DirAccess.get_directories_at(path_to_scan)
+	if dir_names.is_empty() and path_to_scan == dir_path:
+		var global_dir = ProjectSettings.globalize_path(dir_path)
+		if DirAccess.dir_exists_absolute(global_dir):
+			dir_names = DirAccess.get_directories_at(global_dir)
+			if not dir_names.is_empty():
+				path_to_scan = global_dir
+
 	for dir_name in dir_names:
 		if not dir_name.begins_with("."):
 			var lower_name = dir_name.to_lower()
 			if lower_name == "airways" or lower_name == "dragonfly" or lower_name == "dragon_fly":
 				continue
-			var result: Dictionary = CourseValidator.validate(dir_path, dir_name)
+			var result: Dictionary = CourseValidator.validate(path_to_scan, dir_name)
 			if not result.is_empty():
 				result["dir_name"] = dir_name
 				validated.append(result)

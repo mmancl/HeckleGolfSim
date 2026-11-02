@@ -81,7 +81,7 @@ jobs:
           fi
 
       - name: Run Firebase Rules & Budget Function Unit Tests
-        run: npm --prefix firebase/tests test
+        run: firebase emulators:exec --only firestore,database "npm --prefix firebase/tests test"
 
       - name: Setup Firebase Authentication
         id: auth

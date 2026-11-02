@@ -256,8 +256,60 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         Log($"StartScanAsync requested for prefix '{options.DeviceNamePrefix}'. Waiting for CentralManager to power on...");
         await EnsureCentralReadyAsync(cancellationToken);
 
-        ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("scanForPeripheralsWithServices:options:"), IntPtr.Zero, IntPtr.Zero);
-        Log("Active scanning started.");
+        // Check for peripherals already connected to iOS / system Bluetooth settings
+        CheckConnectedPeripherals();
+
+        // Scan with allowDuplicates=true so scan response packets (holding local name / service UUIDs) are not dropped
+        IntPtr scanOptions = ObjCRuntime.CreateScanOptionsDictionary(true);
+        ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("scanForPeripheralsWithServices:options:"), IntPtr.Zero, scanOptions);
+        Log("Active scanning started with allowDuplicates=true.");
+    }
+
+    private void CheckConnectedPeripherals()
+    {
+        if (_centralManager == IntPtr.Zero) return;
+        try
+        {
+            // Well-known Service UUIDs for Square Golf (8660...) and Garmin Approach R10 (6a4e...)
+            Guid[] candidateServices =
+            [
+                Guid.Parse("86602000-6b7e-439a-bdd1-489a3213e9bb"),
+                Guid.Parse("86602100-6b7e-439a-bdd1-489a3213e9bb"),
+                Guid.Parse("86602101-6b7e-439a-bdd1-489a3213e9bb"),
+                Guid.Parse("6a4e2800-667b-11e3-949a-0800200c9a66"),
+                Guid.Parse("6a4e2810-667b-11e3-949a-0800200c9a66"),
+                Guid.Parse("6a4e2820-667b-11e3-949a-0800200c9a66")
+            ];
+
+            IntPtr nsArrayClass = ObjCRuntime.objc_getClass("NSArray");
+            if (nsArrayClass == IntPtr.Zero) return;
+
+            foreach (var svcGuid in candidateServices)
+            {
+                IntPtr cbUuid = ObjCRuntime.CreateCBUUID(svcGuid);
+                if (cbUuid == IntPtr.Zero) continue;
+
+                IntPtr svcArray = ObjCRuntime.objc_msgSend(nsArrayClass, ObjCRuntime.sel_registerName("arrayWithObject:"), cbUuid);
+                if (svcArray == IntPtr.Zero) continue;
+
+                IntPtr retrievedList = ObjCRuntime.objc_msgSend(_centralManager, ObjCRuntime.sel_registerName("retrieveConnectedPeripheralsWithServices:"), svcArray);
+                if (retrievedList == IntPtr.Zero) continue;
+
+                int count = (int)(long)ObjCRuntime.objc_msgSend(retrievedList, ObjCRuntime.sel_registerName("count"));
+                for (int i = 0; i < count; i++)
+                {
+                    IntPtr peripheral = ObjCRuntime.objc_msgSend(retrievedList, ObjCRuntime.sel_registerName("objectAtIndex:"), (IntPtr)i);
+                    if (peripheral != IntPtr.Zero)
+                    {
+                        ProcessDiscoveredPeripheral(this, peripheral, IntPtr.Zero, IntPtr.Zero, svcGuid.ToString());
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogErr($"CheckConnectedPeripherals exception: {ex.Message}");
+        }
     }
 
     public Task StopScanAsync(CancellationToken cancellationToken)
@@ -641,10 +693,22 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         try
         {
             if (!_instances.TryGetValue(self, out var client)) return;
+            ProcessDiscoveredPeripheral(client, peripheral, advData, rssi, null);
+        }
+        catch (Exception ex)
+        {
+            LogErr($"Central_DidDiscoverPeripheral unhandled exception: {ex}");
+        }
+    }
 
+    private static void ProcessDiscoveredPeripheral(AppleBluetoothGattClient client, IntPtr peripheral, IntPtr advData, IntPtr rssi, string? knownServiceUuidHint)
+    {
+        try
+        {
             IntPtr identifier = ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("identifier"));
             IntPtr uuidStringNs = ObjCRuntime.objc_msgSend(identifier, ObjCRuntime.sel_registerName("UUIDString"));
             string deviceId = ObjCRuntime.NSStringToString(uuidStringNs) ?? string.Empty;
+            if (string.IsNullOrEmpty(deviceId)) return;
 
             IntPtr nameNs = ObjCRuntime.objc_msgSend(peripheral, ObjCRuntime.sel_registerName("name"));
             string? name = ObjCRuntime.NSStringToString(nameNs);
@@ -762,8 +826,30 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
                 }
             }
 
+            // Fallback from knownServiceUuidHint (e.g. from retrieveConnectedPeripheralsWithServices)
+            if (!string.IsNullOrEmpty(knownServiceUuidHint))
+            {
+                string hint = knownServiceUuidHint.ToLowerInvariant();
+                if (hint.Contains("8660"))
+                {
+                    if (string.IsNullOrWhiteSpace(name) || name == "Unknown")
+                    {
+                        name = "Square Golf";
+                    }
+                    matchesServiceUuid = true;
+                }
+                else if (hint.Contains("6a4e"))
+                {
+                    if (string.IsNullOrWhiteSpace(name) || name == "Unknown")
+                    {
+                        name = "Approach R10";
+                    }
+                    matchesServiceUuid = true;
+                }
+            }
+
             name ??= "Unknown";
-            int rssiVal = (int)(long)ObjCRuntime.objc_msgSend(rssi, ObjCRuntime.sel_registerName("intValue"));
+            int rssiVal = rssi != IntPtr.Zero ? (int)(long)ObjCRuntime.objc_msgSend(rssi, ObjCRuntime.sel_registerName("intValue")) : -50;
 
             if (!client._discoveredPeripherals.ContainsKey(deviceId))
             {
@@ -792,7 +878,7 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
         }
         catch (Exception ex)
         {
-            LogErr($"Central_DidDiscoverPeripheral unhandled exception: {ex}");
+            LogErr($"ProcessDiscoveredPeripheral unhandled exception: {ex}");
         }
     }
 

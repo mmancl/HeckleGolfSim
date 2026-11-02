@@ -278,7 +278,11 @@ func _ready() -> void:
 		if dialog_scene != null:
 			var dialog = dialog_scene.instantiate()
 			add_child(dialog)
-			dialog.course_downloaded.connect(func(_course_name):
+			dialog.course_downloaded.connect(func(course_name):
+				_scan_available_courses()
+				_select_course_by_name(course_name)
+			)
+			dialog.tree_exited.connect(func():
 				_scan_available_courses()
 			)
 	)
@@ -597,18 +601,45 @@ func _on_create_custom_pressed() -> void:
 
 
 func _scan_dir(dir_path: String, validated: Array[Dictionary]) -> void:
-	if not DirAccess.dir_exists_absolute(dir_path):
-		return
-	var dir_names := DirAccess.get_directories_at(dir_path)
+	var path_to_scan = dir_path
+	if not DirAccess.dir_exists_absolute(path_to_scan):
+		var global_dir = ProjectSettings.globalize_path(dir_path)
+		if DirAccess.dir_exists_absolute(global_dir):
+			path_to_scan = global_dir
+		else:
+			return
+	var dir_names := DirAccess.get_directories_at(path_to_scan)
+	if dir_names.is_empty() and path_to_scan == dir_path:
+		var global_dir = ProjectSettings.globalize_path(dir_path)
+		if DirAccess.dir_exists_absolute(global_dir):
+			dir_names = DirAccess.get_directories_at(global_dir)
+			if not dir_names.is_empty():
+				path_to_scan = global_dir
+
 	for dir_name in dir_names:
 		if not dir_name.begins_with("."):
 			var lower_name = dir_name.to_lower()
 			if lower_name == "airways" or lower_name == "dragonfly" or lower_name == "dragon_fly":
 				continue
-			var result: Dictionary = CourseValidator.validate(dir_path, dir_name)
+			var result: Dictionary = CourseValidator.validate(path_to_scan, dir_name)
 			if not result.is_empty():
 				result["dir_name"] = dir_name
 				validated.append(result)
+
+
+func _select_course_by_name(target_name: String) -> void:
+	if target_name.is_empty():
+		return
+	for i in range(course_list.get_item_count()):
+		var item_text = course_list.get_item_text(i)
+		var meta = course_list.get_item_metadata(i)
+		var meta_title = meta.get("title", "") if typeof(meta) == TYPE_DICTIONARY else ""
+		if item_text.nocasecmp_to(target_name) == 0 or meta_title.nocasecmp_to(target_name) == 0:
+			course_list.select(i)
+			course_list.ensure_current_is_visible()
+			_update_course_length_options(i)
+			_update_start_button()
+			break
 
 
 func _on_delete_course_pressed() -> void:

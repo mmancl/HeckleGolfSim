@@ -30,15 +30,15 @@ grow_horizontal = 2
 grow_vertical = 2
 
 [node name="ModalCard" type="PanelContainer" parent="CenterContainer"]
-custom_minimum_size = Vector2(520, 0)
+custom_minimum_size = Vector2(560, 0)
 layout_mode = 2
 
 [node name="MarginContainer" type="MarginContainer" parent="CenterContainer/ModalCard"]
 layout_mode = 2
-theme_override_constants/margin_left = 24
-theme_override_constants/margin_top = 20
-theme_override_constants/margin_right = 24
-theme_override_constants/margin_bottom = 20
+theme_override_constants/margin_left = 28
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 28
+theme_override_constants/margin_bottom = 24
 
 [node name="VBox" type="VBoxContainer" parent="CenterContainer/ModalCard/MarginContainer"]
 layout_mode = 2
@@ -114,7 +114,7 @@ horizontal_alignment = 1
 
 [node name="Divider" type="Label" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedOutContainer"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1)
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
 text = "— OR USE EMAIL —"
 horizontal_alignment = 1
 
@@ -198,11 +198,12 @@ text = "Golfer"
 
 [node name="EmailLabel" type="Label" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer/ProfileCard/VBox"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.98, 1, 1)
 text = "user@example.com"
 
 [node name="ProviderLabel" type="Label" parent="CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer/ProfileCard/VBox"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_colors/font_color = Color(0.7, 0.76, 0.84, 1)
 theme_override_font_sizes/font_size = 12
 text = "Provider: password"
 

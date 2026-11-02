@@ -72,6 +72,9 @@ func _ready() -> void:
 				dialog.course_downloaded.connect(func(_course_name):
 					_request_course_reload()
 				)
+				dialog.tree_exited.connect(func():
+					_request_course_reload()
+				)
 		)
 		
 		var delete_btn = Button.new()

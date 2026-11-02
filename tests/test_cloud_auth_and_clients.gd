@@ -261,6 +261,13 @@ func _test_4_sse_chunked_parser() -> void:
 func _test_5_controller_focus_traversal_and_modal() -> void:
 	print("\n--- Test 5: Controller Focus Traversal & Universal Google Sign-In ---")
 
+	# Ensure signed-out baseline for modal instantiation
+	var auth = root.get_node_or_null("CloudAuth")
+	if auth != null:
+		auth._current_user = {}
+		auth._id_token = ""
+		auth._refresh_token = ""
+
 	var modal_scene = load("res://UI/Account/account_modal.tscn")
 	assert(modal_scene != null, "account_modal.tscn must be loadable")
 
@@ -299,7 +306,6 @@ func _test_5_controller_focus_traversal_and_modal() -> void:
 	assert(modal.display_name_input.focus_mode == Control.FOCUS_ALL, "Display name input must have FOCUS_ALL")
 
 	# Test signed-in view and leaderboard opt-in toggle
-	var auth = root.get_node_or_null("CloudAuth")
 	if auth != null:
 		auth._current_user = {
 			"uid": "test_user_uid_123",

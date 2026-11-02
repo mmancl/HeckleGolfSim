@@ -129,42 +129,42 @@ public partial class SquareLaunchMonitor : Node
 
     private void EmitDeviceDiscovered(string deviceId, string name, int rssi)
     {
-        CallDeferred("emit_signal", SignalName.DeviceDiscovered, deviceId, name, rssi);
+        Callable.From(() => EmitSignal(SignalName.DeviceDiscovered, deviceId, name, rssi)).CallDeferred();
     }
 
     private void EmitStatus(string status)
     {
-        CallDeferred("emit_signal", SignalName.StatusChanged, status);
+        Callable.From(() => EmitSignal(SignalName.StatusChanged, status)).CallDeferred();
     }
 
     private void EmitError(string message)
     {
-        CallDeferred("emit_signal", SignalName.ErrorOccurred, message);
+        Callable.From(() => EmitSignal(SignalName.ErrorOccurred, message)).CallDeferred();
     }
 
     private void EmitBattery(int level)
     {
-        CallDeferred("emit_signal", SignalName.BatteryChanged, level);
+        Callable.From(() => EmitSignal(SignalName.BatteryChanged, level)).CallDeferred();
     }
 
     private void EmitFirmware(string firmware)
     {
-        CallDeferred("emit_signal", SignalName.FirmwareChanged, firmware);
+        Callable.From(() => EmitSignal(SignalName.FirmwareChanged, firmware)).CallDeferred();
     }
 
     private void EmitReady(bool ready)
     {
-        CallDeferred("emit_signal", SignalName.ReadyChanged, ready);
+        Callable.From(() => EmitSignal(SignalName.ReadyChanged, ready)).CallDeferred();
     }
 
     private void OnSensorDataReceived(SquareSensorData sensor)
     {
-        CallDeferred("emit_signal", SignalName.SensorDataReceived, sensor.PositionX, sensor.PositionY, sensor.PositionZ, sensor.BallReady, sensor.BallDetected);
+        Callable.From(() => EmitSignal(SignalName.SensorDataReceived, sensor.PositionX, sensor.PositionY, sensor.PositionZ, sensor.BallReady, sensor.BallDetected)).CallDeferred();
     }
 
     private void EmitShot(GodotDictionary shotData)
     {
-        CallDeferred("emit_signal", SignalName.ShotReceived, shotData);
+        Callable.From(() => EmitSignal(SignalName.ShotReceived, shotData)).CallDeferred();
     }
 
     private static void LogInfo(string message)

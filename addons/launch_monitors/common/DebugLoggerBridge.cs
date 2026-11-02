@@ -27,17 +27,41 @@ public static class DebugLoggerBridge
     {
         try
         {
-            if (Engine.GetMainLoop() is SceneTree tree && tree.Root != null)
+            Callable.From(() =>
             {
-                var logger = tree.Root.GetNodeOrNull("DebugLogger");
-                if (logger != null && logger.HasMethod(method))
+                try
                 {
-                    logger.Call(method, message);
+                    if (Engine.GetMainLoop() is SceneTree tree && tree.Root != null)
+                    {
+                        var logger = tree.Root.GetNodeOrNull("DebugLogger");
+                        if (logger != null && logger.HasMethod(method))
+                        {
+                            logger.Call(method, message);
+                        }
+                    }
                 }
-            }
+                catch
+                {
+                }
+            }).CallDeferred();
         }
         catch
         {
+            // Direct fallback if Callable creation fails
+            try
+            {
+                if (Engine.GetMainLoop() is SceneTree tree && tree.Root != null)
+                {
+                    var logger = tree.Root.GetNodeOrNull("DebugLogger");
+                    if (logger != null && logger.HasMethod(method))
+                    {
+                        logger.Call(method, message);
+                    }
+                }
+            }
+            catch
+            {
+            }
         }
     }
 }

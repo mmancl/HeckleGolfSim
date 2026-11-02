@@ -143,37 +143,37 @@ public partial class GarminLaunchMonitor : Node
 
     private void EmitDeviceDiscovered(string deviceId, string name, int rssi)
     {
-        CallDeferred("emit_signal", SignalName.DeviceDiscovered, deviceId, name, rssi);
+        Callable.From(() => EmitSignal(SignalName.DeviceDiscovered, deviceId, name, rssi)).CallDeferred();
     }
 
     private void EmitStatus(string status)
     {
-        CallDeferred("emit_signal", SignalName.StatusChanged, status);
+        Callable.From(() => EmitSignal(SignalName.StatusChanged, status)).CallDeferred();
     }
 
     private void EmitError(string message)
     {
-        CallDeferred("emit_signal", SignalName.ErrorOccurred, message);
+        Callable.From(() => EmitSignal(SignalName.ErrorOccurred, message)).CallDeferred();
     }
 
     private void EmitBattery(int level)
     {
-        CallDeferred("emit_signal", SignalName.BatteryChanged, level);
+        Callable.From(() => EmitSignal(SignalName.BatteryChanged, level)).CallDeferred();
     }
 
     private void EmitFirmware(string firmware)
     {
-        CallDeferred("emit_signal", SignalName.FirmwareChanged, firmware);
+        Callable.From(() => EmitSignal(SignalName.FirmwareChanged, firmware)).CallDeferred();
     }
 
     private void EmitReady(bool isReady)
     {
-        CallDeferred("emit_signal", SignalName.ReadyChanged, isReady);
+        Callable.From(() => EmitSignal(SignalName.ReadyChanged, isReady)).CallDeferred();
     }
 
     private void EmitShot(GodotDictionary shotData)
     {
-        CallDeferred("emit_signal", SignalName.ShotReceived, shotData);
+        Callable.From(() => EmitSignal(SignalName.ShotReceived, shotData)).CallDeferred();
     }
 
     private static void LogInfo(string message)

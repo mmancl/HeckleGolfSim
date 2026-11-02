@@ -37,6 +37,7 @@ signal closed
 
 # Signed-in controls
 @onready var signed_in_container: VBoxContainer = $CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer
+@onready var profile_card: PanelContainer = $CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer/ProfileCard
 @onready var user_display_name_label: Label = $CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer/ProfileCard/VBox/DisplayNameLabel
 @onready var user_email_label: Label = $CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer/ProfileCard/VBox/EmailLabel
 @onready var provider_label: Label = $CenterContainer/ModalCard/MarginContainer/VBox/SignedInContainer/ProfileCard/VBox/ProviderLabel
@@ -92,7 +93,69 @@ func _unhandled_input(event: InputEvent) -> void:
 # ── SETUP & STYLES ───────────────────────────────────────────────────────
 
 func _setup_styles() -> void:
-	# High-visibility gold/cyan focus border
+	# Modal container and dimmer background matching Approvals & Shared Access dialog
+	if dimmer_panel != null:
+		var dimmer_style := StyleBoxFlat.new()
+		dimmer_style.bg_color = Color(0.0, 0.0, 0.0, 0.7)
+		dimmer_panel.add_theme_stylebox_override("panel", dimmer_style)
+
+	if modal_card != null:
+		ThemeManager.apply_modal_style(modal_card, 14)
+
+	# Buttons
+	if close_x_button != null:
+		ThemeManager.apply_nav_button_style(close_x_button, 6)
+	if footer_close_button != null:
+		ThemeManager.apply_secondary_button_style(footer_close_button, 8)
+	if submit_button != null:
+		ThemeManager.apply_primary_button_style(submit_button, 8)
+	if sign_out_button != null:
+		ThemeManager.apply_secondary_button_style(sign_out_button, 8)
+	if delete_account_button != null:
+		ThemeManager.apply_danger_button_style(delete_account_button, 8)
+	if resend_verification_button != null:
+		ThemeManager.apply_secondary_button_style(resend_verification_button, 8)
+	if google_copy_open_button != null:
+		ThemeManager.apply_secondary_button_style(google_copy_open_button, 6)
+	if google_cancel_button != null:
+		ThemeManager.apply_secondary_button_style(google_cancel_button, 6)
+
+	# LineEdit inputs
+	if email_input != null:
+		ThemeManager.apply_input_style(email_input, 6)
+	if password_input != null:
+		ThemeManager.apply_input_style(password_input, 6)
+	if display_name_input != null:
+		ThemeManager.apply_input_style(display_name_input, 6)
+
+	# Cards: ProfileCard and GoogleDevicePanel
+	if profile_card != null:
+		var profile_style := StyleBoxFlat.new()
+		profile_style.bg_color = Color(0.12, 0.16, 0.22, 0.8)
+		profile_style.border_color = Color(0.25, 0.35, 0.5, 0.6)
+		profile_style.set_border_width_all(1)
+		profile_style.set_corner_radius_all(8)
+		profile_style.content_margin_left = 16
+		profile_style.content_margin_right = 16
+		profile_style.content_margin_top = 12
+		profile_style.content_margin_bottom = 12
+		profile_card.add_theme_stylebox_override("panel", profile_style)
+
+	if google_device_panel != null:
+		var g_device_style := StyleBoxFlat.new()
+		g_device_style.bg_color = Color(0.12, 0.16, 0.22, 0.85)
+		g_device_style.border_color = Color(0.25, 0.35, 0.5, 0.6)
+		g_device_style.set_border_width_all(1)
+		g_device_style.set_corner_radius_all(8)
+		g_device_style.content_margin_left = 16
+		g_device_style.content_margin_right = 16
+		g_device_style.content_margin_top = 12
+		g_device_style.content_margin_bottom = 12
+		google_device_panel.add_theme_stylebox_override("panel", g_device_style)
+
+	_update_tab_button_styles()
+
+	# High-visibility gold focus border for controller navigation
 	var focus_box := StyleBoxFlat.new()
 	focus_box.bg_color = Color(0, 0, 0, 0)
 	focus_box.border_color = Color(0.95, 0.76, 0.22, 1.0)
@@ -112,6 +175,42 @@ func _setup_styles() -> void:
 			c.add_theme_stylebox_override("focus", focus_box)
 
 	_apply_standard_google_button_style()
+
+
+func _update_tab_button_styles() -> void:
+	if tab_signin_button == null or tab_signup_button == null:
+		return
+
+	var active_tab_style := StyleBoxFlat.new()
+	active_tab_style.bg_color = Color(0.18, 0.34, 0.50, 0.9)
+	active_tab_style.border_color = Color(0.35, 0.82, 1.0, 0.8)
+	active_tab_style.set_border_width_all(1)
+	active_tab_style.set_corner_radius_all(6)
+	active_tab_style.content_margin_left = 12
+	active_tab_style.content_margin_right = 12
+	active_tab_style.content_margin_top = 8
+	active_tab_style.content_margin_bottom = 8
+
+	var inactive_tab_style := StyleBoxFlat.new()
+	inactive_tab_style.bg_color = Color(0.10, 0.14, 0.20, 0.7)
+	inactive_tab_style.border_color = Color(0.24, 0.44, 0.65, 0.3)
+	inactive_tab_style.set_border_width_all(1)
+	inactive_tab_style.set_corner_radius_all(6)
+	inactive_tab_style.content_margin_left = 12
+	inactive_tab_style.content_margin_right = 12
+	inactive_tab_style.content_margin_top = 8
+	inactive_tab_style.content_margin_bottom = 8
+
+	if _is_signup_mode:
+		tab_signup_button.add_theme_stylebox_override("normal", active_tab_style)
+		tab_signup_button.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_GOLD)
+		tab_signin_button.add_theme_stylebox_override("normal", inactive_tab_style)
+		tab_signin_button.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	else:
+		tab_signin_button.add_theme_stylebox_override("normal", active_tab_style)
+		tab_signin_button.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_GOLD)
+		tab_signup_button.add_theme_stylebox_override("normal", inactive_tab_style)
+		tab_signup_button.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
 
 
 func _apply_standard_google_button_style() -> void:
@@ -228,13 +327,7 @@ func _set_auth_mode(is_signup: bool) -> void:
 	forgot_password_button.visible = not is_signup
 	auth_status_label.text = ""
 
-	if is_signup:
-		tab_signup_button.add_theme_color_override("font_color", Color(0.95, 0.76, 0.22, 1.0))
-		tab_signin_button.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 1.0))
-	else:
-		tab_signin_button.add_theme_color_override("font_color", Color(0.95, 0.76, 0.22, 1.0))
-		tab_signup_button.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 1.0))
-
+	_update_tab_button_styles()
 	_update_controller_focus_navigation()
 
 

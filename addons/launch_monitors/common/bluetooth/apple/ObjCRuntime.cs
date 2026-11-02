@@ -99,6 +99,9 @@ internal static class ObjCRuntime
     public static extern IntPtr objc_msgSend_bool(IntPtr receiver, IntPtr selector, byte arg1, IntPtr arg2);
 
     [DllImport(LibObjC, EntryPoint = "objc_msgSend")]
+    public static extern IntPtr objc_msgSend_int(IntPtr receiver, IntPtr selector, int arg1);
+
+    [DllImport(LibObjC, EntryPoint = "objc_msgSend")]
     public static extern IntPtr objc_msgSend_write(IntPtr receiver, IntPtr selector, IntPtr arg1, IntPtr arg2, IntPtr arg3);
 
     [DllImport(LibObjC, EntryPoint = "objc_msgSend")]
@@ -239,6 +242,20 @@ internal static class ObjCRuntime
         IntPtr cbUuidClass = objc_getClass("CBUUID");
         IntPtr uuidStr = CreateNSString(guid.ToString());
         return objc_msgSend(cbUuidClass, sel_registerName("UUIDWithString:"), uuidStr);
+    }
+
+    public static IntPtr CreateScanOptionsDictionary(bool allowDuplicates)
+    {
+        IntPtr nsDictClass = objc_getClass("NSDictionary");
+        IntPtr nsNumberClass = objc_getClass("NSNumber");
+        if (nsDictClass == IntPtr.Zero || nsNumberClass == IntPtr.Zero) return IntPtr.Zero;
+
+        IntPtr numBool = objc_msgSend_int(nsNumberClass, sel_registerName("numberWithInt:"), allowDuplicates ? 1 : 0);
+        IntPtr keyAllowDuplicates = CreateNSString("kCBScanOptionAllowDuplicates");
+
+        if (numBool == IntPtr.Zero || keyAllowDuplicates == IntPtr.Zero) return IntPtr.Zero;
+
+        return objc_msgSend(nsDictClass, sel_registerName("dictionaryWithObject:forKey:"), numBool, keyAllowDuplicates);
     }
 
     public static IntPtr CreateNSUUID(Guid guid)
