@@ -236,10 +236,28 @@ func queue_completed_match(match_json: Dictionary) -> void:
 			else:
 				m_id = "match_%d" % int(Time.get_unix_time_from_system())
 
+		var holes_arr: Array = []
+		var hole_scores = p.get("hole_scores", {})
+		if hole_scores is Dictionary and hole_ids is Array:
+			for i in range(hole_ids.size()):
+				var hid = hole_ids[i]
+				var h_par = int(hole_pars.get(hid, 4)) if hole_pars is Dictionary else 4
+				var h_score = int(hole_scores.get(hid, 0))
+				if h_score > 0:
+					holes_arr.append({
+						"hole_number": i + 1,
+						"par": h_par,
+						"score": h_score
+					})
+
+		var played_time = int(match_json.get("unix_time", match_json.get("timestamp", Time.get_unix_time_from_system())))
+
 		var summary = {
+			"schema_version": 1,
 			"match_id": m_id,
 			"cloud_uid": cloud_uid,
 			"player_name": p_name,
+			"course_name": str(match_json.get("course_title", match_json.get("course_name", "Unknown Course"))),
 			"holes_count": holes_count,
 			"strokes": strokes,
 			"par": par,
@@ -248,12 +266,16 @@ func queue_completed_match(match_json: Dictionary) -> void:
 			"is_loss": is_loss,
 			"is_tie": is_tie,
 			"is_single_player": is_single_player,
+			"match_type": "single_player" if is_single_player else "multiplayer",
 			"mulligans_used": int(p.get("mulligans_used", 0)),
 			"game_mode": game_mode,
 			"longest_drive_yds": longest_dr,
 			"longest_putt_ft": longest_pt,
-			"created_at": int(Time.get_unix_time_from_system())
+			"played_at": played_time,
+			"created_at": played_time
 		}
+		if not holes_arr.is_empty():
+			summary["holes"] = holes_arr
 
 		# Prevent duplicate pending match
 		var already_queued := false
@@ -325,10 +347,27 @@ func enqueue_historical_local_matches_for_profile(player_name: String, cloud_uid
 														if (clb in ["dr", "driver", "1w"] or clb.begins_with("dr")) and tot_y > longest_dr:
 															longest_dr = tot_y
 									var m_id := str(parsed.get("match_id", fname.get_basename()))
+									var played_time := int(parsed.get("unix_time", parsed.get("timestamp", Time.get_unix_time_from_system())))
+									var hist_holes: Array = []
+									var p_hole_scores = p.get("hole_scores", {})
+									if p_hole_scores is Dictionary and hole_ids is Array:
+										for i in range(hole_ids.size()):
+											var hid = hole_ids[i]
+											var h_par = int(hole_pars.get(hid, 4)) if hole_pars is Dictionary else 4
+											var h_score = int(p_hole_scores.get(hid, 0))
+											if h_score > 0:
+												hist_holes.append({
+													"hole_number": i + 1,
+													"par": h_par,
+													"score": h_score
+												})
+
 									var summary := {
+										"schema_version": 1,
 										"match_id": m_id,
 										"cloud_uid": cloud_uid,
 										"player_name": str(p.get("name", player_name)),
+										"course_name": str(parsed.get("course_title", parsed.get("course_name", "Unknown Course"))),
 										"holes_count": holes_count,
 										"strokes": strokes,
 										"par": par,
@@ -337,12 +376,16 @@ func enqueue_historical_local_matches_for_profile(player_name: String, cloud_uid
 										"is_loss": is_loss,
 										"is_tie": is_tie,
 										"is_single_player": is_single_player,
+										"match_type": "single_player" if is_single_player else "multiplayer",
 										"mulligans_used": int(p.get("mulligans_used", 0)),
 										"game_mode": str(parsed.get("game_mode", "Standard")),
 										"longest_drive_yds": longest_dr,
 										"longest_putt_ft": 0.0,
-										"created_at": int(parsed.get("timestamp", Time.get_unix_time_from_system()))
+										"played_at": played_time,
+										"created_at": played_time
 									}
+									if not hist_holes.is_empty():
+										summary["holes"] = hist_holes
 									var exists := false
 									for m in pending_matches:
 										if m.get("match_id") == m_id and m.get("cloud_uid") == cloud_uid:
@@ -372,7 +415,7 @@ func _check_startup_sync() -> void:
 		sync_all_eligible_profiles("startup")
 
 
-func _on_multiplayer_game_over(winners: Array, _skins: Dictionary) -> void:
+func _on_multiplayer_game_over(winners: Array, _skins: Dictionary = {}) -> void:
 	var mp = get_node_or_null("/root/MultiplayerManager")
 	if mp == null or mp.practice_mode_active:
 		return
@@ -477,13 +520,19 @@ func sync_single_profile(player_name: String, cloud_uid: String) -> Dictionary:
 
 	# 1. Cheap startup read optimization: get profiles/{uid}
 	var prof_res = await client.get_doc("profiles/" + cloud_uid)
-	if not prof_res.get("ok", false):
+	var cloud_prof: Dictionary = {}
+	if prof_res.get("ok", false) and prof_res.get("data") is Dictionary:
+		cloud_prof = prof_res.get("data", {})
+	elif prof_res.get("status") == 404:
+		# Profile document does not exist yet in Firestore
+		cloud_prof = {}
+	else:
 		var is_403: bool = (prof_res.get("status") == 403) or str(prof_res.get("error", "")).find("PERMISSION_DENIED") != -1 or str(prof_res.get("error", "")).find("403") != -1
 		if is_403 and str(reg_p.get("link_role", "")) == "linked":
 			return _handle_linked_revocation(player_name, cloud_uid, mp)
+		print("[CloudSync] Failed to fetch profile for %s (%s): %s (status: %s)" % [player_name, cloud_uid, prof_res.get("error", "Unknown error"), prof_res.get("status")])
 		return {"ok": false, "error": prof_res.get("error", "Failed to fetch profile")}
 
-	var cloud_prof: Dictionary = prof_res.get("data", {}) if (prof_res.get("ok", false) and prof_res.get("data") is Dictionary) else {}
 	var cloud_rev = int(cloud_prof.get("rev", 0))
 
 	var needs_stats_sync = is_dirty or (local_rev == 0) or (cloud_rev != local_rev) or cloud_prof.is_empty()
@@ -494,10 +543,11 @@ func sync_single_profile(player_name: String, cloud_uid: String) -> Dictionary:
 			var stats_res = await client.get_doc("profiles/" + cloud_uid + "/sync/stats")
 			if stats_res.get("ok", false) and stats_res.get("data") is Dictionary:
 				cloud_stats_doc = stats_res.get("data")
-			elif not stats_res.get("ok", false):
+			elif not stats_res.get("ok", false) and stats_res.get("status") != 404:
 				var is_403_stats: bool = (stats_res.get("status") == 403) or str(stats_res.get("error", "")).find("PERMISSION_DENIED") != -1 or str(stats_res.get("error", "")).find("403") != -1
 				if is_403_stats and str(reg_p.get("link_role", "")) == "linked":
 					return _handle_linked_revocation(player_name, cloud_uid, mp)
+				print("[CloudSync] Failed to fetch stats for %s (%s): %s (status: %s)" % [player_name, cloud_uid, stats_res.get("error"), stats_res.get("status")])
 
 		# Gather local data
 		var local_stats_dict = _gather_local_stats_dict(player_name, reg_p)
@@ -518,6 +568,7 @@ func sync_single_profile(player_name: String, cloud_uid: String) -> Dictionary:
 			var is_403_put: bool = (put_stats_res.get("status") == 403) or str(put_stats_res.get("error", "")).find("PERMISSION_DENIED") != -1 or str(put_stats_res.get("error", "")).find("403") != -1
 			if is_403_put and str(reg_p.get("link_role", "")) == "linked":
 				return _handle_linked_revocation(player_name, cloud_uid, mp)
+			print("[CloudSync] Failed to upload stats for %s (%s): %s (status: %s)" % [player_name, cloud_uid, put_stats_res.get("error"), put_stats_res.get("status")])
 			return {"ok": false, "error": put_stats_res.get("error", "Failed to upload stats")}
 
 		# Determine display name: preserve user2's cloud display name when host is syncing a linked profile
@@ -527,6 +578,18 @@ func sync_single_profile(player_name: String, cloud_uid: String) -> Dictionary:
 		var final_display_name = player_name
 		if not is_owner and not cloud_display_name.is_empty():
 			final_display_name = cloud_display_name
+
+		# Build effective lifetime stats (merging local records and achievements into lifetime)
+		var eff_lifetime: Dictionary = cloud_prof.get("lifetime", {}).duplicate()
+		var rec_longest_dr = float(merged.get("records", {}).get("longest_drive_yds", merged.get("records", {}).get("longest_drive", 0.0)))
+		if rec_longest_dr > float(eff_lifetime.get("longest_drive_yds", 0.0)):
+			eff_lifetime["longest_drive_yds"] = rec_longest_dr
+		var rec_longest_pt = float(merged.get("records", {}).get("longest_putt_ft", 0.0))
+		if rec_longest_pt > float(eff_lifetime.get("longest_putt_ft", 0.0)):
+			eff_lifetime["longest_putt_ft"] = rec_longest_pt
+		var ach_unlocked = merged.get("achievements", {}).get("unlocked", {})
+		if ach_unlocked is Dictionary and ach_unlocked.size() > int(eff_lifetime.get("achievements_count", 0)):
+			eff_lifetime["achievements_count"] = ach_unlocked.size()
 
 		# Build updated profile document
 		var updated_profile_doc = {
@@ -542,7 +605,8 @@ func sync_single_profile(player_name: String, cloud_uid: String) -> Dictionary:
 			"updated_at": int(Time.get_unix_time_from_system()),
 			"updated_by_uid": auth.get_uid() if (auth != null and auth.has_method("get_uid")) else cloud_uid,
 			"rev": new_rev,
-			"lifetime": cloud_prof.get("lifetime", {}),
+			"lifetime": eff_lifetime,
+			"best_courses": merged.get("best_courses", {}),
 			"club_summary": _build_club_summary(merged.get("clubs", {}))
 		}
 		var put_prof_res = await client.set_doc("profiles/" + cloud_uid, updated_profile_doc)
@@ -550,13 +614,14 @@ func sync_single_profile(player_name: String, cloud_uid: String) -> Dictionary:
 			var is_403_prof: bool = (put_prof_res.get("status") == 403) or str(put_prof_res.get("error", "")).find("PERMISSION_DENIED") != -1 or str(put_prof_res.get("error", "")).find("403") != -1
 			if is_403_prof and str(reg_p.get("link_role", "")) == "linked":
 				return _handle_linked_revocation(player_name, cloud_uid, mp)
+			print("[CloudSync] Failed to upload profile for %s (%s): %s (status: %s)" % [player_name, cloud_uid, put_prof_res.get("error"), put_prof_res.get("status")])
 			return {"ok": false, "error": put_prof_res.get("error", "Failed to upload profile")}
 
 		# Sync public_profiles/{cloud_uid} if leaderboard changed
 		var leaderboard_opt_in = true
 		if auth != null and "leaderboard_opt_in" in auth:
 			leaderboard_opt_in = bool(auth.get("leaderboard_opt_in"))
-		await _sync_public_leaderboard_profile(client, cloud_uid, final_display_name, reg_p.get("avatar", ""), merged.get("records", {}), leaderboard_opt_in)
+		await _sync_public_leaderboard_profile(client, cloud_uid, final_display_name, reg_p.get("avatar", ""), merged.get("records", {}), leaderboard_opt_in, eff_lifetime, merged.get("achievements", {}))
 
 		# Update registry with new rev and cached lifetime stats
 		if mp != null and mp.has_method("get_registered_players"):
@@ -565,7 +630,7 @@ func sync_single_profile(player_name: String, cloud_uid: String) -> Dictionary:
 				if str(p.get("name", "")).to_lower() == player_name.to_lower():
 					p["last_synced_rev"] = new_rev
 					p["last_synced_at"] = int(Time.get_unix_time_from_system())
-					p["cloud_lifetime_cache"] = cloud_prof.get("lifetime", {})
+					p["cloud_lifetime_cache"] = eff_lifetime
 					break
 			mp.save_registered_players(reg_list)
 	else:
@@ -843,7 +908,7 @@ func _upload_pending_matches_for_uid(client: FirestoreClient, cloud_uid: String)
 
 # ── REDUNDANT LEADERBOARD WRITE SKIP ─────────────────────────────────────
 
-func _sync_public_leaderboard_profile(client: FirestoreClient, cloud_uid: String, player_name: String, avatar: String, records: Dictionary, opt_in: bool = true) -> void:
+func _sync_public_leaderboard_profile(client: FirestoreClient, cloud_uid: String, player_name: String, avatar: String, records: Dictionary, opt_in: bool = true, lifetime: Dictionary = {}, achievements: Dictionary = {}) -> void:
 	if not opt_in:
 		if last_pushed_leaderboard.has(cloud_uid):
 			await client.delete_doc("public_profiles/" + cloud_uid)
@@ -851,25 +916,43 @@ func _sync_public_leaderboard_profile(client: FirestoreClient, cloud_uid: String
 			_save_sync_state()
 		return
 
+	var unlocked_count: int = 0
+	var ach_unlocked = achievements.get("unlocked", {})
+	if ach_unlocked is Dictionary:
+		unlocked_count = ach_unlocked.size()
+
+	var longest_dr: float = float(records.get("longest_drive_yds", records.get("longest_drive", lifetime.get("longest_drive_yds", 0.0))))
+	var longest_pt: float = float(records.get("longest_putt_ft", lifetime.get("longest_putt_ft", 0.0)))
+
 	var current_projection = {
 		"schema_version": 1,
 		"uid": cloud_uid,
 		"display_name": player_name,
 		"avatar": avatar,
-		"longest_drive_yds": float(records.get("longest_drive_yds", records.get("longest_drive", 0.0))),
-		"longest_putt_ft": float(records.get("longest_putt_ft", 0.0)),
-		"best_gross_18": int(records.get("best_gross_18", 0)),
-		"best_to_par_18": int(records.get("best_to_par_18", 0)),
-		"best_gross_9": int(records.get("best_gross_9", 0)),
-		"best_to_par_9": int(records.get("best_to_par_9", 0))
+		"longest_drive_yds": longest_dr,
+		"longest_putt_ft": longest_pt,
+		"achievements_count": unlocked_count,
+		"matches_played": int(lifetime.get("matches_played", 0)),
+		"wins": int(lifetime.get("wins", 0))
 	}
+
+	# Firestore rule validRangeOrAbsent requires 18 <= best_gross_18 <= 250 and 9 <= best_gross_9 <= 130
+	var bg18 = int(records.get("best_gross_18", lifetime.get("best_gross_18", 0)))
+	if bg18 >= 18 and bg18 <= 250:
+		current_projection["best_gross_18"] = bg18
+		current_projection["best_to_par_18"] = int(records.get("best_to_par_18", lifetime.get("best_to_par_18", 0)))
+
+	var bg9 = int(records.get("best_gross_9", lifetime.get("best_gross_9", 0)))
+	if bg9 >= 9 and bg9 <= 130:
+		current_projection["best_gross_9"] = bg9
+		current_projection["best_to_par_9"] = int(records.get("best_to_par_9", lifetime.get("best_to_par_9", 0)))
 
 	var last_proj = last_pushed_leaderboard.get(cloud_uid, {})
 	var changed := false
 	if last_proj.is_empty():
 		changed = true
 	else:
-		for k in ["display_name", "avatar", "longest_drive_yds", "longest_putt_ft", "best_gross_18", "best_to_par_18", "best_gross_9", "best_to_par_9"]:
+		for k in current_projection.keys():
 			if current_projection.get(k) != last_proj.get(k):
 				changed = true
 				break
@@ -883,6 +966,8 @@ func _sync_public_leaderboard_profile(client: FirestoreClient, cloud_uid: String
 	if res.get("ok", false):
 		last_pushed_leaderboard[cloud_uid] = current_projection
 		_save_sync_state()
+	else:
+		print("[CloudSync] Failed to update public leaderboard for %s: %s (status: %s)" % [cloud_uid, res.get("error"), res.get("status")])
 
 
 func _handle_linked_revocation(player_name: String, cloud_uid: String, mp: Node) -> Dictionary:

@@ -849,6 +849,405 @@ input:checked + .slider:before {
   background: #b91c1c;
 }
 
+/* ─── Card Header Actions & Filtering ─── */
+.card-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.filter-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.84rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  padding: 0.35rem 0.65rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--card-border);
+  transition: border-color 0.2s, color 0.2s;
+}
+.filter-checkbox-label:hover {
+  border-color: var(--green);
+  color: var(--text);
+}
+.filter-checkbox-label input[type="checkbox"] {
+  accent-color: var(--green);
+  cursor: pointer;
+}
+.btn-action-outline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--card-border);
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-action-outline:hover {
+  border-color: var(--green);
+  color: var(--green);
+  background: var(--green-glow);
+}
+.btn-danger-outline {
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+}
+.btn-danger-outline:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+}
+.btn-clear-club-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-clear-club-row:hover {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: #fff;
+}
+.btn-clear-club-row:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* ─── Profile Preferences Grid ─── */
+.profile-preferences-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.5rem;
+}
+.pref-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--card-border);
+  transition: border-color 0.2s;
+}
+.pref-badge:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.pref-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+.pref-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.pref-val {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 0.15rem;
+}
+
+/* ─── Modal Overlays & Dialogs ─── */
+.portal-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 15, 30, 0.82);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.portal-modal-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.portal-modal {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.65);
+  transform: translateY(20px) scale(0.97);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.portal-modal-overlay.open .portal-modal {
+  transform: translateY(0) scale(1);
+}
+.portal-modal-wide {
+  max-width: 680px;
+}
+.portal-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--card-border);
+}
+.portal-modal-header h3 {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--text);
+}
+.portal-modal-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  transition: color 0.2s;
+}
+.portal-modal-close:hover {
+  color: var(--text);
+}
+.portal-modal-body {
+  padding: 1.5rem;
+}
+.portal-modal-body p {
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+.portal-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--card-border);
+  background: rgba(0, 0, 0, 0.18);
+}
+.btn-modal-cancel {
+  background: transparent;
+  border: 1px solid var(--card-border);
+  color: var(--muted);
+  padding: 0.55rem 1.15rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-modal-cancel:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.btn-modal-primary {
+  background: var(--green);
+  border: 1px solid var(--green);
+  color: #000;
+  padding: 0.55rem 1.35rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.btn-modal-primary:hover {
+  background: #16a34a;
+  box-shadow: 0 0 15px var(--green-glow);
+}
+.btn-modal-danger {
+  background: #dc2626;
+  border: 1px solid #dc2626;
+  color: #fff;
+  padding: 0.55rem 1.35rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-modal-danger:hover {
+  background: #b91c1c;
+}
+.form-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 600px) {
+  .form-row-2 {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+.portal-modal-body select {
+  width: 100%;
+  background: var(--bg2);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  color: var(--text);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.portal-modal-body select:focus {
+  border-color: var(--green);
+}
+
+/* ─── Bag Builder Controls & Chips ─── */
+.bag-modal-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+.bag-count-badge {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--green);
+}
+.bag-presets-row {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.btn-preset {
+  font-size: 0.78rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--card-border);
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+.btn-preset:hover {
+  color: var(--text);
+  border-color: var(--green);
+}
+.bag-clubs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(115px, 1fr));
+  gap: 0.6rem;
+  max-height: 48vh;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+.bag-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 0.5rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--card-border);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+.bag-chip:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+.bag-chip.active {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: var(--green);
+  color: var(--text);
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.18);
+}
+.bag-chip-code {
+  font-weight: 800;
+  font-size: 1.15rem;
+  color: var(--text);
+}
+.bag-chip.active .bag-chip-code {
+  color: var(--green);
+}
+.bag-chip-name {
+  font-size: 0.72rem;
+  margin-top: 0.15rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.bag-chip-status {
+  font-size: 0.7rem;
+  font-weight: 700;
+  margin-top: 0.35rem;
+  color: var(--muted);
+}
+.bag-chip.active .bag-chip-status {
+  color: var(--green);
+}
+
+/* ─── Portal Toast Notification ─── */
+.portal-toast {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  background: var(--card);
+  border: 1px solid var(--green);
+  color: var(--text);
+  padding: 0.85rem 1.4rem;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  font-size: 0.9rem;
+  font-weight: 600;
+  z-index: 2000;
+  opacity: 0;
+  transform: translateY(15px);
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.portal-toast.active {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+@media (max-width: 480px) {
+  .portal-toast {
+    left: 1rem;
+    right: 1rem;
+    bottom: 1rem;
+    justify-content: center;
+  }
+}
+
 /* ─── Responsive adjustments ─── */
 @media (max-width: 768px) {
   .section-header-row {

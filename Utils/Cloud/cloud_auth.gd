@@ -753,6 +753,7 @@ func _init_user_cloud_record(uid: String, email: String, display_name: String) -
 		return
 	# Leaderboard Opt-In default = true (Owner Decision D6)
 	var user_data := {
+		"schema_version": 1,
 		"email": email,
 		"display_name": display_name,
 		"leaderboard_opt_in": true,

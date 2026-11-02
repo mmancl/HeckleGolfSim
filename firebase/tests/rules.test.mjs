@@ -295,6 +295,46 @@ describe("Firebase Backend Security Rules & Budget Guard Suite", () => {
       // Now other player CAN clean up the abandoned lobby
       await assertSucceeds(rtdbRemove(rtdbRef(otherRtdb, "lobbies/match_abc")));
     });
+
+    it("allows the designated host to create and delete /matches/{matchId} while preventing spoofing and unauthorized deletions", async () => {
+      const host = testEnv.authenticatedContext("host_uid");
+      const otherPlayer = testEnv.authenticatedContext("other_uid");
+      const hostRtdb = host.database();
+      const otherRtdb = otherPlayer.database();
+
+      const matchPayload = {
+        meta: {
+          protocol_version: 1,
+          host_uid: "host_uid",
+          status: "lobby",
+          visibility: "public",
+          created_at: Math.floor(Date.now() / 1000),
+          updated_at: Math.floor(Date.now() / 1000),
+        },
+        devices: {
+          host_uid: {
+            device_name: "Host PC",
+            ready: true,
+          },
+        },
+      };
+
+      // 1. Host creates the match root -> SUCCEEDS
+      await assertSucceeds(rtdbSet(rtdbRef(hostRtdb, "matches/match_123"), matchPayload));
+
+      // 2. Another user attempts to create a match claiming host_uid is 'other_uid' while authenticated as 'host_uid' -> FAILS
+      await assertFails(
+        rtdbSet(rtdbRef(hostRtdb, "matches/match_spoofed"), {
+          meta: { host_uid: "other_uid" },
+        })
+      );
+
+      // 3. Other user attempts to delete the host's active match -> FAILS
+      await assertFails(rtdbRemove(rtdbRef(otherRtdb, "matches/match_123")));
+
+      // 4. Host deletes their own match -> SUCCEEDS
+      await assertSucceeds(rtdbRemove(rtdbRef(hostRtdb, "matches/match_123")));
+    });
   });
 
   // 5. $10 Budget Circuit-Breaker Lock Test

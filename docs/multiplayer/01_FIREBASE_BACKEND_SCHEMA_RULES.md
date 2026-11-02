@@ -415,6 +415,10 @@ Create `database.rules.json` in the repository root. Note how:
     "matches": {
       "$matchId": {
         ".read": "auth != null && root.child('system/status/paused').val() != true",
+        ".write": "auth != null && root.child('system/status/paused').val() != true && (
+          (!data.exists() && newData.child('meta/host_uid').val() == auth.uid) ||
+          (!newData.exists() && (data.child('meta/host_uid').val() == auth.uid || data.child('meta/created_at').val() < ((now / 1000) - 86400)))
+        )",
         "meta": {
           ".write": "auth != null && root.child('system/status/paused').val() != true && (
             (!data.exists() && newData.child('host_uid').val() == auth.uid) ||

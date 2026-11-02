@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'web/**'
+      - '.github/workflows/deploy_firebase.yml'
       - 'firestore.rules'
       - 'firestore.indexes.json'
       - 'database.rules.json'
@@ -189,12 +190,7 @@ jobs:
       - name: Deploy to Firebase
         if: ${{ inputs.dry_run != true }}
         run: |
-          DEPLOY_ARGS=(--project heckle-golf-sim)
           TARGET="${{ inputs.targets || 'all' }}"
-          
-          if [ "$TARGET" != "all" ]; then
-            DEPLOY_ARGS+=(--only "$TARGET")
-          fi
           
           MESSAGE="${{ inputs.message }}"
           if [ -z "$MESSAGE" ]; then
@@ -204,13 +200,17 @@ jobs:
               MESSAGE="Manual deploy via GitHub Actions"
             fi
           fi
-          DEPLOY_ARGS+=(-m "$MESSAGE")
-          
-          DEPLOY_ARGS+=(--force)
-          DEPLOY_ARGS+=(--debug)
-          
-          echo "Executing: firebase deploy ${DEPLOY_ARGS[*]}"
-          firebase deploy "${DEPLOY_ARGS[@]}"
+
+          if [ "$TARGET" = "all" ]; then
+            echo "Deploying hosting, firestore rules, and database rules..."
+            firebase deploy --project heckle-golf-sim --only hosting,firestore,database -m "$MESSAGE" --force
+            echo "Deploying functions..."
+            firebase deploy --project heckle-golf-sim --only functions -m "$MESSAGE" --force --debug
+          else
+            DEPLOY_ARGS=(--project heckle-golf-sim --only "$TARGET" -m "$MESSAGE" --force --debug)
+            echo "Executing: firebase deploy ${DEPLOY_ARGS[*]}"
+            firebase deploy "${DEPLOY_ARGS[@]}"
+          fi
 
       - name: Print Firebase Debug Log on Failure
         if: failure()

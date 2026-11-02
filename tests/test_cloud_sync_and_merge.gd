@@ -29,6 +29,7 @@ func _run_all_tests() -> void:
 	await _test_3_tombstone_respect()
 	await _test_4_foreground_timer_pause_and_dirty_guard()
 	await _test_5_controller_focus_navigation()
+	await _test_6_sync_404_resilience_and_leaderboard_projection()
 	_restore_user_files(backup)
 
 	print("\n=======================================================")
@@ -366,6 +367,12 @@ func _test_4_foreground_timer_pause_and_dirty_guard() -> void:
 	var mock_firestore = MockCountingFirestoreClient.new()
 	sync_node.call("set_firestore_client", mock_firestore)
 
+	# Wait for any deferred startup sync to settle before testing timer ticks
+	await process_frame
+	await process_frame
+	while sync_node.get("_is_syncing"):
+		await process_frame
+
 	# 1. Simulate 30 minutes of ticks when NOT dirty
 	sync_node.dirty_profiles.clear()
 	sync_node.pending_matches.clear()
@@ -375,6 +382,8 @@ func _test_4_foreground_timer_pause_and_dirty_guard() -> void:
 	# Tick 1800 seconds (30 minutes)
 	sync_node._process(1800.0)
 	await process_frame
+	while sync_node.get("_is_syncing"):
+		await process_frame
 
 	assert(mock_firestore.set_doc_count == 0, "When dirty == false, 30-minute timer must perform 0 Firestore writes, got %d" % mock_firestore.set_doc_count)
 	assert(mock_firestore.commit_writes_count == 0, "When no pending matches, 0 commits must occur")
@@ -464,3 +473,117 @@ func _test_5_controller_focus_navigation() -> void:
 
 	menu.queue_free()
 	print("  PASS: Controller focus navigation graph, Cloud Account Bar, Primary Profile button, and CloudLinkSection verified.")
+
+
+# ── TEST 6: 404 BRAND NEW PROFILE RESILIENCE & LEADERBOARD PROJECTION ─────
+
+class Mock404NewProfileFirestoreClient extends FirestoreClient:
+	var uploaded_docs: Dictionary = {}
+
+	func _init() -> void:
+		project_id = "test-heckle-golf"
+		api_key = "fake_key"
+		base_url = "https://mock.firestore"
+
+	func get_doc(doc_path: String, _require_auth: bool = true) -> Dictionary:
+		if uploaded_docs.has(doc_path):
+			return {"ok": true, "status": 200, "data": uploaded_docs[doc_path], "error": ""}
+		return {
+			"ok": false,
+			"status": 404,
+			"data": {},
+			"error": "Document not found."
+		}
+
+	func set_doc(doc_path: String, fields: Dictionary, _update_mask: PackedStringArray = [], _update_time: String = "", _current_document_exists: Variant = null) -> Dictionary:
+		uploaded_docs[doc_path] = fields
+		return {"ok": true, "status": 200, "data": fields, "error": ""}
+
+	func commit_writes(writes: Array) -> Dictionary:
+		for w in writes:
+			if w.has("update"):
+				var name_str = str(w["update"].get("name", ""))
+				uploaded_docs[name_str] = w["update"].get("fields", {})
+		return {"ok": true, "status": 200, "data": {}, "error": ""}
+
+
+func _test_6_sync_404_resilience_and_leaderboard_projection() -> void:
+	print("\n--- Test 6: 404 Brand New Profile Resilience, Leaderboard Projection & Schema Version ---")
+
+	var mp = root.get_node_or_null("/root/MultiplayerManager")
+	if mp == null:
+		mp = root.get_node_or_null("MultiplayerManager")
+
+	var sync_node = CloudSyncScript.new()
+	root.add_child(sync_node)
+
+	var mock_fs = Mock404NewProfileFirestoreClient.new()
+	sync_node.call("set_firestore_client", mock_fs)
+
+	sync_node.last_pushed_leaderboard.clear()
+
+	var mock_auth = Node.new()
+	mock_auth.set_script(load("res://Utils/Cloud/cloud_auth.gd"))
+	mock_auth.set("_current_user", {"uid": "mock_uid_new_404", "email": "mock@test.com"})
+	mock_auth.set("_id_token", "mock_valid_token")
+	mock_auth.set("_token_expiry_unix", Time.get_unix_time_from_system() + 3600.0)
+	sync_node.set_auth_node(mock_auth)
+
+	var stats = mp.load_global_club_stats()
+	stats["NewCloudPlayer"] = {
+		"Dr": [{"id": "shot_dr_1", "t": 100, "TotalDistance": 250.0, "CarryDistance": 230.0, "BallSpeed": 150.0, "ClubSpeed": 100.0, "TotalSpin": 2500.0}],
+		"_records": {"longest_drive": 282.5, "longest_putt_ft": 18.0}
+	}
+	mp.save_global_club_stats(stats)
+
+	var reg = mp.get_registered_players()
+	var exists_p = false
+	for p in reg:
+		if p.get("name") == "NewCloudPlayer":
+			exists_p = true
+			break
+	if not exists_p:
+		reg.append({
+			"name": "NewCloudPlayer",
+			"link_role": "none",
+			"cloud_uid": "",
+			"last_synced_rev": 0,
+			"last_synced_at": 0.0
+		})
+		mp.save_registered_players(reg)
+
+	mp.set_primary_player("NewCloudPlayer", "mock_uid_new_404")
+
+	var res = await sync_node.sync_single_profile("NewCloudPlayer", "mock_uid_new_404")
+	assert(res.get("ok", false) == true, "Sync on 404 brand new profile must succeed! Error: %s" % res.get("error", ""))
+
+	assert(mock_fs.uploaded_docs.has("profiles/mock_uid_new_404"), "profiles/mock_uid_new_404 must be created")
+	var prof_doc = mock_fs.uploaded_docs["profiles/mock_uid_new_404"]
+	assert(prof_doc.has("club_summary"), "Profile doc must have club_summary")
+	assert(prof_doc["club_summary"].has("Dr"), "club_summary must contain Dr")
+	assert(prof_doc.has("lifetime"), "Profile doc must have lifetime")
+	assert(float(prof_doc["lifetime"].get("longest_drive_yds", 0.0)) == 282.5, "Lifetime must reflect longest_drive from records")
+
+	assert(mock_fs.uploaded_docs.has("public_profiles/mock_uid_new_404"), "public_profiles/mock_uid_new_404 must be created")
+	var pub_doc = mock_fs.uploaded_docs["public_profiles/mock_uid_new_404"]
+	assert(float(pub_doc.get("longest_drive_yds", 0.0)) == 282.5, "public_profiles must have longest_drive_yds")
+	assert(not pub_doc.has("best_gross_18"), "public_profiles must omit best_gross_18 when round was not played")
+	assert(not pub_doc.has("best_gross_9"), "public_profiles must omit best_gross_9 when round was not played")
+
+	var sample_match = {
+		"match_id": "test_m_1",
+		"is_finished": true,
+		"practice_mode_active": false,
+		"players": [{"name": "NewCloudPlayer", "total_strokes": 4}],
+		"hole_ids": ["Hole 01"],
+		"hole_pars": {"Hole 01": 4}
+	}
+	sync_node.queue_completed_match(sample_match)
+	assert(sync_node.pending_matches.size() == 1, "Match should be queued")
+	var queued_m = sync_node.pending_matches[0]
+	assert(queued_m.get("schema_version") == 1, "Queued match must have schema_version == 1")
+	assert(queued_m.has("played_at"), "Queued match must have played_at")
+
+	sync_node.queue_free()
+	mock_auth.queue_free()
+	print("  PASS: 404 profile resilience, club summary upload, security-safe leaderboard projection, and match schema version verified.")

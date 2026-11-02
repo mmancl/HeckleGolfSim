@@ -171,11 +171,60 @@ func _process(_delta: float) -> bool:
 	assert(setup.back_9_btn.disabled == false, "back_9_btn enabled on 18-hole course")
 	assert(setup.extra_holes_btn.disabled == true, "extra_holes_btn disabled on 18-hole course")
 	assert(setup.extra_holes_selected == false, "extra_holes_selected false on 18-hole course")
+	assert(setup.selected_length == "Front 9, Back 9", "selected_length is 'Front 9, Back 9' on 18-hole course")
 	print("  PASS: 18-hole course automatically defaults to Front 9 + Back 9 selected and disables Extra Holes.")
+
+	# Test 18-hole course with gaps/missing holes (e.g. 14 holes mapped, numbered up to 18)
+	var path_gap18 = "user://test_gap_18_hole_course.json"
+	var f_gap = FileAccess.open(path_gap18, FileAccess.WRITE)
+	var holes_gap = {}
+	for i in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16, 17, 18]:
+		holes_gap["Hole %02d" % i] = {"Par": 4}
+	f_gap.store_string(JSON.stringify({"Hole Info": holes_gap}))
+	f_gap.close()
+
+	setup.course_list.clear()
+	setup.course_list.add_item("Bandon Trails 14 Holes")
+	setup.course_list.set_item_metadata(0, {"config_path": path_gap18})
+	setup.front_9_selected = false
+	setup.back_9_selected = false
+	setup.extra_holes_selected = true
+	setup._update_course_length_options(0)
+
+	assert(setup.front_9_selected == true, "front_9_selected defaults to true on 18-hole course with gaps")
+	assert(setup.back_9_selected == true, "back_9_selected defaults to true on 18-hole course with gaps")
+	assert(setup.back_9_btn.disabled == false, "back_9_btn enabled on 18-hole course with gaps")
+	assert(setup.extra_holes_btn.disabled == true, "extra_holes_btn disabled on 18-hole course with gaps")
+	assert(setup.extra_holes_selected == false, "extra_holes_selected false on 18-hole course with gaps")
+	assert(setup.selected_length == "Front 9, Back 9", "selected_length is 'Front 9, Back 9' on 18-hole course with gaps")
+	print("  PASS: 18-hole course with numbered holes up to 18 (with gaps) defaults to Front 9 + Back 9.")
+
+	# Test 9-hole course: Back 9 and Extra Holes disabled, only Front 9 selected
+	var path_9 = "user://test_9_hole_course.json"
+	var f9 = FileAccess.open(path_9, FileAccess.WRITE)
+	var holes_9 = {}
+	for i in range(1, 10):
+		holes_9["Hole %02d" % i] = {"Par": 4}
+	f9.store_string(JSON.stringify({"Hole Info": holes_9}))
+	f9.close()
+
+	setup.course_list.clear()
+	setup.course_list.add_item("Regulation 9")
+	setup.course_list.set_item_metadata(0, {"config_path": path_9})
+	setup._update_course_length_options(0)
+
+	assert(setup.front_9_selected == true, "front_9_selected true on 9-hole course")
+	assert(setup.back_9_selected == false, "back_9_selected false on 9-hole course")
+	assert(setup.back_9_btn.disabled == true, "back_9_btn disabled on 9-hole course")
+	assert(setup.extra_holes_btn.disabled == true, "extra_holes_btn disabled on 9-hole course")
+	assert(setup.selected_length == "Front 9", "selected_length is 'Front 9' on 9-hole course")
+	print("  PASS: 9-hole course defaults to Front 9 and disables Back 9 and Extra Holes.")
 
 	# Cleanup temp files
 	DirAccess.remove_absolute(path_27)
 	DirAccess.remove_absolute(path_18)
+	DirAccess.remove_absolute(path_gap18)
+	DirAccess.remove_absolute(path_9)
 
 	print("\nALL COURSE PLAY HOLE SELECTION TESTS PASSED SUCCESSFULLY!")
 	print("=======================================================\n")

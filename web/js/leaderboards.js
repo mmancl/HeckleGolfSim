@@ -201,7 +201,16 @@ function renderError(container, message) {
 }
 
 function renderTable(container, category, rows) {
-  if (!rows || rows.length === 0) {
+  const filteredRows = (rows || []).filter((r) => {
+    const val = r[category.field];
+    if (val == null) return false;
+    if ((category.id === "longest_drive" || category.id === "longest_putt") && Number(val) <= 0) {
+      return false;
+    }
+    return true;
+  });
+
+  if (!filteredRows || filteredRows.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
         <span class="empty-icon">${category.icon}</span>
@@ -212,7 +221,7 @@ function renderTable(container, category, rows) {
   }
 
   let rowsHtml = "";
-  rows.forEach((row, i) => {
+  filteredRows.forEach((row, i) => {
     const rank = i + 1;
     let rankBadge = `<span class="rank-badge rank-other">#${rank}</span>`;
     if (rank === 1) rankBadge = `<span class="rank-badge rank-1" title="1st Place">🥇 1</span>`;

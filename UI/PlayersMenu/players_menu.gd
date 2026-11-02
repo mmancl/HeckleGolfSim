@@ -836,8 +836,17 @@ func _update_controller_focus_navigation() -> void:
 			if tab_bar != null and is_instance_valid(tab_bar):
 				cloud_link_buttons.back().focus_neighbor_bottom = cloud_link_buttons.back().get_path_to(tab_bar)
 		elif primary_btn != null and is_instance_valid(primary_btn) and edit_profile_btn != null and is_instance_valid(edit_profile_btn):
-			primary_btn.focus_neighbor_right = primary_btn.get_path_to(edit_profile_btn)
-			edit_profile_btn.focus_neighbor_left = edit_profile_btn.get_path_to(primary_btn)
+			var sync_primary_btn = stats_panel.find_child("SyncPrimaryBtn", true, false) as Button
+			if sync_primary_btn != null and is_instance_valid(sync_primary_btn) and sync_primary_btn.is_visible_in_tree():
+				primary_btn.focus_neighbor_right = primary_btn.get_path_to(sync_primary_btn)
+				sync_primary_btn.focus_neighbor_left = sync_primary_btn.get_path_to(primary_btn)
+				sync_primary_btn.focus_neighbor_right = sync_primary_btn.get_path_to(edit_profile_btn)
+				edit_profile_btn.focus_neighbor_left = edit_profile_btn.get_path_to(sync_primary_btn)
+				if tab_bar != null and is_instance_valid(tab_bar):
+					sync_primary_btn.focus_neighbor_bottom = sync_primary_btn.get_path_to(tab_bar)
+			else:
+				primary_btn.focus_neighbor_right = primary_btn.get_path_to(edit_profile_btn)
+				edit_profile_btn.focus_neighbor_left = edit_profile_btn.get_path_to(primary_btn)
 
 		if edit_profile_btn != null and is_instance_valid(edit_profile_btn):
 			if (primary_btn == null or not is_instance_valid(primary_btn)) and cloud_link_buttons.is_empty():
@@ -1257,8 +1266,29 @@ func _show_primary_confirm_dialog(player_name: String) -> void:
 		var uid = auth.get_uid() if (auth != null and auth.has_method("get_uid")) else ""
 		MultiplayerManager.set_primary_player(player_name, uid)
 		_refresh_players_list()
+		_render_player_profile(player_name)
 		if has_node("/root/CloudSync"):
-			get_node("/root/CloudSync").call("sync_single_profile", player_name, uid)
+			var cs = get_node("/root/CloudSync")
+			var res = await cs.sync_single_profile(player_name, uid)
+			if not res.get("ok", false):
+				print("[PlayersMenu] Primary link sync failed: %s" % res.get("error", "Unknown error"))
+			_render_player_profile(player_name)
+	)
+	primary_confirm_dialog.popup_centered()
+
+
+func _show_unset_primary_confirm_dialog(player_name: String) -> void:
+	primary_confirm_dialog.title = "Unset Primary Cloud Profile"
+	primary_confirm_dialog.dialog_text = "Remove '%s' as your Primary Cloud Profile?\n\nThis simulator will no longer automatically sync stats or matches for this profile to the cloud." % player_name
+	primary_confirm_dialog.ok_button_text = "Unset Primary"
+	primary_confirm_dialog.cancel_button_text = "Keep Primary"
+
+	for conn in primary_confirm_dialog.confirmed.get_connections():
+		primary_confirm_dialog.confirmed.disconnect(conn["callable"])
+
+	primary_confirm_dialog.confirmed.connect(func():
+		MultiplayerManager.set_primary_player("", "")
+		_refresh_players_list()
 		_render_player_profile(player_name)
 	)
 	primary_confirm_dialog.popup_centered()
@@ -2290,26 +2320,61 @@ func _render_player_profile(player_name: String) -> void:
 
 	if signed_in:
 		if is_primary:
+			var cs = get_node_or_null("/root/CloudSync")
+			var last_synced_at = float(reg_p.get("last_synced_at", 0.0))
+			var is_dirty = (cs != null and cs.dirty_profiles.has(player_name))
+			var is_syncing = (cs != null and bool(cs.get("_is_syncing")))
+
 			var primary_badge = Button.new()
 			primary_badge.name = "PrimaryProfileBtn"
-			primary_badge.text = "★ Primary Cloud Profile (Synced)"
+			if is_syncing:
+				primary_badge.text = "★ Primary Cloud Profile (Syncing...)"
+			elif last_synced_at > 0.0 and not is_dirty:
+				primary_badge.text = "★ Primary Cloud Profile (Synced)"
+			else:
+				primary_badge.text = "★ Primary Cloud Profile (Sync Pending)"
+
 			primary_badge.custom_minimum_size = Vector2(250, 38)
 			primary_badge.focus_mode = Control.FOCUS_ALL
 			var p_style = StyleBoxFlat.new()
-			p_style.bg_color = Color(0.12, 0.35, 0.18, 0.95)
-			p_style.border_color = Color(0.35, 0.85, 0.45, 1.0)
+			if last_synced_at > 0.0 and not is_dirty:
+				p_style.bg_color = Color(0.12, 0.35, 0.18, 0.95)
+				p_style.border_color = Color(0.35, 0.85, 0.45, 1.0)
+				primary_badge.add_theme_color_override("font_color", Color(0.9, 1.0, 0.9))
+			else:
+				p_style.bg_color = Color(0.35, 0.25, 0.08, 0.95)
+				p_style.border_color = Color(0.95, 0.75, 0.2, 1.0)
+				primary_badge.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
 			p_style.set_border_width_all(2)
 			p_style.set_corner_radius_all(6)
 			p_style.content_margin_left = 12.0
 			p_style.content_margin_right = 12.0
 			primary_badge.add_theme_stylebox_override("normal", p_style)
-			primary_badge.add_theme_color_override("font_color", Color(0.9, 1.0, 0.9))
-			primary_badge.tooltip_text = "Click to unset Primary"
+			primary_badge.tooltip_text = "Primary cloud profile for this account. Click to unset primary."
 			primary_badge.pressed.connect(func():
-				MultiplayerManager.set_primary_player("", "")
-				_render_player_profile(player_name)
+				_show_unset_primary_confirm_dialog(player_name)
 			)
 			cloud_profile_hbox.add_child(primary_badge)
+
+			var sync_primary_btn = Button.new()
+			sync_primary_btn.name = "SyncPrimaryBtn"
+			sync_primary_btn.text = "🔄 Sync Now"
+			sync_primary_btn.custom_minimum_size = Vector2(110, 38)
+			sync_primary_btn.focus_mode = Control.FOCUS_ALL
+			ThemeManager.apply_secondary_button_style(sync_primary_btn, 6)
+			sync_primary_btn.pressed.connect(func():
+				if cs != null and cs.has_method("sync_single_profile"):
+					sync_primary_btn.text = "⏳..."
+					sync_primary_btn.disabled = true
+					var uid_to_sync = str(reg_p.get("cloud_uid", ""))
+					if uid_to_sync.is_empty() and auth != null and auth.has_method("get_uid"):
+						uid_to_sync = auth.get_uid()
+					var sync_res = await cs.sync_single_profile(player_name, uid_to_sync)
+					if not sync_res.get("ok", false):
+						print("[PlayersMenu] Primary profile sync error: %s" % sync_res.get("error", "Unknown error"))
+					_render_player_profile(player_name)
+			)
+			cloud_profile_hbox.add_child(sync_primary_btn)
 		else:
 			var set_primary_btn = Button.new()
 			set_primary_btn.name = "PrimaryProfileBtn"

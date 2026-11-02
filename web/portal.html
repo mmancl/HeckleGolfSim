@@ -346,6 +346,7 @@
               </div>
             </div>
             <div class="portal-top-actions">
+              <button class="btn-action-outline" id="portal-top-edit-profile-btn" style="margin-right: 0.5rem;">✏️ Edit Profile</button>
               <button class="btn-refresh" id="portal-signout-btn">Sign Out</button>
             </div>
           </div>
@@ -360,6 +361,20 @@
 
           <!-- Tab 1: Overview & Clubs -->
           <div class="portal-tab-pane active" id="portal-tab-overview">
+            <!-- Golfer Profile & Equipment Preferences -->
+            <div class="portal-card">
+              <div class="portal-card-header">
+                <h3 class="portal-card-title">👤 Golfer Profile &amp; Preferences</h3>
+                <div class="card-header-actions">
+                  <button class="btn-action-outline" id="btn-edit-profile">✏️ Edit Profile</button>
+                  <button class="btn-action-outline" id="btn-open-bag-builder">🎒 Build Bag</button>
+                </div>
+              </div>
+              <div class="profile-preferences-grid" id="profile-preferences-summary">
+                <!-- Populated by portal.js -->
+              </div>
+            </div>
+
             <!-- Stat Cards Row -->
             <div class="portal-stats-row">
               <div class="portal-stat-box">
@@ -396,6 +411,14 @@
             <div class="portal-card">
               <div class="portal-card-header">
                 <h3 class="portal-card-title">🏌️ Club Distances &amp; Delivery Averages</h3>
+                <div class="card-header-actions">
+                  <label class="filter-checkbox-label" title="Toggle to display only clubs configured in your golf bag">
+                    <input type="checkbox" id="toggle-active-bag-only">
+                    <span>In-Bag Only</span>
+                  </label>
+                  <button class="btn-action-outline" id="btn-open-bag-modal-table">🎒 Bag</button>
+                  <button class="btn-action-outline btn-danger-outline" id="btn-clear-all-history" title="Clear all ball history across all clubs">🧹 Clear All History</button>
+                </div>
               </div>
               <div id="club-summary-container">
                 <!-- Populated by portal.js -->
@@ -430,6 +453,7 @@
             <div class="portal-card">
               <div class="portal-card-header">
                 <h3 class="portal-card-title">📈 Swing Analysis Tendencies</h3>
+                <button class="btn-action-outline btn-danger-outline" id="btn-clear-swing-history" title="Clear swing flaw and tendency history">🧹 Clear Swing History</button>
               </div>
               <div id="swing-analysis-container">
                 <!-- Lazy loaded by portal.js -->
@@ -507,6 +531,116 @@
       <p>© 2025 Heckle Golf Simulator. All rights reserved. Built with ❤️ using <a href="https://godotengine.org" target="_blank" rel="noopener">Godot Engine</a>.</p>
     </div>
   </footer>
+
+  <!-- ══ CONFIRMATION ACTION MODAL ══════════════════════════════ -->
+  <div class="portal-modal-overlay" id="confirm-modal-overlay">
+    <div class="portal-modal">
+      <div class="portal-modal-header">
+        <h3 id="confirm-modal-title">Confirm Action</h3>
+        <button class="portal-modal-close" id="btn-confirm-close" aria-label="Close">✕</button>
+      </div>
+      <div class="portal-modal-body">
+        <p id="confirm-modal-message">Are you sure you want to proceed?</p>
+      </div>
+      <div class="portal-modal-footer">
+        <button type="button" class="btn-modal-cancel" id="btn-confirm-cancel">Cancel</button>
+        <button type="button" class="btn-modal-danger" id="btn-confirm-proceed">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ EDIT PROFILE MODAL ══════════════════════════════════════ -->
+  <div class="portal-modal-overlay" id="edit-profile-modal-overlay">
+    <div class="portal-modal">
+      <div class="portal-modal-header">
+        <h3>✏️ Edit Player Profile</h3>
+        <button class="portal-modal-close" id="btn-edit-profile-close" aria-label="Close">✕</button>
+      </div>
+      <form id="edit-profile-form" class="portal-modal-body" onsubmit="return false;">
+        <div class="form-group">
+          <label for="input-edit-display-name">Display Name (In-Game Handle)</label>
+          <input type="text" id="input-edit-display-name" maxlength="40" required placeholder="Golfer name">
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="select-edit-preferred-tee">Preferred Tee</label>
+            <select id="select-edit-preferred-tee">
+              <option value="Red">Red (Forward)</option>
+              <option value="White">White (Standard)</option>
+              <option value="Blue">Blue (Championship)</option>
+              <option value="Black">Black (Tournament)</option>
+              <option value="Gold">Gold (Senior)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="select-edit-handedness">Dexterity / Handedness</label>
+            <select id="select-edit-handedness">
+              <option value="0">Right-Handed</option>
+              <option value="1">Left-Handed</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="select-edit-skill-level">Skill Level</label>
+            <select id="select-edit-skill-level">
+              <option value="beginner">Beginner (High Handicap, 20+)</option>
+              <option value="mid_handicap">Mid Handicap (10 - 19)</option>
+              <option value="low_handicap">Low Handicap (Single Digit, 1 - 9)</option>
+              <option value="scratch">Scratch / Pro (0 or Better)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="select-edit-ball-graphic">Ball Alignment Graphic</label>
+            <select id="select-edit-ball-graphic">
+              <option value="single_line">Single Alignment Line</option>
+              <option value="triple_track">Triple Track Lines</option>
+              <option value="visor">Visor Stripe</option>
+              <option value="soccer_ball">Hex Soccer Pattern</option>
+              <option value="truvis">Truvis High Contrast</option>
+            </select>
+          </div>
+        </div>
+      </form>
+      <div class="portal-modal-footer">
+        <button type="button" class="btn-modal-cancel" id="btn-edit-profile-cancel">Cancel</button>
+        <button type="button" class="btn-modal-primary" id="btn-edit-profile-save">Save Profile</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ BAG BUILDER MODAL ════════════════════════════════════════ -->
+  <div class="portal-modal-overlay" id="bag-modal-overlay">
+    <div class="portal-modal portal-modal-wide">
+      <div class="portal-modal-header">
+        <div>
+          <h3>🎒 Configure Golf Bag</h3>
+          <p style="font-size:0.85rem; color:var(--muted); margin-top:0.25rem;">Select active clubs in your bag. Club suggestions and statistics filter to these clubs.</p>
+        </div>
+        <button class="portal-modal-close" id="btn-bag-close" aria-label="Close">✕</button>
+      </div>
+      <div class="portal-modal-body">
+        <div class="bag-modal-controls">
+          <div class="bag-count-badge" id="bag-count-badge">Clubs in Bag: 14 of 20 (Standard Limit: 14)</div>
+          <div class="bag-presets-row">
+            <button type="button" class="btn-preset" id="btn-preset-standard-14">Standard 14 Bag</button>
+            <button type="button" class="btn-preset" id="btn-preset-all">All 20 Clubs</button>
+            <button type="button" class="btn-preset" id="btn-preset-clear">Clear All</button>
+          </div>
+        </div>
+        <div class="bag-clubs-grid" id="bag-clubs-grid">
+          <!-- Populated by portal.js -->
+        </div>
+      </div>
+      <div class="portal-modal-footer">
+        <button type="button" class="btn-modal-cancel" id="btn-bag-cancel">Cancel</button>
+        <button type="button" class="btn-modal-primary" id="btn-bag-save">Save Bag</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ PORTAL TOAST ════════════════════════════════════════════ -->
+  <div class="portal-toast" id="portal-toast" role="status" aria-live="polite"></div>
 
   <!-- ══ PORTAL MODULE ══════════════════════════════════════════ -->
   <script type="module" src="js/portal-page.js"></script>

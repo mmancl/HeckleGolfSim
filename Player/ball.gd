@@ -89,6 +89,7 @@ var falling_time := 0.0
 var holed_out_this_shot := false
 var flight_time := 0.0
 var _cached_target_hole := Vector3.ZERO
+var _cup_sound_played := false
 
 # Tree canopy detection variables (throttled point check, 20 Hz)
 var _has_canopy_trees: bool = false
@@ -1251,23 +1252,48 @@ func _physics_process(delta: float) -> void:
 				var scene_cup_radius = _get_cup_radius()
 				var rim_outer_radius = scene_cup_radius + CUP_BEVEL_WIDTH
 
-				# Strictly zero inward pull outside the 5 mm cut turf bevel (no artificial suction)
+				# Strictly zero inward pull outside the cut turf bevel (no artificial suction)
 				if dist_2d <= rim_outer_radius:
 					var speed_total = velocity.length()
-					var speed_2d = Vector2(velocity.x, velocity.z).length()
-					var is_ground_roll = on_ground or is_putt or state == PhysicsEnums.BallState.ROLLOUT or speed_total < 8.0
-					var is_air_dunk = (not on_ground) and dist_2d < (scene_cup_radius - _ball_radius * 0.35) and vertical_diff <= (_ball_radius + 0.025) and speed_total < 9.0
+					var vel_2d = Vector2(velocity.x, velocity.z)
+					var speed_2d = vel_2d.length()
+					var is_air_dunk = (not on_ground) and (not is_putt) and state == PhysicsEnums.BallState.FLIGHT and dist_2d < (scene_cup_radius - _ball_radius * 0.35) and vertical_diff <= (_ball_radius + 0.025) and velocity.y < -0.5 and speed_total < 5.0
+					var is_ground_roll = not is_air_dunk
 
 					var can_fall = false
+					var s_along = 0.0
+					var b_offset = dist_2d
+					var dir_2d = Vector2.ZERO
+
+					if speed_2d > 0.001:
+						dir_2d = vel_2d / speed_2d
+						s_along = hole_diff_2d.dot(dir_2d)
+						var lat_vec = hole_diff_2d - dir_2d * s_along
+						b_offset = lat_vec.length()
+
+					# Physical critical capture speed calculation based on chord length and gravity drop
+					var chord_length = 0.0
+					if b_offset < scene_cup_radius:
+						chord_length = 2.0 * sqrt(scene_cup_radius * scene_cup_radius - b_offset * b_offset)
+					var chord_ratio = chord_length / (2.0 * scene_cup_radius)
+
+					# Dave Pelz / Penner putting physics:
+					# Max center-cup capture speed without flagstick is ~1.63 m/s (5.35 ft/s).
+					# Off-center putts have reduced chord length, dropping capture speed proportionally.
+					var v_crit_center = 1.63
+					var is_flag_in = _is_flagstick_in_cup()
+					if is_flag_in and b_offset <= (0.0065 + _ball_radius * 0.5):
+						# Flagstick absorbs impact for direct pin hits
+						v_crit_center = 2.25
+
+					var max_capture_speed = v_crit_center * chord_ratio
+
 					if is_air_dunk:
 						can_fall = true
-					elif is_ground_roll and dist_2d <= scene_cup_radius + 0.002:
-						# Ball center of mass is over the open cup mouth (or teetering inside the 2mm inner lip):
-						# Capture speed depends on chord length across the circular opening at impact parameter dist_2d
-						var radial_frac = clampf(dist_2d / scene_cup_radius, 0.0, 1.0)
-						var chord_factor = sqrt(maxf(0.0, 1.0 - radial_frac * radial_frac))
-						var max_capture_speed = 0.25 + 2.40 * chord_factor
-						if speed_2d <= max_capture_speed or speed_total < 0.35:
+					elif is_ground_roll and dist_2d <= scene_cup_radius:
+						# Ball center of mass is over the open cup mouth:
+						# Ball falls in only if it is approaching/over center and moving slow enough to drop under gravity
+						if (s_along >= -0.015 and speed_2d <= max_capture_speed) or speed_total < 0.25:
 							can_fall = true
 
 					if can_fall:
@@ -1276,39 +1302,48 @@ func _physics_process(delta: float) -> void:
 						falling_target_hole = target_hole
 						falling_time = 0.0
 						on_ground = false
+						_cup_sound_played = false
 						# Fold any current visual rim overhang dip into physical Y position seamlessly
 						if _ball_mesh != null:
 							var current_dip = get_visual_y_offset() - _ball_mesh.position.y
 							if current_dip > 0.0:
 								global_position.y -= current_dip
 							_ball_mesh.position.y = get_visual_y_offset()
-						# Preserve 3D horizontal momentum and spin as the ball tips over the rim under gravity
-						velocity.x *= 0.82
-						velocity.z *= 0.82
-						velocity.y = minf(velocity.y, -0.18)
-						if _cup_player != null and not _skipping_flight:
-							_cup_player.play()
-					elif is_ground_roll and dist_2d > 0.0001:
-						# Physical sphere-on-rim normal tilt on the 5 mm cut turf bevel / fast lip-out:
-						# As the ball overhangs the circular edge, the rim contact point shifts outward,
-						# tilting the support normal toward the hole center and curving fast grazing putts around the lip.
-						var inward_dir_2d = hole_diff_2d / dist_2d
-						var rim_penetration = clampf((rim_outer_radius - dist_2d) / (CUP_BEVEL_WIDTH + _ball_radius * 0.65), 0.0, 1.0)
-						var inward_accel = 9.81 * clampf(rim_penetration * 0.68, 0.08, 0.68)
-						var inward_delta_v = inward_dir_2d * (inward_accel * delta)
-						velocity.x += inward_delta_v.x
-						velocity.z += inward_delta_v.y
+						# Preserve forward horizontal momentum on entry - no artificial brake or suction!
+						# Downward gravity will naturally pull the ball into the cup.
+					elif is_ground_roll and speed_2d > 0.001 and dist_2d > 0.0001:
+						# Physical rim normal tilt (deflection / lip-out):
+						# When the ball overhangs the circular lip, the contact normal exerts a LATERAL force
+						# perpendicular to the ball's travel direction. This steers the ball slightly left/right
+						# without creating artificial forward/backward suction toward the hole.
+						var lat_vec = hole_diff_2d - dir_2d * s_along
+						var lat_dist = lat_vec.length()
+						var rim_overlap = clampf((rim_outer_radius - dist_2d) / (CUP_BEVEL_WIDTH + _ball_radius * 0.5), 0.0, 1.0)
+						if lat_dist > 0.0005:
+							var lat_dir = lat_vec / lat_dist
+							# Perpendicular lateral acceleration curves fast grazing putts left or right
+							var lateral_accel = 9.81 * rim_overlap * 0.40
+							var lat_delta_v = lat_dir * (lateral_accel * delta)
+							velocity.x += lat_delta_v.x
+							velocity.z += lat_delta_v.y
 
-						# Rim contact friction on the turf collar edge
-						var drag_factor = 1.0 - clampf((1.4 * rim_penetration + 0.35) * delta, 0.0, 0.20)
+						# Subtle turf edge rolling friction on the collar
+						var drag_factor = 1.0 - clampf((0.6 * rim_overlap) * delta, 0.0, 0.05)
 						velocity.x *= drag_factor
 						velocity.z *= drag_factor
 						if velocity.length_squared() > 0.0001 and _ball_radius > 0.0:
 							omega = (floor_normal.cross(velocity)) / _ball_radius
 
+						# Fast balls crossing over the opening hit the far lip and skip/hop forward
+						if dist_2d < scene_cup_radius and s_along < 0.0 and dist_2d > (scene_cup_radius - 0.020):
+							if velocity.y < 0.0:
+								velocity.y = 0.18
+								velocity.x *= 0.85
+								velocity.z *= 0.85
+
 						# Subtle geometric dip as the sphere overhangs the beveled rim
 						if _ball_mesh != null:
-							var dip_depth = clampf(rim_penetration * 0.012, 0.0, 0.012)
+							var dip_depth = clampf(rim_overlap * 0.008, 0.0, 0.008)
 							_ball_mesh.position.y = get_visual_y_offset() - dip_depth
 				else:
 					# Restore mesh Y offset when rolling away from the rim
@@ -1321,7 +1356,7 @@ func _physics_process(delta: float) -> void:
 	if is_falling_in_hole:
 		falling_time += delta
 		var scene_cup_radius = _get_cup_radius()
-		var max_center_r = maxf(0.008, scene_cup_radius - _ball_radius)
+		var cylinder_max_r = maxf(0.008, scene_cup_radius - _ball_radius)
 		var cup_floor_y = falling_target_hole.y - CUP_DEPTH + _ball_radius
 
 		# 1. Real downward gravity inside the recessed cup
@@ -1336,23 +1371,28 @@ func _physics_process(delta: float) -> void:
 				_ball_mesh.rotate(omega / omega_len, omega_len * delta)
 
 		# 3. Cylindrical inner cup wall & flagstick ferrule collision
+		# When near the top opening, allow the ball center to enter smoothly across the rim without snapping!
 		var offset_2d = Vector2(global_position.x - falling_target_hole.x, global_position.z - falling_target_hole.z)
 		var r = offset_2d.length()
-		if r > max_center_r:
+		var depth_below_rim = falling_target_hole.y - (global_position.y - _ball_radius)
+		var rim_transition = clampf(depth_below_rim / maxf(0.001, _ball_radius * 1.5), 0.0, 1.0)
+		var current_max_r = lerpf(scene_cup_radius, cylinder_max_r, rim_transition)
+
+		if r > current_max_r:
 			var wall_n = offset_2d / r
-			global_position.x = falling_target_hole.x + wall_n.x * max_center_r
-			global_position.z = falling_target_hole.z + wall_n.y * max_center_r
+			global_position.x = falling_target_hole.x + wall_n.x * current_max_r
+			global_position.z = falling_target_hole.z + wall_n.y * current_max_r
 			var v_rad = velocity.x * wall_n.x + velocity.z * wall_n.y
 			if v_rad > 0.0:
 				var wall_restitution = 0.32
 				velocity.x -= (1.0 + wall_restitution) * v_rad * wall_n.x
 				velocity.z -= (1.0 + wall_restitution) * v_rad * wall_n.y
-				velocity.x *= 0.78
-				velocity.z *= 0.78
+				velocity.x *= 0.82
+				velocity.z *= 0.82
 				omega *= 0.75
 		elif _is_flagstick_in_cup():
 			var pole_min_r = 0.0065 + _ball_radius
-			if r < pole_min_r and pole_min_r < max_center_r:
+			if r < pole_min_r and pole_min_r < cylinder_max_r:
 				var push_n = (offset_2d / r) if r > 0.0001 else Vector2(1.0, 0.0)
 				global_position.x = falling_target_hole.x + push_n.x * pole_min_r
 				global_position.z = falling_target_hole.z + push_n.y * pole_min_r
@@ -1366,23 +1406,27 @@ func _physics_process(delta: float) -> void:
 		# 4. Recessed cup bottom drain plate collision & bounce
 		if global_position.y <= cup_floor_y:
 			global_position.y = cup_floor_y
-			if velocity.y < -0.25:
-				velocity.y = -velocity.y * 0.24
+			if not _cup_sound_played:
+				_cup_sound_played = true
+				if _cup_player != null and not _skipping_flight:
+					_cup_player.play()
+			if velocity.y < -0.20:
+				velocity.y = -velocity.y * 0.22
 				velocity.x *= 0.65
 				velocity.z *= 0.65
-				omega *= 0.6
+				omega *= 0.60
 			else:
 				velocity.y = 0.0
-				velocity.x = move_toward(velocity.x, 0.0, 4.5 * delta)
-				velocity.z = move_toward(velocity.z, 0.0, 4.5 * delta)
-				omega = omega.move_toward(Vector3.ZERO, 12.0 * delta)
+				velocity.x = move_toward(velocity.x, 0.0, 5.0 * delta)
+				velocity.z = move_toward(velocity.z, 0.0, 5.0 * delta)
+				omega = omega.move_toward(Vector3.ZERO, 15.0 * delta)
 
 		# 5. Settle at rest at the bottom of the physical cup
 		if (absf(global_position.y - cup_floor_y) <= 0.002 and velocity.length() < 0.05) or falling_time > 1.2:
 			global_position.y = cup_floor_y
 			var final_off = Vector2(global_position.x - falling_target_hole.x, global_position.z - falling_target_hole.z)
-			if final_off.length() > max_center_r:
-				var clamped_off = final_off.normalized() * max_center_r
+			if final_off.length() > cylinder_max_r:
+				var clamped_off = final_off.normalized() * cylinder_max_r
 				global_position.x = falling_target_hole.x + clamped_off.x
 				global_position.z = falling_target_hole.z + clamped_off.y
 			is_falling_in_hole = false
@@ -2305,6 +2349,7 @@ func reset() -> void:
 	falling_target_hole = Vector3.ZERO
 	falling_time = 0.0
 	holed_out_this_shot = false
+	_cup_sound_played = false
 	if _ball_mesh != null:
 		var init_y := get_visual_y_offset()
 		if lie_type == "sand" or is_in_sand:
@@ -2572,6 +2617,7 @@ func hit_from_data(data: Dictionary) -> void:
 	falling_target_hole = Vector3.ZERO
 	falling_time = 0.0
 	holed_out_this_shot = false
+	_cup_sound_played = false
 	if _ball_mesh != null:
 		_ball_mesh.position.y = get_visual_y_offset()
 	flight_time = 0.0

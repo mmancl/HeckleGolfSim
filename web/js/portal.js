@@ -27,20 +27,31 @@ import {
 } from "./firebase-init.js";
 import { checkBudgetStatus, handleWriteError } from "./budget.js";
 
+const STANDARD_CLUBS = [
+  "Dr", "3w", "5w", "2H", "3H", "4H", "1i", "2i", "3i", "4i",
+  "5i", "6i", "7i", "8i", "9i", "Pw", "Gw", "Sw", "Lw", "Pt"
+];
+
+const STANDARD_14_BAG = [
+  "Dr", "3w", "5w", "4H", "5i", "6i", "7i", "8i", "9i", "Pw", "Gw", "Sw", "Lw", "Pt"
+];
+
 const STANDARD_BAG_ORDER = [
-  "Dr", "3W", "5W", "7W", "2H", "3H", "4H", "5H",
-  "3i", "4i", "5i", "6i", "7i", "8i", "9i", "PW", "GW", "SW", "LW", "Pt"
+  "Dr", "3w", "3W", "5w", "5W", "7w", "7W", "2H", "3H", "4H", "5H",
+  "1i", "2i", "3i", "4i", "5i", "6i", "7i", "8i", "9i", "Pw", "PW", "Gw", "GW", "Sw", "SW", "Lw", "LW", "Pt"
 ];
 
 const CLUB_LABELS = {
   Dr: "Driver",
-  "3W": "3 Wood",
-  "5W": "5 Wood",
-  "7W": "7 Wood",
+  "3w": "3 Wood", "3W": "3 Wood",
+  "5w": "5 Wood", "5W": "5 Wood",
+  "7w": "7 Wood", "7W": "7 Wood",
   "2H": "2 Hybrid",
   "3H": "3 Hybrid",
   "4H": "4 Hybrid",
   "5H": "5 Hybrid",
+  "1i": "1 Iron",
+  "2i": "2 Iron",
   "3i": "3 Iron",
   "4i": "4 Iron",
   "5i": "5 Iron",
@@ -48,10 +59,10 @@ const CLUB_LABELS = {
   "7i": "7 Iron",
   "8i": "8 Iron",
   "9i": "9 Iron",
-  PW: "Pitching Wedge",
-  GW: "Gap Wedge",
-  SW: "Sand Wedge",
-  LW: "Lob Wedge",
+  Pw: "Pitching Wedge", PW: "Pitching Wedge",
+  Gw: "Gap Wedge", GW: "Gap Wedge",
+  Sw: "Sand Wedge", SW: "Sand Wedge",
+  Lw: "Lob Wedge", LW: "Lob Wedge",
   Pt: "Putter"
 };
 
@@ -79,6 +90,10 @@ let loadedTabs = { overview: false, matches: false, achievements: false, setting
 let pendingDeviceCode = "";
 let pendingLoopbackPort = "";
 let deviceHandoffCompleted = false;
+let filterInBagOnly = false;
+let temporaryBagSelection = new Set();
+let activeConfirmCallback = null;
+let toastTimeout = null;
 
 export function initPortal() {
   const urlParams = new URLSearchParams(window.location.search);
@@ -88,6 +103,7 @@ export function initPortal() {
   bindAuthModeToggles();
   bindAuthForms();
   bindPortalTabs();
+  bindPlayerManagement();
 
   // Listen to Auth state
   onAuthStateChanged(auth, async (user) => {
@@ -564,7 +580,9 @@ async function loadUserData(user) {
       };
     }
 
+    updateUserHeader(user, currentProfile);
     renderOverviewCards(currentProfile);
+    renderProfilePreferencesSummary(currentProfile);
     renderClubSummary(currentProfile);
     renderBestCourses(currentProfile);
     loadedTabs.overview = true;
@@ -578,14 +596,15 @@ async function loadUserData(user) {
   }
 }
 
-function updateUserHeader(user) {
+function updateUserHeader(user, profile) {
   const avatarEl = document.getElementById("portal-avatar-initial");
   const nameEl = document.getElementById("portal-user-display-name");
   const emailEl = document.getElementById("portal-user-email");
 
-  const initial = (user.displayName || user.email || "?").charAt(0).toUpperCase();
+  const displayName = profile?.display_name || user.displayName || user.email.split("@")[0];
+  const initial = (displayName || "?").charAt(0).toUpperCase();
   if (avatarEl) avatarEl.textContent = initial;
-  if (nameEl) nameEl.textContent = user.displayName || user.email.split("@")[0];
+  if (nameEl) nameEl.textContent = displayName;
   if (emailEl) emailEl.textContent = user.email;
 }
 
@@ -784,6 +803,84 @@ function renderOverviewCards(profile) {
   }
 }
 
+function formatSkillLevel(lvl) {
+  switch (lvl) {
+    case "beginner": return "Beginner (20+ Hcp)";
+    case "mid_handicap": return "Mid Handicap (10-19)";
+    case "low_handicap": return "Low Handicap (1-9)";
+    case "scratch": return "Scratch / Pro (0 or Better)";
+    default: return "Mid Handicap (10-19)";
+  }
+}
+
+function formatBallGraphic(bg) {
+  switch (bg) {
+    case "single_line": return "Single Line";
+    case "triple_track": return "Triple Track";
+    case "visor": return "Visor Stripe";
+    case "soccer_ball": return "Hex Soccer";
+    case "truvis": return "Truvis High Contrast";
+    default: return "Single Line";
+  }
+}
+
+function renderProfilePreferencesSummary(profile) {
+  const container = document.getElementById("profile-preferences-summary");
+  if (!container) return;
+
+  const tee = profile?.preferred_tee || "Blue";
+  const skill = formatSkillLevel(profile?.skill_level);
+  const dexterity = (profile?.handedness === 1) ? "Left-Handed" : "Right-Handed";
+  const ball = formatBallGraphic(profile?.ball_graphic);
+  const bagCount = (profile?.bag && Array.isArray(profile.bag) && profile.bag.length > 0)
+    ? `${profile.bag.length} Clubs Configured`
+    : "Default (All 20 Clubs)";
+
+  container.innerHTML = `
+    <div class="pref-badge">
+      <span class="pref-icon">⛳</span>
+      <div>
+        <div class="pref-label">Preferred Tee</div>
+        <div class="pref-val">${escapeHtml(tee)}</div>
+      </div>
+    </div>
+    <div class="pref-badge">
+      <span class="pref-icon">🎯</span>
+      <div>
+        <div class="pref-label">Skill Level</div>
+        <div class="pref-val">${escapeHtml(skill)}</div>
+      </div>
+    </div>
+    <div class="pref-badge">
+      <span class="pref-icon">🏌️</span>
+      <div>
+        <div class="pref-label">Dexterity</div>
+        <div class="pref-val">${escapeHtml(dexterity)}</div>
+      </div>
+    </div>
+    <div class="pref-badge">
+      <span class="pref-icon">⚪</span>
+      <div>
+        <div class="pref-label">Ball Graphic</div>
+        <div class="pref-val">${escapeHtml(ball)}</div>
+      </div>
+    </div>
+    <div class="pref-badge">
+      <span class="pref-icon">🎒</span>
+      <div>
+        <div class="pref-label">Golf Bag</div>
+        <div class="pref-val">${escapeHtml(bagCount)}</div>
+      </div>
+    </div>
+  `;
+
+  const bagBtnTable = document.getElementById("btn-open-bag-modal-table");
+  if (bagBtnTable) {
+    const count = (profile?.bag && Array.isArray(profile.bag) && profile.bag.length > 0) ? profile.bag.length : 20;
+    bagBtnTable.textContent = `🎒 Bag (${count})`;
+  }
+}
+
 function renderClubSummary(profile) {
   const container = document.getElementById("club-summary-container");
   if (!container) return;
@@ -802,16 +899,34 @@ function renderClubSummary(profile) {
   }
 
   // Sort by standard bag order
-  const sortedClubs = STANDARD_BAG_ORDER.filter((c) => summary[c] != null);
+  let sortedClubs = STANDARD_BAG_ORDER.filter((c) => summary[c] != null || summary[c.toLowerCase()] != null || summary[c.toUpperCase()] != null);
   // Add any extra clubs not in standard list
   clubKeys.forEach((c) => {
-    if (!sortedClubs.includes(c)) sortedClubs.push(c);
+    if (!sortedClubs.some(sc => sc.toLowerCase() === c.toLowerCase())) sortedClubs.push(c);
   });
+
+  // Filter in-bag only if enabled and bag is configured
+  const activeBag = (profile?.bag && Array.isArray(profile.bag) && profile.bag.length > 0) ? profile.bag : null;
+  if (filterInBagOnly && activeBag) {
+    const bagLower = activeBag.map(b => b.toLowerCase());
+    sortedClubs = sortedClubs.filter(c => bagLower.includes(c.toLowerCase()));
+  }
+
+  if (sortedClubs.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <span class="empty-icon">🎒</span>
+        <p>No recorded shots for clubs in your selected bag. Switch clubs or uncheck "In-Bag Only" to view all club averages.</p>
+      </div>
+    `;
+    return;
+  }
 
   let rowsHtml = "";
   sortedClubs.forEach((clubKey) => {
-    const s = summary[clubKey];
-    const clubName = CLUB_LABELS[clubKey] || clubKey;
+    const s = summary[clubKey] || summary[clubKey.toLowerCase()] || summary[clubKey.toUpperCase()];
+    if (!s) return;
+    const clubName = CLUB_LABELS[clubKey] || CLUB_LABELS[clubKey.toLowerCase()] || CLUB_LABELS[clubKey.toUpperCase()] || clubKey;
     const carry = s.carry_yds != null ? Number(s.carry_yds).toFixed(1) : "–";
     const total = s.total_yds != null ? Number(s.total_yds).toFixed(1) : "–";
     const bSpeed = s.ball_speed_mph != null ? Number(s.ball_speed_mph).toFixed(1) : "–";
@@ -823,8 +938,8 @@ function renderClubSummary(profile) {
     rowsHtml += `
       <tr>
         <td style="font-weight: 700; color: var(--text);">
-          <span style="color: var(--green); margin-right: 0.35rem;">${clubKey}</span>
-          <span style="font-size: 0.85rem; color: var(--muted); font-weight: normal;">${clubName}</span>
+          <span style="color: var(--green); margin-right: 0.35rem;">${escapeHtml(clubKey)}</span>
+          <span style="font-size: 0.85rem; color: var(--muted); font-weight: normal;">${escapeHtml(clubName)}</span>
         </td>
         <td style="font-weight: 700; color: var(--green);">${carry}</td>
         <td>${total}</td>
@@ -833,6 +948,13 @@ function renderClubSummary(profile) {
         <td>${smash}</td>
         <td>${spin}</td>
         <td style="text-align: right; color: var(--muted);">${count}</td>
+        <td style="text-align: center;">
+          ${count > 0 ? `
+            <button class="btn-clear-club-row" data-club="${escapeHtml(clubKey)}" data-club-name="${escapeHtml(clubName)}" data-count="${count}" title="Clear shot data for ${escapeHtml(clubName)}">
+              🗑 Clear
+            </button>
+          ` : `<span style="color:var(--muted); font-size:0.8rem;">–</span>`}
+        </td>
       </tr>
     `;
   });
@@ -850,6 +972,7 @@ function renderClubSummary(profile) {
             <th>Smash</th>
             <th>Spin (rpm)</th>
             <th style="text-align: right;">Swings</th>
+            <th style="text-align: center;">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -858,6 +981,516 @@ function renderClubSummary(profile) {
       </table>
     </div>
   `;
+
+  container.querySelectorAll(".btn-clear-club-row").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const code = btn.getAttribute("data-club");
+      const name = btn.getAttribute("data-club-name");
+      const cnt = btn.getAttribute("data-count");
+      showConfirmModal({
+        title: "Clear Club Shot Data",
+        message: `Are you sure you want to clear shot data for ${name} (${code})?\n\nThis will reset all ${cnt} recorded shots for this club and cannot be undone.`,
+        confirmText: "Clear Club Data",
+        onConfirm: () => clearClubShotData(code)
+      });
+    });
+  });
+}
+
+// ─── PLAYER PROFILE & STATS MANAGEMENT ───
+async function clearClubShotData(clubKey) {
+  if (!currentUser) return;
+  try {
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    // 1. Update sync/stats
+    const statsRef = doc(db, "profiles", currentUser.uid, "sync", "stats");
+    const statsSnap = await getDoc(statsRef);
+    const statsData = statsSnap.exists() ? statsSnap.data() : { schema_version: 1, clubs: {}, tombstones: {}, records: {} };
+
+    const clubs = { ...(statsData.clubs || {}) };
+    for (const k of Object.keys(clubs)) {
+      if (k.toLowerCase() === clubKey.toLowerCase()) {
+        delete clubs[k];
+      }
+    }
+
+    const tombstones = { ...(statsData.tombstones || {}) };
+    const clearedClubs = { ...(tombstones.cleared_clubs || {}) };
+    clearedClubs[clubKey] = nowSec;
+    tombstones.cleared_clubs = clearedClubs;
+
+    const records = { ...(statsData.records || {}) };
+    if (clubKey.toLowerCase() === "dr" || clubKey.toLowerCase() === "driver") {
+      delete records.longest_drive;
+    }
+
+    const statsRev = (statsData.rev || 0) + 1;
+    await setDoc(statsRef, {
+      ...statsData,
+      schema_version: 1,
+      clubs,
+      records,
+      tombstones,
+      rev: statsRev,
+      updated_at: nowSec
+    }, { merge: true });
+
+    // 2. Update profiles/{uid}
+    const profRef = doc(db, "profiles", currentUser.uid);
+    const profSnap = await getDoc(profRef);
+    if (profSnap.exists()) {
+      const profData = profSnap.data();
+      const clubSummary = { ...(profData.club_summary || {}) };
+      for (const k of Object.keys(clubSummary)) {
+        if (k.toLowerCase() === clubKey.toLowerCase()) {
+          delete clubSummary[k];
+        }
+      }
+      const profRev = (profData.rev || 0) + 1;
+      await updateDoc(profRef, {
+        club_summary: clubSummary,
+        rev: profRev,
+        updated_at: nowSec,
+        updated_by_uid: currentUser.uid
+      });
+      currentProfile = { ...profData, club_summary: clubSummary, rev: profRev };
+    }
+
+    renderClubSummary(currentProfile);
+    showToast(`✓ Shot data for ${CLUB_LABELS[clubKey] || clubKey} cleared.`);
+  } catch (err) {
+    console.error("Failed to clear club data:", err);
+    const pauseMsg = await handleWriteError(err);
+    showToast(pauseMsg || ("Failed to clear club data: " + (err.message || err)));
+  }
+}
+
+async function clearAllBallHistory() {
+  if (!currentUser) return;
+  try {
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    // 1. Update sync/stats
+    const statsRef = doc(db, "profiles", currentUser.uid, "sync", "stats");
+    const statsSnap = await getDoc(statsRef);
+    const statsData = statsSnap.exists() ? statsSnap.data() : { schema_version: 1 };
+
+    const tombstones = { ...(statsData.tombstones || {}) };
+    tombstones.cleared_all_at = nowSec;
+
+    const statsRev = (statsData.rev || 0) + 1;
+    await setDoc(statsRef, {
+      ...statsData,
+      schema_version: 1,
+      clubs: {},
+      records: {},
+      tombstones,
+      rev: statsRev,
+      updated_at: nowSec
+    }, { merge: true });
+
+    // 2. Update profiles/{uid}
+    const profRef = doc(db, "profiles", currentUser.uid);
+    const profSnap = await getDoc(profRef);
+    if (profSnap.exists()) {
+      const profData = profSnap.data();
+      const lifetime = { ...(profData.lifetime || {}) };
+      lifetime.longest_drive_yds = 0;
+      const profRev = (profData.rev || 0) + 1;
+      await updateDoc(profRef, {
+        club_summary: {},
+        lifetime,
+        rev: profRev,
+        updated_at: nowSec,
+        updated_by_uid: currentUser.uid
+      });
+      currentProfile = { ...profData, club_summary: {}, lifetime, rev: profRev };
+    }
+
+    renderOverviewCards(currentProfile);
+    renderClubSummary(currentProfile);
+    showToast("✓ All ball history across all clubs has been cleared.");
+  } catch (err) {
+    console.error("Failed to clear ball history:", err);
+    const pauseMsg = await handleWriteError(err);
+    showToast(pauseMsg || ("Failed to clear ball history: " + (err.message || err)));
+  }
+}
+
+async function clearSwingHistory() {
+  if (!currentUser) return;
+  try {
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    const statsRef = doc(db, "profiles", currentUser.uid, "sync", "stats");
+    const statsSnap = await getDoc(statsRef);
+    const statsData = statsSnap.exists() ? statsSnap.data() : { schema_version: 1 };
+
+    const tombstones = { ...(statsData.tombstones || {}) };
+    tombstones.cleared_swing_issues_at = nowSec;
+
+    const statsRev = (statsData.rev || 0) + 1;
+    await setDoc(statsRef, {
+      ...statsData,
+      schema_version: 1,
+      swing_issues: {},
+      tombstones,
+      rev: statsRev,
+      updated_at: nowSec
+    }, { merge: true });
+
+    const swingContainer = document.getElementById("swing-analysis-container");
+    if (swingContainer) {
+      swingContainer.innerHTML = `
+        <div class="empty-state">
+          <span class="empty-icon">📊</span>
+          <p>No swing issues logged yet. Enable swing analysis on your launch monitor to track swing tendencies over time!</p>
+        </div>
+      `;
+    }
+    showToast("✓ Swing flaw and tendency history has been cleared.");
+  } catch (err) {
+    console.error("Failed to clear swing history:", err);
+    const pauseMsg = await handleWriteError(err);
+    showToast(pauseMsg || ("Failed to clear swing history: " + (err.message || err)));
+  }
+}
+
+async function saveProfilePreferences(updates) {
+  if (!currentUser) return;
+  try {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const profRef = doc(db, "profiles", currentUser.uid);
+    const profSnap = await getDoc(profRef);
+    const profData = profSnap.exists() ? profSnap.data() : {};
+    const profRev = (profData.rev || 0) + 1;
+
+    const finalName = (updates.displayName || profData.display_name || currentUser.displayName || "Golfer").trim();
+    const newProf = {
+      ...profData,
+      schema_version: 1,
+      display_name: finalName,
+      preferred_tee: updates.preferredTee || profData.preferred_tee || "Blue",
+      skill_level: updates.skillLevel || profData.skill_level || "mid_handicap",
+      handedness: updates.handedness != null ? updates.handedness : (profData.handedness ?? 0),
+      ball_graphic: updates.ballGraphic || profData.ball_graphic || "single_line",
+      rev: profRev,
+      updated_at: nowSec,
+      updated_by_uid: currentUser.uid
+    };
+
+    await setDoc(profRef, newProf, { merge: true });
+
+    // Update Firebase Auth user displayName if changed
+    if (finalName && finalName !== currentUser.displayName) {
+      try {
+        await updateProfile(currentUser, { displayName: finalName });
+      } catch (e) {
+        console.warn("Could not update auth displayName:", e);
+      }
+    }
+
+    // Update users/{uid}
+    try {
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        display_name: finalName,
+        updated_at: nowSec
+      });
+    } catch {}
+
+    // Update public_profiles/{uid} if present
+    try {
+      const pubSnap = await getDoc(doc(db, "public_profiles", currentUser.uid));
+      if (pubSnap.exists()) {
+        await updateDoc(doc(db, "public_profiles", currentUser.uid), {
+          display_name: finalName,
+          updated_at: nowSec
+        });
+      }
+    } catch {}
+
+    currentProfile = newProf;
+
+    updateUserHeader(currentUser, currentProfile);
+    renderProfilePreferencesSummary(currentProfile);
+    closeEditProfileModal();
+    showToast("✓ Profile and preferences updated successfully.");
+  } catch (err) {
+    console.error("Failed to update profile:", err);
+    const pauseMsg = await handleWriteError(err);
+    showToast(pauseMsg || ("Failed to update profile: " + (err.message || err)));
+  }
+}
+
+async function saveBagConfiguration(newBag) {
+  if (!currentUser) return;
+  try {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const profRef = doc(db, "profiles", currentUser.uid);
+    const profSnap = await getDoc(profRef);
+    const profData = profSnap.exists() ? profSnap.data() : {};
+    const profRev = (profData.rev || 0) + 1;
+
+    await updateDoc(profRef, {
+      bag: newBag,
+      rev: profRev,
+      updated_at: nowSec,
+      updated_by_uid: currentUser.uid
+    });
+
+    currentProfile = { ...currentProfile, bag: newBag, rev: profRev };
+    renderProfilePreferencesSummary(currentProfile);
+    renderClubSummary(currentProfile);
+    closeBagModal();
+    showToast(`✓ Golf bag saved (${newBag.length} clubs configured).`);
+  } catch (err) {
+    console.error("Failed to save golf bag:", err);
+    const pauseMsg = await handleWriteError(err);
+    showToast(pauseMsg || ("Failed to save golf bag: " + (err.message || err)));
+  }
+}
+
+// ─── MODAL CONTROLLERS & TOAST ───
+function showConfirmModal({ title, message, confirmText = "Confirm", onConfirm }) {
+  const overlay = document.getElementById("confirm-modal-overlay");
+  const titleEl = document.getElementById("confirm-modal-title");
+  const descEl = document.getElementById("confirm-modal-message");
+  const proceedBtn = document.getElementById("btn-confirm-proceed");
+
+  if (!overlay) return;
+  if (titleEl) titleEl.textContent = title;
+  if (descEl) descEl.textContent = message;
+  if (proceedBtn) proceedBtn.textContent = confirmText;
+  activeConfirmCallback = onConfirm;
+
+  overlay.classList.add("open");
+  document.body.style.overflow = "hidden";
+}
+
+function closeConfirmModal() {
+  const overlay = document.getElementById("confirm-modal-overlay");
+  if (overlay) overlay.classList.remove("open");
+  document.body.style.overflow = "";
+  activeConfirmCallback = null;
+}
+
+function openEditProfileModal() {
+  const overlay = document.getElementById("edit-profile-modal-overlay");
+  if (!overlay) return;
+
+  const nameInput = document.getElementById("input-edit-display-name");
+  const teeSelect = document.getElementById("select-edit-preferred-tee");
+  const handSelect = document.getElementById("select-edit-handedness");
+  const skillSelect = document.getElementById("select-edit-skill-level");
+  const ballSelect = document.getElementById("select-edit-ball-graphic");
+
+  const p = currentProfile || {};
+  if (nameInput) nameInput.value = p.display_name || currentUser?.displayName || currentUser?.email?.split("@")[0] || "";
+  if (teeSelect) teeSelect.value = p.preferred_tee || "Blue";
+  if (handSelect) handSelect.value = String(p.handedness ?? 0);
+  if (skillSelect) skillSelect.value = p.skill_level || "mid_handicap";
+  if (ballSelect) ballSelect.value = p.ball_graphic || "single_line";
+
+  overlay.classList.add("open");
+  document.body.style.overflow = "hidden";
+}
+
+function closeEditProfileModal() {
+  const overlay = document.getElementById("edit-profile-modal-overlay");
+  if (overlay) overlay.classList.remove("open");
+  document.body.style.overflow = "";
+}
+
+function openBagModal() {
+  const overlay = document.getElementById("bag-modal-overlay");
+  if (!overlay) return;
+
+  const currentBag = (currentProfile?.bag && Array.isArray(currentProfile.bag) && currentProfile.bag.length > 0)
+    ? currentProfile.bag
+    : STANDARD_CLUBS;
+
+  temporaryBagSelection = new Set(currentBag);
+  renderBagClubsGrid();
+
+  overlay.classList.add("open");
+  document.body.style.overflow = "hidden";
+}
+
+function closeBagModal() {
+  const overlay = document.getElementById("bag-modal-overlay");
+  if (overlay) overlay.classList.remove("open");
+  document.body.style.overflow = "";
+}
+
+function renderBagClubsGrid() {
+  const grid = document.getElementById("bag-clubs-grid");
+  const countBadge = document.getElementById("bag-count-badge");
+  if (!grid) return;
+
+  const count = temporaryBagSelection.size;
+  if (countBadge) {
+    countBadge.textContent = `Clubs in Bag: ${count} of 20 (Standard Limit: 14)`;
+  }
+
+  let html = "";
+  STANDARD_CLUBS.forEach((code) => {
+    const isSelected = temporaryBagSelection.has(code);
+    const name = CLUB_LABELS[code] || code;
+    html += `
+      <div class="bag-chip ${isSelected ? "active" : ""}" data-club="${code}">
+        <span class="bag-chip-code">${code}</span>
+        <span class="bag-chip-name">${name}</span>
+        <span class="bag-chip-status">${isSelected ? "✓ In Bag" : "+ Add"}</span>
+      </div>
+    `;
+  });
+  grid.innerHTML = html;
+
+  grid.querySelectorAll(".bag-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const code = chip.getAttribute("data-club");
+      if (temporaryBagSelection.has(code)) {
+        temporaryBagSelection.delete(code);
+      } else {
+        temporaryBagSelection.add(code);
+      }
+      renderBagClubsGrid();
+    });
+  });
+}
+
+function showToast(message) {
+  const toast = document.getElementById("portal-toast");
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.add("active");
+  if (toastTimeout) clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => {
+    toast.classList.remove("active");
+  }, 3500);
+}
+
+function bindPlayerManagement() {
+  // Confirm modal buttons
+  document.getElementById("btn-confirm-close")?.addEventListener("click", closeConfirmModal);
+  document.getElementById("btn-confirm-cancel")?.addEventListener("click", closeConfirmModal);
+  document.getElementById("btn-confirm-proceed")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-confirm-proceed");
+    if (activeConfirmCallback) {
+      if (btn) { btn.disabled = true; btn.textContent = "Processing…"; }
+      try {
+        await activeConfirmCallback();
+      } finally {
+        if (btn) { btn.disabled = false; }
+        closeConfirmModal();
+      }
+    }
+  });
+
+  // Edit profile triggers
+  document.getElementById("btn-edit-profile")?.addEventListener("click", openEditProfileModal);
+  document.getElementById("portal-top-edit-profile-btn")?.addEventListener("click", openEditProfileModal);
+  document.getElementById("btn-edit-profile-close")?.addEventListener("click", closeEditProfileModal);
+  document.getElementById("btn-edit-profile-cancel")?.addEventListener("click", closeEditProfileModal);
+  document.getElementById("btn-edit-profile-save")?.addEventListener("click", async () => {
+    const nameInput = document.getElementById("input-edit-display-name");
+    const teeSelect = document.getElementById("select-edit-preferred-tee");
+    const handSelect = document.getElementById("select-edit-handedness");
+    const skillSelect = document.getElementById("select-edit-skill-level");
+    const ballSelect = document.getElementById("select-edit-ball-graphic");
+
+    const updates = {
+      displayName: nameInput?.value?.trim() || "",
+      preferredTee: teeSelect?.value || "Blue",
+      handedness: handSelect ? parseInt(handSelect.value, 10) : 0,
+      skillLevel: skillSelect?.value || "mid_handicap",
+      ballGraphic: ballSelect?.value || "single_line"
+    };
+
+    const saveBtn = document.getElementById("btn-edit-profile-save");
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
+    try {
+      await saveProfilePreferences(updates);
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save Profile"; }
+    }
+  });
+
+  // Bag builder triggers
+  document.getElementById("btn-open-bag-builder")?.addEventListener("click", openBagModal);
+  document.getElementById("btn-open-bag-modal-table")?.addEventListener("click", openBagModal);
+  document.getElementById("btn-bag-close")?.addEventListener("click", closeBagModal);
+  document.getElementById("btn-bag-cancel")?.addEventListener("click", closeBagModal);
+  document.getElementById("btn-preset-standard-14")?.addEventListener("click", () => {
+    temporaryBagSelection = new Set(STANDARD_14_BAG);
+    renderBagClubsGrid();
+  });
+  document.getElementById("btn-preset-all")?.addEventListener("click", () => {
+    temporaryBagSelection = new Set(STANDARD_CLUBS);
+    renderBagClubsGrid();
+  });
+  document.getElementById("btn-preset-clear")?.addEventListener("click", () => {
+    temporaryBagSelection.clear();
+    renderBagClubsGrid();
+  });
+  document.getElementById("btn-bag-save")?.addEventListener("click", async () => {
+    const saveBtn = document.getElementById("btn-bag-save");
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
+    try {
+      await saveBagConfiguration(Array.from(temporaryBagSelection));
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save Bag"; }
+    }
+  });
+
+  // Active in-bag only filter toggle
+  document.getElementById("toggle-active-bag-only")?.addEventListener("change", (e) => {
+    filterInBagOnly = e.target.checked;
+    renderClubSummary(currentProfile);
+  });
+
+  // Clear all ball history
+  document.getElementById("btn-clear-all-history")?.addEventListener("click", () => {
+    showConfirmModal({
+      title: "Clear All Ball History",
+      message: "Are you sure you want to clear your entire ball history across all clubs? This resets all your club average carries, speed, spin, and personal best records, and cannot be undone.",
+      confirmText: "Clear All History",
+      onConfirm: clearAllBallHistory
+    });
+  });
+
+  // Clear swing flaw history
+  document.getElementById("btn-clear-swing-history")?.addEventListener("click", () => {
+    showConfirmModal({
+      title: "Clear Swing Tendencies",
+      message: "Are you sure you want to clear your swing tendency history? This resets all recorded swing flaws and improvement recommendations.",
+      confirmText: "Clear Swing History",
+      onConfirm: clearSwingHistory
+    });
+  });
+
+  // Close modals on overlay backdrop click
+  ["confirm-modal-overlay", "edit-profile-modal-overlay", "bag-modal-overlay"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener("click", (e) => {
+        if (e.target === el) {
+          el.classList.remove("open");
+          document.body.style.overflow = "";
+        }
+      });
+    }
+  });
+
+  // Close modals on Escape key
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeConfirmModal();
+      closeEditProfileModal();
+      closeBagModal();
+    }
+  });
 }
 
 function renderBestCourses(profile) {
@@ -913,12 +1546,28 @@ async function loadRecentMatches(user) {
   `;
 
   try {
-    const q = query(
-      collection(db, "profiles", user.uid, "matches"),
-      orderBy("played_at", "desc"),
-      limit(10)
-    );
-    const snap = await getDocs(q);
+    let snap;
+    try {
+      const q = query(
+        collection(db, "profiles", user.uid, "matches"),
+        orderBy("played_at", "desc"),
+        limit(10)
+      );
+      snap = await getDocs(q);
+      if (snap.empty) {
+        const qFallback = query(
+          collection(db, "profiles", user.uid, "matches"),
+          limit(10)
+        );
+        snap = await getDocs(qFallback);
+      }
+    } catch {
+      const qFallback = query(
+        collection(db, "profiles", user.uid, "matches"),
+        limit(10)
+      );
+      snap = await getDocs(qFallback);
+    }
     const matches = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
     loadedTabs.matches = true;
@@ -936,7 +1585,8 @@ async function loadRecentMatches(user) {
     let listHtml = "";
     matches.forEach((m, idx) => {
       const courseName = escapeHtml(m.course_name || "Unknown Course");
-      const dateStr = m.played_at ? new Date(m.played_at * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
+      const playedTimestamp = m.played_at || m.created_at;
+      const dateStr = playedTimestamp ? new Date(playedTimestamp * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
       const holesCount = m.holes_count || 18;
       const strokes = m.strokes || "–";
       const toPar = m.to_par != null ? (m.to_par === 0 ? "E" : m.to_par > 0 ? `+${m.to_par}` : `${m.to_par}`) : "";

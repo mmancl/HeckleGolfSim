@@ -1349,20 +1349,23 @@ func _update_course_length_options(idx: int) -> void:
 			var holes = parsed.get("Hole Info", {})
 			var num_holes = holes.keys().size()
 			var has_extra = false
+			var max_hole_num = 0
 			for h_id in holes.keys():
-				if MultiplayerManager.get_hole_number_from_id(str(h_id)) >= 19:
+				var h_num = MultiplayerManager.get_hole_number_from_id(str(h_id))
+				if h_num > max_hole_num:
+					max_hole_num = h_num
+				if h_num >= 19:
 					has_extra = true
-					break
-			if num_holes > 18:
+			if num_holes > 18 or max_hole_num >= 19:
 				has_extra = true
 
-			if num_holes < 10:
+			if num_holes < 10 and max_hole_num < 10:
 				back_9_btn.disabled = true
 				back_9_selected = false
 				extra_holes_btn.disabled = true
 				extra_holes_selected = false
 				front_9_selected = true
-			elif num_holes < 18 and not has_extra:
+			elif num_holes < 18 and max_hole_num < 18 and not has_extra:
 				back_9_btn.disabled = false
 				extra_holes_btn.disabled = true
 				extra_holes_selected = false

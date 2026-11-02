@@ -28,6 +28,7 @@
     "matches": {
       "$matchId": {
         ".read": "auth != null && root.child('system/status/paused').val() != true",
+        ".write": "auth != null && root.child('system/status/paused').val() != true && ((!data.exists() && newData.child('meta/host_uid').val() == auth.uid) || (!newData.exists() && (data.child('meta/host_uid').val() == auth.uid || data.child('meta/created_at').val() < ((now / 1000) - 86400))))",
         "meta": {
           ".write": "auth != null && root.child('system/status/paused').val() != true && ((!data.exists() && newData.child('host_uid').val() == auth.uid) || (data.exists() && data.child('host_uid').val() == auth.uid) || (data.exists() && root.child('matches/' + $matchId + '/devices/' + auth.uid).exists() && newData.child('host_uid').val() == data.child('host_uid').val()))"
         },
