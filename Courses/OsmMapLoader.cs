@@ -11626,10 +11626,10 @@ public partial class OsmMapLoader : Node
         var st = new SurfaceTool();
         st.Begin(Mesh.PrimitiveType.Triangles);
 
-        Color centerConcrete = new Color(0.28f, 0.29f, 0.31f);
-        Color laneConcrete = new Color(0.33f, 0.34f, 0.36f);
-        Color curbConcrete = new Color(0.42f, 0.43f, 0.44f);
-        Color skirtConcrete = new Color(0.24f, 0.25f, 0.26f);
+        Color centerConcrete = new Color(0.18f, 0.19f, 0.20f);
+        Color laneConcrete = new Color(0.22f, 0.23f, 0.24f);
+        Color curbConcrete = new Color(0.28f, 0.29f, 0.30f);
+        Color skirtConcrete = new Color(0.15f, 0.16f, 0.17f);
 
         int n = smoothPts.Count;
         var leftSkirt = new Vector3[n];
