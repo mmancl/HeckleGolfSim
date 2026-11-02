@@ -56,8 +56,15 @@ static func get_courses_needing_upgrade(base_dir: String = "user://courses") -> 
 					if json.parse(raw_text) == OK and json.data is Dictionary:
 						var data: Dictionary = json.data
 						var version := int(data.get("graphics_version", 1))
-						var rel_scene := str(data.get("scene_path", "course.tscn"))
+						var rel_scene := str(data.get("scene_path", "course.scn"))
 						var scene_path := course_dir.path_join(rel_scene) if not rel_scene.begins_with("user://") and not rel_scene.begins_with("res://") else rel_scene
+						if not FileAccess.file_exists(scene_path):
+							var scn_path := course_dir.path_join("course.scn")
+							var tscn_path := course_dir.path_join("course.tscn")
+							if FileAccess.file_exists(scn_path):
+								scene_path = scn_path
+							elif FileAccess.file_exists(tscn_path):
+								scene_path = tscn_path
 						if version < CURRENT_COURSE_GRAPHICS_VERSION and FileAccess.file_exists(scene_path):
 							if is_course_scene_already_upgraded(scene_path):
 								data["graphics_version"] = CURRENT_COURSE_GRAPHICS_VERSION

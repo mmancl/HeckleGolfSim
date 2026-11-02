@@ -167,8 +167,9 @@ func pop_lock(target: Variant = null, restore_focus: bool = true) -> void:
 	else:
 		entry = _lock_stack.pop_back()
 
-	var root: Node = entry.get("root") as Node
-	if root != null and is_instance_valid(root):
+	var raw_root = entry.get("root")
+	var root: Node = raw_root as Node if (raw_root != null and is_instance_valid(raw_root)) else null
+	if root != null:
 		if root.tree_exiting.is_connected(_on_lock_root_tree_exiting):
 			root.tree_exiting.disconnect(_on_lock_root_tree_exiting)
 		if root.has_method("_on_focus_lock_popped"):
@@ -179,13 +180,15 @@ func pop_lock(target: Variant = null, restore_focus: bool = true) -> void:
 				cb.call()
 
 	if restore_focus:
-		var prev: Control = entry.get("prev_focus") as Control
+		var raw_prev = entry.get("prev_focus")
+		var prev: Control = raw_prev as Control if (raw_prev != null and is_instance_valid(raw_prev)) else null
 		if _lock_stack.is_empty():
-			if prev != null and is_instance_valid(prev) and prev.is_visible_in_tree():
+			if prev != null and prev.is_visible_in_tree():
 				prev.call_deferred("grab_focus")
 		else:
-			var next_root: Node = _lock_stack.back().get("root") as Node
-			if next_root != null and is_instance_valid(next_root):
+			var raw_next_root = _lock_stack.back().get("root")
+			var next_root: Node = raw_next_root as Node if (raw_next_root != null and is_instance_valid(raw_next_root)) else null
+			if next_root != null:
 				call_deferred("_focus_first_control", next_root)
 
 

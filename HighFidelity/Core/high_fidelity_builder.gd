@@ -57,7 +57,10 @@ func setup(scene_root: Node) -> void:
 	HighFidelityLightingScript.apply(scene_root)
 
 	# 2. Ensure course 3D recessed bunkers, shoreline reeds, & horizon skirt exist and are visible
-	CourseDetailEnhancerScript.enhance_course_scene(scene_root, false)
+	var reeds := scene_root.get_node_or_null("ShorelineReedsMultiMesh")
+	var bunkers := scene_root.get_node_or_null("HighFidelityBunkers")
+	if reeds == null or bunkers == null:
+		CourseDetailEnhancerScript.enhance_course_scene(scene_root, false)
 	_set_detail_nodes_visible(scene_root, true)
 
 	# 3. Spawn GPU MultiMesh 3D Grass System (Golfer Address Turf + Clumped Rough/Fescue)

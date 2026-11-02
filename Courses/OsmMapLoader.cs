@@ -1256,7 +1256,7 @@ public partial class OsmMapLoader : Node
         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
         var (safeName, courseDir, globalCourseDir, courseTitle) = ResolveCoursePathAndTitle(courseName, lat, lon, location);
-        string tscnPath = $"{courseDir}/course.tscn";
+        string scnPath = $"{courseDir}/course.scn";
         string jsonPath = $"{courseDir}/course.json";
         string globalJsonPath = ProjectSettings.GlobalizePath(jsonPath);
         if (!string.IsNullOrEmpty(globalCourseDir) && !Directory.Exists(globalCourseDir))
@@ -4243,13 +4243,13 @@ public partial class OsmMapLoader : Node
 
             GD.Print($"{LogPrefix} Saving Canned Course files to: {courseDir}...");
             
-            // Save TSCN
+            // Save binary PackedScene (.scn for instantaneous loading and compact file size)
             var packedScene = new PackedScene();
             packedScene.Pack(rootNode);
-            var err = ResourceSaver.Save(packedScene, tscnPath);
+            var err = ResourceSaver.Save(packedScene, scnPath, ResourceSaver.SaverFlags.Compress);
             if (err != Error.Ok)
             {
-                GD.PrintErr($"{LogPrefix} Failed to save course.tscn. Error: {err}");
+                GD.PrintErr($"{LogPrefix} Failed to save course.scn. Error: {err}");
                 return false;
             }
 
@@ -4268,7 +4268,7 @@ public partial class OsmMapLoader : Node
             var courseConfig = new CourseJsonConfig
             {
                 GraphicsVersion = GetCurrentGraphicsVersion(),
-                ScenePath = "course.tscn",
+                ScenePath = "course.scn",
                 Title = courseTitle,
                 Latitude = lat,
                 Longitude = lon,
@@ -4316,22 +4316,38 @@ public partial class OsmMapLoader : Node
     {
         if (DisplayServer.GetName() == "headless" || GetTree() == null) return;
 
-        var tcs = new TaskCompletionSource<bool>();
-        Action frameAction = () => tcs.TrySetResult(true);
-        var callable = Callable.From(frameAction);
-
         try
         {
-            var timer = GetTree().CreateTimer(timeoutSec, true, false, true);
-            timer.Timeout += frameAction;
+            // 1. Wait for ProcessFrame to ensure camera transform and scene tree state update
+            var tcsProcess = new TaskCompletionSource<bool>();
+            Action processAction = () => tcsProcess.TrySetResult(true);
+            var processCallable = Callable.From(processAction);
 
-            GetTree().Connect(SceneTree.SignalName.ProcessFrame, callable, (uint)GodotObject.ConnectFlags.OneShot);
+            var timerProcess = GetTree().CreateTimer(timeoutSec, true, false, true);
+            timerProcess.Timeout += processAction;
 
-            await tcs.Task;
+            GetTree().Connect(SceneTree.SignalName.ProcessFrame, processCallable, (uint)GodotObject.ConnectFlags.OneShot);
+            await tcsProcess.Task;
 
-            if (IsInstanceValid(GetTree()) && GetTree().IsConnected(SceneTree.SignalName.ProcessFrame, callable))
+            if (IsInstanceValid(GetTree()) && GetTree().IsConnected(SceneTree.SignalName.ProcessFrame, processCallable))
             {
-                GetTree().Disconnect(SceneTree.SignalName.ProcessFrame, callable);
+                GetTree().Disconnect(SceneTree.SignalName.ProcessFrame, processCallable);
+            }
+
+            // 2. Wait for FramePostDraw to ensure GPU has finished rendering the SubViewport into its texture
+            var tcsRender = new TaskCompletionSource<bool>();
+            Action renderAction = () => tcsRender.TrySetResult(true);
+            var renderCallable = Callable.From(renderAction);
+
+            var timerRender = GetTree().CreateTimer(timeoutSec, true, false, true);
+            timerRender.Timeout += renderAction;
+
+            RenderingServer.Singleton.Connect(RenderingServer.SignalName.FramePostDraw, renderCallable, (uint)GodotObject.ConnectFlags.OneShot);
+            await tcsRender.Task;
+
+            if (RenderingServer.Singleton.IsConnected(RenderingServer.SignalName.FramePostDraw, renderCallable))
+            {
+                RenderingServer.Singleton.Disconnect(RenderingServer.SignalName.FramePostDraw, renderCallable);
             }
         }
         catch (Exception ex)
@@ -7196,7 +7212,7 @@ public partial class OsmMapLoader : Node
         public int GraphicsVersion { get; set; } = GetCurrentGraphicsVersion();
 
         [JsonPropertyName("scene_path")]
-        public string ScenePath { get; set; } = "course.tscn";
+        public string ScenePath { get; set; } = "course.scn";
 
         [JsonPropertyName("Title")]
         public string Title { get; set; } = "";
@@ -9401,11 +9417,14 @@ public partial class OsmMapLoader : Node
 
         var colShape = new CollisionShape3D();
         var concaveShape = new ConcavePolygonShape3D();
+
+        // 1:1 collision mesh matching visual UnifiedTerrain triangles for exact physics and prop alignment
         var collisionVertices = new Vector3[indices.Length];
         for (int i = 0; i < indices.Length; i++)
         {
             collisionVertices[i] = vertices[indices[i]];
         }
+
         concaveShape.Data = collisionVertices;
         colShape.Shape = concaveShape;
 

@@ -26,14 +26,12 @@ func _on_frame():
 
 	var edit_btn = stats_panel.find_child("EditProfileBtn", true, false) as Button
 	assert(edit_btn != null, "EditProfileBtn must exist in header")
-	var build_bag_btn = stats_panel.find_child("BuildBagBtn", true, false) as Button
-	assert(build_bag_btn != null, "BuildBagBtn must exist in header")
 
 	# Check header parent
 	var header_hbox = edit_btn.get_parent() as HBoxContainer
 	assert(header_hbox != null, "Header hbox must exist")
 
-	# Header should contain: avatar (TextureRect or circle PanelContainer), info_vbox (with just name_lbl), edit_btn, build_bag_btn
+	# Header contains: avatar, info_vbox (with NameRow containing name_lbl and cloud profile controls), and edit_btn
 	var info_vbox = header_hbox.get_node_or_null("VBoxContainer")
 	if info_vbox == null:
 		for c in header_hbox.get_children():
@@ -41,8 +39,17 @@ func _on_frame():
 				info_vbox = c
 				break
 	assert(info_vbox != null, "Header info vbox must exist")
-	assert(info_vbox.get_child_count() == 1, "Header info vbox should only contain player name label (has %d children)" % info_vbox.get_child_count())
-	var name_lbl = info_vbox.get_child(0) as Label
+	var name_lbl = info_vbox.find_child("Label", true, false) as Label
+	if name_lbl == null:
+		for c in info_vbox.get_children():
+			if c is Label:
+				name_lbl = c
+				break
+			elif c is HBoxContainer:
+				for sub_c in c.get_children():
+					if sub_c is Label:
+						name_lbl = sub_c
+						break
 	assert(name_lbl != null and name_lbl.text == "TestGolfer", "Header must display player name")
 
 	# Check overview tab contains player details

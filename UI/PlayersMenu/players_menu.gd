@@ -786,7 +786,6 @@ func _update_controller_focus_navigation() -> void:
 		var primary_btn = stats_panel.find_child("PrimaryProfileBtn", true, false) as Button
 		var cloud_link_sec = stats_panel.find_child("CloudLinkSection", true, false) as Control
 		var edit_profile_btn = stats_panel.find_child("EditProfileBtn", true, false) as Button
-		var build_bag_btn = stats_panel.find_child("BuildBagBtn", true, false) as Button
 		var tabs = stats_panel.find_child("TabContainer", true, false) as TabContainer
 		var tab_bar: TabBar = tabs.get_tab_bar() if tabs != null else null
 		var email_report_btn = stats_panel.find_child("EmailReportBtn", true, false) as Button
@@ -796,7 +795,7 @@ func _update_controller_focus_navigation() -> void:
 		if primary_btn != null and is_instance_valid(primary_btn):
 			primary_btn.focus_mode = Control.FOCUS_ALL
 
-		var right_target: Control = primary_btn if (primary_btn != null and is_instance_valid(primary_btn)) else (edit_profile_btn if (edit_profile_btn != null and is_instance_valid(edit_profile_btn)) else (tab_bar if (tab_bar != null and is_instance_valid(tab_bar)) else null))
+		var right_target: Control = primary_btn if (primary_btn != null and is_instance_valid(primary_btn)) else (cloud_link_sec if (cloud_link_sec != null and is_instance_valid(cloud_link_sec) and cloud_link_sec.get_child_count() > 0) else (edit_profile_btn if (edit_profile_btn != null and is_instance_valid(edit_profile_btn)) else (tab_bar if (tab_bar != null and is_instance_valid(tab_bar)) else null)))
 		if right_target != null and not player_buttons.is_empty():
 			for p_btn in player_buttons:
 				p_btn.focus_neighbor_right = p_btn.get_path_to(right_target)
@@ -807,9 +806,6 @@ func _update_controller_focus_navigation() -> void:
 				primary_btn.focus_neighbor_left = primary_btn.get_path_to(player_buttons[0])
 			else:
 				primary_btn.focus_neighbor_left = primary_btn.get_path_to(open_create_profile_btn)
-			if edit_profile_btn != null and is_instance_valid(edit_profile_btn):
-				primary_btn.focus_neighbor_right = primary_btn.get_path_to(edit_profile_btn)
-				edit_profile_btn.focus_neighbor_left = edit_profile_btn.get_path_to(primary_btn)
 			if tab_bar != null and is_instance_valid(tab_bar):
 				primary_btn.focus_neighbor_bottom = primary_btn.get_path_to(tab_bar)
 				tab_bar.focus_neighbor_top = tab_bar.get_path_to(primary_btn)
@@ -847,11 +843,6 @@ func _update_controller_focus_navigation() -> void:
 			if (primary_btn == null or not is_instance_valid(primary_btn)) and cloud_link_buttons.is_empty():
 				if not player_buttons.is_empty():
 					edit_profile_btn.focus_neighbor_left = edit_profile_btn.get_path_to(player_buttons[0])
-			if build_bag_btn != null and is_instance_valid(build_bag_btn):
-				edit_profile_btn.focus_neighbor_right = edit_profile_btn.get_path_to(build_bag_btn)
-				build_bag_btn.focus_neighbor_left = build_bag_btn.get_path_to(edit_profile_btn)
-				if tab_bar != null and is_instance_valid(tab_bar):
-					build_bag_btn.focus_neighbor_bottom = build_bag_btn.get_path_to(tab_bar)
 			if tab_bar != null and is_instance_valid(tab_bar):
 				edit_profile_btn.focus_neighbor_bottom = edit_profile_btn.get_path_to(tab_bar)
 				if primary_btn == null or not is_instance_valid(primary_btn):
@@ -2271,36 +2262,27 @@ func _render_player_profile(player_name: String) -> void:
 	info_vbox.add_theme_constant_override("separation", 2)
 	header_hbox.add_child(info_vbox)
 
+	# Name and inline Cloud Profile / Cloud Link controls
+	var name_row = HBoxContainer.new()
+	name_row.name = "NameRow"
+	name_row.add_theme_constant_override("separation", 12)
+	name_row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	info_vbox.add_child(name_row)
+
 	var name_lbl = Label.new()
 	name_lbl.text = player_name
 	name_lbl.add_theme_font_size_override("font_size", 32)
 	name_lbl.add_theme_color_override("font_color", Color.WHITE)
-	info_vbox.add_child(name_lbl)
+	name_row.add_child(name_lbl)
 
 	var p_tee = reg_p.get("preferred_tee", "")
 
-	var edit_profile_btn = Button.new()
-	edit_profile_btn.name = "EditProfileBtn"
-	edit_profile_btn.text = "✏️ Edit Profile"
-	edit_profile_btn.custom_minimum_size = Vector2(160, 50)
-	edit_profile_btn.add_theme_font_size_override("font_size", 17)
-	ThemeManager.apply_secondary_button_style(edit_profile_btn, 6)
-	edit_profile_btn.pressed.connect(func(): _open_edit_profile_dialog(player_name))
-	header_hbox.add_child(edit_profile_btn)
-
-	var build_bag_btn = Button.new()
-	build_bag_btn.name = "BuildBagBtn"
-	build_bag_btn.text = "🎒 Build Bag"
-	build_bag_btn.custom_minimum_size = Vector2(160, 50)
-	build_bag_btn.add_theme_font_size_override("font_size", 17)
-	ThemeManager.apply_primary_button_style(build_bag_btn, 6)
-	header_hbox.add_child(build_bag_btn)
-	
-	# Cloud Profile controls & CloudLinkSection
+	# Cloud Profile controls & CloudLinkSection placed to the right of the profile name
 	var cloud_profile_hbox = HBoxContainer.new()
 	cloud_profile_hbox.name = "CloudProfileHBox"
 	cloud_profile_hbox.add_theme_constant_override("separation", 10)
-	main_layout.add_child(cloud_profile_hbox)
+	cloud_profile_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	name_row.add_child(cloud_profile_hbox)
 
 	var auth = get_node_or_null("/root/CloudAuth")
 	var signed_in = (auth != null and auth.has_method("is_signed_in") and auth.is_signed_in())
@@ -2358,6 +2340,15 @@ func _render_player_profile(player_name: String) -> void:
 	cloud_link_section.add_theme_constant_override("separation", 8)
 	cloud_profile_hbox.add_child(cloud_link_section)
 	_populate_cloud_link_section(cloud_link_section, reg_p, player_name, signed_in)
+
+	var edit_profile_btn = Button.new()
+	edit_profile_btn.name = "EditProfileBtn"
+	edit_profile_btn.text = "✏️ Edit Profile"
+	edit_profile_btn.custom_minimum_size = Vector2(160, 50)
+	edit_profile_btn.add_theme_font_size_override("font_size", 17)
+	ThemeManager.apply_secondary_button_style(edit_profile_btn, 6)
+	edit_profile_btn.pressed.connect(func(): _open_edit_profile_dialog(player_name))
+	header_hbox.add_child(edit_profile_btn)
 	
 	# Divider
 	var divider = ColorRect.new()
@@ -2372,14 +2363,6 @@ func _render_player_profile(player_name: String) -> void:
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	tabs.add_theme_font_size_override("font_size", 16)
 	main_layout.add_child(tabs)
-
-	build_bag_btn.pressed.connect(func():
-		for i in range(tabs.get_tab_count()):
-			if "Bag" in tabs.get_tab_title(i):
-				tabs.current_tab = i
-				last_active_tab_index = i
-				break
-	)
 	
 	# --- TAB 1: Career Overview ---
 	var overview_vbox = VBoxContainer.new()

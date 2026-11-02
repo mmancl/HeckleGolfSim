@@ -206,6 +206,7 @@ jobs:
           fi
           DEPLOY_ARGS+=(-m "$MESSAGE")
           
+          DEPLOY_ARGS+=(--force)
           DEPLOY_ARGS+=(--debug)
           
           echo "Executing: firebase deploy ${DEPLOY_ARGS[*]}"

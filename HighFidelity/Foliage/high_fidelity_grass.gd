@@ -34,6 +34,8 @@ var _splat_img: Image = null
 var _bunker_polys: Array = []
 var _water_polys: Array = []
 var _cart_path_segments: Array = []
+var _cart_path_grid: Dictionary = {}
+const CART_PATH_GRID_CELL: float = 25.0
 var _height_info: Dictionary = {}
 var _deep_rough_generated: bool = false
 
@@ -264,29 +266,47 @@ func _discover_terrain() -> void:
 								"aabb": Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
 							})
 
-		# Also extract ribbon geometry from any cartpath or bridge MeshInstance3D nodes
-		for child in _scene_root.get_children():
-			var cname := child.name.to_lower()
-			if child is MeshInstance3D and (cname.begins_with("cartpath_") or cname == "cartpaths" or cname.begins_with("cartbridge_")):
-				var mi := child as MeshInstance3D
-				if mi.mesh is ArrayMesh and mi.mesh.get_surface_count() > 0:
-					var arrays := (mi.mesh as ArrayMesh).surface_get_arrays(0)
-					var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-					if verts.size() >= 4:
-						for i in range(0, verts.size() - 3, 2):
-							var p0 := Vector2((verts[i].x + verts[i + 1].x) * 0.5, (verts[i].z + verts[i + 1].z) * 0.5)
-							var p1 := Vector2((verts[i + 2].x + verts[i + 3].x) * 0.5, (verts[i + 2].z + verts[i + 3].z) * 0.5)
-							var hw := maxf(1.85, verts[i].distance_to(verts[i + 1]) * 0.5 + 0.50)
-							var min_x = minf(p0.x, p1.x) - hw
-							var max_x = maxf(p0.x, p1.x) + hw
-							var min_y = minf(p0.y, p1.y) - hw
-							var max_y = maxf(p0.y, p1.y) + hw
-							_cart_path_segments.append({
-								"a": p0,
-								"b": p1,
-								"radius": hw,
-								"aabb": Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
-							})
+		# If polylines were not found, extract ribbon geometry from any cartpath or bridge MeshInstance3D nodes
+		if _cart_path_segments.is_empty():
+			for child in _scene_root.get_children():
+				var cname := child.name.to_lower()
+				if child is MeshInstance3D and (cname.begins_with("cartpath_") or cname == "cartpaths" or cname.begins_with("cartbridge_")):
+					var mi := child as MeshInstance3D
+					if mi.mesh is ArrayMesh and mi.mesh.get_surface_count() > 0:
+						var arrays := (mi.mesh as ArrayMesh).surface_get_arrays(0)
+						var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+						if verts.size() >= 4:
+							for i in range(0, verts.size() - 3, 2):
+								var p0 := Vector2((verts[i].x + verts[i + 1].x) * 0.5, (verts[i].z + verts[i + 1].z) * 0.5)
+								var p1 := Vector2((verts[i + 2].x + verts[i + 3].x) * 0.5, (verts[i + 2].z + verts[i + 3].z) * 0.5)
+								var hw := maxf(1.85, verts[i].distance_to(verts[i + 1]) * 0.5 + 0.50)
+								var min_x = minf(p0.x, p1.x) - hw
+								var max_x = maxf(p0.x, p1.x) + hw
+								var min_y = minf(p0.y, p1.y) - hw
+								var max_y = maxf(p0.y, p1.y) + hw
+								_cart_path_segments.append({
+									"a": p0,
+									"b": p1,
+									"radius": hw,
+									"aabb": Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
+								})
+
+		# Build 2D spatial grid for instant cart path collision tests
+		var inv_cell := 1.0 / CART_PATH_GRID_CELL
+		_cart_path_grid.clear()
+		for seg in _cart_path_segments:
+			var aabb: Rect2 = seg["aabb"]
+			var min_gx := int(floor(aabb.position.x * inv_cell))
+			var max_gx := int(floor(aabb.end.x * inv_cell))
+			var min_gy := int(floor(aabb.position.y * inv_cell))
+			var max_gy := int(floor(aabb.end.y * inv_cell))
+			for gy in range(min_gy, max_gy + 1):
+				for gx in range(min_gx, max_gx + 1):
+					var key := Vector2i(gx, gy)
+					if not _cart_path_grid.has(key):
+						_cart_path_grid[key] = [seg]
+					else:
+						_cart_path_grid[key].append(seg)
 
 
 func _build_address_turf_multimesh() -> void:
@@ -644,7 +664,17 @@ static func _cell_hash(a: int, b: int, salt: float) -> float:
 
 
 func _is_on_cart_path(wx: float, wz: float, nearby_segments = null) -> bool:
-	var segs: Array = nearby_segments if nearby_segments != null else _cart_path_segments
+	var segs: Array = []
+	if nearby_segments != null:
+		segs = nearby_segments
+	elif not _cart_path_grid.is_empty():
+		var key := Vector2i(int(floor(wx / CART_PATH_GRID_CELL)), int(floor(wz / CART_PATH_GRID_CELL)))
+		if not _cart_path_grid.has(key):
+			return false
+		segs = _cart_path_grid[key]
+	else:
+		segs = _cart_path_segments
+
 	if segs.is_empty():
 		return false
 	var pt := Vector2(wx, wz)

@@ -25,7 +25,9 @@ static func enhance_course_scene(scene_root: Node, persist_for_save: bool = fals
 	if scene_root == null or MobilePerformance.is_driving_range_node(scene_root):
 		return result
 
-	_strip_legacy_grass_nodes(scene_root)
+	var force_rebuild: bool = bool(options.get("force_rebuild", false))
+	if force_rebuild:
+		_strip_legacy_grass_nodes(scene_root)
 	var height_map := _build_terrain_height_lookup(scene_root)
 	if scene_root.has_meta("terrain_height_lookup"):
 		scene_root.remove_meta("terrain_height_lookup")
@@ -41,7 +43,7 @@ static func enhance_course_scene(scene_root: Node, persist_for_save: bool = fals
 			gen_bunkers = bool(cfg.get_value("course_generation", "generate_3d_bunkers", true))
 
 	if gen_bunkers:
-		result["bunkers_built"] = _build_recessed_3d_bunkers(scene_root, height_map, persist_for_save)
+		result["bunkers_built"] = _build_recessed_3d_bunkers(scene_root, height_map, persist_for_save, force_rebuild)
 	else:
 		result["bunkers_built"] = 0
 
@@ -56,7 +58,7 @@ static func enhance_course_scene(scene_root: Node, persist_for_save: bool = fals
 			gen_reeds = bool(cfg.get_value("course_generation", "generate_water_long_grass", true))
 
 	if gen_reeds:
-		result["shoreline_reeds"] = _build_shoreline_reeds(scene_root, height_map, persist_for_save)
+		result["shoreline_reeds"] = _build_shoreline_reeds(scene_root, height_map, persist_for_save, force_rebuild)
 	else:
 		result["shoreline_reeds"] = 0
 
@@ -294,8 +296,10 @@ static func _sample_height(wx: float, wz: float, info: Dictionary, fallback_y: f
 	return lerpf(lerpf(h00, h10, tx), lerpf(h01, h11, tx), tz)
 
 
-static func _build_recessed_3d_bunkers(scene_root: Node, height_info: Dictionary, persist_for_save: bool) -> int:
+static func _build_recessed_3d_bunkers(scene_root: Node, height_info: Dictionary, persist_for_save: bool, force_rebuild: bool = false) -> int:
 	var existing_bunkers = scene_root.get_node_or_null("HighFidelityBunkers")
+	if existing_bunkers != null and not force_rebuild and existing_bunkers.get_child_count() > 0:
+		return existing_bunkers.get_child_count()
 	if existing_bunkers != null:
 		if existing_bunkers.is_inside_tree():
 			existing_bunkers.queue_free()
@@ -1012,9 +1016,11 @@ static func _orient_polygon_ccw(poly: PackedVector2Array) -> PackedVector2Array:
 	return poly
 
 
-static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, persist_for_save: bool) -> int:
-	# If shoreline reeds already exist on this scene, remove them so they can be re-generated
-	var existing_reeds := scene_root.get_node_or_null("ShorelineReedsMultiMesh")
+static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, persist_for_save: bool, force_rebuild: bool = false) -> int:
+	# If shoreline reeds already exist on this scene and rebuild is not forced, retain existing
+	var existing_reeds := scene_root.get_node_or_null("ShorelineReedsMultiMesh") as MultiMeshInstance3D
+	if existing_reeds != null and not force_rebuild and existing_reeds.multimesh != null and existing_reeds.multimesh.instance_count > 0:
+		return existing_reeds.multimesh.instance_count
 	if existing_reeds != null:
 		if existing_reeds.is_inside_tree():
 			existing_reeds.queue_free()
@@ -1189,32 +1195,58 @@ static func _build_shoreline_reeds(scene_root: Node, height_info: Dictionary, pe
 							"aabb": Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
 						})
 
-	for child in scene_root.get_children():
-		var cname := child.name.to_lower()
-		if child is MeshInstance3D and (cname.begins_with("cartpath_") or cname == "cartpaths" or cname.begins_with("cartbridge_")):
-			var mi := child as MeshInstance3D
-			if mi.mesh is ArrayMesh and mi.mesh.get_surface_count() > 0:
-				var arrays := (mi.mesh as ArrayMesh).surface_get_arrays(0)
-				if arrays.size() > Mesh.ARRAY_VERTEX:
-					var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-					if verts.size() >= 4:
-						for i in range(0, verts.size() - 3, 2):
-							var p0 := Vector2((verts[i].x + verts[i + 1].x) * 0.5, (verts[i].z + verts[i + 1].z) * 0.5)
-							var p1 := Vector2((verts[i + 2].x + verts[i + 3].x) * 0.5, (verts[i + 2].z + verts[i + 3].z) * 0.5)
-							var hw := maxf(1.95, verts[i].distance_to(verts[i + 1]) * 0.5 + 0.65)
-							var min_x = minf(p0.x, p1.x) - hw
-							var max_x = maxf(p0.x, p1.x) + hw
-							var min_y = minf(p0.y, p1.y) - hw
-							var max_y = maxf(p0.y, p1.y) + hw
-							path_segments.append({
-								"a": p0,
-								"b": p1,
-								"radius": hw,
-								"aabb": Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
-							})
+	# If polylines were not found, extract ribbon geometry from cartpath or bridge MeshInstance3D nodes
+	if path_segments.is_empty():
+		for child in scene_root.get_children():
+			var cname := child.name.to_lower()
+			if child is MeshInstance3D and (cname.begins_with("cartpath_") or cname == "cartpaths" or cname.begins_with("cartbridge_")):
+				var mi := child as MeshInstance3D
+				if mi.mesh is ArrayMesh and mi.mesh.get_surface_count() > 0:
+					var arrays := (mi.mesh as ArrayMesh).surface_get_arrays(0)
+					if arrays.size() > Mesh.ARRAY_VERTEX:
+						var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+						if verts.size() >= 4:
+							for i in range(0, verts.size() - 3, 2):
+								var p0 := Vector2((verts[i].x + verts[i + 1].x) * 0.5, (verts[i].z + verts[i + 1].z) * 0.5)
+								var p1 := Vector2((verts[i + 2].x + verts[i + 3].x) * 0.5, (verts[i + 2].z + verts[i + 3].z) * 0.5)
+								var hw := maxf(1.95, verts[i].distance_to(verts[i + 1]) * 0.5 + 0.65)
+								var min_x = minf(p0.x, p1.x) - hw
+								var max_x = maxf(p0.x, p1.x) + hw
+								var min_y = minf(p0.y, p1.y) - hw
+								var max_y = maxf(p0.y, p1.y) + hw
+								path_segments.append({
+									"a": p0,
+									"b": p1,
+									"radius": hw,
+									"aabb": Rect2(min_x, min_y, max_x - min_x, max_y - min_y)
+								})
+
+	# Build 2D spatial grid for fast O(1) path collision tests
+	var path_grid_cell_size: float = 20.0
+	var inv_path_cell: float = 1.0 / path_grid_cell_size
+	var path_grid: Dictionary = {}
+	for seg in path_segments:
+		var aabb: Rect2 = seg["aabb"]
+		var min_gx := int(floor(aabb.position.x * inv_path_cell))
+		var max_gx := int(floor(aabb.end.x * inv_path_cell))
+		var min_gy := int(floor(aabb.position.y * inv_path_cell))
+		var max_gy := int(floor(aabb.end.y * inv_path_cell))
+		for gy in range(min_gy, max_gy + 1):
+			for gx in range(min_gx, max_gx + 1):
+				var key := Vector2i(gx, gy)
+				if not path_grid.has(key):
+					path_grid[key] = [seg]
+				else:
+					path_grid[key].append(seg)
 
 	var is_pt_on_path := func(pt: Vector2) -> bool:
-		for seg in path_segments:
+		if path_grid.is_empty():
+			return false
+		var key := Vector2i(int(floor(pt.x * inv_path_cell)), int(floor(pt.y * inv_path_cell)))
+		if not path_grid.has(key):
+			return false
+		var segs: Array = path_grid[key]
+		for seg in segs:
 			var aabb: Rect2 = seg["aabb"]
 			if pt.x >= aabb.position.x and pt.x <= aabb.end.x and \
 			   pt.y >= aabb.position.y and pt.y <= aabb.end.y:
