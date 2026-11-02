@@ -3983,7 +3983,10 @@ func _open_camera_setup_dialog(for_putting: Variant = null) -> void:
 				cam_option.add_item("Camera %d (Device)" % i, i)
 			cam_option.select(clamp(_current_camera_feed_index, 0, cam_option.item_count - 1))
 		else:
-			cam_option.add_item("No local webcams detected", 0)
+			var err_hint: String = ""
+			if pose_bridge != null and "last_error_message" in pose_bridge and not str(pose_bridge.last_error_message).is_empty():
+				err_hint = " — " + str(pose_bridge.last_error_message)
+			cam_option.add_item("No local webcams detected" + err_hint, 0)
 			cam_option.disabled = true
 
 	# Populate immediately and schedule polling scans

@@ -43,7 +43,11 @@ import com.google.mediapipe.framework.image.MPImage;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -118,6 +122,30 @@ public class MediaPipePosePlugin extends GodotPlugin {
         return null;
     }
 
+    private String ensureModelFile(Context context) {
+        if (context == null) return null;
+        File modelFile = new File(context.getFilesDir(), "pose_landmarker_lite.task");
+        if (modelFile.exists() && modelFile.length() > 1000000) {
+            return modelFile.getAbsolutePath();
+        }
+
+        String[] assetCandidates = {"pose_landmarker_lite.task", "assets/pose_landmarker_lite.task"};
+        for (String assetPath : assetCandidates) {
+            try (InputStream is = context.getAssets().open(assetPath);
+                 FileOutputStream fos = new FileOutputStream(modelFile)) {
+                byte[] buffer = new byte[16384];
+                int bytesRead;
+                while ((bytesRead = is.read(buffer)) != -1) {
+                    fos.write(buffer, 0, bytesRead);
+                }
+                Log.i(TAG, "Extracted model file to internal storage: " + modelFile.getAbsolutePath() + " (" + modelFile.length() + " bytes)");
+                return modelFile.getAbsolutePath();
+            } catch (Exception ignored) {
+            }
+        }
+        return (modelFile.exists() && modelFile.length() > 0) ? modelFile.getAbsolutePath() : null;
+    }
+
     private synchronized void initMediaPipe() {
         if (poseLandmarker != null) return;
         Context context = getBestContext();
@@ -126,7 +154,13 @@ public class MediaPipePosePlugin extends GodotPlugin {
             return;
         }
 
-        String[] modelPaths = {"pose_landmarker_lite.task", "assets/pose_landmarker_lite.task"};
+        String extractedPath = ensureModelFile(context);
+        List<String> modelPaths = new ArrayList<>();
+        if (extractedPath != null && !extractedPath.isEmpty()) {
+            modelPaths.add(extractedPath);
+        }
+        modelPaths.add("pose_landmarker_lite.task");
+        modelPaths.add("assets/pose_landmarker_lite.task");
         Exception lastException = null;
 
         for (String modelPath : modelPaths) {
@@ -269,22 +303,35 @@ public class MediaPipePosePlugin extends GodotPlugin {
         }
 
         try {
+            String[] cameraIds = manager.getCameraIdList();
+            if (cameraIds.length == 0) {
+                Log.e(TAG, "No cameras found on device");
+                return;
+            }
+
             int targetLensFacing = (facing == 1) ? CameraCharacteristics.LENS_FACING_FRONT : CameraCharacteristics.LENS_FACING_BACK;
             String selectedCameraId = null;
 
-            for (String cameraId : manager.getCameraIdList()) {
-                CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
-                Integer lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING);
-                if (lensFacing != null && lensFacing == targetLensFacing) {
-                    selectedCameraId = cameraId;
-                    Integer orient = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-                    sensorOrientation = (orient != null) ? orient : 0;
-                    break;
+            if (facing >= 2 && facing < cameraIds.length) {
+                selectedCameraId = cameraIds[facing];
+                CameraCharacteristics characteristics = manager.getCameraCharacteristics(selectedCameraId);
+                Integer orient = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+                sensorOrientation = (orient != null) ? orient : 0;
+            } else {
+                for (String cameraId : cameraIds) {
+                    CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
+                    Integer lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING);
+                    if (lensFacing != null && lensFacing == targetLensFacing) {
+                        selectedCameraId = cameraId;
+                        Integer orient = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+                        sensorOrientation = (orient != null) ? orient : 0;
+                        break;
+                    }
                 }
             }
 
-            if (selectedCameraId == null && manager.getCameraIdList().length > 0) {
-                selectedCameraId = manager.getCameraIdList()[0];
+            if (selectedCameraId == null && cameraIds.length > 0) {
+                selectedCameraId = cameraIds[0];
                 CameraCharacteristics characteristics = manager.getCameraCharacteristics(selectedCameraId);
                 Integer orient = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
                 sensorOrientation = (orient != null) ? orient : 0;
@@ -300,7 +347,7 @@ public class MediaPipePosePlugin extends GodotPlugin {
             StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             Size previewSize = chooseOptimalSize(map != null ? map.getOutputSizes(ImageFormat.YUV_420_888) : null, 640, 480);
 
-            imageReader = ImageReader.newInstance(previewSize.getWidth(), previewSize.getHeight(), ImageFormat.YUV_420_888, 2);
+            imageReader = ImageReader.newInstance(previewSize.getWidth(), previewSize.getHeight(), ImageFormat.YUV_420_888, 3);
             imageReader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener() {
                 @Override
                 public void onImageAvailable(ImageReader reader) {
@@ -573,12 +620,15 @@ public class MediaPipePosePlugin extends GodotPlugin {
         int uvWidth = width / 2;
         int uvHeight = height / 2;
 
+        int vLimit = vBuffer.limit();
+        int uLimit = uBuffer.limit();
+
         for (int row = 0; row < uvHeight; row++) {
             for (int col = 0; col < uvWidth; col++) {
                 int vIndex = row * uvRowStride + col * uvPixelStride;
                 int uIndex = row * uPlane.getRowStride() + col * uPlane.getPixelStride();
-                nv21[pos++] = vBuffer.get(vIndex);
-                nv21[pos++] = uBuffer.get(uIndex);
+                nv21[pos++] = (vIndex < vLimit) ? vBuffer.get(vIndex) : 0;
+                nv21[pos++] = (uIndex < uLimit) ? uBuffer.get(uIndex) : 0;
             }
         }
         return nv21;

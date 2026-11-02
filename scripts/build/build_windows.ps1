@@ -167,6 +167,15 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path $TargetExe)) {
 # Ensure .NET data folder is present and accessible
 $heckleData = Join-Path $StagingRoot "data_HeckleGolfSim_windows_x86_64"
 
+# Stage Python mediapipe & camera server for webcam streaming & pose detection
+$serverSrc = Join-Path $RepoRoot "UI\GolferCamera\mediapipe_server"
+$serverDst = Join-Path $StagingRoot "UI\GolferCamera\mediapipe_server"
+if (Test-Path $serverSrc) {
+    Write-Host "Staging MediaPipe & camera server..." -ForegroundColor Gray
+    New-Item -ItemType Directory -Path $serverDst -Force | Out-Null
+    Get-ChildItem -Path $serverSrc -Exclude "node_modules", ".git*", "__pycache__" | Copy-Item -Destination $serverDst -Recurse -Force
+}
+
 # Clean any leftover temporary export files
 Get-ChildItem -Path $StagingRoot -Filter "*.tmp" -ErrorAction SilentlyContinue | Remove-Item -Force
 

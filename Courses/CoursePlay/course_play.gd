@@ -458,6 +458,22 @@ func _setup_hud() -> void:
 	apply_material_button_style(exit_yes_btn, Color(0.65, 0.22, 0.22, 0.85))
 	exit_yes_btn.pressed.connect(func():
 		exit_confirm_dialog.visible = false
+		if not MultiplayerManager.practice_mode_active and not MultiplayerManager.players.is_empty():
+			MultiplayerManager.save_current_match()
+			var cloud_sync = get_node_or_null("/root/CloudSync")
+			if cloud_sync != null and cloud_sync.has_method("queue_completed_match"):
+				var match_dict = {
+					"match_id": MultiplayerManager.current_match_id,
+					"course_title": MultiplayerManager.course_title,
+					"game_mode": MultiplayerManager.game_mode,
+					"practice_mode_active": MultiplayerManager.practice_mode_active,
+					"is_finished": false,
+					"players": MultiplayerManager.players,
+					"winners": [],
+					"hole_pars": MultiplayerManager.call("_get_hole_pars") if MultiplayerManager.has_method("_get_hole_pars") else {},
+					"hole_ids": MultiplayerManager.hole_ids
+				}
+				cloud_sync.queue_completed_match(match_dict)
 		MultiplayerManager.players.clear()
 		MultiplayerManager.practice_mode_active = false
 		SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")

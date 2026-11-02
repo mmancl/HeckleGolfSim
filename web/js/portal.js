@@ -90,8 +90,6 @@ let loadedTabs = { overview: false, matches: false, achievements: false, setting
 let pendingDeviceCode = "";
 let pendingLoopbackPort = "";
 let deviceHandoffCompleted = false;
-let filterInBagOnly = false;
-let temporaryBagSelection = new Set();
 let activeConfirmCallback = null;
 let toastTimeout = null;
 
@@ -562,6 +560,68 @@ function switchPortalTab(tabName) {
 }
 
 // ─── LOAD USER DATA (READ 1 & READ 2) ───
+export async function ensurePublicProfileSynced(user, profile) {
+  if (!user || !profile) return;
+  try {
+    const optIn = profile?.privacy?.leaderboard_opt_in !== false;
+    if (!optIn) {
+      try {
+        await deleteDoc(doc(db, "public_profiles", user.uid));
+      } catch {}
+      return;
+    }
+
+    const lt = profile.lifetime || {};
+    const rec = profile.records || {};
+    const ach = profile.achievements || {};
+    let achCount = 0;
+    if (ach.unlocked && typeof ach.unlocked === "object") {
+      achCount = Object.keys(ach.unlocked).length;
+    } else if (typeof lt.achievements_count === "number") {
+      achCount = lt.achievements_count;
+    }
+
+    const longestDr = Number(lt.longest_drive_yds ?? rec.longest_drive ?? rec.longest_drive_yds ?? 0);
+    const longestPt = Number(lt.longest_putt_ft ?? rec.longest_putt ?? rec.longest_putt_ft ?? 0);
+    const matchesPl = Number(lt.matches_played ?? 0);
+    const wins = Number(lt.wins ?? 0);
+
+    const rawName = profile.display_name || user.displayName || user.email?.split("@")[0] || "Golfer";
+    const displayName = String(rawName).trim().slice(0, 40) || "Golfer";
+
+    const pubData = {
+      schema_version: 1,
+      uid: user.uid,
+      display_name: displayName,
+      avatar: String(profile.avatar || ""),
+      longest_drive_yds: Math.min(Math.max(0, isNaN(longestDr) ? 0 : longestDr), 450.0),
+      longest_putt_ft: Math.min(Math.max(0, isNaN(longestPt) ? 0 : longestPt), 180.0),
+      achievements_count: Math.min(Math.max(0, isNaN(achCount) ? 0 : achCount), 100),
+      matches_played: Math.min(Math.max(0, isNaN(matchesPl) ? 0 : matchesPl), 100000),
+      wins: Math.min(Math.max(0, isNaN(wins) ? 0 : wins), 100000),
+      updated_at: Math.floor(Date.now() / 1000)
+    };
+
+    const bg18 = Number(lt.best_gross_18 ?? rec.best_gross_18);
+    if (!isNaN(bg18) && bg18 >= 18 && bg18 <= 250) {
+      pubData.best_gross_18 = bg18;
+      const btp18 = Number(lt.best_to_par_18 ?? rec.best_to_par_18);
+      if (!isNaN(btp18) && btp18 >= -36 && btp18 <= 180) pubData.best_to_par_18 = btp18;
+    }
+
+    const bg9 = Number(lt.best_gross_9 ?? rec.best_gross_9);
+    if (!isNaN(bg9) && bg9 >= 9 && bg9 <= 130) {
+      pubData.best_gross_9 = bg9;
+      const btp9 = Number(lt.best_to_par_9 ?? rec.best_to_par_9);
+      if (!isNaN(btp9) && btp9 >= -18 && btp9 <= 90) pubData.best_to_par_9 = btp9;
+    }
+
+    await setDoc(doc(db, "public_profiles", user.uid), pubData, { merge: true });
+  } catch (err) {
+    console.warn("[Portal] Public leaderboard projection sync warning:", err);
+  }
+}
+
 async function loadUserData(user) {
   updateUserHeader(user);
   updateVerificationBanner(user);
@@ -586,6 +646,9 @@ async function loadUserData(user) {
     renderClubSummary(currentProfile);
     renderBestCourses(currentProfile);
     loadedTabs.overview = true;
+
+    // Ensure public leaderboard projection has latest lifetime records
+    await ensurePublicProfileSynced(user, currentProfile);
 
     // 2. Read 2: Check incoming link requests (if email is verified)
     if (user.emailVerified) {
@@ -749,7 +812,7 @@ function renderOverviewCards(profile) {
   const lt = profile?.lifetime || {};
 
   // Matches
-  const matchesEl = document.getElementById("stat-matches-played");
+  const matchesEl = document.getElementById("stat-matches-played") || document.getElementById("stat-matches");
   if (matchesEl) matchesEl.textContent = lt.matches_played ?? 0;
 
   // Record W-L-T
@@ -762,7 +825,7 @@ function renderOverviewCards(profile) {
   }
 
   // Scoring Avg to Par
-  const avgParEl = document.getElementById("stat-avg-to-par");
+  const avgParEl = document.getElementById("stat-avg-to-par") || document.getElementById("stat-avg-score");
   if (avgParEl) {
     if (lt.par_diff_matches && lt.par_diff_matches > 0) {
       const avg = lt.par_diff_sum / lt.par_diff_matches;
@@ -832,9 +895,6 @@ function renderProfilePreferencesSummary(profile) {
   const skill = formatSkillLevel(profile?.skill_level);
   const dexterity = (profile?.handedness === 1) ? "Left-Handed" : "Right-Handed";
   const ball = formatBallGraphic(profile?.ball_graphic);
-  const bagCount = (profile?.bag && Array.isArray(profile.bag) && profile.bag.length > 0)
-    ? `${profile.bag.length} Clubs Configured`
-    : "Default (All 20 Clubs)";
 
   container.innerHTML = `
     <div class="pref-badge">
@@ -865,20 +925,7 @@ function renderProfilePreferencesSummary(profile) {
         <div class="pref-val">${escapeHtml(ball)}</div>
       </div>
     </div>
-    <div class="pref-badge">
-      <span class="pref-icon">🎒</span>
-      <div>
-        <div class="pref-label">Golf Bag</div>
-        <div class="pref-val">${escapeHtml(bagCount)}</div>
-      </div>
-    </div>
   `;
-
-  const bagBtnTable = document.getElementById("btn-open-bag-modal-table");
-  if (bagBtnTable) {
-    const count = (profile?.bag && Array.isArray(profile.bag) && profile.bag.length > 0) ? profile.bag.length : 20;
-    bagBtnTable.textContent = `🎒 Bag (${count})`;
-  }
 }
 
 function renderClubSummary(profile) {
@@ -892,7 +939,7 @@ function renderClubSummary(profile) {
     container.innerHTML = `
       <div class="empty-state">
         <span class="empty-icon">🏌️</span>
-        <p>No club shot data recorded yet. Take swings in the simulator to see your bag averages here!</p>
+        <p>No club shot data recorded yet. Take swings in the simulator to see your club averages here!</p>
       </div>
     `;
     return;
@@ -904,23 +951,6 @@ function renderClubSummary(profile) {
   clubKeys.forEach((c) => {
     if (!sortedClubs.some(sc => sc.toLowerCase() === c.toLowerCase())) sortedClubs.push(c);
   });
-
-  // Filter in-bag only if enabled and bag is configured
-  const activeBag = (profile?.bag && Array.isArray(profile.bag) && profile.bag.length > 0) ? profile.bag : null;
-  if (filterInBagOnly && activeBag) {
-    const bagLower = activeBag.map(b => b.toLowerCase());
-    sortedClubs = sortedClubs.filter(c => bagLower.includes(c.toLowerCase()));
-  }
-
-  if (sortedClubs.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <span class="empty-icon">🎒</span>
-        <p>No recorded shots for clubs in your selected bag. Switch clubs or uncheck "In-Bag Only" to view all club averages.</p>
-      </div>
-    `;
-    return;
-  }
 
   let rowsHtml = "";
   sortedClubs.forEach((clubKey) => {
@@ -1214,40 +1244,13 @@ async function saveProfilePreferences(updates) {
 
     updateUserHeader(currentUser, currentProfile);
     renderProfilePreferencesSummary(currentProfile);
+    await ensurePublicProfileSynced(currentUser, currentProfile);
     closeEditProfileModal();
     showToast("✓ Profile and preferences updated successfully.");
   } catch (err) {
     console.error("Failed to update profile:", err);
     const pauseMsg = await handleWriteError(err);
     showToast(pauseMsg || ("Failed to update profile: " + (err.message || err)));
-  }
-}
-
-async function saveBagConfiguration(newBag) {
-  if (!currentUser) return;
-  try {
-    const nowSec = Math.floor(Date.now() / 1000);
-    const profRef = doc(db, "profiles", currentUser.uid);
-    const profSnap = await getDoc(profRef);
-    const profData = profSnap.exists() ? profSnap.data() : {};
-    const profRev = (profData.rev || 0) + 1;
-
-    await updateDoc(profRef, {
-      bag: newBag,
-      rev: profRev,
-      updated_at: nowSec,
-      updated_by_uid: currentUser.uid
-    });
-
-    currentProfile = { ...currentProfile, bag: newBag, rev: profRev };
-    renderProfilePreferencesSummary(currentProfile);
-    renderClubSummary(currentProfile);
-    closeBagModal();
-    showToast(`✓ Golf bag saved (${newBag.length} clubs configured).`);
-  } catch (err) {
-    console.error("Failed to save golf bag:", err);
-    const pauseMsg = await handleWriteError(err);
-    showToast(pauseMsg || ("Failed to save golf bag: " + (err.message || err)));
   }
 }
 
@@ -1300,64 +1303,6 @@ function closeEditProfileModal() {
   const overlay = document.getElementById("edit-profile-modal-overlay");
   if (overlay) overlay.classList.remove("open");
   document.body.style.overflow = "";
-}
-
-function openBagModal() {
-  const overlay = document.getElementById("bag-modal-overlay");
-  if (!overlay) return;
-
-  const currentBag = (currentProfile?.bag && Array.isArray(currentProfile.bag) && currentProfile.bag.length > 0)
-    ? currentProfile.bag
-    : STANDARD_CLUBS;
-
-  temporaryBagSelection = new Set(currentBag);
-  renderBagClubsGrid();
-
-  overlay.classList.add("open");
-  document.body.style.overflow = "hidden";
-}
-
-function closeBagModal() {
-  const overlay = document.getElementById("bag-modal-overlay");
-  if (overlay) overlay.classList.remove("open");
-  document.body.style.overflow = "";
-}
-
-function renderBagClubsGrid() {
-  const grid = document.getElementById("bag-clubs-grid");
-  const countBadge = document.getElementById("bag-count-badge");
-  if (!grid) return;
-
-  const count = temporaryBagSelection.size;
-  if (countBadge) {
-    countBadge.textContent = `Clubs in Bag: ${count} of 20 (Standard Limit: 14)`;
-  }
-
-  let html = "";
-  STANDARD_CLUBS.forEach((code) => {
-    const isSelected = temporaryBagSelection.has(code);
-    const name = CLUB_LABELS[code] || code;
-    html += `
-      <div class="bag-chip ${isSelected ? "active" : ""}" data-club="${code}">
-        <span class="bag-chip-code">${code}</span>
-        <span class="bag-chip-name">${name}</span>
-        <span class="bag-chip-status">${isSelected ? "✓ In Bag" : "+ Add"}</span>
-      </div>
-    `;
-  });
-  grid.innerHTML = html;
-
-  grid.querySelectorAll(".bag-chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      const code = chip.getAttribute("data-club");
-      if (temporaryBagSelection.has(code)) {
-        temporaryBagSelection.delete(code);
-      } else {
-        temporaryBagSelection.add(code);
-      }
-      renderBagClubsGrid();
-    });
-  });
 }
 
 function showToast(message) {
@@ -1417,39 +1362,6 @@ function bindPlayerManagement() {
     }
   });
 
-  // Bag builder triggers
-  document.getElementById("btn-open-bag-builder")?.addEventListener("click", openBagModal);
-  document.getElementById("btn-open-bag-modal-table")?.addEventListener("click", openBagModal);
-  document.getElementById("btn-bag-close")?.addEventListener("click", closeBagModal);
-  document.getElementById("btn-bag-cancel")?.addEventListener("click", closeBagModal);
-  document.getElementById("btn-preset-standard-14")?.addEventListener("click", () => {
-    temporaryBagSelection = new Set(STANDARD_14_BAG);
-    renderBagClubsGrid();
-  });
-  document.getElementById("btn-preset-all")?.addEventListener("click", () => {
-    temporaryBagSelection = new Set(STANDARD_CLUBS);
-    renderBagClubsGrid();
-  });
-  document.getElementById("btn-preset-clear")?.addEventListener("click", () => {
-    temporaryBagSelection.clear();
-    renderBagClubsGrid();
-  });
-  document.getElementById("btn-bag-save")?.addEventListener("click", async () => {
-    const saveBtn = document.getElementById("btn-bag-save");
-    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving…"; }
-    try {
-      await saveBagConfiguration(Array.from(temporaryBagSelection));
-    } finally {
-      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "Save Bag"; }
-    }
-  });
-
-  // Active in-bag only filter toggle
-  document.getElementById("toggle-active-bag-only")?.addEventListener("change", (e) => {
-    filterInBagOnly = e.target.checked;
-    renderClubSummary(currentProfile);
-  });
-
   // Clear all ball history
   document.getElementById("btn-clear-all-history")?.addEventListener("click", () => {
     showConfirmModal({
@@ -1471,7 +1383,7 @@ function bindPlayerManagement() {
   });
 
   // Close modals on overlay backdrop click
-  ["confirm-modal-overlay", "edit-profile-modal-overlay", "bag-modal-overlay"].forEach((id) => {
+  ["confirm-modal-overlay", "edit-profile-modal-overlay"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) {
       el.addEventListener("click", (e) => {
@@ -1488,7 +1400,6 @@ function bindPlayerManagement() {
     if (e.key === "Escape") {
       closeConfirmModal();
       closeEditProfileModal();
-      closeBagModal();
     }
   });
 }
@@ -1591,6 +1502,10 @@ async function loadRecentMatches(user) {
       const strokes = m.strokes || "–";
       const toPar = m.to_par != null ? (m.to_par === 0 ? "E" : m.to_par > 0 ? `+${m.to_par}` : `${m.to_par}`) : "";
       const matchType = m.match_type === "multiplayer" ? "Multiplayer" : "Single Player";
+      const isFinished = m.is_finished !== false;
+      const statusBadge = isFinished
+        ? `<span class="match-score-badge" style="background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3);">Completed</span>`
+        : `<span class="match-score-badge" style="background: rgba(234, 179, 8, 0.15); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.3);">Partial Round</span>`;
 
       let holesTableHtml = "";
       if (m.holes && Array.isArray(m.holes) && m.holes.length > 0) {
@@ -1632,6 +1547,7 @@ async function loadRecentMatches(user) {
             <span><strong>${strokes}</strong> Total Strokes</span>
             ${toPar ? `<span class="match-score-badge">${toPar}</span>` : ""}
             <span>Type: <strong>${matchType}</strong></span>
+            ${statusBadge}
           </div>
           ${holesTableHtml}
         </div>

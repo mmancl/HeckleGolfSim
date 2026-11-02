@@ -132,14 +132,16 @@ async function loadCategory(categoryId, forceRefresh = false) {
     if (cachedStr) {
       try {
         const cached = JSON.parse(cachedStr);
-        const ageMs = Date.now() - cached.timestamp;
-        if (ageMs < LB_CACHE_TTL_MS) {
-          const remainingMins = Math.ceil((LB_CACHE_TTL_MS - ageMs) / 60000);
-          if (cacheStatusEl) {
-            cacheStatusEl.textContent = `Cached (refreshes in ~${remainingMins}m)`;
+        if (cached && Array.isArray(cached.data) && cached.data.length > 0) {
+          const ageMs = Date.now() - cached.timestamp;
+          if (ageMs < LB_CACHE_TTL_MS) {
+            const remainingMins = Math.ceil((LB_CACHE_TTL_MS - ageMs) / 60000);
+            if (cacheStatusEl) {
+              cacheStatusEl.textContent = `Cached (refreshes in ~${remainingMins}m)`;
+            }
+            renderTable(contentArea, category, cached.data);
+            return;
           }
-          renderTable(contentArea, category, cached.data);
-          return;
         }
       } catch {
         // Corrupted cache - continue to fetch
@@ -162,14 +164,20 @@ async function loadCategory(categoryId, forceRefresh = false) {
     const snap = await getDocs(q);
     const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-    // Cache in sessionStorage for 10 minutes
-    sessionStorage.setItem(
-      cacheKey,
-      JSON.stringify({ timestamp: Date.now(), data })
-    );
-
-    if (cacheStatusEl) {
-      cacheStatusEl.textContent = "Live data (cached for 10m)";
+    // Cache in sessionStorage only if non-empty; avoid poisoning cache with empty state
+    if (data.length > 0) {
+      sessionStorage.setItem(
+        cacheKey,
+        JSON.stringify({ timestamp: Date.now(), data })
+      );
+      if (cacheStatusEl) {
+        cacheStatusEl.textContent = "Live data (cached for 10m)";
+      }
+    } else {
+      sessionStorage.removeItem(cacheKey);
+      if (cacheStatusEl) {
+        cacheStatusEl.textContent = "Live data";
+      }
     }
     renderTable(contentArea, category, data);
   } catch (err) {

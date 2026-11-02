@@ -73,8 +73,8 @@ func put_path(path: String, data: Variant, if_match_etag: String = "") -> Dictio
 	])
 
 	if not if_match_etag.is_empty():
-		if if_match_etag == "null_etag":
-			headers.append("if-match: null")
+		if if_match_etag == "null_etag" or if_match_etag == "null":
+			headers.append("if-match: null_etag")
 		else:
 			headers.append("if-match: %s" % if_match_etag)
 

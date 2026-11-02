@@ -30,6 +30,7 @@ var _cam_capture_req: HTTPRequest = null
 var _python_pid: int = -1
 var _server_is_ready: bool = false
 var _health_check_attempts: int = 0
+var last_error_message: String = ""
 
 # Desktop system camera state
 var desktop_cameras: Array = []
@@ -268,6 +269,7 @@ func _start_python_server() -> void:
 	var script_path := _resolve_server_script_path()
 	if script_path.is_empty():
 		push_error("[PoseDetectionBridge] Could not find pose_server.py")
+		last_error_message = "pose_server.py could not be loaded."
 		_server_is_ready = false
 		pose_lost.emit()
 		return
@@ -275,6 +277,7 @@ func _start_python_server() -> void:
 	var python_cmd := _find_python_executable()
 	if python_cmd.is_empty():
 		push_error("[PoseDetectionBridge] Python 3.9+ not found. Install Python & mediapipe to enable AI pose detection.")
+		last_error_message = "Python 3.9+ not found. Install Python 3 to enable local webcam."
 		_server_is_ready = false
 		pose_lost.emit()
 		return
@@ -292,6 +295,7 @@ func _start_python_server() -> void:
 	_python_pid = OS.create_process(python_cmd, args)
 	if _python_pid <= 0:
 		push_error("[PoseDetectionBridge] Failed to start Python server process.")
+		last_error_message = "Failed to launch Python server process."
 		_server_is_ready = false
 		pose_lost.emit()
 		return
@@ -305,22 +309,85 @@ func _start_python_server() -> void:
 
 
 func _resolve_server_script_path() -> String:
-	# In-editor: use res:// path globalized
-	var res_path := "res://UI/GolferCamera/mediapipe_server/pose_server.py"
-	if FileAccess.file_exists(res_path):
-		return ProjectSettings.globalize_path(res_path)
-	
-	# Exported: check next to executable
 	var exe_dir := OS.get_executable_path().get_base_dir()
+
+	# 1. Check folder alongside executable (standard exported distribution)
 	var export_path := exe_dir.path_join("UI/GolferCamera/mediapipe_server/pose_server.py")
 	if FileAccess.file_exists(export_path):
 		return export_path
-	
+	var short_export_path := exe_dir.path_join("mediapipe_server/pose_server.py")
+	if FileAccess.file_exists(short_export_path):
+		return short_export_path
+	var direct_export_path := exe_dir.path_join("pose_server.py")
+	if FileAccess.file_exists(direct_export_path):
+		return direct_export_path
+
+	# 2. In-editor: use res:// path globalized if file exists on disk
+	var res_path := "res://UI/GolferCamera/mediapipe_server/pose_server.py"
+	if OS.has_feature("editor") and FileAccess.file_exists(res_path):
+		var glob := ProjectSettings.globalize_path(res_path)
+		if FileAccess.file_exists(glob):
+			return glob
+
+	# 3. Exported fallback: extract from res:// into user:// so Python can run it
+	var user_dir := "user://mediapipe_server"
+	var user_script := user_dir.path_join("pose_server.py")
+	if FileAccess.file_exists(res_path):
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(user_dir))
+		var script_content := FileAccess.get_file_as_string(res_path)
+		if not script_content.is_empty():
+			var f := FileAccess.open(user_script, FileAccess.WRITE)
+			if f != null:
+				f.store_string(script_content)
+				f.close()
+				print("[PoseDetectionBridge] Extracted pose_server.py to user storage: %s" % ProjectSettings.globalize_path(user_script))
+
+	# Also extract pose_landmarker_full.task if present in PCK
+	var res_model := "res://UI/GolferCamera/mediapipe_server/pose_landmarker_full.task"
+	var user_model := user_dir.path_join("pose_landmarker_full.task")
+	if FileAccess.file_exists(res_model) and not FileAccess.file_exists(user_model):
+		var mf_src := FileAccess.open(res_model, FileAccess.READ)
+		if mf_src != null:
+			var mf_dst := FileAccess.open(user_model, FileAccess.WRITE)
+			if mf_dst != null:
+				var m_buf := mf_src.get_buffer(mf_src.get_length())
+				mf_dst.store_buffer(m_buf)
+				mf_dst.close()
+			mf_src.close()
+
+	if FileAccess.file_exists(user_script):
+		return ProjectSettings.globalize_path(user_script)
+
+	var glob_res := ProjectSettings.globalize_path(res_path)
+	if FileAccess.file_exists(glob_res):
+		return glob_res
+
 	return ""
 
 
 func _find_python_executable() -> String:
 	var candidates: Array[String] = ["python", "python3", "py"]
+
+	if OS.get_name() == "Windows":
+		var local_app_data := OS.get_environment("LOCALAPPDATA")
+		if not local_app_data.is_empty():
+			var py_programs := local_app_data.path_join("Programs/Python")
+			var dir := DirAccess.open(py_programs)
+			if dir != null:
+				dir.list_dir_begin()
+				var fn := dir.get_next()
+				while not fn.is_empty():
+					if dir.current_is_dir() and fn.to_lower().begins_with("python3"):
+						var py_path := py_programs.path_join(fn).path_join("python.exe")
+						if FileAccess.file_exists(py_path):
+							candidates.append(py_path)
+					fn = dir.get_next()
+		var program_files := OS.get_environment("ProgramFiles")
+		if not program_files.is_empty():
+			for py_ver in ["Python313", "Python312", "Python311", "Python310"]:
+				var p := program_files.path_join(py_ver).path_join("python.exe")
+				if FileAccess.file_exists(p):
+					candidates.append(p)
 	
 	for cmd in candidates:
 		var output: Array = []
@@ -338,6 +405,7 @@ func _poll_server_health() -> void:
 	_health_check_attempts += 1
 	if _health_check_attempts > MAX_HEALTH_RETRIES:
 		push_error("[PoseDetectionBridge] Server failed to start after %d attempts." % MAX_HEALTH_RETRIES)
+		last_error_message = "Webcam server failed to respond."
 		_server_is_ready = false
 		pose_lost.emit()
 		return
@@ -360,6 +428,7 @@ func _on_health_response(_result: int, response_code: int, _headers: PackedStrin
 	
 	if response_code == 200:
 		_server_is_ready = true
+		last_error_message = ""
 		print("[PoseDetectionBridge] MediaPipe pose & camera server is READY (%s)." % SERVER_URL)
 		server_ready.emit()
 		fetch_desktop_cameras()

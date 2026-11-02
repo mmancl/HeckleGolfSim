@@ -583,6 +583,20 @@ func _test_6_sync_404_resilience_and_leaderboard_projection() -> void:
 	var queued_m = sync_node.pending_matches[0]
 	assert(queued_m.get("schema_version") == 1, "Queued match must have schema_version == 1")
 	assert(queued_m.has("played_at"), "Queued match must have played_at")
+	assert(queued_m.get("is_finished") == true, "Finished match must have is_finished == true")
+
+	var partial_match = {
+		"match_id": "test_m_partial",
+		"is_finished": false,
+		"practice_mode_active": false,
+		"players": [{"name": "NewCloudPlayer", "total_strokes": 5}],
+		"hole_ids": ["Hole 01", "Hole 02"],
+		"hole_pars": {"Hole 01": 4, "Hole 02": 4}
+	}
+	sync_node.queue_completed_match(partial_match)
+	assert(sync_node.pending_matches.size() == 2, "Partial match should also be queued")
+	var queued_partial = sync_node.pending_matches[1]
+	assert(queued_partial.get("is_finished") == false, "Queued partial match must preserve is_finished == false")
 
 	sync_node.queue_free()
 	mock_auth.queue_free()

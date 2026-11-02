@@ -164,10 +164,10 @@ func mark_profile_dirty(player_name: String) -> void:
 
 
 func queue_completed_match(match_json: Dictionary) -> void:
-	var is_practice = match_json.get("practice_mode_active", false)
-	var is_finished = match_json.get("is_finished", true)
-	if is_practice or not is_finished:
+	var is_practice = bool(match_json.get("practice_mode_active", false))
+	if is_practice:
 		return
+	var is_finished = bool(match_json.get("is_finished", true))
 
 	var players_list = match_json.get("players", [])
 	if players_list.is_empty():
@@ -204,14 +204,14 @@ func queue_completed_match(match_json: Dictionary) -> void:
 		if not (link_role in ["primary", "linked"]) or cloud_uid.is_empty():
 			continue
 
-		var strokes = int(p.get("total_strokes", 0))
+		var raw_strokes = int(p.get("total_strokes", 0))
 		var par = 0
 		var hole_pars = match_json.get("hole_pars", {})
 		if hole_pars is Dictionary:
 			for hid in hole_pars:
 				par += int(hole_pars[hid])
 
-		var to_par = strokes - par if par > 0 else 0
+		var to_par = raw_strokes - par if par > 0 else 0
 		var is_winner = winners.has(p_name)
 		var is_loss = (not is_winner and not is_single_player and winners.size() > 0)
 		var is_tie = (is_winner and winners.size() > 1)
@@ -250,6 +250,11 @@ func queue_completed_match(match_json: Dictionary) -> void:
 						"score": h_score
 					})
 
+		# Do not upload empty 0-shot unplayed stub matches
+		if raw_strokes <= 0 and holes_arr.is_empty() and longest_dr <= 0.0:
+			continue
+		var strokes = maxi(1, raw_strokes)
+
 		var played_time = int(match_json.get("unix_time", match_json.get("timestamp", Time.get_unix_time_from_system())))
 
 		var summary = {
@@ -258,10 +263,11 @@ func queue_completed_match(match_json: Dictionary) -> void:
 			"cloud_uid": cloud_uid,
 			"player_name": p_name,
 			"course_name": str(match_json.get("course_title", match_json.get("course_name", "Unknown Course"))),
-			"holes_count": holes_count,
+			"holes_count": clampi(holes_count, 1, 36),
 			"strokes": strokes,
 			"par": par,
 			"to_par": to_par,
+			"is_finished": is_finished,
 			"is_winner": is_winner,
 			"is_loss": is_loss,
 			"is_tie": is_tie,
@@ -289,7 +295,7 @@ func queue_completed_match(match_json: Dictionary) -> void:
 		mark_profile_dirty(p_name)
 
 	_save_sync_state()
-	sync_all_eligible_profiles("match_finished")
+	sync_all_eligible_profiles.call_deferred("match_finished")
 
 
 func enqueue_historical_local_matches_for_profile(player_name: String, cloud_uid: String) -> void:
@@ -311,25 +317,29 @@ func enqueue_historical_local_matches_for_profile(player_name: String, cloud_uid
 			var fpath := hist_dir + "/" + fname
 			var f := FileAccess.open(fpath, FileAccess.READ)
 			if f != null:
-				var parsed = JSON.parse_string(f.get_as_text())
+				var raw_text := f.get_as_text().strip_edges()
 				f.close()
+				if raw_text.is_empty():
+					fname = dir.get_next()
+					continue
+				var parsed = JSON.parse_string(raw_text)
 				if parsed is Dictionary:
 					var is_practice: bool = bool(parsed.get("practice_mode_active", false))
-					var is_finished: bool = bool(parsed.get("is_finished", true))
-					if not is_practice and is_finished:
+					var is_finished: bool = bool(parsed.get("is_finished", false))
+					if not is_practice:
 						var players_list = parsed.get("players", [])
 						if players_list is Array:
 							for p in players_list:
 								if p is Dictionary and str(p.get("name", "")).strip_edges().to_lower() == clean_target:
 									var hole_ids: Array = parsed.get("hole_ids", [])
-									var holes_count: int = maxi(1, hole_ids.size())
-									var strokes: int = maxi(1, int(p.get("total_strokes", 0)))
+									var holes_count: int = clampi(hole_ids.size(), 1, 36)
+									var raw_strokes: int = int(p.get("total_strokes", 0))
 									var par := 0
 									var hole_pars = parsed.get("hole_pars", {})
 									if hole_pars is Dictionary:
 										for hid in hole_pars:
 											par += int(hole_pars[hid])
-									var to_par := strokes - par if par > 0 else 0
+									var to_par := raw_strokes - par if par > 0 else 0
 									var winners: Array = parsed.get("winners", [])
 									var is_single_player: bool = (players_list.size() == 1)
 									var is_winner: bool = winners.has(p.get("name", ""))
@@ -362,6 +372,11 @@ func enqueue_historical_local_matches_for_profile(player_name: String, cloud_uid
 													"score": h_score
 												})
 
+									# Do not upload unplayed stubs
+									if raw_strokes <= 0 and hist_holes.is_empty() and longest_dr <= 0.0:
+										continue
+									var strokes: int = maxi(1, raw_strokes)
+
 									var summary := {
 										"schema_version": 1,
 										"match_id": m_id,
@@ -372,6 +387,7 @@ func enqueue_historical_local_matches_for_profile(player_name: String, cloud_uid
 										"strokes": strokes,
 										"par": par,
 										"to_par": to_par,
+										"is_finished": is_finished,
 										"is_winner": is_winner,
 										"is_loss": is_loss,
 										"is_tie": is_tie,
@@ -535,6 +551,14 @@ func sync_single_profile(player_name: String, cloud_uid: String) -> Dictionary:
 
 	var cloud_rev = int(cloud_prof.get("rev", 0))
 
+	# Determine display name: preserve user2's cloud display name when host is syncing a linked profile
+	var my_current_uid = auth.get_uid() if (auth != null and auth.has_method("get_uid")) else ""
+	var is_owner = (my_current_uid == cloud_uid)
+	var cloud_display_name = str(cloud_prof.get("display_name", ""))
+	var final_display_name = player_name
+	if not is_owner and not cloud_display_name.is_empty():
+		final_display_name = cloud_display_name
+
 	var needs_stats_sync = is_dirty or (local_rev == 0) or (cloud_rev != local_rev) or cloud_prof.is_empty()
 
 	if needs_stats_sync:
@@ -570,14 +594,6 @@ func sync_single_profile(player_name: String, cloud_uid: String) -> Dictionary:
 				return _handle_linked_revocation(player_name, cloud_uid, mp)
 			print("[CloudSync] Failed to upload stats for %s (%s): %s (status: %s)" % [player_name, cloud_uid, put_stats_res.get("error"), put_stats_res.get("status")])
 			return {"ok": false, "error": put_stats_res.get("error", "Failed to upload stats")}
-
-		# Determine display name: preserve user2's cloud display name when host is syncing a linked profile
-		var my_current_uid = auth.get_uid() if (auth != null and auth.has_method("get_uid")) else ""
-		var is_owner = (my_current_uid == cloud_uid)
-		var cloud_display_name = str(cloud_prof.get("display_name", ""))
-		var final_display_name = player_name
-		if not is_owner and not cloud_display_name.is_empty():
-			final_display_name = cloud_display_name
 
 		# Build effective lifetime stats (merging local records and achievements into lifetime)
 		var eff_lifetime: Dictionary = cloud_prof.get("lifetime", {}).duplicate()
@@ -642,6 +658,11 @@ func sync_single_profile(player_name: String, cloud_uid: String) -> Dictionary:
 					p["cloud_lifetime_cache"] = cloud_prof.get("lifetime", {})
 					break
 			mp.save_registered_players(reg_list)
+
+		var leaderboard_opt_in = true
+		if auth != null and "leaderboard_opt_in" in auth:
+			leaderboard_opt_in = bool(auth.get("leaderboard_opt_in"))
+		await _sync_public_leaderboard_profile(client, cloud_uid, final_display_name, reg_p.get("avatar", ""), cloud_prof.get("records", {}), leaderboard_opt_in, cloud_prof.get("lifetime", {}), cloud_prof.get("achievements", {}))
 
 	# 2. Upload pending matches for this cloud_uid
 	await _upload_pending_matches_for_uid(client, cloud_uid)
@@ -860,32 +881,42 @@ func _upload_pending_matches_for_uid(client: FirestoreClient, cloud_uid: String)
 			}
 		}
 
+		var is_finished_match: bool = bool(M.get("is_finished", true))
+		var holes_played_in_match: int = int(M.get("holes_count", 0))
+		var m_holes = M.get("holes", [])
+		if m_holes is Array and not m_holes.is_empty():
+			holes_played_in_match = m_holes.size()
+
 		var field_transforms: Array = [
-			{"fieldPath": "lifetime.matches_played", "increment": {"integerValue": "1"}},
-			{"fieldPath": "lifetime.holes_played", "increment": {"integerValue": str(M.get("holes_count", 0))}},
+			{"fieldPath": "lifetime.holes_played", "increment": {"integerValue": str(holes_played_in_match)}},
 			{"fieldPath": "lifetime.total_strokes", "increment": {"integerValue": str(M.get("strokes", 0))}},
 			{"fieldPath": "lifetime.total_par", "increment": {"integerValue": str(M.get("par", 0))}}
 		]
-		if M.get("is_winner", false):
-			field_transforms.append({"fieldPath": "lifetime.wins", "increment": {"integerValue": "1"}})
-		elif M.get("is_loss", false):
-			field_transforms.append({"fieldPath": "lifetime.losses", "increment": {"integerValue": "1"}})
-		elif M.get("is_tie", false):
-			field_transforms.append({"fieldPath": "lifetime.ties", "increment": {"integerValue": "1"}})
-		elif M.get("is_single_player", false):
-			field_transforms.append({"fieldPath": "lifetime.single_player_completed", "increment": {"integerValue": "1"}})
 
-		if M.has("to_par"):
-			field_transforms.append({"fieldPath": "lifetime.par_diff_sum", "increment": {"integerValue": str(M.get("to_par"))}})
-			field_transforms.append({"fieldPath": "lifetime.par_diff_matches", "increment": {"integerValue": "1"}})
+		# Only completed matches increment matches_played, win/loss records, scoring averages, and best scores
+		if is_finished_match:
+			field_transforms.append({"fieldPath": "lifetime.matches_played", "increment": {"integerValue": "1"}})
+			if M.get("is_winner", false):
+				field_transforms.append({"fieldPath": "lifetime.wins", "increment": {"integerValue": "1"}})
+			elif M.get("is_loss", false):
+				field_transforms.append({"fieldPath": "lifetime.losses", "increment": {"integerValue": "1"}})
+			elif M.get("is_tie", false):
+				field_transforms.append({"fieldPath": "lifetime.ties", "increment": {"integerValue": "1"}})
+			elif M.get("is_single_player", false):
+				field_transforms.append({"fieldPath": "lifetime.single_player_completed", "increment": {"integerValue": "1"}})
 
-		if M.get("holes_count", 0) == 18 and M.get("game_mode", "") == "Standard" and M.get("mulligans_used", 0) == 0:
-			field_transforms.append({"fieldPath": "lifetime.best_to_par_18", "minimum": {"integerValue": str(M.get("to_par", 0))}})
-			field_transforms.append({"fieldPath": "lifetime.best_gross_18", "minimum": {"integerValue": str(M.get("strokes", 0))}})
-		elif M.get("holes_count", 0) == 9 and M.get("game_mode", "") == "Standard" and M.get("mulligans_used", 0) == 0:
-			field_transforms.append({"fieldPath": "lifetime.best_to_par_9", "minimum": {"integerValue": str(M.get("to_par", 0))}})
-			field_transforms.append({"fieldPath": "lifetime.best_gross_9", "minimum": {"integerValue": str(M.get("strokes", 0))}})
+			if M.has("to_par"):
+				field_transforms.append({"fieldPath": "lifetime.par_diff_sum", "increment": {"integerValue": str(M.get("to_par"))}})
+				field_transforms.append({"fieldPath": "lifetime.par_diff_matches", "increment": {"integerValue": "1"}})
 
+			if M.get("holes_count", 0) == 18 and M.get("game_mode", "") == "Standard" and M.get("mulligans_used", 0) == 0:
+				field_transforms.append({"fieldPath": "lifetime.best_to_par_18", "minimum": {"integerValue": str(M.get("to_par", 0))}})
+				field_transforms.append({"fieldPath": "lifetime.best_gross_18", "minimum": {"integerValue": str(M.get("strokes", 0))}})
+			elif M.get("holes_count", 0) == 9 and M.get("game_mode", "") == "Standard" and M.get("mulligans_used", 0) == 0:
+				field_transforms.append({"fieldPath": "lifetime.best_to_par_9", "minimum": {"integerValue": str(M.get("to_par", 0))}})
+				field_transforms.append({"fieldPath": "lifetime.best_gross_9", "minimum": {"integerValue": str(M.get("strokes", 0))}})
+
+		# Distance records are credited whenever a valid swing occurs
 		if float(M.get("longest_drive_yds", 0.0)) > 0.0:
 			field_transforms.append({"fieldPath": "lifetime.longest_drive_yds", "maximum": {"doubleValue": float(M.get("longest_drive_yds", 0.0))}})
 		if float(M.get("longest_putt_ft", 0.0)) > 0.0:

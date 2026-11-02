@@ -475,13 +475,15 @@
 }
 
 /* ─── Overview Stat Cards Grid ─── */
-.portal-stats-grid {
+.portal-stats-grid,
+.portal-stats-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 1rem;
   margin-bottom: 2.5rem;
 }
-.portal-stat-card {
+.portal-stat-card,
+.portal-stat-box {
   background: var(--card);
   border: 1px solid var(--card-border);
   border-radius: var(--radius);
@@ -491,11 +493,15 @@
   justify-content: center;
   transition: transform 0.2s, border-color 0.2s;
 }
-.portal-stat-card:hover {
+.portal-stat-card:hover,
+.portal-stat-box:hover {
   border-color: rgba(34, 197, 94, 0.3);
   transform: translateY(-2px);
 }
-.portal-stat-card .val {
+.portal-stat-card .val,
+.portal-stat-box .val,
+.portal-stat-card .stat-value,
+.portal-stat-box .stat-value {
   font-size: 1.85rem;
   font-weight: 800;
   color: var(--green);
@@ -503,7 +509,10 @@
   line-height: 1.1;
   margin-bottom: 0.35rem;
 }
-.portal-stat-card .lbl {
+.portal-stat-card .lbl,
+.portal-stat-box .lbl,
+.portal-stat-card .stat-label,
+.portal-stat-box .stat-label {
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--muted);
@@ -1258,7 +1267,8 @@ input:checked + .slider:before {
     flex-direction: column;
     align-items: flex-start;
   }
-  .portal-stats-grid {
+  .portal-stats-grid,
+  .portal-stats-row {
     grid-template-columns: repeat(2, 1fr);
   }
   .approval-card, .delegate-item {

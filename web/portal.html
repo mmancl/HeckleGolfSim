@@ -361,13 +361,12 @@
 
           <!-- Tab 1: Overview & Clubs -->
           <div class="portal-tab-pane active" id="portal-tab-overview">
-            <!-- Golfer Profile & Equipment Preferences -->
+            <!-- Golfer Profile & Preferences -->
             <div class="portal-card">
               <div class="portal-card-header">
                 <h3 class="portal-card-title">👤 Golfer Profile &amp; Preferences</h3>
                 <div class="card-header-actions">
                   <button class="btn-action-outline" id="btn-edit-profile">✏️ Edit Profile</button>
-                  <button class="btn-action-outline" id="btn-open-bag-builder">🎒 Build Bag</button>
                 </div>
               </div>
               <div class="profile-preferences-grid" id="profile-preferences-summary">
@@ -375,35 +374,35 @@
               </div>
             </div>
 
-            <!-- Stat Cards Row -->
-            <div class="portal-stats-row">
-              <div class="portal-stat-box">
-                <div class="stat-value" id="stat-matches">-</div>
-                <div class="stat-label">Matches Played</div>
+            <!-- Stat Cards Grid -->
+            <div class="portal-stats-grid">
+              <div class="portal-stat-card">
+                <div class="val" id="stat-matches-played">-</div>
+                <div class="lbl">Matches Played</div>
               </div>
-              <div class="portal-stat-box">
-                <div class="stat-value" id="stat-record">-</div>
-                <div class="stat-label">Record (W-L-T)</div>
+              <div class="portal-stat-card">
+                <div class="val" id="stat-record">-</div>
+                <div class="lbl">Record (W-L-T)</div>
               </div>
-              <div class="portal-stat-box">
-                <div class="stat-value" id="stat-avg-score">-</div>
-                <div class="stat-label">Avg Score to Par</div>
+              <div class="portal-stat-card">
+                <div class="val" id="stat-avg-to-par">-</div>
+                <div class="lbl">Avg Score to Par</div>
               </div>
-              <div class="portal-stat-box">
-                <div class="stat-value" id="stat-best-18">-</div>
-                <div class="stat-label">Best 18-Hole</div>
+              <div class="portal-stat-card">
+                <div class="val" id="stat-best-18">-</div>
+                <div class="lbl">Best 18-Hole</div>
               </div>
-              <div class="portal-stat-box">
-                <div class="stat-value" id="stat-longest-drive">-</div>
-                <div class="stat-label">Longest Drive</div>
+              <div class="portal-stat-card">
+                <div class="val" id="stat-longest-drive">-</div>
+                <div class="lbl">Longest Drive</div>
               </div>
-              <div class="portal-stat-box">
-                <div class="stat-value" id="stat-longest-putt">-</div>
-                <div class="stat-label">Longest Putt</div>
+              <div class="portal-stat-card">
+                <div class="val" id="stat-longest-putt">-</div>
+                <div class="lbl">Longest Putt</div>
               </div>
-              <div class="portal-stat-box">
-                <div class="stat-value" id="stat-achievements-count">-</div>
-                <div class="stat-label">Achievements</div>
+              <div class="portal-stat-card">
+                <div class="val" id="stat-achievements-count">-</div>
+                <div class="lbl">Achievements</div>
               </div>
             </div>
 
@@ -412,11 +411,6 @@
               <div class="portal-card-header">
                 <h3 class="portal-card-title">🏌️ Club Distances &amp; Delivery Averages</h3>
                 <div class="card-header-actions">
-                  <label class="filter-checkbox-label" title="Toggle to display only clubs configured in your golf bag">
-                    <input type="checkbox" id="toggle-active-bag-only">
-                    <span>In-Bag Only</span>
-                  </label>
-                  <button class="btn-action-outline" id="btn-open-bag-modal-table">🎒 Bag</button>
                   <button class="btn-action-outline btn-danger-outline" id="btn-clear-all-history" title="Clear all ball history across all clubs">🧹 Clear All History</button>
                 </div>
               </div>
@@ -605,36 +599,6 @@
       <div class="portal-modal-footer">
         <button type="button" class="btn-modal-cancel" id="btn-edit-profile-cancel">Cancel</button>
         <button type="button" class="btn-modal-primary" id="btn-edit-profile-save">Save Profile</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ══ BAG BUILDER MODAL ════════════════════════════════════════ -->
-  <div class="portal-modal-overlay" id="bag-modal-overlay">
-    <div class="portal-modal portal-modal-wide">
-      <div class="portal-modal-header">
-        <div>
-          <h3>🎒 Configure Golf Bag</h3>
-          <p style="font-size:0.85rem; color:var(--muted); margin-top:0.25rem;">Select active clubs in your bag. Club suggestions and statistics filter to these clubs.</p>
-        </div>
-        <button class="portal-modal-close" id="btn-bag-close" aria-label="Close">✕</button>
-      </div>
-      <div class="portal-modal-body">
-        <div class="bag-modal-controls">
-          <div class="bag-count-badge" id="bag-count-badge">Clubs in Bag: 14 of 20 (Standard Limit: 14)</div>
-          <div class="bag-presets-row">
-            <button type="button" class="btn-preset" id="btn-preset-standard-14">Standard 14 Bag</button>
-            <button type="button" class="btn-preset" id="btn-preset-all">All 20 Clubs</button>
-            <button type="button" class="btn-preset" id="btn-preset-clear">Clear All</button>
-          </div>
-        </div>
-        <div class="bag-clubs-grid" id="bag-clubs-grid">
-          <!-- Populated by portal.js -->
-        </div>
-      </div>
-      <div class="portal-modal-footer">
-        <button type="button" class="btn-modal-cancel" id="btn-bag-cancel">Cancel</button>
-        <button type="button" class="btn-modal-primary" id="btn-bag-save">Save Bag</button>
       </div>
     </div>
   </div>

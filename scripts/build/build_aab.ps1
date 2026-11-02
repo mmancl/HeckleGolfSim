@@ -76,6 +76,16 @@ if (-not (Test-Path $assetPackAssetsDir)) {
     New-Item -ItemType Directory -Path $assetPackAssetsDir -Force | Out-Null
 }
 
+# Ensure MediaPipePosePlugin AAR is synchronized to plugin directories
+$pluginProject = Join-Path $RepoRoot "android\plugins\MediaPipePosePlugin"
+$pluginReleaseAar = Join-Path $pluginProject "build\outputs\aar\MediaPipePosePlugin-release.aar"
+$pluginTargetAar = Join-Path $RepoRoot "android\plugins\MediaPipePosePlugin.aar"
+$pluginNestedAar = Join-Path $pluginProject "MediaPipePosePlugin.aar"
+if (Test-Path $pluginReleaseAar) {
+    Copy-Item -Path $pluginReleaseAar -Destination $pluginTargetAar -Force
+    Copy-Item -Path $pluginReleaseAar -Destination $pluginNestedAar -Force
+}
+
 # Base export properties
 $gradleArgs = @(
     "bundleMonoRelease",

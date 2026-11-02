@@ -273,6 +273,9 @@ func _test_2_join_code_generation_and_collision_retry() -> void:
 
 	assert(res.get("ok", false), "create_lobby should succeed after collision retry.")
 	assert(mock_rtdb.code_put_attempt_count == 2, "Must attempt code reservation twice due to initial 412 collision.")
+	var code_put_calls = mock_rtdb.put_calls.filter(func(c): return str(c.get("path", "")).begins_with("codes/"))
+	assert(code_put_calls.size() == 2, "Must record both code reservation attempts.")
+	assert(code_put_calls[0].get("if_match_etag") == "null_etag", "Must pass 'null_etag' conditional etag.")
 	assert(res.get("code", "").length() == 6, "Must return valid 6-character code.")
 	assert(session.is_host == true, "Session must flag is_host as true.")
 	assert(session.current_match_id == "-MockMatchId_12345", "Session must store current_match_id.")

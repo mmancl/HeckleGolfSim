@@ -11605,6 +11605,24 @@ public partial class OsmMapLoader : Node
         return _concreteRoadMaterial;
     }
 
+    private Material GetRoadMaterial(string highwayType, float halfW)
+    {
+        if (ResourceLoader.Exists("res://Courses/Environments/shaders/road.gdshader"))
+        {
+            var shader = GD.Load<Shader>("res://Courses/Environments/shaders/road.gdshader");
+            if (shader != null)
+            {
+                var mat = new ShaderMaterial { Shader = shader };
+                bool isMajorRoad = highwayType is "primary" or "secondary" or "trunk" or "motorway";
+                mat.SetShaderParameter("double_yellow", isMajorRoad);
+                mat.SetShaderParameter("road_half_width", halfW);
+                mat.SetShaderParameter("edge_line_offset", Math.Max(0.5f, halfW - 0.35f));
+                return mat;
+            }
+        }
+        return GetConcreteRoadMaterial();
+    }
+
     private void CreateConcreteRoad(Node3D rootNode, PreparedRoad road, int index, List<ExclusionPolygon> exclusions)
     {
         var points = road.Points;
@@ -11635,29 +11653,38 @@ public partial class OsmMapLoader : Node
         if (smoothPts.Count < 2) return;
 
         float halfW = road.HalfWidth;
-        float curbWidth = 0.28f;
+        float curbWidth = 0.20f;
         float skirtWidth = 0.45f;
-        float crownLift = 0.120f;
-        float edgeLift = 0.090f;
-        float curbLift = 0.160f;
-        float skirtDrop = -0.10f;
+        float crownLift = 0.050f;
+        float gutterLift = 0.010f;
+        float edgeLift = 0.020f;
+        float curbLift = 0.150f; // 14cm vertical curb height above asphalt gutter
+        float skirtDrop = -0.08f;
 
         var st = new SurfaceTool();
         st.Begin(Mesh.PrimitiveType.Triangles);
 
-        Color centerConcrete = new Color(0.18f, 0.19f, 0.20f);
-        Color laneConcrete = new Color(0.22f, 0.23f, 0.24f);
-        Color curbConcrete = new Color(0.28f, 0.29f, 0.30f);
-        Color skirtConcrete = new Color(0.15f, 0.16f, 0.17f);
+        // Distinct high-contrast palette: dark asphalt road vs. bright light concrete curb
+        Color asphaltDark = new Color(0.18f, 0.19f, 0.20f);
+        Color asphaltLane = new Color(0.20f, 0.21f, 0.22f);
+        Color curbConcrete = new Color(0.78f, 0.77f, 0.74f);
+        Color skirtGrass = new Color(0.16f, 0.20f, 0.15f);
 
         int n = smoothPts.Count;
         var leftSkirt = new Vector3[n];
-        var leftCurbOuter = new Vector3[n];
-        var leftCurbInner = new Vector3[n];
+        var leftCurbBack = new Vector3[n];
+        var leftCurbTop = new Vector3[n];
+        var leftCurbGutter = new Vector3[n];
+        var leftEdge = new Vector3[n];
         var centerVerts = new Vector3[n];
-        var rightCurbInner = new Vector3[n];
-        var rightCurbOuter = new Vector3[n];
+        var rightEdge = new Vector3[n];
+        var rightCurbGutter = new Vector3[n];
+        var rightCurbTop = new Vector3[n];
+        var rightCurbBack = new Vector3[n];
         var rightSkirt = new Vector3[n];
+
+        var leftCurbFaceNormals = new Vector3[n];
+        var rightCurbFaceNormals = new Vector3[n];
         var arcLengths = new float[n];
 
         float distAccum = 0f;
@@ -11676,50 +11703,64 @@ public partial class OsmMapLoader : Node
                 tangent = (t1 + t2).Normalized();
                 if (tangent.LengthSquared() < 0.001f) tangent = t1;
             }
-            var normal2D = new Vector2(-tangent.Y, tangent.X);
+            var normal2D = new Vector2(-tangent.Y, tangent.X); // pointing to the right
+            var normal3D = new Vector3(normal2D.X, 0f, normal2D.Y);
 
             Vector2 c2 = smoothPts[i];
-            Vector2 lInner2 = c2 - normal2D * halfW;
-            Vector2 rInner2 = c2 + normal2D * halfW;
-            Vector2 lOuter2 = c2 - normal2D * (halfW + curbWidth);
-            Vector2 rOuter2 = c2 + normal2D * (halfW + curbWidth);
+            Vector2 lGutter2 = c2 - normal2D * halfW;
+            Vector2 rGutter2 = c2 + normal2D * halfW;
+            Vector2 lTop2 = c2 - normal2D * (halfW + 0.03f);
+            Vector2 rTop2 = c2 + normal2D * (halfW + 0.03f);
+            Vector2 lBack2 = c2 - normal2D * (halfW + curbWidth);
+            Vector2 rBack2 = c2 + normal2D * (halfW + curbWidth);
+            Vector2 lEdge2 = c2 - normal2D * (halfW - 0.35f);
+            Vector2 rEdge2 = c2 + normal2D * (halfW - 0.35f);
             Vector2 lSkirt2 = c2 - normal2D * (halfW + curbWidth + skirtWidth);
             Vector2 rSkirt2 = c2 + normal2D * (halfW + curbWidth + skirtWidth);
 
             float hc = GetHeightWithFeatures(c2.X, c2.Y, exclusions);
-            float hl = GetHeightWithFeatures(lInner2.X, lInner2.Y, exclusions);
-            float hr = GetHeightWithFeatures(rInner2.X, rInner2.Y, exclusions);
+            float hl = GetHeightWithFeatures(lGutter2.X, lGutter2.Y, exclusions);
+            float hr = GetHeightWithFeatures(rGutter2.X, rGutter2.Y, exclusions);
             float baseH = Math.Max(hc, (hl + hr) * 0.5f);
 
             centerVerts[i] = new Vector3(c2.X, baseH + crownLift, c2.Y);
-            leftCurbInner[i] = new Vector3(lInner2.X, baseH + edgeLift, lInner2.Y);
-            rightCurbInner[i] = new Vector3(rInner2.X, baseH + edgeLift, rInner2.Y);
-            leftCurbOuter[i] = new Vector3(lOuter2.X, baseH + curbLift, lOuter2.Y);
-            rightCurbOuter[i] = new Vector3(rOuter2.X, baseH + curbLift, rOuter2.Y);
+            leftEdge[i] = new Vector3(lEdge2.X, baseH + edgeLift, lEdge2.Y);
+            rightEdge[i] = new Vector3(rEdge2.X, baseH + edgeLift, rEdge2.Y);
+            leftCurbGutter[i] = new Vector3(lGutter2.X, baseH + gutterLift, lGutter2.Y);
+            rightCurbGutter[i] = new Vector3(rGutter2.X, baseH + gutterLift, rGutter2.Y);
+            leftCurbTop[i] = new Vector3(lTop2.X, baseH + curbLift, lTop2.Y);
+            rightCurbTop[i] = new Vector3(rTop2.X, baseH + curbLift, rTop2.Y);
+            leftCurbBack[i] = new Vector3(lBack2.X, baseH + curbLift, lBack2.Y);
+            rightCurbBack[i] = new Vector3(rBack2.X, baseH + curbLift, rBack2.Y);
             leftSkirt[i] = new Vector3(lSkirt2.X, GetHeightWithFeatures(lSkirt2.X, lSkirt2.Y, exclusions) + skirtDrop, lSkirt2.Y);
             rightSkirt[i] = new Vector3(rSkirt2.X, GetHeightWithFeatures(rSkirt2.X, rSkirt2.Y, exclusions) + skirtDrop, rSkirt2.Y);
+
+            // Inward-facing curb face normals catch sunlight and shadows realistically
+            leftCurbFaceNormals[i] = (normal3D + Vector3.Up * 0.15f).Normalized();
+            rightCurbFaceNormals[i] = (-normal3D + Vector3.Up * 0.15f).Normalized();
         }
 
-        Action<Vector3, Color, Vector2, Vector3, Color, Vector2, Vector3, Color, Vector2> addRoadTri =
-            (pA, cA, uvA, pB, cB, uvB, pC, cC, uvC) =>
+        Action<Vector3, Color, Vector2, Vector3, Vector3, Color, Vector2, Vector3, Vector3, Color, Vector2, Vector3> addRoadTri =
+            (pA, cA, uvA, nA, pB, cB, uvB, nB, pC, cC, uvC, nC) =>
             {
-                // Godot front faces are clockwise; make every road triangle face upward regardless of path direction.
-                if ((pB - pA).Cross(pC - pA).Y > 0f)
+                Vector3 faceNormal = (pB - pA).Cross(pC - pA);
+                if (faceNormal.Dot(nA) < 0f)
                 {
                     (pB, pC) = (pC, pB);
                     (cB, cC) = (cC, cB);
                     (uvB, uvC) = (uvC, uvB);
+                    (nB, nC) = (nC, nB);
                 }
-                st.SetNormal(Vector3.Up); st.SetColor(cA); st.SetUV(uvA); st.AddVertex(pA);
-                st.SetNormal(Vector3.Up); st.SetColor(cB); st.SetUV(uvB); st.AddVertex(pB);
-                st.SetNormal(Vector3.Up); st.SetColor(cC); st.SetUV(uvC); st.AddVertex(pC);
+                st.SetNormal(nA); st.SetColor(cA); st.SetUV(uvA); st.AddVertex(pA);
+                st.SetNormal(nB); st.SetColor(cB); st.SetUV(uvB); st.AddVertex(pB);
+                st.SetNormal(nC); st.SetColor(cC); st.SetUV(uvC); st.AddVertex(pC);
             };
 
-        Action<Vector3, Vector3, Vector3, Vector3, Color, Color, float, float> addStripQuad =
-            (a0, b0, a1, b1, colA, colB, v0, v1) =>
+        Action<Vector3, Vector3, Vector3, Vector3, Color, Color, float, float, Vector3, Vector3, float, float> addStripQuad =
+            (a0, b0, a1, b1, colA, colB, uA, uB, normA, normB, v0, v1) =>
             {
-                addRoadTri(a0, colA, new Vector2(0f, v0), b0, colB, new Vector2(1f, v0), a1, colA, new Vector2(0f, v1));
-                addRoadTri(b0, colB, new Vector2(1f, v0), b1, colB, new Vector2(1f, v1), a1, colA, new Vector2(0f, v1));
+                addRoadTri(a0, colA, new Vector2(uA, v0), normA, b0, colB, new Vector2(uB, v0), normB, a1, colA, new Vector2(uA, v1), normA);
+                addRoadTri(b0, colB, new Vector2(uB, v0), normB, b1, colB, new Vector2(uB, v1), normB, a1, colA, new Vector2(uA, v1), normA);
             };
 
         var collisionTriangles = new List<Vector3>((n - 1) * 24);
@@ -11729,21 +11770,68 @@ public partial class OsmMapLoader : Node
             collisionTriangles.Add(b0); collisionTriangles.Add(b1); collisionTriangles.Add(a1);
         };
 
+        float uSkirtL = -(halfW + curbWidth + skirtWidth);
+        float uBackL = -(halfW + curbWidth);
+        float uTopL = -(halfW + 0.03f);
+        float uGutterL = -halfW;
+        float uEdgeL = -(halfW - 0.35f);
+        float uCenter = 0f;
+        float uEdgeR = +(halfW - 0.35f);
+        float uGutterR = +halfW;
+        float uTopR = +(halfW + 0.03f);
+        float uBackR = +(halfW + curbWidth);
+        float uSkirtR = +(halfW + curbWidth + skirtWidth);
+
         for (int i = 0; i < n - 1; i++)
         {
-            float v0 = arcLengths[i] * 0.2f;
-            float v1 = arcLengths[i + 1] * 0.2f;
+            float v0 = arcLengths[i];
+            float v1 = arcLengths[i + 1];
 
-            // Left skirt -> Left curb outer -> Left curb inner -> Center -> Right curb inner -> Right curb outer -> Right skirt
-            addStripQuad(leftSkirt[i], leftCurbOuter[i], leftSkirt[i + 1], leftCurbOuter[i + 1], skirtConcrete, curbConcrete, v0, v1);
-            addStripQuad(leftCurbOuter[i], leftCurbInner[i], leftCurbOuter[i + 1], leftCurbInner[i + 1], curbConcrete, laneConcrete, v0, v1);
-            addStripQuad(leftCurbInner[i], centerVerts[i], leftCurbInner[i + 1], centerVerts[i + 1], laneConcrete, centerConcrete, v0, v1);
-            addStripQuad(centerVerts[i], rightCurbInner[i], centerVerts[i + 1], rightCurbInner[i + 1], centerConcrete, laneConcrete, v0, v1);
-            addStripQuad(rightCurbInner[i], rightCurbOuter[i], rightCurbInner[i + 1], rightCurbOuter[i + 1], laneConcrete, curbConcrete, v0, v1);
-            addStripQuad(rightCurbOuter[i], rightSkirt[i], rightCurbOuter[i + 1], rightSkirt[i + 1], curbConcrete, skirtConcrete, v0, v1);
+            // 1. Left skirt transition
+            addStripQuad(leftSkirt[i], leftCurbBack[i], leftSkirt[i + 1], leftCurbBack[i + 1],
+                skirtGrass, curbConcrete, uSkirtL, uBackL, Vector3.Up, Vector3.Up, v0, v1);
 
-            addCollisionQuad(leftCurbOuter[i], centerVerts[i], leftCurbOuter[i + 1], centerVerts[i + 1]);
-            addCollisionQuad(centerVerts[i], rightCurbOuter[i], centerVerts[i + 1], rightCurbOuter[i + 1]);
+            // 2. Left curb flat top
+            addStripQuad(leftCurbBack[i], leftCurbTop[i], leftCurbBack[i + 1], leftCurbTop[i + 1],
+                curbConcrete, curbConcrete, uBackL, uTopL, Vector3.Up, Vector3.Up, v0, v1);
+
+            // 3. Left curb vertical face (14cm step down into gutter)
+            addStripQuad(leftCurbTop[i], leftCurbGutter[i], leftCurbTop[i + 1], leftCurbGutter[i + 1],
+                curbConcrete, curbConcrete, uTopL, uGutterL, leftCurbFaceNormals[i], leftCurbFaceNormals[i], v0, v1);
+
+            // 4. Left asphalt gutter to white lane edge line
+            addStripQuad(leftCurbGutter[i], leftEdge[i], leftCurbGutter[i + 1], leftEdge[i + 1],
+                asphaltDark, asphaltLane, uGutterL, uEdgeL, Vector3.Up, Vector3.Up, v0, v1);
+
+            // 5. Left driving lane to centerline
+            addStripQuad(leftEdge[i], centerVerts[i], leftEdge[i + 1], centerVerts[i + 1],
+                asphaltLane, asphaltDark, uEdgeL, uCenter, Vector3.Up, Vector3.Up, v0, v1);
+
+            // 6. Centerline to right driving lane
+            addStripQuad(centerVerts[i], rightEdge[i], centerVerts[i + 1], rightEdge[i + 1],
+                asphaltDark, asphaltLane, uCenter, uEdgeR, Vector3.Up, Vector3.Up, v0, v1);
+
+            // 7. Right white lane edge line to asphalt gutter
+            addStripQuad(rightEdge[i], rightCurbGutter[i], rightEdge[i + 1], rightCurbGutter[i + 1],
+                asphaltLane, asphaltDark, uEdgeR, uGutterR, Vector3.Up, Vector3.Up, v0, v1);
+
+            // 8. Right curb vertical face (14cm rise from gutter to curb top)
+            addStripQuad(rightCurbGutter[i], rightCurbTop[i], rightCurbGutter[i + 1], rightCurbTop[i + 1],
+                curbConcrete, curbConcrete, uGutterR, uTopR, rightCurbFaceNormals[i], rightCurbFaceNormals[i], v0, v1);
+
+            // 9. Right curb flat top
+            addStripQuad(rightCurbTop[i], rightCurbBack[i], rightCurbTop[i + 1], rightCurbBack[i + 1],
+                curbConcrete, curbConcrete, uTopR, uBackR, Vector3.Up, Vector3.Up, v0, v1);
+
+            // 10. Right skirt transition
+            addStripQuad(rightCurbBack[i], rightSkirt[i], rightCurbBack[i + 1], rightSkirt[i + 1],
+                curbConcrete, skirtGrass, uBackR, uSkirtR, Vector3.Up, Vector3.Up, v0, v1);
+
+            // Collision geometry covers the entire road surface and curb decks
+            addCollisionQuad(leftCurbBack[i], leftCurbTop[i], leftCurbBack[i + 1], leftCurbTop[i + 1]);
+            addCollisionQuad(leftCurbTop[i], centerVerts[i], leftCurbTop[i + 1], centerVerts[i + 1]);
+            addCollisionQuad(centerVerts[i], rightCurbTop[i], centerVerts[i + 1], rightCurbTop[i + 1]);
+            addCollisionQuad(rightCurbTop[i], rightCurbBack[i], rightCurbTop[i + 1], rightCurbBack[i + 1]);
         }
 
         var mesh = st.Commit();
@@ -11751,7 +11839,7 @@ public partial class OsmMapLoader : Node
         {
             Name = $"road_Mesh_{index}",
             Mesh = mesh,
-            MaterialOverride = GetConcreteRoadMaterial(),
+            MaterialOverride = GetRoadMaterial(road.HighwayType, halfW),
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
         };
 
@@ -11793,42 +11881,58 @@ public partial class OsmMapLoader : Node
             AlbedoTexture = CreateBuildingDetailTexture(),
             Uv1Triplanar = true,
             Uv1WorldTriplanar = true,
-            Uv1Scale = new Vector3(0.22f, 0.22f, 0.22f),
+            Uv1TriplanarSharpness = 8.0f,
+            Uv1Scale = new Vector3(0.25f, 0.25f, 0.25f),
             TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmapsAnisotropic,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-            Roughness = 0.88f,
+            Roughness = 0.80f,
             Metallic = 0.0f
         };
         return _buildingVertexColorMaterial;
     }
 
     /// <summary>
-    /// Procedural grayscale detail texture (horizontal siding/brick courses, mortar lines and grain)
-    /// tinted by the per-vertex facade colors so buildings no longer look like flat solid blocks.
+    /// Procedural grayscale horizontal lap siding texture (continuous overlapping lap boards with
+    /// realistic drop shadows, bevel highlights, and wood grain) tinted by per-vertex siding colors.
+    /// Eliminates the old mono-white checkerboard/brick look.
     /// </summary>
     private static ImageTexture CreateBuildingDetailTexture()
     {
         const int size = 256;
         var img = Image.CreateEmpty(size, size, true, Image.Format.Rgba8);
         var rnd = new Random(4242);
-        const int courseH = 16; // 16 courses per tile
+        const int courseH = 16; // 16 horizontal lap boards per tile
         for (int y = 0; y < size; y++)
         {
             int course = y / courseH;
-            int inCourse = y % courseH;
-            int brickOffset = (course % 2) * 16;
-            float courseShade = 0.85f + (float)((course * 37) % 11) * 0.01f;
+            int inCourse = y % courseH; // 0 (top of lap board) to 15 (bottom overlap lip)
+            float courseVariation = 0.97f + (float)((course * 47) % 7) * 0.01f;
+
+            // Lap siding profile: board slopes outward toward the bottom, casting a shadow below
+            float lapProfile = 0.92f + ((float)inCourse / (courseH - 1)) * 0.10f;
+
             for (int x = 0; x < size; x++)
             {
-                float v = courseShade;
-                // Horizontal shadow/mortar line at the bottom of each course
-                if (inCourse >= courseH - 2) v *= 0.72f;
-                else if (inCourse == 0) v *= 1.04f;
-                // Vertical brick joints, staggered every other course
-                if (((x + brickOffset) % 32) < 1 && inCourse < courseH - 2) v *= 0.82f;
-                // Fine grain
-                v *= 0.95f + (float)rnd.NextDouble() * 0.10f;
-                v = Math.Clamp(v, 0f, 1f);
+                float v = courseVariation * lapProfile;
+
+                // Deep horizontal drop-shadow line where upper board laps over lower board
+                if (inCourse >= courseH - 2)
+                {
+                    v *= 0.65f;
+                }
+                // Crisp highlight along the exposed bottom drip edge
+                else if (inCourse == courseH - 3)
+                {
+                    v *= 1.06f;
+                }
+                else if (inCourse == 0)
+                {
+                    v *= 0.90f;
+                }
+
+                // Fine horizontal wood/vinyl grain along the siding plank
+                float grain = (float)rnd.NextDouble() * 0.06f - 0.03f;
+                v = Math.Clamp(v + grain, 0.1f, 1.0f);
                 img.SetPixel(x, y, new Color(v, v, v, 1f));
             }
         }
@@ -12173,9 +12277,16 @@ public partial class OsmMapLoader : Node
             float wallHeight = floors * floorHeight;
             float eaveY = baseFloorY + wallHeight;
 
-            Color stoneBaseColor = new Color(0.40f, 0.37f, 0.33f);
-            Color stuccoColor = new Color(0.64f, 0.59f, 0.51f);
-            Color trimColor = new Color(0.76f, 0.75f, 0.73f);
+            Color stoneBaseColor = new Color(0.38f, 0.35f, 0.31f);
+            Color[] clubhouseWallPalette = new[]
+            {
+                new Color(0.55f, 0.50f, 0.43f), // Warm limestone stucco / sand beige
+                new Color(0.50f, 0.47f, 0.42f), // Weathered stone greige
+                new Color(0.46f, 0.49f, 0.52f), // Coastal clubhouse slate grey
+                new Color(0.48f, 0.42f, 0.34f)  // Cedar / craftsman timber
+            };
+            Color stuccoColor = clubhouseWallPalette[seed % clubhouseWallPalette.Length];
+            Color trimColor = new Color(0.80f, 0.79f, 0.76f);
             Color slateRoofColor = new Color(0.13f, 0.15f, 0.18f);
             Color windowGlass = new Color(0.18f, 0.26f, 0.33f);
             Color shutterCol = new Color(0.14f, 0.24f, 0.18f); // Classic country club hunter green shutters
@@ -12258,14 +12369,35 @@ public partial class OsmMapLoader : Node
 
             Color[] sidingPalette = new[]
             {
-                new Color(0.38f, 0.29f, 0.22f), // Craftsman cedar / timber brown
-                new Color(0.24f, 0.30f, 0.38f), // Coastal navy siding
-                new Color(0.31f, 0.37f, 0.30f), // Earthy sage / olive green
-                new Color(0.44f, 0.39f, 0.34f), // Warm taupe / clay siding
-                new Color(0.28f, 0.30f, 0.32f), // Charcoal slate siding
-                new Color(0.40f, 0.22f, 0.20f), // Colonial barn red
-                new Color(0.33f, 0.39f, 0.45f), // Harbor blue siding
-                new Color(0.48f, 0.44f, 0.38f)  // Warm sandstone khaki siding
+                // Greys
+                new Color(0.46f, 0.49f, 0.52f), // Cape Cod slate grey
+                new Color(0.52f, 0.54f, 0.55f), // Classic pewter grey
+                new Color(0.36f, 0.38f, 0.40f), // Charcoal siding
+                new Color(0.56f, 0.58f, 0.59f), // Soft dove grey
+                new Color(0.48f, 0.48f, 0.46f), // Weathered driftwood grey
+
+                // Beige & Greige
+                new Color(0.66f, 0.62f, 0.54f), // Warm classic beige
+                new Color(0.62f, 0.59f, 0.53f), // Soft linen greige
+                new Color(0.68f, 0.64f, 0.57f), // Creamy oat beige
+                new Color(0.59f, 0.56f, 0.51f), // Modern muted greige
+
+                // Tans & Khakis
+                new Color(0.58f, 0.50f, 0.40f), // Warm khaki tan
+                new Color(0.62f, 0.54f, 0.44f), // Sandstone tan
+                new Color(0.55f, 0.47f, 0.37f), // Toasted wheat tan
+                new Color(0.64f, 0.56f, 0.46f), // Golden almond tan
+
+                // Light Blue sidings
+                new Color(0.46f, 0.55f, 0.63f), // Coastal light blue
+                new Color(0.50f, 0.58f, 0.65f), // Carolina powder blue
+                new Color(0.42f, 0.50f, 0.58f), // Wedgewood blue siding
+                new Color(0.38f, 0.46f, 0.54f), // Muted slate blue
+                new Color(0.52f, 0.60f, 0.67f), // Pale harbor blue
+
+                // Subtle sage & craftsman accents
+                new Color(0.44f, 0.49f, 0.43f), // Earthy sage green
+                new Color(0.46f, 0.37f, 0.28f)  // Craftsman cedar
             };
             Color[] roofPalette = new[]
             {
@@ -12388,11 +12520,20 @@ public partial class OsmMapLoader : Node
 
             Color[] businessFacades = new[]
             {
-                new Color(0.35f, 0.37f, 0.39f), // Modern brushed dark steel / concrete gray
-                new Color(0.46f, 0.41f, 0.35f), // Architectural warm sandstone masonry
-                new Color(0.38f, 0.27f, 0.22f), // Commercial brick / masonry taupe
-                new Color(0.28f, 0.30f, 0.32f), // Deep slate architectural composite panels
-                new Color(0.42f, 0.41f, 0.39f)  // Precast medium gray limestone
+                // Greys
+                new Color(0.46f, 0.49f, 0.52f), // Slate grey architectural panels
+                new Color(0.52f, 0.54f, 0.55f), // Classic pewter grey
+                new Color(0.36f, 0.38f, 0.40f), // Charcoal composite panels
+
+                // Beiges & Tans
+                new Color(0.58f, 0.54f, 0.47f), // Warm limestone masonry beige
+                new Color(0.55f, 0.48f, 0.39f), // Architectural sandstone tan
+                new Color(0.50f, 0.46f, 0.40f), // Warm taupe concrete
+
+                // Light Blue & Muted
+                new Color(0.42f, 0.50f, 0.58f), // Architectural slate blue panels
+                new Color(0.48f, 0.55f, 0.62f), // Coastal light blue facade
+                new Color(0.42f, 0.34f, 0.28f)  // Commercial brick masonry
             };
             Color facadeColor = businessFacades[seed % businessFacades.Length];
             Color spandrelColor = facadeColor.Darkened(0.18f);

@@ -39,40 +39,55 @@ PORT = 49154
 
 def ensure_model():
     """Download the MediaPipe Pose Landmarker model if it doesn't exist."""
-    if os.path.exists(MODEL_PATH):
+    try:
+        if os.path.exists(MODEL_PATH):
+            size_mb = os.path.getsize(MODEL_PATH) / (1024 * 1024)
+            print(f"[PoseServer] Model found: {MODEL_FILENAME} ({size_mb:.1f} MB)")
+            return True
+        print(f"[PoseServer] Downloading model: {MODEL_FILENAME} ...")
+        import urllib.request
+        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
         size_mb = os.path.getsize(MODEL_PATH) / (1024 * 1024)
-        print(f"[PoseServer] Model found: {MODEL_FILENAME} ({size_mb:.1f} MB)")
-        return
-    print(f"[PoseServer] Downloading model: {MODEL_FILENAME} ...")
-    import urllib.request
-    urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-    size_mb = os.path.getsize(MODEL_PATH) / (1024 * 1024)
-    print(f"[PoseServer] Download complete ({size_mb:.1f} MB)")
+        print(f"[PoseServer] Download complete ({size_mb:.1f} MB)")
+        return True
+    except Exception as e:
+        print(f"[PoseServer] Warning: Failed to ensure model: {e}")
+        return False
 
-
-ensure_model()
 
 import cv2
 import numpy as np
-import mediapipe as mp
-from mediapipe.tasks.python import BaseOptions
-from mediapipe.tasks.python.vision import (
-    PoseLandmarker,
-    PoseLandmarkerOptions,
-    RunningMode,
-)
 
-options = PoseLandmarkerOptions(
-    base_options=BaseOptions(model_asset_path=MODEL_PATH),
-    running_mode=RunningMode.IMAGE,
-    num_poses=1,
-    min_pose_detection_confidence=0.5,
-    min_pose_presence_confidence=0.5,
-    min_tracking_confidence=0.5,
-    output_segmentation_masks=False,
-)
-detector = PoseLandmarker.create_from_options(options)
-print("[PoseServer] MediaPipe PoseLandmarker initialised (full model).")
+mp = None
+detector = None
+
+try:
+    ensure_model()
+    import mediapipe as mp
+    from mediapipe.tasks.python import BaseOptions
+    from mediapipe.tasks.python.vision import (
+        PoseLandmarker,
+        PoseLandmarkerOptions,
+        RunningMode,
+    )
+
+    if os.path.exists(MODEL_PATH):
+        options = PoseLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=MODEL_PATH),
+            running_mode=RunningMode.IMAGE,
+            num_poses=1,
+            min_pose_detection_confidence=0.5,
+            min_pose_presence_confidence=0.5,
+            min_tracking_confidence=0.5,
+            output_segmentation_masks=False,
+        )
+        detector = PoseLandmarker.create_from_options(options)
+        print("[PoseServer] MediaPipe PoseLandmarker initialised (full model).")
+    else:
+        print("[PoseServer] Model file not present; pose detection deferred, running in camera streaming mode.")
+except Exception as e:
+    print(f"[PoseServer] Notice: MediaPipe pose tracking not loaded ({e}); running in camera streaming mode.")
+    detector = None
 
 # Landmark indices used by the golf skeleton overlay
 GOLF_LANDMARK_MAP = {
@@ -182,6 +197,9 @@ class CameraManager:
                 cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
                 if not cap.isOpened():
                     cap.release()
+                    cap = cv2.VideoCapture(i, cv2.CAP_MSMF)
+                if not cap.isOpened():
+                    cap.release()
                     cap = cv2.VideoCapture(i)
             else:
                 cap = cv2.VideoCapture(i)
@@ -236,6 +254,9 @@ class CameraManager:
                 cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
                 if not cap.isOpened():
                     cap.release()
+                    cap = cv2.VideoCapture(index, cv2.CAP_MSMF)
+                if not cap.isOpened():
+                    cap.release()
                     cap = cv2.VideoCapture(index)
             else:
                 cap = cv2.VideoCapture(index)
@@ -283,13 +304,16 @@ class CameraManager:
 
         landmarks = {}
         detected = False
-        if detect:
+        if detect and detector is not None and mp is not None:
             # Run MediaPipe PoseLandmarker only when explicitly requested
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            result = detector.detect(mp_image)
-            landmarks = parse_landmarks(result)
-            detected = len(landmarks) > 0
+            try:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                result = detector.detect(mp_image)
+                landmarks = parse_landmarks(result)
+                detected = len(landmarks) > 0
+            except Exception as e:
+                print(f"[PoseServer] Warning during frame pose detection: {e}", file=sys.stderr)
 
         # Encode frame to JPEG and base64
         encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 75]
@@ -364,6 +388,7 @@ class PoseHandler(http.server.BaseHTTPRequestHandler):
                 "status": "ok",
                 "pid": os.getpid(),
                 "model": MODEL_FILENAME,
+                "detector_ready": detector is not None,
                 "camera_active": camera_mgr.active_index >= 0,
                 "camera_index": camera_mgr.active_index
             })
@@ -387,15 +412,21 @@ class PoseHandler(http.server.BaseHTTPRequestHandler):
 
     @staticmethod
     def _detect_raw(jpeg_bytes: bytes) -> dict:
+        if detector is None or mp is None:
+            return {"detected": False, "landmarks": {}, "warning": "MediaPipe pose tracker not loaded"}
         np_arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
         bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         if bgr is None:
             return {"detected": False, "landmarks": {}}
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        result = detector.detect(mp_image)
-        landmarks = parse_landmarks(result)
-        return {"detected": len(landmarks) > 0, "landmarks": landmarks}
+        try:
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            result = detector.detect(mp_image)
+            landmarks = parse_landmarks(result)
+            return {"detected": len(landmarks) > 0, "landmarks": landmarks}
+        except Exception as e:
+            print(f"[PoseServer] Warning during _detect_raw: {e}", file=sys.stderr)
+            return {"detected": False, "landmarks": {}, "error": str(e)}
 
     def _send(self, code: int, data: dict):
         body = json.dumps(data).encode("utf-8")

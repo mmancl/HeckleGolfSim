@@ -125,7 +125,7 @@ func _get_my_display_name() -> String:
 
 
 func _ensure_auth() -> Dictionary:
-	if rtdb != null:
+	if rtdb != null and rtdb.get_script() != RtdbClient:
 		return {"ok": true}
 	var auth_node := _get_cloud_auth()
 	if auth_node != null:
@@ -254,6 +254,8 @@ func create_lobby(course_config_path: String, settings: Dictionary, visibility: 
 	# 2. Collision-safe Join Code Reservation with null_etag (Hole H15)
 	var reserved_code := ""
 	var code_claimed := false
+	var last_code_error := ""
+	var is_collision := false
 	for attempt in range(5):
 		var cand_code := _generate_join_code()
 		var code_payload := {
@@ -267,14 +269,24 @@ func create_lobby(course_config_path: String, settings: Dictionary, visibility: 
 			code_claimed = true
 			break
 		elif code_res.get("status", 0) == 412 or str(code_res.get("error", "")).contains("412") or str(code_res.get("error", "")).contains("Precondition"):
+			is_collision = true
+			last_code_error = "Join code collision (412 Precondition Failed)"
 			continue
 		else:
 			# Non-collision error (e.g. permission or network error)
+			is_collision = false
+			last_code_error = str(code_res.get("error", "Database error %s" % str(code_res.get("status", ""))))
 			break
 
 	if not code_claimed:
 		await client.delete_path("matches/" + match_id)
-		var err := "Failed to reserve a unique join code after multiple attempts."
+		var err := ""
+		if is_collision:
+			err = "Failed to reserve a unique join code after multiple attempts."
+		elif not last_code_error.is_empty():
+			err = "Failed to reserve join code: %s" % last_code_error
+		else:
+			err = "Failed to reserve a unique join code after multiple attempts."
 		lobby_error.emit("JOIN_CODE_COLLISION", err)
 		return {"ok": false, "error": err}
 
