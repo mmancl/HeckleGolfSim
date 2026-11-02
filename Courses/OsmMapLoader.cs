@@ -1058,11 +1058,11 @@ public partial class OsmMapLoader : Node
         string latStr = lat.ToString(CultureInfo.InvariantCulture);
         string lonStr = lon.ToString(CultureInfo.InvariantCulture);
         string supplementQuery = $@"
-        [out:json][timeout:18];
+        [out:json][timeout:25];
         (
-          way(around:1800, {latStr}, {lonStr})[""highway""];
-          way(around:1800, {latStr}, {lonStr})[""building""];
-          relation(around:1800, {latStr}, {lonStr})[""building""];
+          way(around:1200, {latStr}, {lonStr})[""highway""~""^(residential|service|unclassified|tertiary|secondary|primary|track)$""];
+          way(around:1200, {latStr}, {lonStr})[""building""];
+          relation(around:1200, {latStr}, {lonStr})[""building""];
         );
         out body;
         >;
@@ -1074,7 +1074,7 @@ public partial class OsmMapLoader : Node
             string endpoint = OverpassEndpoints[(attempt - 1) % OverpassEndpoints.Length];
             try
             {
-                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(20));
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(30));
                 var content = new FormUrlEncodedContent(new[] { new KeyValuePair<string, string>("data", supplementQuery) });
                 var response = await HttpClient.PostAsync(endpoint, content, cts.Token);
                 if (!response.IsSuccessStatusCode)
@@ -2609,8 +2609,46 @@ public partial class OsmMapLoader : Node
             float courseWidth = courseMaxX - courseMinX;
             float courseDepth = courseMaxZ - courseMinZ;
 
+            // Remove any erroneously mapped bunkers that sit inside water hazards
+            if (waterPolygons.Count > 0)
+            {
+                var submergedBunkers = exclusionPolygons
+                    .Where(e => e.GolfType == "bunker" && waterPolygons.Any(wp => PointInPolygon(new Vector2((e.MinX + e.MaxX) * 0.5f, (e.MinY + e.MaxY) * 0.5f), wp)))
+                    .ToList();
+                foreach (var sb in submergedBunkers)
+                {
+                    exclusionPolygons.Remove(sb);
+                }
+                var bodiesToRemove = new List<Node>();
+                foreach (Node child in rootNode.GetChildren())
+                {
+                    if (child is StaticBody3D sb && (child.Name.ToString().Contains("bunker", StringComparison.OrdinalIgnoreCase) || child.IsInGroup("bunkers")))
+                    {
+                        if (sb.HasMeta("boundary_polygon"))
+                        {
+                            var bp = sb.GetMeta("boundary_polygon").AsVector2Array();
+                            if (bp.Length >= 3)
+                            {
+                                Vector2 c = Vector2.Zero;
+                                for (int i = 0; i < bp.Length; i++) c += bp[i];
+                                c /= bp.Length;
+                                if (waterPolygons.Any(wp => PointInPolygon(c, wp)))
+                                {
+                                    bodiesToRemove.Add(child);
+                                }
+                            }
+                        }
+                    }
+                }
+                foreach (var b in bodiesToRemove)
+                {
+                    rootNode.RemoveChild(b);
+                    b.QueueFree();
+                }
+            }
+
             // If the course has no mapped bunkers in OSM, synthesize realistic sand traps
-            GenerateSyntheticBunkersIfNoneMapped(holeInfo, exclusionPolygons, coursePolygons, rootNode);
+            GenerateSyntheticBunkersIfNoneMapped(holeInfo, exclusionPolygons, coursePolygons, rootNode, cartPaths, waterPolygons);
 
             // 1. Adjust straight-line or dogleg hole paths to follow the fairway doglegs if needed
             var fairwayPolys = exclusionPolygons.Where(e => e.GolfType == "fairway").ToList();
@@ -9964,6 +10002,12 @@ public partial class OsmMapLoader : Node
         List<List<Vector2>> lineOfPlayPaths,
         List<ExclusionPolygon> exclusionPolygons)
     {
+        // If no course boundaries were mapped in OSM, retain mapped bunkers near course elements
+        if (boundaryInfo.CoursePolygons.Count == 0 && boundaryInfo.OtherCoursePolygons.Count == 0)
+        {
+            return true;
+        }
+
         // If strictly inside an other course's named boundary, exclude
         if (boundaryInfo.OtherCoursePolygons.Count > 0 &&
             boundaryInfo.OtherCoursePolygons.Any(p => PointInPolygon(pt, p)) &&
@@ -9975,7 +10019,7 @@ public partial class OsmMapLoader : Node
         foreach (var poly in boundaryInfo.CoursePolygons)
         {
             if (PointInPolygon(pt, poly)) return true;
-            if (DistancePointToPolygonWithInterior(pt, poly) < 80f) return true;
+            if (DistancePointToPolygonWithInterior(pt, poly) < 120f) return true;
         }
 
         for (int pIdx = 0; pIdx < lineOfPlayPaths.Count; pIdx++)
@@ -9983,7 +10027,7 @@ public partial class OsmMapLoader : Node
             var path = lineOfPlayPaths[pIdx];
             for (int i = 0; i < path.Count - 1; i++)
             {
-                if (DistanceToSegment(pt, path[i], path[i + 1]) < 130.0f)
+                if (DistanceToSegment(pt, path[i], path[i + 1]) < 140.0f)
                     return true;
             }
         }
@@ -9991,13 +10035,74 @@ public partial class OsmMapLoader : Node
         for (int i = 0; i < exclusionPolygons.Count; i++)
         {
             var excl = exclusionPolygons[i];
-            if (pt.X >= excl.MinX - 80f && pt.X <= excl.MaxX + 80f && pt.Y >= excl.MinY - 80f && pt.Y <= excl.MaxY + 80f)
+            if (pt.X >= excl.MinX - 100f && pt.X <= excl.MaxX + 100f && pt.Y >= excl.MinY - 100f && pt.Y <= excl.MaxY + 100f)
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    public static bool IsSyntheticBunkerLocationValid(
+        Vector2[] bunkerPts,
+        Vector2 center,
+        List<ExclusionPolygon> exclusionPolygons,
+        List<List<Vector2>>? cartPaths = null,
+        List<Vector2[]>? waterPolygons = null)
+    {
+        // 1. Check exclusion polygons: must not intersect water, tees, or greens
+        for (int i = 0; i < exclusionPolygons.Count; i++)
+        {
+            var excl = exclusionPolygons[i];
+            if (excl.GolfType == "water" || excl.GolfType == "tee" || excl.GolfType == "green")
+            {
+                if (center.X >= excl.MinX - 15f && center.X <= excl.MaxX + 15f &&
+                    center.Y >= excl.MinY - 15f && center.Y <= excl.MaxY + 15f)
+                {
+                    if (PointInPolygon(center, excl.Polygon)) return false;
+                    for (int p = 0; p < bunkerPts.Length; p++)
+                    {
+                        if (PointInPolygon(bunkerPts[p], excl.Polygon)) return false;
+                        if (DistancePointToPolygonWithInterior(bunkerPts[p], excl.Polygon) < 2.0f) return false;
+                    }
+                }
+            }
+        }
+
+        // 2. Check explicit water polygons
+        if (waterPolygons != null)
+        {
+            for (int w = 0; w < waterPolygons.Count; w++)
+            {
+                var wp = waterPolygons[w];
+                if (PointInPolygon(center, wp)) return false;
+                for (int p = 0; p < bunkerPts.Length; p++)
+                {
+                    if (PointInPolygon(bunkerPts[p], wp)) return false;
+                    if (DistancePointToPolygonWithInterior(bunkerPts[p], wp) < 2.5f) return false;
+                }
+            }
+        }
+
+        // 3. Check cart paths: must not intersect or sit under cart paths (minimum 3.0m clearance)
+        if (cartPaths != null)
+        {
+            for (int pIdx = 0; pIdx < cartPaths.Count; pIdx++)
+            {
+                var path = cartPaths[pIdx];
+                for (int s = 0; s < path.Count - 1; s++)
+                {
+                    if (DistanceToSegment(center, path[s], path[s + 1]) < 3.5f) return false;
+                    for (int p = 0; p < bunkerPts.Length; p++)
+                    {
+                        if (DistanceToSegment(bunkerPts[p], path[s], path[s + 1]) < 2.0f) return false;
+                    }
+                }
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -10008,7 +10113,9 @@ public partial class OsmMapLoader : Node
         Dictionary<string, HoleConfig> holeInfo,
         List<ExclusionPolygon> exclusionPolygons,
         List<Vector2[]> coursePolygons,
-        Node3D rootNode)
+        Node3D rootNode,
+        List<List<Vector2>>? cartPaths = null,
+        List<Vector2[]>? waterPolygons = null)
     {
         if (holeInfo == null || holeInfo.Count == 0) return;
         int existingBunkers = exclusionPolygons.Count(e => e.GolfType == "bunker");
@@ -10064,38 +10171,50 @@ public partial class OsmMapLoader : Node
             // Pseudo-random deterministic hash from holeKey
             int hHash = Math.Abs(holeKey.GetHashCode());
 
-            // 1. Primary Greenside Bunker (left or right, offset slightly toward approach)
+            // 1. Primary Greenside Bunker (left or right, searching for a clear angle)
             bool leftSide = (hHash % 2) == 0;
-            float sideOffset = (greenRadius + 3.5f) * (leftSide ? 1f : -1f);
-            float forwardOffset = -greenRadius * 0.35f + ((hHash % 5) - 2) * 1.5f;
-            Vector2 bunker1Center = pin + sideDir * sideOffset + approachDir * forwardOffset;
-
-            // Generate organic rounded bunker polygon
-            float b1Length = 13.0f + (hHash % 5);
-            float b1Width = 7.0f + (hHash % 3);
-            float b1Angle = MathF.Atan2(approachDir.Y, approachDir.X) + (leftSide ? 0.35f : -0.35f);
-            var b1Pts = CreateOrganicBunkerPolygon(bunker1Center, b1Length, b1Width, b1Angle, hHash);
-
-            if (b1Pts.Length >= 3 && (matchingGreen == null || !PointInPolygon(bunker1Center, matchingGreen.Polygon)))
+            bool b1Placed = false;
+            for (int attempt = 0; attempt < 4; attempt++)
             {
-                AddSyntheticBunker(b1Pts, holeKey, syntheticIdx++, exclusionPolygons, rootNode);
+                float rot = (leftSide ? 0.35f : -0.35f) + attempt * 0.8f;
+                float sideOff = (greenRadius + 3.5f) * (leftSide ? 1f : -1f);
+                float fwdOff = -greenRadius * 0.35f + ((hHash % 5) - 2) * 1.5f;
+                Vector2 curDir = sideDir.Rotated(attempt * 0.8f);
+                Vector2 bCenter = pin + curDir * sideOff + approachDir * fwdOff;
+                float b1Length = 13.0f + (hHash % 5);
+                float b1Width = 7.0f + (hHash % 3);
+                float b1Angle = MathF.Atan2(approachDir.Y, approachDir.X) + rot;
+                var b1Pts = CreateOrganicBunkerPolygon(bCenter, b1Length, b1Width, b1Angle, hHash + attempt * 7);
+
+                if (b1Pts.Length >= 3 && IsSyntheticBunkerLocationValid(b1Pts, bCenter, exclusionPolygons, cartPaths, waterPolygons))
+                {
+                    AddSyntheticBunker(b1Pts, holeKey, syntheticIdx++, exclusionPolygons, rootNode);
+                    b1Placed = true;
+                    break;
+                }
             }
 
             // 2. Secondary Greenside Bunker (opposite side or back corner) on ~70% of holes
-            if ((hHash % 10) >= 3)
+            if (b1Placed && (hHash % 10) >= 3)
             {
-                float side2Offset = (greenRadius + 4.0f) * (leftSide ? -1f : 1f);
-                float forward2Offset = greenRadius * 0.25f + ((hHash % 3) - 1) * 2.0f;
-                Vector2 bunker2Center = pin + sideDir * side2Offset + approachDir * forward2Offset;
-
-                float b2Length = 11.0f + ((hHash >> 2) % 4);
-                float b2Width = 6.0f + ((hHash >> 2) % 3);
-                float b2Angle = MathF.Atan2(approachDir.Y, approachDir.X) + (leftSide ? -0.4f : 0.4f);
-                var b2Pts = CreateOrganicBunkerPolygon(bunker2Center, b2Length, b2Width, b2Angle, hHash + 17);
-
-                if (b2Pts.Length >= 3 && (matchingGreen == null || !PointInPolygon(bunker2Center, matchingGreen.Polygon)))
+                for (int attempt = 0; attempt < 4; attempt++)
                 {
-                    AddSyntheticBunker(b2Pts, holeKey, syntheticIdx++, exclusionPolygons, rootNode);
+                    float rot = (leftSide ? -0.4f : 0.4f) + attempt * 0.8f;
+                    float side2Off = (greenRadius + 4.0f) * (leftSide ? -1f : 1f);
+                    float fwd2Off = greenRadius * 0.25f + ((hHash % 3) - 1) * 2.0f;
+                    Vector2 cur2Dir = sideDir.Rotated(-attempt * 0.8f);
+                    Vector2 b2Center = pin + cur2Dir * side2Off + approachDir * fwd2Off;
+
+                    float b2Length = 11.0f + ((hHash >> 2) % 4);
+                    float b2Width = 6.0f + ((hHash >> 2) % 3);
+                    float b2Angle = MathF.Atan2(approachDir.Y, approachDir.X) + rot;
+                    var b2Pts = CreateOrganicBunkerPolygon(b2Center, b2Length, b2Width, b2Angle, hHash + 17 + attempt * 11);
+
+                    if (b2Pts.Length >= 3 && IsSyntheticBunkerLocationValid(b2Pts, b2Center, exclusionPolygons, cartPaths, waterPolygons))
+                    {
+                        AddSyntheticBunker(b2Pts, holeKey, syntheticIdx++, exclusionPolygons, rootNode);
+                        break;
+                    }
                 }
             }
 
@@ -10142,7 +10261,7 @@ public partial class OsmMapLoader : Node
                         float fwAngle = MathF.Atan2(landingDir.Y, landingDir.X);
                         var fwPts = CreateOrganicBunkerPolygon(fwbCenter, fwLen, fwWid, fwAngle, hHash + 31);
 
-                        if (fwPts.Length >= 3)
+                        if (fwPts.Length >= 3 && IsSyntheticBunkerLocationValid(fwPts, fwbCenter, exclusionPolygons, cartPaths, waterPolygons))
                         {
                             AddSyntheticBunker(fwPts, holeKey, syntheticIdx++, exclusionPolygons, rootNode);
                         }

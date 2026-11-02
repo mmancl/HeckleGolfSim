@@ -27,7 +27,8 @@ static func enhance_course_scene(scene_root: Node, persist_for_save: bool = fals
 
 	_strip_legacy_grass_nodes(scene_root)
 	var height_map := _build_terrain_height_lookup(scene_root)
-	scene_root.set_meta("terrain_height_lookup", height_map)
+	if scene_root.has_meta("terrain_height_lookup"):
+		scene_root.remove_meta("terrain_height_lookup")
 
 	var gen_bunkers := true
 	if options.has("generate_3d_bunkers"):
@@ -383,11 +384,10 @@ static func _build_recessed_3d_bunkers(scene_root: Node, height_info: Dictionary
 				green_bodies.append(child)
 
 		if not green_bodies.is_empty():
+			var features: Dictionary = _extract_course_features(scene_root)
 			var g_idx := 0
 			for g_body in green_bodies:
 				var g_node := g_body as Node3D
-				var g_pos: Vector3 = g_node.position
-				var g_radius := 14.0
 				var g_poly := PackedVector2Array()
 				if g_body.has_meta("boundary_polygon"):
 					var bp = g_body.get_meta("boundary_polygon")
@@ -397,34 +397,67 @@ static func _build_recessed_3d_bunkers(scene_root: Node, height_info: Dictionary
 						for p in bp:
 							if p is Vector2:
 								g_poly.append(p)
-				if not g_poly.is_empty():
-					var max_r := 0.0
-					var g_2d := Vector2(g_pos.x, g_pos.z)
+
+				if g_poly.size() < 3:
+					for sub in g_body.get_children():
+						if sub is CollisionPolygon3D and (sub as CollisionPolygon3D).polygon.size() >= 3:
+							var cp := sub as CollisionPolygon3D
+							for pt in cp.polygon:
+								var wp := g_node.transform * (cp.transform * Vector3(pt.x, 0.0, pt.y))
+								g_poly.append(Vector2(wp.x, wp.z))
+							break
+						elif sub is CollisionShape3D and (sub as CollisionShape3D).shape != null:
+							var cs := sub as CollisionShape3D
+							if cs.shape is ConcavePolygonShape3D:
+								var faces := (cs.shape as ConcavePolygonShape3D).get_faces()
+								g_poly = _extract_boundary_polygon_from_faces(faces, g_node.transform * cs.transform)
+								if g_poly.size() >= 3:
+									break
+
+				var g_center := Vector2.ZERO
+				if g_poly.size() >= 3:
 					for pt in g_poly:
-						var d: float = g_2d.distance_to(pt)
-						if d > max_r and d < 40.0:
-							max_r = d
-					if max_r > 6.0:
-						g_radius = max_r
+						g_center += pt
+					g_center /= float(g_poly.size())
+				elif g_node.position != Vector3.ZERO:
+					g_center = Vector2(g_node.position.x, g_node.position.z)
+				else:
+					continue
 
-				# Generate primary greenside bunker
-				var angle1: float = float(g_idx) * 1.35 + 0.6
+				var max_r := 0.0
+				for pt in g_poly:
+					var d: float = g_center.distance_to(pt)
+					if d > max_r and d < 40.0:
+						max_r = d
+				var g_radius := max_r if max_r > 6.0 else 14.0
+				var g_height := _sample_height(g_center.x, g_center.y, height_info, g_node.position.y)
+
+				# Generate primary greenside bunker, searching for a clear angle away from hazards
+				var base_angle1: float = float(g_idx) * 1.35 + 0.6
 				var dist1: float = g_radius + 4.5
-				var b1_center := Vector2(g_pos.x + cos(angle1) * dist1, g_pos.z + sin(angle1) * dist1)
-				var b1_poly := _create_synthetic_bunker_polygon(b1_center, 13.0, 7.0, angle1 + 0.5, g_idx * 17)
-				if b1_poly.size() >= 3:
-					polygons.append(b1_poly)
-					base_heights.append(g_pos.y)
+				var b1_placed := false
+				for attempt in range(4):
+					var angle1: float = base_angle1 + float(attempt) * 0.85
+					var b1_center := Vector2(g_center.x + cos(angle1) * dist1, g_center.y + sin(angle1) * dist1)
+					var b1_poly := _create_synthetic_bunker_polygon(b1_center, 13.0, 7.0, angle1 + 0.5, g_idx * 17 + attempt * 7)
+					if b1_poly.size() >= 3 and _is_synthetic_bunker_clear(b1_poly, b1_center, g_poly, features, polygons):
+						polygons.append(b1_poly)
+						base_heights.append(g_height)
+						b1_placed = true
+						break
 
-				# Secondary greenside bunker on ~65% of greens
-				if (g_idx % 3) != 1:
-					var angle2: float = angle1 + 2.1
+				# Secondary greenside bunker on ~65% of greens if space permits
+				if b1_placed and (g_idx % 3) != 1:
+					var base_angle2: float = base_angle1 + 2.1
 					var dist2: float = g_radius + 5.0
-					var b2_center := Vector2(g_pos.x + cos(angle2) * dist2, g_pos.z + sin(angle2) * dist2)
-					var b2_poly := _create_synthetic_bunker_polygon(b2_center, 11.5, 6.5, angle2 - 0.4, g_idx * 31 + 7)
-					if b2_poly.size() >= 3:
-						polygons.append(b2_poly)
-						base_heights.append(g_pos.y)
+					for attempt in range(4):
+						var angle2: float = base_angle2 + float(attempt) * 0.85
+						var b2_center := Vector2(g_center.x + cos(angle2) * dist2, g_center.y + sin(angle2) * dist2)
+						var b2_poly := _create_synthetic_bunker_polygon(b2_center, 11.5, 6.5, angle2 - 0.4, g_idx * 31 + attempt * 11 + 7)
+						if b2_poly.size() >= 3 and _is_synthetic_bunker_clear(b2_poly, b2_center, g_poly, features, polygons):
+							polygons.append(b2_poly)
+							base_heights.append(g_height)
+							break
 				g_idx += 1
 
 	if polygons.is_empty():
@@ -496,6 +529,75 @@ static func _create_synthetic_bunker_polygon(center: Vector2, length: float, wid
 		var wz := center.y + (lx * sin_a + lz * cos_a)
 		pts.append(Vector2(wx, wz))
 	return pts
+
+
+static func _is_synthetic_bunker_clear(
+	b_poly: PackedVector2Array,
+	b_center: Vector2,
+	g_poly: PackedVector2Array,
+	features: Dictionary,
+	existing_bunkers: Array[PackedVector2Array]
+) -> bool:
+	# 1. Must not intersect green interior
+	if not g_poly.is_empty():
+		if Geometry2D.is_point_in_polygon(b_center, g_poly):
+			return false
+		for pt in b_poly:
+			if Geometry2D.is_point_in_polygon(pt, g_poly):
+				return false
+
+	# 2. Must not overlap water hazards (>= 3.5m clearance)
+	for water in features.get("water", []):
+		var w_poly: PackedVector2Array = water["poly"]
+		var aabb: Rect2 = water["aabb"]
+		if b_center.x >= aabb.position.x - 12.0 and b_center.x <= aabb.end.x + 12.0 and \
+		   b_center.y >= aabb.position.y - 12.0 and b_center.y <= aabb.end.y + 12.0:
+			if Geometry2D.is_point_in_polygon(b_center, w_poly):
+				return false
+			for pt in b_poly:
+				if Geometry2D.is_point_in_polygon(pt, w_poly) or _distance_to_polygon_2d(pt, w_poly) < 3.5:
+					return false
+
+	# 3. Must not intersect cart paths (>= 2.5m clearance)
+	for path in features.get("cart_paths", []):
+		var p_pts: PackedVector2Array = path as PackedVector2Array
+		for i in range(p_pts.size() - 1):
+			if _distance_squared_to_segment_2d(b_center, p_pts[i], p_pts[i + 1]) < 3.0 * 3.0:
+				return false
+			for pt in b_poly:
+				if _distance_squared_to_segment_2d(pt, p_pts[i], p_pts[i + 1]) < 2.5 * 2.5:
+					return false
+
+	# 4. Must not intersect concrete roads (>= 4.0m clearance)
+	for road in features.get("roads", []):
+		var r_pts: PackedVector2Array = road as PackedVector2Array
+		for i in range(r_pts.size() - 1):
+			if _distance_squared_to_segment_2d(b_center, r_pts[i], r_pts[i + 1]) < 4.0 * 4.0:
+				return false
+
+	# 5. Must not intersect buildings (>= 4.0m clearance)
+	for bld in features.get("buildings", []):
+		var aabb: Rect2 = bld["aabb"]
+		if b_center.x >= aabb.position.x - 8.0 and b_center.x <= aabb.end.x + 8.0 and \
+		   b_center.y >= aabb.position.y - 8.0 and b_center.y <= aabb.end.y + 8.0:
+			if _distance_to_polygon_2d(b_center, bld["poly"]) < 4.0:
+				return false
+
+	# 6. Must not intersect tee boxes (>= 5.0m clearance)
+	for t in features.get("tees", []):
+		var aabb: Rect2 = t["aabb"]
+		if b_center.x >= aabb.position.x - 10.0 and b_center.x <= aabb.end.x + 10.0 and \
+		   b_center.y >= aabb.position.y - 10.0 and b_center.y <= aabb.end.y + 10.0:
+			if _distance_to_polygon_2d(b_center, t["poly"]) < 5.0:
+				return false
+
+	# 7. Must not overlap other existing bunkers
+	for eb in existing_bunkers:
+		for pt in b_poly:
+			if Geometry2D.is_point_in_polygon(pt, eb):
+				return false
+
+	return true
 
 
 ## Extracts the outer 2D boundary polygon from a ConcavePolygonShape3D face array in world space.

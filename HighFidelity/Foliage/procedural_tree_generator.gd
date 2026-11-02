@@ -904,7 +904,7 @@ static func convert_scene_foliage_to_multimesh(scene_root: Node, persist_for_sav
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.use_custom_data = true
-		mm.mesh = base_mesh.duplicate() as Mesh
+		mm.mesh = base_mesh
 		mm.instance_count = count
 
 		var buf := PackedFloat32Array()

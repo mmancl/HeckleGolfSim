@@ -827,7 +827,7 @@ func _apply_preset(preset: String) -> void:
 			if cart_paths_check != null:
 				cart_paths_check.button_pressed = true
 			if roads_buildings_check != null:
-				roads_buildings_check.button_pressed = false
+				roads_buildings_check.button_pressed = true
 		"high":
 			if tree_count_spin_box != null:
 				tree_count_spin_box.value = 6000.0
@@ -848,7 +848,7 @@ func _detect_preset_from_values() -> String:
 	var rb = roads_buildings_check.button_pressed if roads_buildings_check != null else true
 	if t == 6000 and b == true and c == true and rb == true:
 		return "high"
-	elif t == 2500 and b == true and c == true and rb == false:
+	elif t == 2500 and b == true and c == true and rb == true:
 		return "medium"
 	elif t == 1000 and b == false and c == false and rb == false:
 		return "low"

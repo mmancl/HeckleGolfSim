@@ -133,6 +133,7 @@ jobs:
 
       - name: Seed Initial system/status Doc (if not present)
         if: ${{ env.AUTH_MODE == 'Service Account' && inputs.dry_run != true }}
+        timeout-minutes: 2
         run: |
           node -e "
             const admin = require('./functions/node_modules/firebase-admin');
@@ -161,8 +162,11 @@ jobs:
                 console.log('system/status already exists');
               }
             }
-            seed().catch(err => {
+            seed().then(() => {
+              process.exit(0);
+            }).catch(err => {
               console.warn('Seeding note:', err.message);
+              process.exit(0);
             });
           " || true
 
@@ -202,8 +206,18 @@ jobs:
           fi
           DEPLOY_ARGS+=(-m "$MESSAGE")
           
+          DEPLOY_ARGS+=(--debug)
+          
           echo "Executing: firebase deploy ${DEPLOY_ARGS[*]}"
           firebase deploy "${DEPLOY_ARGS[@]}"
+
+      - name: Print Firebase Debug Log on Failure
+        if: failure()
+        run: |
+          if [ -f "firebase-debug.log" ]; then
+            echo "=== firebase-debug.log ==="
+            cat firebase-debug.log
+          fi
 
       - name: Generate Deployment Summary
         if: always()
