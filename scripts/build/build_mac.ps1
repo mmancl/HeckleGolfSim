@@ -158,45 +158,40 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "[2/2] Exporting macOS Universal App (.app) via Godot..." -ForegroundColor Green
 Write-Host "      Compiling dual ARM64 + x86_64 binaries, packing assets, and building ZIP (takes ~45s)..." -ForegroundColor Gray
-$job = Start-Job -ScriptBlock {
-    param($exe, $path, $preset, $output)
-    & $exe --headless --path $path --export-release $preset $output
-} -ArgumentList $GodotExe, $RepoRoot, "macOS", $ZipOutput
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = $GodotExe
+$psi.Arguments = "--headless --path `"$RepoRoot`" --export-release `"macOS`" `"$ZipOutput`""
+$psi.UseShellExecute = $false
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $false
 
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
+$proc = [System.Diagnostics.Process]::Start($psi)
 $exportDone = $false
-$timeoutSec = 600
 
-while ($job.State -eq 'Running' -and $sw.Elapsed.TotalSeconds -lt $timeoutSec) {
-    Start-Sleep -Seconds 2
-    $out = Receive-Job -Job $job
-    if ($out) {
-        $out | ForEach-Object {
-            Write-Host $_
-            if ($_ -match 'DONE' -and ($_ -match 'export' -or $_ -match 'savepack')) {
-                $exportDone = $true
-            }
+while (-not $proc.StandardOutput.EndOfStream) {
+    $line = $proc.StandardOutput.ReadLine()
+    if ($line) {
+        Write-Host $line
+        if ($line -match '\[\s*DONE\s*\]\s*export' -or $line -match '\[\s*DONE\s*\]\s*savepack') {
+            $exportDone = $true
+            break
         }
-    }
-    if ($exportDone -or (Test-Path $ZipOutput)) {
-        Write-Host "Export package files generated on disk. Waiting up to 8s for clean engine shutdown..." -ForegroundColor Gray
-        Start-Sleep -Seconds 8
-        $out = Receive-Job -Job $job
-        if ($out) { $out | ForEach-Object { Write-Host $_ } }
-        Stop-Job -Job $job -ErrorAction SilentlyContinue
-        Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-        break
     }
 }
 
-# Final flush and cleanup
-$out = Receive-Job -Job $job
-if ($out) { $out | ForEach-Object { Write-Host $_ } }
-Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+if ($exportDone) {
+    if (-not $proc.WaitForExit(8000)) {
+        Write-Host "macOS export completed. Engine teardown timed out, terminating Godot process..." -ForegroundColor Gray
+        $proc.Kill()
+    }
+} else {
+    $proc.WaitForExit()
+}
+
 Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 if (-not (Test-Path $ZipOutput)) {
-    throw "Godot export failed. Expected output at $ZipOutput"
+    throw "Godot export failed (exit code $($proc.ExitCode)). Expected output at $ZipOutput"
 }
 
 # Verify / inject NSBluetoothAlwaysUsageDescription into Info.plist inside the zip
