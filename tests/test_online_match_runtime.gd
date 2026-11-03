@@ -32,6 +32,8 @@ func _run_all_tests() -> void:
 	await _test_3_remote_turn_input_gate_h18()
 	await _test_4_disconnect_leave_event_handling_h13()
 	await _test_5_controller_navigation_on_runtime_dialogs()
+	await _test_6_peek_next_player_and_turn_advancement()
+	await _test_7_ready_indicator_visibility_in_menus_and_remote_turns()
 	_restore_user_files(backup)
 
 	print("\n=======================================================")
@@ -427,3 +429,116 @@ func _test_5_controller_navigation_on_runtime_dialogs() -> void:
 	cp.forfeit_confirm_dialog.visible = false
 	cp.queue_free()
 	print("  PASS: 100% controller navigation and focus neighbor bidirectional links verified on runtime dialogs.")
+
+
+# ── TEST 6: Peek Next Player & Local Shot Turn Advancement ──────────────
+
+func _test_6_peek_next_player_and_turn_advancement() -> void:
+	print("\n--- Test 6: Peek Next Player & Local Shot Turn Advancement ---")
+	var mp = root.get_node_or_null("MultiplayerManager")
+	assert(mp != null, "MultiplayerManager autoload must be available")
+
+	var ctrl = root.get_node_or_null("OnlineMatchController")
+	assert(ctrl != null, "OnlineMatchController autoload must be available")
+
+	var sess = _get_session()
+	sess.is_online_match = true
+
+	var p0 := {
+		"name": "HostGolfer",
+		"tee": "Blue",
+		"slot_id": "slot_0",
+		"owner_uid": "local_host_uid",
+		"is_remote": false
+	}
+	var p1 := {
+		"name": "RemoteGolfer",
+		"tee": "Blue",
+		"slot_id": "slot_1",
+		"owner_uid": "remote_rival_uid",
+		"is_remote": true
+	}
+
+	mp.setup_game([p0, p1], _get_mock_course_config(), "", "", "1 Hole", "Standard", {}, "Stay Up")
+	mp.start_hole()
+
+	# Initially slot_0 is active
+	assert(mp.active_player_index == 0, "Slot 0 should be active at match start")
+
+	# Host takes a tee shot
+	var tee_pos = mp.players[0].get("position", Vector3.ZERO)
+	var ball_land_pos = Vector3(10.0, 0.0, 200.0)
+	mp.record_shot(ball_land_pos, {"TotalDistance": 200.0, "BallSpeed": 140.0})
+
+	# Host has strokes = 1, Remote has strokes = 0
+	# peek_next_player must return RemoteGolfer (slot_1) because RemoteGolfer has not teed off yet!
+	var next_p = mp.peek_next_player()
+	assert(not next_p.is_empty(), "peek_next_player must return next player")
+	assert(next_p.get("slot_id") == "slot_1", "peek_next_player must return slot_1 off the tee, got %s" % str(next_p.get("slot_id")))
+
+	# Set match_id on controller to test publish_local_shot serialization
+	ctrl._match_id = "test_match_turn_sync"
+	ctrl._last_applied_seq = 0
+	var evt = ctrl.publish_local_shot(tee_pos, ball_land_pos, "Dr", "fairway", 0, 0, false, Vector3(0, 0, 300))
+
+	assert(evt.get("slot_id") == "slot_0", "publish_local_shot must record slot_0 as shooter")
+	assert(evt.get("next_slot") == "slot_1", "publish_local_shot must predict slot_1 as next_slot, got %s" % str(evt.get("next_slot")))
+
+	# Applying this shot event via record_remote_shot on player 2's device should cleanly set active_player_index to 1 (slot_1)
+	mp.record_remote_shot(evt)
+	assert(mp.active_player_index == 1, "record_remote_shot must set active_player_index to slot_1")
+	assert(mp.get_active_player().get("slot_id") == "slot_1", "Active player must be slot_1")
+
+	print("  PASS: peek_next_player and publish_local_shot correctly synchronize turn advancement to next player.")
+
+
+# ── TEST 7: Ready Indicator Visibility in Menus & Remote Turns ──────────
+
+func _test_7_ready_indicator_visibility_in_menus_and_remote_turns() -> void:
+	print("\n--- Test 7: Ready Indicator Visibility in Menus & Remote Turns ---")
+	var ready_hud_script = load("res://UI/ReadyIndicator/ready_indicator_hud.gd")
+	assert(ready_hud_script != null, "ready_indicator_hud.gd must load")
+
+	var hud = ready_hud_script.new()
+	root.add_child(hud)
+
+	# 1. Menu screen detection: Controls and menu names must be detected as menu screens
+	var mock_menu = Control.new()
+	mock_menu.name = "LeaderboardsMenu"
+	assert(hud._is_menu_screen(mock_menu) == true, "LeaderboardsMenu Control must be detected as menu screen")
+
+	var mock_lobby = Control.new()
+	mock_lobby.name = "OnlineMultiplayerMenu"
+	assert(hud._is_menu_screen(mock_lobby) == true, "OnlineMultiplayerMenu Control must be detected as menu screen")
+
+	var mock_3d_course = Node3D.new()
+	mock_3d_course.name = "CoursePlay"
+	assert(hud._is_menu_screen(mock_3d_course) == false, "CoursePlay Node3D must not be detected as menu screen")
+
+	mock_menu.queue_free()
+	mock_lobby.queue_free()
+	mock_3d_course.queue_free()
+
+	# 2. Remote turn check: when active player is remote, _is_waiting_for_remote_player must be true
+	var mp = root.get_node_or_null("MultiplayerManager")
+	var sess = _get_session()
+	sess.is_online_match = true
+
+	var p_local := {"name": "Host", "slot_id": "slot_0", "owner_uid": "uid_0", "is_remote": false, "strokes": 0, "holed_out": false}
+	var p_remote := {"name": "Opponent", "slot_id": "slot_1", "owner_uid": "uid_1", "is_remote": true, "strokes": 0, "holed_out": false}
+	mp.setup_game([p_local, p_remote], _get_mock_course_config(), "", "", "1 Hole", "Standard", {}, "Stay Up")
+	mp.start_hole()
+
+	# Slot 0 is local: waiting for remote player must be false
+	mp.active_player_index = 0
+	assert(hud._is_waiting_for_remote_player(null) == false, "_is_waiting_for_remote_player must be false when local player's turn")
+
+	# Slot 1 is remote: waiting for remote player must be true!
+	mp.active_player_index = 1
+	assert(hud._is_waiting_for_remote_player(null) == true, "_is_waiting_for_remote_player must be true when remote opponent's turn")
+
+	# While remote player's turn, _should_indicator_be_visible must be false
+	assert(hud._should_indicator_be_visible(null) == false, "Indicator HUD must NOT be visible during remote opponent's turn")
+
+	hud.queue_free()
+	print("  PASS: Ready indicator correctly hides in menus, lobbies, leaderboards, and during remote opponent turns.")

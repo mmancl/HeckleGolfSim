@@ -434,12 +434,30 @@ func _on_replay_started(shot_event: Dictionary) -> void:
 	if sess != null:
 		sess.set_replaying_remote_turn(true)
 
+	var range_node := _find_range_node()
+	if range_node != null and range_node.has_method("on_remote_shot_replay_started"):
+		range_node.call("on_remote_shot_replay_started", shot_event)
+
+	var shooter_name := "Opponent"
+	var mp := _get_mp_manager()
+	if mp != null:
+		var slot_id := str(shot_event.get("slot_id", ""))
+		for p in mp.players:
+			if p.get("slot_id", "") == slot_id:
+				shooter_name = str(p.get("name", "Opponent"))
+				break
+	waiting_banner_status_changed.emit(true, shooter_name, false)
+
 
 func _on_replay_finished(shot_event: Dictionary) -> void:
 	_is_replaying = false
 	var sess := _get_online_session()
 	if sess != null:
 		sess.set_replaying_remote_turn(false)
+
+	var range_node := _find_range_node()
+	if range_node != null and range_node.has_method("on_remote_shot_replay_finished"):
+		range_node.call("on_remote_shot_replay_finished", shot_event)
 
 	var mp := _get_mp_manager()
 	if mp != null:
@@ -521,11 +539,14 @@ func publish_local_shot(
 			"holed_out": p.get("holed_out", false)
 		}
 
-	var hole_complete: bool = mp.is_current_hole_completed()
+	var next_p: Dictionary = {}
+	if mp.has_method("peek_next_player"):
+		next_p = mp.peek_next_player()
+
+	var hole_complete: bool = next_p.is_empty() or mp.is_current_hole_completed()
 	var next_slot := ""
 	var next_owner_uid := ""
-	if not hole_complete:
-		var next_p: Dictionary = mp.get_active_player()
+	if not hole_complete and not next_p.is_empty():
 		next_slot = str(next_p.get("slot_id", ""))
 		next_owner_uid = str(next_p.get("owner_uid", ""))
 
@@ -709,6 +730,15 @@ func _on_heartbeat_timeout() -> void:
 
 func _on_turn_updated(turn_data: Dictionary) -> void:
 	_match_meta["turn"] = turn_data
+	var active_slot := str(turn_data.get("active_slot", ""))
+	var mp := _get_mp_manager()
+	if mp != null and not active_slot.is_empty() and not _is_replaying:
+		for idx in range(mp.players.size()):
+			if mp.players[idx].get("slot_id", "") == active_slot:
+				if mp.active_player_index != idx:
+					mp.active_player_index = idx
+					mp.emit_signal("active_player_changed", mp.get_active_player())
+				break
 	_check_afk_state()
 
 
@@ -717,6 +747,8 @@ func _on_active_player_changed(_player: Dictionary) -> void:
 
 
 func _check_afk_state() -> void:
+	if _is_replaying:
+		return
 	var mp := _get_mp_manager()
 	if mp == null or _match_id.is_empty():
 		waiting_banner_status_changed.emit(false, "", false)
@@ -900,10 +932,33 @@ func _find_tracer_node() -> Node:
 	var tree := get_tree()
 	if tree == null:
 		return null
+	var player = tree.root.find_child("Player", true, false)
+	if player != null:
+		if player.has_method("create_new_tracer"):
+			return player.create_new_tracer()
+		if "current_tracer" in player and player.current_tracer != null:
+			return player.current_tracer
+		if "ball_tracer" in player and player.ball_tracer != null:
+			return player.ball_tracer
 	var tracer = tree.root.find_child("ShotTracer", true, false)
 	if tracer != null:
 		return tracer
-	var player = tree.root.find_child("Player", true, false)
-	if player != null and "ball_tracer" in player and player.ball_tracer != null:
-		return player.ball_tracer
+	return null
+
+
+func _find_range_node() -> Node:
+	var tree := get_tree()
+	if tree == null:
+		return null
+	var curr = tree.current_scene
+	if curr != null:
+		if curr.has_method("on_remote_shot_replay_started"):
+			return curr
+		if curr.has_node("Range") and curr.get_node("Range").has_method("on_remote_shot_replay_started"):
+			return curr.get_node("Range")
+		if "course_instance" in curr and curr.course_instance != null and curr.course_instance.has_method("on_remote_shot_replay_started"):
+			return curr.course_instance
+	var r = tree.root.find_child("Range", true, false)
+	if r != null and r.has_method("on_remote_shot_replay_started"):
+		return r
 	return null

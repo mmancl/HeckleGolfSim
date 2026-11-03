@@ -5147,8 +5147,12 @@ func _on_online_waiting_banner_status_changed(is_waiting: bool, player_name: Str
 		return
 
 	if online_waiting_lbl != null:
+		var sess = get_node_or_null("/root/OnlineSession")
+		var is_replaying: bool = sess != null and sess.has_method("is_replaying_remote_turn") and sess.is_replaying_remote_turn()
 		if _is_spectating():
 			online_waiting_lbl.text = "Spectating: %s's Turn" % player_name
+		elif is_replaying:
+			online_waiting_lbl.text = "Replaying %s's Shot…" % player_name
 		else:
 			online_waiting_lbl.text = "Waiting for %s to hit…" % player_name
 

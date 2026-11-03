@@ -250,6 +250,11 @@ func get_hole_number(idx: int) -> int:
 func get_current_hole_number() -> int:
 	return get_hole_number(current_hole_index)
 
+func get_current_hole_id() -> String:
+	if not hole_ids.is_empty() and current_hole_index >= 0 and current_hole_index < hole_ids.size():
+		return str(hole_ids[current_hole_index])
+	return ""
+
 static func filter_hole_ids_by_length(all_hole_ids: Array, length_str: String) -> Array:
 	var has_front_9 := false
 	var has_back_9 := false
@@ -1332,6 +1337,17 @@ func _select_next_player_stay_up(remaining_players: Array) -> void:
 			return
 
 	# Furthest away from the hole hits
+	var furthest_player := _get_furthest_player_from_pin(remaining_players)
+	if not furthest_player.is_empty():
+		active_player_index = players.find(furthest_player)
+		emit_signal("active_player_changed", get_active_player())
+		var flat_pos := Vector3(furthest_player["position"].x, 0.0, furthest_player["position"].z)
+		var target_pin := _get_target_pin_position()
+		var dist = flat_pos.distance_to(Vector3(target_pin.x, 0.0, target_pin.z))
+		print("[MultiplayerManager] Next to play (furthest from hole: %.1f yds): %s" % [dist * 1.09361, get_active_player()["name"]])
+
+
+func _get_furthest_player_from_pin(remaining_players: Array) -> Dictionary:
 	var target_pin := _get_target_pin_position()
 	var flat_pin := Vector3(target_pin.x, 0.0, target_pin.z)
 	var furthest_player = null
@@ -1344,30 +1360,105 @@ func _select_next_player_stay_up(remaining_players: Array) -> void:
 			max_dist = dist
 			furthest_player = p
 
-	if furthest_player != null:
-		active_player_index = players.find(furthest_player)
-		emit_signal("active_player_changed", get_active_player())
-		print("[MultiplayerManager] Next to play (furthest from hole: %.1f yds): %s" % [max_dist * 1.09361, get_active_player()["name"]])
+	if furthest_player != null and furthest_player is Dictionary:
+		return furthest_player
+	return {}
+
+
+func peek_next_player() -> Dictionary:
+	if is_in_catch_up:
+		var cp = get_player_by_name(catch_up_player_name)
+		if not cp.is_empty():
+			return cp
+		return {}
+
+	if game_mode == "Closest to Pin":
+		var unplayed_players = players.filter(func(p): return p.get("active", true) and not p.get("paused", false) and p.get("strokes", 0) == 0)
+		if not unplayed_players.is_empty():
+			return unplayed_players[0]
+		return {}
+
+	var remaining_players = players.filter(func(p): return p.get("active", true) and not p.get("paused", false) and not p["holed_out"])
+	if remaining_players.is_empty():
+		return {}
+
+	if game_mode in ["Scramble", "2v2 Scramble"]:
+		var min_strokes = 9999
+		for p in remaining_players:
+			if p["strokes"] < min_strokes:
+				min_strokes = p["strokes"]
+		var min_stroke_players = remaining_players.filter(func(p): return p["strokes"] == min_strokes)
+		if not min_stroke_players.is_empty():
+			return min_stroke_players[0]
+
+	var mode = turn_order_mode
+	var gs_mode = _get_global_settings()
+	if mode.is_empty() and gs_mode != null and gs_mode.range_settings != null and gs_mode.range_settings.turn_order_mode != null:
+		mode = gs_mode.range_settings.turn_order_mode.value
+
+	match mode:
+		"Full Hole":
+			var cur_player = get_active_player()
+			if not cur_player.is_empty() and (cur_player in remaining_players):
+				return cur_player
+			return remaining_players[0]
+		"Classic":
+			return _get_furthest_player_from_pin(remaining_players)
+		_:
+			# Stay Up:
+			# 1. Tee shots: all players tee off first
+			var tee_players = remaining_players.filter(func(p): return p.get("strokes", 0) == 0)
+			if not tee_players.is_empty():
+				return tee_players[0]
+
+			# 2. Stay up check: hit <= 35% of avg club distance
+			var just_hit_player = get_active_player()
+			var custom_enabled = true
+			if gs_mode != null and gs_mode.range_settings != null and gs_mode.range_settings.custom_next_player != null:
+				custom_enabled = gs_mode.range_settings.custom_next_player.value
+
+			var shot_from_teebox: bool = (
+				str(just_hit_player.get("last_shot_starting_lie", "")).to_lower() == "teebox"
+				or (not last_shot_info.is_empty() and str(last_shot_info.get("lie_type", "")).to_lower() == "teebox")
+				or just_hit_player.get("strokes", 0) <= 1
+			)
+
+			if custom_enabled and not just_hit_player.is_empty() and (just_hit_player in remaining_players) and just_hit_player.get("strokes", 0) > 0 and just_hit_player.get("last_shot_penalty", 0) == 0 and not shot_from_teebox:
+				var last_dist: float = float(just_hit_player.get("last_shot_distance_yards", -1.0))
+				var club_used: String = str(just_hit_player.get("last_shot_club", current_club))
+				if club_used.is_empty():
+					club_used = current_club
+				if club_used.is_empty():
+					club_used = "Dr"
+				var p_name: String = str(just_hit_player.get("name", ""))
+				var avg_dist: float = get_club_effective_distance(p_name, club_used)
+				var threshold_dist: float = avg_dist * 0.35
+
+				var player_on_green: bool = str(just_hit_player.get("lie_type", "")).to_lower() == "green"
+				var all_on_green: bool = true
+				if player_on_green:
+					for p in remaining_players:
+						if str(p.get("lie_type", "")).to_lower() != "green":
+							all_on_green = false
+							break
+
+				var can_stay_up_on_green: bool = not player_on_green or all_on_green
+				if last_dist >= 0.0 and last_dist <= threshold_dist and can_stay_up_on_green:
+					return just_hit_player
+
+			return _get_furthest_player_from_pin(remaining_players)
 
 
 func _select_next_player_classic(remaining_players: Array) -> void:
 	# Classic: always whoever is furthest from the pin hits next
-	var target_pin := _get_target_pin_position()
-	var flat_pin := Vector3(target_pin.x, 0.0, target_pin.z)
-	var furthest_player = null
-	var max_dist := -1.0
-
-	for p in remaining_players:
-		var flat_pos := Vector3(p["position"].x, 0.0, p["position"].z)
-		var dist = flat_pos.distance_to(flat_pin)
-		if dist > max_dist:
-			max_dist = dist
-			furthest_player = p
-
-	if furthest_player != null:
+	var furthest_player := _get_furthest_player_from_pin(remaining_players)
+	if not furthest_player.is_empty():
 		active_player_index = players.find(furthest_player)
 		emit_signal("active_player_changed", get_active_player())
-		print("[MultiplayerManager] [Classic] Next to play (furthest from hole: %.1f yds): %s" % [max_dist * 1.09361, get_active_player()["name"]])
+		var flat_pos := Vector3(furthest_player["position"].x, 0.0, furthest_player["position"].z)
+		var target_pin := _get_target_pin_position()
+		var dist = flat_pos.distance_to(Vector3(target_pin.x, 0.0, target_pin.z))
+		print("[MultiplayerManager] [Classic] Next to play (furthest from hole: %.1f yds): %s" % [dist * 1.09361, get_active_player()["name"]])
 
 
 func _select_next_player_full_hole(remaining_players: Array) -> void:

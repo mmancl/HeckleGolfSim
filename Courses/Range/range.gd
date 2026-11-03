@@ -2682,7 +2682,13 @@ func set_camera_follow_mode(value) -> void:
 	if camera == null:
 		return
 
-	if value and has_node("Player") and $Player.ball != null and _shot_active:
+	var is_replay_active := false
+	if has_node("/root/OnlineSession"):
+		var sess = get_node("/root/OnlineSession")
+		if sess != null and sess.has_method("is_replaying_remote_turn"):
+			is_replay_active = sess.is_replaying_remote_turn()
+
+	if value and has_node("Player") and $Player.ball != null and (_shot_active or is_replay_active):
 		camera.follow_mode = PhantomCamera3D.FollowMode.SIMPLE
 		var player = $Player
 		var target_node = player.get_camera_target() if player.has_method("get_camera_target") else player.ball
@@ -2791,6 +2797,62 @@ func reset_camera_to_start() -> void:
 	if player != null:
 		player.reset_ball()
 		player.ball.aim_yaw_offset_deg = saved_yaw
+
+
+func on_remote_shot_replay_started(shot_event: Dictionary) -> void:
+	var start_raw = shot_event.get("start", shot_event.get("start_pos", Vector3.ZERO))
+	var end_raw = shot_event.get("end", shot_event.get("end_pos", Vector3.ZERO))
+	var start_pos := Vector3.ZERO
+	if start_raw is Vector3:
+		start_pos = start_raw
+	elif (start_raw is Array or start_raw is PackedFloat32Array or start_raw is PackedFloat64Array) and start_raw.size() >= 3:
+		start_pos = Vector3(float(start_raw[0]), float(start_raw[1]), float(start_raw[2]))
+	var end_pos := Vector3.ZERO
+	if end_raw is Vector3:
+		end_pos = end_raw
+	elif (end_raw is Array or end_raw is PackedFloat32Array or end_raw is PackedFloat64Array) and end_raw.size() >= 3:
+		end_pos = Vector3(float(end_raw[0]), float(end_raw[1]), float(end_raw[2]))
+
+	var club := str(shot_event.get("club", "Dr"))
+	var c_lower := club.strip_edges().to_lower()
+	var is_putt := (c_lower in ["pt", "putt", "putter"] or c_lower.begins_with("putt"))
+
+	_shot_active = true
+	_skip_requested = false
+
+	if has_node("Player") and $Player.ball != null:
+		var diff := end_pos - start_pos
+		var angle_rad := 0.0
+		if Vector2(diff.x, diff.z).length() > 0.01:
+			angle_rad = atan2(diff.z, diff.x)
+			$Player.ball.aim_yaw_offset_deg = rad_to_deg(-angle_rad)
+		$Player.ball.is_putt = is_putt
+		$Player.ball.global_position = start_pos
+
+		var cam_pos := get_address_camera_position(start_pos, -angle_rad)
+		var target_look := get_camera_target_look(end_pos, start_pos)
+		if has_node("PhantomCamera3D"):
+			$PhantomCamera3D.global_position = cam_pos
+			$PhantomCamera3D.look_at(target_look)
+		if has_node("Camera3D"):
+			$Camera3D.global_position = cam_pos
+			$Camera3D.look_at(target_look)
+
+	call_deferred("set_camera_follow_mode", true)
+
+
+func on_remote_shot_replay_finished(shot_event: Dictionary) -> void:
+	_shot_active = false
+	set_camera_follow_mode(false)
+	if has_node("Player") and $Player.ball != null:
+		var end_raw = shot_event.get("end", shot_event.get("end_pos", Vector3.ZERO))
+		var end_pos := Vector3.ZERO
+		if end_raw is Vector3:
+			end_pos = end_raw
+		elif (end_raw is Array or end_raw is PackedFloat32Array or end_raw is PackedFloat64Array) and end_raw.size() >= 3:
+			end_pos = Vector3(float(end_raw[0]), float(end_raw[1]), float(end_raw[2]))
+		$Player.ball.global_position = end_pos
+		$Player.reset_ball()
 
 
 func _on_skip_flight_requested() -> void:

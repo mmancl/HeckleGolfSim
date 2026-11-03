@@ -692,6 +692,10 @@ func _is_menu_screen(scene: Node) -> bool:
 	if scene == null:
 		return true
 
+	# Any 2D Control root scene is a menu/UI screen, not a 3D course/minigame
+	if scene is Control or not (scene is Node3D):
+		return true
+
 	var scene_name := str(scene.name).to_lower()
 	var script: Script = scene.get_script()
 	var script_path := str(script.resource_path).to_lower() if script != null else ""
@@ -707,7 +711,11 @@ func _is_menu_screen(scene: Node) -> bool:
 		or full_id.contains("players_menu") or full_id.contains("playersmenu") \
 		or full_id.contains("analytics") or full_id.contains("history") \
 		or full_id.contains("custom_course_creator") or full_id.contains("osm_download") \
-		or full_id.contains("course_preview"):
+		or full_id.contains("course_preview") \
+		or full_id.contains("leaderboard") or full_id.contains("leaderboards") \
+		or full_id.contains("multiplayer") or full_id.contains("lobby") \
+		or full_id.contains("account") or full_id.contains("credits") \
+		or full_id.contains("connect"):
 		return true
 
 	return false
@@ -883,6 +891,12 @@ func _check_menu_overlay_in_subtree(node: Node) -> bool:
 		elif n_lower == "pausemenu":
 			return true
 
+		# Multiplayer & Leaderboard overlays / waiting banners
+		if n_lower == "onlinewaitingbanner" or n_lower.contains("waitingbanner") \
+			or n_lower.contains("multiplayermenu") or n_lower.contains("leaderboardsmenu") \
+			or n_lower.contains("lobbymenu"):
+			return true
+
 	for child in node.get_children():
 		if _check_menu_overlay_in_subtree(child):
 			return true
@@ -958,7 +972,44 @@ func _should_indicator_be_visible(scene: Node) -> bool:
 	if _is_hole_or_player_finished(scene):
 		return false
 
+	# 10. Hide when waiting for another player in remote multiplayer or during remote shot replay
+	if _is_waiting_for_remote_player(scene):
+		return false
+
 	return true
+
+
+func _is_waiting_for_remote_player(_scene: Node) -> bool:
+	if has_node("/root/OnlineSession"):
+		var sess = get_node("/root/OnlineSession")
+		if sess != null and is_instance_valid(sess):
+			if sess.is_online_match:
+				if bool(sess.get("is_spectator")):
+					return true
+				if sess.has_method("is_replaying_remote_turn") and sess.is_replaying_remote_turn():
+					return true
+
+	if has_node("/root/OnlineMatchController"):
+		var omc = get_node("/root/OnlineMatchController")
+		if omc != null and is_instance_valid(omc):
+			if omc.has_method("is_replaying") and omc.is_replaying():
+				return true
+
+	if has_node("/root/MultiplayerManager"):
+		var mp_mgr = get_node("/root/MultiplayerManager")
+		if mp_mgr != null and is_instance_valid(mp_mgr) and not mp_mgr.players.is_empty():
+			var active_p: Dictionary = mp_mgr.get_active_player()
+			if not active_p.is_empty() and bool(active_p.get("is_remote", false)):
+				return true
+
+	var tree := get_tree()
+	if tree != null and tree.root != null:
+		var banner = tree.root.find_child("OnlineWaitingBanner", true, false)
+		if banner != null and is_instance_valid(banner) and banner is CanvasItem:
+			if banner.visible:
+				return true
+
+	return false
 
 
 func _is_shot_transition_active(scene: Node) -> bool:
