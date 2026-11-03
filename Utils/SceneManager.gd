@@ -88,7 +88,10 @@ func load_course(scene_path: String, config_path: String) -> void:
 	set_loading_stage(0.0, "Reading course configuration...", 4.0)
 	change_scene("res://Utils/CourseManager.tscn")
 	await scene_changed
-	await current_scene.initialize(scene_path, config_path)
+	var load_success: bool = await current_scene.initialize(scene_path, config_path)
+	if not load_success:
+		_hide_loading_screen()
+		return
 	
 	# Yield one more frame to ensure the new scene is drawn before hiding the overlay
 	set_loading_stage(100.0, "Ready!", 100.0)

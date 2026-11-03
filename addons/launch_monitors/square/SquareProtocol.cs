@@ -92,21 +92,42 @@ public static class SquareProtocol
             return false;
         }
 
+        byte mask = data[2];
+        // If no metrics are valid in the mask, the club had no sticker or no metrics could be determined.
+        if ((mask & 0x0F) == 0)
+        {
+            return false;
+        }
+
         var rawPath = BinaryPrimitives.ReadInt16LittleEndian(data[3..5]);
         var rawFace = BinaryPrimitives.ReadInt16LittleEndian(data[5..7]);
         var rawAttack = BinaryPrimitives.ReadInt16LittleEndian(data[7..9]);
         var rawLoft = BinaryPrimitives.ReadInt16LittleEndian(data[9..11]);
 
-        var path = rawPath == -1 || rawPath == -32768 ? 0.0f : rawPath / 100.0f;
-        var face = rawFace == -1 || rawFace == -32768 ? 0.0f : rawFace / 100.0f;
-        var attack = rawAttack == -1 || rawAttack == -32768 ? 0.0f : rawAttack / 100.0f;
-        var loft = rawLoft == -1 || rawLoft == -32768 ? 0.0f : rawLoft / 100.0f;
+        bool hasPath = (mask & 0x01) != 0 && rawPath != -1 && rawPath != -32768;
+        bool hasFace = (mask & 0x02) != 0 && rawFace != -1 && rawFace != -32768;
+        bool hasAttack = (mask & 0x04) != 0 && rawAttack != -1 && rawAttack != -32768;
+        bool hasLoft = (mask & 0x08) != 0 && rawLoft != -1 && rawLoft != -32768;
+
+        if (!hasPath && !hasFace && !hasAttack && !hasLoft)
+        {
+            return false;
+        }
+
+        var path = hasPath ? rawPath / 100.0f : 0.0f;
+        var face = hasFace ? rawFace / 100.0f : 0.0f;
+        var attack = hasAttack ? rawAttack / 100.0f : 0.0f;
+        var loft = hasLoft ? rawLoft / 100.0f : 0.0f;
 
         clubMetrics = new SquareClubMetrics(
             FaceAngle: face,
             ClubPath: path,
             AttackAngle: attack,
-            DynamicLoft: loft);
+            DynamicLoft: loft,
+            HasFaceAngle: hasFace,
+            HasClubPath: hasPath,
+            HasAttackAngle: hasAttack,
+            HasDynamicLoft: hasLoft);
 
         return true;
     }
@@ -174,6 +195,10 @@ public static class SquareProtocol
         // are detected on the club shaft. Uses the same Int16LE ÷100 pattern.
         // The sentinel value -32768 (0x8000) indicates the field was not measured.
         bool hasClubData = false;
+        bool hasClubPath = false;
+        bool hasFaceAngle = false;
+        bool hasAttackAngle = false;
+        bool hasDynamicLoft = false;
         float clubPath = 0.0f;
         float faceAngle = 0.0f;
         float attackAngle = 0.0f;
@@ -186,13 +211,18 @@ public static class SquareProtocol
             var rawAttackAngle = BinaryPrimitives.ReadInt16LittleEndian(data[21..23]);
             var rawDynamicLoft = BinaryPrimitives.ReadInt16LittleEndian(data[23..25]);
 
-            if (rawClubPath != -32768 || rawFaceAngle != -32768 || rawAttackAngle != -32768 || rawDynamicLoft != -32768)
+            hasClubPath = rawClubPath != -32768 && rawClubPath != -1 && rawClubPath != 0;
+            hasFaceAngle = rawFaceAngle != -32768 && rawFaceAngle != -1 && rawFaceAngle != 0;
+            hasAttackAngle = rawAttackAngle != -32768 && rawAttackAngle != -1 && rawAttackAngle != 0;
+            hasDynamicLoft = rawDynamicLoft != -32768 && rawDynamicLoft != -1 && rawDynamicLoft != 0;
+
+            if (hasClubPath || hasFaceAngle || hasAttackAngle || hasDynamicLoft)
             {
                 hasClubData = true;
-                clubPath = rawClubPath == -32768 ? 0.0f : rawClubPath / 100.0f;
-                faceAngle = rawFaceAngle == -32768 ? 0.0f : rawFaceAngle / 100.0f;
-                attackAngle = rawAttackAngle == -32768 ? 0.0f : rawAttackAngle / 100.0f;
-                dynamicLoft = rawDynamicLoft == -32768 ? 0.0f : rawDynamicLoft / 100.0f;
+                clubPath = hasClubPath ? rawClubPath / 100.0f : 0.0f;
+                faceAngle = hasFaceAngle ? rawFaceAngle / 100.0f : 0.0f;
+                attackAngle = hasAttackAngle ? rawAttackAngle / 100.0f : 0.0f;
+                dynamicLoft = hasDynamicLoft ? rawDynamicLoft / 100.0f : 0.0f;
             }
         }
 
@@ -209,7 +239,11 @@ public static class SquareProtocol
             faceAngle,
             attackAngle,
             dynamicLoft,
-            HasClubData: hasClubData);
+            HasClubData: hasClubData,
+            HasClubPath: hasClubPath,
+            HasFaceAngle: hasFaceAngle,
+            HasAttackAngle: hasAttackAngle,
+            HasDynamicLoft: hasDynamicLoft);
 
         return IsPlausible(metrics);
     }

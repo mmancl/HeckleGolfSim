@@ -78,6 +78,45 @@ public partial class TestSquareBle : Node
         if (MathF.Abs(metrics11.DynamicLoft - 10.50f) > 0.01f)
             throw new Exception($"DynamicLoft mismatch in 11-byte packet: {metrics11.DynamicLoft}");
 
+        // Test with 0x00 mask (no sticker detected on shaft)
+        byte[] clubNoSticker = [
+            0x11, 0x07, 0x00,
+            0x00, 0x00,
+            0x00, 0x00,
+            0x00, 0x00,
+            0x00, 0x00
+        ];
+        if (SquareProtocol.TryParseClubData(clubNoSticker, out _))
+            throw new Exception("TryParseClubData should return false when validity mask is 0x00 (no sticker)!");
+
+        // Test mapper with ball-only shot (HasClubData = false)
+        var ballOnlyMetrics = new SquareShotMetrics(
+            BallSpeedMps: 65.0f,
+            VerticalAngle: 12.0f,
+            HorizontalAngle: 1.0f,
+            TotalSpinRpm: 2500,
+            SpinAxis: 0.0f,
+            BackSpinRpm: 2500,
+            SideSpinRpm: 0,
+            ShotType: "full",
+            HasClubData: false);
+        var mappedData = SquareShotDataMapper.ToOsgBallData(ballOnlyMetrics);
+        if (mappedData.ContainsKey("ClubPath") || mappedData.ContainsKey("FaceAngle") || mappedData.ContainsKey("FaceToPath"))
+            throw new Exception("SquareShotDataMapper included club metrics when HasClubData is false!");
+
+        // Test mapper with club metrics (HasClubData = true)
+        var shotWithClub = ballOnlyMetrics with
+        {
+            HasClubData = true,
+            HasClubPath = true,
+            HasFaceAngle = true,
+            ClubPath = 1.5f,
+            FaceAngle = -0.5f
+        };
+        var mappedWithClub = SquareShotDataMapper.ToOsgBallData(shotWithClub);
+        if (!mappedWithClub.ContainsKey("ClubPath") || !mappedWithClub.ContainsKey("FaceAngle"))
+            throw new Exception("SquareShotDataMapper missing expected club metrics when HasClubData is true!");
+
         GD.Print("PASS: 11-byte (0x07) club delivery packets parsed accurately.");
     }
 

@@ -65,7 +65,8 @@ static func get_courses_needing_upgrade(base_dir: String = "user://courses") -> 
 								scene_path = scn_path
 							elif FileAccess.file_exists(tscn_path):
 								scene_path = tscn_path
-						if version < CURRENT_COURSE_GRAPHICS_VERSION and FileAccess.file_exists(scene_path):
+						var is_corrupt := bool(data.get("corrupted_scene", false))
+						if not is_corrupt and version < CURRENT_COURSE_GRAPHICS_VERSION and FileAccess.file_exists(scene_path):
 							if is_course_scene_already_upgraded(scene_path):
 								data["graphics_version"] = CURRENT_COURSE_GRAPHICS_VERSION
 								var wfile := FileAccess.open(config_path, FileAccess.WRITE)
@@ -91,11 +92,13 @@ static func upgrade_single_course(course_entry: Dictionary) -> bool:
 	var packed := ResourceLoader.load(scene_path, "", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
 	if packed == null:
 		push_warning("[CourseGraphicsUpgrader] Failed to load PackedScene: %s" % scene_path)
+		_mark_course_corrupted(config_path)
 		return false
 
 	var root := packed.instantiate()
 	if root == null:
 		push_warning("[CourseGraphicsUpgrader] Failed to instantiate scene: %s" % scene_path)
+		_mark_course_corrupted(config_path)
 		return false
 
 	# 1. Convert individual Tree/Bush/Rock nodes into spatial MultiMesh chunks + consolidated collision
@@ -295,3 +298,22 @@ static func _create_upgrade_progress_modal(tree: SceneTree, total_courses: int) 
 		"status_label": status_lbl,
 		"progress_bar": progress
 	}
+
+
+static func _mark_course_corrupted(config_path: String) -> void:
+	if not FileAccess.file_exists(config_path):
+		return
+	var file := FileAccess.open(config_path, FileAccess.READ)
+	if file == null:
+		return
+	var raw_text := file.get_as_text()
+	file.close()
+	var json := JSON.new()
+	if json.parse(raw_text) == OK and json.data is Dictionary:
+		var data: Dictionary = json.data
+		data["graphics_version"] = CURRENT_COURSE_GRAPHICS_VERSION
+		data["corrupted_scene"] = true
+		var wfile := FileAccess.open(config_path, FileAccess.WRITE)
+		if wfile != null:
+			wfile.store_string(JSON.stringify(data, "\t"))
+			wfile.close()

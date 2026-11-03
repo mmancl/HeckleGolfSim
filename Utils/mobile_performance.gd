@@ -157,14 +157,15 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 	if quality != "Low" and quality != "Medium" and quality != "High":
 		quality = "High"
 
-	if is_mobile() and quality == "High":
+	if is_mobile() and (quality == "High" or quality == "Ultra"):
 		quality = "Medium"
 
 	var is_low = quality == "Low"
 	var is_med = quality == "Medium"
 	var is_high = quality == "High"
 
-	_apply_surrounding_features_visibility(scene_root, is_high)
+	_apply_surrounding_features_visibility(scene_root, quality)
+	_apply_cart_paths_visibility(scene_root, quality)
 
 	# Convert any unbatched course Tree_*, Bush_*, and Rock_* nodes into MultiMesh chunks
 	if ResourceLoader.exists("res://HighFidelity/Foliage/procedural_tree_generator.gd"):
@@ -281,7 +282,7 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 					low_turf.roughness = 0.95
 					low_turf.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
 					n.material_override = low_turf
-				elif is_med:
+				elif is_med or is_mobile():
 					var base_m = n.mesh.surface_get_material(0) if (n.mesh != null and n.mesh.get_surface_count() > 0) else null
 					if base_m is ShaderMaterial:
 						n.material_override = null
@@ -377,8 +378,8 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 			var mmi := n as MultiMeshInstance3D
 			var m_name := mmi.name.to_lower()
 			if m_name.begins_with("shorelinereeds"):
-				mmi.visible = not is_low
-				if not is_low and mmi.multimesh != null and mmi.multimesh.mesh is ArrayMesh:
+				mmi.visible = is_water_grass_enabled_for_quality(scene_root, quality)
+				if mmi.visible and mmi.multimesh != null and mmi.multimesh.mesh is ArrayMesh:
 					if not mmi.has_meta("reeds_version") or int(mmi.get_meta("reeds_version")) < 3:
 						if ResourceLoader.exists("res://HighFidelity/Foliage/procedural_tree_generator.gd"):
 							var ptg = load("res://HighFidelity/Foliage/procedural_tree_generator.gd")
@@ -411,10 +412,18 @@ static func apply_graphics_quality(scene_root: Node, quality: String) -> void:
 					mmi.visibility_range_end_margin = 30.0
 					mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 				elif is_bush_chunk:
-					if is_low:
+					var show_bushes := is_bushes_enabled_for_quality(scene_root, quality)
+					if not show_bushes:
 						mmi.visible = false
 						if mmi.multimesh != null and mmi.multimesh.instance_count > 0:
 							mmi.multimesh.visible_instance_count = 0
+					elif is_low:
+						mmi.visible = true
+						var low_bush_cnt: int = mmi.get_meta("tier_low_count") if mmi.has_meta("tier_low_count") else maxi(1, int(mmi.multimesh.instance_count * 0.25))
+						mmi.multimesh.visible_instance_count = mini(low_bush_cnt, mmi.multimesh.instance_count)
+						mmi.visibility_range_end = 150.0
+						mmi.visibility_range_end_margin = 15.0
+						mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 					elif is_med:
 						mmi.visible = true
 						var med_bush_cnt: int = mmi.get_meta("tier_med_count") if mmi.has_meta("tier_med_count") else maxi(1, int(mmi.multimesh.instance_count * 0.5))
@@ -1213,21 +1222,172 @@ static func apply_graphics_quality_with_spinner(tree: SceneTree, quality: String
 	_is_reloading_graphics = false
 
 
-## Shows or hides generated roads, clubhouses, houses and other buildings (and their collision).
-## They only appear on High graphics quality and when "Roads & Buildings" is enabled in settings.
-static func _apply_surrounding_features_visibility(scene_root: Node, is_high_quality: bool) -> void:
+## Retrieves the saved or embedded course graphic settings from scene metadata or course.json.
+static func get_course_graphic_settings(scene_root: Node) -> Dictionary:
+	if scene_root == null:
+		return {}
+	if scene_root.has_meta("graphic_settings"):
+		var m = scene_root.get_meta("graphic_settings")
+		if m is Dictionary:
+			return m
+	if scene_root.owner != null and scene_root.owner.has_meta("graphic_settings"):
+		var m = scene_root.owner.get_meta("graphic_settings")
+		if m is Dictionary:
+			return m
+	var p = scene_root.get_parent()
+	while p != null:
+		if p.has_meta("graphic_settings"):
+			var m = p.get_meta("graphic_settings")
+			if m is Dictionary:
+				return m
+		p = p.get_parent()
+	for ch in scene_root.get_children():
+		if ch != null and ch.has_meta("graphic_settings"):
+			var m = ch.get_meta("graphic_settings")
+			if m is Dictionary:
+				return m
+	var scene_path := scene_root.scene_file_path
+	if scene_path == "" and scene_root.owner != null:
+		scene_path = scene_root.owner.scene_file_path
+	if scene_path != "":
+		var json_path := scene_path.get_base_dir().path_join("course.json")
+		if FileAccess.file_exists(json_path):
+			var fa := FileAccess.open(json_path, FileAccess.READ)
+			if fa != null:
+				var parsed = JSON.parse_string(fa.get_as_text())
+				if parsed is Dictionary and parsed.has("graphic_settings") and parsed["graphic_settings"] is Dictionary:
+					return parsed["graphic_settings"]
+	return {}
+
+
+## Checks whether surrounding features (highways and buildings) are enabled for the specified quality.
+static func is_surrounding_features_enabled_for_quality(scene_root: Node, quality: String) -> bool:
+	var q_key := quality.to_lower()
+	var g_settings := get_course_graphic_settings(scene_root)
+	if g_settings.has(q_key) and g_settings[q_key] is Dictionary:
+		var q_dict: Dictionary = g_settings[q_key]
+		if q_dict.has("generate_roads_buildings"):
+			return bool(q_dict["generate_roads_buildings"])
+		if q_dict.has("roads_buildings"):
+			return bool(q_dict["roads_buildings"])
+	var cfg_path := "user://course_search_settings.cfg"
+	if FileAccess.file_exists(cfg_path):
+		var cfg := ConfigFile.new()
+		if cfg.load(cfg_path) == OK:
+			var sec := "course_generation_" + q_key
+			if cfg.has_section(sec) and cfg.has_section_key(sec, "generate_roads_buildings"):
+				return bool(cfg.get_value(sec, "generate_roads_buildings"))
+			elif q_key == "medium" and cfg.has_section("course_generation") and cfg.has_section_key("course_generation", "generate_roads_buildings"):
+				return bool(cfg.get_value("course_generation", "generate_roads_buildings"))
+	# Defaults: Low is false; Medium and High are true (matching default download presets)
+	return q_key != "low"
+
+
+## Checks whether cart paths are enabled for the specified quality.
+static func is_cart_paths_enabled_for_quality(scene_root: Node, quality: String) -> bool:
+	var q_key := quality.to_lower()
+	var g_settings := get_course_graphic_settings(scene_root)
+	if g_settings.has(q_key) and g_settings[q_key] is Dictionary:
+		var q_dict: Dictionary = g_settings[q_key]
+		if q_dict.has("generate_cart_paths"):
+			return bool(q_dict["generate_cart_paths"])
+	var cfg_path := "user://course_search_settings.cfg"
+	if FileAccess.file_exists(cfg_path):
+		var cfg := ConfigFile.new()
+		if cfg.load(cfg_path) == OK:
+			var sec := "course_generation_" + q_key
+			if cfg.has_section(sec) and cfg.has_section_key(sec, "generate_cart_paths"):
+				return bool(cfg.get_value(sec, "generate_cart_paths"))
+	return q_key != "low"
+
+
+## Checks whether shoreline reeds / water grass are enabled for the specified quality.
+static func is_water_grass_enabled_for_quality(scene_root: Node, quality: String) -> bool:
+	var q_key := quality.to_lower()
+	var g_settings := get_course_graphic_settings(scene_root)
+	if g_settings.has(q_key) and g_settings[q_key] is Dictionary:
+		var q_dict: Dictionary = g_settings[q_key]
+		if q_dict.has("generate_water_long_grass"):
+			return bool(q_dict["generate_water_long_grass"])
+	var cfg_path := "user://course_search_settings.cfg"
+	if FileAccess.file_exists(cfg_path):
+		var cfg := ConfigFile.new()
+		if cfg.load(cfg_path) == OK:
+			var sec := "course_generation_" + q_key
+			if cfg.has_section(sec) and cfg.has_section_key(sec, "generate_water_long_grass"):
+				return bool(cfg.get_value(sec, "generate_water_long_grass"))
+	return q_key != "low"
+
+
+## Checks whether bushes are enabled for the specified quality.
+static func is_bushes_enabled_for_quality(scene_root: Node, quality: String) -> bool:
+	var q_key := quality.to_lower()
+	var g_settings := get_course_graphic_settings(scene_root)
+	if g_settings.has(q_key) and g_settings[q_key] is Dictionary:
+		var q_dict: Dictionary = g_settings[q_key]
+		if q_dict.has("generate_bushes"):
+			return bool(q_dict["generate_bushes"])
+	var cfg_path := "user://course_search_settings.cfg"
+	if FileAccess.file_exists(cfg_path):
+		var cfg := ConfigFile.new()
+		if cfg.load(cfg_path) == OK:
+			var sec := "course_generation_" + q_key
+			if cfg.has_section(sec) and cfg.has_section_key(sec, "generate_bushes"):
+				return bool(cfg.get_value(sec, "generate_bushes"))
+	return q_key != "low"
+
+
+## Shows or hides cart paths (and their collision) based on quality setting.
+static func _apply_cart_paths_visibility(scene_root: Node, quality_arg: Variant = "High") -> void:
 	if scene_root == null:
 		return
-	var show_features := is_high_quality and not is_mobile()
-	if show_features:
-		var tree := scene_root.get_tree() if scene_root.is_inside_tree() else Engine.get_main_loop() as SceneTree
-		var gs: Node = null
-		if tree != null and tree.root != null:
-			gs = tree.root.get_node_or_null("GlobalSettings")
-			if gs == null:
-				gs = tree.root.find_child("GlobalSettings", true, false)
-		if gs != null and gs.has_method("is_surrounding_features_enabled"):
-			show_features = bool(gs.call("is_surrounding_features_enabled"))
+	var quality_str := "High"
+	if typeof(quality_arg) == TYPE_STRING:
+		quality_str = str(quality_arg)
+	elif typeof(quality_arg) == TYPE_BOOL:
+		quality_str = "High" if bool(quality_arg) else "Low"
+
+	var show_cart_paths := is_cart_paths_enabled_for_quality(scene_root, quality_str)
+	var nodes_to_toggle: Array[Node] = []
+	var stack: Array[Node] = [scene_root]
+	while not stack.is_empty():
+		var curr: Node = stack.pop_back()
+		if curr != null and curr != scene_root:
+			var cname: String = String(curr.name).to_lower()
+			if curr.is_in_group("cart_paths") or bool(curr.get_meta("is_cart_path", false)) or cname.begins_with("cartpath_"):
+				if not nodes_to_toggle.has(curr):
+					nodes_to_toggle.append(curr)
+		for ch in curr.get_children():
+			stack.append(ch)
+
+	for node in nodes_to_toggle:
+		if node is Node3D:
+			(node as Node3D).visible = show_cart_paths
+		if node is CollisionShape3D:
+			var cs := node as CollisionShape3D
+			cs.disabled = not show_cart_paths
+			cs.set_deferred("disabled", not show_cart_paths)
+		for sub in node.find_children("*", "Node", true, false):
+			if sub is Node3D:
+				(sub as Node3D).visible = show_cart_paths
+			if sub is CollisionShape3D:
+				var sub_cs := sub as CollisionShape3D
+				sub_cs.disabled = not show_cart_paths
+				sub_cs.set_deferred("disabled", not show_cart_paths)
+
+
+## Shows or hides generated roads, clubhouses, houses and other buildings (and their collision).
+## They appear on any graphics quality setting where enabled in download settings.
+static func _apply_surrounding_features_visibility(scene_root: Node, quality_arg: Variant = "High") -> void:
+	if scene_root == null:
+		return
+	var quality_str := "High"
+	if typeof(quality_arg) == TYPE_STRING:
+		quality_str = str(quality_arg)
+	elif typeof(quality_arg) == TYPE_BOOL:
+		quality_str = "High" if bool(quality_arg) else "Low"
+
+	var show_features := is_surrounding_features_enabled_for_quality(scene_root, quality_str)
 
 	var nodes_to_toggle: Array[Node] = []
 

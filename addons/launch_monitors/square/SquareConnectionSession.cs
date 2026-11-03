@@ -509,7 +509,11 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
                         ClubPath = clubMetrics.ClubPath,
                         AttackAngle = clubMetrics.AttackAngle,
                         DynamicLoft = clubMetrics.DynamicLoft,
-                        HasClubData = true
+                        HasClubData = true,
+                        HasFaceAngle = clubMetrics.HasFaceAngle,
+                        HasClubPath = clubMetrics.HasClubPath,
+                        HasAttackAngle = clubMetrics.HasAttackAngle,
+                        HasDynamicLoft = clubMetrics.HasDynamicLoft
                     };
                     _pendingShotMetrics = null;
                     _pendingShotCts?.Cancel();
@@ -612,7 +616,11 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
                     ClubPath = club.ClubPath,
                     AttackAngle = club.AttackAngle,
                     DynamicLoft = club.DynamicLoft,
-                    HasClubData = true
+                    HasClubData = true,
+                    HasFaceAngle = club.HasFaceAngle,
+                    HasClubPath = club.HasClubPath,
+                    HasAttackAngle = club.HasAttackAngle,
+                    HasDynamicLoft = club.HasDynamicLoft
                 };
             }
             else
@@ -636,6 +644,7 @@ internal sealed class SquareConnectionSession : IAsyncDisposable
                             {
                                 toEmit = _pendingShotMetrics.Value;
                                 _pendingShotMetrics = null;
+                                _recentClubMetrics = null;
                             }
                         }
                         finally

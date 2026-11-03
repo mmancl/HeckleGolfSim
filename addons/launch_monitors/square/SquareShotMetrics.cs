@@ -15,13 +15,21 @@ public readonly record struct SquareShotMetrics(
     float DynamicLoft = 0.0f,
     float ClubSpeedMps = 0.0f,
     float SmashFactor = 0.0f,
-    bool HasClubData = false);
+    bool HasClubData = false,
+    bool HasClubPath = false,
+    bool HasFaceAngle = false,
+    bool HasAttackAngle = false,
+    bool HasDynamicLoft = false);
 
 public readonly record struct SquareClubMetrics(
     float FaceAngle,
     float ClubPath,
     float AttackAngle,
-    float DynamicLoft);
+    float DynamicLoft,
+    bool HasFaceAngle = true,
+    bool HasClubPath = true,
+    bool HasAttackAngle = true,
+    bool HasDynamicLoft = true);
 
 public readonly record struct SquareSensorData(
     bool BallReady,

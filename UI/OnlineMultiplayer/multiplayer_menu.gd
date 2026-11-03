@@ -3,15 +3,23 @@ extends Control
 ## Online Multiplayer Menu (res://UI/OnlineMultiplayer/multiplayer_menu.gd)
 ## Hosts, joins by 6-char code, browses public lobbies, verifies course fingerprint,
 ## downloads missing courses, and coordinates lobby readiness.
+## Also hosts the full Tournament flow: host/join/browse/standings.
 ## See docs/multiplayer/07_ONLINE_LOBBY_HOST_JOIN.md.
 
 const CourseFingerprintScript = preload("res://Utils/Cloud/course_fingerprint.gd")
 const BudgetPausedBannerScript = preload("res://UI/Account/budget_paused_banner.gd")
 
+# â”€â”€ TOP BAR & MODE SELECTOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @onready var back_button: Button = %BackButton
 @onready var user_status_label: Label = %UserStatusLabel
 @onready var account_button: Button = %AccountButton
 @onready var budget_banner: PanelContainer = %BudgetBanner
+
+@onready var mode_selector_bar: HBoxContainer = %ModeSelectorBar
+@onready var mode_matches_button: Button = %ModeMatchesButton
+@onready var mode_tournaments_button: Button = %ModeTournamentsButton
+
+# â”€â”€ MATCHES SECTION (existing) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @onready var tab_bar: HBoxContainer = %TabBar
 @onready var tab_host_button: Button = %TabHostButton
 @onready var tab_join_code_button: Button = %TabJoinCodeButton
@@ -57,13 +65,81 @@ const BudgetPausedBannerScript = preload("res://UI/Account/budget_paused_banner.
 @onready var start_match_button: Button = %StartMatchButton
 @onready var confirm_leave_dialog: ConfirmationDialog = %ConfirmLeaveDialog
 
-var _active_tab: String = "host" # "host" | "join_code" | "browser" | "room"
+# â”€â”€ TOURNAMENTS SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+@onready var tournaments_section: VBoxContainer = %TournamentsSection
+@onready var tournament_tab_bar: HBoxContainer = %TournamentTabBar
+@onready var ttab_host_button: Button = %TTabHostButton
+@onready var ttab_join_button: Button = %TTabJoinButton
+@onready var ttab_public_button: Button = %TTabPublicButton
+@onready var ttab_standings_button: Button = %TTabStandingsButton
+@onready var tournament_content_stack: PanelContainer = %TournamentContentStack
+
+# Tournament host view
+@onready var tournament_host_view: ScrollContainer = %TournamentHostView
+@onready var t_host_name_input: LineEdit = %THostNameInput
+@onready var t_course_dropdown: OptionButton = %TCourseDropdown
+@onready var t_length_option: OptionButton = %TLengthOption
+@onready var t_mode_option: OptionButton = %TModeOption
+@onready var t_wind_option: OptionButton = %TWindOption
+@onready var t_green_speed_option: OptionButton = %TGreenSpeedOption
+@onready var t_visibility_option: OptionButton = %TVisibilityOption
+@onready var t_max_players_spinbox: SpinBox = %TMaxPlayersSpinBox
+@onready var t_end_date_input: LineEdit = %TEndDateInput
+@onready var t_host_golfer_dropdown: OptionButton = %THostGolferDropdown
+@onready var t_host_golfer_tee: OptionButton = %THostGolferTee
+@onready var t_host_create_button: Button = %THostCreateButton
+@onready var t_host_status_label: Label = %THostStatusLabel
+@onready var t_host_success_panel: PanelContainer = %THostSuccessPanel
+@onready var t_host_success_code_label: Label = %THostSuccessCodeLabel
+@onready var t_host_copy_code_button: Button = %THostCopyCodeButton
+@onready var t_host_success_end_date: Label = %THostSuccessEndDate
+
+# Tournament join view
+@onready var tournament_join_view: VBoxContainer = %TournamentJoinView
+@onready var t_join_code_input: LineEdit = %TJoinCodeInput
+@onready var t_join_paste_button: Button = %TJoinPasteButton
+@onready var t_join_golfer_dropdown: OptionButton = %TJoinGolferDropdown
+@onready var t_join_golfer_tee: OptionButton = %TJoinGolferTee
+@onready var t_join_submit_button: Button = %TJoinSubmitButton
+@onready var t_join_status_label: Label = %TJoinStatusLabel
+
+# Tournament public view
+@onready var tournament_public_view: VBoxContainer = %TournamentPublicView
+@onready var t_public_refresh_button: Button = %TPublicRefreshButton
+@onready var t_public_filter_time_option: OptionButton = %TPublicFilterTimeOption
+@onready var t_public_filter_course_option: OptionButton = %TPublicFilterCourseOption
+@onready var t_public_scroll: ScrollContainer = %TPublicScroll
+@onready var t_public_list: VBoxContainer = %TPublicList
+@onready var t_public_empty_label: Label = %TPublicEmptyLabel
+
+# Tournament standings view
+@onready var tournament_standings_view: VBoxContainer = %TournamentStandingsView
+@onready var t_standings_filter_particip_option: OptionButton = %TStandingsFilterParticipOption
+@onready var t_standings_filter_time_option: OptionButton = %TStandingsFilterTimeOption
+@onready var t_standings_filter_course_option: OptionButton = %TStandingsFilterCourseOption
+@onready var t_standings_refresh_button: Button = %TStandingsRefreshButton
+@onready var t_standings_tournament_dropdown: OptionButton = %TStandingsTournamentDropdown
+@onready var t_standings_meta: Label = %TStandingsMeta
+@onready var t_standings_scroll: ScrollContainer = %TStandingsScroll
+@onready var t_standings_list: VBoxContainer = %TStandingsList
+@onready var t_standings_empty_label: Label = %TStandingsEmptyLabel
+
+# â”€â”€ STATE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+var _active_mode: String = "matches"   # "matches" | "tournaments"
+var _active_tab: String = "host"       # "host" | "join_code" | "browser" | "room"
+var _active_t_tab: String = "t_host"  # "t_host" | "t_join" | "t_public" | "t_standings"
 var _available_courses: Array[Dictionary] = []
 var _registered_players: Array[Dictionary] = []
 var _missing_course_info: Dictionary = {}
 var _is_downloading_course: bool = false
 var _pending_spectate_match_id: String = ""
 var _session_cache: Node = null
+
+# Tournament state
+var _t_available_courses: Array[Dictionary] = []  # same as _available_courses, re-used
+var _standings_tournament_list: Array[Dictionary] = []
+var _standings_selected_id: String = ""
+var _t_last_created_code: String = ""
 
 
 func _get_session() -> Node:
@@ -79,12 +155,18 @@ func _get_session() -> Node:
 	return null
 
 
+func _get_tournament_service() -> Node:
+	return get_node_or_null("/root/TournamentService")
+
+
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
-	# Hook up button signals
+	# â”€â”€ Matches mode signals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	back_button.pressed.connect(_on_back_pressed)
 	account_button.pressed.connect(_on_account_pressed)
+	mode_matches_button.pressed.connect(func(): _switch_mode("matches"))
+	mode_tournaments_button.pressed.connect(func(): _switch_mode("tournaments"))
 	tab_host_button.pressed.connect(func(): _switch_tab("host"))
 	tab_join_code_button.pressed.connect(func(): _switch_tab("join_code"))
 	tab_browser_button.pressed.connect(func(): _switch_tab("browser"))
@@ -101,6 +183,29 @@ func _ready() -> void:
 
 	join_code_input.text_changed.connect(func(t: String):
 		join_code_input.text = t.to_upper().strip_edges()
+	)
+
+	# â”€â”€ Tournament mode signals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+	ttab_host_button.pressed.connect(func(): _switch_t_tab("t_host"))
+	ttab_join_button.pressed.connect(func(): _switch_t_tab("t_join"))
+	ttab_public_button.pressed.connect(func(): _switch_t_tab("t_public"))
+	ttab_standings_button.pressed.connect(func(): _switch_t_tab("t_standings"))
+
+	t_host_create_button.pressed.connect(_on_t_host_create_pressed)
+	t_host_copy_code_button.pressed.connect(_on_t_copy_code_pressed)
+	t_join_paste_button.pressed.connect(_on_t_join_paste_pressed)
+	t_join_submit_button.pressed.connect(_on_t_join_submit_pressed)
+	t_public_refresh_button.pressed.connect(_on_t_public_refresh_pressed)
+	t_standings_refresh_button.pressed.connect(_on_t_standings_load_pressed)
+	t_standings_tournament_dropdown.item_selected.connect(_on_t_standings_tournament_selected)
+	t_standings_filter_particip_option.item_selected.connect(func(_i): _on_t_standings_load_pressed())
+	t_standings_filter_time_option.item_selected.connect(func(_i): _on_t_standings_load_pressed())
+	t_standings_filter_course_option.item_selected.connect(func(_i): _on_t_standings_load_pressed())
+	t_public_filter_time_option.item_selected.connect(func(_i): _on_t_public_refresh_pressed())
+	t_public_filter_course_option.item_selected.connect(func(_i): _on_t_public_refresh_pressed())
+
+	t_join_code_input.text_changed.connect(func(t: String):
+		t_join_code_input.text = t.to_upper().strip_edges()
 	)
 
 	# Connect OnlineSession signals
@@ -127,10 +232,13 @@ func _ready() -> void:
 	_check_budget_pause()
 
 	TouchScrollHelper.attach_to(browser_scroll)
+	TouchScrollHelper.attach_to(t_public_scroll)
+	TouchScrollHelper.attach_to(t_standings_scroll)
 
+	_switch_mode("matches")
 	_switch_tab("host")
 	_update_controller_focus_navigation()
-	tab_host_button.call_deferred("grab_focus")
+	mode_matches_button.call_deferred("grab_focus")
 
 
 func _apply_styles() -> void:
@@ -145,21 +253,35 @@ func _apply_styles() -> void:
 	ThemeManager.apply_secondary_button_style(ready_toggle_button, 8)
 	ThemeManager.apply_danger_button_style(leave_lobby_button, 8)
 	ThemeManager.apply_primary_button_style(download_course_button, 6)
-
 	ThemeManager.apply_input_style(join_code_input)
 
+	# Mode selector
+	ThemeManager.apply_nav_button_style(mode_matches_button, 8)
+	ThemeManager.apply_nav_button_style(mode_tournaments_button, 8)
+
+	# Tournament buttons
+	ThemeManager.apply_primary_button_style(t_host_create_button, 8)
+	ThemeManager.apply_nav_button_style(t_host_copy_code_button, 6)
+	ThemeManager.apply_nav_button_style(t_join_paste_button, 6)
+	ThemeManager.apply_primary_button_style(t_join_submit_button, 8)
+	ThemeManager.apply_nav_button_style(t_public_refresh_button, 6)
+	ThemeManager.apply_primary_button_style(t_standings_refresh_button, 6)
+
+	ThemeManager.apply_input_style(t_host_name_input)
+	ThemeManager.apply_input_style(t_end_date_input)
+	ThemeManager.apply_input_style(t_join_code_input)
+
 	for opt in [
-		course_dropdown,
-		length_option,
-		mode_option,
-		turn_order_option,
-		wind_option,
-		green_speed_option,
-		visibility_option,
-		host_golfer_dropdown,
-		host_golfer_tee,
-		join_golfer_dropdown,
-		join_golfer_tee
+		course_dropdown, length_option, mode_option, turn_order_option,
+		wind_option, green_speed_option, visibility_option,
+		host_golfer_dropdown, host_golfer_tee, join_golfer_dropdown, join_golfer_tee,
+		t_course_dropdown, t_length_option, t_mode_option, t_wind_option,
+		t_green_speed_option, t_visibility_option,
+		t_host_golfer_dropdown, t_host_golfer_tee,
+		t_join_golfer_dropdown, t_join_golfer_tee,
+		t_public_filter_time_option, t_public_filter_course_option,
+		t_standings_filter_particip_option, t_standings_filter_time_option,
+		t_standings_filter_course_option, t_standings_tournament_dropdown
 	]:
 		if opt != null:
 			ThemeManager.apply_option_button_style(opt)
@@ -227,6 +349,9 @@ func _check_budget_pause() -> void:
 	host_create_button.disabled = paused
 	join_code_submit_button.disabled = paused
 	refresh_browser_button.disabled = paused
+	t_host_create_button.disabled = paused
+	t_join_submit_button.disabled = paused
+	t_public_refresh_button.disabled = paused
 
 
 func _on_cloud_service_paused_changed(is_paused: bool, _message: String) -> void:
@@ -236,12 +361,31 @@ func _on_cloud_service_paused_changed(is_paused: bool, _message: String) -> void
 		_show_status("Multiplayer service has been paused.", true)
 
 
-# ── TAB & VIEW MANAGEMENT ───────────────────────────────────────────────
+# â”€â”€ MODE SWITCHING â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+func _switch_mode(mode: String) -> void:
+	_active_mode = mode
+	var in_matches := (mode == "matches")
+	mode_matches_button.disabled = in_matches
+	mode_tournaments_button.disabled = not in_matches
+
+	tab_bar.visible = in_matches and (_active_tab != "room")
+	host_view.visible = in_matches and (_active_tab == "host")
+	join_code_view.visible = in_matches and (_active_tab == "join_code")
+	browser_view.visible = in_matches and (_active_tab == "browser")
+	lobby_room_view.visible = in_matches and (_active_tab == "room")
+
+	tournaments_section.visible = not in_matches
+
+	if not in_matches and _active_t_tab == "t_host":
+		_populate_t_courses()
+
+
+# â”€â”€ TAB & VIEW MANAGEMENT (Matches) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 func _switch_tab(tab_name: String) -> void:
 	_active_tab = tab_name
 
-	# Clear status text whenever changing tabs to avoid error bleed across views
 	if host_status_label != null:
 		host_status_label.text = ""
 	if join_status_label != null:
@@ -263,13 +407,36 @@ func _switch_tab(tab_name: String) -> void:
 	_update_controller_focus_navigation()
 
 
+# â”€â”€ TAB SWITCHING (Tournaments) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+func _switch_t_tab(t_tab: String) -> void:
+	_active_t_tab = t_tab
+
+	ttab_host_button.disabled = (t_tab == "t_host")
+	ttab_join_button.disabled = (t_tab == "t_join")
+	ttab_public_button.disabled = (t_tab == "t_public")
+	ttab_standings_button.disabled = (t_tab == "t_standings")
+
+	tournament_host_view.visible = (t_tab == "t_host")
+	tournament_join_view.visible = (t_tab == "t_join")
+	tournament_public_view.visible = (t_tab == "t_public")
+	tournament_standings_view.visible = (t_tab == "t_standings")
+
+	if t_tab == "t_public":
+		_on_t_public_refresh_pressed()
+	elif t_tab == "t_standings":
+		_on_t_standings_load_pressed()
+
+
+# â”€â”€ DROPDOWN POPULATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 func _populate_dropdowns() -> void:
 	# Course lengths
 	length_option.clear()
 	for l in ["Full 18", "Front 9", "Back 9"]:
 		length_option.add_item(l)
 
-	# Allowed online game modes (H17: Hide Scramble and 2v2 Scramble)
+	# Allowed online game modes
 	mode_option.clear()
 	for m in ["Standard", "Skins", "Closest to Pin"]:
 		mode_option.add_item(m)
@@ -303,16 +470,63 @@ func _populate_dropdowns() -> void:
 			tee_opt.add_item(t)
 		tee_opt.select(1) # Blue
 
+	# Tournament dropdowns
+	t_length_option.clear()
+	for l in ["Full 18", "Front 9", "Back 9"]:
+		t_length_option.add_item(l)
+
+	t_mode_option.clear()
+	for m in ["Standard", "Skins", "Closest to Pin"]:
+		t_mode_option.add_item(m)
+
+	t_wind_option.clear()
+	for w in ["Calm / Off", "Light (3-7 mph)", "Moderate (8-14 mph)", "Breezy (15-20 mph)", "Windy (20+ mph)"]:
+		t_wind_option.add_item(w)
+	t_wind_option.select(1)
+
+	t_green_speed_option.clear()
+	for s in ["Slow", "Normal", "Fast", "Tour"]:
+		t_green_speed_option.add_item(s)
+	t_green_speed_option.select(1)
+
+	t_visibility_option.clear()
+	t_visibility_option.add_item("Public")
+	t_visibility_option.add_item("Private")
+
+	for tee_opt in [t_host_golfer_tee, t_join_golfer_tee]:
+		tee_opt.clear()
+		for t in ["Black", "Blue", "White", "Red", "Gold"]:
+			tee_opt.add_item(t)
+		tee_opt.select(1)
+
+	# Filter time period options (shared pattern)
+	var time_labels := ["All Time", "Today", "This Week", "This Month", "Last 90 Days"]
+	var time_values := ["all", "today", "this_week", "this_month", "last_90_days"]
+
+	t_public_filter_time_option.clear()
+	for i in range(time_labels.size()):
+		t_public_filter_time_option.add_item(time_labels[i])
+
+	t_standings_filter_time_option.clear()
+	for i in range(time_labels.size()):
+		t_standings_filter_time_option.add_item(time_labels[i])
+
+	# Participation filter
+	t_standings_filter_particip_option.clear()
+	t_standings_filter_particip_option.add_item("All Tournaments")
+	t_standings_filter_particip_option.add_item("Tournaments I Joined")
+
 	# Players
 	_populate_players()
-
-	# Courses
+	# Courses (matches)
 	_populate_courses()
 
 
 func _populate_players() -> void:
 	host_golfer_dropdown.clear()
 	join_golfer_dropdown.clear()
+	t_host_golfer_dropdown.clear()
+	t_join_golfer_dropdown.clear()
 
 	_registered_players.clear()
 	var mp_mgr = get_node_or_null("/root/MultiplayerManager")
@@ -334,9 +548,13 @@ func _populate_players() -> void:
 		var p_name: String = p.get("name", "Player")
 		host_golfer_dropdown.add_item(p_name)
 		join_golfer_dropdown.add_item(p_name)
+		t_host_golfer_dropdown.add_item(p_name)
+		t_join_golfer_dropdown.add_item(p_name)
 
 	host_golfer_dropdown.select(0)
 	join_golfer_dropdown.select(0)
+	t_host_golfer_dropdown.select(0)
+	t_join_golfer_dropdown.select(0)
 
 
 func _populate_courses() -> void:
@@ -372,10 +590,36 @@ func _populate_courses() -> void:
 		course_dropdown.add_item(title, i)
 		if is_custom:
 			course_dropdown.set_item_disabled(i, true)
-			course_dropdown.set_item_tooltip(i, "Custom local courses cannot be hosted online yet because remote players cannot download them from the course catalog.")
+			course_dropdown.set_item_tooltip(i, "Custom local courses cannot be hosted online yet.")
+
+	# Mirror to tournament course dropdown
+	_populate_t_courses()
 
 
-# ── HOST FLOW ────────────────────────────────────────────────────────────
+func _populate_t_courses() -> void:
+	_t_available_courses = _available_courses.duplicate()
+	t_course_dropdown.clear()
+
+	# Filter dropdowns for standings/public
+	t_public_filter_course_option.clear()
+	t_public_filter_course_option.add_item("All Courses")
+	t_standings_filter_course_option.clear()
+	t_standings_filter_course_option.add_item("All Courses")
+
+	for i in range(_t_available_courses.size()):
+		var c = _t_available_courses[i]
+		var title: String = c.get("title", "Unknown")
+		var is_custom: bool = c.get("is_custom", false)
+		if is_custom:
+			t_course_dropdown.add_item(title + " (Custom - Local Only)", i)
+			t_course_dropdown.set_item_disabled(i, true)
+		else:
+			t_course_dropdown.add_item(title, i)
+			t_public_filter_course_option.add_item(title)
+			t_standings_filter_course_option.add_item(title)
+
+
+# â”€â”€ HOST MATCH FLOW (existing) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 func _on_host_create_pressed() -> void:
 	if _available_courses.is_empty():
@@ -448,7 +692,7 @@ func _get_selected_golfer(dropdown: OptionButton, tee_opt: OptionButton) -> Dict
 	return golfer
 
 
-# ── JOIN BY CODE FLOW ────────────────────────────────────────────────────
+# â”€â”€ JOIN BY CODE FLOW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 func _on_paste_code_pressed() -> void:
 	var clip := DisplayServer.clipboard_get().strip_edges().to_upper()
@@ -483,7 +727,7 @@ func _on_join_code_submit_pressed() -> void:
 		_show_status(res.get("error", "Failed to join lobby."), true)
 
 
-# ── PUBLIC BROWSER FLOW ──────────────────────────────────────────────────
+# â”€â”€ PUBLIC BROWSER FLOW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 func _on_refresh_browser_pressed() -> void:
 	refresh_browser_button.disabled = true
@@ -533,7 +777,7 @@ func _add_browser_lobby_row(lobby_data: Dictionary) -> void:
 	var status_tag: String = "[In Progress]" if is_in_progress else "[In Lobby]"
 
 	var title_lbl := Label.new()
-	title_lbl.text = "%s — %s (%s) %s" % [
+	title_lbl.text = "%s â€” %s (%s) %s" % [
 		lobby_data.get("course_title", "Unknown Course"),
 		lobby_data.get("course_length", "Full 18"),
 		lobby_data.get("game_mode", "Standard"),
@@ -617,15 +861,17 @@ func _on_spectate_browser_match(match_id: String, _lobby_data: Dictionary = {}) 
 		_show_status(res.get("error", "Failed to spectate match."), true)
 
 
-# ── LOBBY ROOM VIEW ──────────────────────────────────────────────────────
+# â”€â”€ LOBBY ROOM VIEW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 func _on_lobby_updated(meta: Dictionary, devices: Dictionary, golfers: Dictionary) -> void:
 	if _active_tab != "room":
 		_switch_tab("room")
+	if _active_mode != "matches":
+		_switch_mode("matches")
 
 	var sess := _get_session()
 	var cur_code: String = sess.current_join_code if sess != null else ""
-	room_code_label.text = cur_code if not cur_code.is_empty() else "—"
+	room_code_label.text = cur_code if not cur_code.is_empty() else "â€”"
 
 	var course: Dictionary = meta.get("course", {})
 	var settings: Dictionary = meta.get("settings", {})
@@ -635,7 +881,6 @@ func _on_lobby_updated(meta: Dictionary, devices: Dictionary, golfers: Dictionar
 		settings.get("game_mode", "Standard")
 	]
 
-	# Update Start Match button state
 	var my_uid: String = sess._get_my_uid() if sess != null else ""
 	var is_host: bool = sess.is_host if sess != null else false
 	start_match_button.visible = is_host
@@ -649,12 +894,10 @@ func _on_lobby_updated(meta: Dictionary, devices: Dictionary, golfers: Dictionar
 
 	start_match_button.disabled = (golfers.size() < 2 or not all_ready)
 
-	# Update Ready button text
 	var my_dev = devices.get(my_uid, {})
 	var is_my_device_ready: bool = bool(my_dev.get("ready", false))
 	ready_toggle_button.text = "I'm Not Ready" if is_my_device_ready else "Ready Up!"
 
-	# Populate golfers
 	_render_room_golfers(golfers, devices)
 	_update_controller_focus_navigation()
 
@@ -694,11 +937,18 @@ func _render_room_golfers(golfers: Dictionary, devices: Dictionary) -> void:
 		var dev = devices.get(owner_uid, {})
 		var dev_ready: bool = bool(dev.get("ready", false))
 		var dev_course_ready: bool = bool(dev.get("course_ready", false))
+		var dev_course_downloading: bool = bool(dev.get("course_downloading", false))
+		if owner_uid == my_uid and _is_downloading_course:
+			dev_course_downloading = true
 
 		var status_lbl := Label.new()
 		if not dev_course_ready:
-			status_lbl.text = "Missing Course"
-			status_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_DANGER)
+			if dev_course_downloading:
+				status_lbl.text = "Downloading Course..."
+				status_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WARNING)
+			else:
+				status_lbl.text = "Missing Course"
+				status_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_DANGER)
 		elif dev_ready:
 			status_lbl.text = "Ready"
 			status_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_SUCCESS)
@@ -707,7 +957,6 @@ func _render_room_golfers(golfers: Dictionary, devices: Dictionary) -> void:
 			status_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
 		hbox.add_child(status_lbl)
 
-		# Host kick button for remote devices
 		if is_host and owner_uid != my_uid:
 			var kick_btn := Button.new()
 			kick_btn.text = "Kick"
@@ -736,6 +985,12 @@ func _on_download_course_pressed() -> void:
 	download_course_button.disabled = true
 	course_install_label.text = "Downloading & Generating 3D Course Geometry..."
 
+	var sess := _get_session()
+	if sess != null and sess.has_method("set_local_course_downloading"):
+		sess.set_local_course_downloading(true)
+	elif _active_tab == "room":
+		_render_room_golfers(sess.match_golfers if sess != null else {}, sess.match_devices if sess != null else {})
+
 	var lat: float = float(_missing_course_info.get("lat", 0.0))
 	var lon: float = float(_missing_course_info.get("lon", 0.0))
 	var title: String = _missing_course_info.get("title", "")
@@ -754,7 +1009,6 @@ func _on_download_course_pressed() -> void:
 			if success:
 				var found = CourseFingerprintScript.find_installed_course(_missing_course_info.get("key", ""), lat, lon, title)
 				if not found.is_empty():
-					var sess := _get_session()
 					if sess != null:
 						sess.set_local_course_ready(true, found.get("scene_path", ""), found.get("config_path", ""))
 					course_install_banner.visible = false
@@ -764,10 +1018,20 @@ func _on_download_course_pressed() -> void:
 						_pending_spectate_match_id = ""
 						_on_spectate_browser_match(target_spec_id)
 				else:
+					if sess != null and sess.has_method("set_local_course_downloading"):
+						sess.set_local_course_downloading(false)
 					course_install_label.text = "Installed course could not be verified."
 			else:
+				if sess != null and sess.has_method("set_local_course_downloading"):
+					sess.set_local_course_downloading(false)
 				course_install_label.text = "Course download failed. Please retry."
+		else:
+			if sess != null and sess.has_method("set_local_course_downloading"):
+				sess.set_local_course_downloading(false)
+			course_install_label.text = "DownloadAndGenerateCourse method not found."
 	else:
+		if sess != null and sess.has_method("set_local_course_downloading"):
+			sess.set_local_course_downloading(false)
 		course_install_label.text = "OsmMapLoader script not found."
 
 	_is_downloading_course = false
@@ -814,13 +1078,17 @@ func _on_leave_lobby_pressed() -> void:
 func _confirm_leave_lobby() -> void:
 	var sess := _get_session()
 	if sess != null:
+		if sess.has_method("set_local_course_downloading"):
+			sess.set_local_course_downloading(false)
 		sess.leave_lobby()
+	_is_downloading_course = false
 	course_install_banner.visible = false
 	_switch_tab("host")
 
 
 func _on_lobby_closed(reason: String) -> void:
 	course_install_banner.visible = false
+	_is_downloading_course = false
 	if _active_tab == "room":
 		_switch_tab("host")
 		_show_status("Lobby closed: %s" % reason, false)
@@ -834,6 +1102,586 @@ func _on_match_started(match_id: String, _meta: Dictionary, _golfers: Array[Dict
 func _on_lobby_error(code: String, message: String) -> void:
 	_show_status("[%s] %s" % [code, message], true)
 
+
+# â”€â”€ TOURNAMENT: HOST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+func _on_t_host_create_pressed() -> void:
+	if _t_available_courses.is_empty():
+		_show_t_status("No valid courses installed.", true)
+		return
+
+	var sel_idx := t_course_dropdown.get_selected_id()
+	if sel_idx < 0 or sel_idx >= _t_available_courses.size():
+		_show_t_status("Please select a course.", true)
+		return
+
+	var course_data = _t_available_courses[sel_idx]
+	if course_data.get("is_custom", false):
+		_show_t_status("Custom courses cannot be used for tournaments.", true)
+		return
+
+	var end_str: String = t_end_date_input.text.strip_edges()
+	if end_str.length() < 10:
+		_show_t_status("Please enter a valid end date (YYYY-MM-DD HH:MM).", true)
+		return
+
+	var ts_svc := _get_tournament_service()
+	if ts_svc == null:
+		_show_t_status("Tournament service unavailable.", true)
+		return
+
+	var wind_speed := 0.0
+	match t_wind_option.selected:
+		1: wind_speed = 5.0
+		2: wind_speed = 10.0
+		3: wind_speed = 17.0
+		4: wind_speed = 24.0
+
+	var golfer_name: String = t_host_golfer_dropdown.get_item_text(t_host_golfer_dropdown.selected)
+	var tee_str: String = t_host_golfer_tee.get_item_text(t_host_golfer_tee.selected)
+
+	var tournament_name: String = t_host_name_input.text.strip_edges()
+	if tournament_name.is_empty():
+		tournament_name = "%s's Tournament" % golfer_name
+
+	var settings := {
+		"name": tournament_name,
+		"course_key": course_data.get("key", course_data.get("title", "").to_lower().replace(" ", "_")),
+		"course_title": course_data.get("title", ""),
+		"course_length": t_length_option.get_item_text(t_length_option.selected),
+		"game_mode": t_mode_option.get_item_text(t_mode_option.selected),
+		"wind_speed_mph": wind_speed,
+		"wind_dir_rad": randf() * TAU,
+		"green_speed": t_green_speed_option.get_item_text(t_green_speed_option.selected),
+		"pin_seed": randi(),
+		"tee": tee_str,
+		"visibility": "public" if t_visibility_option.selected == 0 else "private",
+		"max_players": int(t_max_players_spinbox.value),
+		"end_date_utc": end_str,
+		"player_name": golfer_name
+	}
+
+	t_host_create_button.disabled = true
+	t_host_success_panel.visible = false
+	_show_t_status("Creating tournament...", false)
+
+	var res: Dictionary = await ts_svc.create_tournament(settings)
+	t_host_create_button.disabled = false
+
+	if res.get("ok", false):
+		var code: String = res.get("join_code", "")
+		var t_data: Dictionary = res.get("data", {})
+		_t_last_created_code = code
+
+		t_host_success_panel.visible = true
+		t_host_success_code_label.text = "Join Code: %s" % code
+		var end_unix: int = ts_svc.call("_parse_date_utc", end_str)
+		t_host_success_end_date.text = "Ends: %s" % ts_svc.format_end_date(end_unix)
+		_show_t_status("Tournament created successfully!", false)
+	else:
+		_show_t_status(res.get("error", "Failed to create tournament."), true)
+
+
+func _on_t_copy_code_pressed() -> void:
+	if not _t_last_created_code.is_empty():
+		DisplayServer.clipboard_set(_t_last_created_code)
+		t_host_copy_code_button.text = "Copied!"
+		get_tree().create_timer(1.5).timeout.connect(func():
+			if is_instance_valid(t_host_copy_code_button):
+				t_host_copy_code_button.text = "Copy Code"
+		)
+
+
+# â”€â”€ TOURNAMENT: JOIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+func _on_t_join_paste_pressed() -> void:
+	var clip := DisplayServer.clipboard_get().strip_edges().to_upper()
+	if not clip.is_empty():
+		t_join_code_input.text = clip.substr(0, 6)
+
+
+func _on_t_join_submit_pressed() -> void:
+	var code := t_join_code_input.text.strip_edges().to_upper()
+	if code.length() != 6:
+		_show_t_status("Please enter a valid 6-character tournament code.", true)
+		return
+
+	var ts_svc := _get_tournament_service()
+	if ts_svc == null:
+		_show_t_status("Tournament service unavailable.", true)
+		return
+
+	var player_name: String = t_join_golfer_dropdown.get_item_text(t_join_golfer_dropdown.selected)
+	var tee_str: String = t_join_golfer_tee.get_item_text(t_join_golfer_tee.selected)
+
+	t_join_submit_button.disabled = true
+	_show_t_status("Joining tournament...", false)
+
+	var res: Dictionary = await ts_svc.join_tournament(code, player_name, tee_str)
+	t_join_submit_button.disabled = false
+
+	if res.get("ok", false):
+		var t_data: Dictionary = res.get("data", {})
+		var end_str: String = t_data.get("end_date_utc", "")
+		var end_unix: int = ts_svc.call("_parse_date_utc", end_str)
+		var end_formatted: String = ts_svc.format_end_date(end_unix)
+		_show_t_status(
+			"Joined! Course: %s (%s) â€” Ends %s" % [
+				t_data.get("course_title", ""),
+				t_data.get("course_length", ""),
+				end_formatted
+			],
+			false
+		)
+	else:
+		_show_t_status(res.get("error", "Failed to join tournament."), true)
+
+
+# â”€â”€ TOURNAMENT: PUBLIC BROWSER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+func _on_t_public_refresh_pressed() -> void:
+	t_public_refresh_button.disabled = true
+	_clear_t_public_list()
+	t_public_empty_label.visible = true
+	t_public_empty_label.text = "Fetching public tournaments..."
+
+	var ts_svc := _get_tournament_service()
+	if ts_svc == null:
+		t_public_empty_label.text = "Tournament service unavailable."
+		t_public_refresh_button.disabled = false
+		return
+
+	var filters := {
+		"time_frame": _time_filter_value(t_public_filter_time_option.selected),
+		"course_key": _course_filter_key(t_public_filter_course_option)
+	}
+
+	var res: Dictionary = await ts_svc.fetch_public_tournaments(filters)
+	t_public_refresh_button.disabled = false
+
+	if not res.get("ok", false):
+		t_public_empty_label.visible = true
+		t_public_empty_label.text = res.get("error", "Failed to load tournaments.")
+		return
+
+	var docs: Array = res.get("documents", [])
+	_clear_t_public_list()
+	if docs.is_empty():
+		t_public_empty_label.visible = true
+		t_public_empty_label.text = "No public tournaments found. Try different filters or host one!"
+	else:
+		t_public_empty_label.visible = false
+		for t_doc in docs:
+			_add_t_public_row(t_doc)
+
+
+func _clear_t_public_list() -> void:
+	for c in t_public_list.get_children():
+		if c != t_public_empty_label:
+			c.queue_free()
+
+
+func _add_t_public_row(t_doc: Dictionary) -> void:
+	var ts_svc := _get_tournament_service()
+	var card := PanelContainer.new()
+	ThemeManager.apply_card_panel_style(card, false, 8, 12, 10, 12, 10)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 6)
+	card.add_child(vbox)
+
+	var hrow := HBoxContainer.new()
+	hrow.add_theme_constant_override("separation", 12)
+	vbox.add_child(hrow)
+
+	var info_vbox := VBoxContainer.new()
+	info_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hrow.add_child(info_vbox)
+
+	var is_ended: bool = ts_svc != null and ts_svc.is_tournament_ended(t_doc)
+	var status_str: String = "[Ended]" if is_ended else "[Open]"
+
+	var title_lbl := Label.new()
+	title_lbl.text = "%s â€” %s %s" % [
+		t_doc.get("name", "Tournament"),
+		t_doc.get("course_title", "Unknown Course"),
+		status_str
+	]
+	title_lbl.add_theme_font_size_override("font_size", 15)
+	if is_ended:
+		title_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	info_vbox.add_child(title_lbl)
+
+	var details_lbl := Label.new()
+	var player_cnt: int = int(t_doc.get("player_count", 0))
+	var max_p: int = int(t_doc.get("max_players", 20))
+	var end_unix: int = 0
+	if ts_svc != null:
+		end_unix = ts_svc.call("_parse_date_utc", t_doc.get("end_date_utc", ""))
+	var end_str: String = ts_svc.format_end_date(end_unix) if ts_svc != null else t_doc.get("end_date_utc", "")
+
+	details_lbl.text = "Host: %s | %s | %s | Players: %d/%d | Ends: %s" % [
+		t_doc.get("host_name", "Host"),
+		t_doc.get("course_length", "Full 18"),
+		t_doc.get("game_mode", "Standard"),
+		player_cnt, max_p, end_str
+	]
+	details_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+	details_lbl.add_theme_font_size_override("font_size", 12)
+	info_vbox.add_child(details_lbl)
+
+	# Action buttons
+	var btn_vbox := VBoxContainer.new()
+	btn_vbox.add_theme_constant_override("separation", 6)
+	hrow.add_child(btn_vbox)
+
+	var is_joined: bool = ts_svc != null and ts_svc.is_joined(t_doc.get("tournament_id", ""))
+	if is_joined:
+		var joined_lbl := Label.new()
+		joined_lbl.text = "âœ“ Joined"
+		joined_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_SUCCESS)
+		joined_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		btn_vbox.add_child(joined_lbl)
+	elif not is_ended and player_cnt < max_p:
+		var join_btn := Button.new()
+		join_btn.text = "Join"
+		join_btn.custom_minimum_size = Vector2(100, 36)
+		ThemeManager.apply_primary_button_style(join_btn, 6)
+		var t_id: String = t_doc.get("tournament_id", "")
+		var join_code: String = t_doc.get("join_code", "")
+		join_btn.pressed.connect(func(): _on_t_quick_join(join_code, t_doc))
+		btn_vbox.add_child(join_btn)
+	elif is_ended or player_cnt >= max_p:
+		var full_lbl := Label.new()
+		full_lbl.text = "Full" if player_cnt >= max_p else "Ended"
+		full_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+		full_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		btn_vbox.add_child(full_lbl)
+
+	var standings_btn := Button.new()
+	standings_btn.text = "Standings"
+	standings_btn.custom_minimum_size = Vector2(100, 36)
+	ThemeManager.apply_secondary_button_style(standings_btn, 6)
+	var t_id_for_standings: String = t_doc.get("tournament_id", "")
+	standings_btn.pressed.connect(func(): _open_standings_for(t_id_for_standings, t_doc))
+	btn_vbox.add_child(standings_btn)
+
+	t_public_list.add_child(card)
+
+
+func _on_t_quick_join(join_code: String, t_doc: Dictionary) -> void:
+	if join_code.is_empty():
+		return
+	var ts_svc := _get_tournament_service()
+	if ts_svc == null:
+		return
+	var player_name: String = t_host_golfer_dropdown.get_item_text(t_host_golfer_dropdown.selected)
+	var tee_str: String = t_host_golfer_tee.get_item_text(t_host_golfer_tee.selected)
+
+	var res: Dictionary = await ts_svc.join_tournament(join_code, player_name, tee_str)
+	if res.get("ok", false):
+		_on_t_public_refresh_pressed()
+	else:
+		t_public_empty_label.visible = true
+		t_public_empty_label.text = res.get("error", "Failed to join.")
+
+
+func _open_standings_for(tournament_id: String, _t_doc: Dictionary) -> void:
+	_switch_t_tab("t_standings")
+	_standings_selected_id = tournament_id
+	_load_standings_for_id(tournament_id)
+
+
+# â”€â”€ TOURNAMENT: STANDINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+func _on_t_standings_load_pressed() -> void:
+	t_standings_refresh_button.disabled = true
+	_clear_standings_list()
+	t_standings_meta.text = "Loading tournaments..."
+	t_standings_tournament_dropdown.clear()
+	_standings_tournament_list.clear()
+
+	var ts_svc := _get_tournament_service()
+	if ts_svc == null:
+		t_standings_meta.text = "Tournament service unavailable."
+		t_standings_refresh_button.disabled = false
+		return
+
+	var particip_idx: int = t_standings_filter_particip_option.selected
+	var time_filter: String = _time_filter_value(t_standings_filter_time_option.selected)
+	var course_key: String = _course_filter_key(t_standings_filter_course_option)
+
+	var docs: Array = []
+
+	if particip_idx == 1:
+		# My tournaments only
+		var res: Dictionary = await ts_svc.fetch_my_tournaments()
+		docs = res.get("documents", [])
+	else:
+		# All public + my private
+		var pub_filters := {"time_frame": time_filter}
+		if not course_key.is_empty():
+			pub_filters["course_key"] = course_key
+		var res: Dictionary = await ts_svc.fetch_public_tournaments(pub_filters)
+		docs = res.get("documents", [])
+
+		# Also merge in any private tournaments I've joined
+		var my_res: Dictionary = await ts_svc.fetch_my_tournaments()
+		for my_t in my_res.get("documents", []):
+			if my_t.get("visibility", "public") == "private":
+				var already: bool = false
+				for d in docs:
+					if d.get("tournament_id", "") == my_t.get("tournament_id", ""):
+						already = true
+						break
+				if not already:
+					docs.append(my_t)
+
+	# Apply course filter post-fetch for my_tournaments path
+	if not course_key.is_empty():
+		docs = docs.filter(func(d): return d.get("course_key", "") == course_key)
+
+	# Apply time filter post-fetch
+	if time_filter != "all":
+		var cutoff: float = ts_svc.call("_time_frame_cutoff", time_filter)
+		docs = docs.filter(func(d): return int(d.get("created_at", 0)) >= int(cutoff))
+
+	t_standings_refresh_button.disabled = false
+
+	if docs.is_empty():
+		t_standings_meta.text = "No tournaments found. Try different filters."
+		return
+
+	_standings_tournament_list = docs
+	t_standings_tournament_dropdown.clear()
+	for t_doc in docs:
+		var ended: bool = ts_svc.is_tournament_ended(t_doc)
+		var label: String = "%s â€” %s [%s]" % [
+			t_doc.get("name", "Tournament"),
+			t_doc.get("course_title", ""),
+			"Ended" if ended else "Open"
+		]
+		t_standings_tournament_dropdown.add_item(label)
+
+	t_standings_meta.text = "%d tournament(s) found. Select one to view standings." % docs.size()
+
+	# If we navigated here from a specific tournament, auto-select it
+	if not _standings_selected_id.is_empty():
+		for i in range(_standings_tournament_list.size()):
+			if _standings_tournament_list[i].get("tournament_id", "") == _standings_selected_id:
+				t_standings_tournament_dropdown.select(i)
+				_load_standings_for_id(_standings_selected_id)
+				break
+		_standings_selected_id = ""
+
+
+func _on_t_standings_tournament_selected(idx: int) -> void:
+	if idx < 0 or idx >= _standings_tournament_list.size():
+		return
+	var t_doc: Dictionary = _standings_tournament_list[idx]
+	_load_standings_for_id(t_doc.get("tournament_id", ""))
+
+
+func _load_standings_for_id(tournament_id: String) -> void:
+	if tournament_id.is_empty():
+		return
+
+	_clear_standings_list()
+	t_standings_meta.text = "Loading standings..."
+
+	var ts_svc := _get_tournament_service()
+	if ts_svc == null:
+		return
+
+	var res: Dictionary = await ts_svc.fetch_standings(tournament_id)
+	if not res.get("ok", false):
+		t_standings_meta.text = "Failed to load standings: %s" % res.get("error", "")
+		return
+
+	var entries: Array = res.get("documents", [])
+	var meta: Dictionary = res.get("meta", {})
+	var t_name: String = meta.get("name", "Tournament")
+	var ended: bool = ts_svc.is_tournament_ended(meta)
+	var end_unix: int = ts_svc.call("_parse_date_utc", meta.get("end_date_utc", ""))
+	var end_formatted: String = ts_svc.format_end_date(end_unix)
+
+	var status_str: String = "ENDED â€” Winners Locked" if ended else "OPEN â€” Ends %s" % end_formatted
+	t_standings_meta.text = "%s | %s (%s) | %s" % [
+		t_name,
+		meta.get("course_title", ""),
+		meta.get("course_length", ""),
+		status_str
+	]
+
+	if entries.is_empty():
+		t_standings_empty_label.visible = true
+		t_standings_empty_label.text = "No entries yet. Be the first to submit a score!"
+		return
+
+	t_standings_empty_label.visible = false
+	_render_standings_table(entries, meta)
+
+
+func _clear_standings_list() -> void:
+	for c in t_standings_list.get_children():
+		if c != t_standings_empty_label:
+			c.queue_free()
+
+
+func _render_standings_table(entries: Array, meta: Dictionary) -> void:
+	var my_uid: String = ""
+	if has_node("/root/CloudAuth"):
+		var ca = get_node("/root/CloudAuth")
+		if ca.has_method("get_uid"):
+			my_uid = str(ca.get_uid())
+
+	var expected_holes: int = 18
+	var length: String = meta.get("course_length", "Full 18")
+	if length in ["Front 9", "Back 9"]:
+		expected_holes = 9
+
+	# Header row
+	var header_hbox := HBoxContainer.new()
+	header_hbox.add_theme_constant_override("separation", 8)
+	t_standings_list.add_child(header_hbox)
+
+	for col_text in ["#", "Player", "Tee", "Holes", "Total", "To Par", "Status"]:
+		var lbl := Label.new()
+		lbl.text = col_text
+		lbl.add_theme_font_size_override("font_size", 13)
+		lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+		match col_text:
+			"#":
+				lbl.custom_minimum_size = Vector2(32, 0)
+			"Player":
+				lbl.custom_minimum_size = Vector2(160, 0)
+				lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			"Tee", "Status":
+				lbl.custom_minimum_size = Vector2(80, 0)
+			_:
+				lbl.custom_minimum_size = Vector2(64, 0)
+				lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		header_hbox.add_child(lbl)
+
+	# Separator
+	var sep := HSeparator.new()
+	t_standings_list.add_child(sep)
+
+	# Entry rows
+	for rank_idx in range(entries.size()):
+		var entry: Dictionary = entries[rank_idx]
+		var e_status: String = entry.get("status", "pending")
+		var is_mine: bool = (entry.get("uid", "") == my_uid)
+
+		var row_panel := PanelContainer.new()
+		if is_mine:
+			ThemeManager.apply_card_panel_style(row_panel, true, 4, 10, 4, 10, 4)
+		else:
+			ThemeManager.apply_card_panel_style(row_panel, false, 4, 10, 4, 10, 4)
+		t_standings_list.add_child(row_panel)
+
+		var row_hbox := HBoxContainer.new()
+		row_hbox.add_theme_constant_override("separation", 8)
+		row_panel.add_child(row_hbox)
+
+		var rank_lbl := Label.new()
+		rank_lbl.custom_minimum_size = Vector2(32, 0)
+		rank_lbl.add_theme_font_size_override("font_size", 14)
+		if e_status == "submitted":
+			rank_lbl.text = "#%d" % (rank_idx + 1)
+		else:
+			rank_lbl.text = "â€”"
+		row_hbox.add_child(rank_lbl)
+
+		var name_lbl := Label.new()
+		name_lbl.custom_minimum_size = Vector2(160, 0)
+		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_lbl.text = entry.get("player_name", "Player")
+		if is_mine:
+			name_lbl.text += " (You)"
+			name_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_SUCCESS)
+		name_lbl.add_theme_font_size_override("font_size", 14)
+		row_hbox.add_child(name_lbl)
+
+		var tee_lbl := Label.new()
+		tee_lbl.custom_minimum_size = Vector2(80, 0)
+		tee_lbl.text = entry.get("tee", "Blue")
+		tee_lbl.add_theme_font_size_override("font_size", 13)
+		row_hbox.add_child(tee_lbl)
+
+		var holes_done: int = int(entry.get("holes_completed", 0))
+		var holes_lbl := Label.new()
+		holes_lbl.custom_minimum_size = Vector2(64, 0)
+		holes_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		holes_lbl.text = "%d/%d" % [holes_done, expected_holes]
+		holes_lbl.add_theme_font_size_override("font_size", 13)
+		row_hbox.add_child(holes_lbl)
+
+		var total_lbl := Label.new()
+		total_lbl.custom_minimum_size = Vector2(64, 0)
+		total_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		var total: int = int(entry.get("total_strokes", 0))
+		total_lbl.text = str(total) if total > 0 else "â€”"
+		total_lbl.add_theme_font_size_override("font_size", 14)
+		row_hbox.add_child(total_lbl)
+
+		var to_par_lbl := Label.new()
+		to_par_lbl.custom_minimum_size = Vector2(64, 0)
+		to_par_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		to_par_lbl.add_theme_font_size_override("font_size", 14)
+		if e_status in ["submitted", "in_progress"]:
+			var tp: int = int(entry.get("to_par", 0))
+			if tp < 0:
+				to_par_lbl.text = str(tp)
+				to_par_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_SUCCESS)
+			elif tp == 0:
+				to_par_lbl.text = "E"
+			else:
+				to_par_lbl.text = "+%d" % tp
+				to_par_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_DANGER)
+		else:
+			to_par_lbl.text = "â€”"
+		row_hbox.add_child(to_par_lbl)
+
+		var status_lbl := Label.new()
+		status_lbl.custom_minimum_size = Vector2(80, 0)
+		status_lbl.add_theme_font_size_override("font_size", 12)
+		match e_status:
+			"submitted":
+				status_lbl.text = "âœ“ Final"
+				status_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_SUCCESS)
+			"in_progress":
+				status_lbl.text = "Playing..."
+				status_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_WARNING)
+			_:
+				status_lbl.text = "Pending"
+				status_lbl.add_theme_color_override("font_color", ThemeManager.COLOR_TEXT_MUTED)
+		row_hbox.add_child(status_lbl)
+
+
+# â”€â”€ FILTER HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+func _time_filter_value(idx: int) -> String:
+	match idx:
+		1: return "today"
+		2: return "this_week"
+		3: return "this_month"
+		4: return "last_90_days"
+		_: return "all"
+
+
+func _course_filter_key(option: OptionButton) -> String:
+	var sel_idx: int = option.selected
+	# Index 0 is "All Courses", indices 1+ map to _available_courses
+	if sel_idx <= 0:
+		return ""
+	var course_idx: int = sel_idx - 1
+	if course_idx < _available_courses.size():
+		return _available_courses[course_idx].get("key", "")
+	return ""
+
+
+# â”€â”€ STATUS DISPLAY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 func _show_status(msg: String, is_error: bool) -> void:
 	var color := ThemeManager.COLOR_TEXT_DANGER if is_error else ThemeManager.COLOR_TEXT_SUCCESS
@@ -850,10 +1698,27 @@ func _show_status(msg: String, is_error: bool) -> void:
 			no_lobbies_label.visible = true
 			no_lobbies_label.text = msg
 	else:
-		# Fallback for other tabs / room view
 		if host_status_label != null:
 			host_status_label.text = msg
 			host_status_label.add_theme_color_override("font_color", color)
+
+
+func _show_t_status(msg: String, is_error: bool) -> void:
+	var color := ThemeManager.COLOR_TEXT_DANGER if is_error else ThemeManager.COLOR_TEXT_SUCCESS
+	match _active_t_tab:
+		"t_host":
+			if t_host_status_label != null:
+				t_host_status_label.text = msg
+				t_host_status_label.add_theme_color_override("font_color", color)
+		"t_join":
+			if t_join_status_label != null:
+				t_join_status_label.text = msg
+				t_join_status_label.add_theme_color_override("font_color", color)
+		"t_public":
+			if t_public_empty_label != null:
+				t_public_empty_label.visible = true
+				t_public_empty_label.text = msg
+				t_public_empty_label.add_theme_color_override("font_color", color)
 
 
 func _on_back_pressed() -> void:
@@ -868,13 +1733,24 @@ func _on_back_pressed() -> void:
 			get_tree().change_scene_to_file("res://UI/MainMenu/main_menu.tscn")
 
 
-# ── CONTROLLER FOCUS & KEYBOARD INTERCEPTION ────────────────────────────
+# â”€â”€ CONTROLLER FOCUS & KEYBOARD INTERCEPTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 func _input(event: InputEvent) -> void:
-	# If controller Joypad A pressed on join code input, trigger VirtualKeyboardManager
 	if join_code_input.has_focus() and (event is InputEventJoypadButton) and event.pressed and event.button_index == JOY_BUTTON_A:
 		if has_node("/root/VirtualKeyboardManager"):
 			get_node("/root/VirtualKeyboardManager").open_for(join_code_input, true)
+			get_viewport().set_input_as_handled()
+	if t_join_code_input.has_focus() and (event is InputEventJoypadButton) and event.pressed and event.button_index == JOY_BUTTON_A:
+		if has_node("/root/VirtualKeyboardManager"):
+			get_node("/root/VirtualKeyboardManager").open_for(t_join_code_input, true)
+			get_viewport().set_input_as_handled()
+	if t_end_date_input.has_focus() and (event is InputEventJoypadButton) and event.pressed and event.button_index == JOY_BUTTON_A:
+		if has_node("/root/VirtualKeyboardManager"):
+			get_node("/root/VirtualKeyboardManager").open_for(t_end_date_input, false)
+			get_viewport().set_input_as_handled()
+	if t_host_name_input.has_focus() and (event is InputEventJoypadButton) and event.pressed and event.button_index == JOY_BUTTON_A:
+		if has_node("/root/VirtualKeyboardManager"):
+			get_node("/root/VirtualKeyboardManager").open_for(t_host_name_input, false)
 			get_viewport().set_input_as_handled()
 
 
@@ -888,78 +1764,94 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _update_controller_focus_navigation() -> void:
-	# Set up focus neighbors depending on the current active tab
-	back_button.focus_neighbor_right = tab_host_button.get_path()
+	# Mode bar
+	back_button.focus_neighbor_right = mode_matches_button.get_path()
+	mode_matches_button.focus_neighbor_left = back_button.get_path()
+	mode_matches_button.focus_neighbor_right = mode_tournaments_button.get_path()
+	mode_tournaments_button.focus_neighbor_left = mode_matches_button.get_path()
+	mode_tournaments_button.focus_neighbor_right = account_button.get_path()
+	account_button.focus_neighbor_left = mode_tournaments_button.get_path()
 
-	tab_host_button.focus_neighbor_left = back_button.get_path()
-	tab_host_button.focus_neighbor_right = tab_join_code_button.get_path()
-	tab_join_code_button.focus_neighbor_left = tab_host_button.get_path()
-	tab_join_code_button.focus_neighbor_right = tab_browser_button.get_path()
-	tab_browser_button.focus_neighbor_left = tab_join_code_button.get_path()
-	tab_browser_button.focus_neighbor_right = account_button.get_path()
-	account_button.focus_neighbor_left = tab_browser_button.get_path()
+	if _active_mode == "matches":
+		mode_matches_button.focus_neighbor_bottom = tab_host_button.get_path()
+		tab_host_button.focus_neighbor_top = mode_matches_button.get_path()
+		tab_host_button.focus_neighbor_right = tab_join_code_button.get_path()
+		tab_join_code_button.focus_neighbor_left = tab_host_button.get_path()
+		tab_join_code_button.focus_neighbor_right = tab_browser_button.get_path()
+		tab_browser_button.focus_neighbor_left = tab_join_code_button.get_path()
 
-	if _active_tab == "host":
-		tab_host_button.focus_neighbor_bottom = course_dropdown.get_path()
-		course_dropdown.focus_neighbor_top = tab_host_button.get_path()
-		course_dropdown.focus_neighbor_bottom = length_option.get_path()
-		length_option.focus_neighbor_top = course_dropdown.get_path()
-		length_option.focus_neighbor_bottom = mode_option.get_path()
-		mode_option.focus_neighbor_top = length_option.get_path()
-		mode_option.focus_neighbor_bottom = turn_order_option.get_path()
-		turn_order_option.focus_neighbor_top = mode_option.get_path()
-		turn_order_option.focus_neighbor_bottom = wind_option.get_path()
-		wind_option.focus_neighbor_top = turn_order_option.get_path()
-		wind_option.focus_neighbor_bottom = green_speed_option.get_path()
-		green_speed_option.focus_neighbor_top = wind_option.get_path()
-		green_speed_option.focus_neighbor_bottom = visibility_option.get_path()
-		visibility_option.focus_neighbor_top = green_speed_option.get_path()
-		visibility_option.focus_neighbor_bottom = host_golfer_dropdown.get_path()
-		host_golfer_dropdown.focus_neighbor_top = visibility_option.get_path()
-		host_golfer_dropdown.focus_neighbor_right = host_golfer_tee.get_path()
-		host_golfer_tee.focus_neighbor_left = host_golfer_dropdown.get_path()
-		host_golfer_dropdown.focus_neighbor_bottom = host_create_button.get_path()
-		host_golfer_tee.focus_neighbor_bottom = host_create_button.get_path()
-		host_create_button.focus_neighbor_top = host_golfer_dropdown.get_path()
+		if _active_tab == "host":
+			tab_host_button.focus_neighbor_bottom = course_dropdown.get_path()
+			course_dropdown.focus_neighbor_top = tab_host_button.get_path()
+			course_dropdown.focus_neighbor_bottom = length_option.get_path()
+			length_option.focus_neighbor_top = course_dropdown.get_path()
+			length_option.focus_neighbor_bottom = mode_option.get_path()
+			mode_option.focus_neighbor_top = length_option.get_path()
+			mode_option.focus_neighbor_bottom = turn_order_option.get_path()
+			turn_order_option.focus_neighbor_top = mode_option.get_path()
+			turn_order_option.focus_neighbor_bottom = wind_option.get_path()
+			wind_option.focus_neighbor_top = turn_order_option.get_path()
+			wind_option.focus_neighbor_bottom = green_speed_option.get_path()
+			green_speed_option.focus_neighbor_top = wind_option.get_path()
+			green_speed_option.focus_neighbor_bottom = visibility_option.get_path()
+			visibility_option.focus_neighbor_top = green_speed_option.get_path()
+			visibility_option.focus_neighbor_bottom = host_golfer_dropdown.get_path()
+			host_golfer_dropdown.focus_neighbor_top = visibility_option.get_path()
+			host_golfer_dropdown.focus_neighbor_right = host_golfer_tee.get_path()
+			host_golfer_tee.focus_neighbor_left = host_golfer_dropdown.get_path()
+			host_golfer_dropdown.focus_neighbor_bottom = host_create_button.get_path()
+			host_golfer_tee.focus_neighbor_bottom = host_create_button.get_path()
+			host_create_button.focus_neighbor_top = host_golfer_dropdown.get_path()
 
-	elif _active_tab == "join_code":
-		tab_join_code_button.focus_neighbor_bottom = join_code_input.get_path()
-		join_code_input.focus_neighbor_top = tab_join_code_button.get_path()
-		join_code_input.focus_neighbor_right = paste_code_button.get_path()
-		paste_code_button.focus_neighbor_left = join_code_input.get_path()
-		join_code_input.focus_neighbor_bottom = join_golfer_dropdown.get_path()
-		paste_code_button.focus_neighbor_bottom = join_golfer_dropdown.get_path()
-		join_golfer_dropdown.focus_neighbor_top = join_code_input.get_path()
-		join_golfer_dropdown.focus_neighbor_right = join_golfer_tee.get_path()
-		join_golfer_tee.focus_neighbor_left = join_golfer_dropdown.get_path()
-		join_golfer_dropdown.focus_neighbor_bottom = join_code_submit_button.get_path()
-		join_golfer_tee.focus_neighbor_bottom = join_code_submit_button.get_path()
-		join_code_submit_button.focus_neighbor_top = join_golfer_dropdown.get_path()
+		elif _active_tab == "join_code":
+			tab_join_code_button.focus_neighbor_bottom = join_code_input.get_path()
+			join_code_input.focus_neighbor_top = tab_join_code_button.get_path()
+			join_code_input.focus_neighbor_right = paste_code_button.get_path()
+			paste_code_button.focus_neighbor_left = join_code_input.get_path()
+			join_code_input.focus_neighbor_bottom = join_golfer_dropdown.get_path()
+			paste_code_button.focus_neighbor_bottom = join_golfer_dropdown.get_path()
+			join_golfer_dropdown.focus_neighbor_top = join_code_input.get_path()
+			join_golfer_dropdown.focus_neighbor_right = join_golfer_tee.get_path()
+			join_golfer_tee.focus_neighbor_left = join_golfer_dropdown.get_path()
+			join_golfer_dropdown.focus_neighbor_bottom = join_code_submit_button.get_path()
+			join_golfer_tee.focus_neighbor_bottom = join_code_submit_button.get_path()
+			join_code_submit_button.focus_neighbor_top = join_golfer_dropdown.get_path()
 
-	elif _active_tab == "browser":
-		tab_browser_button.focus_neighbor_bottom = refresh_browser_button.get_path()
-		refresh_browser_button.focus_neighbor_top = tab_browser_button.get_path()
-		var first_btn: Button = null
-		for card in browser_list.get_children():
-			if card is PanelContainer:
-				for c in card.find_children("*", "Button", true, false):
-					if c is Button and c.is_visible_in_tree():
-						first_btn = c
-						break
+		elif _active_tab == "browser":
+			tab_browser_button.focus_neighbor_bottom = refresh_browser_button.get_path()
+			refresh_browser_button.focus_neighbor_top = tab_browser_button.get_path()
+			var first_btn: Button = null
+			for card in browser_list.get_children():
+				if card is PanelContainer:
+					for c in card.find_children("*", "Button", true, false):
+						if c is Button and c.is_visible_in_tree():
+							first_btn = c
+							break
 				if first_btn != null:
 					break
-		if first_btn != null:
-			refresh_browser_button.focus_neighbor_bottom = first_btn.get_path()
-			first_btn.focus_neighbor_top = refresh_browser_button.get_path()
+			if first_btn != null:
+				refresh_browser_button.focus_neighbor_bottom = first_btn.get_path()
+				first_btn.focus_neighbor_top = refresh_browser_button.get_path()
 
-	elif _active_tab == "room":
-		copy_code_button.focus_neighbor_top = back_button.get_path()
-		copy_code_button.focus_neighbor_bottom = ready_toggle_button.get_path()
-		if course_install_banner.visible:
-			copy_code_button.focus_neighbor_bottom = download_course_button.get_path()
-			download_course_button.focus_neighbor_top = copy_code_button.get_path()
-			download_course_button.focus_neighbor_bottom = ready_toggle_button.get_path()
-		leave_lobby_button.focus_neighbor_right = ready_toggle_button.get_path()
-		ready_toggle_button.focus_neighbor_left = leave_lobby_button.get_path()
-		ready_toggle_button.focus_neighbor_right = start_match_button.get_path()
-		start_match_button.focus_neighbor_left = ready_toggle_button.get_path()
+		elif _active_tab == "room":
+			copy_code_button.focus_neighbor_top = back_button.get_path()
+			copy_code_button.focus_neighbor_bottom = ready_toggle_button.get_path()
+			if course_install_banner.visible:
+				copy_code_button.focus_neighbor_bottom = download_course_button.get_path()
+				download_course_button.focus_neighbor_top = copy_code_button.get_path()
+				download_course_button.focus_neighbor_bottom = ready_toggle_button.get_path()
+			leave_lobby_button.focus_neighbor_right = ready_toggle_button.get_path()
+			ready_toggle_button.focus_neighbor_left = leave_lobby_button.get_path()
+			ready_toggle_button.focus_neighbor_right = start_match_button.get_path()
+			start_match_button.focus_neighbor_left = ready_toggle_button.get_path()
+
+	elif _active_mode == "tournaments":
+		mode_tournaments_button.focus_neighbor_bottom = ttab_host_button.get_path()
+		ttab_host_button.focus_neighbor_top = mode_tournaments_button.get_path()
+		ttab_host_button.focus_neighbor_right = ttab_join_button.get_path()
+		ttab_join_button.focus_neighbor_left = ttab_host_button.get_path()
+		ttab_join_button.focus_neighbor_right = ttab_public_button.get_path()
+		ttab_public_button.focus_neighbor_left = ttab_join_button.get_path()
+		ttab_public_button.focus_neighbor_right = ttab_standings_button.get_path()
+		ttab_standings_button.focus_neighbor_left = ttab_public_button.get_path()
+

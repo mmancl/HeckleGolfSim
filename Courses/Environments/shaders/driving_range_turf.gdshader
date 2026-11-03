@@ -39,11 +39,9 @@ uniform float normal_depth : hint_range(0.0, 2.0) = 0.65;
 uniform float stripe_strength : hint_range(0.0, 1.0) = 0.70;
 
 varying vec3 v_world_pos;
-varying vec3 v_world_normal;
 
 void vertex() {
     v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-    v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 }
 
 void fragment() {
@@ -81,7 +79,8 @@ void fragment() {
     vec3 nr_r = texture(normal_rough, uv_r).rgb * 2.0 - 1.0;
     nr_f = mix(vec3(0.0, 0.0, 1.0), nr_f, 0.35);
     nr_r = mix(vec3(0.0, 0.0, 1.0), nr_r, 0.45);
-    vec3 blended_n = normalize(nr_f * fairway_w + nr_r * rough_w);
+    vec3 n_sum = nr_f * fairway_w + nr_r * rough_w;
+    vec3 blended_n = length(n_sum) > 0.001 ? normalize(n_sum) : vec3(0.0, 0.0, 1.0);
     NORMAL_MAP = blended_n * 0.5 + 0.5;
     NORMAL_MAP_DEPTH = normal_depth;
 

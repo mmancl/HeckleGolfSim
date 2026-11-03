@@ -262,13 +262,25 @@ class CameraManager:
                 cap = cv2.VideoCapture(index)
 
             if cap is not None and cap.isOpened():
+                # Configure MJPEG format at standard definition (640x480 @ 30 FPS)
+                # to prevent USB 2.0 uncompressed YUY2 bus throttling
+                try:
+                    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                except Exception:
+                    pass
+                try:
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    cap.set(cv2.CAP_PROP_FPS, 30)
+                except Exception:
+                    pass
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 self.cap = cap
                 self.active_index = index
                 self._running = True
                 self._bg_thread = threading.Thread(target=self._capture_worker, daemon=True)
                 self._bg_thread.start()
-                print(f"[PoseServer] Activated system camera {index} with threaded grabber")
+                print(f"[PoseServer] Activated system camera {index} (MJPEG 640x480 @ 30fps) with threaded grabber")
                 return True
             else:
                 if cap is not None:
@@ -297,7 +309,7 @@ class CameraManager:
 
         # Resize if large to ensure smooth transmission
         h, w = frame.shape[:2]
-        if w > 960:
+        if w > 640:
             new_w = 640
             new_h = int(h * (640.0 / w))
             frame = cv2.resize(frame, (new_w, new_h))
@@ -315,8 +327,8 @@ class CameraManager:
             except Exception as e:
                 print(f"[PoseServer] Warning during frame pose detection: {e}", file=sys.stderr)
 
-        # Encode frame to JPEG and base64
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 75]
+        # Encode frame to JPEG and base64 with quality 60 for low latency
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 60]
         _, jpg_buffer = cv2.imencode('.jpg', frame, encode_param)
         b64_str = base64.b64encode(jpg_buffer).decode('ascii')
 
@@ -407,6 +419,43 @@ class PoseHandler(http.server.BaseHTTPRequestHandler):
             detect = query.get("detect", ["0"])[0] in ("1", "true", "True")
             res = camera_mgr.capture_and_process(detect=detect)
             self._send(200, res)
+        elif path == "/video" or path == "/mjpeg" or path == "/mjpegfeed":
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            last_id = -1
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 60]
+            try:
+                while True:
+                    with camera_mgr.lock:
+                        frame = camera_mgr._last_frame
+                        frame_id = camera_mgr._frame_id
+                        running = camera_mgr._running
+                    if not running or frame is None:
+                        time.sleep(0.01)
+                        continue
+                    if frame_id != last_id:
+                        last_id = frame_id
+                        h, w = frame.shape[:2]
+                        if w > 640:
+                            frame = cv2.resize(frame, (640, int(h * (640.0 / w))))
+                        ret, jpg = cv2.imencode('.jpg', frame, encode_param)
+                        if ret:
+                            jpg_bytes = jpg.tobytes()
+                            header = (
+                                b"--frame\r\n"
+                                b"Content-Type: image/jpeg\r\n"
+                                b"Content-Length: " + str(len(jpg_bytes)).encode("ascii") + b"\r\n\r\n"
+                            )
+                            self.wfile.write(header + jpg_bytes + b"\r\n")
+                            self.wfile.flush()
+                    time.sleep(0.01)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         else:
             self._send(404, {"error": "not found"})
 

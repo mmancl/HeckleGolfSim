@@ -208,13 +208,22 @@ func finalize_trail() -> void:
 	while replayer.is_replaying() and step < max_steps:
 		replayer._process(0.05)
 		step += 1
+		if step == 5:
+			# Verify ball.get_interpolated_position() follows ball.global_position dynamically
+			assert(ball.is_replaying_remote_shot, "Ball should have is_replaying_remote_shot set to true")
+			assert(ball.get_interpolated_position().is_equal_approx(ball.global_position), "Interpolated position must follow ball.global_position during replay")
 
 	assert(replayer.is_replaying() == false, "Replayer should finish after stepping duration")
 	assert(finished_events.size() == 1, "replay_finished should emit exactly once")
 	assert(finished_events[0] == shot_event, "replay_finished event must match original shot_event")
 	assert(ball.global_position.is_equal_approx(end_pos), "Ball must finish at end_pos")
+	assert(ball.spawn_position.is_equal_approx(end_pos), "Ball spawn_position must be updated to end_pos")
 	assert(mock_tracer.finalized == true, "Tracer should be finalized")
 	assert(progress_points.size() > 1, "replay_progress should emit during steps")
+
+	# Verify reset_ball preserves position at end_pos
+	ball.reset()
+	assert(ball.global_position.is_equal_approx(end_pos), "ball.reset() must maintain position at end_pos, not revert to start_pos")
 
 	ball.queue_free()
 	replayer.queue_free()

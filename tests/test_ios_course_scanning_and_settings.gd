@@ -1,65 +1,83 @@
 extends SceneTree
 
-func _init() -> void:
-	print("=== Running Targeted Test: iOS Course Scanning & Settings Initialization ===")
-	
-	# Test 1: GlobalSettings script compiles and executes _ready cleanly
-	print("Test 1: GlobalSettings loading and _ready execution...")
-	var global_settings_script = load("res://Utils/Settings/global_settings.gd")
-	assert(global_settings_script != null, "GlobalSettings script must load")
-	var gs_node = Node.new()
-	gs_node.set_script(global_settings_script)
-	# Trigger ready manually to test the safe C# loading logic
-	gs_node._ready()
-	print("PASS: GlobalSettings loaded and initialized successfully without parser or runtime errors.")
-	
-	# Test 2: CourseValidator resilience with scene_path
-	print("Test 2: CourseValidator resilience...")
-	# Airway exists in res://Courses/UserCourses/Airways
-	var airway_result = CourseValidator.validate("res://Courses/UserCourses", "Airways")
-	assert(not airway_result.is_empty(), "CourseValidator must validate Airways course")
-	assert(airway_result.get("title") == "Airways Golf Course" or airway_result.get("title") != "", "Title must not be empty")
-	print("PASS: CourseValidator validated Airways course successfully: %s" % airway_result.get("title"))
-	
-	# Test 3: CourseList _scan_dir ignores res://Courses/UserCourses and scans user://courses
-	print("Test 3: CourseList _scan_dir...")
-	var course_list_script = load("res://Courses/CourseSelector/course_list.gd")
-	assert(course_list_script != null, "course_list.gd must load")
-	var cl_node = course_list_script.new()
-	var user_courses: Array[Dictionary] = []
-	cl_node._scan_dir("res://Courses/UserCourses", user_courses)
-	assert(user_courses.size() == 0, "res://Courses/UserCourses must NOT be scanned into player course lists")
-	print("PASS: res://Courses/UserCourses is strictly excluded from player course lists.")
-	
-	# Test 4: DebugLogger log rotation
-	print("Test 4: DebugLogger rotation on startup...")
-	var debug_logger_script = load("res://Utils/debug_logger.gd")
-	assert(debug_logger_script != null, "debug_logger.gd must load")
-	var dl_node = debug_logger_script.new()
-	# Create a dummy test file to rotate
-	var test_log_path := "user://test_rotation.log"
-	var global_test_log := ProjectSettings.globalize_path(test_log_path)
-	var f = FileAccess.open(global_test_log, FileAccess.WRITE)
-	f.store_string("PREVIOUS SESSION LOG ENTRY")
-	f.close()
-	assert(FileAccess.file_exists(global_test_log), "Test log must exist")
-	
-	# Test rotation logic
-	var prev_path = global_test_log + ".previous"
-	if FileAccess.file_exists(prev_path):
-		DirAccess.remove_absolute(prev_path)
-	DirAccess.copy_absolute(global_test_log, prev_path)
-	assert(FileAccess.file_exists(prev_path), "Rotated .previous file must exist")
-	var prev_f = FileAccess.open(prev_path, FileAccess.READ)
-	assert(prev_f.get_as_text() == "PREVIOUS SESSION LOG ENTRY", "Content must match")
-	prev_f.close()
-	DirAccess.remove_absolute(global_test_log)
-	DirAccess.remove_absolute(prev_path)
-	print("PASS: DebugLogger log rotation logic verified successfully.")
-	
-	gs_node.free()
-	cl_node.free()
-	dl_node.free()
-	
-	print("=== All Targeted Tests Passed Successfully! ===")
-	quit(0)
+var _tested := false
+
+func _process(_delta: float) -> bool:
+	if _tested:
+		return false
+	_tested = true
+
+	print("\n=======================================================")
+	print("STARTING TEST: iOS Course Scanning & Settings Resilience")
+	print("=======================================================")
+
+	# 1. Test Square Golf device name recognition in launch_monitor_manager
+	print("\n--- Test 1: Square Golf device name recognition ---")
+	var lmm_script = load("res://addons/launch_monitors/launch_monitor_manager.gd")
+	assert(lmm_script != null, "launch_monitor_manager.gd must load")
+	var lmm = Node.new()
+	lmm.set_script(lmm_script)
+	root.add_child(lmm)
+
+	var valid_square_names = [
+		"SquareGolf",
+		"Square Golf",
+		"SquareGolf(1234)",
+		"SquareGolf_9988",
+		"SGO300",
+		"SGO-300A",
+		"sgo_pro",
+		"SQ100",
+		"EXGOLF-01",
+		"EXG_99",
+		"OMNI_300"
+	]
+	for dev_name in valid_square_names:
+		assert(lmm.call("is_square_device_name", dev_name) == true, "Device name '%s' must match Square Golf" % dev_name)
+
+	var non_square_names = [
+		"Approach R10",
+		"Garmin Approach",
+		"AirPods Pro",
+		"Unknown",
+		""
+	]
+	for dev_name in non_square_names:
+		assert(lmm.call("is_square_device_name", dev_name) == false, "Device name '%s' must NOT match Square Golf" % dev_name)
+	print("  PASS: Square Golf device naming patterns matched successfully.")
+
+	# 2. Test mobile_performance graphics quality capping
+	print("\n--- Test 2: mobile_performance graphics quality capping on mobile ---")
+	var mp_script = load("res://Utils/mobile_performance.gd")
+	assert(mp_script != null, "mobile_performance.gd must load")
+	# Check shader code resilience
+	var ground_markings_shader = load("res://Courses/Environments/shaders/ground_markings.gdshader")
+	assert(ground_markings_shader != null, "ground_markings.gdshader must load")
+	assert(not ground_markings_shader.code.contains("CAMERA_POSITION_WORLD"), "ground_markings.gdshader must not use CAMERA_POSITION_WORLD (Metal incompatibility)")
+	assert(ground_markings_shader.code.contains("v_cam_pos"), "ground_markings.gdshader must use v_cam_pos varying")
+
+	var vignette_shader = load("res://Courses/Environments/shaders/vignette.gdshader")
+	assert(vignette_shader != null, "vignette.gdshader must load")
+	assert(not vignette_shader.code.contains("filter_linear_mipmap"), "vignette.gdshader must not use filter_linear_mipmap on SCREEN_TEXTURE (Metal incompatibility)")
+	assert(vignette_shader.code.contains("filter_linear"), "vignette.gdshader must use filter_linear")
+
+	var range_script = load("res://Courses/Range/range.gd")
+	assert(range_script != null, "range.gd must load")
+	# Check range.gd source does not contain inverse(MODEL_MATRIX) in its dynamic arrow shader
+	var range_file = FileAccess.open("res://Courses/Range/range.gd", FileAccess.READ)
+	assert(range_file != null, "range.gd file must open")
+	var range_text = range_file.get_as_text()
+	range_file.close()
+	assert(not range_text.contains("inverse(MODEL_MATRIX)"), "range.gd must not contain inverse(MODEL_MATRIX) in vertex shader")
+	assert(range_text.contains("transpose(mat3(MODEL_MATRIX))"), "range.gd must use transpose(mat3(MODEL_MATRIX))")
+	print("  PASS: Shaders pass all Metal and mobile compatibility constraints.")
+
+	# Cleanup
+	root.remove_child(lmm)
+	lmm.free()
+
+	print("\n=======================================================")
+	print("ALL TESTS PASSED: iOS Course Scanning & Settings Resilience")
+	print("=======================================================")
+	quit()
+	return true

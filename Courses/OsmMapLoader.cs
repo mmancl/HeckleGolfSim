@@ -156,6 +156,8 @@ public partial class OsmMapLoader : Node
     public bool Generate3dBunkers { get; set; } = true;
     public bool GenerateRoadsAndBuildings { get; set; } = true;
     public bool HasCustomGenerationSettings { get; set; } = false;
+    public Godot.Collections.Dictionary? GraphicPresetSettings { get; set; }
+    public bool IsCachedCourse { get; set; } = false;
 
     public void LoadCourseGenerationSettings(bool forceReload = false)
     {
@@ -201,6 +203,7 @@ public partial class OsmMapLoader : Node
 
     public async void DownloadAndGenerateCourse(double lat, double lon, string courseName, bool isCached, string location = "")
     {
+        IsCachedCourse = isCached;
         LoadCourseGenerationSettings();
         _generationMessage = "";
         var (safeName, courseDir, globalCourseDir, _) = ResolveCoursePathAndTitle(courseName, lat, lon, location);
@@ -989,14 +992,12 @@ public partial class OsmMapLoader : Node
     }
 
     /// <summary>
-    /// Roads, clubhouses, houses and other surrounding buildings are only generated on High graphics (never mobile)
-    /// and only when the player has not disabled them in settings.
+    /// Roads, clubhouses, houses and other surrounding buildings are generated when
+    /// enabled in course generation settings.
     /// </summary>
     private bool ShouldGenerateSurroundingFeatures()
     {
         if (!GenerateRoadsAndBuildings) return false;
-        string os = OS.GetName();
-        if (os == "Android" || os == "iOS") return false;
         return true;
     }
 
@@ -3818,6 +3819,7 @@ public partial class OsmMapLoader : Node
             if (madeUpGreens) madeUpDetails.Add("greens");
             if (madeUpTees) madeUpDetails.Add("tee boxes");
 
+            string finalSuccessMessage = $"Successfully generated course: {courseName}!";
             if (madeUpDetails.Count > 0)
             {
                 string detailsStr = string.Join(" and ", madeUpDetails);
@@ -3825,11 +3827,7 @@ public partial class OsmMapLoader : Node
                 {
                     detailsStr = $"{madeUpDetails[0]}, {madeUpDetails[1]}, and {madeUpDetails[2]}";
                 }
-                _generationMessage = $"Successfully generated course: {courseName}! ({detailsStr} were made up)";
-            }
-            else
-            {
-                _generationMessage = $"Successfully generated course: {courseName}!";
+                finalSuccessMessage = $"Successfully generated course: {courseName}! ({detailsStr} were made up)";
             }
 
             ReportProgress("Generating aerial hole overviews...");
@@ -4243,6 +4241,44 @@ public partial class OsmMapLoader : Node
 
             GD.Print($"{LogPrefix} Saving Canned Course files to: {courseDir}...");
             
+            if (GraphicPresetSettings == null || GraphicPresetSettings.Count == 0)
+            {
+                var defaultLow = new Godot.Collections.Dictionary
+                {
+                    { "max_trees", 1000 },
+                    { "generate_water_long_grass", false },
+                    { "generate_bushes", false },
+                    { "generate_cart_paths", false },
+                    { "generate_3d_bunkers", Generate3dBunkers },
+                    { "generate_roads_buildings", false }
+                };
+                var defaultMed = new Godot.Collections.Dictionary
+                {
+                    { "max_trees", 2500 },
+                    { "generate_water_long_grass", GenerateWaterLongGrass },
+                    { "generate_bushes", GenerateBushes },
+                    { "generate_cart_paths", GenerateCartPaths },
+                    { "generate_3d_bunkers", Generate3dBunkers },
+                    { "generate_roads_buildings", GenerateRoadsAndBuildings }
+                };
+                var defaultHigh = new Godot.Collections.Dictionary
+                {
+                    { "max_trees", MaxTrees },
+                    { "generate_water_long_grass", GenerateWaterLongGrass },
+                    { "generate_bushes", GenerateBushes },
+                    { "generate_cart_paths", GenerateCartPaths },
+                    { "generate_3d_bunkers", Generate3dBunkers },
+                    { "generate_roads_buildings", GenerateRoadsAndBuildings }
+                };
+                GraphicPresetSettings = new Godot.Collections.Dictionary
+                {
+                    { "low", defaultLow },
+                    { "medium", defaultMed },
+                    { "high", defaultHigh }
+                };
+            }
+            rootNode.SetMeta("graphic_settings", GraphicPresetSettings);
+
             // Save binary PackedScene (.scn for instantaneous loading and compact file size)
             var packedScene = new PackedScene();
             packedScene.Pack(rootNode);
@@ -4251,6 +4287,25 @@ public partial class OsmMapLoader : Node
             {
                 GD.PrintErr($"{LogPrefix} Failed to save course.scn. Error: {err}");
                 return false;
+            }
+
+            var serializableGraphicSettings = new Dictionary<string, Dictionary<string, object>>();
+            foreach (var pair in GraphicPresetSettings)
+            {
+                string pKey = pair.Key.AsString();
+                var innerDict = new Dictionary<string, object>();
+                if (pair.Value.VariantType == Variant.Type.Dictionary)
+                {
+                    var innerGodot = pair.Value.AsGodotDictionary();
+                    foreach (var innerPair in innerGodot)
+                    {
+                        if (innerPair.Value.Obj != null)
+                        {
+                            innerDict[innerPair.Key.AsString()] = innerPair.Value.Obj;
+                        }
+                    }
+                }
+                serializableGraphicSettings[pKey] = innerDict;
             }
 
             // Generate course.json
@@ -4273,6 +4328,8 @@ public partial class OsmMapLoader : Node
                 Latitude = lat,
                 Longitude = lon,
                 Location = location,
+                IsCached = IsCachedCourse,
+                GraphicSettings = serializableGraphicSettings,
                 CourseInfo = new CourseInfoConfig
                 {
                     TeeColors = teeColors,
@@ -4291,9 +4348,9 @@ public partial class OsmMapLoader : Node
                 HoleInfo = holeInfo
             };
 
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            string configJson = JsonSerializer.Serialize(courseConfig, options);
+            string configJson = SerializeCourseConfig(courseConfig);
             File.WriteAllText(globalJsonPath, configJson);
+            _generationMessage = finalSuccessMessage;
 
             // Free the course node tree from memory now that it has been saved to disk
             rootNode.QueueFree();
@@ -4304,10 +4361,7 @@ public partial class OsmMapLoader : Node
         catch (Exception ex)
         {
             GD.PrintErr($"{LogPrefix} Failed to query or build OSM course: {ex}");
-            if (string.IsNullOrEmpty(_generationMessage))
-            {
-                _generationMessage = $"Error: Failed to generate course ({ex.Message}). Please retry the download, and if it continues to fail, please log a bug.";
-            }
+            _generationMessage = $"Error: Failed to generate course ({ex.Message}). Please retry the download, and if it continues to fail, please log a bug.";
             return false;
         }
     }
@@ -7206,6 +7260,161 @@ public partial class OsmMapLoader : Node
         return 20;
     }
 
+    private static string SerializeCourseConfig(CourseJsonConfig config)
+    {
+        var root = new Godot.Collections.Dictionary
+        {
+            { "graphics_version", config.GraphicsVersion },
+            { "scene_path", config.ScenePath ?? "course.scn" },
+            { "Title", config.Title ?? "" },
+            { "Latitude", config.Latitude },
+            { "Longitude", config.Longitude },
+            { "Location", config.Location ?? "" },
+            { "is_cached", config.IsCached }
+        };
+
+        if (config.GraphicSettings != null)
+        {
+            var gsDict = new Godot.Collections.Dictionary();
+            foreach (var kvp in config.GraphicSettings)
+            {
+                var innerDict = new Godot.Collections.Dictionary();
+                foreach (var innerKvp in kvp.Value)
+                {
+                    var val = innerKvp.Value;
+                    if (val is string s) innerDict[innerKvp.Key] = s;
+                    else if (val is int i) innerDict[innerKvp.Key] = i;
+                    else if (val is float f) innerDict[innerKvp.Key] = f;
+                    else if (val is double d) innerDict[innerKvp.Key] = d;
+                    else if (val is bool b) innerDict[innerKvp.Key] = b;
+                    else innerDict[innerKvp.Key] = val?.ToString() ?? "";
+                }
+                gsDict[kvp.Key] = innerDict;
+            }
+            root["graphic_settings"] = gsDict;
+        }
+
+        var courseInfoDict = new Godot.Collections.Dictionary();
+        var teeColorsArray = new Godot.Collections.Array();
+        if (config.CourseInfo.TeeColors != null)
+        {
+            foreach (var tc in config.CourseInfo.TeeColors)
+            {
+                teeColorsArray.Add(tc);
+            }
+        }
+        courseInfoDict["Tee Colors"] = teeColorsArray;
+
+        if (config.CourseInfo.SatelliteImageBounds != null)
+        {
+            var boundsArray = new Godot.Collections.Array();
+            foreach (var b in config.CourseInfo.SatelliteImageBounds)
+            {
+                boundsArray.Add(b);
+            }
+            courseInfoDict["Satellite Image Bounds"] = boundsArray;
+        }
+        courseInfoDict["Satellite Image Bounds Version"] = config.CourseInfo.SatelliteImageBoundsVersion;
+
+        if (config.CourseInfo.CartPaths != null)
+        {
+            var cpArray = new Godot.Collections.Array();
+            foreach (var path in config.CourseInfo.CartPaths)
+            {
+                var ptArray = new Godot.Collections.Array();
+                foreach (var pt in path)
+                {
+                    var coordArray = new Godot.Collections.Array();
+                    foreach (var c in pt) coordArray.Add(c);
+                    ptArray.Add(coordArray);
+                }
+                cpArray.Add(ptArray);
+            }
+            courseInfoDict["Cart Paths"] = cpArray;
+        }
+
+        if (config.CourseInfo.SourceCourse != null)
+            courseInfoDict["Source Course"] = config.CourseInfo.SourceCourse;
+        if (config.CourseInfo.SubCourses != null)
+        {
+            var scArray = new Godot.Collections.Array();
+            foreach (var sc in config.CourseInfo.SubCourses) scArray.Add(sc);
+            courseInfoDict["Sub-Courses"] = scArray;
+        }
+        if (config.CourseInfo.VariantType != null)
+            courseInfoDict["Variant Type"] = config.CourseInfo.VariantType;
+        if (config.CourseInfo.OsmRelation != null)
+            courseInfoDict["OSM Relation"] = config.CourseInfo.OsmRelation;
+        if (config.CourseInfo.OsmRelationId != null)
+            courseInfoDict["OSM Relation ID"] = config.CourseInfo.OsmRelationId;
+        if (config.CourseInfo.AvailableVariants != null)
+        {
+            var avArray = new Godot.Collections.Array();
+            foreach (var av in config.CourseInfo.AvailableVariants) avArray.Add(av);
+            courseInfoDict["Available Variants"] = avArray;
+        }
+
+        root["Course Info"] = courseInfoDict;
+
+        var holeInfoDict = new Godot.Collections.Dictionary();
+        if (config.HoleInfo != null)
+        {
+            foreach (var kvp in config.HoleInfo)
+            {
+                var h = kvp.Value;
+                var hDict = new Godot.Collections.Dictionary
+                {
+                    { "Par", h.Par },
+                    { "Distance", h.Distance },
+                    { "Handicap", h.Handicap },
+                    { "Name", h.Name ?? "" }
+                };
+
+                var holeLocArray = new Godot.Collections.Array();
+                if (h.HoleLocation != null)
+                {
+                    foreach (var hl in h.HoleLocation) holeLocArray.Add(hl);
+                }
+                hDict["Hole Location"] = holeLocArray;
+
+                var teeBoxesDict = new Godot.Collections.Dictionary();
+                if (h.TeeBoxes != null)
+                {
+                    foreach (var tb in h.TeeBoxes)
+                    {
+                        var locArray = new Godot.Collections.Array();
+                        if (tb.Value != null)
+                        {
+                            foreach (var loc in tb.Value) locArray.Add(loc);
+                        }
+                        teeBoxesDict[tb.Key] = locArray;
+                    }
+                }
+                hDict["Tee Boxes"] = teeBoxesDict;
+
+                var holePathArray = new Godot.Collections.Array();
+                if (h.HolePath != null)
+                {
+                    foreach (var pt in h.HolePath)
+                    {
+                        var ptArr = new Godot.Collections.Array();
+                        if (pt != null)
+                        {
+                            foreach (var c in pt) ptArr.Add(c);
+                        }
+                        holePathArray.Add(ptArr);
+                    }
+                }
+                hDict["Hole Path"] = holePathArray;
+
+                holeInfoDict[kvp.Key] = hDict;
+            }
+        }
+        root["Hole Info"] = holeInfoDict;
+
+        return Godot.Json.Stringify(root, "  ");
+    }
+
     private class CourseJsonConfig
     {
         [JsonPropertyName("graphics_version")]
@@ -7225,6 +7434,12 @@ public partial class OsmMapLoader : Node
 
         [JsonPropertyName("Location")]
         public string Location { get; set; } = "";
+
+        [JsonPropertyName("is_cached")]
+        public bool IsCached { get; set; }
+
+        [JsonPropertyName("graphic_settings")]
+        public Dictionary<string, Dictionary<string, object>>? GraphicSettings { get; set; }
 
         [JsonPropertyName("Course Info")]
         public CourseInfoConfig CourseInfo { get; set; } = new();
@@ -7622,23 +7837,33 @@ public partial class OsmMapLoader : Node
             if (!string.IsNullOrWhiteSpace(apiKey))
             {
                 string query = string.IsNullOrWhiteSpace(location) ? courseName : $"{courseName} {location}";
-                var body = new Dictionary<string, object> { ["textQuery"] = query, ["maxResultCount"] = 1 };
+                var bodyDict = new Godot.Collections.Dictionary
+                {
+                    { "textQuery", query },
+                    { "maxResultCount", 1 }
+                };
                 if (lat != 0 || lon != 0)
                 {
-                    body["locationBias"] = new Dictionary<string, object>
+                    var centerDict = new Godot.Collections.Dictionary
                     {
-                        ["circle"] = new Dictionary<string, object>
-                        {
-                            ["center"] = new Dictionary<string, object> { ["latitude"] = lat, ["longitude"] = lon },
-                            ["radius"] = 20000.0
-                        }
+                        { "latitude", lat },
+                        { "longitude", lon }
+                    };
+                    var circleDict = new Godot.Collections.Dictionary
+                    {
+                        { "center", centerDict },
+                        { "radius", 20000.0 }
+                    };
+                    bodyDict["locationBias"] = new Godot.Collections.Dictionary
+                    {
+                        { "circle", circleDict }
                     };
                 }
 
                 using var searchRequest = new HttpRequestMessage(HttpMethod.Post, "https://places.googleapis.com/v1/places:searchText");
                 searchRequest.Headers.Add("X-Goog-Api-Key", apiKey);
                 searchRequest.Headers.Add("X-Goog-FieldMask", "places.photos");
-                searchRequest.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+                searchRequest.Content = new StringContent(Godot.Json.Stringify(bodyDict), Encoding.UTF8, "application/json");
                 using var searchResponse = await HttpClient.SendAsync(searchRequest, cts.Token);
                 if (searchResponse.IsSuccessStatusCode)
                 {

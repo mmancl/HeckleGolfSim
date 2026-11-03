@@ -4195,9 +4195,7 @@ func _on_active_player_changed(player: Dictionary) -> void:
 			if player_node_ref != null:
 				player_node_ref.current_lie_type = initial_lie
 				if player_node_ref.get("_last_starting_pos") != null:
-					var player_start_pos = player.get("last_starting_pos", player.get("position", Vector3.ZERO))
-					if typeof(player_start_pos) != TYPE_VECTOR3:
-						player_start_pos = player.get("position", Vector3.ZERO)
+					var player_start_pos = player.get("position", Vector3.ZERO)
 					if typeof(player_start_pos) == TYPE_VECTOR3:
 						player_node_ref._last_starting_pos = player_start_pos
 			active_ball.reset()
@@ -4245,12 +4243,13 @@ func _on_active_player_changed(player: Dictionary) -> void:
 				var target_aim = course_instance.get("aim_target_pos")
 				if is_putting and course_instance.get("current_hole_location") != null:
 					target_aim = course_instance.get("current_hole_location")
-				elif target_aim == null or target_aim.is_zero_approx() or is_new_hole:
-					if course_instance.has_method("apply_default_aim"):
-						var sel_club = MultiplayerManager.current_club if "current_club" in MultiplayerManager else ""
-						target_aim = course_instance.call("apply_default_aim", sel_club)
-					else:
-						target_aim = course_instance.get("current_hole_location")
+				elif GlobalSettings.is_chipping_minigame and target_aim != null and not target_aim.is_zero_approx():
+					pass
+				elif course_instance.has_method("apply_default_aim"):
+					var sel_club = MultiplayerManager.current_club if "current_club" in MultiplayerManager else ""
+					target_aim = course_instance.call("apply_default_aim", sel_club)
+				else:
+					target_aim = course_instance.get("current_hole_location")
 				if GlobalSettings.is_chipping_minigame and course_instance.get("aim_target_pos") != null:
 					target_aim = course_instance.get("aim_target_pos")
 				if target_aim != null and not target_aim.is_zero_approx():

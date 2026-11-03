@@ -486,6 +486,9 @@ func _on_replay_finished(shot_event: Dictionary) -> void:
 	if mp != null:
 		mp.record_remote_shot(shot_event)
 
+	if _match_meta.has("turn") and _match_meta["turn"] is Dictionary:
+		_on_turn_updated(_match_meta["turn"])
+
 	event_applied.emit(shot_event)
 	_check_afk_state()
 	_drain_event_queue()

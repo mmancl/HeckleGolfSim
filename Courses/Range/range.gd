@@ -178,9 +178,13 @@ func get_height(x: float, z: float) -> float:
 			if not _height_raycast.is_colliding():
 				break
 			var collider = _height_raycast.get_collider()
-			if collider and (collider.has_meta("surface_type") or collider.name.contains("Terrain") or collider.name.contains("Rough") or collider.name.contains("green") or collider.name.contains("fairway") or collider.name.contains("tee") or collider.name.contains("bunker")):
-				hit_y = _height_raycast.get_collision_point().y
-				break
+			if collider:
+				if collider.get_meta("is_obstacle", false) == true:
+					_height_raycast.add_exception(collider)
+					continue
+				if collider.has_meta("surface_type") or collider.name.contains("Terrain") or collider.name.contains("Rough") or collider.name.contains("green") or collider.name.contains("fairway") or collider.name.contains("tee") or collider.name.contains("bunker"):
+					hit_y = _height_raycast.get_collision_point().y
+					break
 			# Non-terrain collider (e.g. ball, tree branch, player prop): exclude and raycast through it
 			_height_raycast.add_exception(collider)
 		_height_raycast.clear_exceptions()
@@ -201,8 +205,13 @@ func get_height(x: float, z: float) -> float:
 			if hit.is_empty():
 				break
 			var collider = hit.get("collider")
-			if collider and (collider.has_meta("surface_type") or collider.name.contains("Terrain") or collider.name.contains("Rough") or collider.name.contains("green") or collider.name.contains("fairway") or collider.name.contains("tee") or collider.name.contains("bunker")):
-				return hit["position"].y
+			if collider:
+				if collider.get_meta("is_obstacle", false) == true:
+					if collider is CollisionObject3D:
+						exclude_rids.append(collider.get_rid())
+					continue
+				if collider.has_meta("surface_type") or collider.name.contains("Terrain") or collider.name.contains("Rough") or collider.name.contains("green") or collider.name.contains("fairway") or collider.name.contains("tee") or collider.name.contains("bunker"):
+					return hit["position"].y
 			if collider and collider is CollisionObject3D:
 				exclude_rids.append(collider.get_rid())
 			else:
@@ -322,29 +331,36 @@ func _generate_ground_terrain() -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	
-	var mat := ShaderMaterial.new()
+	var mat: Material = null
 	var shader = load("res://Courses/Environments/shaders/driving_range_turf.gdshader")
 	if shader:
-		mat.shader = shader
-		mat.set_shader_parameter("tex_fairway", load("res://Courses/Environments/grass-fairway/albedo.png"))
-		mat.set_shader_parameter("normal_fairway", load("res://Courses/Environments/grass-fairway/normal.png"))
-		mat.set_shader_parameter("ao_fairway", load("res://Courses/Environments/grass-fairway/ao.png"))
-		mat.set_shader_parameter("roughness_fairway", load("res://Courses/Environments/grass-fairway/roughness.png"))
+		var sm := ShaderMaterial.new()
+		sm.shader = shader
+		sm.set_shader_parameter("tex_fairway", load("res://Courses/Environments/grass-fairway/albedo.png"))
+		sm.set_shader_parameter("normal_fairway", load("res://Courses/Environments/grass-fairway/normal.png"))
+		sm.set_shader_parameter("ao_fairway", load("res://Courses/Environments/grass-fairway/ao.png"))
+		sm.set_shader_parameter("roughness_fairway", load("res://Courses/Environments/grass-fairway/roughness.png"))
 		
-		mat.set_shader_parameter("tex_rough", load("res://Courses/Environments/grass-rough/albedo.png"))
-		mat.set_shader_parameter("normal_rough", load("res://Courses/Environments/grass-rough/normal.png"))
-		mat.set_shader_parameter("ao_rough", load("res://Courses/Environments/grass-rough/ao.png"))
-		mat.set_shader_parameter("roughness_rough", load("res://Courses/Environments/grass-rough/roughness.png"))
+		sm.set_shader_parameter("tex_rough", load("res://Courses/Environments/grass-rough/albedo.png"))
+		sm.set_shader_parameter("normal_rough", load("res://Courses/Environments/grass-rough/normal.png"))
+		sm.set_shader_parameter("ao_rough", load("res://Courses/Environments/grass-rough/ao.png"))
+		sm.set_shader_parameter("roughness_rough", load("res://Courses/Environments/grass-rough/roughness.png"))
 		
-		mat.set_shader_parameter("corridor_half_width", 26.0)
-		mat.set_shader_parameter("blend_margin", 0.85)
-		mat.set_shader_parameter("tee_start_x", -12.0)
-		mat.set_shader_parameter("tee_blend_x", 4.0)
-		mat.set_shader_parameter("max_range_dist", 320.04)
-		mat.set_shader_parameter("uv_scale_fairway", 0.12)
-		mat.set_shader_parameter("uv_scale_rough", 0.08)
-		mat.set_shader_parameter("normal_depth", 0.65)
-		mat.set_shader_parameter("stripe_strength", 0.70)
+		sm.set_shader_parameter("corridor_half_width", 26.0)
+		sm.set_shader_parameter("blend_margin", 0.85)
+		sm.set_shader_parameter("tee_start_x", -12.0)
+		sm.set_shader_parameter("tee_blend_x", 4.0)
+		sm.set_shader_parameter("max_range_dist", 320.04)
+		sm.set_shader_parameter("uv_scale_fairway", 0.12)
+		sm.set_shader_parameter("uv_scale_rough", 0.08)
+		sm.set_shader_parameter("normal_depth", 0.65)
+		sm.set_shader_parameter("stripe_strength", 0.70)
+		mat = sm
+	else:
+		var std_mat := StandardMaterial3D.new()
+		std_mat.albedo_color = Color(0.24, 0.54, 0.20)
+		std_mat.roughness = 0.95
+		mat = std_mat
 	st.set_material(mat)
 	
 	for z in range(subdiv_z):
@@ -2400,7 +2416,9 @@ func _on_golf_ball_rest(_ball_data) -> void:
 			var omc = get_node("/root/OnlineMatchController")
 			var post_active_p: Dictionary = mp_mgr.get_active_player()
 			var shot_start: Vector3 = pre_start_pos
-			if shot_start.is_zero_approx() and post_active_p.has("last_starting_pos") and post_active_p["last_starting_pos"] is Vector3:
+			if has_node("Player") and $Player.ball != null and not ($Player.ball.shot_start_pos_global as Vector3).is_zero_approx():
+				shot_start = $Player.ball.shot_start_pos_global
+			elif shot_start.is_zero_approx() and post_active_p.has("last_starting_pos") and post_active_p["last_starting_pos"] is Vector3:
 				shot_start = post_active_p["last_starting_pos"]
 			var club_str: String = str(post_active_p.get("last_shot_club", _get_current_club()))
 			var lie_str: String = str(post_active_p.get("lie_type", "fairway"))
@@ -2830,7 +2848,12 @@ func on_remote_shot_replay_started(shot_event: Dictionary) -> void:
 			angle_rad = atan2(diff.z, diff.x)
 			$Player.ball.aim_yaw_offset_deg = rad_to_deg(-angle_rad)
 		$Player.ball.is_putt = is_putt
+		$Player.ball.spawn_position = start_pos
 		$Player.ball.global_position = start_pos
+		if "prev_physics_pos" in $Player.ball:
+			$Player.ball.prev_physics_pos = start_pos
+		if "curr_physics_pos" in $Player.ball:
+			$Player.ball.curr_physics_pos = start_pos
 
 		var cam_pos := get_address_camera_position(start_pos, -angle_rad)
 		var target_look := get_camera_target_look(end_pos, start_pos)
@@ -2841,7 +2864,7 @@ func on_remote_shot_replay_started(shot_event: Dictionary) -> void:
 			$Camera3D.global_position = cam_pos
 			$Camera3D.look_at(target_look)
 
-	call_deferred("set_camera_follow_mode", true)
+	set_camera_follow_mode(true)
 
 
 func on_remote_shot_replay_finished(shot_event: Dictionary) -> void:
@@ -2854,6 +2877,7 @@ func on_remote_shot_replay_finished(shot_event: Dictionary) -> void:
 			end_pos = end_raw
 		elif (end_raw is Array or end_raw is PackedFloat32Array or end_raw is PackedFloat64Array) and end_raw.size() >= 3:
 			end_pos = Vector3(float(end_raw[0]), float(end_raw[1]), float(end_raw[2]))
+		$Player.ball.spawn_position = end_pos
 		$Player.ball.global_position = end_pos
 		$Player.reset_ball()
 
@@ -5370,7 +5394,7 @@ func _on_active_player_changed(_player: Dictionary) -> void:
 			$Player.ball.lie_type = _player.get("lie_type", "teebox" if is_tee else "fairway")
 			$Player.reset_ball()
 			if $Player.get("_last_starting_pos") != null:
-				$Player._last_starting_pos = _player.get("last_starting_pos", p_pos)
+				$Player._last_starting_pos = p_pos
 			update_current_lie_and_reduction()
 
 			apply_default_aim()
@@ -6525,16 +6549,16 @@ func update_current_lie_and_reduction() -> void:
 					ball_node.lie_type = "fringe"
 					ball_node.set_surface(PhysicsEnums.SurfaceType.FAIRWAY)
 				# Check if we are on a tee box (first shot on hole only, or practice mode)
-				elif (ball_node.lie_type == "teebox" or get_distance_to_nearest_teebox(ball_node.global_position) <= 0.5 or (practice_start_pos != Vector3.ZERO and ball_node.global_position.distance_to(practice_start_pos) < 1.5)):
-					var tee_allowed = practice_mode_active
-					if not tee_allowed:
-						var mp_mgr_tee = get_node_or_null("/root/MultiplayerManager")
-						if mp_mgr_tee != null and not mp_mgr_tee.players.is_empty():
-							var ap_tee = mp_mgr_tee.get_active_player()
-							tee_allowed = (ap_tee != null and int(ap_tee.get("strokes", 0)) == 0)
-						else:
-							tee_allowed = (shot_count == 0)
+				var tee_allowed: bool = practice_mode_active
+				if not tee_allowed:
+					var mp_mgr_tee = get_node_or_null("/root/MultiplayerManager")
+					if mp_mgr_tee != null and not mp_mgr_tee.players.is_empty():
+						var ap_tee = mp_mgr_tee.get_active_player()
+						tee_allowed = (ap_tee != null and int(ap_tee.get("strokes", 0)) == 0)
+					else:
+						tee_allowed = (shot_count == 0)
 
+				if tee_allowed or ball_node.lie_type == "teebox" or get_distance_to_nearest_teebox(ball_node.global_position) <= 2.5 or (practice_start_pos != Vector3.ZERO and ball_node.global_position.distance_to(practice_start_pos) < 2.5):
 					if tee_allowed:
 						lie_type = "teebox"
 						ball_node.lie_type = "teebox"
@@ -7537,10 +7561,10 @@ void vertex() {
 	float move_speed = clamp(slope_val * 11.0, 0.0, 0.75);
 	float progress = fract(TIME * move_speed * time_scale + phase_offset + segment_phase);
 	
-	// Translate vertex in world space along the displacement vector
-	vec4 world_offset = vec4(displacement * progress, 0.0);
-	vec4 local_offset = inverse(MODEL_MATRIX) * world_offset;
-	VERTEX += local_offset.xyz;
+	// Translate vertex in world space along the displacement vector (using transpose for orthonormal model matrix)
+	vec3 world_offset = displacement * progress;
+	vec3 local_offset = transpose(mat3(MODEL_MATRIX)) * world_offset;
+	VERTEX += local_offset;
 	
 	// Smooth fade-in / fade-out along the segment
 	float fade = sin(progress * 3.14159265);

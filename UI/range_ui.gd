@@ -76,6 +76,9 @@ var _putting_align_slider: HSlider = null
 var _panel_footer_label: Label = null
 var _camera_color_pick_btn: Button = null
 
+const PuttingMJPEGReaderClass = preload("res://UI/PuttingCamera/mjpeg_stream_reader.gd")
+var _putting_mjpeg_reader: Node = null
+
 enum PuttingPickerMode { NONE, PICK_BALL, PICK_BACKGROUND }
 var _putting_picker_mode: PuttingPickerMode = PuttingPickerMode.NONE
 var _color_profile_inst: PuttingColorProfile = null
@@ -2333,6 +2336,14 @@ func _show_exit_confirm_dialog() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	var cam_setup = _get_active_camera_setup_dialog()
+	if cam_setup != null and is_instance_valid(cam_setup) and cam_setup.visible:
+		if event.is_action_pressed("ui_cancel") or (event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE):
+			_close_camera_setup_dialog(cam_setup)
+			if is_inside_tree() and get_viewport() != null:
+				get_viewport().set_input_as_handled()
+			return
+
 	if _exit_confirm_dialog != null and is_instance_valid(_exit_confirm_dialog) and _exit_confirm_dialog.visible:
 		if event.is_action_pressed("ui_cancel") or (event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE):
 			_exit_confirm_dialog.visible = false
@@ -2832,6 +2843,7 @@ func is_putting_camera_visible() -> bool:
 
 
 func minimize_camera() -> void:
+	_close_camera_setup_dialog()
 	if _is_putting_cam_enabled:
 		minimize_putting_camera()
 	elif _is_golfer_cam_enabled:
@@ -2848,6 +2860,7 @@ func restore_camera() -> void:
 func minimize_golfer_camera() -> void:
 	if not _is_golfer_cam_enabled:
 		return
+	_close_camera_setup_dialog()
 	_is_golfer_cam_minimized = true
 	if _golfer_cam_panel != null:
 		_golfer_cam_panel.visible = false
@@ -2876,6 +2889,7 @@ func restore_golfer_camera() -> void:
 func minimize_putting_camera() -> void:
 	if not _is_putting_cam_enabled:
 		return
+	_close_camera_setup_dialog()
 	_is_putting_cam_minimized = true
 	if _golfer_cam_panel != null:
 		_golfer_cam_panel.visible = false
@@ -2959,6 +2973,7 @@ func set_golfer_camera_visible(enabled: bool) -> void:
 	else:
 		_is_golfer_cam_enabled = false
 		_is_golfer_cam_minimized = false
+		_close_camera_setup_dialog()
 		if _stats_were_visible_before_cam and not is_stats_visible():
 			set_stats_visible(true)
 
@@ -3003,6 +3018,7 @@ func set_putting_camera_visible(enabled: bool) -> void:
 	else:
 		_is_putting_cam_enabled = false
 		_is_putting_cam_minimized = false
+		_close_camera_setup_dialog()
 		_show_putting_camera_overlay(false)
 		if _stats_were_visible_before_cam and not is_stats_visible():
 			set_stats_visible(true)
@@ -3098,6 +3114,7 @@ func _show_putting_camera_overlay(enabled: bool) -> void:
 			if _camera_minimize_btn != null:
 				_camera_minimize_btn.tooltip_text = "Minimize Putting Cam (Keeps tracking in background)"
 	else:
+		_close_camera_setup_dialog()
 		if _camera_color_pick_btn != null:
 			_camera_color_pick_btn.visible = false
 		_putting_picker_mode = PuttingPickerMode.NONE
@@ -3269,6 +3286,37 @@ func _apply_image_rotation(img: Image, rotation_deg: int) -> Image:
 	return img
 
 
+func _start_putting_local_mjpeg_stream() -> void:
+	if _putting_mjpeg_reader == null:
+		_putting_mjpeg_reader = PuttingMJPEGReaderClass.new()
+		_putting_mjpeg_reader.name = "PuttingMJPEGReader"
+		add_child(_putting_mjpeg_reader)
+		_putting_mjpeg_reader.frame_received.connect(_on_putting_mjpeg_frame_received)
+		_putting_mjpeg_reader.connection_status_changed.connect(func(connected: bool, _msg: String):
+			if connected:
+				_update_status_overlay("", false)
+		)
+	var put_service = Engine.get_singleton("PuttingCameraService") if Engine.has_singleton("PuttingCameraService") else (get_node_or_null("/root/PuttingCameraService") if is_inside_tree() else null)
+	var stream_url = put_service.get_stream_url() if put_service != null else "http://127.0.0.1:49155/video"
+	_putting_mjpeg_reader.start_stream(stream_url)
+
+
+func _on_putting_mjpeg_frame_received(img: Image, timestamp_usec: int) -> void:
+	if not _is_putting_cam_enabled or img == null:
+		return
+	var active_img: Image = img
+	if _camera_rotation_deg != 0:
+		active_img = img.duplicate()
+		_apply_image_rotation(active_img, _camera_rotation_deg)
+	_last_putting_feed_image = active_img
+	if _camera_feed_rect != null:
+		_camera_feed_rect.material = null
+		_camera_feed_rect.texture = ImageTexture.create_from_image(active_img)
+	_update_status_overlay("", false)
+	if _putting_state_machine != null:
+		_putting_state_machine.process_frame(active_img, timestamp_usec)
+
+
 func _on_desktop_frame_received(_img: Image, tex: Texture2D, _landmarks: Dictionary) -> void:
 	if not _should_camera_feed_be_active():
 		return
@@ -3286,7 +3334,9 @@ func _on_desktop_frame_received(_img: Image, tex: Texture2D, _landmarks: Diction
 			_camera_feed_rect.texture = active_tex
 		_update_status_overlay("", false)
 
-	if _is_putting_cam_enabled and not _use_phone_stream:
+	# On Android, PoseDetectionBridge routes device cameras directly
+	var is_and: bool = OS.has_feature("android") or OS.get_name() == "Android"
+	if _is_putting_cam_enabled and not _use_phone_stream and is_and:
 		if _camera_feed_rect != null:
 			_camera_feed_rect.material = null
 			_camera_feed_rect.texture = active_tex
@@ -3300,6 +3350,11 @@ func _on_desktop_frame_received(_img: Image, tex: Texture2D, _landmarks: Diction
 
 
 func _stop_local_camera_stream() -> void:
+	var put_service = Engine.get_singleton("PuttingCameraService") if Engine.has_singleton("PuttingCameraService") else (get_node_or_null("/root/PuttingCameraService") if is_inside_tree() else null)
+	if put_service != null and put_service.has_method("stop_camera"):
+		put_service.stop_camera()
+	if _putting_mjpeg_reader != null and _putting_mjpeg_reader.has_method("stop_stream"):
+		_putting_mjpeg_reader.stop_stream()
 	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
 	if pose_bridge != null:
 		if pose_bridge.has_method("stop_desktop_camera"):
@@ -3327,9 +3382,25 @@ func _connect_local_camera(sel_idx: int) -> void:
 	_stop_phone_camera_stream()
 	_use_phone_stream = false
 	_current_camera_feed_index = sel_idx
-	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
-	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android" or (pose_bridge != null and "_is_android" in pose_bridge and pose_bridge._is_android)
+	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android"
 
+	if _is_putting_cam_enabled and not is_android:
+		var put_service = Engine.get_singleton("PuttingCameraService") if Engine.has_singleton("PuttingCameraService") else (get_node_or_null("/root/PuttingCameraService") if is_inside_tree() else null)
+		var target_idx = sel_idx
+		if target_idx < 0:
+			target_idx = 0
+		if put_service != null and "desktop_cameras" in put_service and put_service.desktop_cameras.size() > 0:
+			target_idx = clamp(target_idx, 0, put_service.desktop_cameras.size() - 1)
+		_current_camera_feed_index = target_idx
+		if _camera_feed_rect != null:
+			_camera_feed_rect.material = null
+		if put_service != null and put_service.has_method("select_camera"):
+			put_service.select_camera(target_idx)
+		_start_putting_local_mjpeg_stream()
+		_update_status_overlay("", false)
+		return
+
+	var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else (get_node_or_null("/root/PoseDetectionBridge") if is_inside_tree() else null)
 	if not CameraServer.is_monitoring_feeds():
 		CameraServer.set_monitoring_feeds(true)
 
@@ -3379,8 +3450,13 @@ func _update_camera_feed(active: bool) -> void:
 	# Stop any phone stream polling before starting local camera
 	_stop_phone_camera_stream()
 
+	# If putting camera is already actively streaming via local MJPEG, maintain it
+	if _is_putting_cam_enabled and not _use_phone_stream and _putting_mjpeg_reader != null and _putting_mjpeg_reader.has_method("is_active") and _putting_mjpeg_reader.is_active():
+		_update_status_overlay("", false)
+		return
+
 	# If desktop camera is already actively streaming, maintain it without restarting
-	if pose_bridge != null and pose_bridge.has_method("is_desktop_camera_active") and pose_bridge.is_desktop_camera_active():
+	if not _is_putting_cam_enabled and pose_bridge != null and pose_bridge.has_method("is_desktop_camera_active") and pose_bridge.is_desktop_camera_active():
 		_update_status_overlay("", false)
 		return
 
@@ -3422,30 +3498,35 @@ func _update_camera_feed(active: bool) -> void:
 	var feeds = CameraServer.feeds()
 	var count = feeds.size()
 
+	var put_service = Engine.get_singleton("PuttingCameraService") if Engine.has_singleton("PuttingCameraService") else (get_node_or_null("/root/PuttingCameraService") if is_inside_tree() else null)
+	var desk_cams: Array = []
+	if _is_putting_cam_enabled and not is_android:
+		desk_cams = put_service.desktop_cameras if (put_service != null and "desktop_cameras" in put_service) else []
+	elif pose_bridge != null and "desktop_cameras" in pose_bridge:
+		desk_cams = pose_bridge.desktop_cameras
+
 	if count > 0:
 		var selected_index = _current_camera_feed_index
 		if selected_index < 0 or selected_index >= count:
 			selected_index = _find_default_camera_index(feeds)
 			_current_camera_feed_index = selected_index
 		_activate_camera_feed_index(selected_index)
-	elif is_android or (pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0):
+	elif desk_cams.size() > 0 or is_android:
 		var sel_idx = _current_camera_feed_index
 		if sel_idx < 0:
 			sel_idx = 0
-		if pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
-			sel_idx = clamp(sel_idx, 0, pose_bridge.desktop_cameras.size() - 1)
+		if desk_cams.size() > 0:
+			sel_idx = clamp(sel_idx, 0, desk_cams.size() - 1)
 		_current_camera_feed_index = sel_idx
-		if _camera_feed_rect != null:
-			_camera_feed_rect.material = null
-		if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
-			pose_bridge.select_desktop_camera(sel_idx)
-		_update_status_overlay("", false)
+		_activate_camera_feed_index(sel_idx)
 	else:
 		if _camera_feed_rect != null:
 			_camera_feed_rect.material = null
 			_camera_feed_rect.texture = null
 		_update_status_overlay("SEARCHING FOR CAMERAS...\n[ Click ⚙️ Connect Camera for setup ]", true)
-		if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
+		if _is_putting_cam_enabled and not is_android and put_service != null and put_service.has_method("fetch_cameras"):
+			put_service.fetch_cameras()
+		elif pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
 			pose_bridge.fetch_desktop_cameras()
 		# Schedule asynchronous re-scan
 		if get_tree() != null:
@@ -3454,22 +3535,19 @@ func _update_camera_feed(active: bool) -> void:
 					if not CameraServer.is_monitoring_feeds():
 						CameraServer.set_monitoring_feeds(true)
 					var rescan_feeds = CameraServer.feeds()
+					var rescan_desk: Array = []
+					if _is_putting_cam_enabled and not is_android:
+						rescan_desk = put_service.desktop_cameras if (put_service != null and "desktop_cameras" in put_service) else []
+					elif pose_bridge != null and "desktop_cameras" in pose_bridge:
+						rescan_desk = pose_bridge.desktop_cameras
 					if rescan_feeds.size() > 0:
 						var sel_idx = _find_default_camera_index(rescan_feeds) if _current_camera_feed_index < 0 or _current_camera_feed_index >= rescan_feeds.size() else _current_camera_feed_index
 						_current_camera_feed_index = sel_idx
 						_activate_camera_feed_index(sel_idx)
-					elif is_android or (pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0):
-						var sel_idx = _current_camera_feed_index
-						if sel_idx < 0:
-							sel_idx = 0
-						if pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
-							sel_idx = clamp(sel_idx, 0, pose_bridge.desktop_cameras.size() - 1)
+					elif rescan_desk.size() > 0 or is_android:
+						var sel_idx = clamp(_current_camera_feed_index, 0, max(0, rescan_desk.size() - 1))
 						_current_camera_feed_index = sel_idx
-						if _camera_feed_rect != null:
-							_camera_feed_rect.material = null
-						if pose_bridge != null and pose_bridge.has_method("select_desktop_camera"):
-							pose_bridge.select_desktop_camera(sel_idx)
-						_update_status_overlay("", false)
+						_activate_camera_feed_index(sel_idx)
 					elif _phone_cam_url.is_empty():
 						_update_status_overlay("NO LOCAL CAMERA DETECTED\n[ Click ⚙️ Connect Camera for Phone WiFi Stream ]", true)
 			)
@@ -3500,7 +3578,22 @@ func _activate_camera_feed_index(index: int) -> void:
 	var feeds = CameraServer.feeds()
 	var is_android: bool = OS.has_feature("android") or OS.get_name() == "Android"
 	if index < 0 or index >= feeds.size():
+		var put_service = Engine.get_singleton("PuttingCameraService") if Engine.has_singleton("PuttingCameraService") else (get_node_or_null("/root/PuttingCameraService") if is_inside_tree() else null)
 		var pose_bridge = Engine.get_singleton("PoseDetectionBridge") if Engine.has_singleton("PoseDetectionBridge") else get_node_or_null("/root/PoseDetectionBridge")
+		
+		if _is_putting_cam_enabled and not is_android and put_service != null:
+			var target_idx = max(index, 0)
+			if "desktop_cameras" in put_service and put_service.desktop_cameras.size() > 0:
+				target_idx = clamp(index, 0, put_service.desktop_cameras.size() - 1)
+			_current_camera_feed_index = target_idx
+			if _camera_feed_rect != null:
+				_camera_feed_rect.material = null
+			if put_service.has_method("select_camera"):
+				put_service.select_camera(target_idx)
+			_start_putting_local_mjpeg_stream()
+			_update_status_overlay("", false)
+			return
+		
 		if is_android or (pose_bridge != null and "desktop_cameras" in pose_bridge and index >= 0 and index < pose_bridge.desktop_cameras.size()):
 			var target_idx = max(index, 0)
 			if pose_bridge != null and "desktop_cameras" in pose_bridge and pose_bridge.desktop_cameras.size() > 0:
@@ -3852,17 +3945,21 @@ func _open_camera_setup_dialog(for_putting: Variant = null) -> void:
 	)
 	popup.z_index = 100
 
-	var dialog_h: float = 720.0 if is_putting else 560.0
-	popup.custom_minimum_size = Vector2(520, dialog_h)
+	var vp_size = get_viewport().get_visible_rect().size if is_inside_tree() and get_viewport() != null else Vector2(1728, 972)
+	var max_w: float = minf(540.0, vp_size.x * 0.95)
+	var default_h: float = 680.0 if is_putting else 540.0
+	var dialog_h: float = minf(default_h, vp_size.y * 0.88)
+	popup.custom_minimum_size = Vector2(max_w, dialog_h)
+	popup.size = Vector2(max_w, dialog_h)
 	popup.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	popup.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	popup.anchor_left = 0.5
 	popup.anchor_top = 0.5
 	popup.anchor_right = 0.5
 	popup.anchor_bottom = 0.5
-	popup.offset_left = -260
+	popup.offset_left = -max_w * 0.5
 	popup.offset_top = -dialog_h * 0.5
-	popup.offset_right = 260
+	popup.offset_right = max_w * 0.5
 	popup.offset_bottom = dialog_h * 0.5
 
 	var style = StyleBoxFlat.new()
@@ -3887,12 +3984,32 @@ func _open_camera_setup_dialog(for_putting: Variant = null) -> void:
 	outer_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	outer_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
+	var header_hbox = HBoxContainer.new()
+	header_hbox.name = "HeaderHBox"
+	header_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var header_spacer_left = Control.new()
+	header_spacer_left.custom_minimum_size = Vector2(36, 0)
+	header_hbox.add_child(header_spacer_left)
+
 	var title = Label.new()
 	title.text = "🎯 Putting Camera Setup" if is_putting else "📷 Golfer Camera Setup"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.add_theme_font_size_override("font_size", 18)
 	title.add_theme_color_override("font_color", Color.WHITE)
-	outer_vbox.add_child(title)
+	header_hbox.add_child(title)
+
+	var header_close_btn = Button.new()
+	header_close_btn.name = "HeaderCloseButton"
+	header_close_btn.text = "✕"
+	header_close_btn.tooltip_text = "Close Setup"
+	header_close_btn.custom_minimum_size = Vector2(36, 36)
+	apply_material_button_style(header_close_btn, Color(0.4, 0.4, 0.4, 0.8))
+	header_close_btn.pressed.connect(func(): _close_camera_setup_dialog(popup))
+	header_hbox.add_child(header_close_btn)
+
+	outer_vbox.add_child(header_hbox)
 
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -3938,7 +4055,12 @@ func _open_camera_setup_dialog(for_putting: Variant = null) -> void:
 		if not CameraServer.is_monitoring_feeds():
 			CameraServer.set_monitoring_feeds(true)
 		var feeds = CameraServer.feeds()
-		var desk_cams: Array = pose_bridge.desktop_cameras if (pose_bridge != null and "desktop_cameras" in pose_bridge) else []
+		var put_service = Engine.get_singleton("PuttingCameraService") if Engine.has_singleton("PuttingCameraService") else (get_node_or_null("/root/PuttingCameraService") if is_inside_tree() else null)
+		var desk_cams: Array = []
+		if is_putting and not is_android:
+			desk_cams = put_service.desktop_cameras if (put_service != null and "desktop_cameras" in put_service) else []
+		elif pose_bridge != null and "desktop_cameras" in pose_bridge:
+			desk_cams = pose_bridge.desktop_cameras
 		var total_count = max(feeds.size(), desk_cams.size())
 		if is_android and total_count < 2 and desk_cams.is_empty() and feeds.is_empty():
 			total_count = 2
@@ -4002,7 +4124,15 @@ func _open_camera_setup_dialog(for_putting: Variant = null) -> void:
 		if is_instance_valid(popup) and is_instance_valid(webcams_label):
 			populate_feeds.call()
 
-	if pose_bridge != null and pose_bridge.has_signal("desktop_cameras_updated"):
+	if is_putting and not is_android:
+		var put_service = Engine.get_singleton("PuttingCameraService") if Engine.has_singleton("PuttingCameraService") else (get_node_or_null("/root/PuttingCameraService") if is_inside_tree() else null)
+		if put_service != null and put_service.has_signal("cameras_updated"):
+			put_service.cameras_updated.connect(on_cameras_updated)
+			popup.tree_exited.connect(func():
+				if is_instance_valid(put_service) and put_service.is_connected("cameras_updated", on_cameras_updated):
+					put_service.cameras_updated.disconnect(on_cameras_updated)
+			)
+	elif pose_bridge != null and pose_bridge.has_signal("desktop_cameras_updated"):
 		pose_bridge.desktop_cameras_updated.connect(on_cameras_updated)
 		popup.tree_exited.connect(func():
 			if is_instance_valid(pose_bridge) and pose_bridge.is_connected("desktop_cameras_updated", on_cameras_updated):
@@ -4044,7 +4174,11 @@ func _open_camera_setup_dialog(for_putting: Variant = null) -> void:
 		if not is_instance_valid(popup) or not is_instance_valid(webcams_label):
 			return
 		CameraServer.set_monitoring_feeds(true)
-		if pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
+		if is_putting and not is_android:
+			var put_service = Engine.get_singleton("PuttingCameraService") if Engine.has_singleton("PuttingCameraService") else (get_node_or_null("/root/PuttingCameraService") if is_inside_tree() else null)
+			if put_service != null and put_service.has_method("fetch_cameras"):
+				put_service.fetch_cameras()
+		elif pose_bridge != null and pose_bridge.has_method("fetch_desktop_cameras"):
 			pose_bridge.fetch_desktop_cameras()
 		populate_feeds.call()
 	)

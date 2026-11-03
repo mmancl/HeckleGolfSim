@@ -14,7 +14,7 @@ uniform float vertical_weight : hint_range(0.5, 3.0) = 0.85;
 // Subtle desaturation towards edges (peripheral vision loses color sensitivity)
 uniform float edge_desaturation : hint_range(0.0, 1.0) = 0.3;
 uniform vec4 vignette_color : source_color = vec4(0.0, 0.0, 0.0, 1.0);
-uniform sampler2D SCREEN_TEXTURE : hint_screen_texture, filter_linear_mipmap;
+uniform sampler2D SCREEN_TEXTURE : hint_screen_texture, filter_linear;
 
 void fragment() {
 	vec2 centered = SCREEN_UV - vec2(0.5);

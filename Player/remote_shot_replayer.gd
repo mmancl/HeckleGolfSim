@@ -44,6 +44,8 @@ func play_remote_shot(
 	if is_instance_valid(_current_ball):
 		if "is_replaying_remote_shot" in _current_ball:
 			_current_ball.is_replaying_remote_shot = true
+		if "spawn_position" in _current_ball:
+			_current_ball.spawn_position = start_pos
 		_set_node_position(_current_ball, start_pos)
 
 	if is_instance_valid(_current_tracer):
@@ -95,6 +97,8 @@ func _finish_replay() -> void:
 	var end_pos: Vector3 = _current_profile.get("end_pos", Vector3.ZERO)
 
 	if is_instance_valid(_current_ball):
+		if "spawn_position" in _current_ball:
+			_current_ball.spawn_position = end_pos
 		_set_node_position(_current_ball, end_pos)
 		if "is_replaying_remote_shot" in _current_ball:
 			_current_ball.is_replaying_remote_shot = false
@@ -152,6 +156,10 @@ static func _set_node_position(node: Node3D, pos: Vector3) -> void:
 		node.global_position = pos
 	else:
 		node.position = pos
+	if "prev_physics_pos" in node:
+		node.prev_physics_pos = pos
+	if "curr_physics_pos" in node:
+		node.curr_physics_pos = pos
 
 
 static func _parse_vector3(val) -> Vector3:

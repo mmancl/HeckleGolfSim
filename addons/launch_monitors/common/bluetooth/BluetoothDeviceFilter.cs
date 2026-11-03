@@ -33,10 +33,16 @@ public static class BluetoothDeviceFilter
 
         // Special handling for Square Golf:
         // Square Golf devices may advertise as "SquareGolf", "Square Golf", "SquareGolf_xxxx",
+        // "SquareGolf(xxxx)", "SQ...", "EXGOLF...", "EXG...", "OMNI...",
         // or model codes starting with "SGO" (e.g. "SGO300A", "SGO300", "SGO-300", "SGO_300").
-        if (normalizedPrefix.Contains("square", StringComparison.OrdinalIgnoreCase) &&
+        if ((normalizedPrefix.Contains("square", StringComparison.OrdinalIgnoreCase) ||
+             normalizedPrefix.Contains("sq", StringComparison.OrdinalIgnoreCase)) &&
             (normalizedName.Contains("square", StringComparison.OrdinalIgnoreCase) ||
-             normalizedName.StartsWith("sgo", StringComparison.OrdinalIgnoreCase)))
+             normalizedName.StartsWith("sgo", StringComparison.OrdinalIgnoreCase) ||
+             normalizedName.StartsWith("exgolf", StringComparison.OrdinalIgnoreCase) ||
+             normalizedName.StartsWith("exg", StringComparison.OrdinalIgnoreCase) ||
+             normalizedName.StartsWith("sq", StringComparison.OrdinalIgnoreCase) ||
+             normalizedName.StartsWith("omni", StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }

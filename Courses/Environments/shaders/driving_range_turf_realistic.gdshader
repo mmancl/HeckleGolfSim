@@ -12,12 +12,12 @@ render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_sc
 // ============================================================================
 
 // -- Surface albedo textures --
-uniform sampler2D tex_fairway : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
-uniform sampler2D tex_rough   : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D tex_fairway : source_color, filter_linear_mipmap, repeat_enable;
+uniform sampler2D tex_rough   : source_color, filter_linear_mipmap, repeat_enable;
 
 // -- Normal maps --
-uniform sampler2D normal_fairway : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
-uniform sampler2D normal_rough   : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D normal_fairway : hint_normal, filter_linear_mipmap, repeat_enable;
+uniform sampler2D normal_rough   : hint_normal, filter_linear_mipmap, repeat_enable;
 
 // -- Ambient Occlusion (AO) maps --
 uniform sampler2D ao_fairway : hint_default_white, filter_linear_mipmap, repeat_enable;
@@ -43,12 +43,10 @@ uniform float normal_depth : hint_range(0.0, 2.0) = 0.85;
 uniform float stripe_strength : hint_range(0.0, 1.0) = 0.70;
 
 varying vec3 v_world_pos;
-varying vec3 v_world_normal;
 varying vec3 v_cam_pos;
 
 void vertex() {
     v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-    v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
     v_cam_pos = INV_VIEW_MATRIX[3].xyz;
 }
 

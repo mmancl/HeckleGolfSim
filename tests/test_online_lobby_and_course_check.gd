@@ -44,6 +44,8 @@ func _run_all_tests() -> void:
 	await _test_6_account_status_label()
 	await _test_7_status_label_isolation_and_tab_switching()
 	await _test_8_stream_deferred_dispatch_and_match_start_once()
+	await _test_9_course_downloading_status_sync_and_ui()
+	await _test_10_installed_course_verification_resilience()
 	_restore_user_files(backup)
 
 	print("\n=======================================================")
@@ -410,7 +412,15 @@ func _test_4_start_match_preconditions() -> void:
 		"slot_1": {"slot_id": "slot_1", "owner_uid": "client_uid", "order": 1, "name": "ClientPlayer"}
 	}
 
-	# Part A: Refuse to start when client course_ready == false
+	# Part A1: Refuse to start when client course_ready == false and downloading
+	session.match_devices["client_uid"]["course_downloading"] = true
+	session.match_devices["client_uid"]["device_name"] = "ClientPlayer"
+	var fail_res_dl = await session.start_online_match()
+	assert(fail_res_dl.get("ok", false) == false, "Must refuse to start when client is downloading.")
+	assert(str(fail_res_dl.get("error", "")).contains("downloading"), "Error must report downloading.")
+	session.match_devices["client_uid"]["course_downloading"] = false
+
+	# Part A2: Refuse to start when client course_ready == false
 	var fail_res = await session.start_online_match()
 	assert(fail_res.get("ok", false) == false, "Must refuse to start when client course_ready == false.")
 	assert(str(fail_res.get("error", "")).contains("course"), "Error must report course requirement.")
@@ -662,4 +672,152 @@ func _test_8_stream_deferred_dispatch_and_match_start_once() -> void:
 		assert(t_order == "honors", "Expected 'honors', got %s" % t_order)
 
 	print("  PASS: Single-emission match start and duplicate start guards verified successfully.")
+
+
+func _test_9_course_downloading_status_sync_and_ui() -> void:
+	print("\n--- Test 9: Course Downloading Status Sync & Lobby UI Display ---")
+	var session = _get_session()
+	var mock_rtdb := MockRtdbClient.new()
+	session.rtdb = mock_rtdb
+
+	var my_uid: String = session._get_my_uid()
+	session.is_online_match = true
+	session.is_host = false
+	session.current_match_id = "test_match_download_sync"
+	session.match_meta = {"status": "lobby"}
+	session.match_devices = {
+		my_uid: {"device_name": "LocalPlayer", "course_ready": false, "course_downloading": false, "ready": false},
+		"other_uid": {"device_name": "RemotePlayer", "course_ready": false, "course_downloading": false, "ready": false}
+	}
+	session.match_golfers = {
+		"slot_0": {"order": 0, "name": "LocalPlayer", "tee": "Blue", "owner_uid": my_uid},
+		"slot_1": {"order": 1, "name": "RemotePlayer", "tee": "White", "owner_uid": "other_uid"}
+	}
+
+	# 1. Local player begins downloading
+	session.set_local_course_downloading(true)
+	assert(session.is_local_course_downloading == true, "Local downloading flag must be true.")
+	assert(session.match_devices[my_uid]["course_downloading"] == true, "Local device course_downloading must be true in session.")
+	var patch_found := false
+	for p_call in mock_rtdb.patch_calls:
+		if p_call.get("path") == "matches/test_match_download_sync/devices/" + my_uid:
+			patch_found = true
+			assert(p_call.get("data", {}).get("course_downloading") == true, "RTDB must be patched with course_downloading=true.")
+			break
+	assert(patch_found, "RTDB patch call for downloading state must occur.")
+
+	# 2. Remote player downloading stream patch
+	mock_rtdb.patch_calls.clear()
+	session._on_stream_patch("devices/other_uid", {"course_downloading": true})
+	assert(session.match_devices["other_uid"]["course_downloading"] == true, "Remote device course_downloading must update via stream patch.")
+
+	# 3. MultiplayerMenu UI card rendering
+	var menu = MultiplayerMenuScene.instantiate()
+	root.add_child(menu)
+	await process_frame
+
+	menu._render_room_golfers(session.match_golfers, session.match_devices)
+	var cards = menu.get_node("%GolfersContainer").get_children()
+	assert(cards.size() == 2, "Expected 2 golfer cards, got %d" % cards.size())
+
+	# Both local and remote golfers are downloading: cards must display 'Downloading Course...'
+	for card in cards:
+		var hbox = card.get_child(0)
+		var status_label: Label = hbox.get_child(1)
+		assert(status_label.text == "Downloading Course...", "Golfer card must show 'Downloading Course...', got '%s'" % status_label.text)
+		assert(status_label.get_theme_color("font_color") == ThemeManager.COLOR_TEXT_WARNING, "Status label must use COLOR_TEXT_WARNING when downloading.")
+
+	# Remote finishes download, local stops downloading and is missing course
+	session.match_devices["other_uid"]["course_ready"] = true
+	session.match_devices["other_uid"]["course_downloading"] = false
+	session.match_devices["other_uid"]["ready"] = true
+	session.set_local_course_downloading(false)
+	await process_frame
+	menu._render_room_golfers(session.match_golfers, session.match_devices)
+	await process_frame
+
+	cards = menu.get_node("%GolfersContainer").get_children()
+	var local_card_status: Label = cards[0].get_child(0).get_child(1)
+	var remote_card_status: Label = cards[1].get_child(0).get_child(1)
+	assert(local_card_status.text == "Missing Course", "Local player should show 'Missing Course' when not downloading.")
+	assert(local_card_status.get_theme_color("font_color") == ThemeManager.COLOR_TEXT_DANGER, "Status label must use COLOR_TEXT_DANGER when missing course.")
+	assert(remote_card_status.text == "Ready", "Remote player should show 'Ready' after course installed and ready.")
+
+	# 4. set_local_course_ready resets downloading flag
+	session.set_local_course_ready(true, "res://test_scene.tscn", "res://test_config.json")
+	assert(session.is_local_course_downloading == false, "set_local_course_ready must reset downloading flag.")
+	assert(session.match_devices[my_uid]["course_downloading"] == false, "match_devices course_downloading must be false after ready.")
+
+	menu.queue_free()
+	session.leave_lobby()
+	await process_frame
+	print("  PASS: Course downloading status sync and lobby UI display verified successfully.")
+
+
+# ── TEST 10: INSTALLED COURSE VERIFICATION & BACK-TO-BACK READINESS ─────
+
+func _test_10_installed_course_verification_resilience() -> void:
+	print("\n--- Test 10: Installed Course Verification Resilience & Stream State Protection ---")
+	var session = _get_session()
+	var mock_rtdb := MockRtdbClient.new()
+	session.rtdb = mock_rtdb
+
+	var my_uid: String = session._get_my_uid()
+	session.is_online_match = true
+	session.is_host = false
+	session.current_match_id = "test_resilience_match"
+
+	# Course that exists on disk: Airways ("airways@0.0000,0.0000", lat 0, lon 0, "Airways")
+	var installed_course_meta := {
+		"key": "airways@0.0000,0.0000",
+		"title": "Airways",
+		"lat": 0.0,
+		"lon": 0.0,
+		"fingerprint": "different_host_fingerprint_due_to_settings_123456"
+	}
+
+	var state := {"emitted": false}
+	var on_install_req = func(_c, _r):
+		state["emitted"] = true
+	session.course_install_required.connect(on_install_req)
+
+	# 1. Verify installed course with different fingerprint is accepted and marks course_ready
+	session.is_local_course_ready = false
+	session._verify_local_course(installed_course_meta)
+	assert(session.is_local_course_ready == true, "Installed course must be marked ready even if host fingerprint differs slightly.")
+	assert(state["emitted"] == false, "course_install_required must NOT be emitted for installed courses.")
+
+	# 2. Verify non-existent course still triggers course_install_required
+	var missing_course_meta := {
+		"key": "totally_missing_course@10.0000,20.0000",
+		"title": "Totally Missing Course",
+		"lat": 10.0,
+		"lon": 20.0,
+		"fingerprint": "abc"
+	}
+	state["emitted"] = false
+	session._verify_local_course(missing_course_meta)
+	assert(session.is_local_course_ready == false, "Non-existent course must not be marked ready.")
+	assert(state["emitted"] == true, "course_install_required must be emitted when course is missing.")
+
+	session.course_install_required.disconnect(on_install_req)
+
+	# 3. Stream overwrite protection: initial snapshot with course_ready: false must NOT wipe local ready state
+	session.is_local_course_ready = true
+	session.match_devices = {
+		my_uid: {"device_name": "LocalPlayer", "course_ready": true, "ready": false}
+	}
+	session._on_stream_put("", {
+		"meta": {"status": "lobby"},
+		"devices": {
+			my_uid: {"device_name": "LocalPlayer", "course_ready": false, "ready": false}
+		},
+		"golfers": {}
+	})
+	assert(session.match_devices[my_uid]["course_ready"] == true, "Stream snapshot must not overwrite locally verified course_ready.")
+
+	session.leave_lobby()
+	await process_frame
+	print("  PASS: Installed course verification resilience and stream snapshot state protection verified.")
+
 

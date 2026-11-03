@@ -273,6 +273,8 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
             // Well-known Service UUIDs for Square Golf (8660...) and Garmin Approach R10 (6a4e...)
             Guid[] candidateServices =
             [
+                Guid.Parse("86601001-6b7e-439a-bdd1-489a3213e9bb"),
+                Guid.Parse("86601000-6b7e-439a-bdd1-489a3213e9bb"),
                 Guid.Parse("86602000-6b7e-439a-bdd1-489a3213e9bb"),
                 Guid.Parse("86602100-6b7e-439a-bdd1-489a3213e9bb"),
                 Guid.Parse("86602101-6b7e-439a-bdd1-489a3213e9bb"),
@@ -728,12 +730,17 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
                         string? keyStr = ObjCRuntime.NSStringToString(key);
                         if (string.IsNullOrEmpty(keyStr)) continue;
 
-                        if (string.IsNullOrWhiteSpace(name) && keyStr.Contains("LocalName", StringComparison.OrdinalIgnoreCase))
+                        if (keyStr.Contains("LocalName", StringComparison.OrdinalIgnoreCase))
                         {
                             IntPtr val = ObjCRuntime.objc_msgSend(advData, ObjCRuntime.sel_registerName("objectForKey:"), key);
-                            name = ObjCRuntime.NSStringToString(val);
+                            string? discoveredName = ObjCRuntime.NSStringToString(val);
+                            if (!string.IsNullOrWhiteSpace(discoveredName))
+                            {
+                                name = discoveredName;
+                            }
                         }
-                        else if (keyStr.Contains("ServiceUUID", StringComparison.OrdinalIgnoreCase))
+                        else if (keyStr.Contains("ServiceUUID", StringComparison.OrdinalIgnoreCase) ||
+                                 keyStr.Contains("OverflowServiceUUID", StringComparison.OrdinalIgnoreCase))
                         {
                             IntPtr serviceUuidsArray = ObjCRuntime.objc_msgSend(advData, ObjCRuntime.sel_registerName("objectForKey:"), key);
                             if (serviceUuidsArray != IntPtr.Zero)
@@ -754,7 +761,8 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
                                             }
                                             if (string.IsNullOrWhiteSpace(client._scanOptions?.DeviceNamePrefix) ||
                                                 client._scanOptions.DeviceNamePrefix.Contains("square", StringComparison.OrdinalIgnoreCase) ||
-                                                client._scanOptions.DeviceNamePrefix.Contains("sgo", StringComparison.OrdinalIgnoreCase))
+                                                client._scanOptions.DeviceNamePrefix.Contains("sgo", StringComparison.OrdinalIgnoreCase) ||
+                                                client._scanOptions.DeviceNamePrefix.Contains("sq", StringComparison.OrdinalIgnoreCase))
                                             {
                                                 matchesServiceUuid = true;
                                             }
@@ -779,7 +787,46 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
                                 }
                             }
                         }
-                        else if (string.IsNullOrWhiteSpace(name) && keyStr.Contains("ManufacturerData", StringComparison.OrdinalIgnoreCase))
+                        else if (keyStr.Contains("ServiceData", StringComparison.OrdinalIgnoreCase))
+                        {
+                            IntPtr serviceDataDict = ObjCRuntime.objc_msgSend(advData, ObjCRuntime.sel_registerName("objectForKey:"), key);
+                            if (serviceDataDict != IntPtr.Zero)
+                            {
+                                IntPtr sKeys = ObjCRuntime.objc_msgSend(serviceDataDict, ObjCRuntime.sel_registerName("allKeys"));
+                                if (sKeys != IntPtr.Zero)
+                                {
+                                    int sCount = (int)(long)ObjCRuntime.objc_msgSend(sKeys, ObjCRuntime.sel_registerName("count"));
+                                    for (int s = 0; s < sCount; s++)
+                                    {
+                                        IntPtr sKey = ObjCRuntime.objc_msgSend(sKeys, ObjCRuntime.sel_registerName("objectAtIndex:"), (IntPtr)s);
+                                        IntPtr sUuidNs = ObjCRuntime.objc_msgSend(sKey, ObjCRuntime.sel_registerName("UUIDString"));
+                                        string? sUuidStr = ObjCRuntime.NSStringToString(sUuidNs)?.ToLowerInvariant();
+                                        if (!string.IsNullOrEmpty(sUuidStr))
+                                        {
+                                            if (sUuidStr.Contains("8660"))
+                                            {
+                                                if (string.IsNullOrWhiteSpace(name) || name == "Unknown")
+                                                {
+                                                    name = "Square Golf";
+                                                }
+                                                matchesServiceUuid = true;
+                                                break;
+                                            }
+                                            else if (sUuidStr.Contains("6a4e"))
+                                            {
+                                                if (string.IsNullOrWhiteSpace(name) || name == "Unknown")
+                                                {
+                                                    name = "Approach R10";
+                                                }
+                                                matchesServiceUuid = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        else if (keyStr.Contains("ManufacturerData", StringComparison.OrdinalIgnoreCase))
                         {
                             IntPtr mfgDataNs = ObjCRuntime.objc_msgSend(advData, ObjCRuntime.sel_registerName("objectForKey:"), key);
                             if (mfgDataNs != IntPtr.Zero)
@@ -788,9 +835,16 @@ internal sealed class AppleBluetoothGattClient : IBluetoothGattClient
                                 if (mfgBytes.Length > 0)
                                 {
                                     string mfgStr = System.Text.Encoding.ASCII.GetString(mfgBytes);
-                                    if (mfgStr.Contains("Square", StringComparison.OrdinalIgnoreCase))
+                                    if (mfgStr.Contains("Square", StringComparison.OrdinalIgnoreCase) ||
+                                        mfgStr.Contains("SGO", StringComparison.OrdinalIgnoreCase) ||
+                                        mfgStr.Contains("EXG", StringComparison.OrdinalIgnoreCase) ||
+                                        mfgStr.Contains("OMNI", StringComparison.OrdinalIgnoreCase))
                                     {
-                                        name = "Square Golf";
+                                        if (string.IsNullOrWhiteSpace(name) || name == "Unknown")
+                                        {
+                                            name = "Square Golf";
+                                        }
+                                        matchesServiceUuid = true;
                                     }
                                 }
                             }

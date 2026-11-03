@@ -195,7 +195,15 @@ func is_square_device_name(name: String) -> bool:
 	if n == "":
 		return false
 	var stripped := n.replace(" ", "").replace("-", "").replace("_", "")
-	return stripped.begins_with(SQUARE_DEVICE_PREFIX) or stripped.contains("square") or stripped.begins_with("sgo")
+	return (
+		stripped.begins_with(SQUARE_DEVICE_PREFIX) or
+		stripped.contains("square") or
+		stripped.begins_with("sgo") or
+		stripped.begins_with("exgolf") or
+		stripped.begins_with("exg") or
+		stripped.begins_with("sq") or
+		stripped.begins_with("omni")
+	)
 
 
 func is_auto_connecting() -> bool:

@@ -137,7 +137,8 @@ static func inspect_course_config(config_path: String) -> Dictionary:
 	var location: String = str(parsed.get("Location", parsed.get("location", "")))
 	var raw_is_custom: bool = bool(parsed.get("is_custom", parsed.get("IsCustom", false)))
 	var is_custom: bool = raw_is_custom or (lat == 0.0 and lon == 0.0) or config_path.contains("custom_")
-	var is_cached: bool = bool(parsed.get("is_cached", parsed.get("IsCached", false)))
+	var raw_is_cached: bool = bool(parsed.get("is_cached", parsed.get("IsCached", false)))
+	var is_cached: bool = raw_is_cached or location.to_lower().contains("cached") or config_path.contains("Cached")
 
 	var hole_info: Dictionary = parsed.get("Hole Info", parsed.get("hole_info", {}))
 	var fingerprint := compute_fingerprint(hole_info)

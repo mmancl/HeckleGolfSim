@@ -2364,7 +2364,7 @@ func reset() -> void:
 
 
 func get_interpolated_position() -> Vector3:
-	if state == PhysicsEnums.BallState.REST or not _physics_pos_initialized:
+	if is_replaying_remote_shot or state == PhysicsEnums.BallState.REST or not _physics_pos_initialized:
 		return global_position
 	var fraction = Engine.get_physics_interpolation_fraction()
 	return prev_physics_pos.lerp(curr_physics_pos, fraction)
@@ -2626,18 +2626,22 @@ func hit_from_data(data: Dictionary) -> void:
 	
 	RainPhysics.apply_rain_shot_reduction(data)
 	var speed_mph: float = float(data.get("BallSpeed", data.get("Speed", 0.0)))
+	var raw_ball_speed := speed_mph
+	data["RawBallSpeed"] = raw_ball_speed
+	data["RawSpeed"] = raw_ball_speed
 	
-	# Apply lie reduction penalty if any
+	# Apply lie reduction penalty if any (tee shots NEVER suffer lie reduction)
 	var reduction := 0.0
 	var player_node = get_parent()
-	if player_node != null:
-		var mp_mgr = get_node_or_null("/root/MultiplayerManager")
-		if mp_mgr != null and not mp_mgr.players.is_empty():
-			var active_player = mp_mgr.get_active_player()
-			reduction = active_player.get("shot_reduction", 0.0)
-		else:
-			var val = player_node.get("current_shot_reduction")
-			reduction = val if val != null else 0.0
+	if not shot_was_from_teebox:
+		if player_node != null:
+			var mp_mgr = get_node_or_null("/root/MultiplayerManager")
+			if mp_mgr != null and not mp_mgr.players.is_empty():
+				var active_player = mp_mgr.get_active_player()
+				reduction = active_player.get("shot_reduction", 0.0)
+			else:
+				var val = player_node.get("current_shot_reduction")
+				reduction = val if val != null else 0.0
 
 	if reduction > 0.0:
 		var prev_speed = speed_mph

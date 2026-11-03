@@ -26,7 +26,13 @@ var course_graphics_version: int = 1
 var _current_config_path: String = ""
 
 
-func initialize(scene_path: String, config_path: String) -> void:
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel"):
+		if SceneManager != null:
+			SceneManager.change_scene("res://Courses/CourseSelector/course_selector.tscn")
+
+
+func initialize(scene_path: String, config_path: String) -> bool:
 	# 0% - 4%: Reading course configuration
 	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
 		SceneManager.set_loading_stage(0.0, "Reading course configuration...", 4.0)
@@ -45,14 +51,16 @@ func initialize(scene_path: String, config_path: String) -> void:
 		var packed := load(scene_path) as PackedScene
 		if packed == null:
 			push_error("[CourseManager] Could not load course scene: %s" % scene_path)
-			return
+			_show_load_error(scene_path, "Could not load scene resource")
+			return false
 		var course_scene := packed.instantiate()
 		if course_scene == null:
 			push_error("[CourseManager] Could not instantiate course scene: %s" % scene_path)
-			return
+			_show_load_error(scene_path, "Could not instantiate course scene")
+			return false
 		add_child(course_scene)
 		_ensure_course_details(course_scene)
-		return
+		return true
 		
 	var progress_arr := []
 	while true:
@@ -62,7 +70,8 @@ func initialize(scene_path: String, config_path: String) -> void:
 			break
 		elif status == ResourceLoader.THREAD_LOAD_FAILED or status == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
 			push_error("[CourseManager] Failed to load course scene asynchronously: %s" % scene_path)
-			return
+			_show_load_error(scene_path, "Corrupted scene file or parse error")
+			return false
 		
 		var raw_p: float = float(progress_arr[0]) if progress_arr.size() > 0 else 0.0
 		var mapped_percent: float = 5.0 + (raw_p * 25.0)
@@ -82,11 +91,13 @@ func initialize(scene_path: String, config_path: String) -> void:
 	var packed = ResourceLoader.load_threaded_get(scene_path) as PackedScene
 	if packed == null:
 		push_error("[CourseManager] Could not load course scene: %s" % scene_path)
-		return
+		_show_load_error(scene_path, "Could not load scene resource")
+		return false
 	var course_scene := packed.instantiate()
 	if course_scene == null:
 		push_error("[CourseManager] Could not instantiate course scene: %s" % scene_path)
-		return
+		_show_load_error(scene_path, "Could not instantiate course scene")
+		return false
 
 	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
 		SceneManager.set_loading_stage(40.0, "Constructing scene hierarchy...", 40.0)
@@ -113,6 +124,95 @@ func initialize(scene_path: String, config_path: String) -> void:
 	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
 		SceneManager.set_loading_stage(99.0, "Finalizing terrain & graphics quality...", 99.0)
 	await get_tree().process_frame
+	return true
+
+
+func _show_load_error(scene_path: String, reason: String) -> void:
+	var course_name: String = str(course_info.get("Title", ""))
+	if course_name.is_empty():
+		var folder := scene_path.get_base_dir().get_file()
+		course_name = folder.replace("_", " ") if folder != "" else "Course"
+
+	var canvas := CanvasLayer.new()
+	canvas.layer = 120
+	add_child(canvas)
+
+	var bg := ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.06, 0.08, 0.1, 0.96)
+	canvas.add_child(bg)
+
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	canvas.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(560, 300)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.12, 0.15, 0.19, 1.0)
+	sb.border_color = Color(0.85, 0.3, 0.3, 0.8)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(12)
+	sb.content_margin_left = 28
+	sb.content_margin_right = 28
+	sb.content_margin_top = 28
+	sb.content_margin_bottom = 28
+	panel.add_theme_stylebox_override("panel", sb)
+	center.add_child(panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	panel.add_child(vbox)
+
+	var title_lbl := Label.new()
+	title_lbl.text = "Failed to Load Course"
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 24)
+	title_lbl.add_theme_color_override("font_color", Color(1.0, 0.45, 0.45))
+	vbox.add_child(title_lbl)
+
+	var course_lbl := Label.new()
+	course_lbl.text = course_name
+	course_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	course_lbl.add_theme_font_size_override("font_size", 18)
+	course_lbl.add_theme_color_override("font_color", Color(0.9, 0.92, 0.95))
+	vbox.add_child(course_lbl)
+
+	var desc_lbl := Label.new()
+	desc_lbl.text = "The course file is corrupted or could not be loaded (%s).\n\nPlease try redownloading this course, or select a different course." % reason
+	desc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_lbl.custom_minimum_size = Vector2(480, 0)
+	desc_lbl.add_theme_font_size_override("font_size", 14)
+	desc_lbl.add_theme_color_override("font_color", Color(0.75, 0.78, 0.82))
+	vbox.add_child(desc_lbl)
+
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 8)
+	vbox.add_child(spacer)
+
+	var btn_row := HBoxContainer.new()
+	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_row.add_theme_constant_override("separation", 24)
+	vbox.add_child(btn_row)
+
+	var btn_courses := Button.new()
+	btn_courses.text = "Course Selection (Esc)"
+	btn_courses.custom_minimum_size = Vector2(200, 44)
+	btn_courses.pressed.connect(func():
+		if SceneManager != null:
+			SceneManager.change_scene("res://Courses/CourseSelector/course_selector.tscn")
+	)
+	btn_row.add_child(btn_courses)
+
+	var btn_menu := Button.new()
+	btn_menu.text = "Main Menu"
+	btn_menu.custom_minimum_size = Vector2(160, 44)
+	btn_menu.pressed.connect(func():
+		if SceneManager != null:
+			SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")
+	)
+	btn_row.add_child(btn_menu)
 
 
 func _ensure_course_details(course_scene: Node) -> void:

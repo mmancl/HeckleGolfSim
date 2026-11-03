@@ -215,5 +215,38 @@ func _initialize() -> void:
 	dummy_course.free()
 	print("  PASS: Course marker updates, dynamic quality toggling, and driving range bypass verified.")
 
+	# Sub-test 8: Ground elevation adherence and obstacle filtering
+	print("\n--- Sub-test 8: Height Sampling, Obstacle Avoidance & Elevation Clamp ---")
+	var test_height_course = Node3D.new()
+	test_height_course.name = "TestHeightCourse"
+	root.add_child(test_height_course)
+
+	# Mock elevation provider: returns y = 15.0 at tee center, but has an obstacle spike of y = 35.0 nearby
+	var height_func = func(x: float, z: float) -> float:
+		# Simulate a localized spike or floating collider artifact 20m above ground
+		if absf(x - 50.0) < 3.0 and z > 1.0:
+			return 35.0
+		return 15.0
+
+	var test_cluster = TeeboxMarkerBuilder.build_single_teebox_cluster(
+		["Blue"],
+		Vector3(50.0, 15.0, 0.0),
+		Vector3(150.0, 15.0, 0.0),
+		Callable(height_func)
+	)
+	assert(test_cluster != null, "Cluster must build")
+	var sub8_left = test_cluster.get_node_or_null("LeftMarker_Blue")
+	var sub8_right = test_cluster.get_node_or_null("RightMarker_Blue")
+	var sub8_caddy = test_cluster.get_node_or_null("DivotBucket")
+	assert(sub8_left != null and sub8_right != null and sub8_caddy != null, "All cluster components must exist")
+
+	# Right marker would sample in the anomaly zone (z > 1.0), sanity check must clamp/fall back to tee center y
+	assert(absf(sub8_right.position.y - TeeboxMarkerBuilder.SPHERE_RADIUS) < 0.01, "Right marker must not float at y=35, must remain near ground (relative ~SPHERE_RADIUS)")
+	assert(absf(sub8_left.position.y - TeeboxMarkerBuilder.SPHERE_RADIUS) < 0.01, "Left marker must remain at ground height")
+	assert(absf(sub8_caddy.position.y - (TeeboxMarkerBuilder.CADDY_HEIGHT * 0.5)) < 0.01, "Divot caddy must remain grounded")
+	test_cluster.queue_free()
+	test_height_course.free()
+	print("  PASS: Height anomaly clamping and grounded positioning verified.")
+
 	print("\nALL CIRCULAR TEE MARKER & SLATTED DIVOT BOX TESTS PASSED! 🎉")
 	quit(0)

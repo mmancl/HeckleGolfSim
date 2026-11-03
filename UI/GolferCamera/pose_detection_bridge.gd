@@ -50,7 +50,7 @@ const CAM_SELECT_URL: String = "http://127.0.0.1:49154/camera/select"
 const CAM_CAPTURE_URL: String = "http://127.0.0.1:49154/camera/capture"
 
 const MAX_HEALTH_RETRIES: int = 15
-const FRAME_INTERVAL: float = 0.04  # ~25 FPS cap for desktop camera streaming
+const FRAME_INTERVAL: float = 0.033  # ~30 FPS cap for desktop camera streaming
 
 
 func _ready() -> void:

@@ -100,6 +100,7 @@ static func is_pga_tour_course(course: Dictionary) -> bool:
 @onready var bunkers_3d_check: CheckBox = %Bunkers3dCheck
 @onready var roads_buildings_check: CheckBox = %RoadsBuildingsCheck
 var _current_preset: String = "medium"
+var _preset_settings: Dictionary = {}
 @onready var hole_count_card: PanelContainer = %HoleCountCard
 @onready var tag_filter_card: PanelContainer = %TagFilterCard
 @onready var btn_9_hole: Button = %Btn9Hole
@@ -203,11 +204,11 @@ func _ready() -> void:
 	if cart_paths_check != null:
 		cart_paths_check.toggled.connect(_on_generation_option_changed)
 	if water_long_grass_check != null:
-		water_long_grass_check.toggled.connect(func(_p): _save_search_settings())
+		water_long_grass_check.toggled.connect(_on_generation_option_changed)
 	if permutations_18_hole_check != null:
-		permutations_18_hole_check.toggled.connect(func(_p): _save_search_settings())
+		permutations_18_hole_check.toggled.connect(_on_generation_option_changed)
 	if bunkers_3d_check != null:
-		bunkers_3d_check.toggled.connect(func(_p): _save_search_settings())
+		bunkers_3d_check.toggled.connect(_on_generation_option_changed)
 	if roads_buildings_check != null:
 		roads_buildings_check.toggled.connect(_on_generation_option_changed)
 
@@ -807,56 +808,94 @@ func _update_hole_buttons_visual() -> void:
 		ThemeManager.apply_nav_button_style(btn_all_holes, 6)
 
 
+func _get_default_preset_settings() -> Dictionary:
+	return {
+		"low": {
+			"max_trees": 1000.0,
+			"generate_water_long_grass": false,
+			"generate_bushes": false,
+			"generate_cart_paths": false,
+			"generate_3d_bunkers": true,
+			"generate_roads_buildings": false,
+			"create_18_hole_permutations": false,
+		},
+		"medium": {
+			"max_trees": 2500.0,
+			"generate_water_long_grass": true,
+			"generate_bushes": true,
+			"generate_cart_paths": true,
+			"generate_3d_bunkers": true,
+			"generate_roads_buildings": true,
+			"create_18_hole_permutations": false,
+		},
+		"high": {
+			"max_trees": 6000.0,
+			"generate_water_long_grass": true,
+			"generate_bushes": true,
+			"generate_cart_paths": true,
+			"generate_3d_bunkers": true,
+			"generate_roads_buildings": true,
+			"create_18_hole_permutations": false,
+		}
+	}
+
+
+func _save_ui_to_preset(preset: String) -> void:
+	if preset.is_empty():
+		preset = "medium"
+	if not _preset_settings.has(preset):
+		_preset_settings[preset] = {}
+	if tree_count_spin_box != null:
+		_preset_settings[preset]["max_trees"] = float(tree_count_spin_box.value)
+	if water_long_grass_check != null:
+		_preset_settings[preset]["generate_water_long_grass"] = water_long_grass_check.button_pressed
+	if permutations_18_hole_check != null:
+		_preset_settings[preset]["create_18_hole_permutations"] = permutations_18_hole_check.button_pressed
+	if bushes_check != null:
+		_preset_settings[preset]["generate_bushes"] = bushes_check.button_pressed
+	if cart_paths_check != null:
+		_preset_settings[preset]["generate_cart_paths"] = cart_paths_check.button_pressed
+	if bunkers_3d_check != null:
+		_preset_settings[preset]["generate_3d_bunkers"] = bunkers_3d_check.button_pressed
+	if roads_buildings_check != null:
+		_preset_settings[preset]["generate_roads_buildings"] = roads_buildings_check.button_pressed
+
+
+func _load_preset_to_ui(preset: String) -> void:
+	if preset.is_empty():
+		preset = "medium"
+	if not _preset_settings.has(preset):
+		return
+	var ps: Dictionary = _preset_settings[preset]
+	if tree_count_spin_box != null and ps.has("max_trees"):
+		tree_count_spin_box.value = float(ps["max_trees"])
+	if water_long_grass_check != null and ps.has("generate_water_long_grass"):
+		water_long_grass_check.button_pressed = bool(ps["generate_water_long_grass"])
+	if permutations_18_hole_check != null and ps.has("create_18_hole_permutations"):
+		permutations_18_hole_check.button_pressed = bool(ps["create_18_hole_permutations"])
+	if bushes_check != null and ps.has("generate_bushes"):
+		bushes_check.button_pressed = bool(ps["generate_bushes"])
+	if cart_paths_check != null and ps.has("generate_cart_paths"):
+		cart_paths_check.button_pressed = bool(ps["generate_cart_paths"])
+	if bunkers_3d_check != null and ps.has("generate_3d_bunkers"):
+		bunkers_3d_check.button_pressed = bool(ps["generate_3d_bunkers"])
+	if roads_buildings_check != null and ps.has("generate_roads_buildings"):
+		roads_buildings_check.button_pressed = bool(ps["generate_roads_buildings"])
+
+
 func _apply_preset(preset: String) -> void:
+	if preset == _current_preset:
+		_update_preset_buttons_visual()
+		return
+	_save_ui_to_preset(_current_preset)
 	_current_preset = preset
-	match preset:
-		"low":
-			if tree_count_spin_box != null:
-				tree_count_spin_box.value = 1000.0
-			if bushes_check != null:
-				bushes_check.button_pressed = false
-			if cart_paths_check != null:
-				cart_paths_check.button_pressed = false
-			if roads_buildings_check != null:
-				roads_buildings_check.button_pressed = false
-		"medium":
-			if tree_count_spin_box != null:
-				tree_count_spin_box.value = 2500.0
-			if bushes_check != null:
-				bushes_check.button_pressed = true
-			if cart_paths_check != null:
-				cart_paths_check.button_pressed = true
-			if roads_buildings_check != null:
-				roads_buildings_check.button_pressed = true
-		"high":
-			if tree_count_spin_box != null:
-				tree_count_spin_box.value = 6000.0
-			if bushes_check != null:
-				bushes_check.button_pressed = true
-			if cart_paths_check != null:
-				cart_paths_check.button_pressed = true
-			if roads_buildings_check != null:
-				roads_buildings_check.button_pressed = true
+	_load_preset_to_ui(_current_preset)
 	_update_preset_buttons_visual()
 	_save_search_settings()
 
 
-func _detect_preset_from_values() -> String:
-	var t = int(tree_count_spin_box.value) if tree_count_spin_box != null else 2500
-	var b = bushes_check.button_pressed if bushes_check != null else true
-	var c = cart_paths_check.button_pressed if cart_paths_check != null else true
-	var rb = roads_buildings_check.button_pressed if roads_buildings_check != null else true
-	if t == 6000 and b == true and c == true and rb == true:
-		return "high"
-	elif t == 2500 and b == true and c == true and rb == true:
-		return "medium"
-	elif t == 1000 and b == false and c == false and rb == false:
-		return "low"
-	return ""
-
-
 func _on_generation_option_changed(_val = null) -> void:
-	_current_preset = _detect_preset_from_values()
+	_save_ui_to_preset(_current_preset)
 	_update_preset_buttons_visual()
 	_save_search_settings()
 
@@ -866,7 +905,7 @@ func _update_preset_buttons_visual() -> void:
 		return
 	var active = _current_preset
 	if active.is_empty():
-		active = _detect_preset_from_values()
+		active = "medium"
 		_current_preset = active
 
 	btn_preset_low.set_pressed_no_signal(active == "low")
@@ -908,14 +947,9 @@ func _on_reset_defaults_pressed() -> void:
 		force_online_check.button_pressed = false
 
 	var is_mobile_platform := OS.get_name() == "Android" or OS.get_name() == "iOS"
-	_apply_preset("medium" if is_mobile_platform else "high")
-	if water_long_grass_check != null:
-		water_long_grass_check.button_pressed = true
-	if permutations_18_hole_check != null:
-		permutations_18_hole_check.button_pressed = false
-	if bunkers_3d_check != null:
-		bunkers_3d_check.button_pressed = true
-
+	_preset_settings = _get_default_preset_settings()
+	_current_preset = "medium" if is_mobile_platform else "high"
+	_load_preset_to_ui(_current_preset)
 	_update_hole_buttons_visual()
 	_update_preset_buttons_visual()
 	_save_search_settings()
@@ -925,8 +959,8 @@ func _on_reset_defaults_pressed() -> void:
 
 func _load_search_settings() -> void:
 	var is_mobile_platform := OS.get_name() == "Android" or OS.get_name() == "iOS"
-	var default_trees := 2500.0 if is_mobile_platform else 6000.0
 	var default_preset := "medium" if is_mobile_platform else "high"
+	_preset_settings = _get_default_preset_settings()
 
 	var cfg = ConfigFile.new()
 	var err = cfg.load(SETTINGS_FILE)
@@ -956,20 +990,15 @@ func _load_search_settings() -> void:
 			force_online_check.button_pressed = cfg.get_value("search_filter", "force_online", false)
 
 		_current_preset = cfg.get_value("course_generation", "preset", default_preset)
-		if tree_count_spin_box != null:
-			tree_count_spin_box.value = float(cfg.get_value("course_generation", "max_trees", default_trees))
-		if water_long_grass_check != null:
-			water_long_grass_check.button_pressed = bool(cfg.get_value("course_generation", "generate_water_long_grass", true))
-		if permutations_18_hole_check != null:
-			permutations_18_hole_check.button_pressed = bool(cfg.get_value("course_generation", "create_18_hole_permutations", false))
-		if bushes_check != null:
-			bushes_check.button_pressed = bool(cfg.get_value("course_generation", "generate_bushes", true))
-		if cart_paths_check != null:
-			cart_paths_check.button_pressed = bool(cfg.get_value("course_generation", "generate_cart_paths", true))
-		if bunkers_3d_check != null:
-			bunkers_3d_check.button_pressed = bool(cfg.get_value("course_generation", "generate_3d_bunkers", true))
-		if roads_buildings_check != null:
-			roads_buildings_check.button_pressed = bool(cfg.get_value("course_generation", "generate_roads_buildings", true))
+		for p: String in ["low", "medium", "high"]:
+			var section: String = "course_generation_" + p
+			if cfg.has_section(section):
+				for key in _preset_settings[p].keys():
+					_preset_settings[p][key] = cfg.get_value(section, key, _preset_settings[p][key])
+			elif p == _current_preset and cfg.has_section("course_generation"):
+				for key in _preset_settings[p].keys():
+					_preset_settings[p][key] = cfg.get_value("course_generation", key, _preset_settings[p][key])
+		_load_preset_to_ui(_current_preset)
 		_update_preset_buttons_visual()
 	else:
 		if btn_9_hole != null: btn_9_hole.set_pressed_no_signal(true)
@@ -980,17 +1009,12 @@ func _load_search_settings() -> void:
 		if cached_only_check != null: cached_only_check.button_pressed = false
 		if force_online_check != null: force_online_check.button_pressed = false
 		_current_preset = default_preset
-		if tree_count_spin_box != null: tree_count_spin_box.value = default_trees
-		if water_long_grass_check != null: water_long_grass_check.button_pressed = true
-		if permutations_18_hole_check != null: permutations_18_hole_check.button_pressed = false
-		if bushes_check != null: bushes_check.button_pressed = true
-		if cart_paths_check != null: cart_paths_check.button_pressed = true
-		if bunkers_3d_check != null: bunkers_3d_check.button_pressed = true
-		if roads_buildings_check != null: roads_buildings_check.button_pressed = true
+		_load_preset_to_ui(_current_preset)
 		_update_preset_buttons_visual()
 
 
 func _save_search_settings() -> void:
+	_save_ui_to_preset(_current_preset)
 	var cfg = ConfigFile.new()
 	cfg.load(SETTINGS_FILE)
 	if btn_all_holes != null:
@@ -1009,20 +1033,14 @@ func _save_search_settings() -> void:
 		cfg.set_value("search_filter", "force_online", force_online_check.button_pressed)
 
 	cfg.set_value("course_generation", "preset", _current_preset)
-	if tree_count_spin_box != null:
-		cfg.set_value("course_generation", "max_trees", int(tree_count_spin_box.value))
-	if water_long_grass_check != null:
-		cfg.set_value("course_generation", "generate_water_long_grass", water_long_grass_check.button_pressed)
-	if permutations_18_hole_check != null:
-		cfg.set_value("course_generation", "create_18_hole_permutations", permutations_18_hole_check.button_pressed)
-	if bushes_check != null:
-		cfg.set_value("course_generation", "generate_bushes", bushes_check.button_pressed)
-	if cart_paths_check != null:
-		cfg.set_value("course_generation", "generate_cart_paths", cart_paths_check.button_pressed)
-	if bunkers_3d_check != null:
-		cfg.set_value("course_generation", "generate_3d_bunkers", bunkers_3d_check.button_pressed)
-	if roads_buildings_check != null:
-		cfg.set_value("course_generation", "generate_roads_buildings", roads_buildings_check.button_pressed)
+	for p: String in ["low", "medium", "high"]:
+		var section: String = "course_generation_" + p
+		var ps: Dictionary = _preset_settings[p]
+		for key in ps.keys():
+			cfg.set_value(section, key, ps[key])
+	var active_ps: Dictionary = _preset_settings.get(_current_preset, {})
+	for key in active_ps.keys():
+		cfg.set_value("course_generation", key, active_ps[key])
 	cfg.save(SETTINGS_FILE)
 
 
@@ -1298,20 +1316,43 @@ func _update_progress_status(msg: String) -> void:
 func _apply_course_generation_settings_to_loader() -> void:
 	if _loader == null:
 		return
+	_save_ui_to_preset(_current_preset)
+	_save_search_settings()
+
+	var max_trees_val := 0
+	var gen_water_grass := false
+	var perm_18 := false
+	var gen_bushes := false
+	var gen_cart_paths := false
+	var gen_bunkers := false
+	var gen_roads_buildings := false
+
+	for p in ["low", "medium", "high"]:
+		var ps: Dictionary = _preset_settings.get(p, {})
+		max_trees_val = maxi(max_trees_val, int(ps.get("max_trees", 2000)))
+		if bool(ps.get("generate_water_long_grass", false)): gen_water_grass = true
+		if bool(ps.get("create_18_hole_permutations", false)): perm_18 = true
+		if bool(ps.get("generate_bushes", false)): gen_bushes = true
+		if bool(ps.get("generate_cart_paths", false)): gen_cart_paths = true
+		if bool(ps.get("generate_3d_bunkers", false)): gen_bunkers = true
+		if bool(ps.get("generate_roads_buildings", false)): gen_roads_buildings = true
+
 	if "MaxTrees" in _loader:
-		_loader.set("MaxTrees", int(tree_count_spin_box.value) if tree_count_spin_box != null else 2000)
+		_loader.set("MaxTrees", max_trees_val)
 	if "GenerateWaterLongGrass" in _loader:
-		_loader.set("GenerateWaterLongGrass", water_long_grass_check.button_pressed if water_long_grass_check != null else true)
+		_loader.set("GenerateWaterLongGrass", gen_water_grass)
 	if "Create18HolePermutations" in _loader:
-		_loader.set("Create18HolePermutations", permutations_18_hole_check.button_pressed if permutations_18_hole_check != null else false)
+		_loader.set("Create18HolePermutations", perm_18)
 	if "GenerateBushes" in _loader:
-		_loader.set("GenerateBushes", bushes_check.button_pressed if bushes_check != null else true)
+		_loader.set("GenerateBushes", gen_bushes)
 	if "GenerateCartPaths" in _loader:
-		_loader.set("GenerateCartPaths", cart_paths_check.button_pressed if cart_paths_check != null else true)
+		_loader.set("GenerateCartPaths", gen_cart_paths)
 	if "Generate3dBunkers" in _loader:
-		_loader.set("Generate3dBunkers", bunkers_3d_check.button_pressed if bunkers_3d_check != null else true)
+		_loader.set("Generate3dBunkers", gen_bunkers)
 	if "GenerateRoadsAndBuildings" in _loader:
-		_loader.set("GenerateRoadsAndBuildings", roads_buildings_check.button_pressed if roads_buildings_check != null else true)
+		_loader.set("GenerateRoadsAndBuildings", gen_roads_buildings)
+	if "GraphicPresetSettings" in _loader:
+		_loader.set("GraphicPresetSettings", _preset_settings)
 	if "HasCustomGenerationSettings" in _loader:
 		_loader.set("HasCustomGenerationSettings", true)
 

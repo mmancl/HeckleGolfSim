@@ -4936,9 +4936,12 @@ func record_remote_shot(event: Dictionary) -> void:
 				set_current_pin_position(pin_vec)
 
 	var gimme_strokes := int(event.get("gimme_strokes", 0))
-	if gimme_strokes > 0:
-		last_gimme_strokes = gimme_strokes
-		emit_signal("gimme_awarded", target_p, gimme_strokes)
+	if gimme_strokes > 0 or bool(event.get("holed_out", false)):
+		target_p["holed_out"] = true
+		if gimme_strokes > 0:
+			last_gimme_strokes = gimme_strokes
+			target_p["last_gimme_strokes"] = gimme_strokes
+			emit_signal("gimme_awarded", target_p, gimme_strokes)
 
 	emit_signal("shot_recorded", target_p, {})
 	emit_signal("distance_queue_updated")

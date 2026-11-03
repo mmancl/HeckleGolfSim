@@ -7,12 +7,15 @@ func _initialize() -> void:
 
 	# --- Test 1: PoseDetectionBridge Android Camera Detection & Listing ---
 	print("\n--- Test 1: PoseDetectionBridge Android Camera Detection & Listing ---")
-	var bridge_class = load("res://UI/GolferCamera/pose_detection_bridge.gd")
-	assert(bridge_class != null, "PoseDetectionBridge class must load")
-	
-	var bridge = bridge_class.new()
-	bridge.name = "PoseDetectionBridge"
-	root.add_child(bridge)
+	var bridge = root.get_node_or_null("PoseDetectionBridge")
+	var created_bridge: bool = false
+	if bridge == null:
+		var bridge_class = load("res://UI/GolferCamera/pose_detection_bridge.gd")
+		assert(bridge_class != null, "PoseDetectionBridge class must load")
+		bridge = bridge_class.new()
+		bridge.name = "PoseDetectionBridge"
+		root.add_child(bridge)
+		created_bridge = true
 	
 	# Simulate Android platform environment
 	bridge._is_android = true
@@ -56,7 +59,10 @@ func _initialize() -> void:
 
 	# Cleanup
 	widget.queue_free()
-	bridge.queue_free()
+	if created_bridge:
+		bridge.queue_free()
+	else:
+		bridge._is_android = false
 
 	print("\n==================================================")
 	print("ALL ANDROID CAMERA ROUTING TESTS PASSED!")

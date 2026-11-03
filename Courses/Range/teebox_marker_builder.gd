@@ -464,7 +464,10 @@ static func build_single_teebox_cluster(
 		var left_world_xz := tee_center + left_rel_pos
 		var left_ground_y: float = tee_center.y
 		if height_callable.is_valid():
-			left_ground_y = float(height_callable.call(left_world_xz.x, left_world_xz.z))
+			var sampled_left_y: float = float(height_callable.call(left_world_xz.x, left_world_xz.z))
+			# Sanity check: prevent vertical divergence exceeding 3.0m from teebox center
+			if absf(sampled_left_y - tee_center.y) <= 3.0:
+				left_ground_y = sampled_left_y
 		left_rel_pos.y = (left_ground_y - tee_center.y) + SPHERE_RADIUS
 		
 		var left_marker := create_circle_marker(col_name, SPHERE_RADIUS, use_low)
@@ -478,7 +481,10 @@ static func build_single_teebox_cluster(
 		var right_world_xz := tee_center + right_rel_pos
 		var right_ground_y: float = tee_center.y
 		if height_callable.is_valid():
-			right_ground_y = float(height_callable.call(right_world_xz.x, right_world_xz.z))
+			var sampled_right_y: float = float(height_callable.call(right_world_xz.x, right_world_xz.z))
+			# Sanity check: prevent vertical divergence exceeding 3.0m from teebox center
+			if absf(sampled_right_y - tee_center.y) <= 3.0:
+				right_ground_y = sampled_right_y
 		right_rel_pos.y = (right_ground_y - tee_center.y) + SPHERE_RADIUS
 		
 		var right_marker := create_circle_marker(col_name, SPHERE_RADIUS, use_low)
@@ -493,7 +499,10 @@ static func build_single_teebox_cluster(
 	var bucket_world_xz := tee_center + bucket_rel_pos
 	var bucket_ground_y: float = tee_center.y
 	if height_callable.is_valid():
-		bucket_ground_y = float(height_callable.call(bucket_world_xz.x, bucket_world_xz.z))
+		var sampled_bucket_y: float = float(height_callable.call(bucket_world_xz.x, bucket_world_xz.z))
+		# Sanity check: prevent vertical divergence exceeding 3.0m from teebox center
+		if absf(sampled_bucket_y - tee_center.y) <= 3.0:
+			bucket_ground_y = sampled_bucket_y
 	bucket_rel_pos.y = (bucket_ground_y - tee_center.y) + (CADDY_HEIGHT * 0.5)
 	
 	var divot_bucket := create_divot_bucket(use_low)
@@ -526,11 +535,13 @@ static func update_course_teebox_markers(
 	if course_node.get("is_driving_range") == true or (course_node.has_meta("is_driving_range") and course_node.get_meta("is_driving_range") == true):
 		return null
 		
-	# Remove any previous TeeboxMarkers container
+	# Remove any previous TeeboxMarkers container immediately from parent
+	# and disable physics/colliders so subsequent raycasts don't hit them
 	var existing = course_node.get_node_or_null("TeeboxMarkers")
 	if existing != null:
-		existing.queue_free()
+		course_node.remove_child(existing)
 		existing.name = "TeeboxMarkers_Old"
+		existing.queue_free()
 		
 	var root_container := Node3D.new()
 	root_container.name = "TeeboxMarkers"

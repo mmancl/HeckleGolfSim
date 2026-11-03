@@ -76,12 +76,11 @@ func get_graphics_quality() -> String:
 	return MobilePerformance.get_default_graphics_quality()
 
 
-## Roads, clubhouses, houses, and other surrounding buildings are only shown on
-## High graphics quality (never on mobile).
+## Roads, clubhouses, houses, and other surrounding buildings are shown on
+## graphics qualities where enabled in download/generation settings (Medium and High by default).
 func is_surrounding_features_enabled() -> bool:
-	if MobilePerformance.is_mobile():
-		return false
-	return get_graphics_quality() == "High"
+	var q = get_graphics_quality()
+	return MobilePerformance.is_surrounding_features_enabled_for_quality(null, q)
 
 
 func _on_root_child_entered_tree(node: Node) -> void:

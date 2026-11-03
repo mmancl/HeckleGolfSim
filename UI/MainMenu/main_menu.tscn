@@ -13,6 +13,7 @@
 [ext_resource type="Texture2D" uid="uid://li2ev4hci02e" path="res://UI/MainMenu/images/credits.svg" id="11_credits_icon"]
 [ext_resource type="Texture2D" uid="uid://b7kff328e3nra" path="res://UI/MainMenu/images/discord.svg" id="12_discord_icon"]
 [ext_resource type="Texture2D" uid="uid://baukk811fp3ba" path="res://UI/MainMenu/images/youtube.svg" id="13_youtube_icon"]
+[ext_resource type="Texture2D" path="res://UI/MainMenu/images/community.svg" id="14_community_icon"]
 [ext_resource type="Texture2D" uid="uid://b4bt3gln7pska" path="res://assets/images/menu/putting.jpg" id="14_multiplayer_img"]
 [ext_resource type="Texture2D" uid="uid://fp2c1y6hditp" path="res://assets/images/menu/closest_to_pin.jpg" id="15_leaderboards_img"]
 
@@ -231,6 +232,27 @@ theme_override_styles/hover = SubResource("StyleBoxFlat_iau2q")
 theme_override_styles/disabled = SubResource("StyleBoxEmpty_u0e1r")
 theme_override_styles/focus = SubResource("StyleBoxEmpty_ejg71")
 icon = ExtResource("13_youtube_icon")
+icon_alignment = 1
+expand_icon = true
+
+[node name="CommunityButton" type="Button" parent="VerticalLayout/TopStrip/HBoxContainer" unique_id=1316645990]
+custom_minimum_size = Vector2(52, 52)
+layout_mode = 2
+size_flags_vertical = 4
+tooltip_text = "Player Portal Community"
+theme_override_colors/font_color = Color(0.875, 0.875, 0.875, 1)
+theme_override_colors/font_pressed_color = Color(1, 1, 1, 1)
+theme_override_colors/font_hover_color = Color(0.95, 0.95, 0.95, 1)
+theme_override_colors/icon_normal_color = Color(1, 1, 1, 1)
+theme_override_colors/icon_pressed_color = Color(1, 1, 1, 1)
+theme_override_colors/icon_hover_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = SubResource("StyleBoxEmpty_bddxb")
+theme_override_styles/pressed = SubResource("StyleBoxEmpty_iau2q")
+theme_override_styles/hover = SubResource("StyleBoxFlat_iau2q")
+theme_override_styles/disabled = SubResource("StyleBoxEmpty_u0e1r")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_ejg71")
+icon = ExtResource("14_community_icon")
 icon_alignment = 1
 expand_icon = true
 

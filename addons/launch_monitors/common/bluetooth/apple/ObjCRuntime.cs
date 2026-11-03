@@ -56,6 +56,9 @@ internal static class ObjCRuntime
     [DllImport(LibSystem, EntryPoint = "dlopen")]
     public static extern IntPtr dlopen(string path, int mode);
 
+    [DllImport(LibSystem, EntryPoint = "dlsym")]
+    public static extern IntPtr dlsym(IntPtr handle, [MarshalAs(UnmanagedType.LPUTF8Str)] string symbol);
+
     [DllImport(LibObjC, EntryPoint = "objc_getClass")]
     public static extern IntPtr objc_getClass(string name);
 
@@ -177,6 +180,10 @@ internal static class ObjCRuntime
                 {
                     cbHandle = dlopen("/System/Library/Frameworks/CoreBluetooth.framework/Versions/Current/CoreBluetooth", flags);
                 }
+                if (cbHandle != IntPtr.Zero)
+                {
+                    _cbHandle = cbHandle;
+                }
             }
             catch
             {
@@ -184,6 +191,38 @@ internal static class ObjCRuntime
 
             _frameworksLoaded = true;
         }
+    }
+
+    private static IntPtr _cbHandle = IntPtr.Zero;
+    public static IntPtr CoreBluetoothHandle => _cbHandle;
+
+    public static IntPtr GetExportedNSString(IntPtr libraryHandle, string symbolName)
+    {
+        try
+        {
+            IntPtr symbolPtr = IntPtr.Zero;
+            if (libraryHandle != IntPtr.Zero)
+            {
+                symbolPtr = dlsym(libraryHandle, symbolName);
+            }
+            if (symbolPtr == IntPtr.Zero)
+            {
+                // RTLD_DEFAULT on Apple is ((void *) -2)
+                symbolPtr = dlsym(new IntPtr(-2), symbolName);
+            }
+            if (symbolPtr != IntPtr.Zero)
+            {
+                IntPtr nsStringVal = Marshal.ReadIntPtr(symbolPtr);
+                if (nsStringVal != IntPtr.Zero)
+                {
+                    return nsStringVal;
+                }
+            }
+        }
+        catch
+        {
+        }
+        return IntPtr.Zero;
     }
 
     public static IntPtr CreateNSString(string str)
@@ -250,8 +289,17 @@ internal static class ObjCRuntime
         IntPtr nsNumberClass = objc_getClass("NSNumber");
         if (nsDictClass == IntPtr.Zero || nsNumberClass == IntPtr.Zero) return IntPtr.Zero;
 
-        IntPtr numBool = objc_msgSend_int(nsNumberClass, sel_registerName("numberWithInt:"), allowDuplicates ? 1 : 0);
-        IntPtr keyAllowDuplicates = CreateNSString("kCBScanOptionAllowDuplicates");
+        IntPtr numBool = objc_msgSend_bool(nsNumberClass, sel_registerName("numberWithBool:"), allowDuplicates ? (byte)1 : (byte)0);
+        if (numBool == IntPtr.Zero)
+        {
+            numBool = objc_msgSend_int(nsNumberClass, sel_registerName("numberWithInt:"), allowDuplicates ? 1 : 0);
+        }
+
+        IntPtr keyAllowDuplicates = GetExportedNSString(_cbHandle, "CBCentralManagerScanOptionAllowDuplicatesKey");
+        if (keyAllowDuplicates == IntPtr.Zero)
+        {
+            keyAllowDuplicates = CreateNSString("kCBScanOptionAllowDuplicates");
+        }
 
         if (numBool == IntPtr.Zero || keyAllowDuplicates == IntPtr.Zero) return IntPtr.Zero;
 

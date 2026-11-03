@@ -42,6 +42,7 @@ var match_golfers: Dictionary = {}
 var local_scene_path: String = ""
 var local_config_path: String = ""
 var is_local_course_ready: bool = false
+var is_local_course_downloading: bool = false
 var is_local_device_ready: bool = false
 
 var _saved_local_settings: Dictionary = {}
@@ -228,6 +229,7 @@ func create_lobby(course_config_path: String, settings: Dictionary, visibility: 
 				"joined_at": now,
 				"last_seen": now,
 				"course_ready": true,
+				"course_downloading": false,
 				"ready": true
 			}
 		},
@@ -327,6 +329,7 @@ func create_lobby(course_config_path: String, settings: Dictionary, visibility: 
 	local_scene_path = course_info.scene_path
 	local_config_path = course_info.config_path
 	is_local_course_ready = true
+	is_local_course_downloading = false
 	is_local_device_ready = true
 	_match_started_emitted = false
 
@@ -413,6 +416,9 @@ func start_online_match() -> Dictionary:
 		var last_seen := float(dev.get("last_seen", 0.0))
 		if (now - last_seen) < 120.0:
 			if not bool(dev.get("course_ready", false)):
+				if bool(dev.get("course_downloading", false)):
+					var dev_name = str(dev.get("device_name", "A player"))
+					return {"ok": false, "error": "%s is currently downloading the course." % dev_name}
 				return {"ok": false, "error": "Not all players have the required course installed."}
 			if not bool(dev.get("ready", false)):
 				return {"ok": false, "error": "Not all players are ready."}
@@ -571,8 +577,7 @@ func spectate_match(match_id: String) -> Dictionary:
 
 	var expected_fingerprint: String = str(course.get("fingerprint", ""))
 	if not expected_fingerprint.is_empty() and str(found.get("fingerprint", "")) != expected_fingerprint:
-		course_install_required.emit(course, "fingerprint_mismatch")
-		return {"ok": false, "error": "Course version mismatch.", "need_course": true, "course": course}
+		push_warning("[OnlineSession] Spectating course '%s' with geometry fingerprint difference." % title)
 
 	local_scene_path = str(found.get("scene_path", ""))
 	local_config_path = str(found.get("config_path", ""))
@@ -648,11 +653,23 @@ func _join_match_internal(match_id: String, local_golfers: Array) -> Dictionary:
 	var my_uid := _get_my_uid()
 	var my_name := _get_my_display_name()
 
+	var course: Dictionary = meta.get("course", {})
+	var course_key: String = course.get("key", "")
+	var lat: float = float(course.get("lat", 0.0))
+	var lon: float = float(course.get("lon", 0.0))
+	var title: String = course.get("title", "")
+	var found := CourseFingerprint.find_installed_course(course_key, lat, lon, title)
+	var initial_course_ready := not found.is_empty()
+	if initial_course_ready:
+		local_scene_path = str(found.get("scene_path", ""))
+		local_config_path = str(found.get("config_path", ""))
+
 	var dev_payload := {
 		"device_name": my_name,
 		"joined_at": now,
 		"last_seen": now,
-		"course_ready": false,
+		"course_ready": initial_course_ready,
+		"course_downloading": false,
 		"ready": false
 	}
 	await client.put_path("matches/" + match_id + "/devices/" + my_uid, dev_payload)
@@ -689,7 +706,8 @@ func _join_match_internal(match_id: String, local_golfers: Array) -> Dictionary:
 	match_meta = meta
 	match_devices = devices
 	match_golfers = golfers
-	is_local_course_ready = false
+	is_local_course_ready = initial_course_ready
+	is_local_course_downloading = false
 	is_local_device_ready = false
 	_match_started_emitted = false
 
@@ -697,7 +715,6 @@ func _join_match_internal(match_id: String, local_golfers: Array) -> Dictionary:
 	_start_heartbeat()
 
 	# Course Verification (§4.5)
-	var course: Dictionary = meta.get("course", {})
 	_verify_local_course(course)
 
 	lobby_updated.emit(match_meta, match_devices, match_golfers)
@@ -712,25 +729,47 @@ func _verify_local_course(course: Dictionary) -> void:
 	var expected_fp: String = course.get("fingerprint", "")
 
 	var found := CourseFingerprint.find_installed_course(course_key, lat, lon, title)
-	if not found.is_empty() and found.get("fingerprint", "") == expected_fp:
-		set_local_course_ready(true, found.get("scene_path", ""), found.get("config_path", ""))
+	if not found.is_empty():
+		var found_fp: String = str(found.get("fingerprint", ""))
+		if expected_fp.is_empty() or found_fp == expected_fp:
+			set_local_course_ready(true, found.get("scene_path", ""), found.get("config_path", ""))
+		else:
+			push_warning("[OnlineSession] Course '%s' installed with geometry fingerprint difference (local: %s, host: %s). Allowing match play." % [title, found_fp, expected_fp])
+			set_local_course_ready(true, found.get("scene_path", ""), found.get("config_path", ""))
 	else:
-		var reason := "missing" if found.is_empty() else "fingerprint_mismatch"
 		set_local_course_ready(false, "", "")
-		course_install_required.emit(course, reason)
+		course_install_required.emit(course, "missing")
 
 
 func set_local_course_ready(ready: bool, scene_path: String = "", config_path: String = "") -> void:
 	is_local_course_ready = ready
 	local_scene_path = scene_path
 	local_config_path = config_path
+	if ready:
+		is_local_course_downloading = false
 
 	if is_online_match and not current_match_id.is_empty():
 		var my_uid := _get_my_uid()
 		var client := _resolve_rtdb()
-		client.patch_path("matches/" + current_match_id + "/devices/" + my_uid, {"course_ready": ready})
+		var patch_data: Dictionary = {"course_ready": ready}
+		if ready:
+			patch_data["course_downloading"] = false
+		client.patch_path("matches/" + current_match_id + "/devices/" + my_uid, patch_data)
 		if match_devices.has(my_uid):
 			match_devices[my_uid]["course_ready"] = ready
+			if ready:
+				match_devices[my_uid]["course_downloading"] = false
+			lobby_updated.emit(match_meta, match_devices, match_golfers)
+
+
+func set_local_course_downloading(downloading: bool) -> void:
+	is_local_course_downloading = downloading
+	if is_online_match and not is_spectator and not current_match_id.is_empty():
+		var my_uid := _get_my_uid()
+		var client := _resolve_rtdb()
+		client.patch_path("matches/" + current_match_id + "/devices/" + my_uid, {"course_downloading": downloading})
+		if match_devices.has(my_uid):
+			match_devices[my_uid]["course_downloading"] = downloading
 			lobby_updated.emit(match_meta, match_devices, match_golfers)
 
 
@@ -831,6 +870,7 @@ func leave_lobby() -> void:
 	match_devices.clear()
 	match_golfers.clear()
 	is_local_course_ready = false
+	is_local_course_downloading = false
 	is_local_device_ready = false
 
 	if was_spec:
@@ -902,12 +942,24 @@ func _close_stream() -> void:
 		_stream = null
 
 
+func _preserve_local_device_state() -> void:
+	var my_uid := _get_my_uid()
+	if is_online_match and not my_uid.is_empty() and match_devices.has(my_uid):
+		if is_local_course_ready:
+			match_devices[my_uid]["course_ready"] = true
+		if is_local_course_downloading:
+			match_devices[my_uid]["course_downloading"] = true
+		if is_local_device_ready:
+			match_devices[my_uid]["ready"] = true
+
+
 func _on_stream_put(path: String, data: Variant) -> void:
 	var clean_path := path.strip_edges().trim_prefix("/")
 	if clean_path.is_empty():
 		if data is Dictionary:
 			match_meta = data.get("meta", {})
 			match_devices = data.get("devices", {})
+			_preserve_local_device_state()
 			match_golfers = data.get("golfers", {})
 			if data.has("events") and data["events"] is Dictionary:
 				for k in data["events"]:
@@ -926,16 +978,33 @@ func _on_stream_put(path: String, data: Variant) -> void:
 			turn_updated.emit(data)
 	elif clean_path == "devices" and data is Dictionary:
 		match_devices = data
+		_preserve_local_device_state()
 		for dev_uid in match_devices:
 			if match_devices[dev_uid] is Dictionary:
 				device_updated.emit(str(dev_uid), match_devices[dev_uid])
 	elif clean_path.begins_with("devices/"):
-		var dev_uid := clean_path.trim_prefix("devices/")
-		if data == null:
-			match_devices.erase(dev_uid)
-		elif data is Dictionary:
-			match_devices[dev_uid] = data
-			device_updated.emit(dev_uid, data)
+		var sub := clean_path.trim_prefix("devices/")
+		var parts := sub.split("/")
+		var dev_uid := parts[0]
+		if parts.size() == 1:
+			if data == null:
+				match_devices.erase(dev_uid)
+			elif data is Dictionary:
+				match_devices[dev_uid] = data
+				if dev_uid == _get_my_uid():
+					_preserve_local_device_state()
+				device_updated.emit(dev_uid, match_devices[dev_uid])
+		elif parts.size() == 2:
+			var prop := parts[1]
+			if not match_devices.has(dev_uid):
+				match_devices[dev_uid] = {}
+			if data == null:
+				match_devices[dev_uid].erase(prop)
+			else:
+				match_devices[dev_uid][prop] = data
+			if dev_uid == _get_my_uid():
+				_preserve_local_device_state()
+			device_updated.emit(dev_uid, match_devices[dev_uid])
 	elif clean_path == "golfers" and data is Dictionary:
 		match_golfers = data
 	elif clean_path.begins_with("golfers/"):
@@ -969,6 +1038,7 @@ func _on_stream_patch(path: String, data: Variant) -> void:
 					turn_updated.emit(match_meta["turn"])
 			elif k == "devices" and data[k] is Dictionary:
 				_merge_dict(match_devices, data[k])
+				_preserve_local_device_state()
 			elif k == "golfers" and data[k] is Dictionary:
 				_merge_dict(match_golfers, data[k])
 			elif k == "events" and data[k] is Dictionary:
@@ -986,11 +1056,22 @@ func _on_stream_patch(path: String, data: Variant) -> void:
 			turn_updated.emit(data)
 	elif clean_path == "devices":
 		_merge_dict(match_devices, data)
+		_preserve_local_device_state()
 	elif clean_path.begins_with("devices/"):
-		var dev_uid := clean_path.trim_prefix("devices/")
+		var sub := clean_path.trim_prefix("devices/")
+		var parts := sub.split("/")
+		var dev_uid := parts[0]
 		if not match_devices.has(dev_uid):
 			match_devices[dev_uid] = {}
-		_merge_dict(match_devices[dev_uid], data)
+		if parts.size() == 1:
+			_merge_dict(match_devices[dev_uid], data)
+		elif parts.size() == 2:
+			var prop := parts[1]
+			if not match_devices[dev_uid].has(prop) or not (match_devices[dev_uid][prop] is Dictionary):
+				match_devices[dev_uid][prop] = {}
+			_merge_dict(match_devices[dev_uid][prop], data)
+		if dev_uid == _get_my_uid():
+			_preserve_local_device_state()
 		device_updated.emit(dev_uid, match_devices[dev_uid])
 	elif clean_path == "golfers":
 		_merge_dict(match_golfers, data)
@@ -1078,6 +1159,9 @@ func end_online_match() -> void:
 	match_meta = {}
 	match_devices = {}
 	match_golfers = {}
+	is_local_course_ready = false
+	is_local_course_downloading = false
+	is_local_device_ready = false
 	_match_started_emitted = false
 	_close_stream()
 	restore_local_settings()
