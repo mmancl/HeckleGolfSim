@@ -159,32 +159,48 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[2/3] Exporting Windows Desktop release via Godot..." -ForegroundColor Green
-$logFile = Join-Path ([System.IO.Path]::GetTempPath()) "godot_export_windows.log"
-if (Test-Path $logFile) { Remove-Item $logFile -Force -ErrorAction SilentlyContinue }
+$stdoutFile = Join-Path ([System.IO.Path]::GetTempPath()) "godot_export_windows_out.log"
+$stderrFile = Join-Path ([System.IO.Path]::GetTempPath()) "godot_export_windows_err.log"
+Remove-Item $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
 
-$exportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "Windows Desktop", $TargetExe) -RedirectStandardOutput $logFile -RedirectStandardError $logFile -PassThru
+$exportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "Windows Desktop", $TargetExe) -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile -PassThru
 $timeoutSec = 600
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-$lastLine = 0
+$lastOut = 0
+$lastErr = 0
 
 while (-not $exportProc.HasExited -and $sw.Elapsed.TotalSeconds -lt $timeoutSec) {
     Start-Sleep -Seconds 2
-    if (Test-Path $logFile) {
-        $lines = Get-Content $logFile -ErrorAction SilentlyContinue
-        if ($lines -and $lines.Count -gt $lastLine) {
-            $lines[$lastLine..($lines.Count - 1)] | ForEach-Object { Write-Host $_ }
-            $lastLine = $lines.Count
+    if (Test-Path $stdoutFile) {
+        $lines = Get-Content $stdoutFile -ErrorAction SilentlyContinue
+        if ($lines -and $lines.Count -gt $lastOut) {
+            $lines[$lastOut..($lines.Count - 1)] | ForEach-Object { Write-Host $_ }
+            $lastOut = $lines.Count
+        }
+    }
+    if (Test-Path $stderrFile) {
+        $errLines = Get-Content $stderrFile -ErrorAction SilentlyContinue
+        if ($errLines -and $errLines.Count -gt $lastErr) {
+            $errLines[$lastErr..($errLines.Count - 1)] | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
+            $lastErr = $errLines.Count
         }
     }
 }
 
 # Flush remaining output
-if (Test-Path $logFile) {
-    $lines = Get-Content $logFile -ErrorAction SilentlyContinue
-    if ($lines -and $lines.Count -gt $lastLine) {
-        $lines[$lastLine..($lines.Count - 1)] | ForEach-Object { Write-Host $_ }
+if (Test-Path $stdoutFile) {
+    $lines = Get-Content $stdoutFile -ErrorAction SilentlyContinue
+    if ($lines -and $lines.Count -gt $lastOut) {
+        $lines[$lastOut..($lines.Count - 1)] | ForEach-Object { Write-Host $_ }
     }
-    Remove-Item $logFile -Force -ErrorAction SilentlyContinue
+    Remove-Item $stdoutFile -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path $stderrFile) {
+    $errLines = Get-Content $stderrFile -ErrorAction SilentlyContinue
+    if ($errLines -and $errLines.Count -gt $lastErr) {
+        $errLines[$lastErr..($errLines.Count - 1)] | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
+    }
+    Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue
 }
 
 if (-not $exportProc.HasExited) {
