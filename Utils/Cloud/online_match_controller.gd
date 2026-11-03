@@ -119,6 +119,25 @@ func _get_my_uid() -> String:
 	return ""
 
 
+func _get_rtdb():
+	var sess := _get_online_session()
+	if sess != null:
+		if sess.has_method("get_rtdb"):
+			var client = sess.call("get_rtdb")
+			if client != null:
+				return client
+		if sess.has_method("_resolve_rtdb"):
+			var client = sess.call("_resolve_rtdb")
+			if client != null:
+				return client
+		if sess.get("rtdb") != null:
+			return sess.rtdb
+	var auth := _get_cloud_auth()
+	if auth != null and auth.get("rtdb") != null:
+		return auth.rtdb
+	return null
+
+
 func is_replaying() -> bool:
 	return _is_replaying or (_replayer != null and _replayer.is_replaying())
 
@@ -156,6 +175,10 @@ func start_online_match(match_id: String, meta: Dictionary, golfers: Array[Dicti
 		sess.match_meta = meta
 		if sess.has_method("snapshot_and_apply_match_settings"):
 			sess.snapshot_and_apply_match_settings()
+		if sess.has_signal("event_received") and not sess.event_received.is_connected(on_event_received):
+			sess.event_received.connect(on_event_received)
+		if sess.has_signal("turn_updated") and not sess.turn_updated.is_connected(_on_turn_updated):
+			sess.turn_updated.connect(_on_turn_updated)
 
 	var course_title: String = str(meta.get("course_title", "Online Course"))
 	save_active_match_file(match_id, str(meta.get("course_key", "")), course_title)
@@ -523,8 +546,12 @@ func publish_local_shot(
 	if sess_check != null and bool(sess_check.get("is_spectator")):
 		return {}
 
+	if _match_id.is_empty() and sess_check != null and not sess_check.current_match_id.is_empty():
+		_match_id = sess_check.current_match_id
+
 	var mp := _get_mp_manager()
 	if mp == null or _match_id.is_empty():
+		push_warning("[OnlineMatchController] publish_local_shot skipped: mp=%s, match_id='%s'" % [str(mp != null), _match_id])
 		return {}
 
 	var active_p: Dictionary = mp.get_active_player()
@@ -576,22 +603,38 @@ func publish_local_shot(
 
 	_last_applied_seq = seq
 
-	var sess := _get_online_session()
-	if sess != null and sess.rtdb != null:
-		var seq_key := "seq_%06d" % seq
-		sess.rtdb.put_path("matches/%s/events/%s" % [_match_id, seq_key], event_data)
+	var turn_patch := {
+		"hole_index": mp.current_hole_index,
+		"active_slot": next_slot,
+		"active_owner_uid": next_owner_uid,
+		"next_seq": seq + 1,
+		"updated_at": now
+	}
 
-		var turn_patch := {
-			"hole_index": mp.current_hole_index,
-			"active_slot": next_slot,
-			"active_owner_uid": next_owner_uid,
-			"next_seq": seq + 1,
-			"updated_at": now
-		}
-		sess.rtdb.patch_path("matches/%s/meta/turn" % _match_id, turn_patch)
+	var rtdb = _get_rtdb()
+	if rtdb != null:
+		var seq_key := "seq_%06d" % seq
+		print("[OnlineMatchController] Publishing shot %s for %s (%s) -> next_slot=%s" % [seq_key, active_p.get("name", "Player"), slot_id, next_slot])
+		_write_shot_and_turn_async(rtdb, seq_key, event_data, turn_patch)
+	else:
+		push_error("[OnlineMatchController] RTDB client unavailable! Cannot publish shot event.")
 
 	_check_afk_state()
 	return event_data
+
+
+func _write_shot_and_turn_async(rtdb, seq_key: String, event_data: Dictionary, turn_patch: Dictionary) -> void:
+	var put_res = await rtdb.put_path("matches/%s/events/%s" % [_match_id, seq_key], event_data)
+	if not put_res.get("ok", false):
+		push_error("[OnlineMatchController] Failed to publish shot event %s: %s" % [seq_key, str(put_res.get("error", "Unknown error"))])
+	else:
+		print("[OnlineMatchController] Successfully published shot event %s to RTDB." % seq_key)
+
+	var patch_res = await rtdb.patch_path("matches/%s/meta/turn" % _match_id, turn_patch)
+	if not patch_res.get("ok", false):
+		push_error("[OnlineMatchController] Failed to patch turn to %s: %s" % [turn_patch.get("active_slot", ""), str(patch_res.get("error", "Unknown error"))])
+	else:
+		print("[OnlineMatchController] Successfully updated turn to %s in RTDB." % turn_patch.get("active_slot", ""))
 
 
 func concede_active_player() -> void:
@@ -614,10 +657,10 @@ func concede_active_player() -> void:
 	}
 	_last_applied_seq = seq
 
-	var sess := _get_online_session()
-	if sess != null and sess.rtdb != null:
+	var rtdb = _get_rtdb()
+	if rtdb != null:
 		var seq_key := "seq_%06d" % seq
-		sess.rtdb.put_path("matches/%s/events/%s" % [_match_id, seq_key], evt)
+		rtdb.put_path("matches/%s/events/%s" % [_match_id, seq_key], evt)
 
 	_apply_concede_hole_event(evt)
 
@@ -642,10 +685,10 @@ func remove_active_player() -> void:
 	}
 	_last_applied_seq = seq
 
-	var sess := _get_online_session()
-	if sess != null and sess.rtdb != null:
+	var rtdb = _get_rtdb()
+	if rtdb != null:
 		var seq_key := "seq_%06d" % seq
-		sess.rtdb.put_path("matches/%s/events/%s" % [_match_id, seq_key], evt)
+		rtdb.put_path("matches/%s/events/%s" % [_match_id, seq_key], evt)
 
 	_apply_leave_event(evt)
 
@@ -675,9 +718,10 @@ func leave_online_match() -> void:
 			"slot_id": my_slot,
 			"created_at": now
 		}
-		if sess != null and sess.rtdb != null:
+		var rtdb = _get_rtdb()
+		if rtdb != null:
 			var seq_key := "seq_%06d" % seq
-			sess.rtdb.put_path("matches/%s/events/%s" % [_match_id, seq_key], evt)
+			rtdb.put_path("matches/%s/events/%s" % [_match_id, seq_key], evt)
 
 	end_match_and_return_to_menu("Left online match")
 
@@ -723,9 +767,10 @@ func _on_heartbeat_timeout() -> void:
 	var my_uid := _get_my_uid()
 	if my_uid.is_empty():
 		return
-	if sess != null and sess.rtdb != null:
+	var rtdb = _get_rtdb()
+	if rtdb != null:
 		var now := Time.get_unix_time_from_system()
-		sess.rtdb.put_path("matches/%s/devices/%s/last_seen" % [_match_id, my_uid], now)
+		rtdb.put_path("matches/%s/devices/%s/last_seen" % [_match_id, my_uid], now)
 
 
 func _on_turn_updated(turn_data: Dictionary) -> void:
@@ -792,12 +837,12 @@ func _check_afk_state() -> void:
 func _on_poll_fallback_timeout() -> void:
 	if _match_id.is_empty():
 		return
-	var sess := _get_online_session()
-	if sess == null or sess.rtdb == null:
+	var rtdb = _get_rtdb()
+	if rtdb == null:
 		return
 
 	# Fetch missed events
-	var res = await sess.rtdb.get_path("matches/%s/events" % _match_id)
+	var res = await rtdb.get_path("matches/%s/events" % _match_id)
 	if res.get("ok", false) and res.get("data") is Dictionary:
 		var events_dict: Dictionary = res["data"]
 		for k in events_dict:
@@ -851,11 +896,11 @@ func check_and_prompt_rejoin() -> void:
 	if m_id.is_empty():
 		return
 
-	var sess := _get_online_session()
-	if sess == null or sess.rtdb == null:
+	var rtdb = _get_rtdb()
+	if rtdb == null:
 		return
 
-	var meta_res = await sess.rtdb.get_path("matches/%s/meta" % m_id)
+	var meta_res = await rtdb.get_path("matches/%s/meta" % m_id)
 	if not meta_res.get("ok", false) or not (meta_res.get("data") is Dictionary):
 		clear_active_match_file()
 		return
@@ -870,11 +915,11 @@ func check_and_prompt_rejoin() -> void:
 
 
 func rejoin_active_match(match_id: String) -> void:
-	var sess := _get_online_session()
-	if sess == null or sess.rtdb == null:
+	var rtdb = _get_rtdb()
+	if rtdb == null:
 		return
 
-	var snap_res = await sess.rtdb.get_path("matches/%s" % match_id)
+	var snap_res = await rtdb.get_path("matches/%s" % match_id)
 	if not snap_res.get("ok", false) or not (snap_res.get("data") is Dictionary):
 		clear_active_match_file()
 		return

@@ -55,6 +55,7 @@ var _heartbeat_timer: Timer = null
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	_resolve_rtdb()
 
 	# Listen to auth state changes to auto-cleanup lobbies on sign-out
 	var auth_node := _get_cloud_auth()
@@ -104,9 +105,14 @@ func _resolve_rtdb() -> RtdbClient:
 		return rtdb
 	var auth_node := _get_cloud_auth()
 	if auth_node != null and auth_node.rtdb != null:
-		return auth_node.rtdb
+		rtdb = auth_node.rtdb
+		return rtdb
 	rtdb = RtdbClient.new(auth_node)
 	return rtdb
+
+
+func get_rtdb() -> RtdbClient:
+	return _resolve_rtdb()
 
 
 func _get_my_uid() -> String:
