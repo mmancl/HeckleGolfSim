@@ -1,4 +1,5 @@
 ### Bug Fixes
+- **Google Play Deployment Guard for Reused Artifacts**: Prevented duplicate version code errors when deploying releases with reused Android packages. Google Play deployment is now automatically skipped for previously built AAB packages while remaining active for newly built artifacts.
 - **Windows & macOS Build Pipeline Reliability**: Restored synchronous process streaming and graceful package finalization during Godot headless exports, ensuring non-fatal teardown warnings do not trigger spurious build failures.
 - **Fixed Plant Asset Scene Encoding in Windows Builds**: Resolved a parser error (`Parse Error: Expected '['`) caused by hidden UTF-8 Byte Order Marks (BOM) in exterior plant static body scenes.
 - **Online Multiplayer Realtime Event Transmission & Turn Handshake**: Fixed a critical bug where online shot events and turn updates were never published to the cloud backend after hitting the ball due to an uninitialized database client reference, leaving remote players perpetually waiting on the opponent's first shot. Shot events and turn transitions are now published reliably with active cloud verification.

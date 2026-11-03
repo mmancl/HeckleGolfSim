@@ -648,9 +648,22 @@ jobs:
       - name: Check AAB for Play Store Deploy
         id: check_aab
         run: |
+          # Only deploy to Google Play if dist/HeckleGolfSim.aab was built in the CURRENT run,
+          # OR if the Android build was explicitly requested. Reused previous AAB artifacts
+          # already have their version code registered in Google Play and cannot be re-uploaded.
+          IS_BUILT_CURRENT=false
+          if [ -d "current_run_artifacts" ] && find current_run_artifacts -name "*.aab" | grep -q .; then
+            IS_BUILT_CURRENT=true
+          fi
+
           if [ -f "dist/HeckleGolfSim.aab" ]; then
-            echo "has_aab=true" >> $GITHUB_OUTPUT
-            echo "AAB found: dist/HeckleGolfSim.aab is available for Google Play deployment."
+            if [ "$IS_BUILT_CURRENT" = "true" ]; then
+              echo "has_aab=true" >> $GITHUB_OUTPUT
+              echo "AAB found: dist/HeckleGolfSim.aab was built in this run and is ready for Google Play deployment."
+            else
+              echo "has_aab=false" >> $GITHUB_OUTPUT
+              echo "Notice: dist/HeckleGolfSim.aab was reused from a previous run/release. Skipping Google Play deployment to avoid duplicate version code error."
+            fi
           else
             echo "has_aab=false" >> $GITHUB_OUTPUT
             echo "Notice: dist/HeckleGolfSim.aab not found, Google Play deployment step will be skipped."
