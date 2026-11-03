@@ -158,11 +158,39 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "[2/2] Exporting macOS Universal App (.app) via Godot..." -ForegroundColor Green
 Write-Host "      Compiling dual ARM64 + x86_64 binaries, packing assets, and building ZIP (takes ~45s)..." -ForegroundColor Gray
-& $GodotExe --headless --path $RepoRoot --export-release "macOS" $ZipOutput
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path $ZipOutput)) {
-    throw "Godot export failed with exit code $LASTEXITCODE. Expected output at $ZipOutput"
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = $GodotExe
+$psi.Arguments = "--headless --path `"$RepoRoot`" --export-release `"macOS`" `"$ZipOutput`""
+$psi.UseShellExecute = $false
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $false
+
+$proc = [System.Diagnostics.Process]::Start($psi)
+$exportDone = $false
+
+while (-not $proc.StandardOutput.EndOfStream) {
+    $line = $proc.StandardOutput.ReadLine()
+    if ($line) {
+        Write-Host $line
+        if ($line -match '\[\s*DONE\s*\]\s*export' -or $line -match '\[\s*DONE\s*\]\s*savepack') {
+            $exportDone = $true
+            break
+        }
+    }
 }
-Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+if ($exportDone) {
+    if (-not $proc.WaitForExit(8000)) {
+        Write-Host "macOS export completed. Engine teardown timed out, terminating Godot process..." -ForegroundColor Gray
+        $proc.Kill()
+    }
+} else {
+    $proc.WaitForExit()
+}
+
+if (-not (Test-Path $ZipOutput)) {
+    throw "Godot export failed (exit code $($proc.ExitCode)). Expected output at $ZipOutput"
+}
 
 # Verify / inject NSBluetoothAlwaysUsageDescription into Info.plist inside the zip
 try {

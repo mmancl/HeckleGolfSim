@@ -159,11 +159,42 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[2/3] Exporting Windows Desktop release via Godot..." -ForegroundColor Green
-& $GodotExe --headless --path $RepoRoot --export-release "Windows Desktop" $TargetExe
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path $TargetExe)) {
-    throw "Godot export failed with exit code $LASTEXITCODE. Target executable not found at $TargetExe"
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = $GodotExe
+$psi.Arguments = "--headless --path `"$RepoRoot`" --export-release `"Windows Desktop`" `"$TargetExe`""
+$psi.UseShellExecute = $false
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $false
+
+$proc = [System.Diagnostics.Process]::Start($psi)
+$savepackDone = $false
+
+while (-not $proc.StandardOutput.EndOfStream) {
+    $line = $proc.StandardOutput.ReadLine()
+    if ($line) {
+        Write-Host $line
+        if ($line -match '\[\s*DONE\s*\]\s*savepack') {
+            $savepackDone = $true
+            break
+        }
+    }
 }
+
+if ($savepackDone) {
+    # Package files are finalized on disk. Give Godot up to 8s to shut down, then terminate if hung.
+    if (-not $proc.WaitForExit(8000)) {
+        Write-Host "Export package files generated successfully ([DONE] savepack). Engine teardown timed out, terminating Godot process..." -ForegroundColor Gray
+        $proc.Kill()
+    }
+} else {
+    $proc.WaitForExit()
+}
+
 Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+if (-not (Test-Path $TargetExe)) {
+    throw "Godot export failed (exit code $($proc.ExitCode)). Target executable not found at $TargetExe"
+}
 
 # Ensure .NET data folder is present and accessible
 $heckleData = Join-Path $StagingRoot "data_HeckleGolfSim_windows_x86_64"
