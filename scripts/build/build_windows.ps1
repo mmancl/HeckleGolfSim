@@ -159,41 +159,45 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[2/3] Exporting Windows Desktop release via Godot..." -ForegroundColor Green
-$psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = $GodotExe
-$psi.Arguments = "--headless --path `"$RepoRoot`" --export-release `"Windows Desktop`" `"$TargetExe`""
-$psi.UseShellExecute = $false
-$psi.RedirectStandardOutput = $true
-$psi.RedirectStandardError = $false
+$job = Start-Job -ScriptBlock {
+    param($exe, $path, $preset, $output)
+    & $exe --headless --path $path --export-release $preset $output
+} -ArgumentList $GodotExe, $RepoRoot, "Windows Desktop", $TargetExe
 
-$proc = [System.Diagnostics.Process]::Start($psi)
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
 $savepackDone = $false
+$timeoutSec = 600
 
-while (-not $proc.StandardOutput.EndOfStream) {
-    $line = $proc.StandardOutput.ReadLine()
-    if ($line) {
-        Write-Host $line
-        if ($line -match '\[\s*DONE\s*\]\s*savepack') {
-            $savepackDone = $true
-            break
+while ($job.State -eq 'Running' -and $sw.Elapsed.TotalSeconds -lt $timeoutSec) {
+    Start-Sleep -Seconds 2
+    $out = Receive-Job -Job $job
+    if ($out) {
+        $out | ForEach-Object {
+            Write-Host $_
+            if ($_ -match 'savepack' -and $_ -match 'DONE') {
+                $savepackDone = $true
+            }
         }
     }
-}
-
-if ($savepackDone) {
-    # Package files are finalized on disk. Give Godot up to 8s to shut down, then terminate if hung.
-    if (-not $proc.WaitForExit(8000)) {
-        Write-Host "Export package files generated successfully ([DONE] savepack). Engine teardown timed out, terminating Godot process..." -ForegroundColor Gray
-        $proc.Kill()
+    if ($savepackDone -or ((Test-Path $TargetExe) -and (Test-Path $TargetPck))) {
+        Write-Host "Export package files generated on disk. Waiting up to 8s for clean engine shutdown..." -ForegroundColor Gray
+        Start-Sleep -Seconds 8
+        $out = Receive-Job -Job $job
+        if ($out) { $out | ForEach-Object { Write-Host $_ } }
+        Stop-Job -Job $job -ErrorAction SilentlyContinue
+        Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        break
     }
-} else {
-    $proc.WaitForExit()
 }
 
+# Final flush and cleanup
+$out = Receive-Job -Job $job
+if ($out) { $out | ForEach-Object { Write-Host $_ } }
+Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
 Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 if (-not (Test-Path $TargetExe)) {
-    throw "Godot export failed (exit code $($proc.ExitCode)). Target executable not found at $TargetExe"
+    throw "Godot export failed. Target executable not found at $TargetExe"
 }
 
 # Ensure .NET data folder is present and accessible
