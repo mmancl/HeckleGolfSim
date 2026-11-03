@@ -41,67 +41,36 @@ func initialize(scene_path: String, config_path: String) -> bool:
 		SceneManager.set_loading_stage(4.0, "Reading course configuration...", 4.0)
 	await get_tree().process_frame
 
-	# 5% - 30%: Loading 3D course geometry & terrain...
+	# 5% - 40%: Loading 3D course geometry & terrain...
 	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
-		SceneManager.set_loading_stage(5.0, "Loading 3D course geometry & terrain...", 30.0)
+		SceneManager.set_loading_stage(5.0, "Loading 3D course geometry & terrain...", 40.0)
 
-	var err = ResourceLoader.load_threaded_request(scene_path)
-	if err != OK:
-		push_error("[CourseManager] Failed to start threaded load for: %s. Falling back to synchronous load." % scene_path)
-		var packed := load(scene_path) as PackedScene
-		if packed == null:
-			push_error("[CourseManager] Could not load course scene: %s" % scene_path)
-			_show_load_error(scene_path, "Could not load scene resource")
-			return false
-		var course_scene := packed.instantiate()
-		if course_scene == null:
-			push_error("[CourseManager] Could not instantiate course scene: %s" % scene_path)
-			_show_load_error(scene_path, "Could not instantiate course scene")
-			return false
-		add_child(course_scene)
-		_ensure_course_details(course_scene)
-		return true
-		
-	var progress_arr := []
-	while true:
-		progress_arr.clear()
-		var status = ResourceLoader.load_threaded_get_status(scene_path, progress_arr)
-		if status == ResourceLoader.THREAD_LOAD_LOADED:
-			break
-		elif status == ResourceLoader.THREAD_LOAD_FAILED or status == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
-			push_error("[CourseManager] Failed to load course scene asynchronously: %s" % scene_path)
-			_show_load_error(scene_path, "Corrupted scene file or parse error")
-			return false
-		
-		var raw_p: float = float(progress_arr[0]) if progress_arr.size() > 0 else 0.0
-		var mapped_percent: float = 5.0 + (raw_p * 25.0)
-		if SceneManager != null and SceneManager.has_method("set_loading_stage"):
-			SceneManager.set_loading_stage(mapped_percent, "Loading 3D course geometry & terrain...", 30.0)
-		await get_tree().process_frame
-		
-	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
-		SceneManager.set_loading_stage(30.0, "Loading 3D course geometry & terrain...", 30.0)
-	await get_tree().process_frame
+	var target_scene := scene_path
+	var packed: PackedScene = await _load_course_packed_scene(target_scene)
+	if packed == null:
+		# Check for alternate scene format (.scn <-> .tscn) in same directory
+		var alt_ext = ".scn" if target_scene.ends_with(".tscn") else ".tscn"
+		var alt_scene = target_scene.get_base_dir().path_join("course" + alt_ext)
+		if FileAccess.file_exists(alt_scene) or ResourceLoader.exists(alt_scene):
+			push_warning("[CourseManager] Primary scene %s failed to load; attempting fallback to %s" % [target_scene, alt_scene])
+			packed = await _load_course_packed_scene(alt_scene)
+			if packed != null:
+				target_scene = alt_scene
 
-	# 31% - 40%: Constructing scene hierarchy...
-	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
-		SceneManager.set_loading_stage(31.0, "Constructing scene hierarchy...", 40.0)
-	await get_tree().process_frame
-
-	var packed = ResourceLoader.load_threaded_get(scene_path) as PackedScene
 	if packed == null:
 		push_error("[CourseManager] Could not load course scene: %s" % scene_path)
-		_show_load_error(scene_path, "Could not load scene resource")
-		return false
-	var course_scene := packed.instantiate()
-	if course_scene == null:
-		push_error("[CourseManager] Could not instantiate course scene: %s" % scene_path)
-		_show_load_error(scene_path, "Could not instantiate course scene")
+		_show_load_error(scene_path, "Corrupted scene file or parse error")
 		return false
 
 	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
 		SceneManager.set_loading_stage(40.0, "Constructing scene hierarchy...", 40.0)
 	await get_tree().process_frame
+
+	var course_scene := packed.instantiate()
+	if course_scene == null:
+		push_error("[CourseManager] Could not instantiate course scene: %s" % target_scene)
+		_show_load_error(target_scene, "Could not instantiate course scene")
+		return false
 
 	# 41% - 75%: Mounting objects & physics colliders...
 	if SceneManager != null and SceneManager.has_method("set_loading_stage"):
@@ -213,6 +182,31 @@ func _show_load_error(scene_path: String, reason: String) -> void:
 			SceneManager.change_scene("res://UI/MainMenu/main_menu.tscn")
 	)
 	btn_row.add_child(btn_menu)
+
+
+func _load_course_packed_scene(path: String) -> PackedScene:
+	if not FileAccess.file_exists(path) and not ResourceLoader.exists(path):
+		return null
+
+	var err = ResourceLoader.load_threaded_request(path)
+	if err == OK:
+		var progress_arr := []
+		while true:
+			progress_arr.clear()
+			var status = ResourceLoader.load_threaded_get_status(path, progress_arr)
+			if status == ResourceLoader.THREAD_LOAD_LOADED:
+				return ResourceLoader.load_threaded_get(path) as PackedScene
+			elif status == ResourceLoader.THREAD_LOAD_FAILED or status == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+				break
+			var raw_p: float = float(progress_arr[0]) if progress_arr.size() > 0 else 0.0
+			var mapped_percent: float = 5.0 + (raw_p * 30.0)
+			if SceneManager != null and SceneManager.has_method("set_loading_stage"):
+				SceneManager.set_loading_stage(mapped_percent, "Loading 3D course geometry & terrain...", 35.0)
+			await get_tree().process_frame
+
+	# Synchronous load fallback
+	var res = load(path)
+	return res as PackedScene if res is PackedScene else null
 
 
 func _ensure_course_details(course_scene: Node) -> void:

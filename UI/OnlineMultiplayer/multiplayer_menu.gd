@@ -1854,4 +1854,3 @@ func _update_controller_focus_navigation() -> void:
 		ttab_public_button.focus_neighbor_left = ttab_join_button.get_path()
 		ttab_public_button.focus_neighbor_right = ttab_standings_button.get_path()
 		ttab_standings_button.focus_neighbor_left = ttab_public_button.get_path()
-

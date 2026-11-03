@@ -99,6 +99,9 @@ internal static class ObjCRuntime
     public static extern IntPtr dispatch_queue_create([MarshalAs(UnmanagedType.LPUTF8Str)] string label, IntPtr attr);
 
     [DllImport(LibObjC, EntryPoint = "objc_msgSend")]
+    public static extern IntPtr objc_msgSend_bool(IntPtr receiver, IntPtr selector, byte arg1);
+
+    [DllImport(LibObjC, EntryPoint = "objc_msgSend")]
     public static extern IntPtr objc_msgSend_bool(IntPtr receiver, IntPtr selector, byte arg1, IntPtr arg2);
 
     [DllImport(LibObjC, EntryPoint = "objc_msgSend")]

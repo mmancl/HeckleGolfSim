@@ -32,7 +32,14 @@ func parse_directory(path: String) -> int:
 			continue
 
 		var item_index := get_item_count()
-		add_item(course["title"])
+		var display_title: String = str(course.get("title", ""))
+		var is_corrupt: bool = bool(course.get("is_corrupted", false))
+		if is_corrupt:
+			display_title += " [Corrupted - Redownload]"
+		add_item(display_title)
+		if is_corrupt:
+			set_item_tooltip(item_index, "This course scene file is corrupted. Please delete it and redownload it from the Course Catalog.")
+			set_item_custom_fg_color(item_index, Color(0.95, 0.45, 0.45))
 		set_item_metadata(item_index, course)
 
 	print("[CourseList] Found %d valid course(s) for filter '%s'." % [get_item_count(), filter_mode])

@@ -16,4 +16,5 @@ func _initialize() -> void:
 
 	root.add_child(tester)
 	print("TestSquareBle instantiated and tests executed.")
+	await process_frame
 	quit(0)

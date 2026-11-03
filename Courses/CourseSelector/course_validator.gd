@@ -65,7 +65,8 @@ static func validate(course_dir: String, dir_name: String) -> Dictionary:
 		return {}
 
 	var is_custom: bool = parsed.get("is_custom", false) or parsed.get("IsCustom", false) or dir_name.begins_with("custom_")
-	return { "title": title, "scene_path": scene_path, "config_path": config_path, "is_custom": is_custom }
+	var is_corrupted: bool = bool(parsed.get("corrupted_scene", false))
+	return { "title": title, "scene_path": scene_path, "config_path": config_path, "is_custom": is_custom, "is_corrupted": is_corrupted }
 
 
 static func _delete_dir_recursive(path: String) -> void:

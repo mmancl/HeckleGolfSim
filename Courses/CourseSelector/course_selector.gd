@@ -170,6 +170,18 @@ func _on_main_menu_button_pressed() -> void:
 
 
 func _on_course_list_item_activated(index: int) -> void:
+	var metadata = _course_list.get_item_metadata(index) if index >= 0 and index < _course_list.get_item_count() else {}
+	if bool(metadata.get("is_corrupted", false)):
+		var alert := AcceptDialog.new()
+		alert.title = "Corrupted Course Scene"
+		alert.dialog_text = "The course \"%s\" has a corrupted or unreadable scene file.\n\nPlease click 'Delete Course' to delete it, then redownload it fresh from the Course Catalog." % metadata.get("title", "this course")
+		alert.min_size = Vector2(460, 180)
+		ThemeManager.apply_dialog_style(alert)
+		alert.confirmed.connect(func(): alert.queue_free())
+		add_child(alert)
+		alert.popup_centered()
+		return
+
 	var scene_path: String = _course_list.get_scene_path_for_index(index)
 	var config_path: String = _course_list.get_config_path_for_index(index)
 
