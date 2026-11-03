@@ -1,4 +1,4 @@
-﻿[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource path="res://addons/shapespark-low-poly-exterior-plants/meshes/bush-02-mesh.tscn" type="PackedScene" id="1"]
 
