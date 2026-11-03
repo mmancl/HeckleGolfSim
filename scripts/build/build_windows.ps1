@@ -124,6 +124,24 @@ if (-not $GodotExe) {
 }
 Write-Host "Godot Binary:   $GodotExe" -ForegroundColor Gray
 
+# Ensure Godot editor configuration directory & settings exist to suppress teardown warnings/hangs
+$godotConfigDir = Join-Path $env:APPDATA "Godot"
+if (-not (Test-Path $godotConfigDir)) {
+    New-Item -ItemType Directory -Path $godotConfigDir -Force | Out-Null
+}
+$settingsContent = @"
+[godot_resource type="EditorSettings" format=3]
+
+[resource]
+export/android/shutdown_adb_on_exit = false
+"@
+@("editor_settings-4.tres", "editor_settings-4.7.tres") | ForEach-Object {
+    $settingsPath = Join-Path $godotConfigDir $_
+    if (-not (Test-Path $settingsPath)) {
+        Set-Content -Path $settingsPath -Value $settingsContent -Encoding UTF8
+    }
+}
+
 # 4. Check Export Templates
 $TemplatesDir = Join-Path $env:APPDATA "Godot\export_templates\4.7.stable.mono"
 $WinTemplate = Join-Path $TemplatesDir "windows_release_x86_64.exe"
@@ -164,36 +182,120 @@ $psi.FileName = $GodotExe
 $psi.Arguments = "--headless --path `"$RepoRoot`" --export-release `"Windows Desktop`" `"$TargetExe`""
 $psi.UseShellExecute = $false
 $psi.RedirectStandardOutput = $true
-$psi.RedirectStandardError = $false
+$psi.RedirectStandardError = $true
+$psi.CreateNoWindow = $true
 
 $proc = [System.Diagnostics.Process]::Start($psi)
-$savepackDone = $false
 
-while (-not $proc.StandardOutput.EndOfStream) {
-    $line = $proc.StandardOutput.ReadLine()
-    if ($line) {
-        Write-Host $line
-        if ($line -match '\[\s*DONE\s*\]\s*savepack') {
-            $savepackDone = $true
-            break
+$savepackDone = $false
+$exportComplete = $false
+$doneTimer = $null
+$gracePeriodSeconds = 5
+$maxTimeoutSeconds = 600   # 10 minutes safety watchdog
+$overallTimer = [System.Diagnostics.Stopwatch]::StartNew()
+$lastActivityTimer = [System.Diagnostics.Stopwatch]::StartNew()
+
+$outTask = $proc.StandardOutput.ReadLineAsync()
+$errTask = $proc.StandardError.ReadLineAsync()
+
+while (-not $proc.HasExited -or $outTask -or $errTask) {
+    $hadOutput = $false
+
+    # Drain Standard Output (non-blocking)
+    if ($outTask -and $outTask.Wait(100)) {
+        $line = $outTask.Result
+        if ($line -ne $null) {
+            $hadOutput = $true
+            Write-Host $line
+            $cleanLine = $line -replace '\x1b\[[0-9;]*[a-zA-Z]', ''
+            if (($cleanLine -match 'DONE' -and $cleanLine -match 'savepack') -or ($cleanLine -match '\[\s*DONE\s*\]\s*savepack')) {
+                $savepackDone = $true
+                if (-not $doneTimer) {
+                    $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+                    Write-Host "[WATCHDOG] Export pack finalized ([DONE] savepack). Monitoring engine teardown..." -ForegroundColor Cyan
+                }
+            }
+            $outTask = $proc.StandardOutput.ReadLineAsync()
+        } else {
+            $outTask = $null
         }
     }
+
+    # Drain Standard Error (non-blocking)
+    if ($errTask -and $errTask.Wait(100)) {
+        $errLine = $errTask.Result
+        if ($errLine -ne $null) {
+            $hadOutput = $true
+            Write-Host $errLine -ForegroundColor Yellow
+            $cleanErr = $errLine -replace '\x1b\[[0-9;]*[a-zA-Z]', ''
+            if ($cleanErr -match 'shutdown_adb_on_exit') {
+                Write-Host "[WATCHDOG] Engine shutdown sequence reached (shutdown_adb_on_exit)." -ForegroundColor Cyan
+                if (-not $doneTimer) {
+                    $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+                }
+            }
+            $errTask = $proc.StandardError.ReadLineAsync()
+        } else {
+            $errTask = $null
+        }
+    }
+
+    if ($hadOutput) {
+        $lastActivityTimer.Restart()
+    }
+
+    # Check on-disk completion: both TargetExe and TargetPck exist
+    $filesOnDisk = (Test-Path $TargetExe) -and (Test-Path $TargetPck)
+    if ($filesOnDisk) {
+        $pckItem = Get-Item $TargetPck -ErrorAction SilentlyContinue
+        if ($pckItem -and $pckItem.Length -gt 50000000 -and -not $doneTimer -and $savepackDone) {
+            $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+        }
+    }
+
+    # If savepack is done (or engine entered exit shutdown) and grace period elapsed, force exit
+    if ($doneTimer -and ($doneTimer.Elapsed.TotalSeconds -ge $gracePeriodSeconds)) {
+        Write-Host "Export package files generated successfully on disk. Engine teardown finalized ($([int]$doneTimer.Elapsed.TotalSeconds)s elapsed). Finalizing Godot process..." -ForegroundColor Gray
+        $exportComplete = $true
+        break
+    }
+
+    # Inactivity watchdog: If files exist on disk, savepack completed, and no output for 15 seconds
+    if ($filesOnDisk -and $savepackDone -and ($lastActivityTimer.Elapsed.TotalSeconds -ge 15)) {
+        Write-Host "Export files verified on disk and no engine activity for 15s. Finalizing Godot process..." -ForegroundColor Gray
+        $exportComplete = $true
+        break
+    }
+
+    # Safety overall watchdog (10 minutes)
+    if ($overallTimer.Elapsed.TotalSeconds -ge $maxTimeoutSeconds) {
+        Write-Host "[WATCHDOG] Maximum export timeout ($maxTimeoutSeconds s) reached!" -ForegroundColor Red
+        break
+    }
+
+    if ($proc.HasExited -and -not $outTask -and -not $errTask) {
+        $exportComplete = $true
+        break
+    }
 }
 
-if ($savepackDone) {
-    # Package files are finalized on disk. Give Godot up to 8s to shut down, then terminate if hung.
-    if (-not $proc.WaitForExit(8000)) {
-        Write-Host "Export package files generated successfully ([DONE] savepack). Engine teardown timed out, terminating Godot process..." -ForegroundColor Gray
-        $proc.Kill()
+# Cleanly terminate Godot and all child processes to release locks
+try {
+    if (-not $proc.HasExited) {
+        try { $proc.Kill($true) } catch { $proc.Kill() }
     }
-} else {
-    $proc.WaitForExit()
-}
+} catch { }
+
+try {
+    if ($proc.Id) {
+        & taskkill.exe /PID $proc.Id /T /F 2>$null | Out-Null
+    }
+} catch { }
 
 Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
-if (-not (Test-Path $TargetExe)) {
-    throw "Godot export failed (exit code $($proc.ExitCode)). Target executable not found at $TargetExe"
+if (-not (Test-Path $TargetExe) -or -not (Test-Path $TargetPck)) {
+    throw "Godot export failed (exit code $($proc.ExitCode)). Target executable or package not found at $TargetExe / $TargetPck"
 }
 
 # Ensure .NET data folder is present and accessible

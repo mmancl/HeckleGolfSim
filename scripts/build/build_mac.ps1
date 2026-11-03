@@ -163,30 +163,92 @@ $psi.FileName = $GodotExe
 $psi.Arguments = "--headless --path `"$RepoRoot`" --export-release `"macOS`" `"$ZipOutput`""
 $psi.UseShellExecute = $false
 $psi.RedirectStandardOutput = $true
-$psi.RedirectStandardError = $false
+$psi.RedirectStandardError = $true
+$psi.CreateNoWindow = $true
 
 $proc = [System.Diagnostics.Process]::Start($psi)
 $exportDone = $false
+$doneTimer = $null
+$gracePeriodSeconds = 5
+$maxTimeoutSeconds = 600   # 10 minutes safety watchdog
+$overallTimer = [System.Diagnostics.Stopwatch]::StartNew()
+$lastActivityTimer = [System.Diagnostics.Stopwatch]::StartNew()
 
-while (-not $proc.StandardOutput.EndOfStream) {
-    $line = $proc.StandardOutput.ReadLine()
-    if ($line) {
-        Write-Host $line
-        if ($line -match '\[\s*DONE\s*\]\s*export' -or $line -match '\[\s*DONE\s*\]\s*savepack') {
-            $exportDone = $true
-            break
+$outTask = $proc.StandardOutput.ReadLineAsync()
+$errTask = $proc.StandardError.ReadLineAsync()
+
+while (-not $proc.HasExited -or $outTask -or $errTask) {
+    $hadOutput = $false
+
+    # Drain Standard Output (non-blocking)
+    if ($outTask -and $outTask.Wait(100)) {
+        $line = $outTask.Result
+        if ($line -ne $null) {
+            $hadOutput = $true
+            Write-Host $line
+            $cleanLine = $line -replace '\x1b\[[0-9;]*[a-zA-Z]', ''
+            if (($cleanLine -match 'DONE' -and ($cleanLine -match 'export' -or $cleanLine -match 'savepack')) -or ($cleanLine -match '\[\s*DONE\s*\]\s*(export|savepack)')) {
+                $exportDone = $true
+                if (-not $doneTimer) {
+                    $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+                    Write-Host "[WATCHDOG] macOS export finalized ([DONE]). Monitoring engine teardown..." -ForegroundColor Cyan
+                }
+            }
+            $outTask = $proc.StandardOutput.ReadLineAsync()
+        } else {
+            $outTask = $null
         }
     }
+
+    # Drain Standard Error (non-blocking)
+    if ($errTask -and $errTask.Wait(100)) {
+        $errLine = $errTask.Result
+        if ($errLine -ne $null) {
+            $hadOutput = $true
+            Write-Host $errLine -ForegroundColor Yellow
+            $errTask = $proc.StandardError.ReadLineAsync()
+        } else {
+            $errTask = $null
+        }
+    }
+
+    if ($hadOutput) {
+        $lastActivityTimer.Restart()
+    }
+
+    # Check on-disk completion
+    if ((Test-Path $ZipOutput) -and (Get-Item $ZipOutput -ErrorAction SilentlyContinue).Length -gt 50000000 -and -not $doneTimer -and $exportDone) {
+        $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    }
+
+    # If export is done and grace period elapsed, force exit
+    if ($doneTimer -and ($doneTimer.Elapsed.TotalSeconds -ge $gracePeriodSeconds)) {
+        Write-Host "macOS export zip generated successfully. Engine teardown complete/hung ($([int]$doneTimer.Elapsed.TotalSeconds)s elapsed). Finalizing Godot process..." -ForegroundColor Gray
+        break
+    }
+
+    # Inactivity watchdog
+    if ((Test-Path $ZipOutput) -and $exportDone -and ($lastActivityTimer.Elapsed.TotalSeconds -ge 15)) {
+        Write-Host "macOS export verified on disk and no engine activity for 15s. Finalizing Godot process..." -ForegroundColor Gray
+        break
+    }
+
+    # Safety overall watchdog
+    if ($overallTimer.Elapsed.TotalSeconds -ge $maxTimeoutSeconds) {
+        Write-Host "[WATCHDOG] Maximum export timeout ($maxTimeoutSeconds s) reached!" -ForegroundColor Red
+        break
+    }
+
+    if ($proc.HasExited -and -not $outTask -and -not $errTask) {
+        break
+    }
 }
 
-if ($exportDone) {
-    if (-not $proc.WaitForExit(8000)) {
-        Write-Host "macOS export completed. Engine teardown timed out, terminating Godot process..." -ForegroundColor Gray
-        $proc.Kill()
+try {
+    if (-not $proc.HasExited) {
+        try { $proc.Kill($true) } catch { $proc.Kill() }
     }
-} else {
-    $proc.WaitForExit()
-}
+} catch { }
 
 Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 

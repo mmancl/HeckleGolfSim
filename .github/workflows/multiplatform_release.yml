@@ -106,6 +106,21 @@ jobs:
           Write-Host "GODOT_BIN=$godotExe"
           Add-Content -Path $env:GITHUB_ENV -Value "GODOT_BIN=$godotExe"
 
+          # Configure Godot Editor Settings to prevent teardown warnings / ADB shutdown hangs
+          New-Item -ItemType Directory -Path "$HOME\AppData\Roaming\Godot" -Force | Out-Null
+          $settingsContent = @"
+[godot_resource type="EditorSettings" format=3]
+
+[resource]
+export/android/shutdown_adb_on_exit = false
+"@
+          @("editor_settings-4.tres", "editor_settings-4.7.tres") | ForEach-Object {
+            $settingsPath = "$HOME\AppData\Roaming\Godot\$_"
+            if (-not (Test-Path $settingsPath)) {
+              Set-Content -Path $settingsPath -Value $settingsContent -Encoding UTF8
+            }
+          }
+
       - name: Build Windows Release Package
         shell: pwsh
         run: |
