@@ -66,16 +66,14 @@ const BudgetPausedBannerScript = preload("res://UI/Account/budget_paused_banner.
 @onready var confirm_leave_dialog: ConfirmationDialog = %ConfirmLeaveDialog
 
 # â”€â”€ TOURNAMENTS SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-@onready var tournaments_section: VBoxContainer = %TournamentsSection
 @onready var tournament_tab_bar: HBoxContainer = %TournamentTabBar
 @onready var ttab_host_button: Button = %TTabHostButton
 @onready var ttab_join_button: Button = %TTabJoinButton
 @onready var ttab_public_button: Button = %TTabPublicButton
 @onready var ttab_standings_button: Button = %TTabStandingsButton
-@onready var tournament_content_stack: PanelContainer = %TournamentContentStack
 
 # Tournament host view
-@onready var tournament_host_view: ScrollContainer = %TournamentHostView
+@onready var tournament_host_view: VBoxContainer = %TournamentHostView
 @onready var t_host_name_input: LineEdit = %THostNameInput
 @onready var t_course_dropdown: OptionButton = %TCourseDropdown
 @onready var t_length_option: OptionButton = %TLengthOption
@@ -235,6 +233,10 @@ func _ready() -> void:
 	TouchScrollHelper.attach_to(t_public_scroll)
 	TouchScrollHelper.attach_to(t_standings_scroll)
 
+	if t_end_date_input != null and t_end_date_input.text.is_empty():
+		var d = Time.get_datetime_dict_from_unix_time(int(Time.get_unix_time_from_system()) + 7 * 86400)
+		t_end_date_input.text = "%04d-%02d-%02d %02d:00" % [d.year, d.month, d.day, d.hour]
+
 	_switch_mode("matches")
 	_switch_tab("host")
 	_update_controller_focus_navigation()
@@ -256,10 +258,21 @@ func _apply_styles() -> void:
 	ThemeManager.apply_input_style(join_code_input)
 
 	# Mode selector
-	ThemeManager.apply_nav_button_style(mode_matches_button, 8)
-	ThemeManager.apply_nav_button_style(mode_tournaments_button, 8)
+	ThemeManager.apply_tab_button_style(mode_matches_button, true, 8)
+	ThemeManager.apply_tab_button_style(mode_tournaments_button, false, 8)
 
-	# Tournament buttons
+	# Match tabs
+	ThemeManager.apply_tab_button_style(tab_host_button, true, 6)
+	ThemeManager.apply_tab_button_style(tab_join_code_button, false, 6)
+	ThemeManager.apply_tab_button_style(tab_browser_button, false, 6)
+
+	# Tournament tabs
+	ThemeManager.apply_tab_button_style(ttab_host_button, true, 6)
+	ThemeManager.apply_tab_button_style(ttab_join_button, false, 6)
+	ThemeManager.apply_tab_button_style(ttab_public_button, false, 6)
+	ThemeManager.apply_tab_button_style(ttab_standings_button, false, 6)
+
+	# Tournament action buttons
 	ThemeManager.apply_primary_button_style(t_host_create_button, 8)
 	ThemeManager.apply_nav_button_style(t_host_copy_code_button, 6)
 	ThemeManager.apply_nav_button_style(t_join_paste_button, 6)
@@ -366,23 +379,16 @@ func _on_cloud_service_paused_changed(is_paused: bool, _message: String) -> void
 func _switch_mode(mode: String) -> void:
 	_active_mode = mode
 	var in_matches := (mode == "matches")
-	mode_matches_button.disabled = in_matches
-	mode_tournaments_button.disabled = not in_matches
+	ThemeManager.apply_tab_button_style(mode_matches_button, in_matches, 8)
+	ThemeManager.apply_tab_button_style(mode_tournaments_button, not in_matches, 8)
 
 	tab_bar.visible = in_matches and (_active_tab != "room")
-	host_view.visible = in_matches and (_active_tab == "host")
-	join_code_view.visible = in_matches and (_active_tab == "join_code")
-	browser_view.visible = in_matches and (_active_tab == "browser")
-	lobby_room_view.visible = in_matches and (_active_tab == "room")
+	tournament_tab_bar.visible = not in_matches
 
-	tournaments_section.visible = not in_matches
-
-	if not in_matches and _active_t_tab == "t_host":
-		_populate_t_courses()
-
-
-# â”€â”€ TAB & VIEW MANAGEMENT (Matches) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
+	if in_matches:
+		_switch_tab(_active_tab)
+	else:
+		_switch_t_tab(_active_t_tab)
 func _switch_tab(tab_name: String) -> void:
 	_active_tab = tab_name
 
@@ -391,9 +397,9 @@ func _switch_tab(tab_name: String) -> void:
 	if join_status_label != null:
 		join_status_label.text = ""
 
-	tab_host_button.disabled = (tab_name == "host")
-	tab_join_code_button.disabled = (tab_name == "join_code")
-	tab_browser_button.disabled = (tab_name == "browser")
+	ThemeManager.apply_tab_button_style(tab_host_button, tab_name == "host", 6)
+	ThemeManager.apply_tab_button_style(tab_join_code_button, tab_name == "join_code", 6)
+	ThemeManager.apply_tab_button_style(tab_browser_button, tab_name == "browser", 6)
 
 	host_view.visible = (tab_name == "host")
 	join_code_view.visible = (tab_name == "join_code")
@@ -401,35 +407,41 @@ func _switch_tab(tab_name: String) -> void:
 	lobby_room_view.visible = (tab_name == "room")
 	tab_bar.visible = (tab_name != "room")
 
+	tournament_host_view.visible = false
+	tournament_join_view.visible = false
+	tournament_public_view.visible = false
+	tournament_standings_view.visible = false
+
 	if tab_name == "browser":
 		_on_refresh_browser_pressed()
 
 	_update_controller_focus_navigation()
-
-
-# â”€â”€ TAB SWITCHING (Tournaments) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 func _switch_t_tab(t_tab: String) -> void:
 	_active_t_tab = t_tab
 
-	ttab_host_button.disabled = (t_tab == "t_host")
-	ttab_join_button.disabled = (t_tab == "t_join")
-	ttab_public_button.disabled = (t_tab == "t_public")
-	ttab_standings_button.disabled = (t_tab == "t_standings")
+	ThemeManager.apply_tab_button_style(ttab_host_button, t_tab == "t_host", 6)
+	ThemeManager.apply_tab_button_style(ttab_join_button, t_tab == "t_join", 6)
+	ThemeManager.apply_tab_button_style(ttab_public_button, t_tab == "t_public", 6)
+	ThemeManager.apply_tab_button_style(ttab_standings_button, t_tab == "t_standings", 6)
+
+	host_view.visible = false
+	join_code_view.visible = false
+	browser_view.visible = false
+	lobby_room_view.visible = false
 
 	tournament_host_view.visible = (t_tab == "t_host")
 	tournament_join_view.visible = (t_tab == "t_join")
 	tournament_public_view.visible = (t_tab == "t_public")
 	tournament_standings_view.visible = (t_tab == "t_standings")
 
-	if t_tab == "t_public":
+	if t_tab == "t_host":
+		_populate_t_courses()
+	elif t_tab == "t_public":
 		_on_t_public_refresh_pressed()
 	elif t_tab == "t_standings":
 		_on_t_standings_load_pressed()
 
-
-# â”€â”€ DROPDOWN POPULATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
+	_update_controller_focus_navigation()
 func _populate_dropdowns() -> void:
 	# Course lengths
 	length_option.clear()
@@ -1764,6 +1776,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _update_controller_focus_navigation() -> void:
+	if not is_inside_tree():
+		return
 	# Mode bar
 	back_button.focus_neighbor_right = mode_matches_button.get_path()
 	mode_matches_button.focus_neighbor_left = back_button.get_path()
@@ -1854,3 +1868,48 @@ func _update_controller_focus_navigation() -> void:
 		ttab_public_button.focus_neighbor_left = ttab_join_button.get_path()
 		ttab_public_button.focus_neighbor_right = ttab_standings_button.get_path()
 		ttab_standings_button.focus_neighbor_left = ttab_public_button.get_path()
+
+		if _active_t_tab == "t_host":
+			ttab_host_button.focus_neighbor_bottom = t_course_dropdown.get_path()
+			t_course_dropdown.focus_neighbor_top = ttab_host_button.get_path()
+			t_course_dropdown.focus_neighbor_bottom = t_host_name_input.get_path()
+			t_host_name_input.focus_neighbor_top = t_course_dropdown.get_path()
+			t_host_name_input.focus_neighbor_bottom = t_length_option.get_path()
+			t_length_option.focus_neighbor_top = t_host_name_input.get_path()
+			t_length_option.focus_neighbor_bottom = t_mode_option.get_path()
+			t_mode_option.focus_neighbor_top = t_length_option.get_path()
+			t_mode_option.focus_neighbor_bottom = t_wind_option.get_path()
+			t_wind_option.focus_neighbor_top = t_mode_option.get_path()
+			t_wind_option.focus_neighbor_bottom = t_green_speed_option.get_path()
+			t_green_speed_option.focus_neighbor_top = t_wind_option.get_path()
+			t_green_speed_option.focus_neighbor_bottom = t_visibility_option.get_path()
+			t_visibility_option.focus_neighbor_top = t_green_speed_option.get_path()
+			t_visibility_option.focus_neighbor_bottom = t_max_players_spinbox.get_line_edit().get_path()
+			t_max_players_spinbox.get_line_edit().focus_neighbor_top = t_visibility_option.get_path()
+			t_max_players_spinbox.get_line_edit().focus_neighbor_bottom = t_end_date_input.get_path()
+			t_end_date_input.focus_neighbor_top = t_max_players_spinbox.get_line_edit().get_path()
+			t_end_date_input.focus_neighbor_bottom = t_host_golfer_dropdown.get_path()
+			t_host_golfer_dropdown.focus_neighbor_top = t_end_date_input.get_path()
+			t_host_golfer_dropdown.focus_neighbor_right = t_host_golfer_tee.get_path()
+			t_host_golfer_tee.focus_neighbor_left = t_host_golfer_dropdown.get_path()
+			t_host_golfer_dropdown.focus_neighbor_bottom = t_host_create_button.get_path()
+			t_host_golfer_tee.focus_neighbor_bottom = t_host_create_button.get_path()
+			t_host_create_button.focus_neighbor_top = t_host_golfer_dropdown.get_path()
+		elif _active_t_tab == "t_join":
+			ttab_join_button.focus_neighbor_bottom = t_join_code_input.get_path()
+			t_join_code_input.focus_neighbor_top = ttab_join_button.get_path()
+			t_join_code_input.focus_neighbor_right = t_join_paste_button.get_path()
+			t_join_paste_button.focus_neighbor_left = t_join_code_input.get_path()
+			t_join_code_input.focus_neighbor_bottom = t_join_golfer_dropdown.get_path()
+			t_join_golfer_dropdown.focus_neighbor_top = t_join_code_input.get_path()
+			t_join_golfer_dropdown.focus_neighbor_right = t_join_golfer_tee.get_path()
+			t_join_golfer_tee.focus_neighbor_left = t_join_golfer_dropdown.get_path()
+			t_join_golfer_dropdown.focus_neighbor_bottom = t_join_submit_button.get_path()
+			t_join_golfer_tee.focus_neighbor_bottom = t_join_submit_button.get_path()
+			t_join_submit_button.focus_neighbor_top = t_join_golfer_dropdown.get_path()
+		elif _active_t_tab == "t_public":
+			ttab_public_button.focus_neighbor_bottom = t_public_refresh_button.get_path()
+			t_public_refresh_button.focus_neighbor_top = ttab_public_button.get_path()
+		elif _active_t_tab == "t_standings":
+			ttab_standings_button.focus_neighbor_bottom = t_standings_refresh_button.get_path()
+			t_standings_refresh_button.focus_neighbor_top = ttab_standings_button.get_path()

@@ -189,9 +189,43 @@ func _test_6_multiplayer_menu_scene_loading() -> void:
 	var tourneys_btn = instance.get_node_or_null("%ModeTournamentsButton")
 	assert(tourneys_btn != null, "ModeTournamentsButton node must exist")
 
-	# Check that tournament section exists
-	var tourneys_sec = instance.get_node_or_null("%TournamentsSection")
-	assert(tourneys_sec != null, "TournamentsSection must exist")
+	# Check that tournament tab bar and tournament views exist
+	var t_tab_bar = instance.get_node_or_null("%TournamentTabBar")
+	assert(t_tab_bar != null, "TournamentTabBar must exist")
+	var t_host_view = instance.get_node_or_null("%TournamentHostView")
+	assert(t_host_view != null, "TournamentHostView must exist")
+	var t_join_view = instance.get_node_or_null("%TournamentJoinView")
+	assert(t_join_view != null, "TournamentJoinView must exist")
+	var t_public_view = instance.get_node_or_null("%TournamentPublicView")
+	assert(t_public_view != null, "TournamentPublicView must exist")
+	var t_standings_view = instance.get_node_or_null("%TournamentStandingsView")
+	assert(t_standings_view != null, "TournamentStandingsView must exist")
 
+	# Add to tree so _ready runs naturally and get_path() works
+	root.add_child(instance)
+	assert(instance._active_mode == "matches", "Initial mode should be matches")
+	assert(instance.tab_bar.visible == true, "Matches tab bar should be visible initially")
+	assert(instance.tournament_tab_bar.visible == false, "Tournament tab bar should be hidden initially")
+	assert(matches_btn.disabled == false, "Active tab buttons must not be disabled (prevents visual dimming)")
+
+	# Switch to tournaments
+	instance._switch_mode("tournaments")
+	assert(instance._active_mode == "tournaments", "Active mode should now be tournaments")
+	assert(instance.tab_bar.visible == false, "Matches tab bar should be hidden in tournaments mode")
+	assert(instance.tournament_tab_bar.visible == true, "Tournament tab bar should be visible in tournaments mode")
+	assert(tourneys_btn.disabled == false, "Tournament button must not be disabled")
+
+	# Switch tournament tab to host
+	instance._switch_t_tab("t_host")
+	assert(t_host_view.visible == true, "TournamentHostView must be visible when t_host is active")
+	assert(instance.host_view.visible == false, "Matches host_view must be hidden in tournament mode")
+	assert(t_join_view.visible == false, "TournamentJoinView must be hidden when t_host is active")
+
+	# Switch tournament tab to standings
+	instance._switch_t_tab("t_standings")
+	assert(t_standings_view.visible == true, "TournamentStandingsView must be visible when t_standings is active")
+	assert(t_host_view.visible == false, "TournamentHostView must be hidden when t_standings is active")
+
+	root.remove_child(instance)
 	instance.free()
-	print("Multiplayer Menu scene instantiation OK.")
+	print("Multiplayer Menu scene instantiation & tab switching OK.")

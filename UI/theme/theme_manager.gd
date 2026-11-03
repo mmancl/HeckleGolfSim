@@ -68,6 +68,25 @@ static func apply_nav_button_style(btn: Button, corner_radius: int = 8) -> void:
 		COLOR_TEXT_WHITE
 	)
 
+static func apply_tab_button_style(btn: Button, is_active: bool, corner_radius: int = 8) -> void:
+	if btn == null:
+		return
+	btn.disabled = false
+	if is_active:
+		var normal_box = _create_stylebox(Color(0.18, 0.34, 0.50, 0.95), Color(0.35, 0.82, 1.0, 0.95), corner_radius, 2, 18, 10, 18, 10)
+		var hover_box = _create_stylebox(Color(0.22, 0.40, 0.58, 0.95), Color(0.45, 0.90, 1.0, 1.0), corner_radius, 2, 18, 10, 18, 10)
+		var pressed_box = _create_stylebox(Color(0.14, 0.28, 0.42, 0.95), Color(0.35, 0.82, 1.0, 0.95), corner_radius, 2, 18, 10, 18, 10)
+		_apply_button_styles(btn, normal_box, hover_box, pressed_box, COLOR_TEXT_GOLD)
+		btn.add_theme_color_override("font_hover_color", COLOR_TEXT_GOLD)
+		btn.add_theme_color_override("font_focus_color", COLOR_TEXT_GOLD)
+	else:
+		var normal_box = _create_stylebox(Color(0.08, 0.12, 0.18, 0.70), Color(0.24, 0.44, 0.65, 0.30), corner_radius, 1, 18, 10, 18, 10)
+		var hover_box = _create_stylebox(Color(0.15, 0.22, 0.32, 0.85), Color(0.35, 0.65, 0.95, 0.60), corner_radius, 1, 18, 10, 18, 10)
+		var pressed_box = _create_stylebox(Color(0.06, 0.09, 0.14, 0.85), Color(0.24, 0.44, 0.65, 0.30), corner_radius, 1, 18, 10, 18, 10)
+		_apply_button_styles(btn, normal_box, hover_box, pressed_box, COLOR_TEXT_MUTED)
+		btn.add_theme_color_override("font_hover_color", COLOR_TEXT_WHITE)
+		btn.add_theme_color_override("font_focus_color", COLOR_TEXT_WHITE)
+
 static func apply_icon_button_style(btn: Button, corner_radius: int = 8, padding: int = 12) -> void:
 	_apply_button_styles(
 		btn,

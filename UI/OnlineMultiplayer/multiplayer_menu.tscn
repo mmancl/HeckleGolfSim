@@ -126,6 +126,36 @@ custom_minimum_size = Vector2(180, 44)
 layout_mode = 2
 text = "Public Matches"
 
+[node name="TournamentTabBar" type="HBoxContainer" parent="MainMargin/RootVBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="TTabHostButton" type="Button" parent="MainMargin/RootVBox/TournamentTabBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 44)
+layout_mode = 2
+text = "Host Tournament"
+
+[node name="TTabJoinButton" type="Button" parent="MainMargin/RootVBox/TournamentTabBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 44)
+layout_mode = 2
+text = "Join by Code"
+
+[node name="TTabPublicButton" type="Button" parent="MainMargin/RootVBox/TournamentTabBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 44)
+layout_mode = 2
+text = "Public Tournaments"
+
+[node name="TTabStandingsButton" type="Button" parent="MainMargin/RootVBox/TournamentTabBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 44)
+layout_mode = 2
+text = "Standings"
+
 [node name="ContentStack" type="PanelContainer" parent="MainMargin/RootVBox"]
 layout_mode = 2
 size_flags_vertical = 3
@@ -441,157 +471,94 @@ custom_minimum_size = Vector2(200, 44)
 layout_mode = 2
 text = "Start Match"
 
-[node name="ConfirmLeaveDialog" type="ConfirmationDialog" parent="."]
-unique_name_in_owner = true
-title = "Leave Lobby?"
-initial_position = 2
-size = Vector2i(420, 140)
-dialog_text = "Leaving as host will cancel and close the lobby for all players. Are you sure?"
 
-[node name="TournamentsSection" type="VBoxContainer" parent="MainMargin/RootVBox"]
+[node name="TournamentHostView" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
-theme_override_constants/separation = 12
-
-[node name="TournamentTabBar" type="HBoxContainer" parent="MainMargin/RootVBox/TournamentsSection"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_constants/separation = 12
-
-[node name="TTabHostButton" type="Button" parent="MainMargin/RootVBox/TournamentsSection/TournamentTabBar"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(160, 44)
-layout_mode = 2
-text = "Host"
-
-[node name="TTabJoinButton" type="Button" parent="MainMargin/RootVBox/TournamentsSection/TournamentTabBar"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(160, 44)
-layout_mode = 2
-text = "Join"
-
-[node name="TTabPublicButton" type="Button" parent="MainMargin/RootVBox/TournamentsSection/TournamentTabBar"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(180, 44)
-layout_mode = 2
-text = "Public Tournaments"
-
-[node name="TTabStandingsButton" type="Button" parent="MainMargin/RootVBox/TournamentsSection/TournamentTabBar"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(160, 44)
-layout_mode = 2
-text = "Standings"
-
-[node name="TournamentContentStack" type="PanelContainer" parent="MainMargin/RootVBox/TournamentsSection"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="TournamentHostView" type="ScrollContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-follow_focus = true
-
-[node name="THostVBox" type="VBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView"]
-layout_mode = 2
-size_flags_horizontal = 3
 theme_override_constants/separation = 14
 
-[node name="THostTitleLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 17
-text = "Host a Tournament"
-
-[node name="THostNameRow" type="HBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox"]
-layout_mode = 2
-theme_override_constants/separation = 12
-
-[node name="THostNameLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/THostNameRow"]
-layout_mode = 2
-text = "Tournament Name:"
-custom_minimum_size = Vector2(180, 0)
-vertical_alignment = 1
-
-[node name="THostNameInput" type="LineEdit" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/THostNameRow"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-custom_minimum_size = Vector2(0, 40)
-placeholder_text = "My Tournament"
-max_length = 48
-
-[node name="TCourseSelectionSection" type="VBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox"]
+[node name="TCourseSelectionSection" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack/TournamentHostView"]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="TCourseLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TCourseSelectionSection"]
+[node name="TCourseLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TCourseSelectionSection"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 15
+theme_override_font_sizes/font_size = 16
 text = "Select Course:"
 
-[node name="TCourseDropdown" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TCourseSelectionSection"]
+[node name="TCourseDropdown" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TCourseSelectionSection"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 
-[node name="TSettingsGrid" type="GridContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox"]
+[node name="TSettingsGrid" type="GridContainer" parent="MainMargin/RootVBox/ContentStack/TournamentHostView"]
 layout_mode = 2
 theme_override_constants/h_separation = 20
 theme_override_constants/v_separation = 10
 columns = 2
 
-[node name="TLengthLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TNameLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
+layout_mode = 2
+text = "Tournament Name:"
+
+[node name="THostNameInput" type="LineEdit" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(240, 38)
+placeholder_text = "My Tournament"
+max_length = 48
+
+[node name="TLengthLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 layout_mode = 2
 text = "Course Length:"
 
-[node name="TLengthOption" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TLengthOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(240, 38)
 layout_mode = 2
 
-[node name="TModeLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TModeLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 layout_mode = 2
 text = "Game Mode:"
 
-[node name="TModeOption" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TModeOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(240, 38)
 layout_mode = 2
 
-[node name="TWindLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TWindLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 layout_mode = 2
 text = "Wind Condition:"
 
-[node name="TWindOption" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TWindOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(240, 38)
 layout_mode = 2
 
-[node name="TGreenSpeedLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TGreenSpeedLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 layout_mode = 2
 text = "Green Speed:"
 
-[node name="TGreenSpeedOption" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TGreenSpeedOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(240, 38)
 layout_mode = 2
 
-[node name="TVisibilityLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TVisibilityLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 layout_mode = 2
 text = "Visibility:"
 
-[node name="TVisibilityOption" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TVisibilityOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(240, 38)
 layout_mode = 2
 
-[node name="TMaxPlayersLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TMaxPlayersLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 layout_mode = 2
 text = "Max Players:"
 
-[node name="TMaxPlayersSpinBox" type="SpinBox" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TMaxPlayersSpinBox" type="SpinBox" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(140, 38)
 layout_mode = 2
@@ -600,79 +567,79 @@ max_value = 200.0
 step = 1.0
 value = 20.0
 
-[node name="TEndDateLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TEndDateLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 layout_mode = 2
 text = "End Date (UTC):"
 
-[node name="TEndDateInput" type="LineEdit" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/TSettingsGrid"]
+[node name="TEndDateInput" type="LineEdit" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/TSettingsGrid"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(240, 38)
 layout_mode = 2
+custom_minimum_size = Vector2(240, 38)
 placeholder_text = "YYYY-MM-DD HH:MM"
 max_length = 16
 
-[node name="THostGolferSection" type="VBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox"]
+[node name="THostGolferSection" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack/TournamentHostView"]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="THostGolferLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/THostGolferSection"]
+[node name="THostGolferLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/THostGolferSection"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 15
-text = "Your Golfer & Tee:"
+text = "Local Golfers (This Device):"
 
-[node name="THostGolferRow" type="HBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/THostGolferSection"]
+[node name="THostGolferRow" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/THostGolferSection"]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="THostGolferDropdown" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/THostGolferSection/THostGolferRow"]
+[node name="THostGolferDropdown" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/THostGolferSection/THostGolferRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(240, 38)
 layout_mode = 2
 
-[node name="THostGolferTee" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/THostGolferSection/THostGolferRow"]
+[node name="THostGolferTee" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/THostGolferSection/THostGolferRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(140, 38)
 layout_mode = 2
 
-[node name="THostCreateButton" type="Button" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox"]
+[node name="THostCreateButton" type="Button" parent="MainMargin/RootVBox/ContentStack/TournamentHostView"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(280, 48)
+custom_minimum_size = Vector2(260, 48)
 layout_mode = 2
 size_flags_horizontal = 4
 text = "Create Tournament"
 
-[node name="THostStatusLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox"]
+[node name="THostStatusLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView"]
 unique_name_in_owner = true
 layout_mode = 2
 horizontal_alignment = 1
 
-[node name="THostSuccessPanel" type="PanelContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox"]
+[node name="THostSuccessPanel" type="PanelContainer" parent="MainMargin/RootVBox/ContentStack/TournamentHostView"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 
-[node name="THostSuccessMargin" type="MarginContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/THostSuccessPanel"]
+[node name="THostSuccessMargin" type="MarginContainer" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/THostSuccessPanel"]
 layout_mode = 2
 theme_override_constants/margin_left = 16
 theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 16
 theme_override_constants/margin_bottom = 12
 
-[node name="THostSuccessVBox" type="VBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/THostSuccessPanel/THostSuccessMargin"]
+[node name="THostSuccessVBox" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/THostSuccessPanel/THostSuccessMargin"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="THostSuccessTitle" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/THostSuccessPanel/THostSuccessMargin/THostSuccessVBox"]
+[node name="THostSuccessTitle" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/THostSuccessPanel/THostSuccessMargin/THostSuccessVBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
 text = "Tournament Created!"
 horizontal_alignment = 1
 
-[node name="THostSuccessCodeRow" type="HBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/THostSuccessPanel/THostSuccessMargin/THostSuccessVBox"]
+[node name="THostSuccessCodeRow" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/THostSuccessPanel/THostSuccessMargin/THostSuccessVBox"]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="THostSuccessCodeLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/THostSuccessPanel/THostSuccessMargin/THostSuccessVBox/THostSuccessCodeRow"]
+[node name="THostSuccessCodeLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/THostSuccessPanel/THostSuccessMargin/THostSuccessVBox/THostSuccessCodeRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -680,235 +647,243 @@ text = "Join Code: ABCDEF"
 theme_override_font_sizes/font_size = 20
 horizontal_alignment = 1
 
-[node name="THostCopyCodeButton" type="Button" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/THostSuccessPanel/THostSuccessMargin/THostSuccessVBox/THostSuccessCodeRow"]
+[node name="THostCopyCodeButton" type="Button" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/THostSuccessPanel/THostSuccessMargin/THostSuccessVBox/THostSuccessCodeRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 36)
 layout_mode = 2
 text = "Copy Code"
 
-[node name="THostSuccessEndDate" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentHostView/THostVBox/THostSuccessPanel/THostSuccessMargin/THostSuccessVBox"]
+[node name="THostSuccessEndDate" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentHostView/THostSuccessPanel/THostSuccessMargin/THostSuccessVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Ends: ..."
 horizontal_alignment = 1
 
-[node name="TournamentJoinView" type="VBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack"]
+[node name="TournamentJoinView" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 theme_override_constants/separation = 18
 
-[node name="TJoinTitleLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentJoinView"]
+[node name="TJoinTitleLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentJoinView"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 17
 text = "Join a Tournament"
 
-[node name="TJoinInstructions" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentJoinView"]
+[node name="TJoinInstructions" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentJoinView"]
 layout_mode = 2
 text = "Enter the 6-character tournament code from the host:"
 
-[node name="TJoinCodeRow" type="HBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentJoinView"]
+[node name="TJoinCodeRow" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/TournamentJoinView"]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="TJoinCodeInput" type="LineEdit" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentJoinView/TJoinCodeRow"]
+[node name="TJoinCodeInput" type="LineEdit" parent="MainMargin/RootVBox/ContentStack/TournamentJoinView/TJoinCodeRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(240, 48)
 layout_mode = 2
 placeholder_text = "6-CHAR CODE"
 max_length = 6
 
-[node name="TJoinPasteButton" type="Button" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentJoinView/TJoinCodeRow"]
+[node name="TJoinPasteButton" type="Button" parent="MainMargin/RootVBox/ContentStack/TournamentJoinView/TJoinCodeRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(100, 48)
 layout_mode = 2
 text = "Paste"
 
-[node name="TJoinGolferSection" type="HBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentJoinView"]
+[node name="TJoinGolferSection" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/TournamentJoinView"]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="TJoinGolferLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentJoinView/TJoinGolferSection"]
+[node name="TJoinGolferLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentJoinView/TJoinGolferSection"]
 layout_mode = 2
 text = "Golfer:"
 vertical_alignment = 1
 
-[node name="TJoinGolferDropdown" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentJoinView/TJoinGolferSection"]
+[node name="TJoinGolferDropdown" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentJoinView/TJoinGolferSection"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(200, 38)
 layout_mode = 2
 
-[node name="TJoinGolferTee" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentJoinView/TJoinGolferSection"]
+[node name="TJoinGolferTee" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentJoinView/TJoinGolferSection"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(140, 38)
 layout_mode = 2
 
-[node name="TJoinSubmitButton" type="Button" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentJoinView"]
+[node name="TJoinSubmitButton" type="Button" parent="MainMargin/RootVBox/ContentStack/TournamentJoinView"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(240, 48)
 layout_mode = 2
 size_flags_horizontal = 4
 text = "Join Tournament"
 
-[node name="TJoinStatusLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentJoinView"]
+[node name="TJoinStatusLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentJoinView"]
 unique_name_in_owner = true
 layout_mode = 2
 horizontal_alignment = 1
 
-[node name="TournamentPublicView" type="VBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack"]
+[node name="TournamentPublicView" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="TPublicHeader" type="HBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentPublicView"]
+[node name="TPublicHeader" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/TournamentPublicView"]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="TPublicHeaderLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentPublicView/TPublicHeader"]
+[node name="TPublicHeaderLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentPublicView/TPublicHeader"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 15
 text = "Public Tournaments"
 vertical_alignment = 1
 
-[node name="TPublicRefreshButton" type="Button" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentPublicView/TPublicHeader"]
+[node name="TPublicRefreshButton" type="Button" parent="MainMargin/RootVBox/ContentStack/TournamentPublicView/TPublicHeader"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(110, 36)
 layout_mode = 2
 text = "Refresh"
 
-[node name="TPublicFilterBar" type="HBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentPublicView"]
+[node name="TPublicFilterBar" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/TournamentPublicView"]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="TPublicFilterTimeLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentPublicView/TPublicFilterBar"]
+[node name="TPublicFilterTimeLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentPublicView/TPublicFilterBar"]
 layout_mode = 2
 text = "Period:"
 vertical_alignment = 1
 
-[node name="TPublicFilterTimeOption" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentPublicView/TPublicFilterBar"]
+[node name="TPublicFilterTimeOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentPublicView/TPublicFilterBar"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(160, 36)
 layout_mode = 2
 
-[node name="TPublicFilterCourseSpacer" type="Control" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentPublicView/TPublicFilterBar"]
+[node name="TPublicFilterCourseSpacer" type="Control" parent="MainMargin/RootVBox/ContentStack/TournamentPublicView/TPublicFilterBar"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="TPublicFilterCourseLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentPublicView/TPublicFilterBar"]
+[node name="TPublicFilterCourseLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentPublicView/TPublicFilterBar"]
 layout_mode = 2
 text = "Course:"
 vertical_alignment = 1
 
-[node name="TPublicFilterCourseOption" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentPublicView/TPublicFilterBar"]
+[node name="TPublicFilterCourseOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentPublicView/TPublicFilterBar"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(200, 36)
 layout_mode = 2
 
-[node name="TPublicScroll" type="ScrollContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentPublicView"]
+[node name="TPublicScroll" type="ScrollContainer" parent="MainMargin/RootVBox/ContentStack/TournamentPublicView"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 follow_focus = true
 
-[node name="TPublicList" type="VBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentPublicView/TPublicScroll"]
+[node name="TPublicList" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack/TournamentPublicView/TPublicScroll"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 8
 
-[node name="TPublicEmptyLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentPublicView/TPublicScroll/TPublicList"]
+[node name="TPublicEmptyLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentPublicView/TPublicScroll/TPublicList"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "No public tournaments found."
 horizontal_alignment = 1
 
-[node name="TournamentStandingsView" type="VBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack"]
+[node name="TournamentStandingsView" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="TStandingsHeader" type="HBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView"]
+[node name="TStandingsHeader" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView"]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="TStandingsFilterBar" type="HBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView"]
+[node name="TStandingsFilterBar" type="HBoxContainer" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView"]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="TStandingsFilterParticipLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView/TStandingsFilterBar"]
+[node name="TStandingsFilterParticipLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView/TStandingsFilterBar"]
 layout_mode = 2
 text = "Show:"
 vertical_alignment = 1
 
-[node name="TStandingsFilterParticipOption" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView/TStandingsFilterBar"]
+[node name="TStandingsFilterParticipOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView/TStandingsFilterBar"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(170, 36)
 layout_mode = 2
 
-[node name="TStandingsFilterTimeSpacer" type="Control" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView/TStandingsFilterBar"]
+[node name="TStandingsFilterTimeSpacer" type="Control" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView/TStandingsFilterBar"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="TStandingsFilterTimeLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView/TStandingsFilterBar"]
+[node name="TStandingsFilterTimeLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView/TStandingsFilterBar"]
 layout_mode = 2
 text = "Period:"
 vertical_alignment = 1
 
-[node name="TStandingsFilterTimeOption" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView/TStandingsFilterBar"]
+[node name="TStandingsFilterTimeOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView/TStandingsFilterBar"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(160, 36)
 layout_mode = 2
 
-[node name="TStandingsFilterCourseSpacer" type="Control" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView/TStandingsFilterBar"]
+[node name="TStandingsFilterCourseSpacer" type="Control" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView/TStandingsFilterBar"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="TStandingsFilterCourseLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView/TStandingsFilterBar"]
+[node name="TStandingsFilterCourseLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView/TStandingsFilterBar"]
 layout_mode = 2
 text = "Course:"
 vertical_alignment = 1
 
-[node name="TStandingsFilterCourseOption" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView/TStandingsFilterBar"]
+[node name="TStandingsFilterCourseOption" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView/TStandingsFilterBar"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(200, 36)
 layout_mode = 2
 
-[node name="TStandingsRefreshButton" type="Button" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView"]
+[node name="TStandingsRefreshButton" type="Button" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(200, 36)
 layout_mode = 2
 size_flags_horizontal = 4
 text = "Load Standings"
 
-[node name="TStandingsTournamentDropdown" type="OptionButton" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView"]
+[node name="TStandingsTournamentDropdown" type="OptionButton" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 40)
 layout_mode = 2
 
-[node name="TStandingsMeta" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView"]
+[node name="TStandingsMeta" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 13
 horizontal_alignment = 1
 text = ""
 
-[node name="TStandingsScroll" type="ScrollContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView"]
+[node name="TStandingsScroll" type="ScrollContainer" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
 follow_focus = true
 
-[node name="TStandingsList" type="VBoxContainer" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView/TStandingsScroll"]
+[node name="TStandingsList" type="VBoxContainer" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView/TStandingsScroll"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 6
 
-[node name="TStandingsEmptyLabel" type="Label" parent="MainMargin/RootVBox/TournamentsSection/TournamentContentStack/TournamentStandingsView/TStandingsScroll/TStandingsList"]
+[node name="TStandingsEmptyLabel" type="Label" parent="MainMargin/RootVBox/ContentStack/TournamentStandingsView/TStandingsScroll/TStandingsList"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Select a tournament above to view standings."
 horizontal_alignment = 1
+
+[node name="ConfirmLeaveDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "Leave Lobby?"
+initial_position = 2
+size = Vector2i(420, 140)
+dialog_text = "Leaving as host will cancel and close the lobby for all players. Are you sure?"
+
