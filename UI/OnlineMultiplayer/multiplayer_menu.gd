@@ -434,6 +434,7 @@ func _on_host_create_pressed() -> void:
 	host_create_button.disabled = false
 	if res.get("ok", false):
 		_switch_tab("room")
+		_on_lobby_updated(sess.match_meta, sess.match_devices, sess.match_golfers)
 	else:
 		_show_status(res.get("error", "Failed to create lobby"), true)
 
@@ -477,6 +478,7 @@ func _on_join_code_submit_pressed() -> void:
 
 	if res.get("ok", false):
 		_switch_tab("room")
+		_on_lobby_updated(sess.match_meta, sess.match_devices, sess.match_golfers)
 	else:
 		_show_status(res.get("error", "Failed to join lobby."), true)
 
@@ -594,6 +596,7 @@ func _on_join_browser_lobby(match_id: String) -> void:
 	var res = await sess.join_by_match_id(match_id, local_golfers)
 	if res.get("ok", false):
 		_switch_tab("room")
+		_on_lobby_updated(sess.match_meta, sess.match_devices, sess.match_golfers)
 	else:
 		_show_status(res.get("error", "Failed to join match."), true)
 

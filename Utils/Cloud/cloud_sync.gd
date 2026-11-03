@@ -1003,9 +1003,9 @@ func _upload_pending_matches_for_uid(client: FirestoreClient, cloud_uid: String)
 			holes_played_in_match = m_holes.size()
 
 		var field_transforms: Array = [
-			{"fieldPath": "lifetime.holes_played", "increment": {"integerValue": str(holes_played_in_match)}},
-			{"fieldPath": "lifetime.total_strokes", "increment": {"integerValue": str(M.get("strokes", 0))}},
-			{"fieldPath": "lifetime.total_par", "increment": {"integerValue": str(M.get("par", 0))}}
+			{"fieldPath": "lifetime.holes_played", "increment": {"integerValue": str(int(holes_played_in_match))}},
+			{"fieldPath": "lifetime.total_strokes", "increment": {"integerValue": str(int(round(float(M.get("strokes", 0)))))}},
+			{"fieldPath": "lifetime.total_par", "increment": {"integerValue": str(int(round(float(M.get("par", 0)))))}},
 		]
 
 		# Only completed matches increment matches_played, win/loss records, scoring averages, and best scores
@@ -1021,15 +1021,15 @@ func _upload_pending_matches_for_uid(client: FirestoreClient, cloud_uid: String)
 				field_transforms.append({"fieldPath": "lifetime.single_player_completed", "increment": {"integerValue": "1"}})
 
 			if M.has("to_par"):
-				field_transforms.append({"fieldPath": "lifetime.par_diff_sum", "increment": {"integerValue": str(M.get("to_par"))}})
+				field_transforms.append({"fieldPath": "lifetime.par_diff_sum", "increment": {"integerValue": str(int(round(float(M.get("to_par")))))}})
 				field_transforms.append({"fieldPath": "lifetime.par_diff_matches", "increment": {"integerValue": "1"}})
 
 			if M.get("holes_count", 0) == 18 and M.get("game_mode", "") == "Standard" and M.get("mulligans_used", 0) == 0:
-				field_transforms.append({"fieldPath": "lifetime.best_to_par_18", "minimum": {"integerValue": str(M.get("to_par", 0))}})
-				field_transforms.append({"fieldPath": "lifetime.best_gross_18", "minimum": {"integerValue": str(M.get("strokes", 0))}})
+				field_transforms.append({"fieldPath": "lifetime.best_to_par_18", "minimum": {"integerValue": str(int(round(float(M.get("to_par", 0)))))}})
+				field_transforms.append({"fieldPath": "lifetime.best_gross_18", "minimum": {"integerValue": str(int(round(float(M.get("strokes", 0)))))}})
 			elif M.get("holes_count", 0) == 9 and M.get("game_mode", "") == "Standard" and M.get("mulligans_used", 0) == 0:
-				field_transforms.append({"fieldPath": "lifetime.best_to_par_9", "minimum": {"integerValue": str(M.get("to_par", 0))}})
-				field_transforms.append({"fieldPath": "lifetime.best_gross_9", "minimum": {"integerValue": str(M.get("strokes", 0))}})
+				field_transforms.append({"fieldPath": "lifetime.best_to_par_9", "minimum": {"integerValue": str(int(round(float(M.get("to_par", 0)))))}})
+				field_transforms.append({"fieldPath": "lifetime.best_gross_9", "minimum": {"integerValue": str(int(round(float(M.get("strokes", 0)))))}})
 
 		# Distance records are credited whenever a valid swing occurs
 		if float(M.get("longest_drive_yds", 0.0)) > 0.0:

@@ -27,6 +27,7 @@ var _replayer: RemoteShotReplayer = null
 var _match_id: String = ""
 var _match_meta: Dictionary = {}
 var _golfers: Array[Dictionary] = []
+var _is_match_running: bool = false
 
 var _heartbeat_timer: Timer = null
 var _poll_timer: Timer = null
@@ -133,6 +134,11 @@ func get_next_seq() -> int:
 # ── MATCH START & TRANSITION ──────────────────────────────────────────
 
 func start_online_match(match_id: String, meta: Dictionary, golfers: Array[Dictionary]) -> void:
+	if _is_match_running and _match_id == match_id:
+		print("[OnlineMatchController] Match %s is already running. Ignoring duplicate start call." % match_id)
+		return
+	_is_match_running = true
+
 	var sess := _get_online_session()
 	if sess != null and bool(sess.get("is_spectator")):
 		start_spectating_match(match_id, meta, golfers)
@@ -192,9 +198,10 @@ func start_online_match(match_id: String, meta: Dictionary, golfers: Array[Dicti
 			if parser.parse(txt) == OK and parser.data is Dictionary:
 				course_dict = parser.data
 
-	var course_length: String = str(meta.get("course_length", "All"))
-	var game_mode: String = str(meta.get("game_mode", "Standard"))
-	var turn_order: String = str(meta.get("turn_order", "furthest_away"))
+	var settings: Dictionary = meta.get("settings", {})
+	var course_length: String = str(settings.get("course_length", meta.get("course_length", "Full 18")))
+	var game_mode: String = str(settings.get("game_mode", meta.get("game_mode", "Standard")))
+	var turn_order: String = str(settings.get("turn_order", meta.get("turn_order", "furthest_away")))
 	var teams: Dictionary = {}
 
 	var mp := _get_mp_manager()
@@ -217,6 +224,11 @@ func start_online_match(match_id: String, meta: Dictionary, golfers: Array[Dicti
 
 
 func start_spectating_match(match_id: String, meta: Dictionary, golfers: Array[Dictionary], events_dict: Dictionary = {}) -> void:
+	if _is_match_running and _match_id == match_id:
+		print("[OnlineMatchController] Spectating match %s is already running. Ignoring duplicate start call." % match_id)
+		return
+	_is_match_running = true
+
 	_match_id = match_id
 	_match_meta = meta
 	_golfers = golfers
@@ -264,9 +276,10 @@ func start_spectating_match(match_id: String, meta: Dictionary, golfers: Array[D
 			if parser.parse(txt) == OK and parser.data is Dictionary:
 				course_dict = parser.data
 
-	var course_length: String = str(meta.get("course_length", "All"))
-	var game_mode: String = str(meta.get("game_mode", "Standard"))
-	var turn_order: String = str(meta.get("turn_order", "furthest_away"))
+	var settings: Dictionary = meta.get("settings", {})
+	var course_length: String = str(settings.get("course_length", meta.get("course_length", "Full 18")))
+	var game_mode: String = str(settings.get("game_mode", meta.get("game_mode", "Standard")))
+	var turn_order: String = str(settings.get("turn_order", meta.get("turn_order", "furthest_away")))
 	var teams: Dictionary = {}
 
 	var mp := _get_mp_manager()
@@ -662,6 +675,7 @@ func end_match_and_return_to_menu(reason: String = "") -> void:
 	_match_id = ""
 	_match_meta = {}
 	_golfers = []
+	_is_match_running = false
 	_last_applied_seq = 0
 	_event_buffer.clear()
 	_is_replaying = false

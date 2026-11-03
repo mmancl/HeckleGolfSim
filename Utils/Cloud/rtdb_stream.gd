@@ -41,7 +41,7 @@ func close() -> void:
 	if _thread != null and _thread.is_started():
 		_thread.wait_to_finish()
 		_thread = null
-	closed.emit()
+	closed.emit.call_deferred()
 
 
 func is_connected_to_stream() -> bool:
@@ -99,7 +99,7 @@ func _dispatch_current_message() -> void:
 		return
 
 	if event == "cancel" or event == "auth_revoked":
-		error_occurred.emit(event)
+		error_occurred.emit.call_deferred(event)
 		close()
 		return
 
@@ -113,15 +113,15 @@ func _dispatch_current_message() -> void:
 	else:
 		event_dict = {"path": "/", "data": parsed}
 
-	data_received.emit(event, event_dict)
+	data_received.emit.call_deferred(event, event_dict)
 
 	var path: String = str(event_dict.get("path", "/"))
 	var data: Variant = event_dict.get("data", null)
 
 	if event == "put":
-		put.emit(path, data)
+		put.emit.call_deferred(path, data)
 	elif event == "patch":
-		patch.emit(path, data)
+		patch.emit.call_deferred(path, data)
 
 
 # ── BACKGROUND STREAM THREAD ─────────────────────────────────────────────
@@ -155,7 +155,7 @@ func _run_stream_thread() -> void:
 
 	var err := client.connect_to_host(host, port, tls_opts if is_ssl else null)
 	if err != OK:
-		error_occurred.emit("Connection failed: %d" % err)
+		error_occurred.emit.call_deferred("Connection failed: %d" % err)
 		return
 
 	while not _stop_requested and (client.get_status() == HTTPClient.STATUS_CONNECTING or client.get_status() == HTTPClient.STATUS_RESOLVING):
@@ -163,7 +163,7 @@ func _run_stream_thread() -> void:
 		OS.delay_msec(20)
 
 	if client.get_status() != HTTPClient.STATUS_CONNECTED:
-		error_occurred.emit("Failed to connect to host: %s" % host)
+		error_occurred.emit.call_deferred("Failed to connect to host: %s" % host)
 		return
 
 	var headers := PackedStringArray([
@@ -172,7 +172,7 @@ func _run_stream_thread() -> void:
 	])
 	err = client.request(HTTPClient.METHOD_GET, path, headers)
 	if err != OK:
-		error_occurred.emit("Stream request failed: %d" % err)
+		error_occurred.emit.call_deferred("Stream request failed: %d" % err)
 		return
 
 	while not _stop_requested and client.get_status() == HTTPClient.STATUS_REQUESTING:
@@ -180,10 +180,10 @@ func _run_stream_thread() -> void:
 		OS.delay_msec(20)
 
 	if client.get_status() != HTTPClient.STATUS_BODY and client.get_status() != HTTPClient.STATUS_CONNECTED:
-		error_occurred.emit("Stream request invalid status: %d" % client.get_status())
+		error_occurred.emit.call_deferred("Stream request invalid status: %d" % client.get_status())
 		return
 
-	connected.emit()
+	connected.emit.call_deferred()
 
 	while not _stop_requested and client.get_status() == HTTPClient.STATUS_BODY:
 		client.poll()

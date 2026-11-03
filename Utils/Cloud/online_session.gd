@@ -46,6 +46,7 @@ var is_local_device_ready: bool = false
 
 var _saved_local_settings: Dictionary = {}
 var _is_replaying_remote: bool = false
+var _match_started_emitted: bool = false
 
 var rtdb: RtdbClient = null
 var _stream: RtdbStream = null
@@ -321,6 +322,7 @@ func create_lobby(course_config_path: String, settings: Dictionary, visibility: 
 	local_config_path = course_info.config_path
 	is_local_course_ready = true
 	is_local_device_ready = true
+	_match_started_emitted = false
 
 	_start_stream(match_id)
 	_start_heartbeat()
@@ -447,6 +449,7 @@ func start_online_match() -> Dictionary:
 	match_meta["started_at"] = now
 	match_meta["turn"] = meta_patch["turn"]
 
+	_match_started_emitted = true
 	match_started.emit(current_match_id, match_meta, sorted_golfers)
 	return {"ok": true}
 
@@ -682,6 +685,7 @@ func _join_match_internal(match_id: String, local_golfers: Array) -> Dictionary:
 	match_golfers = golfers
 	is_local_course_ready = false
 	is_local_device_ready = false
+	_match_started_emitted = false
 
 	_start_stream(match_id)
 	_start_heartbeat()
@@ -816,6 +820,7 @@ func leave_lobby() -> void:
 	current_match_id = ""
 	is_host = false
 	current_join_code = ""
+	_match_started_emitted = false
 	match_meta.clear()
 	match_devices.clear()
 	match_golfers.clear()
@@ -881,8 +886,8 @@ func _start_stream(match_id: String) -> void:
 	if client == null or client.database_url.is_empty():
 		return
 	_stream = client.open_stream("matches/" + match_id)
-	_stream.put.connect(_on_stream_put)
-	_stream.patch.connect(_on_stream_patch)
+	_stream.put.connect(_on_stream_put, CONNECT_DEFERRED)
+	_stream.patch.connect(_on_stream_patch, CONNECT_DEFERRED)
 
 
 func _close_stream() -> void:
@@ -1067,6 +1072,7 @@ func end_online_match() -> void:
 	match_meta = {}
 	match_devices = {}
 	match_golfers = {}
+	_match_started_emitted = false
 	_close_stream()
 	restore_local_settings()
 	if FileAccess.file_exists("user://active_online_match.json"):
@@ -1087,10 +1093,13 @@ func _check_stream_state_transition() -> void:
 		return
 
 	if match_meta.get("status", "") == "active":
-		var sorted_golfers: Array[Dictionary] = []
-		for g in match_golfers.values():
-			sorted_golfers.append(g)
-		sorted_golfers.sort_custom(func(a, b): return int(a.get("order", 0)) < int(b.get("order", 0)))
-		match_started.emit(current_match_id, match_meta, sorted_golfers)
+		if not _match_started_emitted:
+			_match_started_emitted = true
+			var sorted_golfers: Array[Dictionary] = []
+			for g in match_golfers.values():
+				sorted_golfers.append(g)
+			sorted_golfers.sort_custom(func(a, b): return int(a.get("order", 0)) < int(b.get("order", 0)))
+			match_started.emit(current_match_id, match_meta, sorted_golfers)
 	else:
+		_match_started_emitted = false
 		lobby_updated.emit(match_meta, match_devices, match_golfers)

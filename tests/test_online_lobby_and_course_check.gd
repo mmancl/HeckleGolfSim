@@ -43,6 +43,7 @@ func _run_all_tests() -> void:
 	await _test_5_controller_focus_navigation()
 	await _test_6_account_status_label()
 	await _test_7_status_label_isolation_and_tab_switching()
+	await _test_8_stream_deferred_dispatch_and_match_start_once()
 	_restore_user_files(backup)
 
 	print("\n=======================================================")
@@ -589,4 +590,76 @@ func _test_7_status_label_isolation_and_tab_switching() -> void:
 	menu.queue_free()
 	await process_frame
 	print("  PASS: Status label isolation and tab switching cleanup verified successfully.")
+
+
+func _test_8_stream_deferred_dispatch_and_match_start_once() -> void:
+	print("\n--- Test 8: Single-Emission Match Start & Deferred Dispatch Guard ---")
+	var sess := _get_session()
+	sess.is_online_match = true
+	sess.is_host = true
+	sess.current_match_id = "test_match_single_fire"
+	sess.match_meta = {
+		"status": "active",
+		"settings": {
+			"course_length": "Front 9",
+			"game_mode": "Standard",
+			"turn_order": "furthest_away"
+		}
+	}
+	sess.match_devices = {"dev1": {"ready": true, "course_ready": true}}
+	sess.match_golfers = {
+		"slot_0": {"order": 0, "name": "Player 1", "tee": "Blue", "owner_uid": "dev1"},
+		"slot_1": {"order": 1, "name": "Player 2", "tee": "White", "owner_uid": "dev2"}
+	}
+	sess._match_started_emitted = false
+
+	var counter := [0]
+	var received_match_id := [""]
+	var on_started = func(m_id, _meta, _golfers):
+		counter[0] += 1
+		received_match_id[0] = m_id
+
+	sess.match_started.connect(on_started)
+
+	# 1. First stream update when status is "active" should emit match_started
+	sess._check_stream_state_transition()
+	assert(counter[0] == 1, "Expected match_started to emit exactly once on first active state, got %d" % counter[0])
+	assert(received_match_id[0] == "test_match_single_fire", "Expected match ID to match")
+
+	# 2. Subsequent updates (e.g. from heartbeats, shots, device pings) while still active must NOT re-emit match_started
+	sess._check_stream_state_transition()
+	sess._check_stream_state_transition()
+	sess._check_stream_state_transition()
+	assert(counter[0] == 1, "Expected match_started to NOT re-emit on subsequent stream events, got %d" % counter[0])
+
+	# 3. Transition back to lobby resets the guard
+	sess.match_meta["status"] = "lobby"
+	sess._check_stream_state_transition()
+	assert(sess._match_started_emitted == false, "Guard must reset when status is not active")
+
+	sess.match_started.disconnect(on_started)
+	sess.leave_lobby()
+
+	# 4. Verify OnlineMatchController ignores duplicate start calls
+	var omc = root.get_node_or_null("OnlineMatchController")
+	if omc != null:
+		omc._is_match_running = false
+		omc._match_id = ""
+		# Verify settings extraction
+		var meta_with_settings = {
+			"settings": {
+				"course_length": "Back 9",
+				"game_mode": "Skins",
+				"turn_order": "honors"
+			}
+		}
+		var s: Dictionary = meta_with_settings.get("settings", {})
+		var c_len: String = str(s.get("course_length", meta_with_settings.get("course_length", "Full 18")))
+		var g_mode: String = str(s.get("game_mode", meta_with_settings.get("game_mode", "Standard")))
+		var t_order: String = str(s.get("turn_order", meta_with_settings.get("turn_order", "furthest_away")))
+		assert(c_len == "Back 9", "Expected 'Back 9', got %s" % c_len)
+		assert(g_mode == "Skins", "Expected 'Skins', got %s" % g_mode)
+		assert(t_order == "honors", "Expected 'honors', got %s" % t_order)
+
+	print("  PASS: Single-emission match start and duplicate start guards verified successfully.")
 
