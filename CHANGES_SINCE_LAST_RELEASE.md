@@ -14,7 +14,7 @@
   - **Global Leaderboard Integration:** Synced longest putt personal bests to public cloud profiles and enabled full rankings on the Longest Putt global leaderboard.
 
 ### Bug Fixes
-- **Fixed Release Build Freezes on Windows:** Resolved process redirection errors and headless export deadlocks during Windows release packaging by separating stdout and stderr output streams, removing redundant editor dock import calls, and adding live log streaming with timeout monitors.
+- **Fixed Release Build Freezes on Windows:** Fixed an export preset argument parsing error and headless export deadlocks during Windows release packaging. Cleaned up process invocations, removed redundant editor dock imports, and added multi-run artifact aggregation across previous CI runs.
 - **Player Profile Preservation & Unit Test Isolation:** Restored all local player profiles (`mike`, `Sterling`, `Dave`, `sam`, `Player 1`) and club bags. Added file protection and test sandboxing so automated test suites can never overwrite active user profiles or local club stats.
 - **Fixed Longest Drive and Longest Putt Leaderboards Empty State:** Fixed an issue where the Longest Drive and Longest Putt leaderboards showed no records despite players having valid drive and putt data:
   - **Strict Positive Query & Sorting Filters:** Added filters to Firestore queries and in-memory sorting routines to ensure only positive, valid distances (`> 0.0`) are fetched and ranked, preventing zero-value profiles from displacing actual player records.

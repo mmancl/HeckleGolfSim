@@ -159,57 +159,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[2/3] Exporting Windows Desktop release via Godot..." -ForegroundColor Green
-$stdoutFile = Join-Path ([System.IO.Path]::GetTempPath()) "godot_export_windows_out.log"
-$stderrFile = Join-Path ([System.IO.Path]::GetTempPath()) "godot_export_windows_err.log"
-Remove-Item $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
-
-$exportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "Windows Desktop", $TargetExe) -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile -PassThru
-$timeoutSec = 600
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
-$lastOut = 0
-$lastErr = 0
-
-while (-not $exportProc.HasExited -and $sw.Elapsed.TotalSeconds -lt $timeoutSec) {
-    Start-Sleep -Seconds 2
-    if (Test-Path $stdoutFile) {
-        $lines = Get-Content $stdoutFile -ErrorAction SilentlyContinue
-        if ($lines -and $lines.Count -gt $lastOut) {
-            $lines[$lastOut..($lines.Count - 1)] | ForEach-Object { Write-Host $_ }
-            $lastOut = $lines.Count
-        }
-    }
-    if (Test-Path $stderrFile) {
-        $errLines = Get-Content $stderrFile -ErrorAction SilentlyContinue
-        if ($errLines -and $errLines.Count -gt $lastErr) {
-            $errLines[$lastErr..($errLines.Count - 1)] | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
-            $lastErr = $errLines.Count
-        }
-    }
-}
-
-# Flush remaining output
-if (Test-Path $stdoutFile) {
-    $lines = Get-Content $stdoutFile -ErrorAction SilentlyContinue
-    if ($lines -and $lines.Count -gt $lastOut) {
-        $lines[$lastOut..($lines.Count - 1)] | ForEach-Object { Write-Host $_ }
-    }
-    Remove-Item $stdoutFile -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path $stderrFile) {
-    $errLines = Get-Content $stderrFile -ErrorAction SilentlyContinue
-    if ($errLines -and $errLines.Count -gt $lastErr) {
-        $errLines[$lastErr..($errLines.Count - 1)] | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
-    }
-    Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue
-}
-
-if (-not $exportProc.HasExited) {
-    Write-Host "[ERROR] Godot export process timed out after $timeoutSec seconds. Terminating..." -ForegroundColor Red
-    $exportProc.Kill()
-    throw "Godot export timed out after $timeoutSec seconds."
-}
-if ($exportProc.ExitCode -ne 0 -or -not (Test-Path $TargetExe)) {
-    throw "Godot export failed with exit code $($exportProc.ExitCode). Target executable not found at $TargetExe"
+& $GodotExe --headless --path $RepoRoot --export-release "Windows Desktop" $TargetExe
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $TargetExe)) {
+    throw "Godot export failed with exit code $LASTEXITCODE. Target executable not found at $TargetExe"
 }
 Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 

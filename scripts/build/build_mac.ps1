@@ -158,56 +158,11 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "[2/2] Exporting macOS Universal App (.app) via Godot..." -ForegroundColor Green
 Write-Host "      Compiling dual ARM64 + x86_64 binaries, packing assets, and building ZIP (takes ~45s)..." -ForegroundColor Gray
-$stdoutFile = [System.IO.Path]::GetTempFileName()
-$stderrFile = [System.IO.Path]::GetTempFileName()
-Remove-Item $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
-
-$exportProc = Start-Process -FilePath $GodotExe -ArgumentList @("--headless", "--path", $RepoRoot, "--export-release", "macOS", $ZipOutput) -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile -PassThru
-$timeoutSec = 600
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
-$lastOut = 0
-$lastErr = 0
-
-while (-not $exportProc.HasExited -and $sw.Elapsed.TotalSeconds -lt $timeoutSec) {
-    Start-Sleep -Seconds 2
-    if (Test-Path $stdoutFile) {
-        $lines = Get-Content $stdoutFile -ErrorAction SilentlyContinue
-        if ($lines -and $lines.Count -gt $lastOut) {
-            $lines[$lastOut..($lines.Count - 1)] | ForEach-Object { Write-Host $_ }
-            $lastOut = $lines.Count
-        }
-    }
-    if (Test-Path $stderrFile) {
-        $errLines = Get-Content $stderrFile -ErrorAction SilentlyContinue
-        if ($errLines -and $errLines.Count -gt $lastErr) {
-            $errLines[$lastErr..($errLines.Count - 1)] | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
-            $lastErr = $errLines.Count
-        }
-    }
+& $GodotExe --headless --path $RepoRoot --export-release "macOS" $ZipOutput
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $ZipOutput)) {
+    throw "Godot export failed with exit code $LASTEXITCODE. Expected output at $ZipOutput"
 }
-
-if (Test-Path $stdoutFile) {
-    $lines = Get-Content $stdoutFile -ErrorAction SilentlyContinue
-    if ($lines -and $lines.Count -gt $lastOut) {
-        $lines[$lastOut..($lines.Count - 1)] | ForEach-Object { Write-Host $_ }
-    }
-    Remove-Item $stdoutFile -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path $stderrFile) {
-    $errLines = Get-Content $stderrFile -ErrorAction SilentlyContinue
-    if ($errLines -and $errLines.Count -gt $lastErr) {
-        $errLines[$lastErr..($errLines.Count - 1)] | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
-    }
-    Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue
-}
-if (-not $exportProc.HasExited) {
-    Write-Host "[ERROR] Godot export process timed out after $timeoutSec seconds. Terminating..." -ForegroundColor Red
-    $exportProc.Kill()
-    throw "Godot export timed out after $timeoutSec seconds."
-}
-if ($exportProc.ExitCode -ne 0 -or -not (Test-Path $ZipOutput)) {
-    throw "Godot export failed with exit code $($exportProc.ExitCode). Expected output at $ZipOutput"
-}
+Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 # Verify / inject NSBluetoothAlwaysUsageDescription into Info.plist inside the zip
 try {
