@@ -378,6 +378,9 @@ if ($Zip) {
     
     $fileItem = Get-Item $ZipPath
     $sizeMB = [math]::Round($fileItem.Length / 1MB, 2)
+    if ($fileItem.Length -lt 250000000) {
+        throw "Windows export zip is incomplete or corrupted! Size is only $sizeMB MB (expected ~450-550 MB). Failing build to prevent publishing bad release."
+    }
     
     Write-Host ""
     Write-Host "=======================================================" -ForegroundColor Green

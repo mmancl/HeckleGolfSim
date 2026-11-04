@@ -582,37 +582,57 @@ jobs:
               ("Android AAB",     [".aab"])
           ]
 
+          min_sizes = {
+              "Windows Desktop": 200 * 1024 * 1024,
+              "macOS Universal": 200 * 1024 * 1024,
+              "iOS Package":      40 * 1024 * 1024,
+              "Android AAB":      50 * 1024 * 1024,
+          }
+
           print("=== Assembling Release Assets ===")
           manifest = {}
 
           for platform_name, patterns in targets:
+              min_sz = min_sizes.get(platform_name, 0)
+              selected = None
+              source_info = None
+
+              # Helper to filter valid sized files
+              def get_valid_files(dir_path):
+                  files = find_files(dir_path, patterns)
+                  valid = []
+                  for f in files:
+                      sz = os.path.getsize(f)
+                      if sz >= min_sz:
+                          valid.append(f)
+                      else:
+                          print(f"Warning: Rejecting {f} - size {round(sz/1024/1024, 1)} MB is below minimum {round(min_sz/1024/1024, 1)} MB (corrupt/truncated)")
+                  return valid
+
               # 1. Prefer current run artifacts
-              curr = find_files("current_run_artifacts", patterns)
+              curr = get_valid_files("current_run_artifacts")
               if curr:
-                  src = curr[0]
-                  dst = os.path.join("dist", os.path.basename(src))
-                  shutil.copy2(src, dst)
-                  manifest[platform_name] = f"{os.path.basename(dst)} (Built in this run)"
-                  continue
-
-              # 2. Prefer previous run artifacts (from specified from_run_id)
-              prev = find_files("previous_artifacts", patterns)
-              if prev:
-                  src = prev[0]
-                  dst = os.path.join("dist", os.path.basename(src))
-                  shutil.copy2(src, dst)
-                  manifest[platform_name] = f"{os.path.basename(dst)} (Reused from run artifact: {src})"
-                  continue
-
-              # 3. Fall back to previous published release assets
-              rel = find_files("release_fallback_artifacts", patterns)
-              if rel:
-                  src = rel[0]
-                  dst = os.path.join("dist", os.path.basename(src))
-                  shutil.copy2(src, dst)
-                  manifest[platform_name] = f"{os.path.basename(dst)} (Reused from release: {src})"
+                  selected = curr[0]
+                  source_info = f"{os.path.basename(selected)} (Built in this run, {round(os.path.getsize(selected)/1024/1024, 1)} MB)"
               else:
-                  manifest[platform_name] = "NOT FOUND"
+                  # 2. Prefer previous run artifacts (from specified from_run_id)
+                  prev = get_valid_files("previous_artifacts")
+                  if prev:
+                      selected = prev[0]
+                      source_info = f"{os.path.basename(selected)} (Reused from run artifact: {selected}, {round(os.path.getsize(selected)/1024/1024, 1)} MB)"
+                  else:
+                      # 3. Fall back to previous published release assets
+                      rel = get_valid_files("release_fallback_artifacts")
+                      if rel:
+                          selected = rel[0]
+                          source_info = f"{os.path.basename(selected)} (Reused from release: {selected}, {round(os.path.getsize(selected)/1024/1024, 1)} MB)"
+
+              if selected:
+                  dst = os.path.join("dist", os.path.basename(selected))
+                  shutil.copy2(selected, dst)
+                  manifest[platform_name] = source_info
+              else:
+                  manifest[platform_name] = "NOT FOUND OR REJECTED (CORRUPT/UNDERSIZED)"
 
           # Also copy any cached geometry tar if present
           for src in (find_files("current_run_artifacts", ["cached_geometry.tar"]) +

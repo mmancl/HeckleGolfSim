@@ -217,11 +217,13 @@ while (-not $proc.HasExited -or $outTask -or $errTask) {
                     $hadOutput = $true
                     Write-Host $line
                     $cleanLine = $line -replace '\x1b\[[0-9;]*[a-zA-Z]', ''
-                    if (($cleanLine -match 'DONE' -and ($cleanLine -match 'export' -or $cleanLine -match 'savepack')) -or ($cleanLine -match '\[\s*DONE\s*\]\s*(export|savepack)')) {
+                    # IMPORTANT: For macOS, export ONLY finishes on [DONE] export!
+                    # [DONE] savepack is merely step 1 (packing assets); Godot still has to compile universal binaries and make the zip!
+                    if (($cleanLine -match 'DONE' -and $cleanLine -match 'export') -or ($cleanLine -match '\[\s*DONE\s*\]\s*export')) {
                         $exportDone = $true
                         if (-not $doneTimer) {
                             $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
-                            Write-Host "[WATCHDOG] macOS export finalized ([DONE]). Monitoring engine teardown..." -ForegroundColor Cyan
+                            Write-Host "[WATCHDOG] macOS export finalized ([DONE] export). Monitoring engine exit..." -ForegroundColor Cyan
                         }
                     }
                     $outTask = $proc.StandardOutput.ReadLineAsync()
@@ -238,8 +240,9 @@ while (-not $proc.HasExited -or $outTask -or $errTask) {
                     $hadOutput = $true
                     Write-Host $errLine -ForegroundColor Yellow
                     $cleanErr = $errLine -replace '\x1b\[[0-9;]*[a-zA-Z]', ''
-                    if ($cleanErr -match 'shutdown_adb_on_exit') {
-                        Write-Host "[WATCHDOG] Engine shutdown sequence reached (shutdown_adb_on_exit)." -ForegroundColor Cyan
+                    # Only start shutdown timer on shutdown_adb_on_exit IF exportDone is already true
+                    if ($cleanErr -match 'shutdown_adb_on_exit' -and $exportDone) {
+                        Write-Host "[WATCHDOG] Engine shutdown sequence reached after export." -ForegroundColor Cyan
                         if (-not $doneTimer) {
                             $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
                         }
@@ -257,30 +260,19 @@ while (-not $proc.HasExited -or $outTask -or $errTask) {
         $lastActivityTimer.Restart()
     }
 
-    # Check on-disk completion
-    if (Test-Path $ZipOutput) {
-        $zipItem = Get-Item $ZipOutput -ErrorAction SilentlyContinue
-        if ($zipItem -and $zipItem.Length -gt 50000000) {
-            if (-not $doneTimer -and $exportDone) {
-                $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
-            }
-            if (-not $doneTimer -and ($lastActivityTimer.Elapsed.TotalSeconds -ge 30)) {
-                Write-Host "[WATCHDOG] macOS export zip is complete on disk ($([math]::Round($zipItem.Length / 1MB, 1)) MB) and engine quiet for 30s. Finalizing..." -ForegroundColor Cyan
-                $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
-            }
-        }
-    }
-
-    # If export is done and grace period elapsed, force exit
+    # If export is explicitly done ([DONE] export) and grace period elapsed, force exit
     if ($doneTimer -and ($doneTimer.Elapsed.TotalSeconds -ge $gracePeriodSeconds)) {
-        Write-Host "macOS export zip generated successfully. Engine teardown complete/hung ($([int]$doneTimer.Elapsed.TotalSeconds)s elapsed). Finalizing Godot process..." -ForegroundColor Gray
+        Write-Host "macOS export zip finalized. Engine teardown complete/hung ($([int]$doneTimer.Elapsed.TotalSeconds)s elapsed). Finalizing Godot process..." -ForegroundColor Gray
         break
     }
 
-    # Inactivity watchdog
-    if ((Test-Path $ZipOutput) -and $exportDone -and ($lastActivityTimer.Elapsed.TotalSeconds -ge 15)) {
-        Write-Host "macOS export verified on disk and no engine activity for 15s. Finalizing Godot process..." -ForegroundColor Gray
-        break
+    # Inactivity watchdog: ONLY if exportDone is true AND zip on disk is > 300 MB AND no output for 20s
+    if ($exportDone -and (Test-Path $ZipOutput)) {
+        $zipItem = Get-Item $ZipOutput -ErrorAction SilentlyContinue
+        if ($zipItem -and $zipItem.Length -gt 300000000 -and ($lastActivityTimer.Elapsed.TotalSeconds -ge 20)) {
+            Write-Host "macOS export verified on disk ($([math]::Round($zipItem.Length / 1MB, 1)) MB) and engine quiet for 20s. Finalizing Godot process..." -ForegroundColor Gray
+            break
+        }
     }
 
     # Safety overall watchdog
@@ -304,6 +296,13 @@ Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Proc
 
 if (-not (Test-Path $ZipOutput)) {
     throw "Godot export failed (exit code $($proc.ExitCode)). Expected output at $ZipOutput"
+}
+
+# Strict integrity validation: macOS universal app zip must be at least 250 MB
+$fileItem = Get-Item $ZipOutput
+$sizeMB = [math]::Round($fileItem.Length / 1MB, 2)
+if ($fileItem.Length -lt 250000000) {
+    throw "macOS export zip is incomplete or corrupted! Size is only $sizeMB MB (expected ~450-550 MB). Failing build to prevent publishing bad release."
 }
 
 # Verify / inject NSBluetoothAlwaysUsageDescription into Info.plist inside the zip
