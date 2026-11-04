@@ -180,7 +180,8 @@ jobs:
       - name: Build macOS Release Package
         shell: pwsh
         run: |
-          powershell -ExecutionPolicy Bypass -File ./scripts/build/build_mac.ps1 -CustomGodotPath "$env:GODOT_BIN" -Clean
+          pwsh -ExecutionPolicy Bypass -File ./scripts/build/build_mac.ps1 -CustomGodotPath "$env:GODOT_BIN" -Clean
+          Get-Process -Name Godot*, VBCSCompiler -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
       - name: Upload macOS Artifact
         uses: actions/upload-artifact@v4

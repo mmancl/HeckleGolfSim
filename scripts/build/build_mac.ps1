@@ -119,6 +119,29 @@ if (-not $GodotExe) {
 }
 Write-Host "Godot Binary:   $GodotExe" -ForegroundColor Gray
 
+# Ensure Godot editor configuration directory & settings exist to suppress teardown warnings/hangs
+$godotConfigDirs = @(
+    (Join-Path $env:HOME "Library/Application Support/Godot"),
+    (Join-Path $env:HOME ".config/godot")
+)
+$settingsContent = @"
+[godot_resource type="EditorSettings" format=3]
+
+[resource]
+export/android/shutdown_adb_on_exit = false
+"@
+foreach ($dir in $godotConfigDirs) {
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    @("editor_settings-4.tres", "editor_settings-4.7.tres") | ForEach-Object {
+        $settingsPath = Join-Path $dir $_
+        if (-not (Test-Path $settingsPath)) {
+            Set-Content -Path $settingsPath -Value $settingsContent -Encoding UTF8
+        }
+    }
+}
+
 # 4. Check Export Templates
 $TemplatesDir = if ($env:APPDATA) {
     Join-Path $env:APPDATA "Godot\export_templates\4.7.stable.mono"
@@ -180,35 +203,53 @@ $errTask = $proc.StandardError.ReadLineAsync()
 while (-not $proc.HasExited -or $outTask -or $errTask) {
     $hadOutput = $false
 
-    # Drain Standard Output (non-blocking)
-    if ($outTask -and $outTask.Wait(100)) {
-        $line = $outTask.Result
-        if ($line -ne $null) {
-            $hadOutput = $true
-            Write-Host $line
-            $cleanLine = $line -replace '\x1b\[[0-9;]*[a-zA-Z]', ''
-            if (($cleanLine -match 'DONE' -and ($cleanLine -match 'export' -or $cleanLine -match 'savepack')) -or ($cleanLine -match '\[\s*DONE\s*\]\s*(export|savepack)')) {
-                $exportDone = $true
-                if (-not $doneTimer) {
-                    $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
-                    Write-Host "[WATCHDOG] macOS export finalized ([DONE]). Monitoring engine teardown..." -ForegroundColor Cyan
+    $taskList = [System.Collections.Generic.List[System.Threading.Tasks.Task]]::new()
+    if ($outTask) { $taskList.Add($outTask) }
+    if ($errTask) { $taskList.Add($errTask) }
+
+    if ($taskList.Count -gt 0) {
+        $idx = [System.Threading.Tasks.Task]::WaitAny($taskList.ToArray(), 50)
+        if ($idx -ge 0) {
+            # Drain all currently available standard output lines immediately
+            while ($outTask -and $outTask.IsCompleted) {
+                $line = $outTask.Result
+                if ($line -ne $null) {
+                    $hadOutput = $true
+                    Write-Host $line
+                    $cleanLine = $line -replace '\x1b\[[0-9;]*[a-zA-Z]', ''
+                    if (($cleanLine -match 'DONE' -and ($cleanLine -match 'export' -or $cleanLine -match 'savepack')) -or ($cleanLine -match '\[\s*DONE\s*\]\s*(export|savepack)')) {
+                        $exportDone = $true
+                        if (-not $doneTimer) {
+                            $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+                            Write-Host "[WATCHDOG] macOS export finalized ([DONE]). Monitoring engine teardown..." -ForegroundColor Cyan
+                        }
+                    }
+                    $outTask = $proc.StandardOutput.ReadLineAsync()
+                } else {
+                    $outTask = $null
+                    break
                 }
             }
-            $outTask = $proc.StandardOutput.ReadLineAsync()
-        } else {
-            $outTask = $null
-        }
-    }
 
-    # Drain Standard Error (non-blocking)
-    if ($errTask -and $errTask.Wait(100)) {
-        $errLine = $errTask.Result
-        if ($errLine -ne $null) {
-            $hadOutput = $true
-            Write-Host $errLine -ForegroundColor Yellow
-            $errTask = $proc.StandardError.ReadLineAsync()
-        } else {
-            $errTask = $null
+            # Drain all currently available standard error lines immediately
+            while ($errTask -and $errTask.IsCompleted) {
+                $errLine = $errTask.Result
+                if ($errLine -ne $null) {
+                    $hadOutput = $true
+                    Write-Host $errLine -ForegroundColor Yellow
+                    $cleanErr = $errLine -replace '\x1b\[[0-9;]*[a-zA-Z]', ''
+                    if ($cleanErr -match 'shutdown_adb_on_exit') {
+                        Write-Host "[WATCHDOG] Engine shutdown sequence reached (shutdown_adb_on_exit)." -ForegroundColor Cyan
+                        if (-not $doneTimer) {
+                            $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+                        }
+                    }
+                    $errTask = $proc.StandardError.ReadLineAsync()
+                } else {
+                    $errTask = $null
+                    break
+                }
+            }
         }
     }
 
@@ -217,8 +258,17 @@ while (-not $proc.HasExited -or $outTask -or $errTask) {
     }
 
     # Check on-disk completion
-    if ((Test-Path $ZipOutput) -and (Get-Item $ZipOutput -ErrorAction SilentlyContinue).Length -gt 50000000 -and -not $doneTimer -and $exportDone) {
-        $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    if (Test-Path $ZipOutput) {
+        $zipItem = Get-Item $ZipOutput -ErrorAction SilentlyContinue
+        if ($zipItem -and $zipItem.Length -gt 50000000) {
+            if (-not $doneTimer -and $exportDone) {
+                $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+            }
+            if (-not $doneTimer -and ($lastActivityTimer.Elapsed.TotalSeconds -ge 30)) {
+                Write-Host "[WATCHDOG] macOS export zip is complete on disk ($([math]::Round($zipItem.Length / 1MB, 1)) MB) and engine quiet for 30s. Finalizing..." -ForegroundColor Cyan
+                $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+            }
+        }
     }
 
     # If export is done and grace period elapsed, force exit

@@ -201,42 +201,53 @@ $errTask = $proc.StandardError.ReadLineAsync()
 while (-not $proc.HasExited -or $outTask -or $errTask) {
     $hadOutput = $false
 
-    # Drain Standard Output (non-blocking)
-    if ($outTask -and $outTask.Wait(100)) {
-        $line = $outTask.Result
-        if ($line -ne $null) {
-            $hadOutput = $true
-            Write-Host $line
-            $cleanLine = $line -replace '\x1b\[[0-9;]*[a-zA-Z]', ''
-            if (($cleanLine -match 'DONE' -and $cleanLine -match 'savepack') -or ($cleanLine -match '\[\s*DONE\s*\]\s*savepack')) {
-                $savepackDone = $true
-                if (-not $doneTimer) {
-                    $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
-                    Write-Host "[WATCHDOG] Export pack finalized ([DONE] savepack). Monitoring engine teardown..." -ForegroundColor Cyan
-                }
-            }
-            $outTask = $proc.StandardOutput.ReadLineAsync()
-        } else {
-            $outTask = $null
-        }
-    }
+    $taskList = [System.Collections.Generic.List[System.Threading.Tasks.Task]]::new()
+    if ($outTask) { $taskList.Add($outTask) }
+    if ($errTask) { $taskList.Add($errTask) }
 
-    # Drain Standard Error (non-blocking)
-    if ($errTask -and $errTask.Wait(100)) {
-        $errLine = $errTask.Result
-        if ($errLine -ne $null) {
-            $hadOutput = $true
-            Write-Host $errLine -ForegroundColor Yellow
-            $cleanErr = $errLine -replace '\x1b\[[0-9;]*[a-zA-Z]', ''
-            if ($cleanErr -match 'shutdown_adb_on_exit') {
-                Write-Host "[WATCHDOG] Engine shutdown sequence reached (shutdown_adb_on_exit)." -ForegroundColor Cyan
-                if (-not $doneTimer) {
-                    $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    if ($taskList.Count -gt 0) {
+        $idx = [System.Threading.Tasks.Task]::WaitAny($taskList.ToArray(), 50)
+        if ($idx -ge 0) {
+            # Drain all currently available standard output lines immediately
+            while ($outTask -and $outTask.IsCompleted) {
+                $line = $outTask.Result
+                if ($line -ne $null) {
+                    $hadOutput = $true
+                    Write-Host $line
+                    $cleanLine = $line -replace '\x1b\[[0-9;]*[a-zA-Z]', ''
+                    if (($cleanLine -match 'DONE' -and $cleanLine -match 'savepack') -or ($cleanLine -match '\[\s*DONE\s*\]\s*savepack')) {
+                        $savepackDone = $true
+                        if (-not $doneTimer) {
+                            $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+                            Write-Host "[WATCHDOG] Export pack finalized ([DONE] savepack). Monitoring engine teardown..." -ForegroundColor Cyan
+                        }
+                    }
+                    $outTask = $proc.StandardOutput.ReadLineAsync()
+                } else {
+                    $outTask = $null
+                    break
                 }
             }
-            $errTask = $proc.StandardError.ReadLineAsync()
-        } else {
-            $errTask = $null
+
+            # Drain all currently available standard error lines immediately
+            while ($errTask -and $errTask.IsCompleted) {
+                $errLine = $errTask.Result
+                if ($errLine -ne $null) {
+                    $hadOutput = $true
+                    Write-Host $errLine -ForegroundColor Yellow
+                    $cleanErr = $errLine -replace '\x1b\[[0-9;]*[a-zA-Z]', ''
+                    if ($cleanErr -match 'shutdown_adb_on_exit') {
+                        Write-Host "[WATCHDOG] Engine shutdown sequence reached (shutdown_adb_on_exit)." -ForegroundColor Cyan
+                        if (-not $doneTimer) {
+                            $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+                        }
+                    }
+                    $errTask = $proc.StandardError.ReadLineAsync()
+                } else {
+                    $errTask = $null
+                    break
+                }
+            }
         }
     }
 
@@ -248,8 +259,14 @@ while (-not $proc.HasExited -or $outTask -or $errTask) {
     $filesOnDisk = (Test-Path $TargetExe) -and (Test-Path $TargetPck)
     if ($filesOnDisk) {
         $pckItem = Get-Item $TargetPck -ErrorAction SilentlyContinue
-        if ($pckItem -and $pckItem.Length -gt 50000000 -and -not $doneTimer -and $savepackDone) {
-            $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+        if ($pckItem -and $pckItem.Length -gt 50000000) {
+            if (-not $doneTimer -and $savepackDone) {
+                $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+            }
+            if (-not $doneTimer -and ($lastActivityTimer.Elapsed.TotalSeconds -ge 30)) {
+                Write-Host "[WATCHDOG] Package is complete on disk ($([math]::Round($pckItem.Length / 1MB, 1)) MB) and engine quiet for 30s. Finalizing..." -ForegroundColor Cyan
+                $doneTimer = [System.Diagnostics.Stopwatch]::StartNew()
+            }
         }
     }
 
