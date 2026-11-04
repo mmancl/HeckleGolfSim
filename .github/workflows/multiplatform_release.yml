@@ -404,23 +404,37 @@ export/android/shutdown_adb_on_exit = false
             exit 1
           fi
 
+      - name: Configure Godot Editor Settings
+        run: |
+          mkdir -p "$HOME/.config/godot"
+          cat << EOF > "$HOME/.config/godot/editor_settings-4.tres"
+[godot_resource type="EditorSettings" format=3]
+
+[resource]
+export/android/android_sdk_path = "${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+export/android/java_sdk_path = "${JAVA_HOME}"
+export/android/shutdown_adb_on_exit = false
+EOF
+          cp "$HOME/.config/godot/editor_settings-4.tres" "$HOME/.config/godot/editor_settings-4.7.tres"
+
       - name: Ensure Android Build Template & Directories
         run: |
           mkdir -p dist
-          # Extract android template gradle files from export templates if not already present in git
+          # Extract android template gradle files from export templates without clobbering git-tracked custom files
           TEMPLATE_ZIP="$HOME/.local/share/godot/export_templates/4.7.stable.mono/android_source.zip"
           if [ -f "$TEMPLATE_ZIP" ]; then
             mkdir -p android/build
-            unzip -o -q "$TEMPLATE_ZIP" -d android/build
+            unzip -n -q "$TEMPLATE_ZIP" -d android/build || true
           fi
+          # Ensure custom git-tracked config.gradle is preserved
+          git checkout -- android/build/config.gradle 2>/dev/null || true
           mkdir -p android/build/assetPackInstallTime/src/main/assets
           rm -f android/build/src/main/assets/_cl_
           chmod +x android/build/gradlew
 
-      - name: Build C# Solution & Export Android Project
+      - name: Precompile C# Solution for Android
         run: |
-          dotnet build HeckleGolfSim.csproj -c Release
-          "$GODOT_BIN" --headless --import || true
+          dotnet build HeckleGolfSim.csproj -c ExportRelease -p:GodotTargetPlatform=android -p:UseSharedCompilation=false -nr:false
 
       - name: Read Version Metadata
         id: meta
@@ -431,30 +445,61 @@ export/android/shutdown_adb_on_exit = false
           echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_OUTPUT
           echo "Building Version: $VERSION_NAME (Code: $VERSION_CODE)"
 
-      - name: Build Android App Bundle (.aab) with Gradle
+      - name: Export Android Project & Build AAB
         run: |
-          cd android/build
-          ./gradlew bundleMonoRelease \
-            -Pexport_package_name=com.hecklegolf.simulator \
-            -Pexport_version_name="${{ steps.meta.outputs.VERSION_NAME }}" \
-            -Pexport_version_code="${{ steps.meta.outputs.VERSION_CODE }}" \
-            -Pexport_version_min_sdk=30 \
-            -Pexport_version_target_sdk=36 \
-            -Pexport_format=aab \
-            -Pexport_edition=mono \
-            -Pexport_build_type=release \
-            -Pperform_signing=false
+          export GRADLE_OPTS="-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4096m"
+          "$GODOT_BIN" --headless --import || true
+          "$GODOT_BIN" --headless --export-release "Android" dist/HeckleGolfSim.aab || true
+
+          if [ ! -f "dist/HeckleGolfSim.aab" ]; then
+            if [ -f "HeckleGolfSim.aab" ]; then
+              cp HeckleGolfSim.aab dist/HeckleGolfSim.aab
+            elif [ -f "../HeckleGolfSim.aab" ]; then
+              cp ../HeckleGolfSim.aab dist/HeckleGolfSim.aab
+            else
+              AAB_BUILD=$(find android/build -name "*.aab" | head -n 1)
+              if [ -n "$AAB_BUILD" ]; then
+                echo "Found generated AAB at: $AAB_BUILD, copying to dist/HeckleGolfSim.aab"
+                cp "$AAB_BUILD" dist/HeckleGolfSim.aab
+              else
+                echo "Notice: No .aab found directly after Godot export. Running Gradle bundleMonoRelease on the Godot-exported Android project..."
+                cd android/build
+                ./gradlew bundleMonoRelease \
+                  -Pexport_package_name=com.hecklegolf.simulator \
+                  -Pexport_version_name="${{ steps.meta.outputs.VERSION_NAME }}" \
+                  -Pexport_version_code="${{ steps.meta.outputs.VERSION_CODE }}" \
+                  -Pexport_version_min_sdk=30 \
+                  -Pexport_version_target_sdk=36 \
+                  -Pexport_format=aab \
+                  -Pexport_edition=mono \
+                  -Pexport_build_type=release \
+                  -Pperform_signing=false
+                cd ../..
+                AAB_BUILD=$(find android/build -name "*.aab" | head -n 1)
+                if [ -n "$AAB_BUILD" ]; then
+                  echo "Found generated AAB after Gradle fallback: $AAB_BUILD, copying to dist/HeckleGolfSim.aab"
+                  cp "$AAB_BUILD" dist/HeckleGolfSim.aab
+                fi
+              fi
+            fi
+          fi
+
+          if [ ! -f "dist/HeckleGolfSim.aab" ]; then
+            echo "ERROR: Failed to generate dist/HeckleGolfSim.aab!"
+            exit 1
+          fi
+
+      - name: Validate AAB Package Integrity
+        run: |
+          echo "Validating AAB structure and game assets..."
+          if ! unzip -l dist/HeckleGolfSim.aab | grep -E "(\.pck|/assets/)"; then
+            echo "ERROR: AAB bundle does not contain Godot project assets or pack files! Aborting."
+            exit 1
+          fi
+          echo "AAB integrity check passed successfully."
 
       - name: Sign Android App Bundle with Jarsigner
         run: |
-          AAB_SOURCE=$(find android/build -name "*.aab" | head -n 1)
-          if [ -z "$AAB_SOURCE" ]; then
-            echo "ERROR: No .aab found after gradle build"
-            exit 1
-          fi
-          echo "Found AAB at: $AAB_SOURCE"
-          cp "$AAB_SOURCE" dist/HeckleGolfSim.aab
-
           jarsigner -verbose \
             -sigalg SHA256withRSA \
             -digestalg SHA-256 \
@@ -704,7 +749,7 @@ export/android/shutdown_adb_on_exit = false
           serviceAccountJson: service_account.json
           packageName: com.hecklegolf.simulator
           releaseFiles: dist/HeckleGolfSim.aab
-          tracks: beta
+          track: beta
           status: draft
           whatsNewDirectory: distribution/whatsnew
 

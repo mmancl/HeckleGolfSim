@@ -6140,7 +6140,7 @@ func _calc_default_aim_target(ball_pos: Vector3, active_club: String) -> Vector3
 	# always maintain direct aim toward the green/pin rather than scanning for a fairway corridor off-axis.
 	var is_wedge = active_club.to_lower() in ["pw", "gw", "aw", "sw", "lw", "pt"]
 	var is_approach_range = hole_dist_yards <= 140.0
-	if is_approach_range or (is_wedge and hole_dist_yards <= 180.0):
+	if is_approach_range or (is_wedge and hole_dist_yards <= 220.0):
 		return current_hole_location
 
 	# Rule 3: Otherwise, aim at the middle of the current hole's fairway at the distance the selected club can go
@@ -6171,21 +6171,22 @@ func _calc_default_aim_target(ball_pos: Vector3, active_club: String) -> Vector3
 	var ref_dir = to_hole_dir
 	if has_path:
 		var dir_along_path = (path_target_2d - ball_2d).normalized()
-		if not dir_along_path.is_zero_approx():
+		if not dir_along_path.is_zero_approx() and dir_along_path.dot(to_hole_dir) > 0.2:
 			ref_dir = dir_along_path
 
 	# Scan fairway collision mesh around ref_dir to find fairway middle at radius target_dist_m
 	var scan_fairway_mid = _find_fairway_midpoint_at_radius(ball_2d, ref_dir, target_dist_m, active_hole, all_holes, hole_2d)
 	if scan_fairway_mid != Vector2.ZERO:
-		return Vector3(scan_fairway_mid.x, get_height(scan_fairway_mid.x, scan_fairway_mid.y), scan_fairway_mid.y)
+		var fairway_dir = (scan_fairway_mid - ball_2d).normalized()
+		if fairway_dir.dot(to_hole_dir) > 0.2:
+			return Vector3(scan_fairway_mid.x, get_height(scan_fairway_mid.x, scan_fairway_mid.y), scan_fairway_mid.y)
 
 	# Fallback 1: Hole Path point
 	if has_path and not path_target_2d.is_zero_approx():
 		var fallback_dir = (path_target_2d - ball_2d).normalized()
-		if fallback_dir.is_zero_approx():
-			fallback_dir = ref_dir
-		var fallback_2d = ball_2d + fallback_dir * target_dist_m
-		return Vector3(fallback_2d.x, get_height(fallback_2d.x, fallback_2d.y), fallback_2d.y)
+		if not fallback_dir.is_zero_approx() and fallback_dir.dot(to_hole_dir) > 0.2:
+			var fallback_2d = ball_2d + fallback_dir * target_dist_m
+			return Vector3(fallback_2d.x, get_height(fallback_2d.x, fallback_2d.y), fallback_2d.y)
 
 	# Fallback 2: Straight toward hole at target_dist_m
 	var direct_2d = ball_2d + to_hole_dir * target_dist_m
@@ -6200,6 +6201,18 @@ func apply_default_aim(club_name: String = "") -> Vector3:
 
 	var ball_pos = $Player.ball.global_position
 	var target_pos = get_default_aim_target(ball_pos, club_name)
+
+	# Safety check: ensure default aim never points backward away from the hole
+	var hole_diff: Vector3 = current_hole_location - ball_pos
+	var to_hole_2d: Vector2 = Vector2(hole_diff.x, hole_diff.z).normalized()
+	var target_diff: Vector3 = target_pos - ball_pos
+	var to_target_2d: Vector2 = Vector2(target_diff.x, target_diff.z).normalized()
+	if to_target_2d.dot(to_hole_2d) < 0.1:
+		var safe_dist_m: float = target_diff.length()
+		if safe_dist_m < 5.0 or safe_dist_m > hole_diff.length():
+			safe_dist_m = minf(hole_diff.length(), 150.0)
+		var safe_target_2d: Vector2 = Vector2(ball_pos.x, ball_pos.z) + to_hole_2d * safe_dist_m
+		target_pos = Vector3(safe_target_2d.x, get_height(safe_target_2d.x, safe_target_2d.y), safe_target_2d.y)
 
 	aim_target_pos = target_pos
 	update_dof_focus()

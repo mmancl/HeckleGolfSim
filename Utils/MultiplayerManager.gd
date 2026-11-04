@@ -107,6 +107,8 @@ func setup_game(player_configs: Array, config_data: Dictionary, p_scene_path: St
 		turn_order_mode = gs.range_settings.turn_order_mode.value
 	else:
 		turn_order_mode = "Stay Up"
+	if turn_order_mode == "furthest_away":
+		turn_order_mode = "Classic"
 	skins_won.clear()
 	carryover_skins = 0
 	carryover_eligible_players.clear()
@@ -469,7 +471,7 @@ func start_hole() -> void:
 	var gs = _get_global_settings()
 	if current_mode.is_empty() and gs != null and gs.range_settings != null and gs.range_settings.turn_order_mode != null:
 		current_mode = gs.range_settings.turn_order_mode.value
-	if current_mode == "Classic" and game_mode not in ["Scramble", "2v2 Scramble", "Closest to Pin"]:
+	if (current_mode == "Classic" or current_mode == "furthest_away") and game_mode not in ["Scramble", "2v2 Scramble", "Closest to Pin"]:
 		var target_pin = _get_target_pin_position()
 		var flat_pin = Vector3(target_pin.x, 0.0, target_pin.z)
 		var max_dist := -1.0
@@ -522,12 +524,14 @@ func _format_player_score_clean(p: Dictionary) -> String:
 	else:
 		var total_diff := 0
 		var completed_any := false
-		for h_id in hole_ids:
-			var sc = p.get("hole_scores", {}).get(h_id)
-			if sc != null and sc > 0:
-				var par = int(hole_info.get(h_id, {}).get("Par", 4))
-				total_diff += int(sc) - par
-				completed_any = true
+		for idx in range(hole_ids.size()):
+			var h_id = hole_ids[idx]
+			if idx < current_hole_index or bool(p.get("holed_out", false)):
+				var sc = p.get("hole_scores", {}).get(h_id)
+				if sc != null and sc > 0:
+					var par = int(hole_info.get(h_id, {}).get("Par", 4))
+					total_diff += int(sc) - par
+					completed_any = true
 		if completed_any:
 			if total_diff > 0:
 				return "+" + str(total_diff)
@@ -1151,7 +1155,7 @@ func select_next_player() -> void:
 	match mode:
 		"Full Hole":
 			_select_next_player_full_hole(remaining_players)
-		"Classic":
+		"Classic", "furthest_away":
 			_select_next_player_classic(remaining_players)
 		_:
 			_select_next_player_stay_up(remaining_players)
@@ -1219,7 +1223,7 @@ func _determine_next_player_index() -> int:
 					return players.find(p)
 			return active_player_index
 
-		"Classic":
+		"Classic", "furthest_away":
 			var target_pin := _get_target_pin_position()
 			var flat_pin := Vector3(target_pin.x, 0.0, target_pin.z)
 			var furthest_player = null
@@ -1402,7 +1406,7 @@ func peek_next_player() -> Dictionary:
 			if not cur_player.is_empty() and (cur_player in remaining_players):
 				return cur_player
 			return remaining_players[0]
-		"Classic":
+		"Classic", "furthest_away":
 			return _get_furthest_player_from_pin(remaining_players)
 		_:
 			# Stay Up:

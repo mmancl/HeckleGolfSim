@@ -224,7 +224,9 @@ func start_online_match(match_id: String, meta: Dictionary, golfers: Array[Dicti
 	var settings: Dictionary = meta.get("settings", {})
 	var course_length: String = str(settings.get("course_length", meta.get("course_length", "Full 18")))
 	var game_mode: String = str(settings.get("game_mode", meta.get("game_mode", "Standard")))
-	var turn_order: String = str(settings.get("turn_order", meta.get("turn_order", "furthest_away")))
+	var turn_order: String = str(settings.get("turn_order_mode", settings.get("turn_order", meta.get("turn_order_mode", meta.get("turn_order", "Classic")))))
+	if turn_order == "furthest_away":
+		turn_order = "Classic"
 	var teams: Dictionary = {}
 
 	var mp := _get_mp_manager()
@@ -302,7 +304,9 @@ func start_spectating_match(match_id: String, meta: Dictionary, golfers: Array[D
 	var settings: Dictionary = meta.get("settings", {})
 	var course_length: String = str(settings.get("course_length", meta.get("course_length", "Full 18")))
 	var game_mode: String = str(settings.get("game_mode", meta.get("game_mode", "Standard")))
-	var turn_order: String = str(settings.get("turn_order", meta.get("turn_order", "furthest_away")))
+	var turn_order: String = str(settings.get("turn_order_mode", settings.get("turn_order", meta.get("turn_order_mode", meta.get("turn_order", "Classic")))))
+	if turn_order == "furthest_away":
+		turn_order = "Classic"
 	var teams: Dictionary = {}
 
 	var mp := _get_mp_manager()

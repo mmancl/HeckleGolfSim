@@ -3826,17 +3826,21 @@ func _update_top_hud(player: Dictionary) -> void:
 	else:
 		var total_diff: int = 0
 		var completed_any = false
-		for h_id in MultiplayerManager.hole_ids:
-			var score = player["hole_scores"].get(h_id)
-			if score != null and score > 0:
-				var par = int(MultiplayerManager.hole_info.get(h_id, {}).get("Par", 4))
-				total_diff += int(score) - par
-				completed_any = true
+		for idx in range(MultiplayerManager.hole_ids.size()):
+			var h_id = MultiplayerManager.hole_ids[idx]
+			if idx < MultiplayerManager.current_hole_index or bool(player.get("holed_out", false)):
+				var score = player.get("hole_scores", {}).get(h_id)
+				if score != null and score > 0:
+					var par = int(MultiplayerManager.hole_info.get(h_id, {}).get("Par", 4))
+					total_diff += int(score) - par
+					completed_any = true
 		if completed_any:
 			if total_diff > 0:
 				overall_score_str = "+" + str(total_diff)
 			elif total_diff < 0:
 				overall_score_str = str(total_diff)
+		else:
+			overall_score_str = "E"
 	hud_overall_score_lbl.text = overall_score_str
 	
 	# 3. Update hole number
@@ -4255,6 +4259,11 @@ func _on_active_player_changed(player: Dictionary) -> void:
 				if target_aim != null and not target_aim.is_zero_approx():
 					var ball_pos = active_ball.global_position
 					var diff = target_aim - ball_pos
+					if course_instance.get("current_hole_location") != null and not (course_instance.current_hole_location as Vector3).is_zero_approx():
+						var to_hole: Vector3 = (course_instance.current_hole_location as Vector3) - ball_pos
+						if Vector2(diff.x, diff.z).normalized().dot(Vector2(to_hole.x, to_hole.z).normalized()) < 0.0:
+							diff = to_hole
+							target_aim = course_instance.current_hole_location
 					var angle_rad = atan2(diff.z, diff.x)
 					active_ball.aim_yaw_offset_deg = rad_to_deg(-angle_rad)
 					course_instance.aim_target_pos = target_aim
