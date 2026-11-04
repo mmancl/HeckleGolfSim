@@ -535,6 +535,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p previous_artifacts
+          mkdir -p release_fallback_artifacts
           if [ -n "${{ inputs.from_run_id }}" ]; then
             IFS=',' read -ra RUN_IDS <<< "${{ inputs.from_run_id }}"
             for RUN_ID in "${RUN_IDS[@]}"; do
@@ -549,10 +550,12 @@ jobs:
           LATEST_TAG=$(gh release list -L 5 --json tagName -q '.[0].tagName')
           if [ -n "$LATEST_TAG" ]; then
             echo "Checking/downloading latest release ($LATEST_TAG) assets as fallback..."
-            gh release download "$LATEST_TAG" --dir previous_artifacts --clobber=false || true
+            gh release download "$LATEST_TAG" --dir release_fallback_artifacts --clobber=false || true
           fi
-          echo "Previous/reusable artifacts downloaded:"
+          echo "Previous run artifacts (from specified run IDs):"
           find previous_artifacts -type f
+          echo "Release fallback assets (from GitHub releases):"
+          find release_fallback_artifacts -type f
 
       - name: Assemble Release Assets
         run: |
@@ -592,18 +595,29 @@ jobs:
                   manifest[platform_name] = f"{os.path.basename(dst)} (Built in this run)"
                   continue
 
-              # 2. Fall back to previous artifacts (from run ID or latest release)
+              # 2. Prefer previous run artifacts (from specified from_run_id)
               prev = find_files("previous_artifacts", patterns)
               if prev:
                   src = prev[0]
                   dst = os.path.join("dist", os.path.basename(src))
                   shutil.copy2(src, dst)
-                  manifest[platform_name] = f"{os.path.basename(dst)} (Reused from previous run/release)"
+                  manifest[platform_name] = f"{os.path.basename(dst)} (Reused from run artifact: {src})"
+                  continue
+
+              # 3. Fall back to previous published release assets
+              rel = find_files("release_fallback_artifacts", patterns)
+              if rel:
+                  src = rel[0]
+                  dst = os.path.join("dist", os.path.basename(src))
+                  shutil.copy2(src, dst)
+                  manifest[platform_name] = f"{os.path.basename(dst)} (Reused from release: {src})"
               else:
                   manifest[platform_name] = "NOT FOUND"
 
           # Also copy any cached geometry tar if present
-          for src in find_files("current_run_artifacts", ["cached_geometry.tar"]) + find_files("previous_artifacts", ["cached_geometry.tar"]):
+          for src in (find_files("current_run_artifacts", ["cached_geometry.tar"]) +
+                      find_files("previous_artifacts", ["cached_geometry.tar"]) +
+                      find_files("release_fallback_artifacts", ["cached_geometry.tar"])):
               dst = os.path.join("dist", os.path.basename(src))
               if not os.path.exists(dst):
                   shutil.copy2(src, dst)
@@ -697,21 +711,25 @@ jobs:
       - name: Check AAB for Play Store Deploy
         id: check_aab
         run: |
-          # Only deploy to Google Play if dist/HeckleGolfSim.aab was built in the CURRENT run,
-          # OR if the Android build was explicitly requested. Reused previous AAB artifacts
-          # already have their version code registered in Google Play and cannot be re-uploaded.
-          IS_BUILT_CURRENT=false
+          # Deploy to Google Play if dist/HeckleGolfSim.aab was built in the CURRENT run,
+          # OR if it was fetched from a specified previous run ID (from_run_id).
+          # Only skip if it was reused from an already-published release fallback.
+          IS_FRESH_ARTIFACT=false
           if [ -d "current_run_artifacts" ] && find current_run_artifacts -name "*.aab" | grep -q .; then
-            IS_BUILT_CURRENT=true
+            IS_FRESH_ARTIFACT=true
+            echo "AAB detected from current run build."
+          elif [ -n "${{ inputs.from_run_id }}" ] && [ -d "previous_artifacts" ] && find previous_artifacts -name "*.aab" | grep -q .; then
+            IS_FRESH_ARTIFACT=true
+            echo "AAB detected from specified run ID (${{ inputs.from_run_id }})."
           fi
 
           if [ -f "dist/HeckleGolfSim.aab" ]; then
-            if [ "$IS_BUILT_CURRENT" = "true" ]; then
+            if [ "$IS_FRESH_ARTIFACT" = "true" ]; then
               echo "has_aab=true" >> $GITHUB_OUTPUT
-              echo "AAB found: dist/HeckleGolfSim.aab was built in this run and is ready for Google Play deployment."
+              echo "AAB found: dist/HeckleGolfSim.aab is ready for Google Play deployment."
             else
               echo "has_aab=false" >> $GITHUB_OUTPUT
-              echo "Notice: dist/HeckleGolfSim.aab was reused from a previous run/release. Skipping Google Play deployment to avoid duplicate version code error."
+              echo "Notice: dist/HeckleGolfSim.aab was reused from an already-published release. Skipping Google Play deployment to avoid duplicate version code error."
             fi
           else
             echo "has_aab=false" >> $GITHUB_OUTPUT
