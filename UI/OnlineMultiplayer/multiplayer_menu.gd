@@ -1273,7 +1273,7 @@ func _on_t_public_refresh_pressed() -> void:
 
 	if not res.get("ok", false):
 		t_public_empty_label.visible = true
-		t_public_empty_label.text = res.get("error", "Failed to load tournaments.")
+		t_public_empty_label.text = _format_tournament_error(res.get("error", "Failed to load tournaments."))
 		return
 
 	var docs: Array = res.get("documents", [])
@@ -1395,7 +1395,7 @@ func _on_t_quick_join(join_code: String, t_doc: Dictionary) -> void:
 		_on_t_public_refresh_pressed()
 	else:
 		t_public_empty_label.visible = true
-		t_public_empty_label.text = res.get("error", "Failed to join.")
+		t_public_empty_label.text = _format_tournament_error(res.get("error", "Failed to join."))
 
 
 func _open_standings_for(tournament_id: String, _t_doc: Dictionary) -> void:
@@ -1507,7 +1507,7 @@ func _load_standings_for_id(tournament_id: String) -> void:
 
 	var res: Dictionary = await ts_svc.fetch_standings(tournament_id)
 	if not res.get("ok", false):
-		t_standings_meta.text = "Failed to load standings: %s" % res.get("error", "")
+		t_standings_meta.text = "Failed to load standings: %s" % _format_tournament_error(res.get("error", ""))
 		return
 
 	var entries: Array = res.get("documents", [])
@@ -1715,7 +1715,32 @@ func _show_status(msg: String, is_error: bool) -> void:
 			host_status_label.add_theme_color_override("font_color", color)
 
 
+func _format_tournament_error(raw_err: String) -> String:
+	var msg := raw_err.strip_edges()
+	if msg.is_empty():
+		return "Failed to load tournament data."
+	if msg.contains("PERMISSION_DENIED") or msg.contains("Missing or insufficient permissions") or msg.begins_with("HTTP 403"):
+		return "Permission denied. Please check your cloud sign-in status."
+	if msg.begins_with("HTTP "):
+		var colon_idx := msg.find(":")
+		if colon_idx != -1:
+			var body := msg.substr(colon_idx + 1).strip_edges()
+			var parsed = JSON.parse_string(body)
+			var err_obj = null
+			if parsed is Dictionary and parsed.has("error"):
+				err_obj = parsed["error"]
+			elif parsed is Array and not parsed.is_empty() and parsed[0] is Dictionary and parsed[0].has("error"):
+				err_obj = parsed[0]["error"]
+			if err_obj is Dictionary:
+				return str(err_obj.get("message", msg))
+			elif err_obj != null:
+				return str(err_obj)
+	return msg
+
+
 func _show_t_status(msg: String, is_error: bool) -> void:
+	if is_error:
+		msg = _format_tournament_error(msg)
 	var color := ThemeManager.COLOR_TEXT_DANGER if is_error else ThemeManager.COLOR_TEXT_SUCCESS
 	match _active_t_tab:
 		"t_host":

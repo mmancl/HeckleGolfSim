@@ -452,4 +452,94 @@ describe("Firebase Backend Security Rules & Budget Guard Suite", () => {
       );
     });
   });
+
+  // 6. Tournaments and Entries Access Rules
+  describe("6. Tournaments & Standings Security Rules", () => {
+    it("allows authenticated user to create a tournament and entry, and prevents unauthorized edits", async () => {
+      const host = testEnv.authenticatedContext("host_uid");
+      const player2 = testEnv.authenticatedContext("player2_uid");
+      const unauthed = testEnv.unauthenticatedContext();
+      const hostDb = host.firestore();
+      const player2Db = player2.firestore();
+      const unauthDb = unauthed.firestore();
+
+      const tourneyDoc = {
+        tournament_id: "T_TEST01_100",
+        join_code: "TEST01",
+        name: "Spring Championship",
+        host_uid: "host_uid",
+        host_name: "Host Golfer",
+        course_key: "pebble_beach",
+        course_title: "Pebble Beach",
+        course_length: "Full 18",
+        game_mode: "Standard",
+        wind_speed_mph: 5.0,
+        wind_dir_rad: 0.0,
+        green_speed: "Normal",
+        pin_seed: 1234,
+        tee: "Blue",
+        visibility: "public",
+        max_players: 20,
+        end_date_utc: "2026-12-31 23:59",
+        status: "open",
+        player_count: 1,
+        created_at: 1700000000,
+      };
+
+      // Unauthenticated user cannot create tournament or read
+      await assertFails(setDoc(doc(unauthDb, "tournaments", "T_TEST01_100"), tourneyDoc));
+      await assertFails(getDoc(doc(unauthDb, "tournaments", "T_TEST01_100")));
+
+      // Host creates valid tournament -> SUCCEEDS
+      await assertSucceeds(setDoc(doc(hostDb, "tournaments", "T_TEST01_100"), tourneyDoc));
+
+      // Any authenticated user can read tournament
+      await assertSucceeds(getDoc(doc(player2Db, "tournaments", "T_TEST01_100")));
+
+      // Host cannot spoof host_uid for another user
+      await assertFails(
+        setDoc(doc(hostDb, "tournaments", "T_SPOOF_100"), {
+          ...tourneyDoc,
+          tournament_id: "T_SPOOF_100",
+          host_uid: "player2_uid",
+        })
+      );
+
+      // Host writes initial entry for themselves -> SUCCEEDS
+      await assertSucceeds(
+        setDoc(doc(hostDb, "tournaments", "T_TEST01_100", "entries", "host_uid"), {
+          uid: "host_uid",
+          player_name: "Host Golfer",
+          tee: "Blue",
+          status: "pending",
+        })
+      );
+
+      // Player2 joins: writes their own entry -> SUCCEEDS
+      await assertSucceeds(
+        setDoc(doc(player2Db, "tournaments", "T_TEST01_100", "entries", "player2_uid"), {
+          uid: "player2_uid",
+          player_name: "Player Two",
+          tee: "Blue",
+          status: "pending",
+        })
+      );
+
+      // Player2 increments player_count -> SUCCEEDS
+      await assertSucceeds(
+        updateDoc(doc(player2Db, "tournaments", "T_TEST01_100"), {
+          player_count: 2,
+        })
+      );
+
+      // Player2 cannot overwrite host's entry
+      await assertFails(
+        setDoc(doc(player2Db, "tournaments", "T_TEST01_100", "entries", "host_uid"), {
+          uid: "player2_uid",
+          player_name: "Hacker",
+          status: "submitted",
+        })
+      );
+    });
+  });
 });

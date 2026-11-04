@@ -2414,18 +2414,22 @@ func _on_golf_ball_rest(_ball_data) -> void:
 
 		if is_local_online_turn and has_node("/root/OnlineMatchController"):
 			var omc = get_node("/root/OnlineMatchController")
-			var post_active_p: Dictionary = mp_mgr.get_active_player()
+			var hitter: Dictionary = pre_shot_active_p
 			var shot_start: Vector3 = pre_start_pos
 			if has_node("Player") and $Player.ball != null and not ($Player.ball.shot_start_pos_global as Vector3).is_zero_approx():
 				shot_start = $Player.ball.shot_start_pos_global
-			elif shot_start.is_zero_approx() and post_active_p.has("last_starting_pos") and post_active_p["last_starting_pos"] is Vector3:
-				shot_start = post_active_p["last_starting_pos"]
-			var club_str: String = str(post_active_p.get("last_shot_club", _get_current_club()))
-			var lie_str: String = str(post_active_p.get("lie_type", "fairway"))
-			var pen: int = int(post_active_p.get("last_shot_penalty", 0))
+			elif shot_start.is_zero_approx() and hitter.has("last_starting_pos") and hitter["last_starting_pos"] is Vector3:
+				shot_start = hitter["last_starting_pos"]
+			var club_str: String = str(hitter.get("last_shot_club", _get_current_club()))
+			var lie_str: String = str(hitter.get("lie_type", "fairway"))
+			var pen: int = int(hitter.get("last_shot_penalty", 0))
 			var gimme_strk: int = int(mp_mgr.last_gimme_strokes)
-			var holed: bool = bool(post_active_p.get("holed_out", false))
-			var pin: Vector3 = current_hole_location if is_dynamic_course else Vector3.ZERO
+			var holed: bool = bool(hitter.get("holed_out", false))
+			var pin: Vector3 = current_hole_location
+			if pin.is_zero_approx() and mp_mgr.has_method("get_target_pin_position"):
+				pin = mp_mgr.get_target_pin_position()
+			if pin.is_zero_approx() and _cached_current_green_pin != Vector3.ZERO:
+				pin = _cached_current_green_pin
 			omc.publish_local_shot(shot_start, ball_pos, club_str, lie_str, pen, gimme_strk, holed, pin)
 
 	if is_dynamic_course:

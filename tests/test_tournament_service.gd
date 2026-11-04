@@ -32,6 +32,7 @@ func _run_all_tests() -> void:
 	await _test_4_standings_sorting()
 	await _test_5_expected_hole_counts()
 	await _test_6_multiplayer_menu_scene_loading()
+	await _test_7_error_response_formatting()
 
 	print("\n=======================================================")
 	print("   ALL TOURNAMENT SERVICE UNIT TESTS PASSED SUCCESSFULLY! ")
@@ -229,3 +230,33 @@ func _test_6_multiplayer_menu_scene_loading() -> void:
 	root.remove_child(instance)
 	instance.free()
 	print("Multiplayer Menu scene instantiation & tab switching OK.")
+
+
+func _test_7_error_response_formatting() -> void:
+	print("\n--- Test 7: Firestore & UI Error Response Formatting ---")
+	var fs_script = load("res://Utils/Cloud/firestore_client.gd")
+	var fs = fs_script.new()
+
+	# Test 7.1: Array error response from :runQuery
+	var array_err_body = '[{"error":{"code":403,"message":"Missing or insufficient permissions.","status":"PERMISSION_DENIED"}}]'
+	var res1 = await fs._handle_error_response({"status": 403, "body": array_err_body, "error": ""})
+	assert(res1.ok == false, "Response ok must be false on error")
+	assert(not res1.error.contains("[{"), "Error message must not contain raw JSON array brackets")
+	assert(res1.error.contains("Permission denied"), "Error message should cleanly indicate permission denied, got: %s" % res1.error)
+
+	# Test 7.2: Dictionary error response
+	var dict_err_body = '{"error":{"code":404,"message":"Document not found."}}'
+	var res2 = await fs._handle_error_response({"status": 404, "body": dict_err_body, "error": ""})
+	assert(res2.ok == false, "Response ok must be false on error")
+	assert(res2.error == "Document not found.", "Expected clean error message, got: %s" % res2.error)
+
+	# Test 7.3: Multiplayer menu error cleaning
+	var menu_script = load("res://UI/OnlineMultiplayer/multiplayer_menu.gd")
+	var menu = menu_script.new()
+	var cleaned = menu._format_tournament_error('HTTP 403: [{"error":{"code":403,"message":"Missing or insufficient permissions."}}]')
+	assert(not cleaned.contains("[{"), "Menu cleaned error must not contain raw JSON")
+	assert(cleaned.contains("Permission denied"), "Menu cleaned error should indicate permission denied, got: %s" % cleaned)
+
+	# fs is RefCounted, auto-freed
+	menu.free()
+	print("Firestore & UI error response formatting OK.")

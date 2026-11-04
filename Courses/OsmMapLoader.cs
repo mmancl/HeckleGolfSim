@@ -21,7 +21,7 @@ public partial class OsmMapLoader : Node
     private static readonly string[] OverpassEndpoints = new[]
     {
         "https://overpass-api.de/api/interpreter",
-        "https://overpass.openstreetmap.fr/api/interpreter",
+        "https://z.overpass-api.de/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
         "https://overpass.private.coffee/api/interpreter"
     };
@@ -35,7 +35,8 @@ public partial class OsmMapLoader : Node
             ConnectTimeout = TimeSpan.FromSeconds(25),
             SslOptions = new SslClientAuthenticationOptions
             {
-                AllowRenegotiation = true,
+                AllowRenegotiation = false,
+                EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
                 RemoteCertificateValidationCallback = (sender, cert, chain, errors) =>
                 {
                     if (errors == SslPolicyErrors.None)
@@ -1170,7 +1171,7 @@ public partial class OsmMapLoader : Node
         string latStr = lat.ToString(CultureInfo.InvariantCulture);
         string lonStr = lon.ToString(CultureInfo.InvariantCulture);
         string query = $@"
-        [out:json][timeout:35];
+        [out:json][timeout:45];
         (
           nwr(around:1800, {latStr}, {lonStr})[""leisure""=""golf_course""];
           nwr(around:1800, {latStr}, {lonStr})[""golf""];
@@ -1194,8 +1195,8 @@ public partial class OsmMapLoader : Node
 
             try
             {
-                // Timeout must exceed Overpass [timeout:35] to avoid cancelling before server responds
-                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(40));
+                // Timeout must exceed Overpass [timeout:45] plus queueing time to avoid cancelling before server responds
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(65));
                 var content = new FormUrlEncodedContent(new[] { new KeyValuePair<string, string>("data", query) });
                 var response = await HttpClient.PostAsync(endpoint, content, cts.Token);
 
@@ -1227,14 +1228,14 @@ public partial class OsmMapLoader : Node
             }
             catch (Exception ex)
             {
-                GD.PrintErr($"{LogPrefix} Attempt {attempt} exception querying {endpoint}: {ex.Message}{(ex.InnerException != null ? $" (Inner: {ex.InnerException.Message})" : "")}");
+                GD.PrintErr($"{LogPrefix} Attempt {attempt} exception querying {endpoint}: {ex.Message}{(ex.InnerException != null ? $" (Inner: {ex.InnerException.Message})" : "")}{(ex.GetBaseException() != null && ex.GetBaseException() != ex && ex.GetBaseException() != ex.InnerException ? $" (Base: {ex.GetBaseException().Message})" : "")}");
             }
 
             if (attempt < maxAttempts)
             {
                 _generationMessage = $"Overpass server busy or timed out, trying mirror (attempt {attempt + 1}/{maxAttempts})...";
                 ReportProgress(_generationMessage);
-                await Task.Delay(500);
+                await Task.Delay(attempt * 1500);
             }
         }
 
@@ -5342,7 +5343,7 @@ public partial class OsmMapLoader : Node
             }
             catch (Exception ex)
             {
-                GD.PrintErr($"{LogPrefix} Overpass verification attempt {attempt} failed on {endpoint}: {ex.Message}{(ex.InnerException != null ? $" (Inner: {ex.InnerException.Message})" : "")}");
+                GD.PrintErr($"{LogPrefix} Overpass verification attempt {attempt} failed on {endpoint}: {ex.Message}{(ex.InnerException != null ? $" (Inner: {ex.InnerException.Message})" : "")}{(ex.GetBaseException() != null && ex.GetBaseException() != ex && ex.GetBaseException() != ex.InnerException ? $" (Base: {ex.GetBaseException().Message})" : "")}");
             }
         }
 

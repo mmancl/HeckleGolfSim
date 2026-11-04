@@ -456,16 +456,23 @@ func _handle_error_response(resp: Dictionary) -> Dictionary:
 
 	if error_msg.is_empty() and not body_str.is_empty():
 		var parsed = JSON.parse_string(body_str)
+		var err_obj = null
 		if parsed is Dictionary and parsed.has("error"):
-			var err_obj = parsed["error"]
-			if err_obj is Dictionary:
-				error_msg = str(err_obj.get("message", "HTTP %d" % status))
-			else:
-				error_msg = str(err_obj)
+			err_obj = parsed["error"]
+		elif parsed is Array and not parsed.is_empty() and parsed[0] is Dictionary and parsed[0].has("error"):
+			err_obj = parsed[0]["error"]
+
+		if err_obj is Dictionary:
+			error_msg = str(err_obj.get("message", "HTTP %d" % status))
+		elif err_obj != null:
+			error_msg = str(err_obj)
 		else:
-			error_msg = "HTTP %d: %s" % [status, body_str]
+			error_msg = "HTTP %d" % status if body_str.length() > 100 else "HTTP %d: %s" % [status, body_str]
 	elif error_msg.is_empty():
 		error_msg = "HTTP %d" % status
+
+	if error_msg.contains("Missing or insufficient permissions"):
+		error_msg = "Permission denied: Missing or insufficient permissions."
 
 	var budget_paused: bool = false
 	if status == 403:

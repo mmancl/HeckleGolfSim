@@ -4931,12 +4931,23 @@ func record_remote_shot(event: Dictionary) -> void:
 	if not hole_id.is_empty():
 		target_p["hole_scores"][hole_id] = target_p["strokes"]
 
-	# Snap pin position if included and differs by > 0.05m
+	# Snap pin position if included and differs by > 0.05m, guarding against cross-client map origin offsets (> 40.0m)
 	if event.has("pin"):
 		var pin_vec := _vec3_from_array(event["pin"])
 		if not pin_vec.is_zero_approx():
 			var cur_pin := _get_target_pin_position()
-			if cur_pin.distance_to(pin_vec) > 0.05:
+			if not cur_pin.is_zero_approx():
+				var offset_x := cur_pin.x - pin_vec.x
+				var offset_z := cur_pin.z - pin_vec.z
+				# If unnormalized remote event arrived with large coordinate shift, align positions to local pin
+				if (absf(offset_x) >= 2.0 or absf(offset_z) >= 2.0) and not bool(event.get("_normalized", false)):
+					start_pos.x += offset_x
+					start_pos.z += offset_z
+					final_position.x += offset_x
+					final_position.z += offset_z
+					target_p["last_starting_pos"] = start_pos
+					target_p["position"] = final_position
+			if cur_pin.distance_to(pin_vec) > 0.05 and cur_pin.distance_to(pin_vec) <= 40.0:
 				set_current_pin_position(pin_vec)
 
 	var gimme_strokes := int(event.get("gimme_strokes", 0))

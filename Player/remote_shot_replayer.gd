@@ -78,6 +78,22 @@ func _process(delta: float) -> void:
 	var current_pos: Vector3 = sample_trajectory_at_time(_current_profile, _elapsed_s)
 
 	if is_instance_valid(_current_ball):
+		var is_putt: bool = bool(_current_profile.get("is_putt", false))
+		var ground_y: Variant = null
+		if _current_ball.has_method("_get_ground_y_at"):
+			ground_y = _current_ball.call("_get_ground_y_at", current_pos.x, current_pos.z)
+		elif _current_ball.is_inside_tree() and _current_ball.get_tree() != null:
+			var curr = _current_ball.get_tree().current_scene
+			if curr != null and curr.has_method("get_height"):
+				ground_y = curr.call("get_height", current_pos.x, current_pos.z)
+
+		if ground_y != null and typeof(ground_y) in [TYPE_FLOAT, TYPE_INT]:
+			var gy: float = float(ground_y)
+			if is_putt:
+				current_pos.y = gy + 0.022335
+			else:
+				current_pos.y = maxf(current_pos.y, gy + 0.022335)
+
 		_set_node_position(_current_ball, current_pos)
 
 	if is_instance_valid(_current_tracer):

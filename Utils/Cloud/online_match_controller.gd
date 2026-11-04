@@ -341,7 +341,7 @@ func start_spectating_match(match_id: String, meta: Dictionary, golfers: Array[D
 				var evt_type := str(evt.get("type", "shot"))
 				match evt_type:
 					"shot":
-						mp.record_remote_shot(evt)
+						mp.record_remote_shot(_normalize_event_coordinates(evt))
 					"leave":
 						_apply_leave_event(evt)
 					"concede_hole":
@@ -432,6 +432,7 @@ func _apply_shot_event(evt: Dictionary) -> void:
 						tree.current_scene.call("_on_scorecard_advance")
 
 	if shooter_is_remote:
+		evt = _normalize_event_coordinates(evt)
 		var ball_node := _find_ball_node()
 		var tracer_node := _find_tracer_node()
 
@@ -962,7 +963,7 @@ func rejoin_active_match(match_id: String) -> void:
 		if i < sorted_seqs.size() - 1:
 			# Apply instantaneously
 			if mp != null and evt.get("type", "shot") == "shot":
-				mp.record_remote_shot(evt)
+				mp.record_remote_shot(_normalize_event_coordinates(evt))
 		else:
 			# Animate / apply latest event
 			_apply_event(evt)
@@ -1004,13 +1005,99 @@ func _find_range_node() -> Node:
 		return null
 	var curr = tree.current_scene
 	if curr != null:
-		if curr.has_method("on_remote_shot_replay_started"):
+		if curr.has_method("on_remote_shot_replay_started") or curr.has_method("get_height"):
 			return curr
-		if curr.has_node("Range") and curr.get_node("Range").has_method("on_remote_shot_replay_started"):
+		if curr.has_node("Range") and (curr.get_node("Range").has_method("on_remote_shot_replay_started") or curr.get_node("Range").has_method("get_height")):
 			return curr.get_node("Range")
-		if "course_instance" in curr and curr.course_instance != null and curr.course_instance.has_method("on_remote_shot_replay_started"):
+		if "course_instance" in curr and curr.course_instance != null and (curr.course_instance.has_method("on_remote_shot_replay_started") or curr.course_instance.has_method("get_height")):
 			return curr.course_instance
 	var r = tree.root.find_child("Range", true, false)
-	if r != null and r.has_method("on_remote_shot_replay_started"):
+	if r != null and (r.has_method("on_remote_shot_replay_started") or r.has_method("get_height")):
 		return r
 	return null
+
+
+# ── COORDINATE NORMALIZATION ──────────────────────────────────────────
+
+func _normalize_event_coordinates(evt: Dictionary) -> Dictionary:
+	if not evt.has("start") or not evt.has("end") or not evt.has("pin"):
+		return evt
+
+	var shooter_pin := _parse_vector3(evt["pin"])
+	if shooter_pin.is_zero_approx():
+		return evt
+
+	var mp := _get_mp_manager()
+	var hole_id := str(evt.get("hole_id", ""))
+	if hole_id.is_empty() and mp != null and not mp.hole_ids.is_empty():
+		var h_idx: int = int(evt.get("hole_index", mp.current_hole_index))
+		if h_idx >= 0 and h_idx < mp.hole_ids.size():
+			hole_id = mp.hole_ids[h_idx]
+
+	var local_pin := Vector3.ZERO
+	var range_node := _find_range_node()
+	if range_node != null and "current_hole_location" in range_node:
+		var cur_loc = range_node.current_hole_location
+		if cur_loc is Vector3 and not (cur_loc as Vector3).is_zero_approx():
+			if mp == null or hole_id.is_empty() or hole_id == mp.get_current_hole_id():
+				local_pin = cur_loc
+
+	if local_pin.is_zero_approx() and mp != null and not hole_id.is_empty():
+		var h_info: Dictionary = mp.hole_info.get(hole_id, {})
+		var h_loc = h_info.get("Hole Location", [])
+		if h_loc is Array and h_loc.size() >= 2:
+			if range_node != null and range_node.has_method("get_hole_location_for"):
+				local_pin = range_node.get_hole_location_for(h_loc)
+			elif range_node != null and range_node.has_method("get_height"):
+				local_pin = Vector3(float(h_loc[0]), range_node.get_height(float(h_loc[0]), float(h_loc[1])), float(h_loc[1]))
+			else:
+				local_pin = Vector3(float(h_loc[0]), 0.0, float(h_loc[1]))
+
+	if local_pin.is_zero_approx() and mp != null and mp.has_method("get_target_pin_position"):
+		local_pin = mp.get_target_pin_position()
+
+	if local_pin.is_zero_approx():
+		return evt
+
+	var offset_x: float = local_pin.x - shooter_pin.x
+	var offset_z: float = local_pin.z - shooter_pin.z
+	if absf(offset_x) < 2.0 and absf(offset_z) < 2.0:
+		return evt
+
+	print("[OnlineMatchController] Cross-client coordinate offset detected: dX=%.2f, dZ=%.2f. Aligning shot coordinates to local course origin." % [offset_x, offset_z])
+
+	var normalized := evt.duplicate(true)
+	var start_raw := _parse_vector3(evt["start"])
+	var end_raw := _parse_vector3(evt["end"])
+	var norm_start := Vector3(start_raw.x + offset_x, start_raw.y, start_raw.z + offset_z)
+	var norm_end := Vector3(end_raw.x + offset_x, end_raw.y, end_raw.z + offset_z)
+
+	var elev_offset_y: float = local_pin.y - shooter_pin.y
+	norm_start.y += elev_offset_y
+	norm_end.y += elev_offset_y
+
+	if range_node != null and range_node.has_method("get_height"):
+		var gh_start: float = range_node.get_height(norm_start.x, norm_start.z)
+		var gh_end: float = range_node.get_height(norm_end.x, norm_end.z)
+		norm_end.y = gh_end + 0.022335
+		var is_teed := (int(evt.get("hole_strokes", 0)) == 0 and str(evt.get("club", "")).to_lower() in ["dr", "driver", "1w"])
+		norm_start.y = maxf(norm_start.y, gh_start + (0.059435 if is_teed else 0.022335))
+
+	normalized["start"] = [norm_start.x, norm_start.y, norm_start.z]
+	normalized["end"] = [norm_end.x, norm_end.y, norm_end.z]
+	if normalized.has("start_pos"):
+		normalized["start_pos"] = [norm_start.x, norm_start.y, norm_start.z]
+	if normalized.has("end_pos"):
+		normalized["end_pos"] = [norm_end.x, norm_end.y, norm_end.z]
+	normalized["pin"] = [local_pin.x, local_pin.y, local_pin.z]
+	normalized["_normalized"] = true
+	return normalized
+
+
+static func _parse_vector3(val) -> Vector3:
+	if val is Vector3:
+		return val
+	if val is Array or val is PackedFloat32Array or val is PackedFloat64Array:
+		if val.size() >= 3:
+			return Vector3(float(val[0]), float(val[1]), float(val[2]))
+	return Vector3.ZERO

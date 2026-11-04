@@ -168,5 +168,77 @@ service cloud.firestore {
         && validRangeOrAbsent(request.resource.data, 'hole_in_ones', 0, 1000);
       allow delete: if isOwner(uid);
     }
+
+    // 5. Tournaments and Tournament Entries
+    match /tournaments/{tournamentId} {
+      allow read: if isSignedIn();
+
+      allow create: if isCloudActive()
+        && isSignedIn()
+        && request.resource.data.host_uid == request.auth.uid
+        && request.resource.data.tournament_id == tournamentId
+        && request.resource.data.join_code is string
+        && request.resource.data.join_code.size() == 6
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 120
+        && request.resource.data.visibility in ['public', 'private']
+        && request.resource.data.status in ['open', 'ended']
+        && (request.resource.data.max_players is int || request.resource.data.max_players is number)
+        && request.resource.data.max_players >= 2
+        && request.resource.data.max_players <= 200
+        && (request.resource.data.player_count is int || request.resource.data.player_count is number)
+        && request.resource.data.player_count >= 1
+        && request.resource.data.player_count <= request.resource.data.max_players
+        && request.resource.data.course_key is string
+        && request.resource.data.course_key.size() >= 1;
+
+      allow update: if isCloudActive() && isSignedIn() && (
+        // Host can update their tournament metadata
+        (isOwner(resource.data.host_uid) && request.resource.data.host_uid == resource.data.host_uid && request.resource.data.tournament_id == tournamentId)
+        ||
+        // Joining players can increment player_count
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['player_count'])
+          && (request.resource.data.player_count is int || request.resource.data.player_count is number)
+          && request.resource.data.player_count > resource.data.player_count
+          && request.resource.data.player_count <= resource.data.max_players
+          && resource.data.status == 'open'
+        )
+        ||
+        // Any signed-in participant can mark tournament as ended once expired
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+          && request.resource.data.status == 'ended'
+        )
+      );
+
+      allow delete: if isOwner(resource.data.host_uid);
+
+      // Subcollection for participant scores and progress
+      match /entries/{entryId} {
+        allow read: if isSignedIn();
+
+        allow create: if isCloudActive()
+          && isSignedIn()
+          && request.auth.uid == entryId
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.player_name is string
+          && request.resource.data.player_name.size() >= 1
+          && request.resource.data.player_name.size() <= 80
+          && request.resource.data.status in ['pending', 'in_progress', 'submitted'];
+
+        allow update: if isCloudActive()
+          && isSignedIn()
+          && request.auth.uid == entryId
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.status in ['pending', 'in_progress', 'submitted'];
+
+        allow delete: if isSignedIn() && (
+          request.auth.uid == entryId ||
+          isOwner(get(/databases/$(database)/documents/tournaments/$(tournamentId)).data.host_uid)
+        );
+      }
+    }
   }
 }
