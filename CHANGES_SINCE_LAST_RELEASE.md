@@ -45,11 +45,12 @@
 - **Backend & Web Security Upgrades and Node 22 Transition**: Upgraded Cloud Functions, web services, and deployment pipelines to current LTS versions to enhance security and eliminate startup and container image build deprecation notices:
   - Transitioned Cloud Functions runtime stack and continuous deployment workflows to Node.js 22 LTS, resolving Node 20 end-of-life deprecation notices during container image builds.
   - Upgraded backend dependencies (`firebase-admin` to v14.5.0 and `firebase-functions` to v7.4.0), remediating legacy package vulnerabilities (including buffer bounds vulnerabilities in legacy `uuid` and dependent libraries).
-  - Modernized the web client and emulator testing suites to Firebase JavaScript SDK v11.10.0.
+  - Modernized the web client to Firebase JavaScript SDK v11.10.0 while preserving emulator testing suite compatibility with `@firebase/rules-unit-testing` on SDK v10.
   - Eliminated emulator and function startup warnings by explicitly setting single-project mode and pre-configuring runtime database connection endpoints.
 - **Re-calibrated Green Speeds & Natural Rollout**: Re-tuned green speeds across all game modes, course play, and putting practice to address feedback that greens were rolling far too fast. The default green speed (setting 10.0) now delivers the comfortable, slower rollout previously found at speed 5.0, while setting 15.0 provides the fast pace previously found at standard 10.0. Green speed sliders now smoothly range from 5.0 (extra slow) to 16.0 (tournament fast), giving players realistic, manageable putting touch and controllable approach rollouts.
 
 ### Bug Fixes
+- **Firebase Emulator Security Rules CI Dependency Alignment**: Resolved an `npm ci` package lock mismatch failure during automated cloud deployment and security testing workflows by synchronizing `firebase/tests` dependency specifications with `@firebase/rules-unit-testing` requirements.
 - **Web & Local Shot Recommendations Synchronization**: Fixed an issue where swing flaw recommendations and improvement drills tracked in the simulator (e.g. Excessive Driver Spin, Pop-up launch, face-to-path curvature) appeared locally in the player profile but were not syncing or displaying online in the web portal:
   - Corrected web portal container element matching so swing recommendation and tendency cards render reliably into the DOM.
   - Added case-insensitive player lookup and fallback timestamp resolution in `cloud_sync.gd`, preventing local swing recommendations from being mistakenly purged by tombstones during merge cycles.
