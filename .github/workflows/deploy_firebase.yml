@@ -63,7 +63,7 @@ jobs:
           java-version: '21'
 
       - name: Install Firebase Tools CLI
-        run: npm install -g firebase-tools
+        run: npm install -g firebase-tools@latest
 
       - name: Install Functions Dependencies
         run: |
