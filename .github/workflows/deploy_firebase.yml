@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'web/**'
+      - 'firebase/**'
       - '.github/workflows/deploy_firebase.yml'
       - 'firestore.rules'
       - 'firestore.indexes.json'
